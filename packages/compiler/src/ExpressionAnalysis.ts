@@ -461,6 +461,51 @@ export const enumFactByType = (
         )
     : undefined
 
+export const unionFactByType = (
+  index: DeclarationIndex.Index,
+  type: SemanticType,
+): DeclarationFacts.UnionFact | undefined => {
+  if (!Type.isNominal(type)) return undefined
+  const declaration = DeclarationFacts.byCanonical(index, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
+  return declaration?._tag === 'UnionDeclaration' ? declaration : undefined
+}
+
+const nominalUnionCoverage = (
+  index: DeclarationIndex.Index,
+  type: Type.Nominal,
+  root: Type.Type,
+): ReadonlyArray<Match.CoverageIdentity> => {
+  const union = unionFactByType(index, type)
+  return Object.freeze(
+    union?.variants.flatMap((variant) =>
+      variant.canonical._tag === 'Canonical'
+        ? [Match.nominalUnionVariant(root, type, variant.canonical.id, variant.id.ordinal)]
+        : [],
+    ) ?? [],
+  )
+}
+
+export const coverageMembersOf = (
+  index: DeclarationIndex.Index,
+  type: Type.Type,
+): ReadonlyArray<Match.CoverageIdentity> => {
+  if (Type.isUnion(type))
+    return Object.freeze(
+      type.members.flatMap((member) =>
+        Type.isNominal(member) && unionFactByType(index, member) !== undefined
+          ? nominalUnionCoverage(index, member, member)
+          : [Match.structuralMember(member)],
+      ),
+    )
+  if (Type.isNominal(type) && unionFactByType(index, type) !== undefined)
+    return nominalUnionCoverage(index, type, type)
+  return Match.membersOf(type)
+}
+
 export const analyzeEnumMember = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
@@ -1598,7 +1643,12 @@ export const analyzePattern = (
     })
   }
 
-  if (node.kind === 'EnumMemberPattern') {
+  const bareUnionPatternTarget =
+    node.kind === 'EnumMemberPattern' || node.kind === 'NominalPattern'
+      ? resolveBareUnionVariantTarget(source, node, resolution)
+      : undefined
+
+  if (node.kind === 'EnumMemberPattern' && bareUnionPatternTarget === undefined) {
     const identifiers = SyntaxTree.tokens(node).filter((token) => token.kind === 'Identifier')
     const qualifierToken = identifiers.at(0)
     const memberToken = identifiers.at(1)
@@ -1732,19 +1782,61 @@ export const analyzePattern = (
     })
   }
 
-  const targetSyntax = SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
-  const target = resolveStructTarget(source, targetSyntax, resolution, declaration)
+  const variantSelector = SyntaxTree.directNode(node, 'UnionVariantSelector')
+  const unionTarget =
+    variantSelector === undefined
+      ? bareUnionPatternTarget
+      : resolveUnionVariantTarget(source, variantSelector, resolution, declaration)
+  let targetSyntax: SyntaxTree.Node
+  if (variantSelector === undefined && unionTarget !== undefined) {
+    targetSyntax = node
+  } else if (variantSelector === undefined) {
+    targetSyntax = SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
+  } else {
+    targetSyntax =
+      SyntaxTree.directNode(variantSelector, 'AppliedType') ??
+      childNode(variantSelector, 'TypePath')
+  }
+  const structTarget =
+    unionTarget === undefined
+      ? resolveStructTarget(source, targetSyntax, resolution, declaration)
+      : undefined
+  const target = unionTarget ?? structTarget
+  if (target === undefined) throw new RangeError('Pattern target resolution is unavailable')
   const diagnostics: Array<Diagnostic.Diagnostic> = [...target.diagnostics]
-  const struct = target.fact._tag === 'Resolved' ? target.fact.struct : undefined
+  const struct =
+    target.fact._tag === 'Resolved' && 'struct' in target.fact ? target.fact.struct : undefined
+  const union =
+    target.fact._tag === 'Resolved' && 'union' in target.fact ? target.fact.union : undefined
+  const variant =
+    target.fact._tag === 'Resolved' && 'variant' in target.fact ? target.fact.variant : undefined
+  const aggregate = struct ?? union
+  const aggregateFields = struct?.fields ?? variant?.fields ?? Object.freeze([])
   const nominal = target.fact._tag === 'Resolved' ? target.fact.type : undefined
   const structSubstitution =
-    struct === undefined || nominal === undefined
+    aggregate === undefined || nominal === undefined
       ? new Map<string, SemanticType>()
       : (TypeInference.substitution(
-          struct.typeParameters.map((parameter) => parameter.type),
+          aggregate.typeParameters.map((parameter) => parameter.type),
           nominal.arguments,
         ) ?? new Map())
-  const label = nominal === undefined ? 'unknown struct' : Type.encode(nominal)
+  const unresolvedParameters =
+    aggregate === undefined || nominal === undefined
+      ? []
+      : aggregate.typeParameters.filter((parameter, ordinal) => {
+          const argument = nominal.arguments.at(ordinal)
+          return argument === undefined || isOwnStructArgument(parameter.type, argument)
+        })
+  for (const parameter of unresolvedParameters) {
+    diagnostics.push(
+      Diagnostic.uninferredTypeParameter(
+        nominal === undefined ? 'unknown aggregate' : Type.encode(nominal),
+        parameter.type.name,
+        parameter.syntax.span,
+      ),
+    )
+  }
+  const label = nominal === undefined ? 'unknown aggregate' : Type.encode(nominal)
   const seen = new Map<string, PatternFieldFact>()
   const bindings: Array<PatternBindingFact> = []
   const fields = SyntaxTree.directNodes(node, 'PatternField').map((fieldNode): PatternFieldFact => {
@@ -1755,9 +1847,9 @@ export const analyzePattern = (
     const nameToken = identifiers.at(0)
     const name = nameToken === undefined ? undefined : spelling(source, nameToken)
     const lookup =
-      struct === undefined || name === undefined
+      aggregate === undefined || name === undefined
         ? undefined
-        : DeclarationFacts.lookupField(struct.fields, name)
+        : DeclarationFacts.lookupField(aggregateFields, name)
     let state: PatternFieldState = Object.freeze({ _tag: 'Unavailable' })
     let resolvedField: DeclarationFacts.FieldFact | undefined
     if (lookup?._tag === 'Resolved') {
@@ -1789,6 +1881,7 @@ export const analyzePattern = (
     }
 
     const nestedNode =
+      SyntaxTree.directNode(fieldNode, 'UnionVariantPattern') ??
       SyntaxTree.directNode(fieldNode, 'NominalPattern') ??
       SyntaxTree.directNode(fieldNode, 'BindingPattern')
     let nested: PatternFact | undefined
@@ -1815,7 +1908,9 @@ export const analyzePattern = (
           : undefined
       if (
         expected !== undefined &&
-        (nested._tag === 'NominalPattern' || nested._tag === 'TypePattern') &&
+        (nested._tag === 'NominalPattern' ||
+          nested._tag === 'UnionVariantPattern' ||
+          nested._tag === 'TypePattern') &&
         nested.member !== undefined &&
         !Type.equals(expected, nested.member)
       ) {
@@ -1887,37 +1982,62 @@ export const analyzePattern = (
   const omitted: Array<ReadonlyArray<DeclarationFacts.FieldId>> = fields.flatMap(
     (field) => field.nested?.omitted ?? [],
   )
-  if (struct !== undefined && !rest) {
-    for (const field of struct.fields) {
+  if (aggregate !== undefined && !rest) {
+    for (const field of aggregateFields) {
       if (field.name._tag !== 'Present' || seen.has(field.name.spelling)) continue
       diagnostics.push(Diagnostic.missingPatternField(label, field.name.spelling, node.span))
     }
-  } else if (struct !== undefined && rest) {
-    for (const field of struct.fields) {
+  } else if (aggregate !== undefined && rest) {
+    for (const field of aggregateFields) {
       if (field.name._tag === 'Present' && seen.has(field.name.spelling)) continue
       omitted.push(Object.freeze([...prefix, field.id]))
     }
   }
   const complete =
     target.fact._tag === 'Resolved' &&
+    unresolvedParameters.length === 0 &&
     !counters.invalid &&
     isAvailableSyntax(node) &&
     fields.every(
       (field) =>
         field.state._tag === 'Resolved' &&
         (field.nested === undefined ||
-          ((field.nested._tag === 'NominalPattern' || field.nested._tag === 'TypePattern') &&
+          ((field.nested._tag === 'NominalPattern' ||
+            field.nested._tag === 'UnionVariantPattern' ||
+            field.nested._tag === 'TypePattern') &&
             field.nested.complete)),
     ) &&
     (rest ||
-      struct?.fields.every(
+      aggregateFields.every(
         (field) => field.name._tag !== 'Present' || seen.has(field.name.spelling),
       ) === true)
+  if (unionTarget !== undefined) {
+    const coverage =
+      nominal !== undefined && variant?.canonical._tag === 'Canonical'
+        ? Match.nominalUnionVariant(nominal, nominal, variant.canonical.id, variant.id.ordinal)
+        : undefined
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'UnionVariantPattern',
+        id,
+        target: unionTarget.fact,
+        ...(nominal === undefined ? {} : { member: nominal }),
+        ...(coverage === undefined ? {} : { coverage }),
+        fields: Object.freeze(fields),
+        bindings: Object.freeze(bindings),
+        omitted: Object.freeze(omitted),
+        rest,
+        complete,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze(diagnostics),
+    })
+  }
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'NominalPattern',
       id,
-      target: target.fact,
+      target: structTarget?.fact ?? Object.freeze({ _tag: 'Unavailable' }),
       ...(nominal === undefined ? {} : { member: nominal }),
       fields: Object.freeze(fields),
       bindings: Object.freeze(bindings),
@@ -1975,7 +2095,7 @@ export const analyzeMatch = (
   if (scrutinee?.type === undefined) {
     members = undefined
   } else if (enumScrutinee === undefined) {
-    members = Match.membersOf(scrutinee.type)
+    members = coverageMembersOf(resolution.index, scrutinee.type)
   } else {
     members = Match.enumMembersOf(enumScrutinee)
   }
@@ -1986,6 +2106,7 @@ export const analyzeMatch = (
       SyntaxTree.directNode(armNode, 'ErrorPattern') ??
       SyntaxTree.directNode(armNode, 'EnumMemberPattern') ??
       SyntaxTree.directNode(armNode, 'IntegerPattern') ??
+      SyntaxTree.directNode(armNode, 'UnionVariantPattern') ??
       SyntaxTree.directNode(armNode, 'NominalPattern') ??
       SyntaxTree.directNode(armNode, 'BindingPattern') ??
       SyntaxTree.directNode(armNode, 'UniversalPattern')
@@ -2010,6 +2131,7 @@ export const analyzeMatch = (
   })
   const coverageIdentity = (pattern: PatternFact): Match.CoverageIdentity | undefined => {
     if (pattern._tag === 'EnumMemberPattern') return pattern.coverage
+    if (pattern._tag === 'UnionVariantPattern') return pattern.coverage
     return (pattern._tag === 'NominalPattern' || pattern._tag === 'TypePattern') &&
       pattern.member !== undefined
       ? Match.structuralMember(pattern.member)
@@ -2056,10 +2178,10 @@ export const analyzeMatch = (
     const member = coverageIdentity(pattern)
     const guarded = directToken(armNode, 'IfKeyword') !== undefined
     const memberInDomain =
-      member !== undefined && members?.some((candidate) => Match.identityEquals(candidate, member))
+      member !== undefined && members?.some((candidate) => Match.selects(member, candidate))
     if (
       enumScrutinee === undefined &&
-      member?._tag === 'StructuralTypeMember' &&
+      member !== undefined &&
       members !== undefined &&
       !memberInDomain
     ) {
@@ -2296,7 +2418,9 @@ export const analyzeMatch = (
         arm.reachable &&
         (arm.pattern._tag === 'UniversalPattern' ||
           (arm.pattern._tag === 'EnumMemberPattern' && arm.pattern.complete) ||
-          ((arm.pattern._tag === 'NominalPattern' || arm.pattern._tag === 'TypePattern') &&
+          ((arm.pattern._tag === 'NominalPattern' ||
+            arm.pattern._tag === 'UnionVariantPattern' ||
+            arm.pattern._tag === 'TypePattern') &&
             arm.pattern.complete)),
     ) &&
     !unavailableReachableResult &&

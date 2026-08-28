@@ -1,8 +1,7 @@
 import type { ControlProvenance } from './Backend.js'
 import type * as Layout from './Layout.js'
-import * as Match from './Match.js'
+import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
-import type * as SilkType from './Type.js'
 
 export type LinearTerminator =
   | { readonly _tag: 'Return'; readonly value: Mir.LocalId; readonly provenance: Mir.Provenance }
@@ -18,7 +17,8 @@ export type LinearTerminator =
   | {
       readonly _tag: 'MatchBranch'
       readonly scrutinee: Mir.LocalId
-      readonly memberOrdinal: number
+      readonly shape: Layout.CallingShape
+      readonly member: Match.CoverageIdentity
       readonly taken: Mir.RegionId
       readonly otherwise: Mir.RegionId
       readonly provenance: Mir.Provenance
@@ -41,7 +41,7 @@ export type LinearOperation =
       readonly _tag: 'BindMatch'
       readonly scrutinee: Mir.LocalId
       readonly shape: Layout.CallingShape
-      readonly member: SilkType.Type
+      readonly member: Match.CoverageIdentity
       readonly binding: Mir.MatchBinding
       readonly provenance: Mir.Provenance
     }
@@ -350,7 +350,7 @@ export const expandMatches = (
             _tag: 'BindMatch' as const,
             scrutinee: match.scrutinee,
             shape: match.scrutineeShape,
-            member: Match.sourceType(member),
+            member,
             binding,
             provenance: binding.provenance,
           }),
@@ -434,7 +434,10 @@ export const expandMatches = (
       })
       return
     }
-    if (match.scrutineeType._tag !== 'Union') {
+    if (
+      match.scrutineeShape.tree._tag !== 'SumShape' &&
+      match.scrutineeShape.tree._tag !== 'NominalUnionShape'
+    ) {
       const selected = decisionEntries.at(0) ?? trap
       blocks.push(
         Object.freeze({
@@ -448,7 +451,7 @@ export const expandMatches = (
       return
     }
     const dispatchIds = match.decisions.map((_, ordinal) => (ordinal === 0 ? dispatch : reserve()))
-    match.decisions.forEach((_, ordinal) => {
+    match.decisions.forEach((decision, ordinal) => {
       blocks.push(
         Object.freeze({
           id: dispatchIds.at(ordinal) ?? dispatch,
@@ -458,7 +461,8 @@ export const expandMatches = (
           terminator: Object.freeze({
             _tag: 'MatchBranch',
             scrutinee: match.scrutinee,
-            memberOrdinal: ordinal,
+            shape: match.scrutineeShape,
+            member: decision.member,
             taken: decisionEntries.at(ordinal) ?? trap,
             otherwise: dispatchIds.at(ordinal + 1) ?? trap,
             provenance: match.provenance,

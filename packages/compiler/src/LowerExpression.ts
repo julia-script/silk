@@ -1372,10 +1372,20 @@ export function lowerExpressionInner(
           candidate.id.span.start === expression.id.span.start &&
           candidate.id.span.end === expression.id.span.end,
       )
-      const specializeMember = (member: Match.CoverageIdentity): Match.CoverageIdentity =>
-        member._tag === 'StructuralTypeMember'
-          ? Match.structuralMember(fn.semantic(member.type))
+      const specializeMember = (member: Match.CoverageIdentity): Match.CoverageIdentity => {
+        if (member._tag === 'StructuralTypeMember')
+          return Match.structuralMember(fn.semantic(member.type))
+        if (member._tag !== 'NominalUnionVariant') return member
+        const type = fn.semantic(member.type)
+        return Type.isNominal(type)
+          ? Match.nominalUnionVariant(
+              fn.semantic(member.root),
+              type,
+              member.variant,
+              member.variantOrdinal,
+            )
           : member
+      }
       const members = Object.freeze(expression.members.map(specializeMember))
       const specializedCoverage = Match.cover(
         members,
@@ -1495,8 +1505,7 @@ export function lowerExpressionInner(
             arms
               .filter(
                 (arm) =>
-                  arm.universal ||
-                  (arm.member !== undefined && Match.identityEquals(arm.member, member)),
+                  arm.universal || (arm.member !== undefined && Match.selects(arm.member, member)),
               )
               .map((arm) => arm.id),
           ),

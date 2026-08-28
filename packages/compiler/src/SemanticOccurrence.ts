@@ -824,6 +824,43 @@ const collectPattern = (
         )
       if (field.nested !== undefined) collectPattern(field.nested, index, scope, pending)
     }
+  } else if (pattern._tag === 'UnionVariantPattern') {
+    if (pattern.target._tag === 'Resolved') {
+      const parentToken = SyntaxTree.tokens(pattern.syntax).find(
+        (token) => token.kind === 'Identifier',
+      )
+      push(
+        pending,
+        parentToken?.span,
+        'Type',
+        available(identityOfDeclaration(pattern.target.union)),
+        locationOfDeclaration(index, pattern.target.union),
+      )
+      if (pattern.target.variant.canonical._tag === 'Canonical')
+        push(
+          pending,
+          pattern.target.token.span,
+          'Value',
+          available(
+            Object.freeze({
+              _tag: 'UnionVariantIdentity',
+              id: pattern.target.variant.canonical.id,
+            }),
+          ),
+          locationOfUnionVariant(pattern.target.variant),
+        )
+    }
+    for (const field of pattern.fields) {
+      if (field.state._tag === 'Resolved')
+        push(
+          pending,
+          field.token?.span,
+          'Field',
+          available(Object.freeze({ _tag: 'FieldIdentity', id: field.state.field.id })),
+          locationOfField(index, field.state.field),
+        )
+      if (field.nested !== undefined) collectPattern(field.nested, index, scope, pending)
+    }
   } else if (pattern._tag === 'TypePattern') {
     collectDeclaredType(pattern.declared, index, scope, pending)
   }

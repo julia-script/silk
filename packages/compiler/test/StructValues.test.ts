@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as Layout from '../src/Layout.js'
 import * as LayoutEncode from '../src/LayoutEncode.js'
+import * as Match from '../src/Match.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -235,6 +236,47 @@ pub fn main() -> i32 { let state = keep(make()) return 42 }`),
             (operation) => operation._tag === 'ConstructUnionVariant',
           )?._tag,
       'ConstructUnionVariant',
+    )
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('evaluates exhaustive nominal union variant patterns with payload bindings', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-values/patterns',
+      ascii(`union Option<T> { Some { value: T }, None }
+fn unwrap(option: Option<i32>) -> i32 {
+  return match move option {
+    Option<i32>.Some { value } => value
+    Option<i32>.None => 0
+  }
+}
+pub fn main() -> i32 { return unwrap(Option<i32>.Some { value: 42 }) }`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const returned = Analysis.rootAnalysis(self).functions.at(0)?.returnedExpression
+    assert.strictEqual(returned?._tag, 'Match')
+    if (returned?._tag !== 'Match') return
+    assert.strictEqual(returned.exhaustive, true)
+    assert.deepEqual(returned.members.map(Match.encodeIdentity), [
+      'union-values/patterns.Option<i32>::union-values/patterns.Option<i32>.Some',
+      'union-values/patterns.Option<i32>::union-values/patterns.Option<i32>.None',
+    ])
+    assert.deepEqual(
+      returned.arms.map((arm) => [arm.pattern._tag, arm.bindings.length, arm.reachable]),
+      [
+        ['UnionVariantPattern', 1, true],
+        ['UnionVariantPattern', 0, true],
+      ],
     )
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
     const outcome = Analysis.evaluate(self)

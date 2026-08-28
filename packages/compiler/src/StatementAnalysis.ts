@@ -35,6 +35,7 @@ import {
   analyzeExpression,
   analyzePattern,
   bindingName,
+  coverageMembersOf,
   enumFactByType,
   statementExpressionNode,
   unsafeCallAuthorized,
@@ -293,6 +294,7 @@ export const analyzeStatements = (
       SyntaxTree.directNode(element, 'ErrorPattern') ??
       SyntaxTree.directNode(element, 'EnumMemberPattern') ??
       SyntaxTree.directNode(element, 'IntegerPattern') ??
+      SyntaxTree.directNode(element, 'UnionVariantPattern') ??
       SyntaxTree.directNode(element, 'NominalPattern') ??
       SyntaxTree.directNode(element, 'BindingPattern') ??
       SyntaxTree.directNode(element, 'UniversalPattern')
@@ -317,12 +319,14 @@ export const analyzeStatements = (
     if (subject.type._tag !== 'Available') {
       members = []
     } else if (subjectEnum === undefined) {
-      members = Match.membersOf(subject.type.type)
+      members = coverageMembersOf(context.resolution.index, subject.type.type)
     } else {
       members = Match.enumMembersOf(subjectEnum)
     }
     let member: Match.CoverageIdentity | undefined
     if (pattern.fact._tag === 'EnumMemberPattern') {
+      member = pattern.fact.coverage
+    } else if (pattern.fact._tag === 'UnionVariantPattern') {
       member = pattern.fact.coverage
     } else if (
       (pattern.fact._tag === 'NominalPattern' || pattern.fact._tag === 'TypePattern') &&
@@ -334,9 +338,9 @@ export const analyzeStatements = (
     }
     if (
       subjectEnum === undefined &&
-      member?._tag === 'StructuralTypeMember' &&
+      member !== undefined &&
       subject.type._tag === 'Available' &&
-      !members.some((candidate) => Match.identityEquals(candidate, member))
+      !members.some((candidate) => Match.selects(member, candidate))
     ) {
       context.diagnostics.push(
         Diagnostic.matchMemberNotInScrutinee(
@@ -599,6 +603,8 @@ export const analyzeStatements = (
         let selected: Match.CoverageIdentity | undefined
         if (selection.pattern._tag === 'EnumMemberPattern') {
           selected = selection.pattern.coverage
+        } else if (selection.pattern._tag === 'UnionVariantPattern') {
+          selected = selection.pattern.coverage
         } else if (
           (selection.pattern._tag === 'NominalPattern' ||
             selection.pattern._tag === 'TypePattern') &&
@@ -618,7 +624,7 @@ export const analyzeStatements = (
                 )
               : '<unavailable>',
             selection.members
-              .filter((member) => selected === undefined || !Match.identityEquals(member, selected))
+              .filter((member) => selected === undefined || !Match.selects(selected, member))
               .map(Match.encodeIdentity),
             selection.pattern.syntax.span,
           ),

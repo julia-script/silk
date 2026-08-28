@@ -4181,6 +4181,70 @@ export const memberFieldSlots = (
       )
 }
 
+/** Canonical match leaves described by a realized calling shape. */
+export const coverageMembers = (shape: CallingShape): ReadonlyArray<Match.CoverageIdentity> => {
+  const variants = (
+    root: Type.Type,
+    node: Extract<CallingShapeNode, { readonly _tag: 'NominalUnionShape' }>,
+  ): ReadonlyArray<Match.CoverageIdentity> =>
+    node.variants.map((variant) =>
+      Match.nominalUnionVariant(root, node.type, variant.variant, variant.ordinal),
+    )
+  if (shape.tree._tag === 'NominalUnionShape')
+    return Object.freeze(variants(shape.type, shape.tree))
+  if (shape.tree._tag !== 'SumShape') return Match.membersOf(shape.type)
+  return Object.freeze(
+    shape.tree.members.flatMap((member) =>
+      member.shape._tag === 'NominalUnionShape'
+        ? variants(member.member, member.shape)
+        : [Match.structuralMember(member.member)],
+    ),
+  )
+}
+
+/** Physical calling-lane slots for a field selected by one exact match coverage identity. */
+export const coverageFieldSlots = (
+  shape: CallingShape,
+  member: Match.CoverageIdentity,
+  path: ReadonlyArray<DeclarationFacts.FieldId>,
+): ReadonlyArray<number> | undefined => {
+  if (member._tag !== 'NominalUnionVariant')
+    return memberFieldSlots(shape, Match.sourceType(member), path)
+  let selected: { readonly shape: CallingShapeNode; readonly physicalOffset: number } | undefined
+  if (shape.tree._tag === 'NominalUnionShape' && Type.equals(shape.tree.type, member.type)) {
+    const variant = shape.tree.variants.find(
+      (candidate) =>
+        candidate.ordinal === member.variantOrdinal &&
+        candidate.variant.union.module === member.variant.union.module &&
+        candidate.variant.union.name === member.variant.union.name &&
+        candidate.variant.name === member.variant.name,
+    )
+    if (variant !== undefined) selected = { shape: variant.shape, physicalOffset: 1 }
+  } else if (shape.tree._tag === 'SumShape') {
+    const outer = shape.tree.members.find((candidate) => Type.equals(candidate.member, member.root))
+    if (outer?.shape._tag === 'NominalUnionShape') {
+      const variant = outer.shape.variants.find(
+        (candidate) =>
+          candidate.ordinal === member.variantOrdinal &&
+          candidate.variant.union.module === member.variant.union.module &&
+          candidate.variant.union.name === member.variant.union.name &&
+          candidate.variant.name === member.variant.name,
+      )
+      if (variant !== undefined) selected = { shape: variant.shape, physicalOffset: 2 }
+    }
+  }
+  if (selected === undefined) return undefined
+  const slice = fieldSlice(selected.shape, path)
+  return slice === undefined
+    ? undefined
+    : Object.freeze(
+        Array.from(
+          { length: slice.length },
+          (_, ordinal) => selected.physicalOffset + slice.offset + ordinal,
+        ),
+      )
+}
+
 /** Looks up one available or unavailable nominal catalog entry. */
 export const catalogEntry = (
   self: Catalog,

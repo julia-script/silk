@@ -66,16 +66,23 @@ export const lowerPatternSelection = (
   const resultType = fn.type(resultSemantic)
   if (subject === undefined || subjectType === undefined || resultType === undefined)
     return undefined
-  if (
-    selection.members.some((member) => member._tag === 'EnumMember') ||
-    selection.member?._tag === 'EnumMember'
-  )
-    return undefined
-  const members = Match.membersOf(semanticSubject)
-  const member =
-    selection.member?._tag === 'StructuralTypeMember'
-      ? Match.structuralMember(fn.semantic(selection.member.type))
-      : undefined
+  if (selection.members.some((member) => member._tag === 'EnumMember')) return undefined
+  const specializeMember = (candidate: Match.CoverageIdentity): Match.CoverageIdentity => {
+    if (candidate._tag === 'StructuralTypeMember')
+      return Match.structuralMember(fn.semantic(candidate.type))
+    if (candidate._tag !== 'NominalUnionVariant') return candidate
+    const type = fn.semantic(candidate.type)
+    return Type.isNominal(type)
+      ? Match.nominalUnionVariant(
+          fn.semantic(candidate.root),
+          type,
+          candidate.variant,
+          candidate.variantOrdinal,
+        )
+      : candidate
+  }
+  const members = Object.freeze(selection.members.map(specializeMember))
+  const member = selection.member === undefined ? undefined : specializeMember(selection.member)
   const literal = (value: boolean): LoweredExpression | undefined =>
     lowerExpression(
       fn,
@@ -120,9 +127,7 @@ export const lowerPatternSelection = (
   const selectedAfter = selection.universal
     ? emptyCoverage
     : Object.freeze(
-        members.filter(
-          (candidate) => member === undefined || !Match.identityEquals(candidate, member),
-        ),
+        members.filter((candidate) => member === undefined || !Match.selects(member, candidate)),
       )
   const ownedArm = ownership?.arms.find(
     (candidate) => candidate.id.ordinal === selection.arm.ordinal,
@@ -193,7 +198,7 @@ export const lowerPatternSelection = (
           let candidates: ReadonlyArray<Match.ArmId>
           if (selection.universal) {
             candidates = [selection.arm]
-          } else if (member === undefined || !Match.identityEquals(candidate, member)) {
+          } else if (member === undefined || !Match.selects(member, candidate)) {
             candidates = [fallbackId]
           } else {
             candidates = needsFallback ? [selection.arm, fallbackId] : [selection.arm]

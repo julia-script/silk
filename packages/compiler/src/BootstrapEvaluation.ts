@@ -1939,10 +1939,27 @@ function* executeFunction(
           }
           case 'Match': {
             const scrutinee = read(operation.scrutinee).value
-            const activeIdentity =
-              scrutinee._tag === 'EnumValue'
-                ? Match.enumMember(scrutinee.enum, scrutinee.member)
-                : undefined
+            let activeIdentity: Match.CoverageIdentity | undefined
+            if (scrutinee._tag === 'EnumValue') {
+              activeIdentity = Match.enumMember(scrutinee.enum, scrutinee.member)
+            } else if (scrutinee._tag === 'NominalUnionValue') {
+              activeIdentity = Match.nominalUnionVariant(
+                scrutinee.type,
+                scrutinee.type,
+                scrutinee.variant,
+                scrutinee.variantOrdinal,
+              )
+            } else if (
+              scrutinee._tag === 'UnionValue' &&
+              scrutinee.payload._tag === 'NominalUnionValue'
+            ) {
+              activeIdentity = Match.nominalUnionVariant(
+                scrutinee.member,
+                scrutinee.payload.type,
+                scrutinee.payload.variant,
+                scrutinee.payload.variantOrdinal,
+              )
+            }
             let activeMember: Type.Type
             if (activeIdentity !== undefined) {
               activeMember = activeIdentity.type
@@ -1950,13 +1967,18 @@ function* executeFunction(
               activeMember = scrutinee.member
             } else if (scrutinee._tag === 'AggregateValue') {
               activeMember = scrutinee.type
+            } else if (scrutinee._tag === 'NominalUnionValue') {
+              activeMember = scrutinee.type
             } else {
               activeMember = Mir.semanticType(operation.scrutineeType)
             }
             let payload: Value
             if (scrutinee._tag === 'UnionValue') {
               payload = scrutinee.payload
-            } else if (scrutinee._tag === 'AggregateValue') {
+            } else if (
+              scrutinee._tag === 'AggregateValue' ||
+              scrutinee._tag === 'NominalUnionValue'
+            ) {
               payload = scrutinee
             } else {
               payload = scrutinee

@@ -938,6 +938,40 @@ const fieldPathType = (
   return current
 }
 
+const coverageFieldPathType = (
+  layout: Layout.Plan,
+  member: Match.CoverageIdentity,
+  path: ReadonlyArray<DeclarationFacts.FieldId>,
+): DeclarationFacts.SemanticType | undefined => {
+  if (member._tag !== 'NominalUnionVariant')
+    return fieldPathType(layout, Match.sourceType(member), path)
+  let current: DeclarationFacts.SemanticType | undefined = member.type
+  let variant = Layout.entry(layout, member.type)?.representation
+  for (const [ordinal, selector] of path.entries()) {
+    let field: Layout.Field | undefined
+    if (ordinal === 0 && variant?._tag === 'NominalUnion') {
+      field = variant.variants
+        .find((candidate) => candidate.ordinal === member.variantOrdinal)
+        ?.fields.find((candidate) => DeclarationFacts.sameFieldId(candidate.id, selector))
+    } else if (SilkType.isNominal(current)) {
+      const representation: Layout.Representation | undefined = Layout.entry(
+        layout,
+        current,
+      )?.representation
+      field =
+        representation?._tag === 'Aggregate'
+          ? representation.fields.find((candidate) =>
+              DeclarationFacts.sameFieldId(candidate.id, selector),
+            )
+          : undefined
+    }
+    current = field?.type
+    variant = undefined
+    if (current === undefined) return undefined
+  }
+  return current
+}
+
 const sameMembers = (
   left: ReadonlyArray<SilkType.Type>,
   right: ReadonlyArray<SilkType.Type>,
@@ -4261,9 +4295,12 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               operation.arms.every(
                 (arm) => arm.member === undefined || arm.member._tag === 'EnumMember',
               ))
+          const plannedMembers = Layout.coverageMembers(operation.scrutineeShape)
           const decisionsValid =
             coverage.exhaustive &&
             enumCoverageValid &&
+            (operation.scrutineeType._tag === 'Enum' ||
+              sameCoverage(operation.members, plannedMembers)) &&
             operation.decisions.length === operation.members.length &&
             operation.decisions.every((decision, ordinal) => {
               const member = operation.members.at(ordinal)
@@ -4272,7 +4309,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                   arm.universal ||
                   (arm.member !== undefined &&
                     member !== undefined &&
-                    Match.identityEquals(arm.member, member)),
+                    Match.selects(arm.member, member)),
               )
               return (
                 member !== undefined &&
@@ -4310,7 +4347,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               const selected =
                 arm.member === undefined
                   ? undefined
-                  : fieldPathType(self.layout, Match.sourceType(arm.member), binding.path)
+                  : coverageFieldPathType(self.layout, arm.member, binding.path)
               if (
                 localType === undefined ||
                 selected === undefined ||
@@ -4369,7 +4406,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                     const selected =
                       arm.member === undefined
                         ? undefined
-                        : fieldPathType(self.layout, Match.sourceType(arm.member), entry.path)
+                        : coverageFieldPathType(self.layout, arm.member, entry.path)
                     return selected !== undefined && SilkType.equals(selected, entry.cleanup.type)
                   })
                 : arm.selected.cleanup.length === 0)

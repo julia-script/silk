@@ -70,6 +70,8 @@ export const hirPatternSelection = (selection: PatternSelectionFact): Hir.Patter
   let member: Match.CoverageIdentity | undefined
   if (selection.pattern._tag === 'EnumMemberPattern') {
     member = selection.pattern.coverage
+  } else if (selection.pattern._tag === 'UnionVariantPattern') {
+    member = selection.pattern.coverage
   } else if (
     (selection.pattern._tag === 'NominalPattern' || selection.pattern._tag === 'TypePattern') &&
     selection.pattern.member !== undefined
@@ -658,6 +660,8 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
         fact.arms.map((arm) => {
           let member: Match.CoverageIdentity | undefined
           if (arm.pattern._tag === 'EnumMemberPattern') {
+            member = arm.pattern.coverage
+          } else if (arm.pattern._tag === 'UnionVariantPattern') {
             member = arm.pattern.coverage
           } else if (
             (arm.pattern._tag === 'NominalPattern' || arm.pattern._tag === 'TypePattern') &&

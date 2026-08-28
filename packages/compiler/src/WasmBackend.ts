@@ -4610,11 +4610,7 @@ const emitMatchOperation = (
     const arm = operation.arms.find((entry) => entry.id.ordinal === candidate.ordinal)
     if (arm === undefined) throw new RangeError('Wasm match lost a candidate arm')
     const bindings = arm.bindings.flatMap((binding) => {
-      const physical = LayoutPlan.memberFieldSlots(
-        operation.scrutineeShape,
-        Match.sourceType(member),
-        binding.path,
-      )
+      const physical = LayoutPlan.coverageFieldSlots(operation.scrutineeShape, member, binding.path)
       if (physical === undefined) {
         throw new RangeError('Wasm match lost a pattern payload path')
       }
@@ -4665,12 +4661,43 @@ const emitMatchOperation = (
         Instr.ifElse(Instr.emptyBlockType, selected, emitDecisions(ordinal + 1)),
       ]
     }
-    if (operation.scrutineeType._tag !== 'Union') return selected
     const tag = slots(operation.scrutinee).at(0)
-    if (tag === undefined) throw new RangeError('Wasm union match has no tag lane')
+    if (tag === undefined) throw new RangeError('Wasm match has no tag lane')
+    if (decision.member._tag === 'NominalUnionVariant') {
+      const member = decision.member
+      const nested = operation.scrutineeShape.tree._tag === 'SumShape'
+      const variantTag = slots(operation.scrutinee).at(nested ? 1 : 0)
+      if (variantTag === undefined) throw new RangeError('Wasm nominal union match has no tag lane')
+      const outer =
+        operation.scrutineeShape.tree._tag === 'SumShape'
+          ? operation.scrutineeShape.tree.members.find((candidate) =>
+              SilkType.equals(candidate.member, member.root),
+            )
+          : undefined
+      if (nested && outer === undefined)
+        throw new RangeError('Wasm nominal union match lost its structural member')
+      return [
+        ...(nested
+          ? [Instr.localGet(tag), Instr.i32Const(outer?.ordinal ?? 0), Instr.op('i32.eq')]
+          : []),
+        Instr.localGet(variantTag),
+        Instr.i32Const(member.variantOrdinal),
+        Instr.op('i32.eq'),
+        ...(nested ? [Instr.op('i32.and')] : []),
+        Instr.ifElse(Instr.emptyBlockType, selected, emitDecisions(ordinal + 1)),
+      ]
+    }
+    if (operation.scrutineeType._tag !== 'Union') return selected
+    const outer =
+      operation.scrutineeShape.tree._tag === 'SumShape'
+        ? operation.scrutineeShape.tree.members.find((candidate) =>
+            SilkType.equals(candidate.member, Match.sourceType(decision.member)),
+          )
+        : undefined
+    if (outer === undefined) throw new RangeError('Wasm union match lost its structural member')
     return [
       Instr.localGet(tag),
-      Instr.i32Const(ordinal),
+      Instr.i32Const(outer.ordinal),
       Instr.op('i32.eq'),
       Instr.ifElse(Instr.emptyBlockType, selected, emitDecisions(ordinal + 1)),
     ]

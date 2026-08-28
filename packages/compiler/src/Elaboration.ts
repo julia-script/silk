@@ -441,6 +441,19 @@ export type PatternFact =
       readonly syntax: SyntaxTree.Node
     }
   | {
+      readonly _tag: 'UnionVariantPattern'
+      readonly id: Match.PatternId
+      readonly target: UnionVariantTargetFact
+      readonly member?: Type.Nominal
+      readonly coverage?: Match.CoverageIdentity
+      readonly fields: ReadonlyArray<PatternFieldFact>
+      readonly bindings: ReadonlyArray<PatternBindingFact>
+      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
+      readonly rest: boolean
+      readonly complete: boolean
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
       readonly _tag: 'UniversalPattern'
       readonly id: Match.PatternId
       readonly bindings: ReadonlyArray<PatternBindingFact>

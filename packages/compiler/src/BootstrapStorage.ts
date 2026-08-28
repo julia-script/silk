@@ -1,4 +1,4 @@
-import type { AggregateValue, Value } from './BootstrapValue.js'
+import type { AggregateValue, NominalUnionValue, Value } from './BootstrapValue.js'
 import type * as CleanupPlan from './CleanupPlan.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as ExecutionPackage from './ExecutionPackage.js'
@@ -257,9 +257,12 @@ export const selectFieldPath = (
 ): Value => {
   let selected: Value = root
   for (const selector of path) {
-    if (selected._tag !== 'AggregateValue')
-      throw new RangeError('MIR verifier allowed a match field below a non-struct value')
-    const field: AggregateValue['fields'][number] | undefined = selected.fields.find((candidate) =>
+    if (selected._tag !== 'AggregateValue' && selected._tag !== 'NominalUnionValue')
+      throw new RangeError('MIR verifier allowed a match field below a non-aggregate value')
+    const field:
+      | AggregateValue['fields'][number]
+      | NominalUnionValue['fields'][number]
+      | undefined = selected.fields.find((candidate) =>
       DeclarationFacts.sameFieldId(candidate.field, selector),
     )
     if (field === undefined) throw new RangeError('MIR verifier allowed a missing match field')

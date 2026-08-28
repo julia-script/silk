@@ -48,7 +48,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
   const checkOrdinal = context.state.checkOrdinal
   switch (operation._tag) {
     case 'BindMatch': {
-      const physical = Layout.memberFieldSlots(
+      const physical = Layout.coverageFieldSlots(
         operation.shape,
         operation.member,
         operation.binding.path,
