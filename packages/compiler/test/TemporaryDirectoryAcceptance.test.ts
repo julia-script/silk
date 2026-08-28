@@ -30,6 +30,7 @@ afterAll(() => {
  * being handed to `Effect.ensuring`, whose finalizer is typed `! never`.
  */
 const prelude = `import silk.os_filesystem { make as osMake }
+import silk.effect as Effect
 import silk.filesystem {
   FileError, FileSystem, Path, TemporaryDirectory,
   createDirectoriesRecursively, exists, fromBytes as pathFromBytes, join as pathJoin,
@@ -50,7 +51,7 @@ const epilogue = `import silk.allocator { OutOfMemoryError }
 import silk.filesystem { FileError }
 import silk.result { Result }
 pub fn main() -> i32 {
-  let completed = run Intrinsic.effectResult(program())
+  let completed = run Effect.result(program())
   return match move completed {
       Result<i32, FileError | OutOfMemoryError>.Success { value } => value
       Result<i32, FileError | OutOfMemoryError>.Failure { error } => match move error {

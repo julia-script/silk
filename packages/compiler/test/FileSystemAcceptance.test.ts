@@ -238,7 +238,7 @@ effect fn program() -> i32 ! FileError | OutOfMemoryError {
 }
 
 pub fn main() -> i32 {
-  let completed = run Intrinsic.effectResult(program())
+  let completed = run Effect.result(program())
   return match move completed {
       Result<i32, FileError | OutOfMemoryError>.Success { value } => value
       Result<i32, FileError | OutOfMemoryError>.Failure { error } => 10
@@ -280,7 +280,7 @@ effect fn check() -> i32 ! FileError | OutOfMemoryError {
 }
 
 pub fn main() -> i32 {
-  let completed = run Intrinsic.effectResult(check())
+  let completed = run Effect.result(check())
   return match move completed {
       Result<i32, FileError | OutOfMemoryError>.Success { value } => value
       Result<i32, FileError | OutOfMemoryError>.Failure { error } => 2

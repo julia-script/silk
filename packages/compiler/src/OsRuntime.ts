@@ -46,8 +46,6 @@ enum {
   SILK_OTHER = 10
 };
 
-typedef struct { int tag; size_t value; } silk_option_usize;
-
 static int silk_reason_from_errno(int value) {
   switch (value) {
     case ENOENT: return SILK_NOT_FOUND;
@@ -85,14 +83,9 @@ static void silk_success(int *reason, uint32_t *native_code) {
   *native_code = 0;
 }
 
-static silk_option_usize silk_transfer(size_t count) {
-  silk_option_usize result = { 1, count };
-  return result;
-}
-
-static silk_option_usize silk_transfer_failure(void) {
-  silk_option_usize result = { 0, 0 };
-  return result;
+static int silk_transfer(size_t count, size_t *output) {
+  *output = count;
+  return 1;
 }
 `
 
@@ -387,19 +380,19 @@ extern char **environ;
 
 /* Copies the prefix of one host value that fits and reports the value's complete byte length, so a
    caller that received a short buffer can size an exact one and ask again. */
-static silk_option_usize silk_host_copy(const unsigned char *value, size_t length,
-                                        unsigned char *output, size_t capacity,
-                                        int *reason, uint32_t *native_code) {
+static int silk_host_copy(const unsigned char *value, size_t length,
+                          unsigned char *output, size_t capacity, size_t *count,
+                          int *reason, uint32_t *native_code) {
   size_t committed = length < capacity ? length : capacity;
   if (committed > 0) memcpy(output, value, committed);
   silk_success(reason, native_code);
-  return silk_transfer(length);
+  return silk_transfer(length, count);
 }
 
 /* An absent value: an index past the last argument, or an unset variable name. */
-static silk_option_usize silk_host_absent(int *reason, uint32_t *native_code) {
+static int silk_host_absent(int *reason, uint32_t *native_code) {
   silk_protocol_failure(reason, native_code, SILK_NOT_FOUND);
-  return silk_transfer_failure();
+  return 0;
 }
 `
 
@@ -497,29 +490,29 @@ int silk_os_file_open_v1(const unsigned char *root, size_t root_length,
 }
 `,
   silk_os_file_read_v1: `
-silk_option_usize silk_os_file_read_v1(silk_os_handle *handle, unsigned char *output,
-                                       size_t capacity, int *reason, uint32_t *native_code) {
+int silk_os_file_read_v1(silk_os_handle *handle, unsigned char *output,
+                         size_t capacity, size_t *count, int *reason, uint32_t *native_code) {
   silk_native_handle *native = silk_live(handle, 0, reason, native_code);
-  if (native == NULL) return silk_transfer_failure();
+  if (native == NULL) return 0;
   ssize_t received;
   do { received = read(native->fd, output, capacity); } while (received < 0 && errno == EINTR);
-  if (received < 0) { silk_failure(reason, native_code, errno); return silk_transfer_failure(); }
+  if (received < 0) { silk_failure(reason, native_code, errno); return 0; }
   silk_success(reason, native_code);
-  return silk_transfer((size_t)received);
+  return silk_transfer((size_t)received, count);
 }
 `,
   silk_os_file_write_v1: `
-silk_option_usize silk_os_file_write_v1(silk_os_handle *handle, const unsigned char *input,
-                                        size_t length, size_t offset,
-                                        int *reason, uint32_t *native_code) {
+int silk_os_file_write_v1(silk_os_handle *handle, const unsigned char *input,
+                          size_t length, size_t offset, size_t *count,
+                          int *reason, uint32_t *native_code) {
   silk_native_handle *native = silk_live(handle, 0, reason, native_code);
-  if (native == NULL) return silk_transfer_failure();
-  if (offset > length) { silk_protocol_failure(reason, native_code, SILK_INVALID_PATH); return silk_transfer_failure(); }
+  if (native == NULL) return 0;
+  if (offset > length) { silk_protocol_failure(reason, native_code, SILK_INVALID_PATH); return 0; }
   ssize_t written;
   do { written = write(native->fd, input + offset, length - offset); } while (written < 0 && errno == EINTR);
-  if (written < 0) { silk_failure(reason, native_code, errno); return silk_transfer_failure(); }
+  if (written < 0) { silk_failure(reason, native_code, errno); return 0; }
   silk_success(reason, native_code);
-  return silk_transfer((size_t)written);
+  return silk_transfer((size_t)written, count);
 }
 `,
   silk_os_directory_open_v1: `
@@ -545,34 +538,34 @@ int silk_os_directory_open_v1(const unsigned char *root, size_t root_length,
 }
 `,
   silk_os_directory_next_v1: `
-silk_option_usize silk_os_directory_next_v1(silk_os_handle *handle, unsigned char *output,
-                                            size_t capacity, int *kind, size_t *required,
-                                            int *reason, uint32_t *native_code) {
+int silk_os_directory_next_v1(silk_os_handle *handle, unsigned char *output,
+                              size_t capacity, size_t *count, int *kind, size_t *required,
+                              int *reason, uint32_t *native_code) {
   silk_native_handle *native = silk_live(handle, 1, reason, native_code);
-  if (native == NULL) return silk_transfer_failure();
+  if (native == NULL) return 0;
   while (native->pending_name == NULL) {
     errno = 0;
     struct dirent *entry = readdir(native->directory);
     if (entry == NULL) {
-      if (errno != 0) { silk_failure(reason, native_code, errno); return silk_transfer_failure(); }
+      if (errno != 0) { silk_failure(reason, native_code, errno); return 0; }
       silk_success(reason, native_code);
-      return silk_transfer(0);
+      return silk_transfer(0, count);
     }
     if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
     struct stat info;
     if (fstatat(native->fd, entry->d_name, &info, AT_SYMLINK_NOFOLLOW) != 0) {
       silk_failure(reason, native_code, errno);
-      return silk_transfer_failure();
+      return 0;
     }
     if (S_ISLNK(info.st_mode) || (!S_ISREG(info.st_mode) && !S_ISDIR(info.st_mode))) {
       silk_protocol_failure(reason, native_code, SILK_WRONG_TYPE);
-      return silk_transfer_failure();
+      return 0;
     }
     native->pending_length = strlen(entry->d_name);
     native->pending_name = (unsigned char *)malloc(native->pending_length);
     if (native->pending_name == NULL) {
       silk_protocol_failure(reason, native_code, SILK_NO_SPACE);
-      return silk_transfer_failure();
+      return 0;
     }
     memcpy(native->pending_name, entry->d_name, native->pending_length);
     native->pending_kind = S_ISREG(info.st_mode) ? 0 : 1;
@@ -580,7 +573,7 @@ silk_option_usize silk_os_directory_next_v1(silk_os_handle *handle, unsigned cha
   if (capacity < native->pending_length) {
     *required = native->pending_length;
     silk_protocol_failure(reason, native_code, SILK_BUFFER_TOO_SMALL);
-    return silk_transfer_failure();
+    return 0;
   }
   memcpy(output, native->pending_name, native->pending_length);
   *kind = native->pending_kind;
@@ -589,7 +582,7 @@ silk_option_usize silk_os_directory_next_v1(silk_os_handle *handle, unsigned cha
   native->pending_name = NULL;
   native->pending_length = 0;
   silk_success(reason, native_code);
-  return silk_transfer(length);
+  return silk_transfer(length, count);
 }
 `,
   silk_os_path_inspect_v1: `
@@ -628,32 +621,30 @@ int silk_os_directory_create_v1(const unsigned char *root, size_t root_length,
 }
 `,
   silk_os_directory_create_unique_v1: `
-silk_option_usize silk_os_directory_create_unique_v1(const unsigned char *root, size_t root_length,
-                                                     const unsigned char *parent,
-                                                     size_t parent_length,
-                                                     const unsigned char *prefix,
-                                                     size_t prefix_length, unsigned char *output,
-                                                     size_t capacity, size_t *required,
-                                                     int *reason, uint32_t *native_code) {
+int silk_os_directory_create_unique_v1(const unsigned char *root, size_t root_length,
+                                       const unsigned char *parent, size_t parent_length,
+                                       const unsigned char *prefix, size_t prefix_length,
+                                       unsigned char *output, size_t capacity, size_t *count,
+                                       size_t *required, int *reason, uint32_t *native_code) {
   static const char alphabet[] = "abcdefghijklmnopqrstuvwxyz0123456789";
   size_t length = prefix_length + SILK_UNIQUE_SUFFIX;
   if (capacity < length) {
     *required = length;
     silk_protocol_failure(reason, native_code, SILK_BUFFER_TOO_SMALL);
-    return silk_transfer_failure();
+    return 0;
   }
   if (!silk_utf8(prefix, prefix_length) || !silk_component_valid(prefix, prefix_length) ||
       memchr(prefix, '/', prefix_length) != NULL) {
     silk_protocol_failure(reason, native_code, SILK_INVALID_PATH);
-    return silk_transfer_failure();
+    return 0;
   }
   int directory = silk_directory(root, root_length, parent, parent_length, reason, native_code);
-  if (directory < 0) return silk_transfer_failure();
+  if (directory < 0) return 0;
   char *name = (char *)malloc(length + 1);
   if (name == NULL) {
     close(directory);
     silk_protocol_failure(reason, native_code, SILK_NO_SPACE);
-    return silk_transfer_failure();
+    return 0;
   }
   memcpy(name, prefix, prefix_length);
   name[length] = 0;
@@ -669,20 +660,20 @@ silk_option_usize silk_os_directory_create_unique_v1(const unsigned char *root, 
       free(name);
       close(directory);
       silk_success(reason, native_code);
-      return silk_transfer(length);
+      return silk_transfer(length, count);
     }
     int selected = errno;
     if (selected != EEXIST) {
       free(name);
       close(directory);
       silk_failure(reason, native_code, selected);
-      return silk_transfer_failure();
+      return 0;
     }
   }
   free(name);
   close(directory);
   silk_protocol_failure(reason, native_code, SILK_ALREADY_EXISTS);
-  return silk_transfer_failure();
+  return 0;
 }
 `,
   silk_os_file_remove_v1: `
@@ -739,13 +730,13 @@ int silk_os_handle_close_v1(size_t identity, int kind, int active,
 }
 `,
   silk_os_standard_input_read_v1: `
-silk_option_usize silk_os_standard_input_read_v1(unsigned char *output, size_t capacity,
-                                                 int *reason, uint32_t *native_code) {
+int silk_os_standard_input_read_v1(unsigned char *output, size_t capacity, size_t *count,
+                                   int *reason, uint32_t *native_code) {
   ssize_t received;
   do { received = read(0, output, capacity); } while (received < 0 && errno == EINTR);
-  if (received < 0) { silk_failure(reason, native_code, errno); return silk_transfer_failure(); }
+  if (received < 0) { silk_failure(reason, native_code, errno); return 0; }
   silk_success(reason, native_code);
-  return silk_transfer((size_t)received);
+  return silk_transfer((size_t)received, count);
 }
 `,
   silk_os_process_execute_v1: `
@@ -914,22 +905,23 @@ int silk_os_process_execute_v1(const unsigned char *program, size_t program_leng
 }
 `,
   silk_os_process_capture_v1: `
-silk_option_usize silk_os_process_capture_v1(int stream, size_t offset, unsigned char *output,
-                                             size_t capacity, int *reason, uint32_t *native_code) {
+int silk_os_process_capture_v1(int stream, size_t offset, unsigned char *output,
+                               size_t capacity, size_t *count,
+                               int *reason, uint32_t *native_code) {
   if (stream != 0 && stream != 1) {
     silk_protocol_failure(reason, native_code, SILK_WRONG_TYPE);
-    return silk_transfer_failure();
+    return 0;
   }
   silk_capture *capture = &silk_captures[stream];
   if (offset > capture->length) {
     silk_protocol_failure(reason, native_code, SILK_INVALID_PATH);
-    return silk_transfer_failure();
+    return 0;
   }
   size_t remaining = capture->length - offset;
   size_t transferred = remaining < capacity ? remaining : capacity;
   if (transferred != 0) memcpy(output, capture->bytes + offset, transferred);
   silk_success(reason, native_code);
-  return silk_transfer(transferred);
+  return silk_transfer(transferred, count);
 }
 `,
   silk_os_host_argument_count_v1: `
@@ -944,22 +936,22 @@ int silk_os_host_argument_count_v1(size_t *count, int *reason, uint32_t *native_
 }
 `,
   silk_os_host_argument_v1: `
-silk_option_usize silk_os_host_argument_v1(size_t index, unsigned char *output, size_t capacity,
-                                           int *reason, uint32_t *native_code) {
+int silk_os_host_argument_v1(size_t index, unsigned char *output, size_t capacity, size_t *count,
+                             int *reason, uint32_t *native_code) {
   if (silk_host_argv_v1 == NULL || silk_host_argc_v1 < 0 ||
       index >= (size_t)silk_host_argc_v1) {
     return silk_host_absent(reason, native_code);
   }
   const char *selected = silk_host_argv_v1[index];
   if (selected == NULL) return silk_host_absent(reason, native_code);
-  return silk_host_copy((const unsigned char *)selected, strlen(selected), output, capacity,
+  return silk_host_copy((const unsigned char *)selected, strlen(selected), output, capacity, count,
                         reason, native_code);
 }
 `,
   silk_os_host_variable_v1: `
-silk_option_usize silk_os_host_variable_v1(const unsigned char *name, size_t name_length,
-                                           unsigned char *output, size_t capacity,
-                                           int *reason, uint32_t *native_code) {
+int silk_os_host_variable_v1(const unsigned char *name, size_t name_length,
+                             unsigned char *output, size_t capacity, size_t *count,
+                             int *reason, uint32_t *native_code) {
   char **entries = silk_host_environ;
   if (entries == NULL) return silk_host_absent(reason, native_code);
   /* The environment block is scanned by raw bytes rather than through getenv, so a name or value
@@ -971,25 +963,25 @@ silk_option_usize silk_os_host_variable_v1(const unsigned char *name, size_t nam
     if ((size_t)(separator - text) != name_length) continue;
     if (name_length > 0 && memcmp(text, name, name_length) != 0) continue;
     const unsigned char *value = separator + 1;
-    return silk_host_copy(value, strlen((const char *)value), output, capacity, reason,
+    return silk_host_copy(value, strlen((const char *)value), output, capacity, count, reason,
                           native_code);
   }
   return silk_host_absent(reason, native_code);
 }
 `,
   silk_os_host_working_directory_v1: `
-silk_option_usize silk_os_host_working_directory_v1(unsigned char *output, size_t capacity,
-                                                    int *reason, uint32_t *native_code) {
+int silk_os_host_working_directory_v1(unsigned char *output, size_t capacity, size_t *count,
+                                      int *reason, uint32_t *native_code) {
   size_t room = 256;
   while (room <= ((size_t)1 << 20)) {
     char *buffer = (char *)malloc(room);
     if (buffer == NULL) {
       silk_protocol_failure(reason, native_code, SILK_NO_SPACE);
-      return silk_transfer_failure();
+      return 0;
     }
     if (getcwd(buffer, room) != NULL) {
-      silk_option_usize result = silk_host_copy((const unsigned char *)buffer, strlen(buffer),
-                                                output, capacity, reason, native_code);
+      int result = silk_host_copy((const unsigned char *)buffer, strlen(buffer), output, capacity,
+                                  count, reason, native_code);
       free(buffer);
       return result;
     }
@@ -997,12 +989,12 @@ silk_option_usize silk_os_host_working_directory_v1(unsigned char *output, size_
     free(buffer);
     if (selected != ERANGE) {
       silk_failure(reason, native_code, selected);
-      return silk_transfer_failure();
+      return 0;
     }
     room *= 2;
   }
   silk_protocol_failure(reason, native_code, SILK_TOO_LARGE);
-  return silk_transfer_failure();
+  return 0;
 }
 `,
   silk_os_system_clock_now_v1: `

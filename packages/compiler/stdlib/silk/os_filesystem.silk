@@ -283,14 +283,18 @@ effect fn readLoop(handle: &mut OsHandle) -> Bytes ! FileError | OutOfMemoryErro
     let mut lowReason = 0
     let mut nativeCode = u32.toU32(0)
     let mut output = bytesMutSlice(&mut buffer)
-    let mut received = none<usize>()
+    let mut length = usize.ZERO
+    let mut received = false
     unsafe {
-      received = run Intrinsic.osFileRead(handle, output, &mut lowReason, &mut nativeCode)
+      received = run Intrinsic.osFileRead(
+        handle,
+        output,
+        &mut length,
+        &mut lowReason,
+        &mut nativeCode
+      )
     }
-    let length = match move received {
-      Option<usize>.None => run raise(readFileOperation(), lowReason, nativeCode)
-      Option<usize>.Some { value: selected } => selected
-    }
+    if received == false { return run raise(readFileOperation(), lowReason, nativeCode) }
     if length == usize.ZERO {
       complete = true
     } else {
@@ -331,14 +335,19 @@ effect fn writeLoop(handle: &mut OsHandle, bytes: &[u8]) -> () ! FileError {
     let mut lowReason = 0
     let mut nativeCode = u32.toU32(0)
     // The low-level operation may commit a prefix. Re-presenting the remaining bytes is provider policy.
-    let mut written = none<usize>()
+    let mut length = usize.ZERO
+    let mut written = false
     unsafe {
-      written = run Intrinsic.osFileWrite(handle, bytes, offset, &mut lowReason, &mut nativeCode)
+      written = run Intrinsic.osFileWrite(
+        handle,
+        bytes,
+        offset,
+        &mut length,
+        &mut lowReason,
+        &mut nativeCode
+      )
     }
-    let length = match move written {
-      Option<usize>.None => run raise(writeFileOperation(), lowReason, nativeCode)
-      Option<usize>.Some { value: selected } => selected
-    }
+    if written == false { return run raise(writeFileOperation(), lowReason, nativeCode) }
     if length == usize.ZERO { return run raise(writeFileOperation(), 10, u32.toU32(0)) }
     offset = offset + length
   }
@@ -383,15 +392,20 @@ effect fn listLoop(
     let mut lowReason = 0
     let mut nativeCode = u32.toU32(0)
     let mut output = bytesMutSlice(&mut buffer)
-    let mut next = none<usize>()
+    let mut length = usize.ZERO
+    let mut next = false
     unsafe {
-      next = run Intrinsic.osDirectoryNext(handle, output, &mut kind, &mut required, &mut lowReason, &mut nativeCode)
+      next = run Intrinsic.osDirectoryNext(
+        handle,
+        output,
+        &mut length,
+        &mut kind,
+        &mut required,
+        &mut lowReason,
+        &mut nativeCode
+      )
     }
-    let encodedLength = match move next {
-      Option<usize>.Some { value: presentLength } => presentLength + usize.ONE
-      Option<usize>.None => usize.ZERO
-    }
-    if encodedLength == usize.ZERO {
+    if next == false {
       if lowReason == 8 {
         let resized = bytesZeroed(required)
         buffer = run resized
@@ -399,7 +413,6 @@ effect fn listLoop(
         return run raise(listDirectoryOperation(), lowReason, nativeCode)
       }
     } else {
-      let length = encodedLength - usize.ONE
       if length == usize.ZERO {
         complete = true
       } else {
@@ -498,15 +511,24 @@ effect fn rawCreateUnique(
   parent: &[u8],
   prefix: &[u8],
   output: &mut [u8],
+  count: &mut usize,
   required: &mut usize,
   lowReason: &mut i32,
   nativeCode: &mut u32
-) -> Option<usize> {
+) -> bool {
   unsafe {
-    return run Intrinsic.osDirectoryCreateUnique(root, parent, prefix, output, required, lowReason, nativeCode)
+    return run Intrinsic.osDirectoryCreateUnique(
+      root,
+      parent,
+      prefix,
+      output,
+      count,
+      required,
+      lowReason,
+      nativeCode
+    )
   }
-  let impossible = 1 / 0
-  return none<usize>()
+  return false
 }
 
 /// Creates one uniquely named directory under `parent` and returns its complete Path.
@@ -527,20 +549,18 @@ effect fn createTemporaryDirectory(
     let mut lowReason = 0
     let mut nativeCode = u32.toU32(0)
     let mut output = bytesMutSlice(&mut buffer)
+    let mut length = usize.ZERO
     let chosen = run rawCreateUnique(
       bytesSlice(&self.root),
       pathBytes(parent),
       prefix,
       move output,
+      &mut length,
       &mut required,
       &mut lowReason,
       &mut nativeCode
     )
-    let length = match move chosen {
-      Option<usize>.Some { value: selected } => selected
-      Option<usize>.None => usize.ZERO
-    }
-    if length == usize.ZERO {
+    if chosen == false {
       if lowReason == 8 {
         let resized = bytesZeroed(required)
         buffer = run resized

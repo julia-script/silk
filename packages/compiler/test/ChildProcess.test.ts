@@ -114,7 +114,7 @@ import silk.filesystem { FileError }
 import silk.option { Option }
 import silk.result { Result }
 pub fn main() -> i32 {
-  let attempted = run Intrinsic.effectResult(program())
+  let attempted = run Effect.result(program())
   return match move attempted {
       Result<i32, ProcessError | OutOfMemoryError | FileError>.Success { value } => value
       Result<i32, ProcessError | OutOfMemoryError | FileError>.Failure { error } => match move error {

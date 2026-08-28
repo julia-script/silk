@@ -67,7 +67,6 @@ import silk.child_process {
 import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.i32 as i32
-import silk.option { Option, none }
 import silk.u32 as u32
 import silk.u8 as u8
 import silk.usize as usize
@@ -146,14 +145,14 @@ effect fn rawCapture(
   stream: i32,
   offset: usize,
   output: &mut [u8],
+  count: &mut usize,
   lowReason: &mut i32,
   nativeCode: &mut u32
-) -> Option<usize> {
+) -> bool {
   unsafe {
-    return run Intrinsic.osProcessCapture(stream, offset, output, lowReason, nativeCode)
+    return run Intrinsic.osProcessCapture(stream, offset, output, count, lowReason, nativeCode)
   }
-  let impossible = 1 / 0
-  return none<usize>()
+  return false
 }
 
 /// Copies one completed capture out of the boundary into independently owned bytes.
@@ -170,11 +169,16 @@ effect fn drain(stream: i32, length: usize) -> Bytes ! ProcessError | OutOfMemor
     let mut lowReason = 0
     let mut nativeCode = u32.toU32(0)
     let mut output = bytesMutSlice(&mut buffer)
-    let transferred = run rawCapture(stream, offset, move output, &mut lowReason, &mut nativeCode)
-    let received = match move transferred {
-      Option<usize>.None => run raise(captureOperation(), lowReason, nativeCode)
-      Option<usize>.Some { value: selected } => selected
-    }
+    let mut received = usize.ZERO
+    let transferred = run rawCapture(
+      stream,
+      offset,
+      move output,
+      &mut received,
+      &mut lowReason,
+      &mut nativeCode
+    )
+    if transferred == false { return run raise(captureOperation(), lowReason, nativeCode) }
     if received == usize.ZERO { return run raise(captureOperation(), 10, u32.toU32(0)) }
     let view = bytesSlice(&buffer)
     let mut index = usize.ZERO

@@ -32,7 +32,6 @@
 //! ```
 
 import silk.i32 as i32
-import silk.option { Option, none }
 import silk.standard_input {
   ReadOutcome,
   StandardInput,
@@ -68,10 +67,14 @@ pub fn make() -> OsStandardInput {
   return OsStandardInput {}
 }
 
-effect fn rawRead(output: &mut [u8], lowReason: &mut i32, nativeCode: &mut u32) -> Option<usize> {
-  unsafe { return run Intrinsic.osStandardInputRead(output, lowReason, nativeCode) }
-  let impossible = 1 / 0
-  return none<usize>()
+effect fn rawRead(
+  output: &mut [u8],
+  count: &mut usize,
+  lowReason: &mut i32,
+  nativeCode: &mut u32
+) -> bool {
+  unsafe { return run Intrinsic.osStandardInputRead(output, count, lowReason, nativeCode) }
+  return false
 }
 
 effect fn raise() -> never ! StreamReadError {
@@ -88,11 +91,9 @@ effect fn raise() -> never ! StreamReadError {
 effect fn read(self: &mut OsStandardInput, buffer: &mut [u8]) -> ReadOutcome ! StreamReadError {
   let mut lowReason = 0
   let mut nativeCode = u32.toU32(0)
-  let received = run rawRead(move buffer, &mut lowReason, &mut nativeCode)
-  let length = match move received {
-    Option<usize>.None => run raise()
-    Option<usize>.Some { value: selected } => selected
-  }
+  let mut length = usize.ZERO
+  let received = run rawRead(move buffer, &mut length, &mut lowReason, &mut nativeCode)
+  if received == false { return run raise() }
   if length == usize.ZERO { return endOfInput() }
   return filled(length)
 }
