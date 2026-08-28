@@ -23,7 +23,7 @@
 - [x] 3.4 Implement unit and named-field construction with complete field initialization, construction authority, visibility fences, type compatibility, represented fields, and precise parent result types, and verify cross-module private fields block raw construction.
 - [x] 3.5 Preserve every variant through generic specialization, including equal and `never` payloads while independently renormalizing structural-union fields, and verify specialization facts never collapse or flatten variants.
 - [x] 3.6 Reject direct parent-union field projection and common-field synthesis while retaining diagnostic facts, and verify `result.value` is unavailable until a variant pattern binds its payload.
-- [ ] 3.7 Admit interface, operator, Copy, and Drop declarations against nominal union parents through the ordinary conformance/coherence path, and verify variant names do not become lookup or implementation targets.
+- [x] 3.7 Admit interface, operator, Copy, and Drop declarations against nominal union parents through the ordinary conformance/coherence path, and verify variant names do not become lookup or implementation targets.
 
 ## 4. Variant Patterns and Hierarchical Coverage
 
@@ -36,7 +36,7 @@
 
 ## 5. Ownership, Represented Fields, and Cleanup
 
-- [ ] 5.1 Apply affine-by-default ownership and explicit Copy validation across every specialized variant field, and verify all-Copy payloads remain affine without `impl Copy` while one affine field rejects the implementation.
+- [x] 5.1 Apply affine-by-default ownership and explicit Copy validation across every specialized variant field, and verify all-Copy payloads remain affine without `impl Copy` while one affine field rejects the implementation.
 - [ ] 5.2 Build active-variant cleanup plans that reuse nominal Drop ordering and clean only initialized fields of the selected variant, and verify success, typed-failure, and ordinary scope exits release each owned payload exactly once.
 - [ ] 5.3 Implement moved and borrowed variant-pattern ownership, including branch-local cleanup of omitted fields and rejection of invalid partial moves, and verify extracted and omitted fields have one final owner.
 - [ ] 5.4 Realize callable-bounded fields only inside the active variant using exact static callable storage and access rules, and verify unsupported representations retain the pre-MIR storage fence.

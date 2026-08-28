@@ -293,8 +293,33 @@ export const cleanupPlan = (
       type.arguments,
     ) ?? new Map()
   const nextSeen = new Set(seen).add(key)
-  if (declaration._tag === 'UnionDeclaration') {
+  const withDropHook = (inner: CleanupPlan): CleanupPlan => {
+    const witness = ConformanceProof.witness(index, type, Type.dropCapability)
+    if (witness?._tag !== 'SourceConformanceWitness') return inner
+    const conformance = index.modules
+      .find((module) => module.module === witness.module)
+      ?.conformances.find((candidate) => candidate.ordinal === witness.ordinal)
+    if (conformance?.provider._tag !== 'Resolved') return inner
+    const inferred = new Map<string, Type.GenericArgument>()
+    if (!TypeInference.infer(conformance.provider.type, type, inferred)) return inner
     return Object.freeze({
+      _tag: 'HookCleanup',
+      type,
+      hook: Object.freeze({
+        _tag: 'CanonicalDeclarationId' as const,
+        module: witness.module,
+        name: `drop@impl#${witness.ordinal}`,
+      }),
+      typeArguments: Object.freeze(
+        conformance.typeParameters.map(
+          (parameter) => inferred.get(Type.key(parameter.type)) ?? parameter.type,
+        ),
+      ),
+      inner,
+    })
+  }
+  if (declaration._tag === 'UnionDeclaration') {
+    const unionPlan: CleanupPlan = Object.freeze({
       _tag: 'NominalUnionCleanup',
       type,
       variants: Object.freeze(
@@ -325,6 +350,7 @@ export const cleanupPlan = (
         ),
       ),
     })
+    return withDropHook(unionPlan)
   }
   const structPlan: CleanupPlan = Object.freeze({
     _tag: 'StructCleanup',
@@ -342,29 +368,7 @@ export const cleanupPlan = (
     ),
   })
   // A source Drop conformance runs its hook before automatic field cleanup.
-  const witness = ConformanceProof.witness(index, type, Type.dropCapability)
-  if (witness?._tag !== 'SourceConformanceWitness') return structPlan
-  const conformance = index.modules
-    .find((module) => module.module === witness.module)
-    ?.conformances.find((candidate) => candidate.ordinal === witness.ordinal)
-  if (conformance?.provider._tag !== 'Resolved') return structPlan
-  const inferred = new Map<string, Type.GenericArgument>()
-  if (!TypeInference.infer(conformance.provider.type, type, inferred)) return structPlan
-  return Object.freeze({
-    _tag: 'HookCleanup',
-    type,
-    hook: Object.freeze({
-      _tag: 'CanonicalDeclarationId' as const,
-      module: witness.module,
-      name: `drop@impl#${witness.ordinal}`,
-    }),
-    typeArguments: Object.freeze(
-      conformance.typeParameters.map(
-        (parameter) => inferred.get(Type.key(parameter.type)) ?? parameter.type,
-      ),
-    ),
-    inner: structPlan,
-  })
+  return withDropHook(structPlan)
 }
 
 export const cleanupTypeAtPath = (

@@ -1432,6 +1432,36 @@ impl Clock for FixedClock {}`,
   }),
 )
 
+it.effect('validates Copy over every specialized nominal union variant field', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('union-copy', [
+      [
+        'union-copy',
+        `union Choice<T> { Empty, Present { value: T } }
+impl<T: Copy> Copy for Choice<T> {}
+union Implicit { Left { value: i32 }, Right }
+union Owned { Empty, Present { allocation: Allocation } }
+impl Copy for Owned {}`,
+      ],
+    ])
+    const choice = (element: Type.Type): Type.Nominal =>
+      Type.nominal('union-copy', 'Choice', [element])
+
+    assert.isTrue(ConformanceProof.copyType(index, choice('i32')))
+    assert.isFalse(ConformanceProof.copyType(index, choice(Type.nominal('union-copy', 'Implicit'))))
+    assert.isFalse(ConformanceProof.copyType(index, Type.nominal('union-copy', 'Implicit')))
+    assert.isFalse(ConformanceProof.copyType(index, Type.nominal('union-copy', 'Owned')))
+    assert.deepEqual(
+      index.modules.at(0)?.conformances.map((conformance) => conformance.validity._tag),
+      ['ValidConformance', 'InvalidConformance'],
+    )
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0083'],
+    )
+  }),
+)
+
 it.effect('indexes parametric conformances with bound parameters', () =>
   Effect.gen(function* () {
     const index = yield* collect('parametric', [
