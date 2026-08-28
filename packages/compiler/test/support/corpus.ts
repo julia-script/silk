@@ -1939,7 +1939,7 @@ import silk.i32 as i32
 import silk.hash as Hash
 import silk.hash { HashKey, HashSeed, Word }
 import silk.hash_map { HashMap, bucketCount, contains, get, insert, length, make, remove }
-import silk.option { Option }
+import silk.option { Option, unwrapOr }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()

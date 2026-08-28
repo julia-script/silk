@@ -280,11 +280,16 @@ const directStaticCases = new Set([
   'map-both-failure-effect',
   'flat-map-effect',
   'provide-effect',
-  'stored-effect',
   'affine-imperative',
   'affine-effect',
   'trap-effect',
 ])
+const constructorOnlyCases = new Set(['stored-effect'])
+const applicabilityOf = (id) => {
+  if (directStaticCases.has(id)) return 'DirectStaticRun'
+  if (constructorOnlyCases.has(id)) return 'ConstructorOnly'
+  return 'None'
+}
 
 const clangText = (bitcode, id, arguments_) => {
   const bitcodePath = join(temporary, `${id}.bc`)
@@ -688,7 +693,7 @@ try {
       const coroutineFrameDescriptors = loweredWasm.functions.filter(
         (fn) => fn.suspension?.frame !== undefined,
       ).length
-      const applicability = directStaticCases.has(sample.id) ? 'DirectStaticRun' : 'None'
+      const applicability = applicabilityOf(sample.id)
 
       cases.push(
         Object.freeze({

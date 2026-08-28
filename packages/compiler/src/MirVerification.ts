@@ -4494,7 +4494,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               const localType = fn.localTypes.at(binding.destination.ordinal)
               const selected =
                 arm.member === undefined
-                  ? undefined
+                  ? fieldPathType(self.layout, semanticType(operation.scrutineeType), binding.path)
                   : coverageFieldPathType(self.layout, arm.member, binding.path)
               if (
                 localType === undefined ||
@@ -4553,7 +4553,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 ? arm.selected.cleanup.every((entry) => {
                     const selected =
                       arm.member === undefined
-                        ? undefined
+                        ? fieldPathType(
+                            self.layout,
+                            semanticType(operation.scrutineeType),
+                            entry.path,
+                          )
                         : coverageFieldPathType(self.layout, arm.member, entry.path)
                     return (
                       selected !== undefined &&
