@@ -197,6 +197,8 @@ const operationText = (operation: Operation): string => {
       return `drop ${localText(operation.local)}${operation.cleanup._tag === 'NoCleanup' ? '' : ` cleanup=${operation.cleanup._tag}`}${operation.localShared === undefined ? '' : ` element=${SilkType.encode(operation.localShared.element)} layout=${operation.localShared.block.provenance} transition=decrement-or-cleanup-release`} ${provenanceText(operation.provenance)}`
     case 'Match':
       return `${localText(operation.destination)} = match#${operation.id.span.start} ${operation.access.toLowerCase()} ${localText(operation.scrutinee)} : ${typeText(operation.scrutineeType)} -> ${typeText(operation.type)}${operation.retainsBindings ? ' retain-bindings' : ''} ${provenanceText(operation.provenance)}`
+    case 'Conditional':
+      return `${localText(operation.destination)} = conditional ${localText(operation.condition)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ShortCircuit':
       return `${localText(operation.destination)} = short-circuit ${operation.operator === 'And' ? '&&' : '||'} ${localText(operation.left)} : bool ${provenanceText(operation.provenance)}`
   }
@@ -206,6 +208,15 @@ const fieldPathText = (path: ReadonlyArray<DeclarationFacts.FieldId>): string =>
   path.length === 0 ? 'payload' : path.map((field) => `#${field.ordinal}`).join('.')
 
 const operationLines = (operation: Operation, indent: string): ReadonlyArray<string> => {
+  if (operation._tag === 'Conditional') {
+    return [
+      `${indent}${operationText(operation)}`,
+      `${indent}  taken -> ${localText(operation.taken.result)}`,
+      ...operation.taken.operations.flatMap((child) => operationLines(child, `${indent}    `)),
+      `${indent}  otherwise -> ${localText(operation.otherwise.result)}`,
+      ...operation.otherwise.operations.flatMap((child) => operationLines(child, `${indent}    `)),
+    ]
+  }
   if (operation._tag === 'ShortCircuit') {
     return [
       `${indent}${operationText(operation)}`,
@@ -328,7 +339,7 @@ const suspensionLines = (fn: MirFunction): ReadonlyArray<string> => {
         ...suspensionRunnerLines(region.runner),
         region.completion._tag === 'Propagate'
           ? `    completion propagate outcome=${SilkType.encode(region.completion.outcome)} mappings=${region.completion.failureMappings.map((mapping) => `${mapping.source}:${mapping.target}`).join(',') || 'none'}`
-          : `    completion reify outcome=${SilkType.encode(region.completion.outcome)} result=${SilkType.encode(region.completion.resultType)} success-tag=${region.completion.successTag} failure-tag=${region.completion.failureTag}`,
+          : `    completion reify outcome=${SilkType.encode(region.completion.outcome)} success=${SilkType.encode(region.completion.successType)} failure=${SilkType.encode(region.completion.failureValueType)}`,
         `    live ${region.liveLocals.map(localText).join(',') || 'none'}`,
         ...(descriptor === undefined
           ? []

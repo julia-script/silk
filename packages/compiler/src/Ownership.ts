@@ -1014,14 +1014,28 @@ const checkExpression = (
       return
     }
     case 'EffectResult':
-      // The intrinsic consumes its protected Effect exactly like its source-callable contract.
-      // Visiting the dedicated HIR operand prevents the runner's exit cleanup from releasing an
-      // affine environment that the reification operation already transferred to its runner.
+      // The intrinsic consumes all three operands exactly like its source-callable contract.
       checkExpression(
         state,
         live,
         expression.protected,
         argumentConsumes(expression.protected),
+        guard,
+        escaping,
+      )
+      checkExpression(
+        state,
+        live,
+        expression.success,
+        argumentConsumes(expression.success),
+        guard,
+        escaping,
+      )
+      checkExpression(
+        state,
+        live,
+        expression.failure,
+        argumentConsumes(expression.failure),
         guard,
         escaping,
       )
@@ -1402,7 +1416,12 @@ const analyzeLoans = (
       return Object.freeze(
         expression.elements.flatMap((element) => movedExecutableBindings(element.expression)),
       )
-    if (expression._tag === 'EffectResult') return movedExecutableBindings(expression.protected)
+    if (expression._tag === 'EffectResult')
+      return Object.freeze([
+        ...movedExecutableBindings(expression.protected),
+        ...movedExecutableBindings(expression.success),
+        ...movedExecutableBindings(expression.failure),
+      ])
     if (expression._tag === 'EffectCatch')
       return Object.freeze([
         ...movedExecutableBindings(expression.protected),
@@ -1532,6 +1551,8 @@ const analyzeLoans = (
         return
       case 'EffectResult':
         scanRunEnds(expression.protected, region)
+        scanRunEnds(expression.success, region)
+        scanRunEnds(expression.failure, region)
         return
       case 'EffectBindRequirement':
         scanRunEnds(expression.protected, region)

@@ -1088,6 +1088,8 @@ const collectExpression = (
     case 'EffectResult':
       collectIntrinsicReference(expression.reference, index, pending)
       collectExpression(expression.protected, index, scope, pending)
+      collectExpression(expression.success, index, scope, pending)
+      collectExpression(expression.failure, index, scope, pending)
       return
     case 'EffectCatch':
       collectIntrinsicReference(expression.reference, index, pending)

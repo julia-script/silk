@@ -885,6 +885,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `drop ${localText(operation.local)}`
     case 'Match':
       return `${localText(operation.destination)} = match ${operation.access.toLowerCase()} ${localText(operation.scrutinee)}`
+    case 'Conditional':
+      return `${localText(operation.destination)} = if ${localText(operation.condition)}`
     case 'ShortCircuit':
       return `${localText(operation.destination)} = ${operation.operator === 'And' ? '&&' : '||'} ${localText(operation.left)}`
     case 'HostWrite':

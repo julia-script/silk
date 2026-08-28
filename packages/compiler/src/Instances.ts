@@ -132,8 +132,6 @@ export interface CallInstance {
   readonly span: Hir.Expression['span']
   readonly target: InstanceKey
   readonly resultEffect?: string
-  /** Parameter whose Effect is reified by an exact source forwarding wrapper. */
-  readonly effectResultParameter?: number
 }
 
 /** One exact sealed intrinsic call retained by executable instance closure. */

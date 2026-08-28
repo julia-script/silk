@@ -934,7 +934,7 @@ pub effect fn createDirectoriesRecursively(
     if boundary {
       let prefixBytes = run appendRange(bytesMake(), values, usize.ZERO, index)
       let prefix = run finishPath(move prefixBytes)
-      let completed = run Intrinsic.effectResult(FileSystem.stat(&prefix))
+      let completed = run Effect.result(FileSystem.stat(&prefix))
       let decision = classifyDirectory(move completed)
       let ensured = match move decision {
         DirectoryPresent {} => ()
@@ -978,7 +978,7 @@ pub effect fn writeFileWithParents(
     if boundary {
       let prefixBytes = run appendRange(bytesMake(), values, usize.ZERO, index)
       let prefix = run finishPath(move prefixBytes)
-      let completed = run Intrinsic.effectResult(FileSystem.stat(&prefix))
+      let completed = run Effect.result(FileSystem.stat(&prefix))
       let decision = classifyDirectory(move completed)
       let ensured = match move decision {
         DirectoryPresent {} => ()
@@ -1004,7 +1004,7 @@ effect fn existsFailure(failure: FileError) -> bool ! FileError {
 /// Only the portable `NotFound` reason becomes `false`. Permission, I/O, and every other provider
 /// failure propagate so callers cannot mistake an inaccessible path for an absent one.
 pub effect fn exists(path: &Path) -> bool ! FileError ? &mut FileSystem {
-  let completed = run Intrinsic.effectResult(FileSystem.stat(path))
+  let completed = run Effect.result(FileSystem.stat(path))
   return match move completed {
     Result<FileInfo | DirectoryInfo, FileError>.Success { value: info } => true
     Result<FileInfo | DirectoryInfo, FileError>.Failure { error: failure } => run existsFailure(move failure)

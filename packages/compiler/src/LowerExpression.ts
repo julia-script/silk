@@ -413,7 +413,9 @@ export function lowerExpressionInner(
           _tag: 'MakeCallable',
           destination,
           target: expression.target,
-          typeArguments: expression.typeArguments,
+          typeArguments: Object.freeze(
+            expression.typeArguments.map((argument) => fn.semanticArgument(argument)),
+          ),
           captures: Object.freeze([]),
           type,
           provenance: authored(expression.span),
@@ -766,10 +768,12 @@ export function lowerExpressionInner(
           const reified = lowerReifiedEffectRecipe(
             fn,
             resultRecipe.protected,
+            resultRecipe.success,
+            resultRecipe.failure,
             expression.type,
             expression.span,
           )
-          return reified === undefined ? undefined : Object.freeze({ result: reified.result })
+          return reified
         }
         if (
           resultRecipe !== undefined &&

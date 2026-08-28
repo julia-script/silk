@@ -7,7 +7,6 @@ import {
   propagationReleases,
 } from './CleanupEmission.js'
 import * as ConformanceProof from './ConformanceProof.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
 import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
 import { effectRecipe, inlineForwardedRequirement } from './Forwarding.js'
@@ -312,14 +311,9 @@ export const lowerRunEffectComposite = (
 }
 
 export interface ReifiedEffect {
-  readonly result: Mir.LocalId
-  readonly resultType: Extract<Mir.Type, { readonly _tag: 'Nominal' }>
-  readonly resultField: DeclarationFacts.FieldId
-  readonly resultUnion: Type.StructuralUnion
-  readonly successType: Type.Nominal
-  readonly successField: DeclarationFacts.FieldId
-  readonly failureType: Type.Nominal
-  readonly failureField: DeclarationFacts.FieldId
+  readonly valid: Mir.LocalId
+  readonly success: Mir.LocalId
+  readonly failure: Mir.LocalId
   readonly failureValueType: Type.Type
 }
 
@@ -327,7 +321,6 @@ export const reifyEffectValue = (
   fn: FunctionLowering,
   effect: Mir.LocalId,
   effectType: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>,
-  result: Type.Type,
   span: SourceSpan.SourceSpan,
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.providedRequirements,
 ): ReifiedEffect | undefined => {
@@ -343,59 +336,35 @@ export const reifyEffectValue = (
     _tag: 'EffectOutcome',
     type: effectType.type,
   })
-  const resultType = fn.type(result)
   const failureValueType = Type.failureValue(Type.failureMembers(effectType.type))
-  const successType = Type.resultSuccess(effectType.type.success)
-  const failureType = Type.resultFailure(failureValueType)
-  const resultUnionNormalization = Type.union([successType, failureType])
-  const resultUnion =
-    resultUnionNormalization._tag === 'Normalized' && Type.isUnion(resultUnionNormalization.type)
-      ? resultUnionNormalization.type
-      : undefined
-  const resultEntry =
-    resultType?._tag === 'Nominal' ? Layout.entry(fn.layout, resultType.type) : undefined
-  const successEntry = Layout.entry(fn.layout, successType)
-  const failureEntry = Layout.entry(fn.layout, failureType)
-  const resultField =
-    resultEntry?.representation._tag === 'Aggregate'
-      ? resultEntry.representation.fields.at(0)?.id
-      : undefined
-  const successField =
-    successEntry?.representation._tag === 'Aggregate'
-      ? successEntry.representation.fields.at(0)?.id
-      : undefined
-  const failureField =
-    failureEntry?.representation._tag === 'Aggregate'
-      ? failureEntry.representation.fields.at(0)?.id
-      : undefined
-  const resultShape =
-    resultType?._tag === 'Nominal' ? Layout.callingShape(fn.layout, resultType.type) : undefined
+  const boolType = fn.type('bool')
+  const successType = fn.type(effectType.type.success)
+  const failureType = fn.type(failureValueType)
   const outcomeShape = Layout.callingShape(fn.layout, effectType.type)
+  const successShape = Layout.callingShape(fn.layout, effectType.type.success)
   const failureValueShape = Layout.callingShape(fn.layout, failureValueType)
-  const successTag = resultUnion?.members.findIndex((member) => Type.equals(member, successType))
-  const failureTag = resultUnion?.members.findIndex((member) => Type.equals(member, failureType))
   if (
-    resultType?._tag !== 'Nominal' ||
-    resultUnion === undefined ||
-    resultField === undefined ||
-    successField === undefined ||
-    failureField === undefined ||
-    resultShape === undefined ||
+    boolType?._tag !== 'bool' ||
+    successType === undefined ||
+    successType._tag === 'EffectOutcome' ||
+    (failureType?._tag !== 'Nominal' && failureType?._tag !== 'Union') ||
     outcomeShape === undefined ||
+    successShape === undefined ||
     failureValueShape === undefined ||
-    successTag === undefined ||
-    successTag < 0 ||
-    failureTag === undefined ||
-    failureTag < 0
+    Type.failureMembers(effectType.type).length === 0
   )
     return undefined
   const outcome = fn.alloc(outcomeType)
-  const destination = fn.alloc(resultType)
+  const valid = fn.alloc(boolType)
+  const success = fn.alloc(successType)
+  const failure = fn.alloc(failureType)
   fn.emit(
     Object.freeze({
       _tag: 'ReifyEffect' as const,
-      destination,
+      destination: valid,
       outcome,
+      successValue: success,
+      failureValue: failure,
       effect,
       runner,
       runnerTypeArguments:
@@ -403,32 +372,18 @@ export const reifyEffectValue = (
         effectType.environment.instance.typeArguments,
       arguments: runtimeRequirementArguments(provided),
       outcomeType,
-      resultType,
-      resultField,
-      resultUnion,
-      successType,
-      successField,
-      successTag,
-      failureType,
-      failureField,
-      failureTag,
       failureValueType,
-      resultShape,
+      successShape,
       outcomeShape,
       failureValueShape,
-      type: resultType,
+      type: boolType,
       provenance: authored(span),
     }),
   )
   return Object.freeze({
-    result: destination,
-    resultType,
-    resultField,
-    resultUnion,
-    successType,
-    successField,
-    failureType,
-    failureField,
+    valid,
+    success,
+    failure,
     failureValueType,
   })
 }
@@ -441,6 +396,7 @@ export const callableEffectResult = (
   const typeArguments =
     callable.environment?.callable.typeArguments ??
     callable.storage?.realization.targetArguments ??
+    callable.typeArguments ??
     Object.freeze([])
   const result = fn.effectResults.get(instanceText(callable.target.declaration, typeArguments))
   return result?._tag === 'EffectValue' ? result : undefined
@@ -524,32 +480,10 @@ export const lowerEffectCatch = (
   )
     return undefined
 
-  const reified = reifyEffectValue(
-    fn,
-    protected_.result,
-    protectedType,
-    Type.result(protectedEffect.success, Type.failureValue(protectedFailures)),
-    expression.span,
-  )
+  const reified = reifyEffectValue(fn, protected_.result, protectedType, expression.span)
   if (reified === undefined) return undefined
-  const resultUnionType: Extract<Mir.Type, { readonly _tag: 'Union' }> = Object.freeze({
-    _tag: 'Union',
-    type: reified.resultUnion,
-  })
-  const resultUnion = fn.alloc(resultUnionType)
-  fn.emit(
-    Object.freeze({
-      _tag: 'Project' as const,
-      destination: resultUnion,
-      source: reified.result,
-      field: reified.resultField,
-      type: resultUnionType,
-      provenance: generated(expression.span),
-    }),
-  )
 
   const successType = fn.type(resultEffect.success)
-  const resultUnionShape = Layout.callingShape(fn.layout, reified.resultUnion)
   const successShape = Layout.callingShape(fn.layout, resultEffect.success)
   const failureValueMir = fn.type(reified.failureValueType)
   const propagationEffect = fn.effectOutcome
@@ -559,7 +493,6 @@ export const lowerEffectCatch = (
   if (
     successType === undefined ||
     successType._tag === 'EffectOutcome' ||
-    resultUnionShape === undefined ||
     successShape === undefined ||
     (failureValueMir?._tag !== 'Nominal' && failureValueMir?._tag !== 'Union') ||
     propagationEffect === undefined ||
@@ -569,34 +502,6 @@ export const lowerEffectCatch = (
     return undefined
 
   const declaration = fn.owner.function.declaration.id
-  const outerMatch: Match.MatchId = Object.freeze({
-    _tag: 'MatchId',
-    function: declaration,
-    span: expression.span,
-  })
-  const successArm: Match.ArmId = Object.freeze({
-    _tag: 'MatchArmId',
-    match: outerMatch,
-    ordinal: 0,
-  })
-  const failureArm: Match.ArmId = Object.freeze({
-    _tag: 'MatchArmId',
-    match: outerMatch,
-    ordinal: 1,
-  })
-  const successBinding: Match.BindingId = Object.freeze({
-    _tag: 'PatternBindingId',
-    arm: successArm,
-    ordinal: 0,
-  })
-  const failureBinding: Match.BindingId = Object.freeze({
-    _tag: 'PatternBindingId',
-    arm: failureArm,
-    ordinal: 0,
-  })
-  const success = fn.alloc(successType)
-  const failure = fn.alloc(failureValueMir)
-
   const failureMembers =
     failureValueMir._tag === 'Nominal'
       ? Object.freeze([failureValueMir.type])
@@ -670,6 +575,7 @@ export const lowerEffectCatch = (
             typeArguments:
               handlerType.environment?.callable.typeArguments ??
               handlerType.storage?.realization.targetArguments ??
+              handlerType.typeArguments ??
               Object.freeze([]),
             captures: Object.freeze([]),
             arguments: Object.freeze([handlerArgument]),
@@ -740,9 +646,9 @@ export const lowerEffectCatch = (
     _tag: 'Match',
     id: innerMatch,
     destination: innerResult,
-    scrutinee: failure,
+    scrutinee: reified.failure,
     scrutineeType: failureValueMir,
-    scrutineeShape: Layout.callingShape(fn.layout, reified.failureValueType) ?? resultUnionShape,
+    scrutineeShape: Layout.callingShape(fn.layout, reified.failureValueType) ?? successShape,
     access: 'Move',
     retainsBindings: false,
     members: failureCoverage,
@@ -762,77 +668,14 @@ export const lowerEffectCatch = (
   const destination = fn.alloc(successType)
   fn.emit(
     Object.freeze({
-      _tag: 'Match' as const,
-      id: outerMatch,
+      _tag: 'Conditional' as const,
       destination,
-      scrutinee: resultUnion,
-      scrutineeType: resultUnionType,
-      scrutineeShape: resultUnionShape,
-      access: 'Move' as const,
-      retainsBindings: false,
-      members: Object.freeze(reified.resultUnion.members.map(Match.structuralMember)),
-      decisions: Object.freeze(
-        reified.resultUnion.members.map((member) =>
-          Object.freeze({
-            member: Match.structuralMember(member),
-            candidates: Object.freeze([
-              Type.equals(member, reified.successType) ? successArm : failureArm,
-            ]),
-          }),
-        ),
-      ),
-      arms: Object.freeze([
-        Object.freeze({
-          id: successArm,
-          member: Match.structuralMember(reified.successType),
-          universal: false,
-          before: Object.freeze(reified.resultUnion.members.map(Match.structuralMember)),
-          after: Object.freeze([Match.structuralMember(reified.failureType)]),
-          bindings: Object.freeze([
-            Object.freeze({
-              id: successBinding,
-              destination: success,
-              path: Object.freeze([reified.successField]),
-              type: successType,
-              access: 'Move' as const,
-              provenance: generated(expression.span),
-            }),
-          ]),
-          selected: Object.freeze({
-            access: 'Move' as const,
-            operations: unusedHandlerDrop(),
-            result: success,
-            cleanup: Object.freeze([]),
-            endBorrow: false,
-          }),
-          provenance: generated(expression.span),
-        }),
-        Object.freeze({
-          id: failureArm,
-          member: Match.structuralMember(reified.failureType),
-          universal: false,
-          before: Object.freeze([Match.structuralMember(reified.failureType)]),
-          after: Object.freeze([]),
-          bindings: Object.freeze([
-            Object.freeze({
-              id: failureBinding,
-              destination: failure,
-              path: Object.freeze([reified.failureField]),
-              type: failureValueMir,
-              access: 'Move' as const,
-              provenance: generated(expression.span),
-            }),
-          ]),
-          selected: Object.freeze({
-            access: 'Move' as const,
-            operations: Object.freeze([innerOperation]),
-            result: innerResult,
-            cleanup: Object.freeze([]),
-            endBorrow: false,
-          }),
-          provenance: generated(expression.span),
-        }),
-      ]),
+      condition: reified.valid,
+      taken: Object.freeze({ operations: unusedHandlerDrop(), result: reified.success }),
+      otherwise: Object.freeze({
+        operations: Object.freeze([innerOperation]),
+        result: innerResult,
+      }),
       type: successType,
       resultShape: successShape,
       provenance: generated(expression.span),
@@ -1307,10 +1150,12 @@ const lowerForwardedProvider = <A>(
 export const lowerReifiedEffectRecipe = (
   fn: FunctionLowering,
   subject: Hir.Expression,
+  successCarrier: Hir.Expression,
+  failureCarrier: Hir.Expression,
   resultType: Type.Type,
   span: SourceSpan.SourceSpan,
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.providedRequirements,
-): ReifiedEffect | undefined => {
+): LoweredExpression | undefined => {
   const recipe = effectRecipe(fn, subject)
   const forwarded = inlineForwardedRequirement(fn, recipe)
   if (forwarded !== undefined) {
@@ -1318,6 +1163,8 @@ export const lowerReifiedEffectRecipe = (
       const reified = lowerReifiedEffectRecipe(
         fn,
         forwarded.binding.protected,
+        successCarrier,
+        failureCarrier,
         resultType,
         span,
         Object.freeze([...availableRequirements, requirement]),
@@ -1333,6 +1180,8 @@ export const lowerReifiedEffectRecipe = (
       const reified = lowerReifiedEffectRecipe(
         fn,
         recipe.protected,
+        successCarrier,
+        failureCarrier,
         resultType,
         span,
         Object.freeze([...availableRequirements, requirement]),
@@ -1348,19 +1197,91 @@ export const lowerReifiedEffectRecipe = (
       : lowerExpression(fn, recipe)
   const effectType = lowered === undefined ? undefined : fn.localTypes.at(lowered.result.ordinal)
   if (lowered === undefined || effectType?._tag !== 'EffectValue') return undefined
-  const reified = reifyEffectValue(
-    fn,
-    lowered.result,
-    effectType,
-    resultType,
-    span,
-    availableRequirements,
+  const success = lowerExpression(fn, successCarrier)
+  const failure = lowerExpression(fn, failureCarrier)
+  const successType = success === undefined ? undefined : fn.localTypes.at(success.result.ordinal)
+  const failureType = failure === undefined ? undefined : fn.localTypes.at(failure.result.ordinal)
+  const carrierType = fn.type(resultType)
+  const carrierShape =
+    carrierType === undefined
+      ? undefined
+      : Layout.callingShape(fn.layout, Mir.semanticType(carrierType))
+  if (
+    success === undefined ||
+    failure === undefined ||
+    successType?._tag !== 'CallableValue' ||
+    failureType?._tag !== 'CallableValue' ||
+    carrierType === undefined ||
+    carrierType._tag === 'EffectOutcome' ||
+    carrierShape === undefined
   )
+    return undefined
+  const reified = reifyEffectValue(fn, lowered.result, effectType, span, availableRequirements)
   if (reified === undefined) return undefined
+  const drop = (
+    local: Mir.LocalId,
+    type: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
+  ): ReadonlyArray<Mir.DropOperation> => {
+    const cleanup = cleanupForLocal(fn, concreteCleanup(fn, Mir.semanticType(type)), type)
+    return cleanup._tag === 'NoCleanup'
+      ? Object.freeze([])
+      : Object.freeze([
+          Object.freeze({
+            _tag: 'Drop' as const,
+            local,
+            cleanup,
+            provenance: generated(span),
+          }),
+        ])
+  }
+  const apply = (
+    callable: Mir.LocalId,
+    callableType: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
+    argument: Mir.LocalId,
+  ): Extract<Mir.Operation, { readonly _tag: 'ApplyCallable' }> =>
+    Object.freeze({
+      _tag: 'ApplyCallable',
+      destination: fn.alloc(carrierType),
+      callable,
+      typeArguments:
+        callableType.environment?.callable.typeArguments ??
+        callableType.storage?.realization.targetArguments ??
+        callableType.typeArguments ??
+        Object.freeze([]),
+      captures: Object.freeze([]),
+      arguments: Object.freeze([argument]),
+      callableType: callableType.type,
+      access: callableType.type.mode,
+      evaluation: 'CalleeThenArguments',
+      realization: 'Environment',
+      type: carrierType,
+      provenance: generated(span),
+    })
+  const successApply = apply(success.result, successType, reified.success)
+  const failureApply = apply(failure.result, failureType, reified.failure)
+  const destination = fn.alloc(carrierType)
+  fn.emit(
+    Object.freeze({
+      _tag: 'Conditional' as const,
+      destination,
+      condition: reified.valid,
+      taken: Object.freeze({
+        operations: Object.freeze([...drop(failure.result, failureType), successApply]),
+        result: successApply.destination,
+      }),
+      otherwise: Object.freeze({
+        operations: Object.freeze([...drop(success.result, successType), failureApply]),
+        result: failureApply.destination,
+      }),
+      type: carrierType,
+      resultShape: carrierShape,
+      provenance: generated(span),
+    }),
+  )
   endRunLoans(fn, span)
   if (recipe._tag === 'EffectConstruct' || recipe._tag === 'ServiceEffectConstruct')
     endLoans(fn, recipe.loanEnds, span)
-  return reified
+  return Object.freeze({ result: destination })
 }
 
 export const lowerEffectExecution = (

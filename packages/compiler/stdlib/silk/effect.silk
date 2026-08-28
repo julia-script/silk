@@ -121,7 +121,7 @@
 
 import silk.bool as bool
 import silk.logger { LogError, LogLevel, Logger }
-import silk.result { Result }
+import silk.result { Result, failResult, succeed }
 import silk.usize as usize
 
 /// The importable name of the `silk.effect` module scope.
@@ -229,7 +229,7 @@ pub effect fn logError(
 pub effect fn result<A, E, ?R>(
   protected: once Effect<A ! E ? R>
 ) -> Result<A, E> ? R {
-  return run Intrinsic.effectResult(move protected)
+  return run Intrinsic.effectResult<Result<A, E>>(move protected, succeed, failResult)
 }
 
 effect fn raise<E>(error: E) -> never ! E {

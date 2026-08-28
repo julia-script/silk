@@ -315,7 +315,12 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
         expression(argument, depth + 1, `${path}.argument${index}`)
       })
     }
-    if (node._tag === 'EffectResult' || node._tag === 'EffectBindRequirement') {
+    if (node._tag === 'EffectResult') {
+      expression(node.protected, depth + 1, `${path}.protected`)
+      expression(node.success, depth + 1, `${path}.success`)
+      expression(node.failure, depth + 1, `${path}.failure`)
+    }
+    if (node._tag === 'EffectBindRequirement') {
       expression(node.protected, depth + 1, `${path}.protected`)
     }
     if (node._tag === 'SliceLength') expression(node.slice, depth + 1, `${path}.s`)

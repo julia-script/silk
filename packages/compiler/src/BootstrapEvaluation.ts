@@ -1956,6 +1956,16 @@ function* executeFunction(
             write(operation.destination, read(operation.right.result))
             break
           }
+          case 'Conditional': {
+            const branch =
+              readInteger(operation.condition, 'i32').value === 0n
+                ? operation.otherwise
+                : operation.taken
+            const branchStep = yield* executeOperations(branch.operations)
+            if (branchStep !== undefined) return branchStep
+            write(operation.destination, read(branch.result))
+            break
+          }
           case 'Match': {
             const scrutinee = read(operation.scrutinee).value
             let activeIdentity: Match.CoverageIdentity | undefined

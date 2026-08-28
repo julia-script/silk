@@ -676,61 +676,21 @@ const runnerOf = (
 
 const reifyPolicy = (
   outcome: Type.Effect,
-  result: Type.Type,
   context: BuildContext,
 ): Extract<CompletionPolicy, { readonly _tag: 'Reify' }> | undefined => {
   const failureValueType = Type.failureValue(Type.failureMembers(outcome))
-  const successType = Type.resultSuccess(outcome.success)
-  const failureType = Type.resultFailure(failureValueType)
-  const union = Type.union([successType, failureType])
-  if (union._tag !== 'Normalized' || !Type.isUnion(union.type)) return undefined
-  if (!Type.isNominal(result)) return undefined
-  const resultType = result
-  const resultEntry = Layout.entry(context.layout, resultType)
-  const successEntry = Layout.entry(context.layout, successType)
-  const failureEntry = Layout.entry(context.layout, failureType)
-  const resultField =
-    resultEntry?.representation._tag === 'Aggregate'
-      ? resultEntry.representation.fields.at(0)?.id
-      : undefined
-  const successField =
-    successEntry?.representation._tag === 'Aggregate'
-      ? successEntry.representation.fields.at(0)?.id
-      : undefined
-  const failureField =
-    failureEntry?.representation._tag === 'Aggregate'
-      ? failureEntry.representation.fields.at(0)?.id
-      : undefined
-  const resultShape = Layout.callingShape(context.layout, resultType)
+  const successType = outcome.success
   const outcomeShape = Layout.callingShape(context.layout, outcome)
+  const successShape = Layout.callingShape(context.layout, successType)
   const failureValueShape = Layout.callingShape(context.layout, failureValueType)
-  const successTag = union.type.members.findIndex((member) => Type.equals(member, successType))
-  const failureTag = union.type.members.findIndex((member) => Type.equals(member, failureType))
-  if (
-    resultField === undefined ||
-    successField === undefined ||
-    failureField === undefined ||
-    resultShape === undefined ||
-    outcomeShape === undefined ||
-    failureValueShape === undefined ||
-    successTag < 0 ||
-    failureTag < 0
-  )
+  if (outcomeShape === undefined || successShape === undefined || failureValueShape === undefined)
     return undefined
   return Object.freeze({
     _tag: 'Reify',
     outcome,
-    resultType,
-    resultField,
-    resultUnion: union.type,
     successType,
-    successField,
-    successTag,
-    failureType,
-    failureField,
-    failureTag,
     failureValueType,
-    resultShape,
+    successShape,
     outcomeShape,
     failureValueShape,
   })
@@ -823,11 +783,7 @@ const controlsOfCatch = (
   if (!Type.isEffect(protectedEffect) || !Type.isEffect(resultEffect)) return Object.freeze([])
 
   const protectedRunner = runnerOf(expression.protected, context)
-  const protectedResult = Type.result(
-    protectedEffect.success,
-    Type.failureValue(Type.failureMembers(protectedEffect)),
-  )
-  const protectedPolicy = reifyPolicy(protectedRunner.outcome, protectedResult, context)
+  const protectedPolicy = reifyPolicy(protectedRunner.outcome, context)
   if (protectedRunner.classification !== 'Synchronous' && protectedPolicy !== undefined) {
     const id = controlId(execution, expression.span, 0, 'Invoke')
     const complete = controlId(execution, expression.span, 0, 'Complete')
@@ -964,11 +920,7 @@ const controlsOf = (
         if (runner.classification !== 'Synchronous') {
           const policy =
             expression.subject._tag === 'EffectResult'
-              ? reifyPolicy(
-                  runner.outcome,
-                  Type.substitute(expression.type, context.instance.substitution),
-                  context,
-                )
+              ? reifyPolicy(runner.outcome, context)
               : Object.freeze({
                   _tag: 'Propagate' as const,
                   outcome: runner.outcome,

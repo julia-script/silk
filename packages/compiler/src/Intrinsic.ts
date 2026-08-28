@@ -1616,9 +1616,13 @@ const intrinsicOperations = Object.freeze([
     effect({
       name: 'result',
       operation: 'Result',
-      typeParameters: Object.freeze([]),
-      parameters: Object.freeze([valueParameter('protected', 'Effect<A ! E ? R>')]),
-      result: 'Effect<Result<A, E> ? R>',
+      typeParameters: Object.freeze(['R']),
+      parameters: Object.freeze([
+        valueParameter('protected', 'Effect<A ! E ? Q>'),
+        valueParameter('success', 'once fn(A) -> R'),
+        valueParameter('failure', 'once fn(E) -> R'),
+      ]),
+      result: 'Effect<R ? Q>',
     }),
     contractEffect({
       name: 'bindRequirement',

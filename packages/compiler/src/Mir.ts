@@ -975,29 +975,22 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
-      /** Runs one Effect and materializes only its completed typed channel as silk/result data. */
+      /** Runs one Effect and exposes its completed typed channel without choosing a carrier. */
       readonly _tag: 'ReifyEffect'
       readonly destination: LocalId
       readonly outcome: LocalId
+      readonly successValue: LocalId
+      readonly failureValue: LocalId
       readonly effect: LocalId
       readonly runner: DeclarationFacts.CanonicalId
       readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly arguments: ReadonlyArray<LocalId>
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
-      readonly resultType: Extract<Type, { readonly _tag: 'Nominal' }>
-      readonly resultField: DeclarationFacts.FieldId
-      readonly resultUnion: SilkType.StructuralUnion
-      readonly successType: SilkType.Nominal
-      readonly successField: DeclarationFacts.FieldId
-      readonly successTag: number
-      readonly failureType: SilkType.Nominal
-      readonly failureField: DeclarationFacts.FieldId
-      readonly failureTag: number
       readonly failureValueType: SilkType.Type
-      readonly resultShape: Layout.CallingShape
+      readonly successShape: Layout.CallingShape
       readonly outcomeShape: Layout.CallingShape
       readonly failureValueShape: Layout.CallingShape
-      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly type: Extract<Type, { readonly _tag: 'bool' }>
       readonly provenance: Provenance
     }
   | {
@@ -1095,7 +1088,26 @@ export type Operation =
     }
   | DropOperation
   | MatchOperation
+  | ConditionalOperation
   | ShortCircuitOperation
+
+/** One compiler-owned structured conditional whose branches may produce any value type. */
+export interface ConditionalOperation {
+  readonly _tag: 'Conditional'
+  readonly destination: LocalId
+  readonly condition: LocalId
+  readonly taken: {
+    readonly operations: ReadonlyArray<Operation>
+    readonly result: LocalId
+  }
+  readonly otherwise: {
+    readonly operations: ReadonlyArray<Operation>
+    readonly result: LocalId
+  }
+  readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' }>
+  readonly resultShape: Layout.CallingShape
+  readonly provenance: Provenance
+}
 
 /**
  * One compiler-owned conditional evaluation: `&&` and `||`. `left` is already evaluated when the
@@ -1642,6 +1654,8 @@ export const operationsOf = (region: Region): ReadonlyArray<Operation> => {
 }
 
 export const operationChildren = (operation: Operation): ReadonlyArray<Operation> => {
+  if (operation._tag === 'Conditional')
+    return [...operation.taken.operations, ...operation.otherwise.operations]
   if (operation._tag === 'ShortCircuit') return operation.right.operations
   if (operation._tag === 'Match') {
     return operation.arms.flatMap((arm) => [

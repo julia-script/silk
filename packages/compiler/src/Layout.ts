@@ -2838,6 +2838,11 @@ export const plan = (
     for (const expression of instance.function.statements
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)) {
+      if (expression._tag === 'EffectResult') {
+        reached.set(Type.key('bool'), 'bool')
+        const result = Type.substitute(expression.type, instance.substitution)
+        reached.set(Type.key(result), result)
+      }
       if (
         expression._tag !== 'BuiltinCall' ||
         (expression.operation !== 'ExecutionLayout' &&

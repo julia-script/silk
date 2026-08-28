@@ -290,7 +290,11 @@ export const make = (operations: Operations) => {
   ): ReadonlyArray<CallTarget> => {
     if (expression._tag === 'Run') return callTargets(expression.subject, index, substitution)
     if (expression._tag === 'EffectResult')
-      return callTargets(expression.protected, index, substitution)
+      return [
+        ...callTargets(expression.protected, index, substitution),
+        ...callTargets(expression.success, index, substitution),
+        ...callTargets(expression.failure, index, substitution),
+      ]
     if (expression._tag === 'EffectCatch')
       return [
         ...callTargets(expression.protected, index, substitution),
@@ -962,13 +966,18 @@ export const make = (operations: Operations) => {
     const completed = block._tag === 'EffectBlock' ? block.statements.at(-1) : undefined
     const run = completed?._tag === 'Return' ? completed.expression : undefined
     const result = run?._tag === 'Run' ? run.subject : undefined
-    const protected_ = result?._tag === 'EffectResult' ? result.protected : undefined
-    const parameter = protected_?._tag === 'Move' ? protected_.subject : protected_
-    return block._tag === 'EffectBlock' &&
-      block.statements.length === 1 &&
-      parameter?._tag === 'ParameterReference'
-      ? parameter.parameter.ordinal
-      : undefined
+    if (
+      block._tag !== 'EffectBlock' ||
+      block.statements.length !== 1 ||
+      result?._tag !== 'EffectResult'
+    )
+      return undefined
+    const parameterOrdinal = (expression: Hir.Expression): number | undefined => {
+      const parameter = expression._tag === 'Move' ? expression.subject : expression
+      return parameter._tag === 'ParameterReference' ? parameter.parameter.ordinal : undefined
+    }
+    const protected_ = parameterOrdinal(result.protected)
+    return protected_
   }
 
   const requirementBoundEffectRecipe = (
@@ -1588,7 +1597,6 @@ export const make = (operations: Operations) => {
           const targetFn = targetFunction(results, target.declaration)
           if (targetFn === undefined) return []
           const resultEffect = resultEffectIdentity(targetFn, target, results, index)
-          const reifiedParameter = forwardedEffectResultParameter(targetFn)
           return [
             Object.freeze({
               _tag: 'CallInstance',
@@ -1596,9 +1604,6 @@ export const make = (operations: Operations) => {
               span: expression.span,
               target,
               ...(resultEffect === undefined ? {} : { resultEffect }),
-              ...(reifiedParameter === undefined
-                ? {}
-                : { effectResultParameter: reifiedParameter }),
             }),
           ]
         }
@@ -1612,7 +1617,6 @@ export const make = (operations: Operations) => {
           target === undefined ? undefined : targetFunction(results, expression.target)
         if (target === undefined || targetFn === undefined) return []
         const resultEffect = resultEffectIdentity(targetFn, target, results, index)
-        const reifiedParameter = forwardedEffectResultParameter(targetFn)
         return [
           Object.freeze({
             _tag: 'CallInstance',
@@ -1620,7 +1624,6 @@ export const make = (operations: Operations) => {
             span: expression.span,
             target,
             ...(resultEffect === undefined ? {} : { resultEffect }),
-            ...(reifiedParameter === undefined ? {} : { effectResultParameter: reifiedParameter }),
           }),
         ]
       })

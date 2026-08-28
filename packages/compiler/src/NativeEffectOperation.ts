@@ -840,35 +840,34 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         zero,
         `effect_result_success${operation.destination.ordinal}`,
       )
-      const successBlock = yield* LlvmBlock.make(
-        body,
-        `effect_result${operation.destination.ordinal}_success`,
+      nativeStorage.locals.set(
+        operation.destination.ordinal,
+        Object.freeze([
+          yield* FunctionBody.cast(
+            body,
+            'zext',
+            succeeded,
+            i32,
+            `effect_result_success_flag${operation.destination.ordinal}`,
+          ),
+        ]),
       )
-      const failureBlock = yield* LlvmBlock.make(
-        body,
-        `effect_result${operation.destination.ordinal}_failure`,
-      )
-      const followingBlock = yield* LlvmBlock.make(
-        body,
-        `effect_result${operation.destination.ordinal}_following`,
-      )
-      yield* FunctionBody.conditionalBranch(body, succeeded, successBlock, failureBlock)
-      const destinationLanes = operation.resultShape.lanes
-      const destinationPayloadLanes = destinationLanes.slice(1)
       const outcomeLanes = operation.outcomeShape.lanes
-      const writeBranch = Effect.fnUntraced(function* (
-        outerTag: number,
+      const successLaneCount =
+        operation.outcomeShape.tree._tag === 'OutcomeShape'
+          ? operation.outcomeShape.tree.success.laneCount
+          : 0
+      const coerce = Effect.fnUntraced(function* (
         values: ReadonlyArray<Value.Input>,
-        lanes: ReadonlyArray<Layout.CallingLane>,
+        sourceLanes: ReadonlyArray<Layout.CallingLane>,
+        targetLanes: ReadonlyArray<Layout.CallingLane>,
         label: string,
       ) {
-        const branch: Array<Value.Input> = [
-          yield* Constant.integerSigned(builder, i32, BigInt(outerTag)),
-        ]
-        for (const [ordinal, targetLane] of destinationPayloadLanes.entries()) {
+        const coerced: Array<Value.Input> = []
+        for (const [ordinal, targetLane] of targetLanes.entries()) {
           const input = values.at(ordinal)
-          const sourceLane = lanes.at(ordinal)
-          branch.push(
+          const sourceLane = sourceLanes.at(ordinal)
+          coerced.push(
             input === undefined || sourceLane === undefined
               ? yield* Constant.nullValue(builder, NativeType.laneType(types, targetLane))
               : yield* NativeArith.coerceLane(
@@ -880,83 +879,45 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
                 ),
           )
         }
-        yield* NativeStorage.storeMutable(
-          nativeStorage,
-          operation.destination,
-          Object.freeze(branch),
-        )
+        return Object.freeze(coerced)
       })
-      yield* LlvmBlock.setInsertionPoint(body, successBlock)
-      const successLaneCount =
-        operation.outcomeShape.tree._tag === 'OutcomeShape'
-          ? operation.outcomeShape.tree.success.laneCount
-          : 0
-      yield* writeBranch(
-        operation.successTag,
-        Object.freeze(outcomeValues.slice(1, 1 + successLaneCount)),
-        Object.freeze(outcomeLanes.slice(1, 1 + successLaneCount)),
-        `effect_result${operation.destination.ordinal}_success`,
+      nativeStorage.locals.set(
+        operation.successValue.ordinal,
+        yield* coerce(
+          Object.freeze(outcomeValues.slice(1, 1 + successLaneCount)),
+          Object.freeze(outcomeLanes.slice(1, 1 + successLaneCount)),
+          operation.successShape.lanes,
+          `effect_result${operation.destination.ordinal}_success`,
+        ),
       )
-      yield* FunctionBody.branch(body, followingBlock)
-      yield* LlvmBlock.setInsertionPoint(body, failureBlock)
-      if (SilkType.failureMembers(operation.outcomeType.type).length === 0) {
-        if (trapBlock === undefined)
-          trapBlock = yield* LlvmBlock.make(body, 'effect_result_invalid_tag')
-        yield* FunctionBody.branch(body, trapBlock)
-      } else {
-        const failureValues: Array<Value.Input> = []
-        if (SilkType.isUnion(operation.failureValueType)) {
-          failureValues.push(
-            yield* FunctionBody.binary(
-              body,
-              'sub',
-              tag,
-              yield* Constant.integerSigned(builder, i32, 1n),
-              `effect_result${operation.destination.ordinal}_failure_tag`,
-            ),
-          )
-        }
-        failureValues.push(...outcomeValues.slice(1))
-        const failureLanes: Array<Layout.CallingLane> = []
-        if (SilkType.isUnion(operation.failureValueType)) {
-          const failureTagLane = operation.failureValueShape.lanes.at(0)
-          if (failureTagLane === undefined)
-            throw new RangeError('Effect result lost its failure-union tag lane')
-          failureLanes.push(failureTagLane)
-        }
-        failureLanes.push(...outcomeLanes.slice(1))
-        yield* writeBranch(
-          operation.failureTag,
-          Object.freeze(failureValues),
-          Object.freeze(failureLanes),
-          `effect_result${operation.destination.ordinal}_failure`,
-        )
-        yield* FunctionBody.branch(body, followingBlock)
-      }
-      yield* LlvmBlock.setInsertionPoint(body, followingBlock)
-      // Both arms of this outcome dispatch reach here, so neither arm's cached
-      // values are readable in the join. Reloading re-roots them at this block.
-      yield* NativeStorage.reloadRoots(
-        nativeStorage,
-        `effect_result${operation.destination.ordinal}_following`,
-      )
-      const storage = nativeStorage.mutableStorage.get(operation.destination.ordinal)
-      if (storage === undefined)
-        throw new RangeError('Effect result destination is not materialized')
-      const loaded: Array<Value.Input> = []
-      for (const [ordinal, pointer] of storage.entries()) {
-        const lane = destinationLanes.at(ordinal)
-        if (lane === undefined) throw new RangeError('Effect result destination lost a lane')
-        loaded.push(
-          yield* FunctionBody.load(
+      const failureValues: Array<Value.Input> = []
+      const failureLanes: Array<Layout.CallingLane> = []
+      if (SilkType.isUnion(operation.failureValueType)) {
+        failureValues.push(
+          yield* FunctionBody.binary(
             body,
-            NativeType.laneType(types, lane),
-            pointer,
-            `effect_result${operation.destination.ordinal}_${ordinal}`,
+            'sub',
+            tag,
+            yield* Constant.integerSigned(builder, i32, 1n),
+            `effect_result${operation.destination.ordinal}_failure_tag`,
           ),
         )
+        const failureTagLane = operation.failureValueShape.lanes.at(0)
+        if (failureTagLane === undefined)
+          throw new RangeError('Effect result lost its failure-union tag lane')
+        failureLanes.push(failureTagLane)
       }
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(loaded))
+      failureValues.push(...outcomeValues.slice(1))
+      failureLanes.push(...outcomeLanes.slice(1))
+      nativeStorage.locals.set(
+        operation.failureValue.ordinal,
+        yield* coerce(
+          Object.freeze(failureValues),
+          Object.freeze(failureLanes),
+          operation.failureValueShape.lanes,
+          `effect_result${operation.destination.ordinal}_failure`,
+        ),
+      )
       break
     }
     case 'CloseEffectEntry': {

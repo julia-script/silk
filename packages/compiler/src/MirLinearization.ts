@@ -39,7 +39,12 @@ export type LinearOperation =
   | Exclude<
       Mir.Operation,
       {
-        readonly _tag: 'Match' | 'ShortCircuit' | 'CheckedScalar' | 'PropagateEffectFailure'
+        readonly _tag:
+          | 'Match'
+          | 'Conditional'
+          | 'ShortCircuit'
+          | 'CheckedScalar'
+          | 'PropagateEffectFailure'
       }
     >
   | {
@@ -65,6 +70,7 @@ export const isLinearOperation = (
   operation: Mir.Operation | LinearOperation,
 ): operation is LinearOperation =>
   operation._tag !== 'Match' &&
+  operation._tag !== 'Conditional' &&
   operation._tag !== 'ShortCircuit' &&
   operation._tag !== 'CheckedScalar' &&
   operation._tag !== 'PropagateEffectFailure'
@@ -225,6 +231,7 @@ export const expandMatches = (
     const specialIndex = operations.findIndex(
       (operation) =>
         operation._tag === 'Match' ||
+        operation._tag === 'Conditional' ||
         operation._tag === 'ShortCircuit' ||
         operation._tag === 'CheckedScalar' ||
         operation._tag === 'PropagateEffectFailure',
@@ -333,6 +340,58 @@ export const expandMatches = (
         origin,
         'Normal',
         [drop(special.present, special.presentCleanup), apply(special.absent, absentType, [])],
+        jump(following, special.provenance),
+      )
+      return
+    }
+    if (special?._tag === 'Conditional') {
+      const following = reserve()
+      const taken = reserve()
+      const otherwise = reserve()
+      blocks.push(
+        Object.freeze({
+          id,
+          origin,
+          kind,
+          operations: linearOperations(operations.slice(0, specialIndex)),
+          terminator: Object.freeze({
+            _tag: 'Branch',
+            condition: special.condition,
+            taken,
+            otherwise,
+            provenance: special.provenance,
+          }),
+        }),
+      )
+      lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
+      lowerSequence(
+        taken,
+        origin,
+        'Normal',
+        [
+          ...special.taken.operations,
+          Object.freeze({
+            _tag: 'Move' as const,
+            destination: special.destination,
+            source: special.taken.result,
+            provenance: special.provenance,
+          }),
+        ],
+        jump(following, special.provenance),
+      )
+      lowerSequence(
+        otherwise,
+        origin,
+        'Normal',
+        [
+          ...special.otherwise.operations,
+          Object.freeze({
+            _tag: 'Move' as const,
+            destination: special.destination,
+            source: special.otherwise.result,
+            provenance: special.provenance,
+          }),
+        ],
         jump(following, special.provenance),
       )
       return

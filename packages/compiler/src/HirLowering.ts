@@ -575,8 +575,12 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
   }
   if (fact._tag === 'EffectResult') {
     const protected_ = hirExpression(fact.protected)
+    const success = hirExpression(fact.success)
+    const failure = hirExpression(fact.failure)
     if (
       protected_._tag === 'Unavailable' ||
+      success._tag === 'Unavailable' ||
+      failure._tag === 'Unavailable' ||
       fact.type._tag !== 'Available' ||
       !Type.isEffect(fact.type.type)
     )
@@ -584,6 +588,8 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     return Object.freeze({
       _tag: 'EffectResult',
       protected: protected_,
+      success,
+      failure,
       type: fact.type.type,
       span: fact.syntax.span,
     })

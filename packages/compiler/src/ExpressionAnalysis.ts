@@ -5043,6 +5043,7 @@ export const analyzeEffectResult = (
   declaration: DeclarationFact,
   scope: Scope,
   resolution: ResolutionContext,
+  expected?: SemanticType,
 ): ExpressionResult => {
   const pipelined = node.kind === 'PipelineExpression'
   const target = pipelined ? (pipelineCallable(node) ?? node) : node
@@ -5052,6 +5053,9 @@ export const analyzeEffectResult = (
       isRecursiveArgumentNode(element),
     ) ?? []
   const protectedNode = pipelined ? pipelineInput(node) : argumentNodes.at(0)
+  const successNode = argumentNodes.at(pipelined ? 0 : 1)
+  const failureNode = argumentNodes.at(pipelined ? 1 : 2)
+  const callTypeArguments = analyzeCallTypeArguments(source, target, declaration, resolution)
   const protectedResult =
     protectedNode === undefined
       ? undefined
@@ -5060,10 +5064,83 @@ export const analyzeEffectResult = (
     protectedResult?.type !== undefined && Type.isEffect(protectedResult.type)
       ? protectedResult.type
       : undefined
-  const diagnostics: Array<Diagnostic.Diagnostic> = [...(protectedResult?.diagnostics ?? [])]
-  if (argumentNodes.length !== (pipelined ? 0 : 1))
+  const expectedEffect = expected !== undefined && Type.isEffect(expected) ? expected : undefined
+  let carrierResult = expectedEffect?.success ?? callTypeArguments.types?.at(0)
+  let successResult =
+    successNode === undefined
+      ? undefined
+      : analyzeExpression(
+          source,
+          successNode,
+          declarations,
+          declaration,
+          scope,
+          resolution,
+          protectedEffect === undefined || carrierResult === undefined
+            ? undefined
+            : Type.callable(Object.freeze([protectedEffect.success]), carrierResult, 'Take'),
+        )
+  let failureResult =
+    failureNode === undefined
+      ? undefined
+      : analyzeExpression(
+          source,
+          failureNode,
+          declarations,
+          declaration,
+          scope,
+          resolution,
+          protectedEffect === undefined || carrierResult === undefined
+            ? undefined
+            : Type.callable(
+                Object.freeze([Type.failureType(protectedEffect)]),
+                carrierResult,
+                'Take',
+              ),
+        )
+  const successCallable =
+    successResult?.type !== undefined && Type.isCallable(successResult.type)
+      ? successResult.type
+      : undefined
+  const failureCallable =
+    failureResult?.type !== undefined && Type.isCallable(failureResult.type)
+      ? failureResult.type
+      : undefined
+  carrierResult ??= successCallable?.result ?? failureCallable?.result
+  if (protectedEffect !== undefined && carrierResult !== undefined) {
+    if (successNode !== undefined)
+      successResult = analyzeExpression(
+        source,
+        successNode,
+        declarations,
+        declaration,
+        scope,
+        resolution,
+        Type.callable(Object.freeze([protectedEffect.success]), carrierResult, 'Take'),
+      )
+    if (failureNode !== undefined)
+      failureResult = analyzeExpression(
+        source,
+        failureNode,
+        declarations,
+        declaration,
+        scope,
+        resolution,
+        Type.callable(Object.freeze([Type.failureType(protectedEffect)]), carrierResult, 'Take'),
+      )
+  }
+  const diagnostics: Array<Diagnostic.Diagnostic> = [
+    ...callTypeArguments.diagnostics,
+    ...(protectedResult?.diagnostics ?? []),
+    ...(successResult?.diagnostics ?? []),
+    ...(failureResult?.diagnostics ?? []),
+  ]
+  if (argumentNodes.length !== (pipelined ? 2 : 3))
     diagnostics.push(
-      Diagnostic.invalidEffectHandler('result requires exactly one Effect', node.span),
+      Diagnostic.invalidEffectHandler(
+        'result requires one Effect plus success and failure carriers',
+        node.span,
+      ),
     )
   if (protectedEffect === undefined)
     diagnostics.push(
@@ -5072,15 +5149,52 @@ export const analyzeEffectResult = (
         protectedNode?.span ?? node.span,
       ),
     )
-  const failureValue = protectedEffect === undefined ? 'never' : Type.failureType(protectedEffect)
+  const expectedSuccess =
+    protectedEffect === undefined || carrierResult === undefined
+      ? undefined
+      : Type.callable(Object.freeze([protectedEffect.success]), carrierResult, 'Take')
+  const expectedFailure =
+    protectedEffect === undefined || carrierResult === undefined
+      ? undefined
+      : Type.callable(Object.freeze([Type.failureType(protectedEffect)]), carrierResult, 'Take')
+  if (
+    expectedSuccess !== undefined &&
+    (successResult?.type === undefined || !typesCompatible(successResult.type, expectedSuccess))
+  )
+    diagnostics.push(
+      Diagnostic.invalidEffectHandler(
+        'the success carrier must accept the Effect success and return the shared result type',
+        successNode?.span ?? node.span,
+      ),
+    )
+  if (
+    expectedFailure !== undefined &&
+    (failureResult?.type === undefined || !typesCompatible(failureResult.type, expectedFailure))
+  )
+    diagnostics.push(
+      Diagnostic.invalidEffectHandler(
+        'the failure carrier must accept the Effect failure and return the shared result type',
+        failureNode?.span ?? node.span,
+      ),
+    )
   const type =
-    protectedEffect === undefined
+    protectedEffect === undefined || carrierResult === undefined
       ? unavailableExpressionType
       : availableExpressionType(
           Type.effectWithRows(
-            Type.result(protectedEffect.success, failureValue),
+            carrierResult,
             RowAlgebra.concrete(Type.failureRowPolicy(), []),
-            protectedEffect.access,
+            strongestEffectAccess(
+              protectedResult === undefined
+                ? protectedEffect.access
+                : effectExpressionAccess(protectedResult.fact, resolution.index),
+              ...(successResult === undefined
+                ? []
+                : [effectExpressionAccess(successResult.fact, resolution.index)]),
+              ...(failureResult === undefined
+                ? []
+                : [effectExpressionAccess(failureResult.fact, resolution.index)]),
+            ),
             protectedEffect.requirementRow,
           ),
         )
@@ -5089,6 +5203,8 @@ export const analyzeEffectResult = (
       _tag: 'EffectResult',
       reference: intrinsicReference(source, target),
       protected: protectedResult?.fact ?? unavailableExpression(node),
+      success: successResult?.fact ?? unavailableExpression(successNode ?? node),
+      failure: failureResult?.fact ?? unavailableExpression(failureNode ?? node),
       type,
       syntax: node,
     }),
@@ -5842,7 +5958,15 @@ export function analyzeExpression(
   if (node.kind === 'PipelineExpression' || node.kind === 'CallExpression') {
     const operationTarget = node.kind === 'PipelineExpression' ? pipelineCallable(node) : node
     if (operationTarget !== undefined && isEffectResultTarget(source, operationTarget))
-      return analyzeEffectResult(source, node, declarations, declaration, scope, resolution)
+      return analyzeEffectResult(
+        source,
+        node,
+        declarations,
+        declaration,
+        scope,
+        resolution,
+        expected,
+      )
     if (node.kind === 'PipelineExpression')
       return analyzePipelineExpression(source, node, declarations, declaration, scope, resolution)
   }

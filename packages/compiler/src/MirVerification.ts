@@ -123,6 +123,11 @@ const structuredCfgPathsValid = <State>(
       }
       return incoming
     }
+    if (operation._tag === 'Conditional')
+      return semantics.merge(
+        sequence(operation.taken.operations, incoming),
+        sequence(operation.otherwise.operations, incoming),
+      )
     if (operation._tag === 'ShortCircuit')
       return semantics.merge(incoming, sequence(operation.right.operations, incoming))
     if (operation._tag === 'Match') {
@@ -522,10 +527,11 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
             }))) ||
         (region.completion._tag === 'Reify' &&
           (effectOperation._tag !== 'ReifyEffect' ||
-            !SilkType.equals(region.completion.resultType, effectOperation.resultType.type) ||
-            region.completion.resultField.ordinal !== effectOperation.resultField.ordinal ||
-            region.completion.successTag !== effectOperation.successTag ||
-            region.completion.failureTag !== effectOperation.failureTag))
+            !SilkType.equals(
+              region.completion.successType,
+              effectOperation.outcomeType.type.success,
+            ) ||
+            !SilkType.equals(region.completion.failureValueType, effectOperation.failureValueType)))
       )
         invalid('InvalidSuspension', 'typed completion mapping disagrees with its MIR operation')
     }
@@ -808,7 +814,14 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         ...operation.arguments,
       ]
     case 'ReifyEffect':
-      return [operation.destination, operation.outcome, operation.effect, ...operation.arguments]
+      return [
+        operation.destination,
+        operation.outcome,
+        operation.successValue,
+        operation.failureValue,
+        operation.effect,
+        ...operation.arguments,
+      ]
     case 'CloseEffectEntry':
       return [
         operation.destination,
@@ -840,6 +853,13 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
           ...(arm.guard === undefined ? [] : [arm.guard.result]),
           arm.selected.result,
         ]),
+      ]
+    case 'Conditional':
+      return [
+        operation.destination,
+        operation.condition,
+        operation.taken.result,
+        operation.otherwise.result,
       ]
     case 'ShortCircuit':
       return [operation.destination, operation.left, operation.right.result]
@@ -1672,10 +1692,6 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
     case 'ReifyEffect':
       return [
         semanticType(operation.outcomeType),
-        operation.resultType.type,
-        operation.resultUnion,
-        operation.successType,
-        operation.failureType,
         operation.failureValueType,
         ...operation.runnerTypeArguments.filter(SilkType.isTypeArgument),
       ]
@@ -1712,6 +1728,12 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
           ...arm.selected.operations.flatMap(operationTypes),
           ...arm.selected.cleanup.flatMap((entry) => cleanupTypes(entry.cleanup)),
         ]),
+      ]
+    case 'Conditional':
+      return [
+        semanticType(operation.type),
+        ...operation.taken.operations.flatMap(operationTypes),
+        ...operation.otherwise.operations.flatMap(operationTypes),
       ]
     case 'ShortCircuit':
       return [semanticType(operation.type), ...operation.right.operations.flatMap(operationTypes)]
@@ -1850,6 +1872,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.local]
     case 'Match':
       return [operation.scrutinee]
+    case 'Conditional':
+      return [operation.condition]
     case 'ShortCircuit':
       return [operation.left]
     case 'Literal':
@@ -2035,6 +2059,10 @@ const loanViolations = (
           process(arm.selected.operations, active)
         }
       }
+      if (operation._tag === 'Conditional') {
+        process(operation.taken.operations, new Map(active))
+        process(operation.otherwise.operations, new Map(active))
+      }
     }
     for (const [key] of active) {
       if (!inheritedKeys.has(key) && !globalEndings.has(key)) {
@@ -2156,10 +2184,7 @@ const suspensionTypes = (fn: MirFunction): ReadonlyArray<SilkType.Type> =>
         ? [region.completion.outcome]
         : [
             region.completion.outcome,
-            region.completion.resultType,
-            region.completion.resultUnion,
             region.completion.successType,
-            region.completion.failureType,
             region.completion.failureValueType,
           ]
     const descriptor = region.relay.state
@@ -2745,6 +2770,13 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
     >()
     const localUseCounts = new Map<number, number>()
     const successPathOperations = (operation: Operation): ReadonlyArray<Operation> => {
+      if (operation._tag === 'Conditional') {
+        return [
+          operation,
+          ...operation.taken.operations.flatMap(successPathOperations),
+          ...operation.otherwise.operations.flatMap(successPathOperations),
+        ]
+      }
       if (operation._tag === 'ShortCircuit') {
         return [operation, ...operation.right.operations.flatMap(successPathOperations)]
       }
@@ -5603,8 +5635,15 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidNormalization',
                 function: fn.id,
                 region: region.id,
-                detail:
-                  'direct static Effect run disagrees with its runner, captures, outcome, or propagation contract',
+                detail: `direct static Effect run disagrees: ${[
+                  runnerResultValid ? undefined : 'runner',
+                  outcomeValid ? undefined : 'outcome',
+                  destinationValid ? undefined : 'destination',
+                  parametersValid ? undefined : 'parameters',
+                  propagationValid ? undefined : 'propagation',
+                ]
+                  .filter((part): part is string => part !== undefined)
+                  .join(', ')}`,
               }),
             )
         }
@@ -5615,30 +5654,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const effect = fn.localTypes.at(operation.effect.ordinal)
           const outcome = fn.localTypes.at(operation.outcome.ordinal)
+          const success = fn.localTypes.at(operation.successValue.ordinal)
+          const failure = fn.localTypes.at(operation.failureValue.ordinal)
           const expectedFailureValue = SilkType.failureValue(
             SilkType.failureMembers(operation.outcomeType.type),
           )
-          const expectedResult = SilkType.result(
-            operation.outcomeType.type.success,
-            expectedFailureValue,
-          )
-          const expectedSuccess = SilkType.resultSuccess(operation.outcomeType.type.success)
-          const expectedFailure = SilkType.resultFailure(expectedFailureValue)
-          const selectedSuccess = SilkType.failureCarrierMember(
-            operation.resultUnion,
-            operation.successTag,
-            'ZeroBased',
-          )
-          const selectedFailure = SilkType.failureCarrierMember(
-            operation.resultUnion,
-            operation.failureTag,
-            'ZeroBased',
-          )
-          const tagsValid =
-            selectedSuccess !== undefined &&
-            selectedFailure !== undefined &&
-            SilkType.equals(selectedSuccess, expectedSuccess) &&
-            SilkType.equals(selectedFailure, expectedFailure)
           const disagreements = [
             runner?.result._tag === 'EffectOutcome' &&
             SilkType.equals(runner.result.type, operation.outcomeType.type)
@@ -5652,25 +5672,26 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             SilkType.equals(outcome.type, operation.outcomeType.type)
               ? undefined
               : 'outcome',
-            destination?._tag === 'Nominal' && SilkType.equals(destination.type, expectedResult)
+            destination?._tag === 'bool' ? undefined : 'destination',
+            success !== undefined &&
+            SilkType.equals(semanticType(success), operation.outcomeType.type.success)
               ? undefined
-              : 'destination',
-            SilkType.equals(operation.resultType.type, expectedResult) ? undefined : 'result-type',
+              : 'success',
+            failure !== undefined && SilkType.equals(semanticType(failure), expectedFailureValue)
+              ? undefined
+              : 'failure',
             SilkType.equals(operation.failureValueType, expectedFailureValue)
               ? undefined
               : 'failure-value',
-            SilkType.equals(operation.successType, expectedSuccess) ? undefined : 'success',
-            SilkType.equals(operation.failureType, expectedFailure) ? undefined : 'failure',
-            SilkType.equals(operation.resultShape.type, expectedResult)
+            SilkType.equals(operation.successShape.type, operation.outcomeType.type.success)
               ? undefined
-              : 'result-shape',
+              : 'success-shape',
             SilkType.equals(operation.outcomeShape.type, operation.outcomeType.type)
               ? undefined
               : 'outcome-shape',
             SilkType.equals(operation.failureValueShape.type, expectedFailureValue)
               ? undefined
               : 'failure-shape',
-            tagsValid ? undefined : 'tags',
           ].filter((disagreement): disagreement is string => disagreement !== undefined)
           if (disagreements.length > 0) {
             violations.push(
@@ -5679,7 +5700,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidEffectOperation',
                 function: fn.id,
                 region: region.id,
-                detail: `effect result runner, channel data, tags, or calling shapes disagree: ${disagreements.join(', ')}`,
+                detail: `effect result runner, channel data, or calling shapes disagree: ${disagreements.join(', ')}`,
               }),
             )
           }

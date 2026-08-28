@@ -28,7 +28,6 @@ import {
   callableRecipe,
   delayedEffectState,
   effectRecipe,
-  inlineForwardedEffectResult,
   inlineForwardedRequirement,
   movedEffectRecipe,
   restoreDelayedEffectState,
@@ -341,7 +340,6 @@ export const lowerSequence = (
         : id
     }
     const forwardedRequirement = inlineForwardedRequirement(fn, statement.initializer)
-    const forwardedResult = inlineForwardedEffectResult(fn, statement.initializer)
     const forwardedResultEffect =
       forwardedRequirement === undefined
         ? undefined
@@ -357,7 +355,6 @@ export const lowerSequence = (
         protectedRecipe?._tag === 'ServiceEffectConstruct' ||
         protectedRecipe !== forwardedRequirement.binding.protected)
     if (
-      forwardedResult !== undefined ||
       forwardedRequirementNeedsRecipe ||
       statement.initializer._tag === 'ServiceEffectConstruct' ||
       (statement.initializer._tag === 'EffectConstruct' &&
@@ -374,7 +371,7 @@ export const lowerSequence = (
         effectContract(initializerType ?? 'never') !== undefined) ||
       (statement.initializer._tag === 'BuiltinCall' && Type.isEffect(statement.initializer.type))
     ) {
-      fn.effectRecipes.set(statement.binding.ordinal, forwardedResult ?? statement.initializer)
+      fn.effectRecipes.set(statement.binding.ordinal, statement.initializer)
       const following = fn.reserve()
       fn.publish(
         Object.freeze({

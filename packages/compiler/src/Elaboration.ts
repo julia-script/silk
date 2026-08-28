@@ -931,10 +931,12 @@ export type ExpressionFact =
       readonly syntax: SyntaxTree.Node
     }
   | {
-      /** Executes one typed Effect into ordinary Result data without catching traps. */
+      /** Folds one typed Effect outcome through ordinary carrier functions without catching traps. */
       readonly _tag: 'EffectResult'
       readonly reference: IntrinsicReferenceFact
       readonly protected: ExpressionFact
+      readonly success: ExpressionFact
+      readonly failure: ExpressionFact
       readonly type: ExpressionTypeFact
       readonly syntax: SyntaxTree.Node
     }

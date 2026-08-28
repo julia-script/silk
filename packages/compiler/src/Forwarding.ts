@@ -253,36 +253,6 @@ export const callableRecipe = (
   return argument === undefined ? undefined : callableRecipe(fn, argument, resolving)
 }
 
-export const inlineForwardedEffectResult = (
-  fn: FunctionLowering,
-  expression: Hir.Expression,
-): Extract<Hir.Expression, { readonly _tag: 'EffectResult' }> | undefined => {
-  if (expression._tag !== 'EffectConstruct') return undefined
-  const call = fn.call(expression.span)
-  const parameter = call?.effectResultParameter
-  const protected_ = parameter === undefined ? undefined : expression.arguments.at(parameter)
-  let recipeBinding: number | undefined
-  if (protected_?._tag === 'BindingReference') {
-    recipeBinding = protected_.binding.ordinal
-  } else if (protected_?._tag === 'Move' && protected_.subject._tag === 'BindingReference') {
-    recipeBinding = protected_.subject.binding.ordinal
-  } else {
-    recipeBinding = undefined
-  }
-  const type = fn.semantic(expression.type)
-  return protected_ === undefined ||
-    recipeBinding === undefined ||
-    !fn.effectRecipes.has(recipeBinding) ||
-    !Type.isEffect(type)
-    ? undefined
-    : Object.freeze({
-        _tag: 'EffectResult',
-        protected: protected_,
-        type,
-        span: expression.span,
-      })
-}
-
 export const effectRecipe = (
   fn: FunctionLowering,
   expression: Hir.Expression,
@@ -300,8 +270,7 @@ export const effectRecipe = (
     const subject = effectRecipe(fn, expression.subject, resolving)
     return subject === expression.subject ? expression : subject
   }
-  const forwarded = inlineForwardedEffectResult(fn, expression)
-  return forwarded === undefined ? expression : effectRecipe(fn, forwarded, resolving)
+  return expression
 }
 
 export const movedEffectRecipe = (

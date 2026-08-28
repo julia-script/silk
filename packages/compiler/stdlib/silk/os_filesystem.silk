@@ -53,6 +53,7 @@
 //! ```
 
 import silk.bool as bool
+import silk.effect { Effect }
 import silk.bytes {
   Bytes,
   append as bytesAppend,
@@ -310,8 +311,8 @@ effect fn readFile(
   path: &Path
 ) -> Bytes ! FileError | OutOfMemoryError ? &mut Allocator {
   let mut handle = run openFile(move self, path, 0, readFileOperation())
-  let attempted = run Intrinsic.effectResult(readLoop(&mut handle))
-  let closed = run Intrinsic.effectResult(close(move handle, readFileOperation()))
+  let attempted = run Effect.result(readLoop(&mut handle))
+  let closed = run Effect.result(close(move handle, readFileOperation()))
   return match move attempted {
     Result<Bytes, FileError | OutOfMemoryError>.Success { value: bytes } => match move closed {
       Result<(), FileError>.Success { value: completed } => move bytes
@@ -346,8 +347,8 @@ effect fn writeLoop(handle: &mut OsHandle, bytes: &[u8]) -> () ! FileError {
 
 effect fn writeFile(self: &mut OsFileSystem, path: &Path, bytes: &[u8]) -> () ! FileError {
   let mut handle = run openFile(move self, path, 1, writeFileOperation())
-  let attempted = run Intrinsic.effectResult(writeLoop(&mut handle, bytes))
-  let closed = run Intrinsic.effectResult(close(move handle, writeFileOperation()))
+  let attempted = run Effect.result(writeLoop(&mut handle, bytes))
+  let closed = run Effect.result(close(move handle, writeFileOperation()))
   return match move attempted {
     Result<(), FileError>.Success { value: completed } => match move closed {
       Result<(), FileError>.Success { value: closedValue } => ()
@@ -456,8 +457,8 @@ effect fn listDirectory(
   path: &Path
 ) -> Vector<DirectoryEntry> ! FileError | OutOfMemoryError ? &mut Allocator {
   let mut handle = run openDirectory(move self, path, listDirectoryOperation())
-  let attempted = run Intrinsic.effectResult(listLoop(&mut handle, path))
-  let closed = run Intrinsic.effectResult(close(move handle, listDirectoryOperation()))
+  let attempted = run Effect.result(listLoop(&mut handle, path))
+  let closed = run Effect.result(close(move handle, listDirectoryOperation()))
   return match move attempted {
     Result<Vector<DirectoryEntry>, FileError | OutOfMemoryError>.Success { value: entries } => match move closed {
       Result<(), FileError>.Success { value: completed } => move entries

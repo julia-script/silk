@@ -4704,6 +4704,22 @@ const emitShortCircuitOperation = (
   ]
 }
 
+const emitConditionalOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'Conditional' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const branch = (selected: typeof operation.taken): ReadonlyArray<Instr.Instr> => [
+    ...selected.operations.flatMap((nested) =>
+      emitOperation(nested, state.emitter, state.suspension),
+    ),
+    ...state.copy(state.slots(selected.result), state.slots(operation.destination)),
+  ]
+  return [
+    Instr.localGet(state.scalar(operation.condition)),
+    Instr.ifElse(Instr.emptyBlockType, branch(operation.taken), branch(operation.otherwise)),
+  ]
+}
+
 const emitEnumConstantOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'EnumConstant' }>,
   state: WasmOperationContext,
@@ -6127,10 +6143,12 @@ const emitReifyEffectOperation = (
     return suspension?.originate(suspensionRegion) ?? []
   const outcomeSlots = slots(operation.outcome)
   const destinationSlots = slots(operation.destination)
+  const successSlots = slots(operation.successValue)
+  const failureSlots = slots(operation.failureValue)
   const outcomeTag = outcomeSlots.at(0)
-  const resultTag = destinationSlots.at(0)
-  if (outcomeTag === undefined || resultTag === undefined)
-    throw new RangeError('Wasm Effect result lost an outcome or Result tag lane')
+  const valid = destinationSlots.at(0)
+  if (outcomeTag === undefined || valid === undefined)
+    throw new RangeError('Wasm Effect result lost an outcome or validity lane')
   const invoke = [
     ...slots(operation.effect).map((slot) => Instr.localGet(slot)),
     ...operation.arguments.flatMap((argument) =>
@@ -6161,40 +6179,35 @@ const emitReifyEffectOperation = (
       }
       return [Instr.localGet(value), ...bridgeToMember, ...bridgeToTarget, Instr.localSet(target)]
     })
-  const resultPayload = destinationSlots.slice(1)
   const successLaneCount =
     operation.outcomeShape.tree._tag === 'OutcomeShape'
       ? operation.outcomeShape.tree.success.laneCount
       : 0
-  const successShape = LayoutPlan.callingShape(plan, operation.outcomeType.type.success)
-  if (successShape === undefined)
-    throw new RangeError('Wasm Effect Result lost its success member shape')
   const success = [
-    Instr.i32Const(operation.successTag),
-    Instr.localSet(resultTag),
-    ...writePayload(outcomeSlots.slice(1, 1 + successLaneCount), resultPayload, successShape.lanes),
+    Instr.i32Const(1),
+    Instr.localSet(valid),
+    ...writePayload(
+      outcomeSlots.slice(1, 1 + successLaneCount),
+      successSlots,
+      operation.successShape.lanes,
+    ),
   ]
-  let failure: ReadonlyArray<Instr.Instr>
-  if (SilkType.failureMembers(operation.outcomeType.type).length === 0) {
-    failure = [Instr.op('unreachable')]
+  let failurePayload: ReadonlyArray<Instr.Instr>
+  if (SilkType.isUnion(operation.failureValueType)) {
+    const innerTag = failureSlots.at(0)
+    if (innerTag === undefined)
+      throw new RangeError('Wasm Effect result failure lost its union tag lane')
+    failurePayload = [
+      Instr.localGet(outcomeTag),
+      Instr.i32Const(1),
+      Instr.op('i32.sub'),
+      Instr.localSet(innerTag),
+      ...writePayload(outcomeSlots.slice(1), failureSlots.slice(1)),
+    ]
   } else {
-    let payload: ReadonlyArray<Instr.Instr>
-    if (SilkType.isUnion(operation.failureValueType)) {
-      const innerTag = resultPayload.at(0)
-      if (innerTag === undefined)
-        throw new RangeError('Wasm Effect Result failure lost its nested tag lane')
-      payload = [
-        Instr.localGet(outcomeTag),
-        Instr.i32Const(1),
-        Instr.op('i32.sub'),
-        Instr.localSet(innerTag),
-        ...writePayload(outcomeSlots.slice(1), resultPayload.slice(1)),
-      ]
-    } else {
-      payload = writePayload(outcomeSlots.slice(1), resultPayload)
-    }
-    failure = [Instr.i32Const(operation.failureTag), Instr.localSet(resultTag), ...payload]
+    failurePayload = writePayload(outcomeSlots.slice(1), failureSlots)
   }
+  const failure = [Instr.i32Const(0), Instr.localSet(valid), ...failurePayload]
   return [
     ...(skipInvocation ? [] : invoke),
     ...(skipInvocation || suspensionRegion?._tag !== 'RunSuspendableEffectRegion'
@@ -7318,6 +7331,8 @@ const emitOperationWithContext = (
       return emitSlotDropOperation(operation, context)
     case 'ShortCircuit':
       return emitShortCircuitOperation(operation, context)
+    case 'Conditional':
+      return emitConditionalOperation(operation, context)
     case 'Match':
       return emitMatchOperation(operation, context)
     case 'Literal':
