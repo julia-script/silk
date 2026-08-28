@@ -881,15 +881,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         }
         return Object.freeze(coerced)
       })
-      nativeStorage.locals.set(
-        operation.successValue.ordinal,
-        yield* coerce(
-          Object.freeze(outcomeValues.slice(1, 1 + successLaneCount)),
-          Object.freeze(outcomeLanes.slice(1, 1 + successLaneCount)),
-          operation.successShape.lanes,
-          `effect_result${operation.destination.ordinal}_success`,
-        ),
+      const successValues = yield* coerce(
+        Object.freeze(outcomeValues.slice(1, 1 + successLaneCount)),
+        Object.freeze(outcomeLanes.slice(1, 1 + successLaneCount)),
+        operation.successShape.lanes,
+        `effect_result${operation.destination.ordinal}_success`,
       )
+      nativeStorage.locals.set(operation.successValue.ordinal, successValues)
+      yield* NativeStorage.storeMutable(nativeStorage, operation.successValue, successValues)
       const failureValues: Array<Value.Input> = []
       const failureLanes: Array<Layout.CallingLane> = []
       if (SilkType.isUnion(operation.failureValueType)) {
@@ -909,15 +908,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       }
       failureValues.push(...outcomeValues.slice(1))
       failureLanes.push(...outcomeLanes.slice(1))
-      nativeStorage.locals.set(
-        operation.failureValue.ordinal,
-        yield* coerce(
-          Object.freeze(failureValues),
-          Object.freeze(failureLanes),
-          operation.failureValueShape.lanes,
-          `effect_result${operation.destination.ordinal}_failure`,
-        ),
+      const coercedFailureValues = yield* coerce(
+        Object.freeze(failureValues),
+        Object.freeze(failureLanes),
+        operation.failureValueShape.lanes,
+        `effect_result${operation.destination.ordinal}_failure`,
       )
+      nativeStorage.locals.set(operation.failureValue.ordinal, coercedFailureValues)
+      yield* NativeStorage.storeMutable(nativeStorage, operation.failureValue, coercedFailureValues)
       break
     }
     case 'CloseEffectEntry': {

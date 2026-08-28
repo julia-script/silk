@@ -1432,7 +1432,18 @@ export function lowerExpressionInner(
             )
           : member
       }
-      const members = Object.freeze(expression.members.map(specializeMember))
+      const specializedMembers = expression.members.map(specializeMember)
+      const members =
+        scrutineeType._tag === 'Enum'
+          ? Object.freeze(
+              specializedMembers.filter(
+                (member, ordinal) =>
+                  specializedMembers.findIndex((candidate) =>
+                    Match.identityEquals(candidate, member),
+                  ) === ordinal,
+              ),
+            )
+          : Layout.coverageMembers(scrutineeShape)
       const specializedCoverage = Match.cover(
         members,
         expression.arms.map((arm) =>
