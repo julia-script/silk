@@ -255,6 +255,35 @@ it('rejects malformed and decreasing monotonic scripts without throwing', () => 
   )
 })
 
+it('accepts exact monotonic scalar endpoints and rejects values outside them', () => {
+  const minimum = -(1n << 63n)
+  const maximum = (1n << 63n) - 1n
+  const maximumResolution = (1n << 64n) - 1n
+  assert.strictEqual(
+    MonotonicClockHost.scripted([{ seconds: minimum, nanoseconds: 0n }], 1n)._tag,
+    'Constructed',
+  )
+  assert.strictEqual(
+    MonotonicClockHost.scripted(
+      [{ seconds: maximum, nanoseconds: 999_999_999n }],
+      maximumResolution,
+    )._tag,
+    'Constructed',
+  )
+  for (const [instant, resolution, reason] of [
+    [{ seconds: minimum - 1n, nanoseconds: 0n }, 1n, 'SecondsOutOfRange'],
+    [{ seconds: maximum + 1n, nanoseconds: 0n }, 1n, 'SecondsOutOfRange'],
+    [{ seconds: 0n, nanoseconds: -1n }, 1n, 'NanosecondsOutOfRange'],
+    [{ seconds: 0n, nanoseconds: 1_000_000_000n }, 1n, 'NanosecondsOutOfRange'],
+    [{ seconds: 0n, nanoseconds: 0n }, 0n, 'ResolutionOutOfRange'],
+    [{ seconds: 0n, nanoseconds: 0n }, maximumResolution + 1n, 'ResolutionOutOfRange'],
+  ] as const) {
+    const built = MonotonicClockHost.scripted([instant], resolution)
+    assert.strictEqual(built._tag, 'ConstructionFailure')
+    if (built._tag === 'ConstructionFailure') assert.strictEqual(built.reason._tag, reason)
+  }
+})
+
 it('registers the clock modules, namespaces, and shared Instant alias', () => {
   assert.strictEqual(Stdlib.findNamespace('SystemClock')?.module, 'silk/system_clock')
   assert.strictEqual(Stdlib.findNamespace('MonotonicClock')?.module, 'silk/monotonic_clock')
@@ -458,6 +487,39 @@ it.effect('derives zero, carry, and maximum monotonic waits from one read each',
         'osMonotonicClockNow',
         'osMonotonicClockWaitUntil',
       ],
+    )
+  }),
+)
+
+it.effect('preserves negative scripted marks through source-derived absolute waits', () =>
+  Effect.gen(function* () {
+    const built = MonotonicClockHost.scripted([{ seconds: -1n, nanoseconds: 0n }], 1n)
+    assert.strictEqual(built._tag, 'Constructed')
+    if (built._tag !== 'Constructed') return
+    const self = yield* snapshot(`import silk.effect as Effect
+import silk.monotonic_clock as MonotonicClock
+import silk.os_monotonic_clock as OsMonotonicClock
+pub fn main() -> i32 {
+  let mut provider = OsMonotonicClock.make()
+  run Effect.provideMut(MonotonicClock.waitFor(0), &mut provider)
+  return 42
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const outcome = Analysis.evaluate(self, { monotonicClock: built.value.provider })
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 42n)
+    assert.deepEqual(built.value.waits(), [
+      {
+        _tag: 'WaitUntil',
+        deadline: { seconds: -1n, nanoseconds: 0n },
+        before: { seconds: -1n, nanoseconds: 0n },
+        after: { seconds: -1n, nanoseconds: 0n },
+      },
+    ])
+    assert.deepEqual(
+      outcome.trace.filter((event) => event._tag === 'OsCall').map((event) => event.operation.name),
+      ['osMonotonicClockNow', 'osMonotonicClockWaitUntil'],
     )
   }),
 )

@@ -28,8 +28,8 @@ service has no typed failure channel.
 ### Read a fixed instant through an ordinary provider
 
 ```silk
-import silk.effect as Effect
-import silk.system_clock as SystemClock
+import silk.effect { Effect }
+import silk.system_clock { SystemClock }
 
 import silk.u64 as u64
 

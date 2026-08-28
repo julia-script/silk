@@ -261,7 +261,7 @@ export const execute = (
           seconds: readInteger(seconds, 'i64').value,
           nanoseconds: readInteger(nanoseconds, 'i64').value,
         })
-        if (deadline.seconds < 0n || !SystemClock.isInstant(deadline)) {
+        if (!SystemClock.isInstant(deadline)) {
           const boundary = clockResult(false)
           commit(boundary.value)
           break

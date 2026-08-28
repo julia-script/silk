@@ -42,10 +42,12 @@ source over those primitives.
 
 Clock-read primitives SHALL report whether their scalar outputs were initialized successfully;
 failed reads MUST NOT expose partial output. Resolution SHALL report success only for a positive
-whole-nanosecond value representable as `u64`. Absolute wait SHALL accept only canonical
+whole-nanosecond value representable as `u64`. Native absolute wait SHALL accept only canonical
 non-negative monotonic deadlines and SHALL report success only after that clock reaches the
-deadline. The ordinary-source OS providers SHALL convert any false result or impossible conversion
-into a fatal trap because the public services declare no typed failure channel.
+deadline. An evaluator host SHALL accept any canonical signed-`i64` deadline so a virtual provider
+can use the complete shared `Instant` domain. The ordinary-source OS providers SHALL convert any
+false result or impossible conversion into a fatal trap because the public services declare no
+typed failure channel.
 
 #### Scenario: Reject malformed scalar deadline arguments
 
@@ -59,6 +61,13 @@ into a fatal trap because the public services declare no typed failure channel.
 - **WHEN** the platform clock read fails
 - **THEN** the primitive reports false and the source provider traps without constructing an
   `Instant` from partially initialized outputs
+
+#### Scenario: Preserve a signed virtual monotonic timeline
+
+- **WHEN** an evaluator host supplies a canonical negative monotonic mark and the source provider
+  waits for that mark or a later canonical negative deadline
+- **THEN** the evaluator forwards the exact deadline to that host rather than applying the native
+  POSIX non-negative precondition
 
 #### Scenario: Complete an absolute wait after its deadline
 

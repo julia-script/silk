@@ -106,8 +106,9 @@ precision discovery.
 
 Normalizing arbitrary constructor inputs was considered. It would make several different field
 pairs silently name one mark and would still not solve provider provenance. `make` instead traps on
-a noncanonical fraction. `waitUntil` accepts only the canonical same-provider form and returns
-immediately for a canonical non-positive OS deadline.
+a noncanonical fraction. Native `waitUntil` accepts only the canonical non-negative POSIX form;
+evaluator hosts retain the complete signed-`i64` domain so deterministic providers with a negative
+origin can compare and advance their own timeline.
 
 ### Five independently consumed intrinsics are the minimum native clock surface
 
