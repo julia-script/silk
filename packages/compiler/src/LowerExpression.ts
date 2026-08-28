@@ -1594,6 +1594,67 @@ export function lowerExpressionInner(
       )
       return { result: destination }
     }
+    case 'ConstructUnionVariant': {
+      const type = fn.type(expression.type)
+      if (type?._tag !== 'Nominal') return undefined
+      const representation = Layout.entry(fn.layout, type.type)?.representation
+      if (representation?._tag !== 'NominalUnion') return undefined
+      const variant = representation.variants.find(
+        (candidate) =>
+          candidate.ordinal === expression.variantOrdinal &&
+          candidate.variant.union.module === expression.variant.union.module &&
+          candidate.variant.union.name === expression.variant.union.name &&
+          candidate.variant.name === expression.variant.name,
+      )
+      if (variant === undefined) return undefined
+      const canonicalFields = new Map(
+        expression.fields.map(
+          (field) => [DeclarationFacts.fieldIdKey(field.field), field] as const,
+        ),
+      )
+      const loweredFields = new Map<string, Mir.LocalId>()
+      for (const fieldId of expression.evaluationOrder) {
+        const field = canonicalFields.get(DeclarationFacts.fieldIdKey(fieldId))
+        if (field === undefined) return undefined
+        const lowered = lowerExpression(fn, field.value)
+        if (lowered === undefined) return undefined
+        loweredFields.set(DeclarationFacts.fieldIdKey(field.field), lowered.result)
+      }
+      const fields = expression.fields.flatMap((field) => {
+        const value = loweredFields.get(DeclarationFacts.fieldIdKey(field.field))
+        const declared = variant.fields.find((candidate) =>
+          DeclarationFacts.sameFieldId(candidate.id, field.field),
+        )
+        const stored =
+          declared === undefined
+            ? undefined
+            : (storedCallableValueType(fn.layout, declared.type)?.storage ??
+              storedEffectValueType(fn.layout, declared.type)?.storage)
+        return value === undefined
+          ? []
+          : [
+              Object.freeze({
+                field: field.field,
+                value,
+                ...(stored === undefined ? {} : { stored }),
+              }),
+            ]
+      })
+      if (fields.length !== expression.fields.length) return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'ConstructUnionVariant',
+          destination,
+          type,
+          variant: expression.variant,
+          variantOrdinal: expression.variantOrdinal,
+          fields: Object.freeze(fields),
+          provenance: authored(expression.span),
+        }),
+      )
+      return { result: destination }
+    }
     case 'ArrayConstruct': {
       const type = fn.type(expression.type)
       if (type?._tag !== 'FixedArray') return undefined

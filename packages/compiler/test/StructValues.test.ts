@@ -214,6 +214,38 @@ fn project(result: Result<i32, bool>) -> i32 { return result.value }`),
   }),
 )
 
+it.effect('lowers and evaluates nominal union construction as a whole value', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-values/runtime',
+      ascii(`union State { Ready, Waiting { count: i32 } }
+fn make() -> State { return State.Waiting { count: 2 } }
+fn keep(state: State) -> State { return move state }
+pub fn main() -> i32 { let state = keep(make()) return 42 }`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(Analysis.loweredMir(self)._tag, 'MirModule')
+    const make = Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'make')
+    assert.strictEqual(
+      make === undefined
+        ? undefined
+        : MirVerification.operations(make).find(
+            (operation) => operation._tag === 'ConstructUnionVariant',
+          )?._tag,
+      'ConstructUnionVariant',
+    )
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
 it.effect('evaluates initializers in source order before constructing in declaration order', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(

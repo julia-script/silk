@@ -109,6 +109,7 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'ReifyEffect':
     case 'CloseEffectEntry':
     case 'Construct':
+    case 'ConstructUnionVariant':
     case 'ConstructArray':
     case 'Project':
     case 'ReadPlace':

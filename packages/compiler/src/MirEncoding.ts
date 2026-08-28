@@ -1,4 +1,4 @@
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as LayoutEncode from './LayoutEncode.js'
 import * as Match from './Match.js'
@@ -181,6 +181,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = close-effect-entry ${targetText(operation.target)} effect=${localText(operation.effect)} runner=${targetText(operation.runner)} outcome=${localText(operation.outcome)} failures=${operation.failures.map((failure) => `${failure.tag}:${SilkType.encode(failure.type)}->${localText(failure.payload)}:${failure.cleanup._tag}`).join(',') || 'none'} : i32 ${provenanceText(operation.provenance)}`
     case 'Construct':
       return `${localText(operation.destination)} = construct ${typeText(operation.type)} { ${operation.fields.map(({ field, value, stored }) => `#${field.ordinal}: ${localText(value)}${stored === undefined ? '' : ` stored=${storedExecutableText(stored)}`}`).join(', ')} } ${provenanceText(operation.provenance)}`
+    case 'ConstructUnionVariant':
+      return `${localText(operation.destination)} = construct-variant ${typeText(operation.type)}.${operation.variant.name}#${operation.variantOrdinal} { ${operation.fields.map(({ field, value, stored }) => `${DeclarationFacts.fieldIdKey(field)}: ${localText(value)}${stored === undefined ? '' : ` stored=${storedExecutableText(stored)}`}`).join(', ')} } ${provenanceText(operation.provenance)}`
     case 'ConstructArray':
       return `${localText(operation.destination)} = construct-array ${typeText(operation.type)} [${operation.elements.map(localText).join(', ')}] ${provenanceText(operation.provenance)}`
     case 'Project':

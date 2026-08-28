@@ -233,6 +233,8 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
       return `match ${expression.access.toLowerCase()} · ${expression.members.map(Match.encodeIdentity).join(' | ')}`
     case 'Construct':
       return `construct ${hirTypeText(expression.nominal)}`
+    case 'ConstructUnionVariant':
+      return `construct ${hirTypeText(expression.nominal)}.${expression.variant.name}`
     case 'ArrayConstruct':
       return `array ${hirTypeText(expression.type)} · ${expression.elements.length} elements`
     case 'Project':
@@ -328,7 +330,7 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
       expression(node.subject, depth + 1, `${path}.s`)
       expression(node.index, depth + 1, `${path}.i`)
     }
-    if (node._tag === 'Construct') {
+    if (node._tag === 'Construct' || node._tag === 'ConstructUnionVariant') {
       // Canonical storage order, one child per field — the reordering from source order is the
       // struct-values pane's story; here the construct is just a typed expression tree.
       node.fields.forEach(({ field, value }) => {

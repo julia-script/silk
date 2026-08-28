@@ -4972,6 +4972,29 @@ const emitConstructOperation = (
   )
 }
 
+const emitConstructUnionVariantOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ConstructUnionVariant' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, copy, zeroFor } = state
+  const destination = slots(operation.destination)
+  const tag = destination.at(0)
+  if (tag === undefined) throw new RangeError('Wasm nominal union lost its tag lane')
+  const payload = operation.fields.flatMap((field) => [...slots(field.value)])
+  const payloadTargets = destination.slice(1, payload.length + 1)
+  if (payloadTargets.length !== payload.length) {
+    throw new RangeError('Wasm nominal union payload exceeds its calling shape')
+  }
+  return [
+    Instr.i32Const(operation.variantOrdinal),
+    Instr.localSet(tag),
+    ...copy(payload, payloadTargets),
+    ...destination
+      .slice(payload.length + 1)
+      .flatMap((target) => [zeroFor(target), Instr.localSet(target)]),
+  ]
+}
+
 const emitConstructArrayOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'ConstructArray' }>,
   state: WasmOperationContext,
@@ -7110,6 +7133,8 @@ const emitOperationWithContext = (
       return emitConvertUnionOperation(operation, context)
     case 'Construct':
       return emitConstructOperation(operation, context)
+    case 'ConstructUnionVariant':
+      return emitConstructUnionVariantOperation(operation, context)
     case 'ConstructArray':
       return emitConstructArrayOperation(operation, context)
     case 'Project':

@@ -1,4 +1,4 @@
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 /**
  * Module, name, ownership, lowering and backend phases as rows.
@@ -861,6 +861,10 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = construct ${typeText(operation.type.type)} { ${operation.fields
         .map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`)
         .join(', ')} }`
+    case 'ConstructUnionVariant':
+      return `${localText(operation.destination)} = construct ${typeText(operation.type.type)}.${operation.variant.name}#${operation.variantOrdinal} { ${operation.fields
+        .map(({ field, value }) => `${DeclarationFacts.fieldIdKey(field)}: ${localText(value)}`)
+        .join(', ')} }`
     case 'ConstructArray':
       return `${localText(operation.destination)} = array [${operation.elements
         .map(localText)
@@ -1182,6 +1186,8 @@ const valueText = (value: BootstrapEvaluation.Value): string => {
       return `${value.enum.module}.${value.enum.name}.${value.member.name} = ${value.discriminant}`
     case 'AggregateValue':
       return `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+    case 'NominalUnionValue':
+      return `${typeText(value.type)}.${value.variant.name} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
   }
 }
 
@@ -1684,6 +1690,10 @@ const selectorPathText = (path: ReadonlyArray<Layout.Selector>): string =>
           return 'tag'
         case 'UnionPayloadSelector':
           return `payload[${selector.slot}]`
+        case 'NominalUnionTagSelector':
+          return 'nominal-tag'
+        case 'NominalUnionPayloadSelector':
+          return `nominal-payload[${selector.slot}]`
         case 'SliceAddressSelector':
           return 'address'
         default:

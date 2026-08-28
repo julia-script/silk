@@ -147,7 +147,12 @@ export const representedNominals = (
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)
     for (const expression of expressions) {
-      if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') continue
+      if (
+        expression._tag !== 'Construct' &&
+        expression._tag !== 'ConstructUnionVariant' &&
+        expression._tag !== 'ArrayConstruct'
+      )
+        continue
       collectNominals(
         index,
         Specialization.specializeType(instance.key, expression.type, [instance.substitution]),
@@ -259,7 +264,12 @@ const storedExecutableViolations = (
         .flatMap(Hir.statementExpressions)
         .flatMap(Hir.expressionTree)
         .flatMap((expression) => {
-          if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') return []
+          if (
+            expression._tag !== 'Construct' &&
+            expression._tag !== 'ConstructUnionVariant' &&
+            expression._tag !== 'ArrayConstruct'
+          )
+            return []
           const aggregate = Specialization.specializeType(instance.key, expression.type, [
             instance.substitution,
           ])

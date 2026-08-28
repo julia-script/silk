@@ -1,6 +1,6 @@
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
@@ -796,12 +796,15 @@ const checkExpression = (
       checkExpression(state, live, expression.left, false, guard, escaping)
       checkExpression(state, live, expression.right, false, guard, escaping)
       return
-    case 'Construct': {
+    case 'Construct':
+    case 'ConstructUnionVariant': {
       const fields = new Map(
-        expression.fields.map((field) => [field.field.ordinal, field.value] as const),
+        expression.fields.map(
+          (field) => [DeclarationFacts.fieldIdKey(field.field), field.value] as const,
+        ),
       )
       for (const field of expression.evaluationOrder) {
-        const value = fields.get(field.ordinal)
+        const value = fields.get(DeclarationFacts.fieldIdKey(field))
         if (value !== undefined) checkExpression(state, live, value, true, guard, escaping)
       }
       return

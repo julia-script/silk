@@ -810,6 +810,7 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         ...operation.failures.map((failure) => failure.payload),
       ]
     case 'Construct':
+    case 'ConstructUnionVariant':
       return [operation.destination, ...operation.fields.map((field) => field.value)]
     case 'ConstructArray':
       return [operation.destination, ...operation.elements]
@@ -1614,6 +1615,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
         ]),
       ]
     case 'Construct':
+    case 'ConstructUnionVariant':
     case 'ConstructArray':
       return [semanticType(operation.type)]
     case 'ConvertUnion':
@@ -1758,6 +1760,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'CloseEffectEntry':
       return []
     case 'Construct':
+    case 'ConstructUnionVariant':
       return operation.fields.map((field) => field.value)
     case 'ConstructArray':
       return operation.elements
@@ -4620,6 +4623,46 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 function: fn.id,
                 region: region.id,
                 detail: `construction of ${typeText(operation.type)} does not match its canonical fields`,
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'ConstructUnionVariant') {
+          const layout = Layout.entry(self.layout, operation.type.type)
+          const representation =
+            layout?.representation._tag === 'NominalUnion' ? layout.representation : undefined
+          const expected = representation?.variants.find(
+            (variant) =>
+              variant.ordinal === operation.variantOrdinal &&
+              variant.variant.union.module === operation.variant.union.module &&
+              variant.variant.union.name === operation.variant.union.name &&
+              variant.variant.name === operation.variant.name,
+          )
+          const valid =
+            representation !== undefined &&
+            expected !== undefined &&
+            representation.union.module === operation.type.type.module &&
+            representation.union.name === operation.type.type.name &&
+            expected.fields.length === operation.fields.length &&
+            operation.fields.every((field, ordinal) => {
+              const declared = expected.fields.at(ordinal)
+              const valueType = fn.localTypes.at(field.value.ordinal)
+              return (
+                declared !== undefined &&
+                DeclarationFacts.sameFieldId(declared.id, field.field) &&
+                valueType !== undefined &&
+                field.stored === undefined &&
+                SilkType.equals(semanticType(valueType), declared.type)
+              )
+            })
+          if (!valid) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidAggregateOperation',
+                function: fn.id,
+                region: region.id,
+                detail: `construction of ${typeText(operation.type)}.${operation.variant.name} does not match its canonical variant layout`,
               }),
             )
           }

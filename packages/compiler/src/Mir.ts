@@ -1030,6 +1030,21 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      readonly _tag: 'ConstructUnionVariant'
+      readonly destination: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly variant: DeclarationFacts.CanonicalUnionVariantId
+      readonly variantOrdinal: number
+      readonly fields: ReadonlyArray<{
+        readonly field: DeclarationFacts.FieldId
+        readonly value: LocalId
+        readonly stored?:
+          | Extract<Type, { readonly _tag: 'CallableValue' }>['storage']
+          | Extract<Type, { readonly _tag: 'EffectValue' }>['storage']
+      }>
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'ConstructArray'
       readonly destination: LocalId
       readonly type: Extract<Type, { readonly _tag: 'FixedArray' }>

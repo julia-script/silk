@@ -1990,7 +1990,7 @@ const addExpressionTypes = (
   ) {
     addExpressionTypes(types, expression.root.value, substitution)
   }
-  if (expression._tag === 'Construct') {
+  if (expression._tag === 'Construct' || expression._tag === 'ConstructUnionVariant') {
     for (const field of expression.fields) addExpressionTypes(types, field.value, substitution)
   }
   if (expression._tag === 'ArrayConstruct') {

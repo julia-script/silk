@@ -186,6 +186,7 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
           changed = include(operation.root, [operation.source]) || changed
           break
         case 'Construct':
+        case 'ConstructUnionVariant':
           changed =
             include(
               operation.destination,

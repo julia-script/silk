@@ -99,6 +99,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'SliceLength':
     case 'ConvertUnion':
     case 'Construct':
+    case 'ConstructUnionVariant':
     case 'ConstructArray':
     case 'Project':
     case 'ReadPlace':

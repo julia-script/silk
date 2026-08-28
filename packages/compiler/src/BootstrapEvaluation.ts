@@ -56,6 +56,7 @@ import type {
   ExecutionValue,
   FloatValue,
   IntegerValue,
+  NominalUnionValue,
   SharedCoreValue,
   SliceValue,
   StaticViewValue,
@@ -80,6 +81,7 @@ export type {
   ExecutionValue,
   FloatValue,
   IntegerValue,
+  NominalUnionValue,
   RawBufferValue,
   ReferenceValue,
   SharedCoreValue,
@@ -1649,6 +1651,7 @@ function* executeFunction(
       values.add(value)
       switch (value._tag) {
         case 'AggregateValue':
+        case 'NominalUnionValue':
           for (const field of value.fields) visit(field.value)
           return
         case 'ArrayValue':
@@ -3936,6 +3939,30 @@ function* executeFunction(
                 function: fn.id,
                 type: aggregate.type,
                 fieldCount: aggregate.fields.length,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'ConstructUnionVariant': {
+            const value: NominalUnionValue = Object.freeze({
+              _tag: 'NominalUnionValue',
+              type: operation.type.type,
+              variant: operation.variant,
+              variantOrdinal: operation.variantOrdinal,
+              fields: Object.freeze(
+                operation.fields.map((field) =>
+                  Object.freeze({ field: field.field, value: read(field.value).value }),
+                ),
+              ),
+            })
+            write(operation.destination, { value, fromCall: false })
+            trace.push(
+              Object.freeze({
+                _tag: 'Construct',
+                function: fn.id,
+                type: value.type,
+                fieldCount: value.fields.length,
                 span: operation.provenance.span,
               }),
             )
