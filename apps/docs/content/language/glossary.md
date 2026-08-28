@@ -631,10 +631,17 @@ success type is the normalized union of the protected expression and reachable r
 _Avoid_: catch-all exception handler, resumption point
 
 **Type union**:
-A normalized, unordered set of nominal alternatives such as `A | B`; order, nesting, and duplicate
-members do not affect its identity. A value has one active member and an implicit discriminant,
-allowing exhaustive matching without user-defined tag-field names.
+A normalized, unordered set of detached concrete value types such as `Full | Empty` or
+`i32 | string`; order, nesting, and duplicate members do not affect its identity. A value has one
+active member and an implicit discriminant, allowing exhaustive matching without user-defined
+tag-field names.
 _Avoid_: tagged record, variant map
+
+**Scalar enum**:
+A closed nominal type whose qualified, fieldless members have fixed-width integer discriminants.
+It is Copy, supports exhaustive matching by member name, and does not implicitly convert to or from
+its backing integer. Alternatives that carry data use a type union of nominal structs instead.
+_Avoid_: data-carrying enum, open enum, integer alias
 
 **Finite type-set constraint**:
 A compile-time generic bound restricting a type parameter to a closed set of nominal types while
