@@ -22,7 +22,7 @@ operations support the current Unix-family native targets and evaluator hosts. L
 `glibc` 2.17 or later and needs no `librt` link. Direct WebAssembly rejects reachable operations
 and does not add an ambient time import.
 
-Import as `OsSystemClock` with `import silk.os_system_clock`.
+Import as `OsSystemClock` with `import silk.os_system_clock { OsSystemClock }`.
 
 Public declarations: 2.
 

@@ -25,9 +25,26 @@ Dropping a dormant Execution cancels it. A retained Wake keeps the complete iner
 until the Wake is consumed or dropped. [`drive`](#declaration-73696c6b2f657865637574696f6e3a3a6472697665) returns continued ownership only to
 `onSuspend`.
 
-Import as `Execution` with `import silk.execution`.
+Import as `Execution` with `import silk.execution { Execution }`.
 
-Public declarations: 4.
+Public declarations: 5.
+
+<a id="declaration-73696c6b2f657865637574696f6e3a3a457865637574696f6e"></a>
+
+## `Execution`
+
+```silk
+pub struct Execution
+```
+
+The importable name of the `silk.execution` module scope.
+
+### Details
+
+This struct carries no data and is never constructed by the library. Importing it as
+`import silk.execution { Execution }` names the module scope, so `Execution.make(...)` and the
+other lifecycle operations resolve through it. It is unrelated to the builtin
+`Intrinsic.Execution<A>` type.
 
 <a id="declaration-73696c6b2f657865637574696f6e3a3a6d616b65"></a>
 

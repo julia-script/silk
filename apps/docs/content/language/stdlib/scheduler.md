@@ -20,7 +20,7 @@ Fiber. `Fiber.forkChild` registers that data after the exclusive service dispatc
 A provider must not expose the Fiber before publication succeeds. Publication failure consumes
 the complete pending value and returns no Fiber.
 
-Import as `Scheduler` with `import silk.scheduler`.
+Import as `Scheduler` with `import silk.scheduler { Scheduler }`.
 
 Public declarations: 17.
 

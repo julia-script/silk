@@ -31,9 +31,9 @@ import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.string as String
+import silk.string { String }
 
-import silk.unicode as Unicode
+import silk.unicode { Unicode }
 
 effect fn normalize() -> i32
 ! Allocator.OutOfMemoryError {
@@ -62,9 +62,25 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Unicode` with `import silk.unicode`.
+Import as `Unicode` with `import silk.unicode { Unicode }`.
 
-Public declarations: 5.
+Public declarations: 6.
+
+<a id="declaration-73696c6b2f756e69636f64653a3a556e69636f6465"></a>
+
+## `Unicode`
+
+```silk
+pub struct Unicode
+```
+
+The importable name of the `silk.unicode` module scope.
+
+### Details
+
+This struct carries no data and is never constructed by the library. Importing it as
+`import silk.unicode { Unicode }` names the module scope, so normalization and Unicode-data
+operations resolve through `Unicode`.
 
 <a id="declaration-73696c6b2f756e69636f64653a3a6461746156657273696f6e"></a>
 

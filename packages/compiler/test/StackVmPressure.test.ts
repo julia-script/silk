@@ -213,7 +213,6 @@ const quotaSourceFor = (bytecode: ReadonlyArray<number>, quota: number): string 
     `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
 import silk.layout { Layout }
 import silk.logger { length as logLength }
 

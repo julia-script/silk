@@ -36,7 +36,7 @@ import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.vector as Vector
+import silk.vector { Vector }
 
 effect fn build() -> i32
 ! Allocator.OutOfMemoryError {
@@ -69,11 +69,11 @@ import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.option as Option
+import silk.option { Option }
 
-import silk.usize as usize
+import silk.usize
 
-import silk.vector as Vector
+import silk.vector { Vector }
 
 effect fn search() -> i32
 ! Allocator.OutOfMemoryError {
@@ -105,7 +105,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Vector` with `import silk.vector`.
+Import as `Vector` with `import silk.vector { Vector }`.
 
 Public declarations: 20.
 

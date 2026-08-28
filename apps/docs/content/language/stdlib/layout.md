@@ -20,9 +20,9 @@ it does not allocate or initialize it.
 ### Size storage for repeated values
 
 ```silk
-import silk.layout as Layout
+import silk.layout { Layout }
 
-import silk.usize as usize
+import silk.usize
 
 pub fn main() -> i32 {
   let element = Layout.of<i32>()
@@ -33,7 +33,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Layout` with `import silk.layout`.
+Import as `Layout` with `import silk.layout { Layout }`.
 
 Public declarations: 6.
 

@@ -36,13 +36,13 @@ import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.hash as Hash
+import silk.hash { Hash }
 
-import silk.hash_set as HashSet
+import silk.hash_set { HashSet }
 
-import silk.option as Option
+import silk.option { Option }
 
-import silk.u64 as u64
+import silk.u64
 
 effect fn build() -> i32
 ! Allocator.OutOfMemoryError {
@@ -68,7 +68,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `HashSet` with `import silk.hash_set`.
+Import as `HashSet` with `import silk.hash_set { HashSet }`.
 
 Public declarations: 13.
 

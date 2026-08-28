@@ -24,7 +24,7 @@ into a `Result` when a caller needs to inspect or store the outcome.
 ### Transform a success and choose a fallback for failure
 
 ```silk
-import silk.result as Result
+import silk.result { Result }
 
 fn half(value: i32) -> Result.Result<i32, i32> {
   if value == 0 {
@@ -49,7 +49,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Result` with `import silk.result`.
+Import as `Result` with `import silk.result { Result }`.
 
 Public declarations: 11.
 

@@ -32,7 +32,7 @@ import silk.effect { Effect }
 import silk.logger { Logger }
 import silk.logger { LogLevel }
 
-import silk.usize as usize
+import silk.usize
 
 effect fn program() -> i32
 ! Logger.LogError {
@@ -57,7 +57,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Logger` with `import silk.logger`.
+Import as `Logger` with `import silk.logger { Logger }`.
 
 Public declarations: 14.
 

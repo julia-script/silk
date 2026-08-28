@@ -31,7 +31,7 @@ service has no typed failure channel.
 import silk.effect { Effect }
 import silk.system_clock { SystemClock }
 
-import silk.u64 as u64
+import silk.u64
 
 struct FixedClock {}
 
@@ -58,7 +58,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `SystemClock` with `import silk.system_clock`.
+Import as `SystemClock` with `import silk.system_clock { SystemClock }`.
 
 Public declarations: 7.
 

@@ -19,7 +19,7 @@
 //! # Examples
 //! ## Read the high half of a 64-bit field
 //! ```silk
-//! import silk.u64 as u64
+//! import silk.u64
 //!
 //! pub fn main() -> i32 {
 //!   let high = u64.shiftRight(0x0000002A00000000, 32)

@@ -36,7 +36,7 @@ import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.filesystem as FileSystem
+import silk.filesystem { FileSystem }
 
 effect fn example() -> i32
 ! FileSystem.FileError | Allocator.OutOfMemoryError {
@@ -58,7 +58,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `FileSystem` with `import silk.filesystem`.
+Import as `FileSystem` with `import silk.filesystem { FileSystem }`.
 
 Public declarations: 58.
 
@@ -721,9 +721,9 @@ create-or-truncate writes, and deterministic listing order described here.
 ```silk
 import silk.allocator { Allocator }
 
-import silk.filesystem as FileSystem
+import silk.filesystem { FileSystem }
 
-import silk.usize as usize
+import silk.usize
 
 pub effect fn store(path: &FileSystem.Path, contents: &[u8]) -> usize
 ! FileSystem.FileError | Allocator.OutOfMemoryError

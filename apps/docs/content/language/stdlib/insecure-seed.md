@@ -25,7 +25,7 @@ collections use a different one-word hash policy and do not consume this seed au
 
 ```silk
 import silk.effect { Effect }
-import silk.insecure_seed as InsecureSeed
+import silk.insecure_seed { InsecureSeed }
 
 pub fn main() -> i32 {
   let provider = InsecureSeed.fixed(20, 22)
@@ -36,7 +36,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `InsecureSeed` with `import silk.insecure_seed`.
+Import as `InsecureSeed` with `import silk.insecure_seed { InsecureSeed }`.
 
 Public declarations: 8.
 

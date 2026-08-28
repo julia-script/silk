@@ -16,7 +16,7 @@
 //! # Examples
 //! ## Classify each comparison result
 //! ```silk
-//! import silk.order as Order
+//! import silk.order { Order }
 //!
 //! pub fn main() -> i32 {
 //!   let low = Order.compare<i32>(2, 7)

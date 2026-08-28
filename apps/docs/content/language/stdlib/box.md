@@ -26,7 +26,7 @@ Ordinary recursive destruction uses the call stack. For a very deep chain, consu
 ### Store and recover one owned value
 
 ```silk
-import silk.box as Box
+import silk.box { Box }
 
 import silk.allocator { Allocator }
 
@@ -54,7 +54,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Box` with `import silk.box`.
+Import as `Box` with `import silk.box { Box }`.
 
 Public declarations: 7.
 

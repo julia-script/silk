@@ -127,7 +127,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Effect` with `import silk.effect`.
+Import as `Effect` with `import silk.effect { Effect }`.
 
 Public declarations: 32.
 
@@ -251,7 +251,7 @@ failures and therefore are not captured.
 ```silk
 import silk.effect { Effect }
 
-import silk.result as Result
+import silk.result { Result }
 
 struct Problem {
   answer: i32

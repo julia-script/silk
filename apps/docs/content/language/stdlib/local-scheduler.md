@@ -14,7 +14,7 @@ Use [`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a6578656
 Each call creates fresh task storage and a FIFO ready queue. The root is task zero and uses the
 same `Execution<()>` storage as every child. [`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a65786563757465) returns only after the root terminates.
 
-Import as `LocalScheduler` with `import silk.local_scheduler`.
+Import as `LocalScheduler` with `import silk.local_scheduler { LocalScheduler }`.
 
 Public declarations: 4.
 

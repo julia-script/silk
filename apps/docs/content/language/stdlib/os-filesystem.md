@@ -40,7 +40,7 @@ import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.os_filesystem as OsFileSystem
+import silk.os_filesystem { OsFileSystem }
 
 effect fn program() -> i32
 ! Allocator.OutOfMemoryError {
@@ -60,7 +60,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `OsFileSystem` with `import silk.os_filesystem`.
+Import as `OsFileSystem` with `import silk.os_filesystem { OsFileSystem }`.
 
 Public declarations: 2.
 

@@ -31,11 +31,11 @@ available input from end-of-input.
 ```silk
 import silk.effect { Effect }
 
-import silk.standard_input as Input
+import silk.standard_input { StandardInput as Input }
 
-import silk.u8 as u8
+import silk.u8
 
-import silk.usize as usize
+import silk.usize
 
 struct OneByte {
   complete: bool
@@ -81,7 +81,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `StandardInput` with `import silk.standard_input`.
+Import as `StandardInput` with `import silk.standard_input { StandardInput }`.
 
 Public declarations: 11.
 

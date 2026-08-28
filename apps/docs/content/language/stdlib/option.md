@@ -20,7 +20,7 @@ ownership: a present value moves forward, while an unused fallback or abandoned 
 ### Transform and continue only when a value is present
 
 ```silk
-import silk.option as Option
+import silk.option { Option }
 
 fn double(value: i32) -> i32 {
   return value * 2
@@ -45,7 +45,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Option` with `import silk.option`.
+Import as `Option` with `import silk.option { Option }`.
 
 Public declarations: 8.
 
@@ -155,7 +155,7 @@ two owned values leaves this call and the other drops.
 #### Choose between a present value and a fallback
 
 ```silk
-import silk.option as Option
+import silk.option { Option }
 
 pub fn main() -> i32 {
   let present = Option.some<i32>(7)

@@ -25,17 +25,17 @@ directory. No ambient global is consulted after a provider is supplied.
 ### Read the argument count through an application provider
 
 ```silk
-import silk.bytes as Bytes
+import silk.bytes { Bytes }
 
 import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.host_input as Host
+import silk.host_input { HostInput as Host }
 
-import silk.option as Option
+import silk.option { Option }
 
-import silk.usize as usize
+import silk.usize
 
 struct FixedInput {}
 
@@ -89,7 +89,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `HostInput` with `import silk.host_input`.
+Import as `HostInput` with `import silk.host_input { HostInput }`.
 
 Public declarations: 10.
 

@@ -27,7 +27,7 @@
 //!
 //! import silk.effect { Effect }
 //!
-//! import silk.filesystem as FileSystem
+//! import silk.filesystem { FileSystem }
 //!
 //! effect fn example() -> i32
 //! ! FileSystem.FileError | Allocator.OutOfMemoryError {
@@ -671,9 +671,9 @@ pub effect fn parent(
 /// ```silk
 /// import silk.allocator { Allocator }
 ///
-/// import silk.filesystem as FileSystem
+/// import silk.filesystem { FileSystem }
 ///
-/// import silk.usize as usize
+/// import silk.usize
 ///
 /// pub effect fn store(path: &FileSystem.Path, contents: &[u8]) -> usize
 /// ! FileSystem.FileError | Allocator.OutOfMemoryError

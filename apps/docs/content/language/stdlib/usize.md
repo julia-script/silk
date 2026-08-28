@@ -28,9 +28,9 @@ A value valid as usize on a 64-bit target can be out of range on a 32-bit target
 ### Keep a count within the target range
 
 ```silk
-import silk.option as Option
+import silk.option { Option }
 
-import silk.usize as usize
+import silk.usize
 
 pub fn main() -> i32 {
   let next = usize.checkedAdd(usize.MAX, usize.ONE)

@@ -20,15 +20,13 @@
 //! ```silk
 //! import silk.allocator { Allocator }
 //!
-//! import silk.allocator {Allocator}
-//!
 //! import silk.effect { Effect }
 //!
-//! import silk.layout as Layout
+//! import silk.layout { Layout }
 //!
-//! import silk.raw_buffer as RawBuffer
+//! import silk.raw_buffer { RawBuffer }
 //!
-//! import silk.slot as Slot
+//! import silk.slot { Slot }
 //!
 //! effect fn build() -> i32
 //! ! Allocator.OutOfMemoryError {
@@ -54,6 +52,15 @@
 //!   return run Effect.catchAll(build(), recover)
 //! }
 //! ```
+
+/// The importable name of the `silk.slot` module scope.
+///
+/// # Details
+///
+/// This struct carries no data and is never constructed by the library. Importing it as
+/// `import silk.slot { Slot }` names the module scope, so `Slot.write(...)` and the other slot
+/// operations resolve through it. It is unrelated to the builtin `Slot<T>` place type.
+pub struct Slot {}
 
 /// Moves one value into a selected uninitialized raw slot.
 ///

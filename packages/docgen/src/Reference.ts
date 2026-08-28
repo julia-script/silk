@@ -296,6 +296,30 @@ const targetMap = (modules: ReadonlyArray<Project.Module>): ReadonlyMap<string, 
   return result
 }
 
+const primitiveNamespaces = new Set([
+  'bool',
+  'char',
+  'f32',
+  'f64',
+  'i8',
+  'i16',
+  'i32',
+  'i64',
+  'isize',
+  'u8',
+  'u16',
+  'u32',
+  'u64',
+  'usize',
+])
+
+const importStatement = (entry: ManifestEntry, module: Project.Module): string => {
+  const path = module.name.replaceAll('/', '.')
+  return primitiveNamespaces.has(entry.namespace)
+    ? `import ${path}`
+    : `import ${path} { ${entry.namespace} }`
+}
+
 const renderModule = (
   entry: ManifestEntry,
   module: Project.Module,
@@ -311,7 +335,7 @@ const renderModule = (
     '',
     ...documentMarkdown(module.documentation, 1, file, targets),
     '',
-    `Import as \`${entry.namespace}\` with \`import ${module.name.replaceAll('/', '.')}\`.`,
+    `Import as \`${entry.namespace}\` with \`${importStatement(entry, module)}\`.`,
     '',
     `Public declarations: ${publicDeclarations}.`,
   ]

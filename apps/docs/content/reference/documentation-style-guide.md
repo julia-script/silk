@@ -376,7 +376,7 @@ interface contract operations still take precedence over same-named module membe
 Preferred:
 
 ```silk
-import silk.usize as usize
+import silk.usize
 
 import silk.vector { Vector }
 
@@ -533,7 +533,7 @@ an owned value pipeline.
 ///
 /// import silk.effect { Effect }
 ///
-/// import silk.usize as usize
+/// import silk.usize
 ///
 /// import silk.vector { Vector }
 ///
