@@ -765,6 +765,7 @@ export interface FunctionItemExpressionFact {
   readonly _tag: 'FunctionItem'
   readonly reference: CallReferenceFact
   readonly path: ReferencePathFact
+  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
 }

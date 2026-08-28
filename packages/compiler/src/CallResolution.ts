@@ -1747,6 +1747,7 @@ export const analyzeFunctionItem = (
   node: SyntaxTree.Node,
   declarations: ReadonlyArray<DeclarationFact>,
   resolution: ResolutionContext,
+  expected?: SemanticType,
 ): ExpressionResult | undefined => {
   const reference = resolvedFunctionReference(source, node, declarations, resolution)
   if (reference === undefined) {
@@ -1787,6 +1788,7 @@ export const analyzeFunctionItem = (
         _tag: 'FunctionItem',
         reference: missing,
         path: referencePath(node),
+        typeArguments: Object.freeze([]),
         type: unavailableExpressionType,
         syntax: node,
       }),
@@ -1794,7 +1796,38 @@ export const analyzeFunctionItem = (
       type: undefined,
     })
   }
-  const callable = callableTypeOfReference(reference)
+  const unresolvedCallable = callableTypeOfReference(reference)
+  const contract = resolvedCallableContract(reference)
+  const contextual = new Map<string, Type.GenericArgument>()
+  const expectedCallable =
+    expected !== undefined && Type.isCallable(expected) ? expected : undefined
+  const contextualPattern =
+    unresolvedCallable === undefined || expectedCallable === undefined
+      ? undefined
+      : Type.callable(
+          unresolvedCallable.parameters,
+          unresolvedCallable.result,
+          expectedCallable.mode,
+          unresolvedCallable.schema,
+          unresolvedCallable.unsafe,
+        )
+  const specialized =
+    contextualPattern !== undefined &&
+    expectedCallable !== undefined &&
+    TypeInference.infer(contextualPattern, expectedCallable, contextual)
+  let callable = unresolvedCallable
+  if (callable !== undefined && specialized) {
+    const contextualCallable = Type.substitute(callable, contextual)
+    callable = Type.isCallable(contextualCallable) ? contextualCallable : undefined
+  }
+  const typeArguments = Object.freeze(
+    specialized
+      ? (contract?.binders ?? []).flatMap((parameter) => {
+          const argument = contextual.get(Type.key(parameter))
+          return argument === undefined ? [] : [argument]
+        })
+      : [],
+  )
   const type =
     callable === undefined ? unavailableExpressionType : availableExpressionType(callable)
   return Object.freeze({
@@ -1802,6 +1835,7 @@ export const analyzeFunctionItem = (
       _tag: 'FunctionItem',
       reference,
       path: referencePath(node),
+      typeArguments,
       type,
       syntax: node,
     }),

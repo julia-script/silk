@@ -36,7 +36,22 @@ export type LinearTerminator =
   | { readonly _tag: 'Trap'; readonly reason: string; readonly provenance: Mir.Provenance }
 
 export type LinearOperation =
-  | Exclude<Mir.Operation, { readonly _tag: 'Match' | 'ShortCircuit' | 'PropagateEffectFailure' }>
+  | Exclude<
+      Mir.Operation,
+      {
+        readonly _tag: 'Match' | 'ShortCircuit' | 'CheckedScalar' | 'PropagateEffectFailure'
+      }
+    >
+  | {
+      readonly _tag: 'CheckedScalarOutcome'
+      readonly operation: Extract<Mir.Operation, { readonly _tag: 'CheckedScalar' }>['operation']
+      readonly valid: Mir.LocalId
+      readonly value: Mir.LocalId
+      readonly operands: ReadonlyArray<Mir.LocalId>
+      readonly sourceType: Mir.ScalarType
+      readonly valueType: Mir.ScalarType
+      readonly provenance: Mir.Provenance
+    }
   | {
       readonly _tag: 'BindMatch'
       readonly scrutinee: Mir.LocalId
@@ -51,6 +66,7 @@ export const isLinearOperation = (
 ): operation is LinearOperation =>
   operation._tag !== 'Match' &&
   operation._tag !== 'ShortCircuit' &&
+  operation._tag !== 'CheckedScalar' &&
   operation._tag !== 'PropagateEffectFailure'
 
 export const linearOperations = (
@@ -91,7 +107,6 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'StringEqualsExact':
     case 'Binary':
     case 'ConvertInteger':
-    case 'CheckedScalar':
     case 'Move':
     case 'BeginLoan':
     case 'SliceLength':
@@ -138,6 +153,8 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'SlotCopy':
     case 'SlotDrop':
       return operation.destination
+    case 'CheckedScalarOutcome':
+      return operation.value
     case 'BindMatch':
       return operation.binding.destination
     case 'CheckPlace':
@@ -209,6 +226,7 @@ export const expandMatches = (
       (operation) =>
         operation._tag === 'Match' ||
         operation._tag === 'ShortCircuit' ||
+        operation._tag === 'CheckedScalar' ||
         operation._tag === 'PropagateEffectFailure',
     )
     if (specialIndex < 0) {
@@ -233,6 +251,89 @@ export const expandMatches = (
           operations: linearOperations(operations.slice(0, specialIndex)),
           terminator: special,
         }),
+      )
+      return
+    }
+    if (special?._tag === 'CheckedScalar') {
+      const presentType = fn.localTypes.at(special.present.ordinal)
+      const absentType = fn.localTypes.at(special.absent.ordinal)
+      if (presentType?._tag !== 'CallableValue' || absentType?._tag !== 'CallableValue')
+        throw new RangeError('LLVM checked scalar expansion lost its carrier callables')
+      const following = reserve()
+      const present = reserve()
+      const absent = reserve()
+      const apply = (
+        callable: Mir.LocalId,
+        callableType: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
+        arguments_: ReadonlyArray<Mir.LocalId>,
+      ): Extract<Mir.Operation, { readonly _tag: 'ApplyCallable' }> =>
+        Object.freeze({
+          _tag: 'ApplyCallable',
+          destination: special.destination,
+          callable,
+          typeArguments:
+            callableType.environment?.callable.typeArguments ??
+            callableType.storage?.realization.targetArguments ??
+            callableType.typeArguments ??
+            Object.freeze([]),
+          captures: Object.freeze([]),
+          arguments: arguments_,
+          callableType: callableType.type,
+          access: callableType.type.mode,
+          evaluation: 'CalleeThenArguments',
+          realization: 'Environment',
+          type: special.type,
+          provenance: special.provenance,
+        })
+      const drop = (
+        local: Mir.LocalId,
+        cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
+      ): Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
+        Object.freeze({ _tag: 'Drop', local, cleanup, provenance: special.provenance })
+      blocks.push(
+        Object.freeze({
+          id,
+          origin,
+          kind,
+          operations: linearOperations([
+            ...operations.slice(0, specialIndex),
+            Object.freeze({
+              _tag: 'CheckedScalarOutcome' as const,
+              operation: special.operation,
+              valid: special.valid,
+              value: special.value,
+              operands: special.operands,
+              sourceType: special.sourceType,
+              valueType: special.valueType,
+              provenance: special.provenance,
+            }),
+          ]),
+          terminator: Object.freeze({
+            _tag: 'Branch',
+            condition: special.valid,
+            taken: present,
+            otherwise: absent,
+            provenance: special.provenance,
+          }),
+        }),
+      )
+      lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
+      lowerSequence(
+        present,
+        origin,
+        'Normal',
+        [
+          drop(special.absent, special.absentCleanup),
+          apply(special.present, presentType, Object.freeze([special.value])),
+        ],
+        jump(following, special.provenance),
+      )
+      lowerSequence(
+        absent,
+        origin,
+        'Normal',
+        [drop(special.present, special.presentCleanup), apply(special.absent, absentType, [])],
+        jump(following, special.provenance),
       )
       return
     }

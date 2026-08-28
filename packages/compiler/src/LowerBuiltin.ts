@@ -1,4 +1,10 @@
-import { authored, cleanupForLocal, concreteCleanup, generated } from './CleanupEmission.js'
+import {
+  authored,
+  callableLocalCleanup,
+  cleanupForLocal,
+  concreteCleanup,
+  generated,
+} from './CleanupEmission.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type { LoweredExpression } from './EffectLowering.js'
 import type {} from './EntryAssembly.js'
@@ -818,7 +824,13 @@ export const lowerBuiltinExpression = (
   if (expression.operation === 'StringEqualsExact') return undefined
   const conversionTarget = Scalar.conversionTarget(expression.operation)
   if (Scalar.isCheckedOperation(expression.operation)) {
-    const [first] = argumentLocals
+    const arity = expression.operation.startsWith('CheckedConvertTo') ? 1 : 2
+    const operands = Object.freeze(argumentLocals.slice(0, arity))
+    const present = argumentLocals.at(arity)
+    const absent = argumentLocals.at(arity + 1)
+    const presentType = present === undefined ? undefined : fn.localTypes.at(present.ordinal)
+    const absentType = absent === undefined ? undefined : fn.localTypes.at(absent.ordinal)
+    const [first] = operands
     const sourceType = first === undefined ? undefined : fn.localTypes.at(first.ordinal)
     const semanticSource = sourceType === undefined ? undefined : Mir.semanticType(sourceType)
     const sourceScalar =
@@ -830,32 +842,35 @@ export const lowerBuiltinExpression = (
     const targetType = fn.type(expression.type)
     if (
       first === undefined ||
+      present === undefined ||
+      absent === undefined ||
+      presentType?._tag !== 'CallableValue' ||
+      absentType?._tag !== 'CallableValue' ||
       sourceScalar?.category !== 'Integer' ||
       (valueScalar?.category !== 'Integer' && valueScalar?.category !== 'Character') ||
       sourceType?._tag !== sourceScalar.spelling ||
-      targetType?._tag !== 'Union' ||
-      argumentLocals.some((local) => fn.localTypes.at(local.ordinal)?._tag !== sourceType._tag)
+      targetType === undefined ||
+      operands.some((local) => fn.localTypes.at(local.ordinal)?._tag !== sourceType._tag)
     )
       return undefined
-    const success = Type.some(valueScalar.spelling)
-    const failure = Type.none
-    if (
-      !targetType.type.members.some((member) => Type.equals(member, success)) ||
-      !targetType.type.members.some((member) => Type.equals(member, failure))
-    )
-      return undefined
+    const valid = fn.alloc(Object.freeze({ _tag: 'bool' as const }))
+    const value = fn.alloc(Object.freeze({ _tag: valueScalar.spelling }))
     const destination = fn.alloc(targetType)
     fn.emit(
       Object.freeze({
         _tag: 'CheckedScalar' as const,
         operation: expression.operation,
         destination,
-        operands: Object.freeze(argumentLocals),
+        valid,
+        value,
+        operands,
+        present,
+        absent,
+        presentCleanup: callableLocalCleanup(fn, presentType),
+        absentCleanup: callableLocalCleanup(fn, absentType),
         sourceType,
         valueType: Object.freeze({ _tag: valueScalar.spelling }),
         type: targetType,
-        success,
-        failure,
         provenance: authored(expression.span),
       }),
     )

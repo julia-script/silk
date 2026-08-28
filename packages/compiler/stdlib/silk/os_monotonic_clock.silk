@@ -18,7 +18,7 @@
 
 import silk.i64 as i64
 import silk.monotonic_clock as MonotonicClock
-import silk.option { None, Option, Some }
+import silk.option { Option }
 import silk.system_clock as SystemClock
 import silk.system_clock { Instant }
 import silk.u64 as u64
@@ -43,8 +43,8 @@ fn invalidI64() -> i64 {
 
 fn requireI64(value: Option<i64>) -> i64 {
   return match move value {
-    None {} => invalidI64()
-    Some<i64> { value: present } => present
+    Option<i64>.None => invalidI64()
+    Option<i64>.Some { value: present } => present
   }
 }
 

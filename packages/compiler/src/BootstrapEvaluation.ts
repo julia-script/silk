@@ -3929,38 +3929,48 @@ function* executeFunction(
                     )
                     return arithmetic >= range.minimum && arithmetic <= range.maximum
                   })())
-            const member = success ? operation.success : operation.failure
-            const entry = program.layout.entries.find((candidate) =>
-              Type.equals(candidate.type, member),
-            )
-            if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate')
-              throw new RangeError('Target plan omitted a canonical Option member')
-            const payload: AggregateValue = Object.freeze({
-              _tag: 'AggregateValue',
-              type: member,
-              fields: Object.freeze(
-                success
-                  ? entry.representation.fields.map((field) =>
-                      Object.freeze({
-                        field: field.id,
-                        value:
-                          target.category === 'Character'
-                            ? characterValue(Number(arithmetic))
-                            : integerValue(target.spelling, arithmetic),
-                      }),
-                    )
-                  : [],
-              ),
-            })
-            write(operation.destination, {
-              value: Object.freeze({
-                _tag: 'UnionValue',
-                type: operation.type.type,
-                member,
-                payload,
+            if (success && arithmetic !== undefined) {
+              write(operation.value, {
+                value:
+                  target.category === 'Character'
+                    ? characterValue(Number(arithmetic))
+                    : integerValue(target.spelling, arithmetic),
+                fromCall: false,
+              })
+            }
+            const callable = success ? operation.present : operation.absent
+            const unused = success ? operation.absent : operation.present
+            const cleanup = success ? operation.absentCleanup : operation.presentCleanup
+            const callableType = fn.localTypes.at(callable.ordinal)
+            if (callableType?._tag !== 'CallableValue')
+              throw new RangeError('MIR checked scalar operation lost its carrier callable')
+            const carrier = yield* executeOperations([
+              Object.freeze({
+                _tag: 'Drop' as const,
+                local: unused,
+                cleanup,
+                provenance: operation.provenance,
               }),
-              fromCall: false,
-            })
+              Object.freeze({
+                _tag: 'ApplyCallable' as const,
+                destination: operation.destination,
+                callable,
+                typeArguments:
+                  callableType.environment?.callable.typeArguments ??
+                  callableType.storage?.realization.targetArguments ??
+                  callableType.typeArguments ??
+                  Object.freeze([]),
+                captures: Object.freeze([]),
+                arguments: success ? Object.freeze([operation.value]) : Object.freeze([]),
+                callableType: callableType.type,
+                access: callableType.type.mode,
+                evaluation: 'CalleeThenArguments' as const,
+                realization: 'Environment' as const,
+                type: operation.type,
+                provenance: operation.provenance,
+              }),
+            ])
+            if (carrier !== undefined) return carrier
             break
           }
           case 'Construct': {

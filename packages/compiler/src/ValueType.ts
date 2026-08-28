@@ -560,6 +560,15 @@ export const functionItemValueType = (
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
   const type = Type.substitute(Type.substitute(item.type, fn.substitution), applicationSubstitution)
   return Type.isCallable(type) && Type.isRuntimeConcrete(type)
-    ? Object.freeze({ _tag: 'CallableValue', type, target: item.target })
+    ? Object.freeze({
+        _tag: 'CallableValue',
+        type,
+        target: item.target,
+        typeArguments: Object.freeze(
+          item.typeArguments.map((argument) =>
+            Type.substituteGenericArgument(argument, fn.substitution),
+          ),
+        ),
+      })
     : undefined
 }

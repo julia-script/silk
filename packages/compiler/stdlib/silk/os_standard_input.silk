@@ -32,7 +32,7 @@
 //! ```
 
 import silk.i32 as i32
-import silk.option { None, Option, Some, none }
+import silk.option { Option, none }
 import silk.standard_input {
   ReadOutcome,
   StandardInput,
@@ -90,8 +90,8 @@ effect fn read(self: &mut OsStandardInput, buffer: &mut [u8]) -> ReadOutcome ! S
   let mut nativeCode = u32.toU32(0)
   let received = run rawRead(move buffer, &mut lowReason, &mut nativeCode)
   let length = match move received {
-    None {} => run raise()
-    Some<usize> { value: selected } => selected
+    Option<usize>.None => run raise()
+    Option<usize>.Some { value: selected } => selected
   }
   if length == usize.ZERO { return endOfInput() }
   return filled(length)

@@ -668,8 +668,13 @@ const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Op
       break
   }
   const checked = operation.result === 'OptionSelf' || operation.result === 'OptionTarget'
-  const result = checked ? `Option<${concreteResult}>` : concreteResult
-  const semanticResult = checked ? Type.option(concreteResult) : concreteResult
+  const carrierOwner = Object.freeze({
+    module: 'Intrinsic',
+    name: `$${scalar.spelling}.${operation.spelling}`,
+  })
+  const carrierResult = Type.parameter(carrierOwner, 0, 'R')
+  const result = checked ? 'R' : concreteResult
+  const semanticResult = checked ? carrierResult : concreteResult
   const parameterNames =
     operation.arity === 1 ? Object.freeze(['value']) : Object.freeze(['left', 'right'])
   const semanticParameters =
@@ -678,18 +683,37 @@ const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Op
   const contractParameters = borrowed
     ? Object.freeze(semanticParameters.map((type) => Type.reference('Shared', type)))
     : semanticParameters
+  const carrierParameters = checked
+    ? Object.freeze([
+        valueParameter('present', `once fn(${concreteResult}) -> R`),
+        valueParameter('absent', 'once fn() -> R'),
+      ])
+    : Object.freeze([])
+  const semanticCarrierParameters = checked
+    ? Object.freeze([
+        Type.callable(Object.freeze([concreteResult]), carrierResult, 'Take'),
+        Type.callable(Object.freeze([]), carrierResult, 'Take'),
+      ])
+    : Object.freeze([])
   return builtin({
     actor: scalar.spelling,
     name: operation.spelling,
     operation: operation.code,
-    parameters: Object.freeze(
-      parameterNames.map((name, ordinal) => {
+    ...(checked
+      ? {
+          typeParameters: Object.freeze(['R']),
+          semanticTypeParameters: Object.freeze([carrierResult]),
+        }
+      : {}),
+    parameters: Object.freeze([
+      ...parameterNames.map((name, ordinal) => {
         const type = semanticParameters.at(ordinal) ?? scalar.spelling
         return valueParameter(name, borrowed ? `&${type}` : type)
       }),
-    ),
-    semanticParameters,
-    callParameters: contractParameters,
+      ...carrierParameters,
+    ]),
+    semanticParameters: Object.freeze([...semanticParameters, ...semanticCarrierParameters]),
+    callParameters: Object.freeze([...contractParameters, ...semanticCarrierParameters]),
     result,
     semanticResult,
   })

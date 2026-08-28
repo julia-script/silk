@@ -82,6 +82,7 @@ export type Type =
       readonly _tag: 'CallableValue'
       readonly type: SilkType.Callable
       readonly target: Hir.CallableTarget
+      readonly typeArguments?: ReadonlyArray<SilkType.GenericArgument>
       readonly site?: Hir.CallableSiteId
       readonly environment?: Extract<
         Layout.CallableEnvironment,
@@ -423,12 +424,16 @@ export type Operation =
       readonly _tag: 'CheckedScalar'
       readonly operation: Scalar.OperationCode
       readonly destination: LocalId
+      readonly valid: LocalId
+      readonly value: LocalId
       readonly operands: ReadonlyArray<LocalId>
+      readonly present: LocalId
+      readonly absent: LocalId
+      readonly presentCleanup: CleanupPlan.CleanupPlan
+      readonly absentCleanup: CleanupPlan.CleanupPlan
       readonly sourceType: ScalarType
       readonly valueType: ScalarType
-      readonly type: Extract<Type, { readonly _tag: 'Union' }>
-      readonly success: SilkType.Nominal
-      readonly failure: SilkType.Nominal
+      readonly type: Type
       readonly provenance: Provenance
     }
   | {

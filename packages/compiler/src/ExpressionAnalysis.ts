@@ -5640,7 +5640,7 @@ export function analyzeExpression(
       return value
     return (
       analyzeConstantReference(source, node, resolution) ??
-      analyzeFunctionItem(source, node, declarations, resolution) ??
+      analyzeFunctionItem(source, node, declarations, resolution, expected) ??
       value
     )
   }
@@ -5805,7 +5805,7 @@ export function analyzeExpression(
     return (
       analyzeEnumMember(source, node, resolution, expected) ??
       analyzeConstantReference(source, node, resolution) ??
-      analyzeFunctionItem(source, node, declarations, resolution) ??
+      analyzeFunctionItem(source, node, declarations, resolution, expected) ??
       analyzeProjection(source, node, declarations, declaration, scope, resolution)
     )
   }

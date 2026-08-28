@@ -657,6 +657,7 @@ export type Expression =
   | {
       readonly _tag: 'FunctionItem'
       readonly target: CallableTarget
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly type: Type.Callable
       readonly span: SourceSpan.SourceSpan
     }
@@ -1747,7 +1748,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         expression.target._tag === 'DeclarationCallableTarget'
           ? `${expression.target.declaration.module}.${expression.target.declaration.name}`
           : `${expression.target.actor}.${expression.target.operation}`
-      } : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      }<${expression.typeArguments.map(Type.genericArgumentKey).join(',')}> : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'CallableSection':
       return [
         `${indent}callable-section site=${executableSiteLabel(expression.site)} mode=${expression.mode.toLowerCase()} remaining=${expression.remainingParameters.map((ordinal) => `p${ordinal}`).join(',')} target=${

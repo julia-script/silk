@@ -612,15 +612,7 @@ export const resolveDeclaredType = (
             diagnostics: Object.freeze(diagnostics),
           })
         }
-        const firstConcrete = concrete.at(0)
-        const type =
-          target.fact.type.module === 'silk/option' &&
-          target.fact.type.name === 'Option' &&
-          concrete.length === 1 &&
-          firstConcrete !== undefined &&
-          Type.isTypeArgument(firstConcrete)
-            ? Type.option(firstConcrete)
-            : Type.specializeNominal(target.fact.type, concrete)
+        const type = Type.specializeNominal(target.fact.type, concrete)
         return Object.freeze({
           fact: Object.freeze({
             _tag: 'Resolved',

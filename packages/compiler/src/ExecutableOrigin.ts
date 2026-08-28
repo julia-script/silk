@@ -696,11 +696,14 @@ export const make = (operations: Operations) => {
   ): Type.CallableIdentityArgument | undefined => {
     if (expression._tag === 'FunctionItem') {
       const target = Hir.callableTargetIdentity(expression.target)
+      const typeArguments = expression.typeArguments.map((argument) =>
+        Type.substituteGenericArgument(argument, context.substitution),
+      )
       const identity =
         target._tag === 'Declaration'
           ? `declaration:${target.module}:${target.name}`
           : `builtin:${target.actor}:${target.operation}`
-      return Type.callableIdentityArgument(identity, target)
+      return Type.callableIdentityArgument(identity, target, typeArguments)
     }
     if (expression._tag === 'CallableSection') {
       const typeArguments = expression.typeArguments.map((argument) =>
@@ -1739,10 +1742,21 @@ export const make = (operations: Operations) => {
         continue
       const declaration = declarationTarget(value.target)
       if (declaration === undefined) continue
-      const substitution = value._tag === 'CallableSection' ? value.substitution : new Map()
-      const arguments_ = targetArguments(value.target, substitution, results)
       const target = targetFunction(results, declaration)
-      if (arguments_ === undefined || target === undefined) continue
+      if (target === undefined) continue
+      const substitution = value._tag === 'CallableSection' ? value.substitution : new Map()
+      let arguments_: ReadonlyArray<Type.GenericArgument> | undefined
+      if (value._tag === 'FunctionItem') {
+        if (value.typeArguments.length === target.declaration.typeParameters.length)
+          arguments_ = Object.freeze(
+            value.typeArguments.map((argument) =>
+              Type.substituteGenericArgument(argument, ownerSubstitution),
+            ),
+          )
+      } else {
+        arguments_ = targetArguments(value.target, substitution, results)
+      }
+      if (arguments_ === undefined) continue
       const targetSubstitution = TypeInference.substitution(
         target.declaration.typeParameters.map((parameter) => parameter.type),
         arguments_,

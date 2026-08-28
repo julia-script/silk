@@ -46,7 +46,7 @@ import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.host_input { HostInput, HostInputError, inputFailure }
 import silk.i32 as i32
-import silk.option { None, Option, Some, none, some }
+import silk.option { Option, none, some }
 import silk.string { utf8Bytes as stringUtf8Bytes }
 import silk.u32 as u32
 import silk.u8 as u8
@@ -156,8 +156,8 @@ effect fn fetch(
       }
     }
     let encoded = match move received {
-      Some<usize> { value: total } => total + usize.ONE
-      None {} => usize.ZERO
+      Option<usize>.Some { value: total } => total + usize.ONE
+      Option<usize>.None => usize.ZERO
     }
     if encoded == usize.ZERO {
       if lowReason != 0 { return run raise() }
@@ -213,8 +213,8 @@ effect fn workingDirectory(
 ) -> Bytes ! HostInputError | OutOfMemoryError ? &mut Allocator {
   let found = run fetch(2, usize.ZERO, stringUtf8Bytes(""))
   return match move found {
-    Some<Bytes> { value: bytes } => move bytes
-    None {} => run raise()
+    Option<Bytes>.Some { value: bytes } => move bytes
+    Option<Bytes>.None => run raise()
   }
 }
 

@@ -25,8 +25,7 @@
 //! }
 //! ```
 
-import silk.option { None }
-import silk.option { Some }
+import silk.option { Option }
 import silk.usize as usize
 
 /// A byte size paired with a non-zero power-of-two alignment.
@@ -78,7 +77,7 @@ pub fn make(size: usize, alignment: usize) -> Layout | InvalidAlignment {
 /// If the total byte size does not fit in `usize`, returns `LayoutOverflow`.
 pub fn repeat(layout: Layout, count: usize) -> Layout | LayoutOverflow {
   return match move usize.checkedMultiply(layout.bytes, count) {
-    None {} => LayoutOverflow {}
-    Some<usize> { value } => Layout { bytes: value, alignment: layout.alignment }
+    Option<usize>.None => LayoutOverflow {}
+    Option<usize>.Some { value } => Layout { bytes: value, alignment: layout.alignment }
   }
 }

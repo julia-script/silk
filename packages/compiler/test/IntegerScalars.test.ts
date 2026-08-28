@@ -7,7 +7,7 @@ import * as Scalar from '../src/Scalar.js'
 
 const source = `import silk.i16 as i16
 import silk.u8 as u8
-import silk.option { Option, Some, None }
+import silk.option { Option }
 
 fn overflow() -> Option<u8> {
   return u8.checkedAdd(255, 1)
@@ -24,16 +24,16 @@ fn section() -> Option<u8> {
 
 pub fn main() -> i32 {
   let failed = match move overflow() {
-    None {} => 40
-    Some<u8> { value } => u8.toI32(value)
+    Option<u8>.None => 40
+    Option<u8>.Some { value } => u8.toI32(value)
   }
   let converted = match move convert() {
-    None {} => 0
-    Some<u8> { value } => u8.toI32(value)
+    Option<u8>.None => 0
+    Option<u8>.Some { value } => u8.toI32(value)
   }
   let sectioned = match move section() {
-    None {} => 0
-    Some<u8> { value } => u8.toI32(value)
+    Option<u8>.None => 0
+    Option<u8>.Some { value } => u8.toI32(value)
   }
   return failed + converted + sectioned - 295
 }`
@@ -73,14 +73,75 @@ it.effect('lowers checked integer outcomes through LLVM and direct Wasm', () =>
   }),
 )
 
+const customCheckedCarrier = `import silk.u8 as u8
+
+union Checked<T> {
+  Present { value: T },
+  Absent
+}
+
+fn present<T>(value: T) -> Checked<T> {
+  return Checked<T>.Present { value: move value }
+}
+
+fn absent<T>() -> Checked<T> {
+  return Checked<T>.Absent
+}
+
+fn add(left: u8, right: u8) -> Checked<u8> {
+  return Intrinsic.u8CheckedAdd<Checked<u8>>(left, right, present, absent)
+}
+
+fn value(self: Checked<u8>) -> i32 {
+  return match move self {
+    Checked<u8>.Present { value } => u8.toI32(value)
+    Checked<u8>.Absent => 0
+  }
+}
+
+pub fn main() -> i32 {
+  return value(add(40, 2)) + value(add(255, 1))
+}`
+
+it.effect('lets checked scalar intrinsics choose a generic nominal carrier', () =>
+  Effect.gen(function* () {
+    const wasm = yield* Analysis.ofSourceRealized(
+      'integer/custom-checked-carrier',
+      new TextEncoder().encode(customCheckedCarrier),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(wasm), [])
+
+    const evaluated = Analysis.evaluate(wasm)
+    assert.strictEqual(
+      evaluated._tag,
+      'Completed',
+      JSON.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? `${value}n` : value), 2),
+    )
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+
+    const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+
+    const native = yield* Analysis.ofSourceRealized(
+      'integer/custom-checked-carrier-native',
+      new TextEncoder().encode(customCheckedCarrier),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(native), [])
+    assert.isAbove((yield* Analysis.codegen(native, { mode: 'release' })).bitcode.length, 0)
+  }),
+)
+
 const characters = `import silk.u32 as u32
 import silk.char { fromU32, toU32 }
-import silk.option { Some, None }
+import silk.option { Option }
 
 fn value(input: u32) -> u32 {
   return match move fromU32(input) {
-    Some<char> { value } => toU32(value)
-    None {} => u32.toU32(0)
+    Option<char>.Some { value } => toU32(value)
+    Option<char>.None => u32.toU32(0)
   }
 }
 
@@ -211,12 +272,11 @@ const integerCase = (
   if (operation.result === 'Boolean')
     return `fn integerCase${ordinal}() -> i32 { if ${invocation} { return 42 } return 0 }`
   if (operation.result === 'OptionSelf' || operation.result === 'OptionTarget')
-    return `import silk.option { None }
-import silk.option { Some }
+    return `import silk.option { Option }
 fn integerCase${ordinal}() -> i32 {
   return match move ${invocation} {
-    None {} => 0
-    Some<${target.spelling}> { value } => ${target.spelling === 'i32' ? 'value' : `${target.spelling}.toI32(value)`}
+    Option<${target.spelling}>.None => 0
+    Option<${target.spelling}>.Some { value } => ${target.spelling === 'i32' ? 'value' : `${target.spelling}.toI32(value)`}
   }
 }`
   return `fn integerCase${ordinal}() -> i32 { return ${target.spelling === 'i32' ? invocation : `${target.spelling}.toI32(${invocation})`} }`
@@ -238,7 +298,7 @@ const matrixSource = (() => {
   return `${imports}
 import silk.f32 as f32
 import silk.f64 as f64
-import silk.option { Some, None }
+import silk.option { Option }
 ${declarations.join('\n')}
 fn verify(value: i32) -> () { if value != 42 { let boom = 1 / 0 } }
 pub fn main() -> i32 {

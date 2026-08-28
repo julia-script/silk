@@ -1860,6 +1860,7 @@ export const catalog = (
       }
       for (const child of Hir.expressionTree(expression)) {
         if (child._tag === 'BuiltinCall') {
+          if (Scalar.isCheckedOperation(child.operation)) addReferenced('bool')
           for (const argument of child.typeArguments) {
             const specialized = Type.substituteGenericArgument(argument, substitution)
             if (Type.isTypeArgument(specialized)) addReferenced(specialized)
@@ -1948,6 +1949,7 @@ const addExpressionTypes = (
   const specialized = Type.substitute(expression.type, substitution)
   types.set(Type.key(specialized), specialized)
   if (expression._tag === 'BuiltinCall') {
+    if (Scalar.isCheckedOperation(expression.operation)) types.set(Type.key('bool'), 'bool')
     for (const argument of expression.typeArguments) {
       const specialized = Type.substituteGenericArgument(argument, substitution)
       const type = Type.isTypeArgument(specialized)

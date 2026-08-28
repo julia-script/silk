@@ -674,7 +674,14 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
     case 'FloatTranscendental':
       return [operation.destination, operation.source]
     case 'CheckedScalar':
-      return [operation.destination, ...operation.operands]
+      return [
+        operation.destination,
+        operation.valid,
+        operation.value,
+        ...operation.operands,
+        operation.present,
+        operation.absent,
+      ]
     case 'ValidateLayout':
       return [operation.destination, operation.bytes, operation.alignment]
     case 'RepeatLayout':
@@ -1527,8 +1534,9 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
         semanticType(operation.sourceType),
         semanticType(operation.valueType),
         semanticType(operation.type),
-        operation.success,
-        operation.failure,
+        'bool',
+        ...cleanupTypes(operation.presentCleanup),
+        ...cleanupTypes(operation.absentCleanup),
       ]
     case 'RawBufferFrom':
       return [semanticType(operation.type), operation.element]
@@ -1743,7 +1751,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'FloatTranscendental':
       return [operation.source]
     case 'CheckedScalar':
-      return operation.operands
+      return [...operation.operands, operation.present, operation.absent]
     case 'ValidateLayout':
       return [operation.bytes, operation.alignment]
     case 'RepeatLayout':
@@ -3261,6 +3269,10 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         }
         if (operation._tag === 'CheckedScalar') {
           const destination = fn.localTypes.at(operation.destination.ordinal)
+          const valid = fn.localTypes.at(operation.valid.ordinal)
+          const value = fn.localTypes.at(operation.value.ordinal)
+          const present = fn.localTypes.at(operation.present.ordinal)
+          const absent = fn.localTypes.at(operation.absent.ordinal)
           const operands = operation.operands.map((operand) => fn.localTypes.at(operand.ordinal))
           const sourceScalar = Scalar.find(operation.sourceType._tag)
           const valueScalar = Scalar.find(operation.valueType._tag)
@@ -3273,19 +3285,22 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           if (
             (!characterConversion && !integerOperation) ||
             destination === undefined ||
+            valid?._tag !== 'bool' ||
+            value?._tag !== operation.valueType._tag ||
+            present?._tag !== 'CallableValue' ||
+            absent?._tag !== 'CallableValue' ||
             operands.length < 1 ||
             operands.some(
               (operand) =>
                 operand === undefined ||
                 !SilkType.equals(semanticType(operand), operation.sourceType._tag),
             ) ||
-            !SilkType.equals(semanticType(destination), operation.type.type) ||
-            !operation.type.type.members.some((member) =>
-              SilkType.equals(member, operation.success),
-            ) ||
-            !operation.type.type.members.some((member) =>
-              SilkType.equals(member, operation.failure),
-            )
+            !SilkType.equals(semanticType(destination), semanticType(operation.type)) ||
+            present.type.parameters.length !== 1 ||
+            !SilkType.equals(present.type.parameters[0] ?? 'never', operation.valueType._tag) ||
+            !SilkType.equals(present.type.result, semanticType(operation.type)) ||
+            absent.type.parameters.length !== 0 ||
+            !SilkType.equals(absent.type.result, semanticType(operation.type))
           )
             violations.push(
               Object.freeze({
@@ -3293,7 +3308,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidIntegerOperation',
                 function: fn.id,
                 region: region.id,
-                detail: 'checked scalar operation has inconsistent operands or Option result',
+                detail: 'checked scalar operation has inconsistent operands or carrier result',
               }),
             )
         }

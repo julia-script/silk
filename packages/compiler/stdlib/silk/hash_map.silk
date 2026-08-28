@@ -89,7 +89,7 @@ import silk.allocator { OutOfMemoryError }
 import silk.hash { HashKey, HashSeed }
 import silk.layout { Layout }
 import silk.layout { LayoutOverflow }
-import silk.option { Option, Some, None }
+import silk.option { Option, none, some }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 import silk.u64 as u64
@@ -430,7 +430,7 @@ fn partValue<K, V>(entry: Entry<K, V>) -> Option<V> {
 
 fn releaseKey<K, V>(key: K, value: V) -> Option<V> {
   drop key
-  return Option.some<V>(move value)
+  return some<V>(move value)
 }
 
 fn markRemoved<K, V>(owned: &mut Table<K, V>, index: usize) -> () {
@@ -522,7 +522,7 @@ pub effect fn insert<K: HashKey, V>(
   if fresh {
     self.used = self.used + usize.ONE
   }
-  return Option.none<V>()
+  return none<V>()
 }
 
 /// Reports whether the map holds an entry under a key equivalent to one probe key.
@@ -565,7 +565,7 @@ pub fn contains<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> bool {
 /// This function consumes the probe key.
 pub fn indexOf<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> Option<usize> {
   if self.capacity == usize.ZERO {
-    return Option.none<usize>()
+    return none<usize>()
   }
   let hashed = HashKey.hash(&key, &self.seed)
   let mut index = bucketOf(hashed, self.capacity)
@@ -573,20 +573,20 @@ pub fn indexOf<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> Option<usize> {
   while scanned < self.capacity {
     let state = stateAt<K, V>(self, index)
     if state == VACANT {
-      return Option.none<usize>()
+      return none<usize>()
     }
     if state == OCCUPIED {
       let held = entryAt<K, V>(self, index)
       if held[usize.ZERO].hash == hashed {
         if (&held[usize.ZERO].key) == (&key) {
-          return Option.some<usize>(index)
+          return some<usize>(index)
         }
       }
     }
     index = advance(index, self.capacity)
     scanned = scanned + usize.ONE
   }
-  return Option.none<usize>()
+  return none<usize>()
 }
 
 /// Returns the value held under a key equivalent to one probe key, or an absent value.
@@ -598,7 +598,7 @@ pub fn indexOf<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> Option<usize> {
 /// This function consumes the probe key and does not change the map.
 pub fn get<K: HashKey + Copy, V: Copy>(self: &HashMap<K, V>, key: K) -> Option<V> {
   if self.capacity == usize.ZERO {
-    return Option.none<V>()
+    return none<V>()
   }
   let hashed = HashKey.hash(&key, &self.seed)
   let mut index = bucketOf(hashed, self.capacity)
@@ -606,7 +606,7 @@ pub fn get<K: HashKey + Copy, V: Copy>(self: &HashMap<K, V>, key: K) -> Option<V
   while scanned < self.capacity {
     let state = stateAt<K, V>(self, index)
     if state == VACANT {
-      return Option.none<V>()
+      return none<V>()
     }
     if state == OCCUPIED {
       let held = entryAt<K, V>(self, index)
@@ -619,7 +619,7 @@ pub fn get<K: HashKey + Copy, V: Copy>(self: &HashMap<K, V>, key: K) -> Option<V
     index = advance(index, self.capacity)
     scanned = scanned + usize.ONE
   }
-  return Option.none<V>()
+  return none<V>()
 }
 
 /// Runs one take-once callback with exclusive access to an existing value.
@@ -683,7 +683,7 @@ pub fn withMut<
 /// held is released, and the probe key is released as well.
 pub fn remove<K: HashKey, V>(self: &mut HashMap<K, V>, key: K) -> Option<V> {
   if self.capacity == usize.ZERO {
-    return Option.none<V>()
+    return none<V>()
   }
   let hashed = HashKey.hash(&key, &self.seed)
   let storage = Intrinsic.replace(self.storage, Unallocated<K, V> { anchor: [] })
@@ -711,7 +711,7 @@ pub fn remove<K: HashKey, V>(self: &mut HashMap<K, V>, key: K) -> Option<V> {
   }
   if self.capacity <= found {
     self.storage = move owned
-    return Option.none<V>()
+    return none<V>()
   }
   let carried = evict<K, V>(&mut owned, found)
   let marked = markRemoved<K, V>(&mut owned, found)

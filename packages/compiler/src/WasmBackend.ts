@@ -6923,33 +6923,22 @@ const emitCheckedScalarOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'CheckedScalar' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
-  const { layout, plan, slots, scalar } = state
+  const { layout, plan, scalar } = state
 
-  const destination = slots(operation.destination)
-  const tag = destination.at(0)
-  const payload = destination.at(1)
+  const valid = scalar(operation.valid)
+  const value = scalar(operation.value)
   const left = operation.operands.at(0)
   const right = operation.operands.at(1)
   const source = Scalar.find(operation.sourceType._tag)
   const target = Scalar.find(operation.valueType._tag)
   if (
     operation.operation === 'CheckedConvertToChar' &&
-    tag !== undefined &&
-    payload !== undefined &&
     left !== undefined &&
     source?.spelling === 'u32' &&
     target?.category === 'Character'
   ) {
-    const successOrdinal = operation.type.type.members.findIndex((member) =>
-      SilkType.equals(member, operation.success),
-    )
-    const failureOrdinal = operation.type.type.members.findIndex((member) =>
-      SilkType.equals(member, operation.failure),
-    )
-    if (successOrdinal < 0 || failureOrdinal < 0)
-      throw new RangeError('Wasm checked char operation lost its Option members')
     const leftSlot = scalar(left)
-    return [
+    const raw = [
       Instr.localGet(leftSlot),
       Instr.i32Const(0x10ffff),
       Instr.op('i32.gt_u'),
@@ -6961,24 +6950,15 @@ const emitCheckedScalarOperation = (
       Instr.op('i32.le_u'),
       Instr.op('i32.and'),
       Instr.op('i32.or'),
-      Instr.localSet(tag),
-      Instr.i32Const(failureOrdinal),
-      Instr.i32Const(successOrdinal),
-      Instr.localGet(tag),
-      Instr.op('select'),
-      Instr.localSet(tag),
+      Instr.op('i32.eqz'),
+      Instr.localSet(valid),
       Instr.localGet(leftSlot),
-      Instr.localSet(payload),
+      Instr.localSet(value),
     ]
+    return [...raw, ...emitCheckedScalarCarrier(operation, state)]
   }
-  if (
-    tag === undefined ||
-    payload === undefined ||
-    left === undefined ||
-    source?.category !== 'Integer' ||
-    target?.category !== 'Integer'
-  )
-    throw new RangeError('Wasm checked scalar operation lost its Option lanes')
+  if (left === undefined || source?.category !== 'Integer' || target?.category !== 'Integer')
+    throw new RangeError('Wasm checked scalar operation lost its scalar lanes')
   const leftSlot = scalar(left)
   const rightSlot = right === undefined ? undefined : scalar(right)
   const pointerBits = plan.target.pointerSize === 4 ? 32 : 64
@@ -6990,21 +6970,7 @@ const emitCheckedScalarOperation = (
     sourceBits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
   const targetConstant = (value: bigint): Instr.Instr =>
     targetBits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
-  const successOrdinal = operation.type.type.members.findIndex((member) =>
-    SilkType.equals(member, operation.success),
-  )
-  const failureOrdinal = operation.type.type.members.findIndex((member) =>
-    SilkType.equals(member, operation.failure),
-  )
-  if (successOrdinal < 0 || failureOrdinal < 0)
-    throw new RangeError('Wasm checked scalar operation lost its Option members')
-  const setTag = [
-    Instr.i32Const(failureOrdinal),
-    Instr.i32Const(successOrdinal),
-    Instr.localGet(tag),
-    Instr.op('select'),
-    Instr.localSet(tag),
-  ]
+  const setValid = [Instr.localGet(valid), Instr.op('i32.eqz'), Instr.localSet(valid)]
   if (operation.operation.startsWith('CheckedConvertTo')) {
     const sourceRange = Scalar.range(source, pointerBits)
     const targetRange = Scalar.range(target, pointerBits)
@@ -7030,15 +6996,16 @@ const emitCheckedScalarOperation = (
     } else if (sourceBits === 64 && targetBits < 64) {
       conversion = [Instr.op('i32.wrap_i64')]
     }
-    return [
+    const raw = [
       ...(invalid.length === 0 ? [Instr.i32Const(0)] : invalid),
-      Instr.localSet(tag),
-      ...setTag,
+      Instr.localSet(valid),
+      ...setValid,
       Instr.localGet(leftSlot),
       ...conversion,
       ...normalizeSubword(targetBits, target.signedness === 'Signed'),
-      Instr.localSet(payload),
+      Instr.localSet(value),
     ]
+    return [...raw, ...emitCheckedScalarCarrier(operation, state)]
   }
   if (rightSlot === undefined)
     throw new RangeError('Wasm checked arithmetic lost its right operand')
@@ -7062,14 +7029,15 @@ const emitCheckedScalarOperation = (
         throw new RangeError('Wasm checked arithmetic lost its operation')
     }
     const resultScratch = targetBits === 64 ? layout.scratch64 : layout.scratch
-    return [
+    const raw = [
       ...checkedArithmeticOutcome(shape, target, leftSlot, rightSlot, resultScratch, pointerBits),
-      Instr.localSet(tag),
-      ...setTag,
+      Instr.localSet(valid),
+      ...setValid,
       Instr.localGet(resultScratch),
       ...normalizeSubword(targetBits, target.signedness === 'Signed'),
-      Instr.localSet(payload),
+      Instr.localSet(value),
     ]
+    return [...raw, ...emitCheckedScalarCarrier(operation, state)]
   }
   const minimum = Scalar.range(target, pointerBits).minimum
   const signedOverflow =
@@ -7090,21 +7058,80 @@ const emitCheckedScalarOperation = (
     operation.operation === 'CheckedDivide'
       ? `${targetPrefix}.div_${signedness}`
       : `${targetPrefix}.rem_${signedness}`
-  return [
+  const raw = [
     Instr.localGet(rightSlot),
     Instr.op(`${targetPrefix}.eqz`),
     ...signedOverflow,
     Instr.op('i32.or'),
-    Instr.localSet(tag),
-    Instr.localGet(tag),
+    Instr.localSet(valid),
+    Instr.localGet(valid),
     Instr.ifElse(
       Instr.valueBlockType(targetBits === 64 ? i64 : i32),
       [targetConstant(0n)],
       [Instr.localGet(leftSlot), Instr.localGet(rightSlot), Instr.op(division)],
     ),
     ...normalizeSubword(targetBits, target.signedness === 'Signed'),
-    Instr.localSet(payload),
-    ...setTag,
+    Instr.localSet(value),
+    ...setValid,
+  ]
+  return [...raw, ...emitCheckedScalarCarrier(operation, state)]
+}
+
+const emitCheckedScalarCarrier = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'CheckedScalar' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const presentType = state.layout.types.at(operation.present.ordinal)
+  const absentType = state.layout.types.at(operation.absent.ordinal)
+  if (presentType?._tag !== 'CallableValue' || absentType?._tag !== 'CallableValue')
+    throw new RangeError('Wasm checked scalar operation lost its carrier callables')
+  const apply = (
+    callable: Mir.LocalId,
+    callableType: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
+    arguments_: ReadonlyArray<Mir.LocalId>,
+  ): ReadonlyArray<Instr.Instr> =>
+    emitApplyCallableOperation(
+      Object.freeze({
+        _tag: 'ApplyCallable',
+        destination: operation.destination,
+        callable,
+        typeArguments:
+          callableType.environment?.callable.typeArguments ??
+          callableType.storage?.realization.targetArguments ??
+          callableType.typeArguments ??
+          Object.freeze([]),
+        captures: Object.freeze([]),
+        arguments: arguments_,
+        callableType: callableType.type,
+        access: callableType.type.mode,
+        evaluation: 'CalleeThenArguments',
+        realization: 'Environment',
+        type: operation.type,
+        provenance: operation.provenance,
+      }),
+      state,
+    )
+  const drop = (
+    local: Mir.LocalId,
+    cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
+  ): ReadonlyArray<Instr.Instr> =>
+    emitDropOperation(
+      Object.freeze({ _tag: 'Drop', local, cleanup, provenance: operation.provenance }),
+      state,
+    )
+  return [
+    Instr.localGet(state.scalar(operation.valid)),
+    Instr.ifElse(
+      Instr.emptyBlockType,
+      [
+        ...drop(operation.absent, operation.absentCleanup),
+        ...apply(operation.present, presentType, Object.freeze([operation.value])),
+      ],
+      [
+        ...drop(operation.present, operation.presentCleanup),
+        ...apply(operation.absent, absentType, Object.freeze([])),
+      ],
+    ),
   ]
 }
 

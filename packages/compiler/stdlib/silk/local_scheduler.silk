@@ -14,8 +14,8 @@ import silk.execution as Execution
 import silk.fiber as Fiber
 import silk.hash as Hash
 import silk.hash_map as HashMap
-import silk.option { None, Option, Some }
-import silk.result { Failure, Result, Success }
+import silk.option { Option }
+import silk.result { Result }
 import silk.scheduler as Scheduler
 import silk.shared as Shared
 import silk.u64 as u64
@@ -196,10 +196,9 @@ fn publishTaskResult<A, E>(
   result: Result<A, E>,
   producer: Fiber.CompletionProducer<A, E>,
 ) -> () {
-  let Result<A, E> { value } = move result
-  return match move value {
-    Success<A> { value: success } => Fiber.completeSuccess<A, E>(move producer, move success)
-    Failure<E> { error } => Fiber.completeFailure<A, E>(move producer, move error)
+  return match move result {
+    Result<A, E>.Success { value: success } => Fiber.completeSuccess<A, E>(move producer, move success)
+    Result<A, E>.Failure { error } => Fiber.completeFailure<A, E>(move producer, move error)
   }
 }
 
@@ -535,9 +534,8 @@ fn finishAdoption(
   response: Shared.Shared<Scheduler.PublicationResponse>,
   outcome: Result<Option<TaskEntry>, OutOfMemoryError>,
 ) -> () {
-  let Result<Option<TaskEntry>, OutOfMemoryError> { value } = move outcome
-  return match move value {
-    Success<Option<TaskEntry>> { value: previous } => finishAcceptedAdoption(
+  return match move outcome {
+    Result<Option<TaskEntry>, OutOfMemoryError>.Success { value: previous } => finishAcceptedAdoption(
       move driver,
       parent,
       child,
@@ -545,7 +543,7 @@ fn finishAdoption(
       move response,
       move previous,
     )
-    Failure<OutOfMemoryError> { error } => finishRejectedAdoption(
+    Result<Option<TaskEntry>, OutOfMemoryError>.Failure { error } => finishRejectedAdoption(
       move response,
       move wake,
       move error,
@@ -667,8 +665,8 @@ fn phaseCompleted(entry: &mut TaskEntry, output: &mut CompletionAudit) -> () {
 fn releaseEntry(entry: TaskEntry) -> () { drop entry return () }
 fn releaseRemoved(selected: Option<TaskEntry>) -> () {
   return match move selected {
-    None {} => ()
-    Some<TaskEntry> { value } => releaseEntry(move value)
+    Option<TaskEntry>.None => ()
+    Option<TaskEntry>.Some { value } => releaseEntry(move value)
   }
 }
 
@@ -755,8 +753,8 @@ fn cancelEntry(entry: TaskEntry) -> () {
 
 fn cancelRemoved(selected: Option<TaskEntry>) -> () {
   return match move selected {
-    None {} => ()
-    Some<TaskEntry> { value } => cancelEntry(move value)
+    Option<TaskEntry>.None => ()
+    Option<TaskEntry>.Some { value } => cancelEntry(move value)
   }
 }
 
@@ -1060,10 +1058,9 @@ effect fn finishRoot<A, E>(selected: RootPending | RootReady<A, E>) -> A ! E {
 }
 
 effect fn finishRootResult<A, E>(result: Result<A, E>) -> A ! E {
-  let Result<A, E> { value } = move result
-  return match move value {
-    Success<A> { value: success } => move success
-    Failure<E> { error } => run raiseRoot<A, E>(move error)
+  return match move result {
+    Result<A, E>.Success { value: success } => move success
+    Result<A, E>.Failure { error } => run raiseRoot<A, E>(move error)
   }
 }
 

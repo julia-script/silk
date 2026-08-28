@@ -111,7 +111,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'ReinterpretScalar':
     case 'FloatUnary':
     case 'FloatTranscendental':
-    case 'CheckedScalar':
+    case 'CheckedScalarOutcome':
     case 'Binary':
       return yield* NativeScalarOperation.emit(context.scalar, operation)
     case 'Drop':

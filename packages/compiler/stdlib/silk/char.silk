@@ -38,13 +38,13 @@
 //! ```
 
 import silk.bool as bool
-import silk.option { Option }
+import silk.option { Option, none, some }
 import silk.u32 as u32
 
 /// Converts an integer to a Unicode scalar. Returns `None` for `0xD800` through `0xDFFF` and values
 /// above `0x10FFFF`.
 pub fn fromU32(value: u32) -> Option<char> {
-  return Intrinsic.charFromU32(value)
+  return Intrinsic.charFromU32<Option<char>>(value, some, none)
 }
 
 /// Returns the exact integer value of an already valid Unicode scalar.

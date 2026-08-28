@@ -1021,6 +1021,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     return Object.freeze({
       _tag: 'FunctionItem',
       target,
+      typeArguments: fact.typeArguments,
       type: fact.type.type,
       span: fact.syntax.span,
     })

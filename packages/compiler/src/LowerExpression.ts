@@ -413,7 +413,7 @@ export function lowerExpressionInner(
           _tag: 'MakeCallable',
           destination,
           target: expression.target,
-          typeArguments: Object.freeze([]),
+          typeArguments: expression.typeArguments,
           captures: Object.freeze([]),
           type,
           provenance: authored(expression.span),
@@ -547,8 +547,7 @@ export function lowerExpressionInner(
       if (!lowered || type === undefined || callableType === undefined) return undefined
       if (
         realizedTarget?._tag === 'BuiltinCallableTarget' &&
-        Scalar.isCheckedOperation(realizedTarget.operation) &&
-        type._tag === 'Union'
+        Scalar.isCheckedOperation(realizedTarget.operation)
       ) {
         const actorScalar = Scalar.find(realizedTarget.actor)
         const scalarOperation = actorScalar?.operations.find(
@@ -563,39 +562,53 @@ export function lowerExpressionInner(
             : (Scalar.conversionTarget(realizedTarget.operation) ?? actorScalar)
         const realizedCaptures = definition?.captures ?? captures
         const ordered: Array<Mir.LocalId | undefined> = Array.from({
-          length: scalarOperation?.arity ?? 0,
+          length: (scalarOperation?.arity ?? 0) + 2,
         })
         for (const capture of realizedCaptures) ordered[capture.parameterOrdinal] = capture.source
         for (const argument of arguments_) {
           const empty = ordered.indexOf(undefined)
           if (empty >= 0) ordered[empty] = argument
         }
-        const operands = ordered.filter((operand): operand is Mir.LocalId => operand !== undefined)
+        const operands = ordered
+          .slice(0, scalarOperation?.arity ?? 0)
+          .filter((operand): operand is Mir.LocalId => operand !== undefined)
+        const present = ordered.at(scalarOperation?.arity ?? -1)
+        const absent = ordered.at((scalarOperation?.arity ?? -1) + 1)
         const first = operands.at(0)
         const sourceType = first === undefined ? undefined : fn.localTypes.at(first.ordinal)
+        const presentType = present === undefined ? undefined : fn.localTypes.at(present.ordinal)
+        const absentType = absent === undefined ? undefined : fn.localTypes.at(absent.ordinal)
         if (
           sourceScalar?.category !== 'Integer' ||
           (valueScalar?.category !== 'Integer' && valueScalar?.category !== 'Character') ||
           scalarOperation === undefined ||
+          present === undefined ||
+          absent === undefined ||
+          presentType?._tag !== 'CallableValue' ||
+          absentType?._tag !== 'CallableValue' ||
           operands.length !== scalarOperation.arity ||
           sourceType?._tag !== sourceScalar.spelling ||
           operands.some((operand) => fn.localTypes.at(operand.ordinal)?._tag !== sourceType._tag)
         )
           return undefined
-        const success = Type.some(valueScalar.spelling)
-        const failure = Type.none
+        const valid = fn.alloc(Object.freeze({ _tag: 'bool' as const }))
+        const value = fn.alloc(Object.freeze({ _tag: valueScalar.spelling }))
         const destination = fn.alloc(type)
         fn.emit(
           Object.freeze({
             _tag: 'CheckedScalar' as const,
             operation: scalarOperation.code,
             destination,
+            valid,
+            value,
             operands: Object.freeze(operands),
+            present,
+            absent,
+            presentCleanup: callableLocalCleanup(fn, presentType),
+            absentCleanup: callableLocalCleanup(fn, absentType),
             sourceType,
             valueType: Object.freeze({ _tag: valueScalar.spelling }),
             type,
-            success,
-            failure,
             provenance: authored(expression.span),
           }),
         )
