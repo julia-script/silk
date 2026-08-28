@@ -246,6 +246,26 @@ pub effect fn main() -> () ! StreamWriteError {
   `import silk.usize as usize
 import silk.option { Option, none }
 fn absurd<T>() -> T { let boom = 1 / 0 return absurd<T>() }
+effect fn systemClockNow(seconds: &mut i64, nanoseconds: &mut i64) -> bool {
+  unsafe { return run Intrinsic.osSystemClockNow(seconds, nanoseconds) }
+  return false
+}
+effect fn systemClockResolution(nanoseconds: &mut u64) -> bool {
+  unsafe { return run Intrinsic.osSystemClockResolution(nanoseconds) }
+  return false
+}
+effect fn monotonicClockNow(seconds: &mut i64, nanoseconds: &mut i64) -> bool {
+  unsafe { return run Intrinsic.osMonotonicClockNow(seconds, nanoseconds) }
+  return false
+}
+effect fn monotonicClockResolution(nanoseconds: &mut u64) -> bool {
+  unsafe { return run Intrinsic.osMonotonicClockResolution(nanoseconds) }
+  return false
+}
+effect fn monotonicClockWaitUntil(seconds: i64, nanoseconds: i64) -> bool {
+  unsafe { return run Intrinsic.osMonotonicClockWaitUntil(seconds, nanoseconds) }
+  return false
+}
 effect fn fileOpen(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> Option<OsHandle> {
   unsafe { return run Intrinsic.osFileOpen(root, path, 0, reason, code) }
   return none<OsHandle>()

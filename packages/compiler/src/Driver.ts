@@ -308,7 +308,9 @@ export const compile = Effect.fn('Driver.compile')(function* (
           target,
           request.profile,
           artifact.bitcode,
-          cacheKind === 'NativeExecutable' ? ToolchainPlan.shimSource(artifact.termination) : '',
+          cacheKind === 'NativeExecutable'
+            ? ToolchainPlan.shimSource(artifact.termination, artifact.nativeRuntimeSymbols)
+            : '',
         )
       : undefined
   if (

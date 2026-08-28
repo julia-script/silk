@@ -4979,6 +4979,51 @@
       "identity": "StringEqualsExact"
     },
     {
+      "operation": "Intrinsic.osSystemClockNow",
+      "signature": "unsafe fn Intrinsic.osSystemClockNow(seconds: &mut i64, nanoseconds: &mut i64) -> Effect<bool>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os_system_clock.now",
+      "identity": "OsSystemClockNow",
+      "invariant": "outputs are initialized only on success and form a canonical Unix-epoch split instant"
+    },
+    {
+      "operation": "Intrinsic.osSystemClockResolution",
+      "signature": "unsafe fn Intrinsic.osSystemClockResolution(nanoseconds: &mut u64) -> Effect<bool>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os_system_clock.getResolution",
+      "identity": "OsSystemClockResolution",
+      "invariant": "output is initialized only on success and is a positive whole-nanosecond resolution"
+    },
+    {
+      "operation": "Intrinsic.osMonotonicClockNow",
+      "signature": "unsafe fn Intrinsic.osMonotonicClockNow(seconds: &mut i64, nanoseconds: &mut i64) -> Effect<bool>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os_monotonic_clock.now",
+      "identity": "OsMonotonicClockNow",
+      "invariant": "outputs are initialized only on success and form a canonical mark on one monotonic timeline"
+    },
+    {
+      "operation": "Intrinsic.osMonotonicClockResolution",
+      "signature": "unsafe fn Intrinsic.osMonotonicClockResolution(nanoseconds: &mut u64) -> Effect<bool>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os_monotonic_clock.getResolution",
+      "identity": "OsMonotonicClockResolution",
+      "invariant": "output is initialized only on success and is a positive whole-nanosecond resolution"
+    },
+    {
+      "operation": "Intrinsic.osMonotonicClockWaitUntil",
+      "signature": "unsafe fn Intrinsic.osMonotonicClockWaitUntil(seconds: i64, nanoseconds: i64) -> Effect<bool>",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "silk/os_monotonic_clock.waitUntil",
+      "identity": "OsMonotonicClockWaitUntil",
+      "invariant": "deadline is a canonical non-negative mark from the selected monotonic timeline and success means it has been reached"
+    },
+    {
       "operation": "Intrinsic.osFileOpen",
       "signature": "unsafe fn Intrinsic.osFileOpen(root: &[u8], path: &[u8], mode: i32, reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<OsHandle>>",
       "unsafe": true,

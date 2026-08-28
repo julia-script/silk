@@ -690,6 +690,10 @@ const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
       return 'MissingHostInput: no host provider was supplied'
     case 'MissingOsFileSystemHost':
       return 'MissingOsFileSystemHost: no OS filesystem host provider was supplied'
+    case 'MissingSystemClock':
+      return 'MissingSystemClock: no system-clock host provider was supplied'
+    case 'MissingMonotonicClock':
+      return 'MissingMonotonicClock: no monotonic-clock host provider was supplied'
     case 'IntrinsicTargetUnavailable':
       return `IntrinsicTargetUnavailable: ${reason.diagnostics.map((diagnostic) => diagnostic.message).join('; ')}`
   }
@@ -720,6 +724,10 @@ const blockedSpan = (
     case 'MissingHostInput':
       return undefined
     case 'MissingOsFileSystemHost':
+      return undefined
+    case 'MissingSystemClock':
+      return undefined
+    case 'MissingMonotonicClock':
       return undefined
     case 'EvaluationLimit':
       return reason.span
@@ -867,7 +875,7 @@ export const projectDataFlow = (
       (span === undefined
         ? undefined
         : draft.groups.find((candidate) => sameSpan(candidate.span, span))) ?? draft.groups.at(0)
-    if (group !== undefined && span !== undefined) {
+    if (group !== undefined) {
       const terminalId = `${group.id}-evaluated-stop`
       const evidence = Object.freeze({ order: outcome.trace.length + 1 })
       draft.nodes.push(
@@ -885,7 +893,7 @@ export const projectDataFlow = (
           ordinal: undefined,
           layer: 'Evaluated',
           state: 'Stopped',
-          span,
+          span: span ?? group.span,
           evaluation: evidence,
         }),
       )

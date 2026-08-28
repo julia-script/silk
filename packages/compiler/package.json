@@ -138,6 +138,10 @@
       "types": "./dist/HostInput.d.ts",
       "import": "./dist/HostInput.js"
     },
+    "./MonotonicClock": {
+      "types": "./dist/MonotonicClock.d.ts",
+      "import": "./dist/MonotonicClock.js"
+    },
     "./HeapObservation": {
       "types": "./dist/HeapObservation.d.ts",
       "import": "./dist/HeapObservation.js"
@@ -153,6 +157,10 @@
     "./StandardStreams": {
       "types": "./dist/StandardStreams.d.ts",
       "import": "./dist/StandardStreams.js"
+    },
+    "./SystemClock": {
+      "types": "./dist/SystemClock.d.ts",
+      "import": "./dist/SystemClock.js"
     },
     "./SourceSpan": {
       "types": "./dist/SourceSpan.d.ts",

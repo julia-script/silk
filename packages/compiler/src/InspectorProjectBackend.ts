@@ -1438,6 +1438,10 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
       return 'missing HostInput host provider'
     case 'MissingOsFileSystemHost':
       return 'missing OS filesystem host provider'
+    case 'MissingSystemClock':
+      return 'missing SystemClock host provider'
+    case 'MissingMonotonicClock':
+      return 'missing MonotonicClock host provider'
     case 'IntrinsicTargetUnavailable':
       return reason.diagnostics.map((diagnostic) => diagnostic.message).join(' · ')
   }

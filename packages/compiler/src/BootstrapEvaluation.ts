@@ -27,11 +27,13 @@ import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
+import type * as MonotonicClock from './MonotonicClock.js'
 import type * as OsFileSystemHost from './OsFileSystemHost.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StandardInput from './StandardInput.js'
 import type * as StandardStreams from './StandardStreams.js'
+import type * as SystemClock from './SystemClock.js'
 import * as Transcendental from './Transcendental.js'
 import * as Type from './Type.js'
 import * as WakeCell from './WakeCell.js'
@@ -249,6 +251,8 @@ interface EvaluationState {
   readonly processCaptures: Array<ReadonlyArray<number>>
   readonly hostInput?: HostInput.Provider
   readonly osFileSystem?: OsFileSystemHost.Provider
+  readonly systemClock?: SystemClock.Provider
+  readonly monotonicClock?: MonotonicClock.Provider
   readonly executionMachines: Map<number, IndependentMachine>
 }
 
@@ -5043,6 +5047,8 @@ export interface Options {
   readonly childProcess?: ChildProcess.Provider
   readonly hostInput?: HostInput.Provider
   readonly osFileSystem?: OsFileSystemHost.Provider
+  readonly systemClock?: SystemClock.Provider
+  readonly monotonicClock?: MonotonicClock.Provider
   readonly maxSteps?: number
   readonly maxCallDepth?: number
   /** Host-only deterministic bound for compiler-private coroutine-frame storage. */
@@ -5135,6 +5141,8 @@ export const evaluate = (
     processCaptures: [Object.freeze([]), Object.freeze([])],
     ...(options.hostInput === undefined ? {} : { hostInput: options.hostInput }),
     ...(options.osFileSystem === undefined ? {} : { osFileSystem: options.osFileSystem }),
+    ...(options.systemClock === undefined ? {} : { systemClock: options.systemClock }),
+    ...(options.monotonicClock === undefined ? {} : { monotonicClock: options.monotonicClock }),
   })
   if (result._tag === 'Blocked') {
     if (result.reason._tag === 'Trap') {

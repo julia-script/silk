@@ -130,3 +130,53 @@ it.effect(
     }),
   1_200_000,
 )
+
+it.effect(
+  'links and runs the native system and monotonic clock ABI',
+  () =>
+    Effect.gen(function* () {
+      const outcome = yield* compileSource(
+        'native-clocks',
+        `import silk.effect as Effect
+import silk.monotonic_clock as MonotonicClock
+import silk.os_monotonic_clock as OsMonotonicClock
+import silk.os_system_clock as OsSystemClock
+import silk.system_clock as SystemClock
+pub fn main() -> i32 {
+  let mut system = OsSystemClock.make()
+  let systemNow = run Effect.provideMut(SystemClock.now(), &mut system)
+  let systemResolution = run Effect.provideMut(SystemClock.getResolution(), &mut system)
+  let systemFraction = SystemClock.nanoseconds(&systemNow)
+  if systemFraction < 0 { return 1 }
+  if systemFraction >= 1000000000 { return 2 }
+  if systemResolution == 0 { return 3 }
+
+  let mut monotonic = OsMonotonicClock.make()
+  let mark = run Effect.provideMut(MonotonicClock.now(), &mut monotonic)
+  let monotonicResolution = run Effect.provideMut(
+    MonotonicClock.getResolution(),
+    &mut monotonic
+  )
+  let monotonicFraction = SystemClock.nanoseconds(&mark)
+  if monotonicFraction < 0 { return 4 }
+  if monotonicFraction >= 1000000000 { return 5 }
+  if monotonicResolution == 0 { return 6 }
+  run Effect.provideMut(MonotonicClock.waitUntil(move mark), &mut monotonic)
+  run Effect.provideMut(MonotonicClock.waitFor(1), &mut monotonic)
+  return 42
+}`,
+      )
+      assert.strictEqual(
+        outcome._tag,
+        'Compiled',
+        outcome._tag === 'BackendFailed'
+          ? `${outcome.error.message}\n${JSON.stringify(outcome.error.reason)}`
+          : outcome._tag,
+      )
+      if (outcome._tag !== 'Compiled') return
+      const run = yield* runCompiled(outcome.path, undefined)
+      assert.strictEqual(run.signal, null)
+      assert.strictEqual(run.status, 42)
+    }),
+  120_000,
+)

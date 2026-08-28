@@ -1,0 +1,115 @@
+//! Provider-replaceable Unix-epoch time with canonical split-second instants.
+//!
+//! # When to use
+//! Require [`SystemClock`] when an application needs the current time for reporting, persistence,
+//! or exchange with an external Unix-time boundary. Use `silk.monotonic_clock` instead when
+//! measuring elapsed time.
+//!
+//! # Details
+//! [`Instant`] stores signed seconds from `1970-01-01T00:00:00Z` and a canonical non-negative
+//! nanosecond fraction. The clock may move forwards or backwards when its external reference is
+//! adjusted. Providers are explicit and lexically replaceable; importing this module installs no
+//! ambient clock.
+//!
+//! # Gotchas
+//! [`getResolution`] reports a positive nominal tick in whole nanoseconds. The tick may be a lower
+//! bound on observable precision. An invalid or unrepresentable provider result traps because this
+//! service has no typed failure channel.
+//!
+//! # Examples
+//! ## Read a fixed instant through an ordinary provider
+//! ```silk
+//! import silk.effect { Effect }
+//! import silk.system_clock { SystemClock }
+//!
+//! import silk.u64 as u64
+//!
+//! struct FixedClock {}
+//!
+//! effect fn fixedNow(self: &mut FixedClock) -> SystemClock.Instant {
+//!   return SystemClock.make(-1, 999999999)
+//! }
+//!
+//! effect fn fixedResolution(self: &mut FixedClock) -> u64 {
+//!   return u64.toU64(1)
+//! }
+//!
+//! impl SystemClock.SystemClock for FixedClock {
+//!   now: FixedClock.fixedNow
+//!   getResolution: FixedClock.fixedResolution
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   let mut provider = FixedClock {}
+//!   let instant = run SystemClock.now()
+//!     |> Effect.provideMut<SystemClock.SystemClock>(&mut provider)
+//!   if SystemClock.seconds(&instant) != -1 { return 1 }
+//!   if SystemClock.nanoseconds(&instant) != 999999999 { return 2 }
+//!   return 42
+//! }
+//! ```
+
+/// A canonical point on a clock represented by signed seconds and a nanosecond fraction.
+///
+/// # Details
+///
+/// System-clock seconds are measured from `1970-01-01T00:00:00Z`. A monotonic provider may reuse
+/// this representation with an unspecified provider-local origin. The fraction is always in
+/// `0..1000000000`; consequently `{ seconds: -1, nanoseconds: 999999999 }` is one nanosecond before
+/// zero.
+pub struct Instant {
+  seconds: i64
+  nanoseconds: i64
+}
+
+/// Creates a canonical split-second instant.
+///
+/// # Gotchas
+///
+/// `nanoseconds` must be non-negative and less than one billion. A noncanonical fraction traps
+/// instead of being normalized into another field pair.
+pub fn make(seconds: i64, nanoseconds: i64) -> Instant {
+  if nanoseconds < 0 { let invalid = 1 / 0 }
+  if nanoseconds >= 1000000000 { let invalid = 1 / 0 }
+  return Instant { seconds: seconds, nanoseconds: nanoseconds }
+}
+
+/// Returns the signed whole-second component of an instant.
+pub fn seconds(self: &Instant) -> i64 {
+  return self.seconds
+}
+
+/// Returns the canonical non-negative nanosecond fraction of an instant.
+pub fn nanoseconds(self: &Instant) -> i64 {
+  return self.nanoseconds
+}
+
+/// An explicit provider of Unix-epoch time and nominal clock resolution.
+///
+/// # Details
+///
+/// Exclusive access permits deterministic providers to advance a script between calls. The
+/// service does not install an implementation or expose a clock-setting operation.
+pub service SystemClock {
+  /// Reads the current Unix-epoch instant.
+  /// The result is canonical but need not be greater than an earlier read because the external
+  /// reference may be adjusted.
+  effect fn now() -> Instant ? &mut SystemClock
+
+  /// Returns the provider-reported positive nominal resolution in whole nanoseconds.
+  /// The value may be a lower bound on actual observable precision.
+  effect fn getResolution() -> u64 ? &mut SystemClock
+}
+
+/// Reads the current Unix-epoch instant from the active [`SystemClock`] provider.
+/// The result can precede an earlier result. An invalid or unrepresentable provider result traps.
+pub effect fn now() -> Instant ? &mut SystemClock {
+  return run SystemClock.now()
+}
+
+/// Returns the active [`SystemClock`] provider's positive nominal resolution in nanoseconds.
+/// The result may be a lower bound on observable precision. An invalid or unrepresentable result
+/// traps.
+pub effect fn getResolution() -> u64 ? &mut SystemClock {
+  return run SystemClock.getResolution()
+}

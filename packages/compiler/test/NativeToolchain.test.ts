@@ -96,6 +96,31 @@ it('includes coroutine storage only when suspension requests it', () => {
   assert.include(suspended, CoroutineRuntime.popSymbol)
 })
 
+it.effect('includes the selected native clock runtime in the artifact cache identity', () =>
+  Effect.gen(function* () {
+    const target = yield* NativeToolchain.hostTarget()
+    const selected = [
+      [],
+      ['silk_os_system_clock_now_v1'],
+      ['silk_os_monotonic_clock_now_v1', 'silk_os_monotonic_clock_wait_until_v1'],
+    ] as const
+    const keys = []
+    for (const symbols of selected) {
+      keys.push(
+        yield* NativeToolchain.artifactCacheKey(
+          toolchain,
+          'NativeExecutable',
+          target,
+          'release',
+          Uint8Array.from([0, 1, 2, 3]),
+          ToolchainPlan.shimSource(termination(), symbols),
+        ),
+      )
+    }
+    assert.strictEqual(new Set(keys).size, selected.length)
+  }),
+)
+
 it.effect('yields a typed spawn failure with command, stage, and arbitrary cause', () =>
   Effect.gen(function* () {
     const target = yield* NativeToolchain.hostTarget()
