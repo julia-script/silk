@@ -1088,6 +1088,13 @@ const cleanupTypes = (cleanup: CleanupPlan.CleanupPlan): ReadonlyArray<SilkType.
       return [cleanup.type, ...cleanupTypes(cleanup.inner)]
     case 'StructCleanup':
       return [cleanup.type, ...cleanup.fields.flatMap((field) => cleanupTypes(field.cleanup))]
+    case 'NominalUnionCleanup':
+      return [
+        cleanup.type,
+        ...cleanup.variants.flatMap((variant) =>
+          variant.fields.flatMap((field) => cleanupTypes(field.cleanup)),
+        ),
+      ]
     case 'ArrayCleanup':
       return [cleanup.type, ...cleanupTypes(cleanup.element)]
     case 'UnionCleanup':
@@ -1367,6 +1374,33 @@ const cleanupMatchesSemanticType = (
   const key = SilkType.key(type)
   if (seen.has(key)) return cleanup._tag === 'NoCleanup'
   const representation = Layout.entry(layout, type)?.representation
+  if (representation?._tag === 'NominalUnion') {
+    if (
+      cleanup._tag !== 'NominalUnionCleanup' ||
+      cleanup.variants.length !== representation.variants.length
+    )
+      return false
+    const next = new Set(seen).add(key)
+    return cleanup.variants.every((variant, ordinal) => {
+      const expected = representation.variants.at(ordinal)
+      return (
+        expected !== undefined &&
+        variant.ordinal === expected.ordinal &&
+        variant.variant.union.module === expected.variant.union.module &&
+        variant.variant.union.name === expected.variant.union.name &&
+        variant.variant.name === expected.variant.name &&
+        variant.fields.length === expected.fields.length &&
+        variant.fields.every((field, fieldOrdinal) => {
+          const expectedField = expected.fields.at(fieldOrdinal)
+          return (
+            expectedField !== undefined &&
+            DeclarationFacts.sameFieldId(field.field, expectedField.id) &&
+            cleanupMatchesSemanticType(layout, field.cleanup, expectedField.type, next)
+          )
+        })
+      )
+    })
+  }
   if (representation?._tag !== 'Aggregate') return cleanup._tag === 'NoCleanup'
   const requiredHook = representation.cleanupHook
   if (requiredHook !== undefined) {

@@ -891,6 +891,13 @@ const localSharedCleanupDepth = (cleanup: CleanupPlan.CleanupPlan): number => {
       return localSharedCleanupDepth(cleanup.inner)
     case 'StructCleanup':
       return Math.max(0, ...cleanup.fields.map((field) => localSharedCleanupDepth(field.cleanup)))
+    case 'NominalUnionCleanup':
+      return Math.max(
+        0,
+        ...cleanup.variants.flatMap((variant) =>
+          variant.fields.map((field) => localSharedCleanupDepth(field.cleanup)),
+        ),
+      )
     case 'ArrayCleanup':
       return localSharedCleanupDepth(cleanup.element)
     case 'UnionCleanup':
@@ -944,6 +951,10 @@ const containsExecutionCleanup = (cleanup: CleanupPlan.CleanupPlan): boolean => 
       return containsExecutionCleanup(cleanup.inner)
     case 'StructCleanup':
       return cleanup.fields.some((field) => containsExecutionCleanup(field.cleanup))
+    case 'NominalUnionCleanup':
+      return cleanup.variants.some((variant) =>
+        variant.fields.some((field) => containsExecutionCleanup(field.cleanup)),
+      )
     case 'ArrayCleanup':
       return containsExecutionCleanup(cleanup.element)
     case 'UnionCleanup':
@@ -1784,6 +1795,42 @@ const makeOperationContext = (
             ),
           })
         }
+        case 'NominalUnionCleanup': {
+          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+          if (representation?._tag !== 'NominalUnion') return Object.freeze({})
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.variants.flatMap((variant) => {
+                const layoutVariant = representation.variants.find(
+                  (candidate) => candidate.ordinal === variant.ordinal,
+                )
+                if (layoutVariant === undefined) return []
+                return variant.fields.flatMap((field) => {
+                  if (!CleanupPlan.hasHook(field.cleanup)) return []
+                  const layoutField = layoutVariant.fields.find((candidate) =>
+                    DeclarationFacts.sameFieldId(candidate.id, field.field),
+                  )
+                  return layoutField === undefined
+                    ? []
+                    : [
+                        Object.freeze({
+                          cleanup: field.cleanup,
+                          state: byteOffset + representation.payloadOffset + layoutField.offset,
+                          wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                            Object.freeze([
+                              ...addressAt(byteOffset),
+                              Instr.memoryAccess('i32.load', memory.memory),
+                              Instr.i32Const(variant.ordinal),
+                              Instr.op('i32.eq'),
+                              Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                            ]),
+                        }),
+                      ]
+                })
+              }),
+            ),
+          })
+        }
         case 'ArrayCleanup': {
           if (!CleanupPlan.hasHook(plan_.element)) return Object.freeze({})
           const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
@@ -2225,6 +2272,63 @@ const makeOperationContext = (
             ),
           })
         }
+        case 'NominalUnionCleanup': {
+          const shape = LayoutPlan.callingShape(plan, plan_.type)
+          const tag = currentValues.at(0)
+          if (shape?.tree._tag !== 'NominalUnionShape' || tag === undefined)
+            throw new RangeError('Wasm nominal union cleanup lost its shape')
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.variants.flatMap((variant) => {
+                const identity = Match.nominalUnionVariant(
+                  plan_.type,
+                  plan_.type,
+                  variant.variant,
+                  variant.ordinal,
+                )
+                return variant.fields.flatMap((field) => {
+                  const physical = LayoutPlan.coverageFieldSlots(shape, identity, [field.field])
+                  const fieldLanes = semanticLanesOf(field.cleanup.type)
+                  if (physical === undefined || physical.length !== fieldLanes.length) return []
+                  const selected = physical.flatMap((ordinal, index) => {
+                    const value = currentValues.at(ordinal)
+                    const physicalLane = shape.lanes.at(ordinal)
+                    const fieldLane = fieldLanes.at(index)
+                    return value === undefined ||
+                      physicalLane === undefined ||
+                      fieldLane === undefined
+                      ? []
+                      : [
+                          Object.freeze([
+                            ...value,
+                            ...laneBridge(
+                              laneValueType(plan, physicalLane),
+                              laneValueType(plan, fieldLane),
+                            ),
+                          ]),
+                        ]
+                  })
+                  if (selected.length !== fieldLanes.length) return []
+                  return [
+                    Object.freeze({
+                      cleanup: field.cleanup,
+                      state: selected,
+                      wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                        instructions.length === 0
+                          ? Object.freeze([])
+                          : Object.freeze([
+                              ...tag,
+                              Instr.i32Const(variant.ordinal),
+                              Instr.op('i32.eq'),
+                              Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                            ]),
+                    }),
+                  ]
+                })
+              }),
+            ),
+          })
+        }
         case 'ArrayCleanup': {
           const lanes = semanticLanesOf(plan_.type)
           return Object.freeze({
@@ -2404,6 +2508,42 @@ const makeOperationContext = (
                         state: currentOffset + layoutField.offset,
                       }),
                     ]
+              }),
+            ),
+          })
+        }
+        case 'NominalUnionCleanup': {
+          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+          if (representation?._tag !== 'NominalUnion') return Object.freeze({})
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.variants.flatMap((variant) => {
+                const layoutVariant = representation.variants.find(
+                  (candidate) => candidate.ordinal === variant.ordinal,
+                )
+                if (layoutVariant === undefined) return []
+                return variant.fields.flatMap((field) => {
+                  const layoutField = layoutVariant.fields.find((candidate) =>
+                    DeclarationFacts.sameFieldId(candidate.id, field.field),
+                  )
+                  return layoutField === undefined
+                    ? []
+                    : [
+                        Object.freeze({
+                          cleanup: field.cleanup,
+                          state: currentOffset + representation.payloadOffset + layoutField.offset,
+                          wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                            instructions.length === 0
+                              ? Object.freeze([])
+                              : Object.freeze([
+                                  ...loadAt(address, currentOffset),
+                                  Instr.i32Const(variant.ordinal),
+                                  Instr.op('i32.eq'),
+                                  Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                                ]),
+                        }),
+                      ]
+                })
               }),
             ),
           })
@@ -4609,8 +4749,16 @@ const emitMatchOperation = (
     if (candidate === undefined) return [Instr.op('unreachable')]
     const arm = operation.arms.find((entry) => entry.id.ordinal === candidate.ordinal)
     if (arm === undefined) throw new RangeError('Wasm match lost a candidate arm')
+    const bindingMember =
+      arm.member?._tag === 'StructuralTypeMember' && Match.selects(arm.member, member)
+        ? arm.member
+        : member
     const bindings = arm.bindings.flatMap((binding) => {
-      const physical = LayoutPlan.coverageFieldSlots(operation.scrutineeShape, member, binding.path)
+      const physical = LayoutPlan.coverageFieldSlots(
+        operation.scrutineeShape,
+        bindingMember,
+        binding.path,
+      )
       if (physical === undefined) {
         throw new RangeError('Wasm match lost a pattern payload path')
       }
@@ -4661,6 +4809,8 @@ const emitMatchOperation = (
         Instr.ifElse(Instr.emptyBlockType, selected, emitDecisions(ordinal + 1)),
       ]
     }
+    if (decision.member._tag !== 'NominalUnionVariant' && operation.scrutineeType._tag !== 'Union')
+      return selected
     const tag = slots(operation.scrutinee).at(0)
     if (tag === undefined) throw new RangeError('Wasm match has no tag lane')
     if (decision.member._tag === 'NominalUnionVariant') {
@@ -4687,7 +4837,6 @@ const emitMatchOperation = (
         Instr.ifElse(Instr.emptyBlockType, selected, emitDecisions(ordinal + 1)),
       ]
     }
-    if (operation.scrutineeType._tag !== 'Union') return selected
     const outer =
       operation.scrutineeShape.tree._tag === 'SumShape'
         ? operation.scrutineeShape.tree.members.find((candidate) =>

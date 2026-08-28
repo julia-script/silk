@@ -62,6 +62,18 @@ export type CleanupPlan =
       }>
     }
   | {
+      readonly _tag: 'NominalUnionCleanup'
+      readonly type: Type.Nominal
+      readonly variants: ReadonlyArray<{
+        readonly variant: DeclarationFacts.CanonicalUnionVariantId
+        readonly ordinal: number
+        readonly fields: ReadonlyArray<{
+          readonly field: DeclarationFacts.FieldId
+          readonly cleanup: CleanupPlan
+        }>
+      }>
+    }
+  | {
       readonly _tag: 'ArrayCleanup'
       readonly type: Type.FixedArray
       readonly length: number
@@ -112,6 +124,8 @@ export type CleanupPlan =
 export const hasHook = (self: CleanupPlan): boolean =>
   self._tag === 'HookCleanup' ||
   (self._tag === 'StructCleanup' && self.fields.some((field) => hasHook(field.cleanup))) ||
+  (self._tag === 'NominalUnionCleanup' &&
+    self.variants.some((variant) => variant.fields.some((field) => hasHook(field.cleanup)))) ||
   (self._tag === 'ArrayCleanup' && hasHook(self.element)) ||
   (self._tag === 'UnionCleanup' && self.cases.some((entry) => hasHook(entry.cleanup))) ||
   ((self._tag === 'CallableCleanup' || self._tag === 'EffectCleanup') &&
@@ -128,6 +142,8 @@ export const reclaims = (self: CleanupPlan): boolean =>
   self._tag === 'WakeCleanup' ||
   (self._tag === 'HookCleanup' && reclaims(self.inner)) ||
   (self._tag === 'StructCleanup' && self.fields.some((field) => reclaims(field.cleanup))) ||
+  (self._tag === 'NominalUnionCleanup' &&
+    self.variants.some((variant) => variant.fields.some((field) => reclaims(field.cleanup)))) ||
   (self._tag === 'ArrayCleanup' && reclaims(self.element)) ||
   (self._tag === 'UnionCleanup' && self.cases.some((entry) => reclaims(entry.cleanup))) ||
   ((self._tag === 'CallableCleanup' || self._tag === 'EffectCleanup') &&
@@ -268,7 +284,7 @@ export const cleanupPlan = (
     module: type.module,
     name: type.name,
   })
-  if (declaration?._tag !== 'StructDeclaration') {
+  if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration') {
     return Object.freeze({ _tag: 'NoCleanup', type })
   }
   const substitution =
@@ -277,6 +293,39 @@ export const cleanupPlan = (
       type.arguments,
     ) ?? new Map()
   const nextSeen = new Set(seen).add(key)
+  if (declaration._tag === 'UnionDeclaration') {
+    return Object.freeze({
+      _tag: 'NominalUnionCleanup',
+      type,
+      variants: Object.freeze(
+        declaration.variants.flatMap((variant) =>
+          variant.canonical._tag === 'Canonical'
+            ? [
+                Object.freeze({
+                  variant: variant.canonical.id,
+                  ordinal: variant.id.ordinal,
+                  fields: Object.freeze(
+                    variant.fields.map((field) =>
+                      Object.freeze({
+                        field: field.id,
+                        cleanup:
+                          field.declaredType._tag === 'Resolved'
+                            ? cleanupPlan(
+                                index,
+                                Type.substitute(field.declaredType.type, substitution),
+                                nextSeen,
+                              )
+                            : Object.freeze({ _tag: 'NoCleanup' as const, type: 'i32' as const }),
+                      }),
+                    ),
+                  ),
+                }),
+              ]
+            : [],
+        ),
+      ),
+    })
+  }
   const structPlan: CleanupPlan = Object.freeze({
     _tag: 'StructCleanup',
     type,
@@ -420,6 +469,28 @@ export const specializeCleanup = (
             Object.freeze({
               field: field.field,
               cleanup: specializeCleanup(field.cleanup, substitution, resolveConcrete),
+            }),
+          ),
+        ),
+      })
+    case 'NominalUnionCleanup':
+      if (!Type.isNominal(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+      return Object.freeze({
+        _tag: 'NominalUnionCleanup',
+        type,
+        variants: Object.freeze(
+          cleanup.variants.map((variant) =>
+            Object.freeze({
+              variant: variant.variant,
+              ordinal: variant.ordinal,
+              fields: Object.freeze(
+                variant.fields.map((field) =>
+                  Object.freeze({
+                    field: field.field,
+                    cleanup: specializeCleanup(field.cleanup, substitution, resolveConcrete),
+                  }),
+                ),
+              ),
             }),
           ),
         ),

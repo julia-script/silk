@@ -239,6 +239,24 @@ export const cleanupMembers = (
   if (cleanup._tag === 'HookCleanup') return cleanupMembers(cleanup.inner, owner)
   if (cleanup._tag === 'RepresentedCallableCleanup' || cleanup._tag === 'RepresentedEffectCleanup')
     return Object.freeze([])
+  if (cleanup._tag === 'NominalUnionCleanup') {
+    if (owner._tag !== 'NominalUnionValue') return Object.freeze([])
+    const active = cleanup.variants.find(
+      (variant) =>
+        variant.ordinal === owner.variantOrdinal &&
+        variant.variant.union.module === owner.variant.union.module &&
+        variant.variant.union.name === owner.variant.union.name &&
+        variant.variant.name === owner.variant.name,
+    )
+    return Object.freeze(
+      active?.fields.flatMap((field) => {
+        const value = owner.fields.find((candidate) =>
+          DeclarationFacts.sameFieldId(candidate.field, field.field),
+        )
+        return value === undefined ? [] : cleanupMembers(field.cleanup, value.value)
+      }) ?? [],
+    )
+  }
   if (owner._tag !== 'AggregateValue') return Object.freeze([])
   return Object.freeze(
     cleanup.fields.flatMap((field) => {

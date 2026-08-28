@@ -382,6 +382,10 @@ const cleanupText = (cleanup: CleanupPlan.CleanupPlan): string => {
       return `${typeText(cleanup.type)} ${cleanup.fields
         .map(({ field }) => `#${field.ordinal}`)
         .join(' → ')}`
+    case 'NominalUnionCleanup':
+      return `${typeText(cleanup.type)} active variant · ${cleanup.variants
+        .map((variant) => `${variant.ordinal}:${variant.variant.name}`)
+        .join(', ')}`
     case 'ArrayCleanup':
       return `${typeText(cleanup.type)} elements in reverse order · ${cleanupText(cleanup.element)}`
     case 'UnionCleanup':

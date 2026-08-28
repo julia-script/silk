@@ -288,6 +288,143 @@ pub fn main() -> i32 { return unwrap(Option<i32>.Some { value: 42 }) }`),
   }),
 )
 
+it.effect('keeps nominal variants nested beneath structural union roots', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-values/hierarchical-match',
+      ascii(`union HttpError { Timeout, DNS { code: i32 } }
+struct OutOfMemoryError {}
+
+fn inspect(error: HttpError | OutOfMemoryError) -> i32 {
+  return match move error {
+    HttpError.DNS { code } => code
+    HttpError.Timeout => 1
+    OutOfMemoryError other => 0
+  }
+}
+
+fn classify(error: HttpError | OutOfMemoryError) -> i32 {
+  return match move error {
+    HttpError whole => 7
+    OutOfMemoryError other => 0
+  }
+}
+
+pub fn main() -> i32 {
+  return inspect(HttpError.DNS { code: 42 }) + classify(HttpError.Timeout)
+}`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const returned = Analysis.rootAnalysis(self).functions.at(0)?.returnedExpression
+    assert.strictEqual(returned?._tag, 'Match')
+    if (returned?._tag !== 'Match') return
+    assert.deepEqual(returned.members.map(Match.encodeIdentity), [
+      'union-values/hierarchical-match.HttpError::union-values/hierarchical-match.HttpError.Timeout',
+      'union-values/hierarchical-match.HttpError::union-values/hierarchical-match.HttpError.DNS',
+      'union-values/hierarchical-match.OutOfMemoryError',
+    ])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 49n)
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 49)
+  }),
+)
+
+it.effect('keeps generic applications and never-payload variants as distinct coverage leaves', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-values/generic-coverage',
+      ascii(`union Option<T> { Some { value: T }, None }
+union Result<T, E> { Success { value: T }, Failure { error: E } }
+
+fn read(option: Option<i32> | Option<bool>) -> i32 {
+  return match move option {
+    Option<i32>.Some { value } => value
+    Option<i32>.None => 0
+    Option<bool>.Some { value } => 1
+    Option<bool>.None => 0
+  }
+}
+
+fn required(result: Result<i32, never>) -> i32 {
+  return match move result {
+    Result<i32, never>.Success { value } => value
+    Result<i32, never>.Failure { error } => 0
+  }
+}
+
+pub fn main() -> i32 { return read(Option<i32>.Some { value: 42 }) }`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const functions = Analysis.rootAnalysis(self).functions
+    const read = functions.at(0)?.returnedExpression
+    const required = functions.at(1)?.returnedExpression
+    assert.strictEqual(read?._tag, 'Match')
+    assert.strictEqual(required?._tag, 'Match')
+    if (read?._tag !== 'Match' || required?._tag !== 'Match') return
+    assert.strictEqual(read.members.length, 4)
+    assert.deepEqual(
+      read.members.map((member) => Type.encode(Match.sourceType(member))),
+      [
+        'union-values/generic-coverage.Option<bool>',
+        'union-values/generic-coverage.Option<bool>',
+        'union-values/generic-coverage.Option<i32>',
+        'union-values/generic-coverage.Option<i32>',
+      ],
+    )
+    assert.deepEqual(required.members.map(Match.encodeIdentity), [
+      'union-values/generic-coverage.Result<i32, never>::union-values/generic-coverage.Result<i32, never>.Success',
+      'union-values/generic-coverage.Result<i32, never>::union-values/generic-coverage.Result<i32, never>.Failure',
+    ])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('keeps affine variant payloads available after a false guard', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-values/guarded-affine',
+      ascii(`struct Token { value: i32 }
+union Option<T> { Some { value: T }, None }
+
+fn select(option: Option<Token>, guard: bool) -> i32 {
+  return match move option {
+    Option<Token>.Some { value } if guard => value.value
+    Option<Token>.Some { value } => value.value + 1
+    Option<Token>.None => 0
+  }
+}
+
+pub fn main() -> i32 {
+  return select(Option<Token>.Some { value: Token { value: 41 } }, false)
+}`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
 it.effect('evaluates initializers in source order before constructing in declaration order', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(

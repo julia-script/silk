@@ -944,6 +944,25 @@ function* executeFunction(
         }
         return undefined
       }
+      case 'NominalUnionCleanup': {
+        if (owner._tag !== 'NominalUnionValue') return undefined
+        const active = cleanup.variants.find((variant) => variant.ordinal === owner.variantOrdinal)
+        if (active === undefined) return undefined
+        for (const field of active.fields) {
+          const entry = owner.fields.find((candidate) =>
+            DeclarationFacts.sameFieldId(candidate.field, field.field),
+          )
+          if (entry === undefined) continue
+          const blocked = yield* releaseThroughPlan(
+            field.cleanup,
+            entry.value,
+            provenance,
+            localOrdinal,
+          )
+          if (blocked !== undefined) return blocked
+        }
+        return undefined
+      }
       case 'ArrayCleanup': {
         if (owner._tag !== 'ArrayValue') return undefined
         for (const element of owner.elements) {

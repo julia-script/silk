@@ -881,6 +881,30 @@ pub fn main() -> i32 { return 0 }`,
   })
 })
 
+it('plans cleanup only through the active nominal union variant', () => {
+  const facts = check(
+    'ownership://nominal-union-cleanup.silk',
+    `union MaybeAllocation { None, Some { value: Allocation } }
+fn consume(value: MaybeAllocation) -> i32 { return 42 }
+pub fn main() -> i32 { return 0 }`,
+  )
+  const cleanup = facts.functions.at(0)?.exits.at(0)?.releases.at(0)?.cleanup
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.strictEqual(cleanup?._tag, 'NominalUnionCleanup')
+  if (cleanup?._tag !== 'NominalUnionCleanup') return
+  assert.deepEqual(
+    cleanup.variants.map((variant) => ({
+      name: variant.variant.name,
+      fields: variant.fields.map((field) => field.cleanup._tag),
+    })),
+    [
+      { name: 'None', fields: [] },
+      { name: 'Some', fields: ['AllocationCleanup'] },
+    ],
+  )
+})
+
 it('ends exclusive service access when a provided operation returns', () => {
   const facts = check(
     'ownership://service-provider-loan.silk',

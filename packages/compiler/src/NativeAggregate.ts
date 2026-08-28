@@ -14,6 +14,7 @@ import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
+import * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeCall from './NativeCall.js'
@@ -230,6 +231,72 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
           Object.freeze(values.slice(range.laneOffset, range.laneOffset + range.laneCount)),
           `${tag}_callable${slot.ordinal}`,
         )
+      }
+      return
+    }
+    case 'NominalUnionCleanup': {
+      if (
+        plan.variants.every(
+          (variant) => !variant.fields.some((field) => CleanupPlan.hasEffect(field.cleanup)),
+        )
+      )
+        return
+      const shape = Layout.callingShape(program.layout, plan.type)
+      const tagValue = values.at(0)
+      if (shape?.tree._tag !== 'NominalUnionShape' || tagValue === undefined)
+        throw new RangeError('LLVM nominal union cleanup lost its shape')
+      for (const variant of plan.variants) {
+        if (!variant.fields.some((field) => CleanupPlan.hasEffect(field.cleanup))) continue
+        const matches = yield* FunctionBody.integerCompare(
+          body,
+          'eq',
+          tagValue,
+          yield* Constant.integerSigned(builder, i32, BigInt(variant.ordinal)),
+          `${tag}_v${variant.ordinal}_is`,
+        )
+        const selectedBlock = yield* LlvmBlock.make(body, `${tag}_v${variant.ordinal}_drop`)
+        const followingBlock = yield* LlvmBlock.make(body, `${tag}_v${variant.ordinal}_next`)
+        yield* FunctionBody.conditionalBranch(body, matches, selectedBlock, followingBlock)
+        yield* LlvmBlock.setInsertionPoint(body, selectedBlock)
+        const identity = Match.nominalUnionVariant(
+          plan.type,
+          plan.type,
+          variant.variant,
+          variant.ordinal,
+        )
+        for (const [fieldOrdinal, field] of variant.fields.entries()) {
+          if (!CleanupPlan.hasEffect(field.cleanup)) continue
+          const physical = Layout.coverageFieldSlots(shape, identity, [field.field])
+          const targetLanes = semanticLanesOf(field.cleanup.type)
+          const fieldValues: Array<Value.Input> = []
+          for (const [targetOrdinal, ordinal] of physical?.entries() ?? []) {
+            const value = values.at(ordinal)
+            const sourceLane = shape.lanes.at(ordinal)
+            const targetLane = targetLanes.at(targetOrdinal)
+            if (value === undefined || sourceLane === undefined || targetLane === undefined)
+              continue
+            fieldValues.push(
+              yield* NativeArith.coerceLane(
+                arith,
+                value,
+                sourceLane,
+                targetLane,
+                `${tag}_v${variant.ordinal}_f${fieldOrdinal}_${targetOrdinal}_lane`,
+              ),
+            )
+          }
+          if (fieldValues.length !== targetLanes.length)
+            throw new RangeError('LLVM nominal union cleanup lost a field payload lane')
+          yield* dropThroughPlan(
+            context,
+            field.cleanup,
+            Object.freeze(fieldValues),
+            `${tag}_v${variant.ordinal}_f${fieldOrdinal}`,
+          )
+        }
+        yield* FunctionBody.branch(body, followingBlock)
+        yield* LlvmBlock.setInsertionPoint(body, followingBlock)
+        yield* NativeStorage.reloadRoots(storage, `${tag}_v${variant.ordinal}_next`)
       }
       return
     }

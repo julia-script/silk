@@ -236,6 +236,10 @@ export const make = (operations: Operations) => {
         ]
       case 'StructCleanup':
         return cleanup.fields.flatMap((field) => hookCalls(field.cleanup, index))
+      case 'NominalUnionCleanup':
+        return cleanup.variants.flatMap((variant) =>
+          variant.fields.flatMap((field) => hookCalls(field.cleanup, index)),
+        )
       case 'ArrayCleanup':
         return hookCalls(cleanup.element, index)
       case 'UnionCleanup':

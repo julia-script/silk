@@ -27,12 +27,12 @@
 
 ## 4. Variant Patterns and Hierarchical Coverage
 
-- [ ] 4.1 Extend the shared pattern representation with fully applied variant selectors and struct-like named-field bindings, omissions, nesting, borrows, moves, and writes, and verify unit and payload pattern diagnostics match struct field policy.
-- [ ] 4.2 Replace flat match coverage keys with canonical selection paths that retain structural roots, applied nominal parents, and variants, and verify ordinary structural-union and scalar-enum coverage behavior remains unchanged.
-- [ ] 4.3 Implement direct variant subtraction through structural-union roots plus whole-parent subtree subtraction, and verify exhaustive, duplicate, unreachable, wildcard, and fully qualified missing-path diagnostics.
-- [ ] 4.4 Preserve nominal union roots as atomic `A | B` members during injection, widening, normalization, pattern selection, and specialization, and verify matching a leaf never changes the structural member set.
-- [ ] 4.5 Keep guarded affine variant selections provisional until guard success, and verify a false guard leaves both tag levels, complete payload ownership, and cleanup available to a later arm.
-- [ ] 4.6 Cover generic and uninhabited cases, and verify `Option<i32> | Option<bool>` retains distinct fully applied paths and `Result<A, never>.Failure` remains a required coverage leaf without becoming constructible.
+- [x] 4.1 Extend the shared pattern representation with fully applied variant selectors and struct-like named-field bindings, omissions, nesting, borrows, moves, and writes, and verify unit and payload pattern diagnostics match struct field policy.
+- [x] 4.2 Replace flat match coverage keys with canonical selection paths that retain structural roots, applied nominal parents, and variants, and verify ordinary structural-union and scalar-enum coverage behavior remains unchanged.
+- [x] 4.3 Implement direct variant subtraction through structural-union roots plus whole-parent subtree subtraction, and verify exhaustive, duplicate, unreachable, wildcard, and fully qualified missing-path diagnostics.
+- [x] 4.4 Preserve nominal union roots as atomic `A | B` members during injection, widening, normalization, pattern selection, and specialization, and verify matching a leaf never changes the structural member set.
+- [x] 4.5 Keep guarded affine variant selections provisional until guard success, and verify a false guard leaves both tag levels, complete payload ownership, and cleanup available to a later arm.
+- [x] 4.6 Cover generic and uninhabited cases, and verify `Option<i32> | Option<bool>` retains distinct fully applied paths and `Result<A, never>.Failure` remains a required coverage leaf without becoming constructible.
 
 ## 5. Ownership, Represented Fields, and Cleanup
 

@@ -1,6 +1,6 @@
 import type { ControlProvenance } from './Backend.js'
 import type * as Layout from './Layout.js'
-import type * as Match from './Match.js'
+import * as Match from './Match.js'
 import * as Mir from './Mir.js'
 
 export type LinearTerminator =
@@ -344,13 +344,17 @@ export const expandMatches = (
       }
       const arm = match.arms.find((item) => item.id.ordinal === candidate.ordinal)
       if (arm === undefined) throw new RangeError('LLVM match expansion lost a candidate arm')
+      const bindingMember =
+        arm.member?._tag === 'StructuralTypeMember' && Match.selects(arm.member, member)
+          ? arm.member
+          : member
       const bindings: ReadonlyArray<LinearOperation> = Object.freeze(
         arm.bindings.map((binding) =>
           Object.freeze({
             _tag: 'BindMatch' as const,
             scrutinee: match.scrutinee,
             shape: match.scrutineeShape,
-            member,
+            member: bindingMember,
             binding,
             provenance: binding.provenance,
           }),
