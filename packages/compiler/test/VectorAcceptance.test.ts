@@ -587,8 +587,7 @@ const popShrinks = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect as Effect
-import silk.option { None }
-import silk.option { Some }
+import silk.option { Option }
 import silk.vector { Vector, make, append, get, length, capacity, pop }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -602,8 +601,8 @@ effect fn build() -> i32 ! OutOfMemoryError {
   let appended2 = run pending2
   let taken = pop<i32>(&mut values)
   let last = match move taken {
-    Some<i32> { value } => move value
-    None missing => 0
+    Option<i32>.Some { value } => move value
+    Option<i32>.None => 0
   }
   if last == 21 {} else { return 1 }
   // The length drops by exactly one and the capacity is untouched.
@@ -625,8 +624,7 @@ it.effect(
 
 const popEmpty = `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
-import silk.option { None }
-import silk.option { Some }
+import silk.option { Option }
 import silk.vector { Vector, make, append, length, pop }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -634,8 +632,8 @@ effect fn build() -> i32 ! OutOfMemoryError {
   // An empty vector never allocated, so pop must answer from the Empty arm.
   let first = pop<i32>(&mut values)
   let absent = match move first {
-    Some<i32> { value } => 0
-    None missing => 42
+    Option<i32>.Some { value } => 0
+    Option<i32>.None => 42
   }
   if length<i32>(&values) == 0 {} else { return 1 }
   return absent
@@ -846,8 +844,7 @@ import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect as Effect
-import silk.option { None }
-import silk.option { Some }
+import silk.option { Option }
 import silk.vector { Vector, make, append, length, pop, remove }
 
 struct Entry {
@@ -886,8 +883,8 @@ effect fn build() -> i32 ! OutOfMemoryError {
   let s3 = run (seed(&mut values, 9) |> Effect.provideMut(&mut allocator))
   let taken = pop<Entry>(&mut values)
   let popped = match move taken {
-    Some<Entry> { value } => release(move value)
-    None missing => 0
+    Option<Entry>.Some { value } => release(move value)
+    Option<Entry>.None => 0
   }
   // The popped element is the last one appended, and the removed one is the first.
   if popped == 9 {} else { return 1 }

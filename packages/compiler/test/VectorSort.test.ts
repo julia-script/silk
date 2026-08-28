@@ -22,7 +22,7 @@ import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.usize as usize
 import silk.vector { Vector, make, append, sort, binarySearch, get, length }
-import silk.option { Option, Some, None }
+import silk.option { Option }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -233,9 +233,9 @@ ${fill('values', [9, 2, 7, 2, 5])}
   let hit = binarySearch<i32>(&values, 7)
   let miss = binarySearch<i32>(&values, 4)
   let duplicate = binarySearch<i32>(&values, 2)
-  let hitCode = match move hit { Some<usize> { value } => usize.toI32(value) None {} => 0 - 1 }
-  let missCode = match move miss { Some<usize> { value } => usize.toI32(value) None {} => 0 - 1 }
-  let duplicateCode = match move duplicate { Some<usize> { value } => usize.toI32(value) None {} => 0 - 1 }
+  let hitCode = match move hit { Option<usize>.Some { value } => usize.toI32(value) _ => 0 - 1 }
+  let missCode = match move miss { Option<usize>.Some { value } => usize.toI32(value) _ => 0 - 1 }
+  let duplicateCode = match move duplicate { Option<usize>.Some { value } => usize.toI32(value) _ => 0 - 1 }
   return hitCode * 100 + (missCode + 1) * 10 + duplicateCode`),
     )
     assert.strictEqual(value, 300)
@@ -253,9 +253,9 @@ ${fill('values', [5, 1, 9])}
   let between = binarySearch<i32>(&values, 4)
   let above = binarySearch<i32>(&values, 12)
   let mut score = 0
-  let belowCode = match move below { Some<usize> { value } => 1 None {} => 0 }
-  let betweenCode = match move between { Some<usize> { value } => 1 None {} => 0 }
-  let aboveCode = match move above { Some<usize> { value } => 1 None {} => 0 }
+  let belowCode = match move below { Option<usize>.Some { value } => 1 _ => 0 }
+  let betweenCode = match move between { Option<usize>.Some { value } => 1 _ => 0 }
+  let aboveCode = match move above { Option<usize>.Some { value } => 1 _ => 0 }
   if belowCode + betweenCode + aboveCode == 0 { return 42 }
   return 0`),
     )
@@ -269,7 +269,7 @@ it.effect('searches an empty vector without matching', () =>
       'vector-sort/search-empty',
       program(`  let mut values = make<i32>()
   let missing = binarySearch<i32>(&values, 3)
-  return match move missing { Some<usize> { value } => 0 None {} => 42 }`),
+  return match move missing { Option<usize>.Some { value } => 0 _ => 42 }`),
     )
     assert.strictEqual(value, 42)
   }),

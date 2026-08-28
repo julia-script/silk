@@ -102,8 +102,8 @@ import silk.child_process {
   terminatingSignal
 }
 import silk.filesystem { FileError, fromBytes as pathFromBytes }
-import silk.option { None, Option, Some }
-import silk.result { Failure, Result, Success }
+import silk.option { Option }
+import silk.result { Result }
 
 `
 
@@ -111,24 +111,21 @@ import silk.result { Failure, Result, Success }
 const recovery = `import silk.child_process { ProcessError }
 import silk.allocator { OutOfMemoryError }
 import silk.filesystem { FileError }
-import silk.option { None }
-import silk.option { Some }
+import silk.option { Option }
 import silk.result { Result }
 pub fn main() -> i32 {
   let attempted = run Intrinsic.effectResult(program())
   return match move attempted {
-    Result<i32, ProcessError | OutOfMemoryError | FileError> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<ProcessError | OutOfMemoryError | FileError> { error } => match move error {
+      Result<i32, ProcessError | OutOfMemoryError | FileError>.Success { value } => value
+      Result<i32, ProcessError | OutOfMemoryError | FileError>.Failure { error } => match move error {
         ProcessError processFailure => match move providerCode(&processFailure) {
-          Some<i32> { value } =>
+          Option<i32>.Some { value } =>
             70 + processFailure.reason.code + 10 * processFailure.operation.code + value
-          None {} => 70 + processFailure.reason.code + 10 * processFailure.operation.code
+          _ => 70 + processFailure.reason.code + 10 * processFailure.operation.code
         }
         OutOfMemoryError exhausted => 98
         FileError invalid => 99
       }
-    }
   }
 }`
 
@@ -191,8 +188,8 @@ it.effect('carries an exit code, captured output, and captured errors as one own
   if outputBytes(&outcome)[usize.ZERO] != u8.toU8(115) { return 3 }
   if errorBytes(&outcome).length != usize.ZERO { return 4 }
   return match move exitCode(&outcome) {
-    Some<i32> { value } => 42 + value
-    None {} => 5
+    Option<i32>.Some { value } => 42 + value
+    Option<i32>.None => 5
   }`,
       ),
     )
@@ -217,8 +214,8 @@ it.effect('reports a nonzero exit code as outcome data rather than as a typed fa
   )
   if isSignaled(&outcome) { return 1 }
   return match move exitCode(&outcome) {
-    Some<i32> { value } => 39 + value
-    None {} => 2
+    Option<i32>.Some { value } => 39 + value
+    Option<i32>.None => 2
   }`,
       ),
     )
@@ -243,13 +240,13 @@ it.effect('separates termination by a signal from an ordinary exit code', () =>
   if isSignaled(&outcome) == false { return 1 }
   // A signal never presents itself as an exit code, so no caller reads 9 as a return value.
   let absent = match move exitCode(&outcome) {
-    Some<i32> { value } => false
-    None {} => true
+    Option<i32>.Some { value } => false
+    Option<i32>.None => true
   }
   if absent == false { return 2 }
   return match move terminatingSignal(&outcome) {
-    Some<i32> { value } => 33 + value
-    None {} => 3
+    Option<i32>.Some { value } => 33 + value
+    Option<i32>.None => 3
   }`,
       ),
     )
@@ -326,8 +323,8 @@ const nativeEcho =
   if errorBytes(&outcome).length != usize.add(0, 2) { return 5 }
   if errorBytes(&outcome)[usize.ZERO] != u8.toU8(101) { return 6 }
   return match move exitCode(&outcome) {
-    Some<i32> { value } => 42 + value
-    None {} => 7
+    Option<i32>.Some { value } => 42 + value
+    Option<i32>.None => 7
   }`)
 
 it.effect('runs a program that exits zero and owns everything it captured', () =>
@@ -364,8 +361,8 @@ it.effect('keeps a nonzero exit code on the success channel through the native p
   if outputBytes(&outcome).length != usize.ONE { return 2 }
   if errorBytes(&outcome).length != usize.add(0, 4) { return 3 }
   return match move exitCode(&outcome) {
-    Some<i32> { value } => 39 + value
-    None {} => 4
+    Option<i32>.Some { value } => 39 + value
+    Option<i32>.None => 4
   }`),
     )
     assert.deepEqual(Analysis.diagnostics(self), [])

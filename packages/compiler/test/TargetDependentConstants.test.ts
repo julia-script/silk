@@ -241,14 +241,14 @@ it.effect('reports no diagnostic for the new stdlib declarations on either width
 const probes = [
   'fn usizeMaxIsAllOnes() -> i32 { if usize.MAX == usize.bitNot(usize.ZERO) { return 42 } return 0 }',
   'fn usizeMaxWrapsToZero() -> i32 { if usize.wrappingAdd(usize.MAX, usize.ONE) == usize.ZERO { return 42 } return 0 }',
-  'fn usizeMaxRefusesStep() -> i32 { return match move usize.checkedAdd(usize.MAX, usize.ONE) { Some<usize> { value: result } => 0 None nothing => 42 } }',
+  'fn usizeMaxRefusesStep() -> i32 { return match move usize.checkedAdd(usize.MAX, usize.ONE) { Option<usize>.Some { value: result } => 0 _ => 42 } }',
   'fn usizeMinIsZero() -> i32 { if usize.MIN == usize.ZERO { return 42 } return 0 }',
-  'fn usizeMinRefusesStep() -> i32 { return match move usize.checkedSubtract(usize.MIN, usize.ONE) { Some<usize> { value: result } => 0 None nothing => 42 } }',
+  'fn usizeMinRefusesStep() -> i32 { return match move usize.checkedSubtract(usize.MIN, usize.ONE) { Option<usize>.Some { value: result } => 0 _ => 42 } }',
   'fn usizeBitsPinsMax() -> i32 { if usize.shiftRight(usize.MAX, usize.subtract(u32.toUsize(usize.BITS), usize.ONE)) == usize.ONE { return 42 } return 0 }',
   'fn isizeMaxComplementsMin() -> i32 { if isize.MAX == isize.bitNot(isize.MIN) { return 42 } return 0 }',
   'fn isizeMaxWrapsToMin() -> i32 { if isize.wrappingAdd(isize.MAX, i32.toIsize(1)) == isize.MIN { return 42 } return 0 }',
-  'fn isizeMaxRefusesStep() -> i32 { return match move isize.checkedAdd(isize.MAX, i32.toIsize(1)) { Some<isize> { value: result } => 0 None nothing => 42 } }',
-  'fn isizeMinRefusesStep() -> i32 { return match move isize.checkedSubtract(isize.MIN, i32.toIsize(1)) { Some<isize> { value: result } => 0 None nothing => 42 } }',
+  'fn isizeMaxRefusesStep() -> i32 { return match move isize.checkedAdd(isize.MAX, i32.toIsize(1)) { Option<isize>.Some { value: result } => 0 _ => 42 } }',
+  'fn isizeMinRefusesStep() -> i32 { return match move isize.checkedSubtract(isize.MIN, i32.toIsize(1)) { Option<isize>.Some { value: result } => 0 _ => 42 } }',
   'fn isizeBitsMatchUsize() -> i32 { if isize.BITS == usize.BITS { return 42 } return 0 }',
 ]
 
@@ -264,7 +264,7 @@ const acceptance = `import silk.i32 as i32
 import silk.isize as isize
 import silk.u32 as u32
 import silk.usize as usize
-import silk.option { Some, None }
+import silk.option { Option }
 
 ${probes.join('\n')}
 

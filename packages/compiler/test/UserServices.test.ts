@@ -573,7 +573,7 @@ for (const provider of [
     () =>
       Effect.gen(function* () {
         const source = `import silk.effect as Effect
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 struct Token { value: i32 }
 service Counter {
   effect fn increment(token: ${provider.access === 'Exclusive' ? '&mut Token' : '&Token'}) -> i32 ? ${provider.access === 'Exclusive' ? '&mut Counter' : '&Counter'}
@@ -625,10 +625,8 @@ pub fn main() -> i32 {
   let reifiedAlias = move reifiedHop
   let completed = run move reifiedAlias
   let second = match move completed {
-    Result<i32, never> { value: outcome } => match move outcome {
-      Success<i32> { value: answer } => answer
-      Failure<never> { error: impossible } => 0
-    }
+      Result<i32, never>.Success { value: answer } => answer
+      Result<i32, never>.Failure { error: impossible } => 0
   }
   let branches = branchRead(true, 40)
     + branchRead(false, 50)

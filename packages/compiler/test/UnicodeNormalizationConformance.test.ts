@@ -104,7 +104,7 @@ import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.u8 as u8
 import silk.usize as usize
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 import silk.string { String, InvalidUtf8, fromUtf8, ownedUtf8Bytes }
 import silk.unicode { normalizeNfc, normalizeNfd }
 import silk.vector { Vector, make as vectorMake, append as vectorAppend, asSlice as vectorAsSlice }
@@ -173,10 +173,8 @@ effect fn build() -> i32 ! OutOfMemoryError {
       |> Effect.provideMut(&mut allocator)
     offset = offset + usize.ONE + nfdLength
     let sourceText = match move fromUtf8(vectorAsSlice<u8>(&sourceBytes)) {
-      Result<string, InvalidUtf8> { value: outcome } => match move outcome {
-        Success<string> { value } => value
-        Failure<InvalidUtf8> { error } => ""
-      }
+        Result<string, InvalidUtf8>.Success { value } => value
+        Result<string, InvalidUtf8>.Failure { error } => ""
     }
     let fromSource = run checkFrom(
       sourceText,
@@ -184,10 +182,8 @@ effect fn build() -> i32 ! OutOfMemoryError {
       vectorAsSlice<u8>(&nfdBytes),
     ) |> Effect.provideMut(&mut allocator)
     let nfcText = match move fromUtf8(vectorAsSlice<u8>(&nfcBytes)) {
-      Result<string, InvalidUtf8> { value: outcome } => match move outcome {
-        Success<string> { value } => value
-        Failure<InvalidUtf8> { error } => ""
-      }
+        Result<string, InvalidUtf8>.Success { value } => value
+        Result<string, InvalidUtf8>.Failure { error } => ""
     }
     let fromNfc = run checkFrom(
       nfcText,
@@ -195,10 +191,8 @@ effect fn build() -> i32 ! OutOfMemoryError {
       vectorAsSlice<u8>(&nfdBytes),
     ) |> Effect.provideMut(&mut allocator)
     let nfdText = match move fromUtf8(vectorAsSlice<u8>(&nfdBytes)) {
-      Result<string, InvalidUtf8> { value: outcome } => match move outcome {
-        Success<string> { value } => value
-        Failure<InvalidUtf8> { error } => ""
-      }
+        Result<string, InvalidUtf8>.Success { value } => value
+        Result<string, InvalidUtf8>.Failure { error } => ""
     }
     let fromNfd = run checkFrom(
       nfdText,

@@ -75,7 +75,7 @@ import silk.hash_map {
   valueAt,
   withMut
 }
-import silk.option { Option, Some, None }
+import silk.option { Option }
 import silk.u64 as u64
 import silk.usize as usize`
 
@@ -372,7 +372,7 @@ import silk.hash_set {
   occupiedAt,
   remove
 }
-import silk.option { Option, Some, None }`
+import silk.option { Option }`
 
 it.effect(
   'refuses a second equivalent element, and answers membership before and after removal',
@@ -394,8 +394,8 @@ it.effect(
   if !contains<Word>(&seen, Hash.word(9)) { return 5 }
   let taken = remove<Word>(&mut seen, Hash.word(9))
   let gone = match move taken {
-    Some<Word> { value } => u64.toI32(value.value)
-    None {} => 0
+    Option<Word>.Some { value } => u64.toI32(value.value)
+    Option<Word>.None => 0
   }
   if gone != 9 { return 6 }
   if contains<Word>(&seen, Hash.word(9)) { return 7 }

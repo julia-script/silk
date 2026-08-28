@@ -44,13 +44,13 @@ import silk.string {
   scalarValue,
   nextCursor
 }
-import silk.option { Some, None }
+import silk.option { Option }
 import silk.char { toU32 as charToU32 }
 
 fn scalarSum(value: string, cursor: ScalarCursor) -> u32 {
   return match move nextScalar(value, move cursor) {
-    Some<ScalarStep> { value: step } => continueSum(value, move step)
-    None nothing => u32.toU32(0)
+    Option<ScalarStep>.Some { value: step } => continueSum(value, move step)
+    Option<ScalarStep>.None => u32.toU32(0)
   }
 }
 
@@ -89,15 +89,13 @@ it.effect(
 
 const validation = `import silk.usize as usize
 import silk.string { InvalidUtf8, fromUtf8, byteLength }
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 
 fn inspect(bytes: &[u8]) -> i32 {
   let result = fromUtf8(bytes)
   return match move result {
-    Result<string, InvalidUtf8> { value: outcome } => match move outcome {
-      Success<string> { value } => usize.toI32(byteLength(value))
-      Failure<InvalidUtf8> { error } => usize.toI32(error.offset) + 40
-    }
+      Result<string, InvalidUtf8>.Success { value } => usize.toI32(byteLength(value))
+      Result<string, InvalidUtf8>.Failure { error } => usize.toI32(error.offset) + 40
   }
 }
 

@@ -728,7 +728,7 @@ export const independentExecutionParkedTypedFailure = `import silk.allocator { A
 import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 struct Failed { code: i32 }
 struct Empty {}
 struct Stored { execution: Intrinsic.Execution<Result<i32, Failed>> }
@@ -743,10 +743,8 @@ effect fn body() -> Result<i32, Failed> {
 fn ready(state: &()) -> () { return () }
 fn observe(result: Result<i32, Failed>) -> i32 {
   return match move result {
-    Result<i32, Failed> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<Failed> { error } => match move error { Failed { code } => code }
-    }
+      Result<i32, Failed>.Success { value } => value
+      Result<i32, Failed>.Failure { error } => match move error { Failed { code } => code }
   }
 }
 fn complete(owner: &mut Owner, result: Result<i32, Failed>) -> () {
@@ -1718,13 +1716,13 @@ import silk.string {
   scalarValue,
   nextCursor
 }
-import silk.option { Some, None }
+import silk.option { Option }
 import silk.char { toU32 as charToU32 }
 
 fn scalarSum(value: string, cursor: ScalarCursor) -> u32 {
   return match move nextScalar(value, move cursor) {
-    Some<ScalarStep> { value: step } => continueSum(value, move step)
-    None nothing => u32.toU32(0)
+    Option<ScalarStep>.Some { value: step } => continueSum(value, move step)
+    Option<ScalarStep>.None => u32.toU32(0)
   }
 }
 
@@ -1874,7 +1872,7 @@ import silk.i32 as i32
 import silk.hash as Hash
 import silk.hash { HashKey, HashSeed, Word }
 import silk.hash_map { HashMap, bucketCount, contains, get, insert, length, make, remove }
-import silk.option { Option, Some, None }
+import silk.option { Option }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()

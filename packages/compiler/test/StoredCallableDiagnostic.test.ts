@@ -208,7 +208,7 @@ pub fn main() -> i32 {
 
 it.effect('points a stdlib construction reached through inference at the user call', () =>
   Effect.gen(function* () {
-    // `Option.some(i32.add(1))` specializes `Some<T>` with a callable argument. The construction
+    // `Option.some(i32.add(1))` specializes `Option<T>.Some` with a callable argument. The construction
     // that cannot receive a layout lives inside silk/option, but the callable was written at the
     // user's call, so the primary span is the user source and the stdlib construction is related
     // provenance.

@@ -176,7 +176,7 @@ import silk.usize as usize
 import silk.os_filesystem { make as osMake }
 import silk.bytes { asSlice as bytesSlice }
 import silk.filesystem { FileError, FileSystem, make as pathMake }
-import silk.result { Failure, Result, Success }
+import silk.result { Result }
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -195,13 +195,11 @@ effect fn program() -> i32 ! FileError | OutOfMemoryError {
 pub fn main() -> i32 {
   let attempted = run Intrinsic.effectResult(program())
   return match move attempted {
-    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<FileError | OutOfMemoryError> { error } => match move error {
+      Result<i32, FileError | OutOfMemoryError>.Success { value } => value
+      Result<i32, FileError | OutOfMemoryError>.Failure { error } => match move error {
         FileError failure => failure.reason.code
         OutOfMemoryError exhausted => 99
       }
-    }
   }
 }`
       const snapshot = yield* Analysis.ofSourceRealized(
@@ -288,7 +286,7 @@ import silk.effect as Effect
 import silk.usize as usize
 import silk.os_filesystem { make as osMake }
 import silk.filesystem { DirectoryEntry, FileError, FileSystem, root as pathRoot, view as pathView }
-import silk.result { Failure, Result, Success }
+import silk.result { Result }
 import silk.vector { asSlice as vectorSlice }
 
 fn pathMatches(entries: &[DirectoryEntry], index: usize, expected: string) -> bool {
@@ -315,10 +313,8 @@ effect fn program() -> i32 ! FileError | OutOfMemoryError {
 pub fn main() -> i32 {
   let attempted = run Intrinsic.effectResult(program())
   return match move attempted {
-    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<FileError | OutOfMemoryError> { error } => 10
-    }
+      Result<i32, FileError | OutOfMemoryError>.Success { value } => value
+      Result<i32, FileError | OutOfMemoryError>.Failure { error } => 10
   }
 }`
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -624,7 +620,7 @@ import silk.usize as usize
 import silk.os_filesystem { make as osMake }
 import silk.bytes { asSlice as bytesSlice }
 import silk.filesystem { FileError, FileSystem, make as pathMake }
-import silk.result { Failure, Result, Success }
+import silk.result { Result }
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -665,10 +661,8 @@ effect fn program() -> i32 ! FileError | OutOfMemoryError {
 pub fn main() -> i32 {
   let completed = run Intrinsic.effectResult(program())
   return match move completed {
-    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<FileError | OutOfMemoryError> { error } => 10
-    }
+      Result<i32, FileError | OutOfMemoryError>.Success { value } => value
+      Result<i32, FileError | OutOfMemoryError>.Failure { error } => 10
   }
 }`
       const compiled = yield* Driver.compile({

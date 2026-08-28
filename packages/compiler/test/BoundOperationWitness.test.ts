@@ -249,7 +249,7 @@ it.effect(
       const outcome = yield* twoEngineValue(
         'bound-operation-witness/fallible-weaker-access',
         `import silk.effect as Effect
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 
 pub struct Problem { code: i32 }
 
@@ -271,10 +271,8 @@ fn pending<T: Decoder>(value: &mut T) -> Effect<i32 ! Problem> {
 
 fn observe(result: Result<i32, Problem>) -> i32 {
   return match move result {
-    Result<i32, Problem> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<Problem> { error } => error.code
-    }
+      Result<i32, Problem>.Success { value } => value
+      Result<i32, Problem>.Failure { error } => error.code
   }
 }
 
@@ -366,7 +364,7 @@ it.effect('widens a pure source witness to the exact interface Effect contract',
   Effect.gen(function* () {
     const module = 'bound-operation-witness/pure-effect-boundary'
     const source = `import silk.effect as Effect
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 
 pub struct Problem {}
 
@@ -386,10 +384,8 @@ fn pending<T: Decoder>(value: &T) -> Effect<i32 ! Problem> {
 
 fn observe(result: Result<i32, Problem>) -> i32 {
   return match move result {
-    Result<i32, Problem> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<Problem> { error } => 0
-    }
+      Result<i32, Problem>.Success { value } => value
+      Result<i32, Problem>.Failure { error } => 0
   }
 }
 
@@ -495,7 +491,7 @@ it.effect('widens a smaller Effect witness row at the interface boundary', () =>
     const value = yield* evaluatedValue(
       'bound-operation-witness/smaller-effect-row',
       `import silk.effect as Effect
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 
 pub struct Problem {}
 pub struct Extra {}
@@ -516,13 +512,11 @@ fn pending<T: Decoder>(value: &T) -> Effect<i32 ! Problem | Extra> {
 
 fn observe(result: Result<i32, Problem | Extra>) -> i32 {
   return match move result {
-    Result<i32, Problem | Extra> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<Problem | Extra> { error } => match move error {
+      Result<i32, Problem | Extra>.Success { value } => value
+      Result<i32, Problem | Extra>.Failure { error } => match move error {
         Problem {} => 0
         Extra {} => 0
       }
-    }
   }
 }
 

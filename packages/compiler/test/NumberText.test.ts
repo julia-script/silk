@@ -53,7 +53,7 @@ const prelude = `${Scalar.integers()
   .join('\n')}
 import silk.string { String, copy, append, appendOwned, ownedUtf8Bytes, utf8Bytes }
 import silk.format { ParseError, NotANumber, OutOfRange }
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 
 fn sameText(text: &String, expected: string) -> bool {
   let actual = ownedUtf8Bytes(text)
@@ -123,10 +123,8 @@ const valueCheck = (name: string, spelling: string, text: string, expected: stri
 import silk.result { Result }
 fn ${name}() -> i32 {
   return match move ${spelling}.parse("${text}") {
-    Result<${spelling}, ParseError> { value: outcome } => match move outcome {
-      Success<${spelling}> { value } => ${isSigned(spelling) ? 'sameSigned' : 'sameUnsigned'}(${spelling}.${widen(spelling)}(value), ${expected})
-      Failure<ParseError> { error } => 1
-    }
+      Result<${spelling}, ParseError>.Success { value } => ${isSigned(spelling) ? 'sameSigned' : 'sameUnsigned'}(${spelling}.${widen(spelling)}(value), ${expected})
+      Result<${spelling}, ParseError>.Failure { error } => 1
   }
 }`,
 })
@@ -156,10 +154,8 @@ import silk.result { Result }
 import silk.usize as usize
 fn ${name}() -> i32 {
   return match move ${spelling}.parse("${text}") {
-    Result<${spelling}, ParseError> { value: outcome } => match move outcome {
-      Success<${spelling}> { value } => 1
-      Failure<ParseError> { error } => ${failure}
-    }
+      Result<${spelling}, ParseError>.Success { value } => 1
+      Result<${spelling}, ParseError>.Failure { error } => ${failure}
   }
 }`,
   }

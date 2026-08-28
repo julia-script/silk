@@ -677,17 +677,15 @@ it.effect('completes a reified typed failure as data and releases its package on
 import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 struct State { value: i32 }
 struct Failed { code: i32 }
 struct Ready {}
 fn ready(state: &Ready) -> () { return () }
 fn observe(result: Result<i32, Failed>) -> i32 {
   return match move result {
-    Result<i32, Failed> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<Failed> { error } => match move error { Failed { code } => code }
-    }
+      Result<i32, Failed>.Success { value } => value
+      Result<i32, Failed>.Failure { error } => match move error { Failed { code } => code }
   }
 }
 fn complete(state: &mut State, value: Result<i32, Failed>) -> () {

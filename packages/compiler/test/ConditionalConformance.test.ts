@@ -793,7 +793,7 @@ it.effect('infers operand binders and propagates a failing smaller generic witne
     const snapshot = yield* analyze(
       module,
       `import silk.effect as Effect
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 
 struct Problem { code: i32 }
 struct Extra {}
@@ -816,13 +816,11 @@ fn pending<T: Decoder>(value: &T) -> Effect<i32 ! Problem | Extra> {
 
 fn observe(result: Result<i32, Problem | Extra>) -> i32 {
   return match move result {
-    Result<i32, Problem | Extra> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<Problem | Extra> { error } => match move error {
+      Result<i32, Problem | Extra>.Success { value } => value
+      Result<i32, Problem | Extra>.Failure { error } => match move error {
         Problem { code } => code
         Extra {} => 0
       }
-    }
   }
 }
 

@@ -20,14 +20,12 @@ const diagnosticSummary = (snapshot: Analysis.Snapshot) =>
 
 const validation = `import silk.usize as usize
 import silk.string { InvalidUtf8, fromUtf8, byteLength }
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 
 fn observe(result: Result<string, InvalidUtf8>) -> i32 {
   return match move result {
-    Result<string, InvalidUtf8> { value: outcome } => match move outcome {
-      Success<string> { value } => usize.toI32(byteLength(value))
-      Failure<InvalidUtf8> { error } => usize.toI32(error.offset) + 100
-    }
+      Result<string, InvalidUtf8>.Success { value } => usize.toI32(byteLength(value))
+      Result<string, InvalidUtf8>.Failure { error } => usize.toI32(error.offset) + 100
   }
 }
 
@@ -213,14 +211,14 @@ import silk.string {
   scalarByteOffset,
   nextCursor
 }
-import silk.option { Option, Some, None }
+import silk.option { Option }
 import silk.char { toU32 as charToU32 }
 
 fn walk(value: string, cursor: ScalarCursor, expectedOffset: usize) -> u32 {
   if cursorByteOffset(&cursor) == expectedOffset {} else { return u32.toU32(1) }
   return match move nextScalar(value, move cursor) {
-    Some<ScalarStep> { value: step } => continueWalk(value, move step)
-    None nothing => u32.toU32(0)
+    Option<ScalarStep>.Some { value: step } => continueWalk(value, move step)
+    Option<ScalarStep>.None => u32.toU32(0)
   }
 }
 

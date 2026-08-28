@@ -54,7 +54,7 @@ import silk.layout { Layout }
 import silk.hash as Hash
 import silk.hash { HashKey, HashSeed }
 import silk.hash_map { HashMap, contains, insert, length, make, remove, withMut }
-import silk.option { Option, Some, None }
+import silk.option { Option }
 
 struct Handle {
   tag: i32
@@ -319,8 +319,8 @@ it.effect('releases the replaced value and the replaced key when an overwrite la
     |> Effect.provideMut(&mut allocator)
   if length<Handle, Held>(&map) != 1 { return 1 }
   let replaced = match move displaced {
-    Some<Held> { value } => tagOf(move value)
-    None {} => 0
+    Option<Held>.Some { value } => tagOf(move value)
+    Option<Held>.None => 0
   }
   if replaced != 11 { return 2 }
   return 42`),
@@ -352,8 +352,8 @@ it.effect('transfers a removed value out and releases the key the map held', () 
   let taken = remove<Handle, Held>(&mut map, move probe)
   if length<Handle, Held>(&map) != 1 { return 1 }
   let carried = match move taken {
-    Some<Held> { value } => tagOf(move value)
-    None {} => 0
+    Option<Held>.Some { value } => tagOf(move value)
+    Option<Held>.None => 0
   }
   // The removed value is the caller's now, and the map still owns the entry it kept.
   if carried != 20 { return 2 }

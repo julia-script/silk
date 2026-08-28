@@ -203,16 +203,14 @@ pub fn main() -> i32 {
   return false
 }`,
   `import silk.effect as Effect
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 struct ResultProblem {}
 effect fn succeed() -> i32 ! ResultProblem { return 42 }
 pub effect fn main() -> i32 {
   let completed = run Effect.result(succeed())
   return match move completed {
-    Result<i32, ResultProblem> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<ResultProblem> { error } => 0
-    }
+      Result<i32, ResultProblem>.Success { value } => value
+      Result<i32, ResultProblem>.Failure { error } => 0
   }
 }`,
   `struct CatalogProblem {}

@@ -10,19 +10,17 @@ const ascii = (value: string): Uint8Array =>
  * Every manifest namespace is auto-injected into user scope, so a program names Option, Result,
  * and Vector as qualified actors without writing a single import statement.
  */
-const qualified = `import silk.option { None }
-import silk.option { Option }
-import silk.option { Some }
-import silk.result { Result }
-import silk.vector { Vector }
-fn present(value: Option<i32>) -> i32 {
+const qualified = `import silk.option as Option
+import silk.result as Result
+import silk.vector as Vector
+fn present(value: Option.Option<i32>) -> i32 {
   return match move value {
-    None {} => 0
-    Some<i32> { value: carried } => carried
+    Option.Option<i32>.None => 0
+    Option.Option<i32>.Some { value: carried } => carried
   }
 }
 
-fn settled(value: Result<i32, i32>) -> i32 {
+fn settled(value: Result.Result<i32, i32>) -> i32 {
   drop value
   return 2
 }
@@ -35,22 +33,20 @@ pub fn main() -> i32 {
 
 /** The selective import form keeps resolving the same members alongside the injected namespaces. */
 const selective = `import silk.vector { Vector, make }
-import silk.option { Option, Some, None, some }
-import silk.result { Result, Success, Failure, succeed }
+import silk.option { Option, some }
+import silk.result { Result, succeed }
 
 fn settled(value: Result<i32, i32>) -> i32 {
   return match move value {
-    Result<i32, i32> { value: outcome } => match move outcome {
-      Success<i32> { value: carried } => carried
-      Failure<i32> { error: failure } => failure
-    }
+      Result<i32, i32>.Success { value: carried } => carried
+      Result<i32, i32>.Failure { error: failure } => failure
   }
 }
 
 fn present(value: Option<i32>) -> i32 {
   return match move value {
-    None {} => 0
-    Some<i32> { value: carried } => carried
+    Option<i32>.None => 0
+    Option<i32>.Some { value: carried } => carried
   }
 }
 

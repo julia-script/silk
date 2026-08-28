@@ -10,16 +10,14 @@ import * as Projections from './support/projections.js'
 
 const encoder = new TextEncoder()
 const source = `import silk.effect as Effect
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 effect fn succeed(value: i32) -> i32 { return value }
 fn addOne(value: i32) -> i32 { return value + 1 }
 effect fn userMap(self: once Effect<i32>, onSuccess: once fn(i32) -> i32) -> i32 {
   let completed = run Effect.result(move self)
   return match move completed {
-    Result<i32, never> { value: outcome } => match move outcome {
-      Success<i32> { value } => onSuccess(move value)
-      Failure<never> { error } => move error
-    }
+      Result<i32, never>.Success { value } => onSuccess(move value)
+      Result<i32, never>.Failure { error } => move error
   }
 }
 pub fn main() -> i32 { return run succeed(41) |> userMap(addOne) }`
