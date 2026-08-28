@@ -77,27 +77,30 @@ export async function POST(req: Request) {
 
   const result = streamText({
     model: openrouter.chat(process.env.OPENROUTER_MODEL ?? 'anthropic/claude-sonnet-5'),
+    instructions: systemPrompt,
     stopWhen: stepCountIs(5),
     tools: {
       search: searchTool,
     },
-    messages: [
-      { role: 'system', content: systemPrompt },
-      ...(await convertToModelMessages<ChatUIMessage>(reqJson.messages ?? [], {
-        convertDataPart(part) {
-          if (part.type === 'data-client')
-            return {
-              type: 'text',
-              text: `[Client Context: ${JSON.stringify(part.data)}]`,
-            };
-        },
-      })),
-    ],
+    messages: await convertToModelMessages<ChatUIMessage>(reqJson.messages ?? [], {
+      convertDataPart(part) {
+        if (part.type === 'data-client')
+          return {
+            type: 'text',
+            text: `[Client Context: ${JSON.stringify(part.data)}]`,
+          };
+      },
+    }),
     toolChoice: 'auto',
   });
 
   return createUIMessageStreamResponse({
-    stream: toUIMessageStream({ stream: result.stream }),
+    stream: toUIMessageStream({
+      stream: result.stream,
+      onError() {
+        return 'Ask AI could not complete the request. Please try again.';
+      },
+    }),
   });
 }
 
