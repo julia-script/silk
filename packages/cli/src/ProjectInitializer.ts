@@ -167,8 +167,14 @@ const ignoreBytes = (previous: Uint8Array | undefined): Uint8Array => {
 const manifest = (name: string): string =>
   `[package]\nname = "${name}"\nversion = "0.1.0"\nroot = "src/main.silk"\n`
 
-const entry = `pub effect fn main() -> () {
-  return ()
+const entry = `import silk.effect { Effect }
+import silk.logger { Logger }
+
+pub effect fn main() -> () ! Logger.LogError {
+  let mut logger = Logger.stdoutProvider()
+
+  run Effect.log("Hello, world!")
+    |> Effect.provideMut(&mut logger)
 }
 `
 
