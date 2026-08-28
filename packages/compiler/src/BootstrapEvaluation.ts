@@ -374,7 +374,7 @@ function* executeFunction(
     arguments_: ReadonlyArray<Value>,
     operation: Extract<
       Mir.Operation,
-      { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
+      { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' }
     >,
   ): FunctionExecution {
     const control = suspensionFor(operation)
@@ -4475,7 +4475,7 @@ function* executeFunction(
           case 'RunEffectComposite':
           case 'RunEffectValue':
           case 'RunStaticEffect':
-          case 'ReifyEffect': {
+          case 'CatchEffect': {
             const effectStep = yield* BootstrapEffect.execute(
               {
                 program,

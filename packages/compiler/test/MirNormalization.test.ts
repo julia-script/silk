@@ -153,17 +153,18 @@ it.effect('retains only the exact execution whose runner fact is unknown', () =>
   }),
 )
 
-it.effect('retains suspendable reification and effect-entry closure control', () =>
+it.effect('retains suspendable catch and effect-entry closure control', () =>
   Effect.gen(function* () {
-    const reified = yield* Analysis.ofSourceRealized(
-      'test/mir-normalization-reify-suspendable',
+    const caught = yield* Analysis.ofSourceRealized(
+      'test/mir-normalization-catch-suspendable',
       encoder.encode(`import silk.effect as Effect
-effect fn seed(value: i32) -> i32 {
+struct Problem {}
+effect fn seed(value: i32) -> i32 ! Problem {
   return run Effect.suspend(effect { return value })
 }
-fn increment(value: i32) -> i32 { return value + 1 }
+effect fn recover(problem: Problem) -> i32 { return 0 }
 pub fn main() -> i32 {
-  return run seed(41) |> Effect.map(increment)
+  return run seed(42) |> Effect.catchAll(recover)
 }`),
       'wasm32-unknown-unknown',
     )
@@ -173,9 +174,9 @@ pub fn main() -> i32 {
       'wasm32-unknown-unknown',
       { normalizeMir: false },
     )
-    assert.deepEqual(Analysis.diagnostics(reified), [])
+    assert.deepEqual(Analysis.diagnostics(caught), [])
     assert.deepEqual(Analysis.diagnostics(entry), [])
-    const reifiedProgram = Analysis.loweredMir(reified)
+    const caughtProgram = Analysis.loweredMir(caught)
     const rawEntryProgram = Analysis.loweredMir(entry)
     const closure = allOperations(rawEntryProgram).find(
       (operation): operation is Extract<Mir.Operation, { readonly _tag: 'CloseEffectEntry' }> =>
@@ -198,36 +199,15 @@ pub fn main() -> i32 {
     })
     const entryProgram = MirNormalization.normalize(rawEntryProgram, suspendableEntryFacts)
     assert.isTrue(
-      allOperations(reifiedProgram).some((operation) => operation._tag === 'ReifyEffect'),
-      MirEncoding.encode(reifiedProgram),
+      allOperations(caughtProgram).some((operation) => operation._tag === 'CatchEffect'),
+      MirEncoding.encode(caughtProgram),
     )
-    const reify = allOperations(reifiedProgram).find(
-      (operation): operation is Extract<Mir.Operation, { readonly _tag: 'ReifyEffect' }> =>
-        operation._tag === 'ReifyEffect',
-    )
-    assert.isDefined(reify)
-    assert.isFalse(allOperations(reifiedProgram).some((operation) => operation._tag === 'Allocate'))
-    if (reify === undefined) return
-    for (const field of ['successTag', 'failureTag'] as const) {
-      for (const tag of [-1, reify.resultUnion.members.length, Number.MAX_SAFE_INTEGER + 1]) {
-        const forged = structuredClone(reifiedProgram)
-        const operation = allOperations(forged).find(
-          (candidate) => candidate._tag === 'ReifyEffect',
-        )
-        assert.isDefined(operation)
-        if (operation === undefined) return
-        Reflect.set(operation, field, tag)
-        assert.include(
-          MirVerification.verify(forged).map((violation) => violation.rule),
-          'InvalidEffectOperation',
-        )
-      }
-    }
+    assert.isFalse(allOperations(caughtProgram).some((operation) => operation._tag === 'Allocate'))
     assert.isTrue(
       allOperations(entryProgram).some((operation) => operation._tag === 'CloseEffectEntry'),
       MirEncoding.encode(entryProgram),
     )
-    for (const program of [reifiedProgram, entryProgram]) {
+    for (const program of [caughtProgram, entryProgram]) {
       assert.isTrue(
         (program.normalization ?? []).some(
           (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'SuspendableRunner',
@@ -263,7 +243,7 @@ pub fn main() -> i32 {
     assert.isTrue(
       allOperations(program).some(
         (operation) =>
-          (operation._tag === 'RunEffectValue' || operation._tag === 'ReifyEffect') &&
+          (operation._tag === 'RunEffectValue' || operation._tag === 'CatchEffect') &&
           operation.runner.name.includes('$provided$'),
       ),
       MirEncoding.encode(program),

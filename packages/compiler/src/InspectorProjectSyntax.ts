@@ -269,8 +269,6 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
       return `effect block · ${expression.type.access.toLowerCase()}`
     case 'Run':
       return 'run recipe'
-    case 'EffectResult':
-      return 'materialize effect result'
     case 'EffectBindRequirement':
       return expression.provider.capability === undefined
         ? 'bind selected requirement'
@@ -314,11 +312,6 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
       node.arguments.forEach((argument, index) => {
         expression(argument, depth + 1, `${path}.argument${index}`)
       })
-    }
-    if (node._tag === 'EffectResult') {
-      expression(node.protected, depth + 1, `${path}.protected`)
-      expression(node.success, depth + 1, `${path}.success`)
-      expression(node.failure, depth + 1, `${path}.failure`)
     }
     if (node._tag === 'EffectBindRequirement') {
       expression(node.protected, depth + 1, `${path}.protected`)

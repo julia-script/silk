@@ -1013,33 +1013,6 @@ const checkExpression = (
         )
       return
     }
-    case 'EffectResult':
-      // The intrinsic consumes all three operands exactly like its source-callable contract.
-      checkExpression(
-        state,
-        live,
-        expression.protected,
-        argumentConsumes(expression.protected),
-        guard,
-        escaping,
-      )
-      checkExpression(
-        state,
-        live,
-        expression.success,
-        argumentConsumes(expression.success),
-        guard,
-        escaping,
-      )
-      checkExpression(
-        state,
-        live,
-        expression.failure,
-        argumentConsumes(expression.failure),
-        guard,
-        escaping,
-      )
-      return
     case 'EffectCatch':
       // The sealed primitive has the same owned operands as its ordinary callable contract.
       // Visiting both here preserves take-once use checking after elaboration replaces the call
@@ -1416,12 +1389,6 @@ const analyzeLoans = (
       return Object.freeze(
         expression.elements.flatMap((element) => movedExecutableBindings(element.expression)),
       )
-    if (expression._tag === 'EffectResult')
-      return Object.freeze([
-        ...movedExecutableBindings(expression.protected),
-        ...movedExecutableBindings(expression.success),
-        ...movedExecutableBindings(expression.failure),
-      ])
     if (expression._tag === 'EffectCatch')
       return Object.freeze([
         ...movedExecutableBindings(expression.protected),
@@ -1548,11 +1515,6 @@ const analyzeLoans = (
       case 'EffectCatch':
         scanRunEnds(expression.protected, region)
         scanRunEnds(expression.handler, region)
-        return
-      case 'EffectResult':
-        scanRunEnds(expression.protected, region)
-        scanRunEnds(expression.success, region)
-        scanRunEnds(expression.failure, region)
         return
       case 'EffectBindRequirement':
         scanRunEnds(expression.protected, region)

@@ -857,7 +857,7 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = run effect choice ${localText(operation.effect)}`
     case 'RunStaticEffect':
       return `${localText(operation.destination)} = run static ${operation.runner.name} with ${operation.captures.map((capture) => localText(capture.source)).join(', ') || 'no captures'}`
-    case 'ReifyEffect':
+    case 'CatchEffect':
       return `${localText(operation.destination)} = result ${localText(operation.effect)} with ${operation.runner.name}`
     case 'CloseEffectEntry':
       return `${localText(operation.destination)} = close ${operation.target.name} with ${operation.runner.name}`

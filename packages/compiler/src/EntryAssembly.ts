@@ -201,7 +201,7 @@ export const lowerInstance = (
     terminalStatement?._tag === 'Return' && 'type' in terminalStatement.expression
       ? terminalStatement.expression
       : undefined
-  const hiddenEffectResult =
+  const hiddenEffectValue =
     returnedBlock === undefined ? undefined : effectValueType(layout, instance.key, returnedBlock)
   const hiddenCompositeResult =
     returnedExpression === undefined
@@ -212,13 +212,13 @@ export const lowerInstance = (
           returnedExpression.type,
           instance.substitution,
         )
-  const specializedEffectResult =
+  const specializedEffectValue =
     instance.resultEffect === undefined
       ? undefined
       : effectValueByIdentity(layout, instance.resultEffect)
   const resultType =
-    specializedEffectResult ??
-    hiddenEffectResult ??
+    specializedEffectValue ??
+    hiddenEffectValue ??
     hiddenCompositeResult ??
     (contract._tag === 'Contract'
       ? (storedCallableValueType(layout, effectOutcome ?? instance.specialization.result) ??

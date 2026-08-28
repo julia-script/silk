@@ -238,7 +238,7 @@ export interface OperationContext {
     arguments_: ReadonlyArray<Value>,
     operation: Extract<
       Mir.Operation,
-      { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
+      { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' }
     >,
   ) => Generator<MachineRequest, Step, Step>
   readonly callFunction: (
@@ -270,11 +270,11 @@ type EffectOperation = Extract<
       | 'RunEffectComposite'
       | 'RunEffectValue'
       | 'RunStaticEffect'
-      | 'ReifyEffect'
+      | 'CatchEffect'
   }
 >
 
-/** Executes Effect construction, execution, propagation, and reification. */
+/** Executes Effect construction, execution, propagation, and typed-failure catching. */
 export function* execute(
   context: OperationContext,
   operation: EffectOperation,
@@ -609,7 +609,7 @@ export function* execute(
       })
       return Object.freeze({ _tag: 'Value', value: propagated })
     }
-    case 'ReifyEffect': {
+    case 'CatchEffect': {
       const effect = read(operation.effect).value
       if (effect._tag !== 'EffectValue')
         throw new RangeError('MIR attempted to reify a non-Effect value')

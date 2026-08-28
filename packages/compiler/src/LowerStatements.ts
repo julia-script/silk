@@ -365,7 +365,6 @@ export const lowerSequence = (
             statement.initializer.typeArguments.map((argument) => fn.semanticArgument(argument)),
           ),
         ) === undefined) ||
-      statement.initializer._tag === 'EffectResult' ||
       statement.initializer._tag === 'EffectBindRequirement' ||
       (statement.initializer._tag === 'Match' &&
         effectContract(initializerType ?? 'never') !== undefined) ||

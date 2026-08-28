@@ -531,12 +531,6 @@ export const storageFailure: Nominal = sealedStorageFailure()
 export const some = (element: Type): Nominal => nominal('silk/option', 'Some', [element])
 export const none: Nominal = nominal('silk/option', 'None')
 
-/** Canonical completed Effect outcome data shipped by silk/result. */
-export const resultSuccess = (value: Type): Nominal => nominal('silk/result', 'Success', [value])
-export const resultFailure = (error: Type): Nominal => nominal('silk/result', 'Failure', [error])
-export const result = (value: Type, error: Type): Nominal =>
-  nominal('silk/result', 'Result', [value, error])
-
 /** Normalizes one or more ordinary failure types to their runtime value union. */
 export const failureValue = (failures: ReadonlyArray<Type>): Type => {
   const only = failures.at(0)

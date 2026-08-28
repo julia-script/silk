@@ -5421,14 +5421,6 @@
       "identity": "EffectSuspend"
     },
     {
-      "operation": "Intrinsic.effectResult",
-      "signature": "fn Intrinsic.effectResult<R>(protected: Effect<A ! E ? Q>, success: once fn(A) -> R, failure: once fn(E) -> R) -> Effect<R ? Q>",
-      "unsafe": false,
-      "admission": "Effect",
-      "consumer": "silk/effect.result",
-      "identity": "EffectRule.Result"
-    },
-    {
       "operation": "Intrinsic.bindRequirement",
       "signature": "fn Intrinsic.bindRequirement<?S, A, P, E, ?R>(protected: once Effect<A ! E ? R>, provider: &P) -> Effect<A ! E ? Without<R, S>>",
       "unsafe": false,

@@ -23,7 +23,6 @@ import {
   lowerEffectCatch,
   lowerEffectExecution,
   lowerPlace,
-  lowerReifiedEffectRecipe,
   lowerRunEffectComposite,
   ownedWriteRoot,
 } from './EffectLowering.js'
@@ -540,7 +539,7 @@ export function lowerExpressionInner(
       const definition =
         callable === undefined ? undefined : fn.callableDefinitions.get(callable.ordinal)
       const realizedTarget = target ?? definition?.target
-      const declaredEffectResult =
+      const declaredEffectValue =
         realizedTarget?._tag === 'DeclarationCallableTarget'
           ? fn.effectResults.get(instanceText(realizedTarget.declaration, typeArguments))
           : undefined
@@ -548,7 +547,7 @@ export function lowerExpressionInner(
         (call?.resultEffect === undefined
           ? undefined
           : effectValueByIdentity(fn.layout, call.resultEffect)) ??
-        declaredEffectResult ??
+        declaredEffectValue ??
         fn.type(expression.type)
       if (!lowered || type === undefined || callableType === undefined) return undefined
       if (
@@ -761,24 +760,11 @@ export function lowerExpressionInner(
     }
     case 'EffectCatch':
       return lowerCatchEffectValue(fn, expression)
-    case 'EffectResult':
-      return undefined
     case 'Run': {
       return fn.withRecipeReplay(() => {
         const resultRecipe = effectRecipe(fn, expression.subject)
         if (resultRecipe?._tag === 'EffectCatch')
           return lowerEffectCatch(fn, resultRecipe, expression.span)
-        if (resultRecipe?._tag === 'EffectResult') {
-          const reified = lowerReifiedEffectRecipe(
-            fn,
-            resultRecipe.protected,
-            resultRecipe.success,
-            resultRecipe.failure,
-            expression.type,
-            expression.span,
-          )
-          return reified
-        }
         if (
           resultRecipe !== undefined &&
           inlineForwardedRequirement(fn, resultRecipe) !== undefined

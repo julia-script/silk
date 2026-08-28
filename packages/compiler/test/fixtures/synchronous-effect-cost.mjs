@@ -512,7 +512,7 @@ const runnerClassifications = (program) => {
           'RunEffect',
           'RunEffectValue',
           'RunStaticEffect',
-          'ReifyEffect',
+          'CatchEffect',
           'CloseEffectEntry',
         ].includes(candidate._tag),
       ).length

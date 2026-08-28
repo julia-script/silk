@@ -51,7 +51,7 @@ export const callSynchronous = Effect.fnUntraced(function* (
 export const operationInputs = (
   operation: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' | 'ExecutionPark' }
   >,
 ): ReadonlyArray<Mir.LocalId> => {
   if (operation._tag === 'ExecutionPark') {

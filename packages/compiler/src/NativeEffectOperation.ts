@@ -31,7 +31,7 @@ type Operation = Extract<
       | 'RunEffectComposite'
       | 'RunEffectValue'
       | 'RunStaticEffect'
-      | 'ReifyEffect'
+      | 'CatchEffect'
       | 'CloseEffectEntry'
   }
 >
@@ -796,7 +796,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(loaded))
       break
     }
-    case 'ReifyEffect': {
+    case 'CatchEffect': {
       const target = declared.find((candidate) =>
         Mir.matchesInstance(candidate.fn, operation.runner, operation.runnerTypeArguments),
       )

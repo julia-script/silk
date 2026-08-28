@@ -573,27 +573,6 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       span: fact.syntax.span,
     })
   }
-  if (fact._tag === 'EffectResult') {
-    const protected_ = hirExpression(fact.protected)
-    const success = hirExpression(fact.success)
-    const failure = hirExpression(fact.failure)
-    if (
-      protected_._tag === 'Unavailable' ||
-      success._tag === 'Unavailable' ||
-      failure._tag === 'Unavailable' ||
-      fact.type._tag !== 'Available' ||
-      !Type.isEffect(fact.type.type)
-    )
-      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
-    return Object.freeze({
-      _tag: 'EffectResult',
-      protected: protected_,
-      success,
-      failure,
-      type: fact.type.type,
-      span: fact.syntax.span,
-    })
-  }
   if (fact._tag === 'EffectCatch') {
     const protected_ = hirExpression(fact.protected)
     const handler = hirExpression(fact.handler)
@@ -1651,8 +1630,6 @@ export const directExpressionChildren = (
       return Object.freeze(expression.initializers.map((initializer) => initializer.expression))
     case 'Grouped':
       return Object.freeze([expression.expression])
-    case 'EffectResult':
-      return Object.freeze([expression.protected])
     case 'EffectBindRequirement':
       return Object.freeze([expression.protected])
     case 'EffectCatch':

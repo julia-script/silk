@@ -708,7 +708,7 @@ export const emitOrigin = Effect.fnUntraced(function* (
   context: OperationContext,
   operation: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' }
   >,
   arguments_: ReadonlyArray<Value.Input>,
   name: string,
@@ -740,7 +740,7 @@ export const joinOutcome = Effect.fnUntraced(function* (
   context: OperationContext,
   operation: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' }
   >,
   completedValues: ReadonlyArray<Value.Input>,
   name: string,

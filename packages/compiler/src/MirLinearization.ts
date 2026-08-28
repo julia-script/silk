@@ -127,7 +127,7 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'RunEffect':
     case 'RunEffectValue':
     case 'RunStaticEffect':
-    case 'ReifyEffect':
+    case 'CatchEffect':
     case 'CloseEffectEntry':
     case 'Construct':
     case 'ConstructUnionVariant':
@@ -193,7 +193,7 @@ export const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'RunEffectValue' ||
   operation._tag === 'RunEffectComposite' ||
   operation._tag === 'RunStaticEffect' ||
-  operation._tag === 'ReifyEffect' ||
+  operation._tag === 'CatchEffect' ||
   operation._tag === 'CloseEffectEntry' ||
   (operation._tag === 'Binary' &&
     operation.operator !== 'Equals' &&

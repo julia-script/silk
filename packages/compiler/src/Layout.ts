@@ -1872,10 +1872,11 @@ export const catalog = (
         }
         if (child._tag === 'EffectCatch' && child.protected._tag !== 'Unavailable') {
           const protected_ = Type.substitute(child.protected.type, substitution)
-          if (Type.isEffect(protected_))
-            addReferenced(
-              Type.result(protected_.success, Type.failureValue(Type.failureMembers(protected_))),
-            )
+          if (Type.isEffect(protected_)) {
+            addReferenced('bool')
+            addReferenced(protected_.success)
+            addReferenced(Type.failureValue(Type.failureMembers(protected_)))
+          }
         }
       }
     }
@@ -2047,16 +2048,15 @@ const addExpressionTypes = (
   }
   if (expression._tag === 'EffectCatch') {
     types.set(Type.key('never'), 'never')
+    types.set(Type.key('bool'), 'bool')
     addExpressionTypes(types, expression.protected, substitution)
     addExpressionTypes(types, expression.handler, substitution)
     if (expression.protected._tag !== 'Unavailable') {
       const protected_ = Type.substitute(expression.protected.type, substitution)
       if (Type.isEffect(protected_)) {
-        const reified = Type.result(
-          protected_.success,
-          Type.failureValue(Type.failureMembers(protected_)),
-        )
-        types.set(Type.key(reified), reified)
+        types.set(Type.key(protected_.success), protected_.success)
+        const failure = Type.failureValue(Type.failureMembers(protected_))
+        types.set(Type.key(failure), failure)
       }
     }
   }
@@ -2839,11 +2839,6 @@ export const plan = (
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)) {
       if (expression._tag === 'EffectCatch') reached.set(Type.key('bool'), 'bool')
-      if (expression._tag === 'EffectResult') {
-        reached.set(Type.key('bool'), 'bool')
-        const result = Type.substitute(expression.type, instance.substitution)
-        reached.set(Type.key(result), result)
-      }
       if (
         expression._tag !== 'BuiltinCall' ||
         (expression.operation !== 'ExecutionLayout' &&

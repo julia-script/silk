@@ -125,7 +125,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'RunEffectComposite':
     case 'RunEffectValue':
     case 'RunStaticEffect':
-    case 'ReifyEffect':
+    case 'CatchEffect':
     case 'CloseEffectEntry':
       return yield* NativeEffectOperation.emit(context.effect, operation)
     case 'ApplyCallable':

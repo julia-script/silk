@@ -427,8 +427,6 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         provider: expression.provider,
         span: expression.span,
       })
-    if (expression._tag === 'EffectResult')
-      return originOf(expression.protected, instance, parameterOrigins, resolving, activeBindings)
     if (expression._tag === 'EffectCatch')
       return originOf(expression.protected, instance, parameterOrigins, resolving, activeBindings)
     if (expression._tag === 'EffectBlock') {

@@ -1411,7 +1411,7 @@ const layoutOf = (
 const suspensionOperationInputs = (
   operation: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' | 'ExecutionPark' }
   >,
 ): ReadonlyArray<Mir.LocalId> => {
   switch (operation._tag) {
@@ -1420,7 +1420,7 @@ const suspensionOperationInputs = (
     case 'RunEffect':
       return operation.arguments
     case 'RunEffectValue':
-    case 'ReifyEffect':
+    case 'CatchEffect':
       return Object.freeze([operation.effect, ...operation.arguments])
   }
 }
@@ -1429,13 +1429,13 @@ const matchesSuspensionOperation = (
   candidate: Mir.Operation,
   expected: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' | 'ExecutionPark' }
   >,
 ): boolean =>
   candidate === expected ||
   ((candidate._tag === 'RunEffect' ||
     candidate._tag === 'RunEffectValue' ||
-    candidate._tag === 'ReifyEffect' ||
+    candidate._tag === 'CatchEffect' ||
     candidate._tag === 'ExecutionPark') &&
     candidate._tag === expected._tag &&
     candidate.destination.ordinal === expected.destination.ordinal &&
@@ -6122,8 +6122,8 @@ const emitRunEffectCompositeOperation = (
   ]
 }
 
-const emitReifyEffectOperation = (
-  operation: Extract<Mir.Operation, { readonly _tag: 'ReifyEffect' }>,
+const emitCatchEffectOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'CatchEffect' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
   const {
@@ -7387,8 +7387,8 @@ const emitOperationWithContext = (
       return emitRunEffectValueOrRunStaticEffectOperation(operation, context)
     case 'RunEffectComposite':
       return emitRunEffectCompositeOperation(operation, context)
-    case 'ReifyEffect':
-      return emitReifyEffectOperation(operation, context)
+    case 'CatchEffect':
+      return emitCatchEffectOperation(operation, context)
     case 'CloseEffectEntry':
       return emitCloseEffectEntryOperation(operation, context)
     case 'Call':

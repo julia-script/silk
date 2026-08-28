@@ -226,7 +226,7 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
               ...operation.arguments,
             ]) || changed
           break
-        case 'ReifyEffect':
+        case 'CatchEffect':
           changed =
             include(operation.destination, [operation.effect, ...operation.arguments]) || changed
           break

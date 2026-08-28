@@ -289,12 +289,6 @@ export const make = (operations: Operations) => {
     substitution: Type.Substitution,
   ): ReadonlyArray<CallTarget> => {
     if (expression._tag === 'Run') return callTargets(expression.subject, index, substitution)
-    if (expression._tag === 'EffectResult')
-      return [
-        ...callTargets(expression.protected, index, substitution),
-        ...callTargets(expression.success, index, substitution),
-        ...callTargets(expression.failure, index, substitution),
-      ]
     if (expression._tag === 'EffectCatch')
       return [
         ...callTargets(expression.protected, index, substitution),
@@ -886,15 +880,7 @@ export const make = (operations: Operations) => {
             ? undefined
             : resultEffectIdentity(serviceFunction, serviceTarget, context.results, context.index)
       }
-      if (identity === undefined) {
-        if (
-          forwardedEffectResultParameter(target) === ordinal &&
-          argument !== undefined &&
-          requirementBoundEffectRecipe(argument, context)
-        )
-          continue
-        return undefined
-      }
+      if (identity === undefined) return undefined
       hiddenArguments.push(Type.effectIdentityArgument(identity))
     }
     for (const ordinal of callableParameterOrdinals(target, targetSubstitution)) {
@@ -959,51 +945,6 @@ export const make = (operations: Operations) => {
     })
   }
 
-  const forwardedEffectResultParameter = (target: Hir.HirFunction): number | undefined => {
-    const returned = target.statements.at(-1)
-    if (target.statements.length !== 1 || returned?._tag !== 'Return') return undefined
-    const block = returned.expression
-    const completed = block._tag === 'EffectBlock' ? block.statements.at(-1) : undefined
-    const run = completed?._tag === 'Return' ? completed.expression : undefined
-    const result = run?._tag === 'Run' ? run.subject : undefined
-    if (
-      block._tag !== 'EffectBlock' ||
-      block.statements.length !== 1 ||
-      result?._tag !== 'EffectResult'
-    )
-      return undefined
-    const parameterOrdinal = (expression: Hir.Expression): number | undefined => {
-      const parameter = expression._tag === 'Move' ? expression.subject : expression
-      return parameter._tag === 'ParameterReference' ? parameter.parameter.ordinal : undefined
-    }
-    const protected_ = parameterOrdinal(result.protected)
-    return protected_
-  }
-
-  const requirementBoundEffectRecipe = (
-    expression: Hir.Expression,
-    context: EffectOriginContext,
-    resolving: ReadonlySet<number> = new Set(),
-  ): boolean => {
-    if (expression._tag === 'Move')
-      return requirementBoundEffectRecipe(expression.subject, context, resolving)
-    if (expression._tag === 'UnionConvert')
-      return requirementBoundEffectRecipe(expression.source, context, resolving)
-    if (expression._tag === 'BindingReference') {
-      const ordinal = expression.binding.ordinal
-      if (resolving.has(ordinal)) return false
-      const initializer = callableBindings(context.fn).get(ordinal)
-      return (
-        initializer !== undefined &&
-        requirementBoundEffectRecipe(initializer, context, new Set(resolving).add(ordinal))
-      )
-    }
-    if (expression._tag === 'EffectBindRequirement') return true
-    if (expression._tag !== 'Call' && expression._tag !== 'EffectConstruct') return false
-    const target = targetFunction(context.results, expression.target)
-    return target !== undefined && forwardedRequirementBinding(target) !== undefined
-  }
-
   function serviceEffectRecipes(
     expression: Hir.Expression,
     context: EffectOriginContext,
@@ -1021,8 +962,6 @@ export const make = (operations: Operations) => {
       )
     if (expression._tag === 'Run')
       return serviceEffectRecipes(expression.subject, context, resolving)
-    if (expression._tag === 'EffectResult')
-      return serviceEffectRecipes(expression.protected, context, resolving)
     if (expression._tag === 'Move')
       return serviceEffectRecipes(expression.subject, context, resolving)
     if (expression._tag === 'UnionConvert')
@@ -1313,15 +1252,7 @@ export const make = (operations: Operations) => {
             ? undefined
             : resultEffectIdentity(serviceFunction, serviceTarget, context.results, context.index)
       }
-      if (identity === undefined) {
-        if (
-          forwardedEffectResultParameter(target) === ordinal &&
-          argument !== undefined &&
-          requirementBoundEffectRecipe(argument, context)
-        )
-          continue
-        return undefined
-      }
+      if (identity === undefined) return undefined
       hiddenArguments.push(Type.effectIdentityArgument(identity))
     }
     for (const ordinal of callableParameterOrdinals(target, targetSubstitution)) {
@@ -2466,7 +2397,6 @@ export const make = (operations: Operations) => {
       const executionTargets = (expression: Hir.Expression): ReadonlyArray<string> => {
         if (expression._tag === 'EffectBindRequirement')
           return Object.freeze([providerBindingNode(instance.key, expression)])
-        if (expression._tag === 'EffectResult') return executionTargets(expression.protected)
         if (expression._tag === 'BindingReference') {
           const initializer = bindings.get(expression.binding.ordinal)
           return initializer === undefined ? [] : executionTargets(initializer)

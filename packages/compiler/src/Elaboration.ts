@@ -931,16 +931,6 @@ export type ExpressionFact =
       readonly syntax: SyntaxTree.Node
     }
   | {
-      /** Folds one typed Effect outcome through ordinary carrier functions without catching traps. */
-      readonly _tag: 'EffectResult'
-      readonly reference: IntrinsicReferenceFact
-      readonly protected: ExpressionFact
-      readonly success: ExpressionFact
-      readonly failure: ExpressionFact
-      readonly type: ExpressionTypeFact
-      readonly syntax: SyntaxTree.Node
-    }
-  | {
       /** `Place.replace(place, value)`: swap one writable place, yielding its old value. */
       readonly _tag: 'PlaceReplace'
       readonly reference: IntrinsicReferenceFact

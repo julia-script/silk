@@ -501,7 +501,7 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
         invalid('InvalidSuspension', 'suspension runner identity disagrees with its exact MIR call')
       if (
         (region.completion._tag === 'Propagate' &&
-          (effectOperation._tag === 'ReifyEffect' ||
+          (effectOperation._tag === 'CatchEffect' ||
             region.completion.failureMappings.length !==
               SilkType.failureMembers(effectOperation.outcomeType.type).length ||
             region.completion.failureMappings.some((mapping, ordinal) => {
@@ -526,7 +526,7 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
               )
             }))) ||
         (region.completion._tag === 'Reify' &&
-          (effectOperation._tag !== 'ReifyEffect' ||
+          (effectOperation._tag !== 'CatchEffect' ||
             !SilkType.equals(
               region.completion.successType,
               effectOperation.outcomeType.type.success,
@@ -813,7 +813,7 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         ...operation.captures.map((capture) => capture.source),
         ...operation.arguments,
       ]
-    case 'ReifyEffect':
+    case 'CatchEffect':
       return [
         operation.destination,
         operation.outcome,
@@ -1689,7 +1689,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
         semanticType(operation.type),
         ...operation.runnerTypeArguments.filter(SilkType.isTypeArgument),
       ]
-    case 'ReifyEffect':
+    case 'CatchEffect':
       return [
         semanticType(operation.outcomeType),
         operation.failureValueType,
@@ -1853,7 +1853,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       ]
     case 'RunStaticEffect':
       return [...operation.captures.map((capture) => capture.source), ...operation.arguments]
-    case 'ReifyEffect':
+    case 'CatchEffect':
       return [operation.effect, ...operation.arguments]
     case 'CloseEffectEntry':
       return []
@@ -2088,7 +2088,7 @@ const suspensionCallTargets = (operation: Operation): ReadonlyArray<SuspensionCa
       ]
     case 'RunEffectValue':
     case 'RunStaticEffect':
-    case 'ReifyEffect':
+    case 'CatchEffect':
       return [
         Object.freeze({
           declaration: operation.runner,
@@ -5647,7 +5647,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               }),
             )
         }
-        if (operation._tag === 'ReifyEffect') {
+        if (operation._tag === 'CatchEffect') {
           const runner = self.functions.find((candidate) =>
             matchesInstance(candidate, operation.runner, operation.runnerTypeArguments),
           )

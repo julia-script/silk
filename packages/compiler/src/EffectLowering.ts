@@ -9,7 +9,7 @@ import {
 import * as ConformanceProof from './ConformanceProof.js'
 import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
-import { effectRecipe, inlineForwardedRequirement } from './Forwarding.js'
+import { inlineForwardedRequirement } from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -311,20 +311,20 @@ export const lowerRunEffectComposite = (
   return Object.freeze({ result: destination })
 }
 
-export interface ReifiedEffect {
+export interface CaughtEffect {
   readonly valid: Mir.LocalId
   readonly success: Mir.LocalId
   readonly failure: Mir.LocalId
   readonly failureValueType: Type.Type
 }
 
-export const reifyEffectValue = (
+export const runCaughtEffectValue = (
   fn: FunctionLowering,
   effect: Mir.LocalId,
   effectType: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>,
   span: SourceSpan.SourceSpan,
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.providedRequirements,
-): ReifiedEffect | undefined => {
+): CaughtEffect | undefined => {
   const provided = requirementsFor(availableRequirements, effectType.type)
   if (provided === undefined) return undefined
   const runner =
@@ -362,7 +362,7 @@ export const reifyEffectValue = (
   const failure = fn.alloc(failureType)
   fn.emit(
     Object.freeze({
-      _tag: 'ReifyEffect' as const,
+      _tag: 'CatchEffect' as const,
       destination: valid,
       outcome,
       successValue: success,
@@ -390,7 +390,7 @@ export const reifyEffectValue = (
   })
 }
 
-export const callableEffectResult = (
+export const callableEffectValue = (
   fn: FunctionLowering,
   callable: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
 ): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
@@ -441,7 +441,7 @@ export const lowerEffectCatch = (
     captured?.handlerType ??
     (handler === undefined ? undefined : fn.localTypes.at(handler.result.ordinal))
   const handlerEffectType =
-    handlerType?._tag === 'CallableValue' ? callableEffectResult(fn, handlerType) : undefined
+    handlerType?._tag === 'CallableValue' ? callableEffectValue(fn, handlerType) : undefined
   if (
     handler === undefined ||
     handlerType?._tag !== 'CallableValue' ||
@@ -528,12 +528,12 @@ export const lowerEffectCatch = (
   )
     return undefined
 
-  const reified = reifyEffectValue(fn, protected_.result, protectedType, expression.span)
-  if (reified === undefined) return undefined
+  const caught = runCaughtEffectValue(fn, protected_.result, protectedType, expression.span)
+  if (caught === undefined) return undefined
 
   const successType = fn.type(resultEffect.success)
   const successShape = Layout.callingShape(fn.layout, resultEffect.success)
-  const failureValueMir = fn.type(reified.failureValueType)
+  const failureValueMir = fn.type(caught.failureValueType)
   const propagationEffect = fn.effectOutcome
   const propagationType = propagationEffect === undefined ? undefined : fn.type(propagationEffect)
   const propagationShape =
@@ -571,7 +571,7 @@ export const lowerEffectCatch = (
             handlerType.typeArguments ??
             Object.freeze([]),
           captures: Object.freeze([]),
-          arguments: Object.freeze([reified.failure]),
+          arguments: Object.freeze([caught.failure]),
           callableType: handlerType.type,
           access: handlerType.type.mode,
           evaluation: 'CalleeThenArguments' as const,
@@ -588,8 +588,8 @@ export const lowerEffectCatch = (
       Object.freeze({
         _tag: 'Conditional' as const,
         destination,
-        condition: reified.valid,
-        taken: Object.freeze({ operations: unusedHandlerDrop(), result: reified.success }),
+        condition: caught.valid,
+        taken: Object.freeze({ operations: unusedHandlerDrop(), result: caught.success }),
         otherwise: Object.freeze({ operations: handledOperations, result: handled.result }),
         type: successType,
         resultShape: successShape,
@@ -745,9 +745,9 @@ export const lowerEffectCatch = (
     _tag: 'Match',
     id: innerMatch,
     destination: innerResult,
-    scrutinee: reified.failure,
+    scrutinee: caught.failure,
     scrutineeType: failureValueMir,
-    scrutineeShape: Layout.callingShape(fn.layout, reified.failureValueType) ?? successShape,
+    scrutineeShape: Layout.callingShape(fn.layout, caught.failureValueType) ?? successShape,
     access: 'Move',
     retainsBindings: false,
     members: failureCoverage,
@@ -769,8 +769,8 @@ export const lowerEffectCatch = (
     Object.freeze({
       _tag: 'Conditional' as const,
       destination,
-      condition: reified.valid,
-      taken: Object.freeze({ operations: unusedHandlerDrop(), result: reified.success }),
+      condition: caught.valid,
+      taken: Object.freeze({ operations: unusedHandlerDrop(), result: caught.success }),
       otherwise: Object.freeze({
         operations: Object.freeze([innerOperation]),
         result: innerResult,
@@ -1046,13 +1046,13 @@ export const lowerServiceEffectValue = (
   )
     return undefined
   const typeArguments = call?.target.typeArguments ?? provided.witness.typeArguments
-  const effectResult =
+  const effectValue =
     (call?.resultEffect === undefined
       ? undefined
       : effectValueByIdentity(fn.layout, call.resultEffect)) ??
     fn.effectResults.get(instanceText(target, typeArguments))
-  if (effectResult === undefined) return undefined
-  const effect = fn.alloc(effectResult)
+  if (effectValue === undefined) return undefined
+  const effect = fn.alloc(effectValue)
   fn.emit(
     Object.freeze({
       _tag: 'Call',
@@ -1065,7 +1065,7 @@ export const lowerServiceEffectValue = (
           argument === undefined ? [] : [argument.result],
         ),
       ]),
-      type: effectResult,
+      type: effectValue,
       provenance: authored(subject.span),
     }),
   )
@@ -1163,7 +1163,7 @@ const prepareProvidedEffect = (
 }
 
 /**
- * Brackets one provided requirement for reification or immediate execution. The actor that begins
+ * Brackets one provided requirement for catch handling or immediate execution. The actor that begins
  * a provider loan also ends it, removes its tracking entry, and drops a taken provider after the
  * protected lowering has finished.
  */
@@ -1244,143 +1244,6 @@ const lowerForwardedProvider = <A>(
       forwarded.provider.span,
     )
   return result
-}
-
-export const lowerReifiedEffectRecipe = (
-  fn: FunctionLowering,
-  subject: Hir.Expression,
-  successCarrier: Hir.Expression,
-  failureCarrier: Hir.Expression,
-  resultType: Type.Type,
-  span: SourceSpan.SourceSpan,
-  availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.providedRequirements,
-): LoweredExpression | undefined => {
-  const recipe = effectRecipe(fn, subject)
-  const forwarded = inlineForwardedRequirement(fn, recipe)
-  if (forwarded !== undefined) {
-    return lowerForwardedProvider(fn, forwarded, span, (requirement) => {
-      const reified = lowerReifiedEffectRecipe(
-        fn,
-        forwarded.binding.protected,
-        successCarrier,
-        failureCarrier,
-        resultType,
-        span,
-        Object.freeze([...availableRequirements, requirement]),
-      )
-      if (reified === undefined) return undefined
-      endRunLoans(fn, span)
-      return reified
-    })
-  }
-
-  if (recipe._tag === 'EffectBindRequirement') {
-    return lowerProvidedEffect(fn, recipe.provider, (requirement) => {
-      const reified = lowerReifiedEffectRecipe(
-        fn,
-        recipe.protected,
-        successCarrier,
-        failureCarrier,
-        resultType,
-        span,
-        Object.freeze([...availableRequirements, requirement]),
-      )
-      if (reified === undefined) return undefined
-      endRunLoans(fn, span)
-      return reified
-    })
-  }
-  const lowered =
-    recipe._tag === 'ServiceEffectConstruct'
-      ? lowerServiceEffectValue(fn, recipe, availableRequirements)
-      : lowerExpression(fn, recipe)
-  const effectType = lowered === undefined ? undefined : fn.localTypes.at(lowered.result.ordinal)
-  if (lowered === undefined || effectType?._tag !== 'EffectValue') return undefined
-  const success = lowerExpression(fn, successCarrier)
-  const failure = lowerExpression(fn, failureCarrier)
-  const successType = success === undefined ? undefined : fn.localTypes.at(success.result.ordinal)
-  const failureType = failure === undefined ? undefined : fn.localTypes.at(failure.result.ordinal)
-  const carrierType = fn.type(resultType)
-  const carrierShape =
-    carrierType === undefined
-      ? undefined
-      : Layout.callingShape(fn.layout, Mir.semanticType(carrierType))
-  if (
-    success === undefined ||
-    failure === undefined ||
-    successType?._tag !== 'CallableValue' ||
-    failureType?._tag !== 'CallableValue' ||
-    carrierType === undefined ||
-    carrierType._tag === 'EffectOutcome' ||
-    carrierShape === undefined
-  )
-    return undefined
-  const reified = reifyEffectValue(fn, lowered.result, effectType, span, availableRequirements)
-  if (reified === undefined) return undefined
-  const drop = (
-    local: Mir.LocalId,
-    type: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
-  ): ReadonlyArray<Mir.DropOperation> => {
-    const cleanup = cleanupForLocal(fn, concreteCleanup(fn, Mir.semanticType(type)), type)
-    return cleanup._tag === 'NoCleanup'
-      ? Object.freeze([])
-      : Object.freeze([
-          Object.freeze({
-            _tag: 'Drop' as const,
-            local,
-            cleanup,
-            provenance: generated(span),
-          }),
-        ])
-  }
-  const apply = (
-    callable: Mir.LocalId,
-    callableType: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
-    argument: Mir.LocalId,
-  ): Extract<Mir.Operation, { readonly _tag: 'ApplyCallable' }> =>
-    Object.freeze({
-      _tag: 'ApplyCallable',
-      destination: fn.alloc(carrierType),
-      callable,
-      typeArguments:
-        callableType.environment?.callable.typeArguments ??
-        callableType.storage?.realization.targetArguments ??
-        callableType.typeArguments ??
-        Object.freeze([]),
-      captures: Object.freeze([]),
-      arguments: Object.freeze([argument]),
-      callableType: callableType.type,
-      access: callableType.type.mode,
-      evaluation: 'CalleeThenArguments',
-      realization: 'Environment',
-      type: carrierType,
-      provenance: generated(span),
-    })
-  const successApply = apply(success.result, successType, reified.success)
-  const failureApply = apply(failure.result, failureType, reified.failure)
-  const destination = fn.alloc(carrierType)
-  fn.emit(
-    Object.freeze({
-      _tag: 'Conditional' as const,
-      destination,
-      condition: reified.valid,
-      taken: Object.freeze({
-        operations: Object.freeze([...drop(failure.result, failureType), successApply]),
-        result: successApply.destination,
-      }),
-      otherwise: Object.freeze({
-        operations: Object.freeze([...drop(success.result, successType), failureApply]),
-        result: failureApply.destination,
-      }),
-      type: carrierType,
-      resultShape: carrierShape,
-      provenance: generated(span),
-    }),
-  )
-  endRunLoans(fn, span)
-  if (recipe._tag === 'EffectConstruct' || recipe._tag === 'ServiceEffectConstruct')
-    endLoans(fn, recipe.loanEnds, span)
-  return Object.freeze({ result: destination })
 }
 
 export const lowerEffectExecution = (
@@ -1465,13 +1328,12 @@ export const lowerEffectExecution = (
   }
   if (subject._tag === 'ServiceEffectConstruct') {
     const lowered = lowerServiceEffectValue(fn, subject, availableRequirements)
-    const effectResult =
-      lowered === undefined ? undefined : fn.localTypes.at(lowered.result.ordinal)
-    if (lowered === undefined || effectResult?._tag !== 'EffectValue') return undefined
+    const effectValue = lowered === undefined ? undefined : fn.localTypes.at(lowered.result.ordinal)
+    if (lowered === undefined || effectValue?._tag !== 'EffectValue') return undefined
     const result = lowerRunEffectValue(
       fn,
       lowered.result,
-      effectResult,
+      effectValue,
       success,
       span,
       availableRequirements,

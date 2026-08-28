@@ -733,14 +733,6 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
-      readonly _tag: 'EffectResult'
-      readonly protected: Expression
-      readonly success: Expression
-      readonly failure: Expression
-      readonly type: Type.Effect
-      readonly span: SourceSpan.SourceSpan
-    }
-  | {
       /**
        * Member-selective recovery, carrying the four rows the semantic-fact surface records.
        * `residualRow` is the protected row minus `selected`; it is stored rather than derived
@@ -1047,8 +1039,6 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
         return expression.statements.flatMap(statementExpressions)
       case 'Run':
         return [expression.subject]
-      case 'EffectResult':
-        return [expression.protected, expression.success, expression.failure]
       case 'EffectBindRequirement':
         return [expression.protected]
       case 'EffectCatch':
@@ -1147,8 +1137,6 @@ export const firstUnavailable = (
       }
       case 'Run':
         return walk(expression.subject)
-      case 'EffectResult':
-        return walk(expression.protected) ?? walk(expression.success) ?? walk(expression.failure)
       case 'EffectBindRequirement':
         return walk(expression.protected)
       case 'EffectCatch':
@@ -1596,13 +1584,6 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       return [
         `${indent}run : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.subject, depth + 1),
-      ].join('\n')
-    case 'EffectResult':
-      return [
-        `${indent}effect-result : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
-        encodeExpression(expression.protected, depth + 1),
-        encodeExpression(expression.success, depth + 1),
-        encodeExpression(expression.failure, depth + 1),
       ].join('\n')
     case 'EffectCatch':
       return [

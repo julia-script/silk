@@ -21,7 +21,7 @@
 //! owned provider bindings have distinct borrowing and capture behavior.
 //!
 //! # Gotchas
-//! Typed failures are outcomes that combinators can reify and recover. Traps are not: they bypass
+//! Typed failures are outcomes that combinators can materialize and recover. Traps are not: they bypass
 //! [`catchAll`], [`ensuring`], and Drop hooks. [`suspend`] crosses the stack-safe execution boundary
 //! while preserving all three channels exactly; frame exhaustion is fatal.
 //!
@@ -116,8 +116,8 @@
 //! }
 //! ```
 
-// Familiar channel transformations derived from the closed compiler core. The core executes one
-// Effect into Result data and binds one typed requirement; everything here is ordinary Silk.
+// Familiar channel transformations derived from the closed compiler core. The core catches typed
+// failures and binds typed requirements; everything here is ordinary Silk.
 
 import silk.bool as bool
 import silk.logger { LogError, LogLevel, Logger }
@@ -198,7 +198,7 @@ pub effect fn logError(
 ///
 /// # Details
 ///
-/// The returned Effect still requires `R`, because reification does not provide services. Its typed
+/// The returned Effect still requires `R`, because conversion does not provide services. Its typed
 /// failure row is empty: an `E` becomes [`Failure`] data instead of propagating. Traps are not typed
 /// failures and therefore are not captured.
 ///
@@ -439,7 +439,7 @@ where S in E {
 ///
 /// # Details
 ///
-/// The protected Effect is reified into Result data before the finalizer runs, which is what fixes
+/// The protected Effect is converted into Result data before the finalizer runs, which is what fixes
 /// the order: a typed failure reaches this body as data rather than as a propagation, so the
 /// protected Effect's own frame — and every local it cleans up — is already gone by the time the
 /// finalizer starts. The finalizer therefore exits last, in reverse acquisition order against the

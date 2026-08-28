@@ -65,10 +65,6 @@ export type Rule =
       readonly result: Type.Type
     }
   | {
-      readonly _tag: 'EffectRule'
-      readonly operation: 'Result'
-    }
-  | {
       readonly _tag: 'ContractRule'
       readonly contract: CallableContract.CallableContract
       readonly post: 'BindRequirement' | 'CatchFailure'
@@ -259,32 +255,6 @@ const builtin = (options: {
 
 export const isBuiltinOperation = (operation: Operation): operation is BuiltinOperation =>
   operation.rule._tag === 'BuiltinRule' && 'callParameters' in operation
-
-const effect = (options: {
-  readonly name: string
-  readonly operation: Extract<Rule, { readonly _tag: 'EffectRule' }>['operation']
-  readonly typeParameters: ReadonlyArray<string>
-  readonly parameters: ReadonlyArray<ValueParameter>
-  readonly result: string
-}): Operation => {
-  const spelling = intrinsicSpelling('Effect', options.name)
-  return Object.freeze({
-    _tag: 'IntrinsicOperation',
-    id: operationId('Intrinsic', spelling),
-    spelling,
-    typeParameters: Object.freeze(options.typeParameters.map(typeParameter)),
-    parameters: Object.freeze(Array.from(options.parameters)),
-    result: options.result,
-    unsafe: false,
-    admission: admission('Effect'),
-    consumer: consumer('Effect', options.name),
-    targets: executionTargets,
-    rule: Object.freeze({
-      _tag: 'EffectRule',
-      operation: options.operation,
-    }),
-  })
-}
 
 const contractEffect = (options: {
   readonly name: string
@@ -1639,17 +1609,6 @@ const intrinsicOperations = Object.freeze([
         suspensionRequirementRow,
       ),
     }),
-    effect({
-      name: 'result',
-      operation: 'Result',
-      typeParameters: Object.freeze(['R']),
-      parameters: Object.freeze([
-        valueParameter('protected', 'Effect<A ! E ? Q>'),
-        valueParameter('success', 'once fn(A) -> R'),
-        valueParameter('failure', 'once fn(E) -> R'),
-      ]),
-      result: 'Effect<R ? Q>',
-    }),
     contractEffect({
       name: 'bindRequirement',
       post: 'BindRequirement',
@@ -1787,9 +1746,6 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
       switch (operation.rule._tag) {
         case 'BuiltinRule':
           identity = operation.rule.operation
-          break
-        case 'EffectRule':
-          identity = `${operation.rule._tag}.${operation.rule.operation}`
           break
         case 'ContractRule':
           identity = `${operation.rule._tag}.${operation.rule.post}`

@@ -975,8 +975,8 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
-      /** Runs one Effect and exposes its completed typed channel without choosing a carrier. */
-      readonly _tag: 'ReifyEffect'
+      /** Runs the protected Effect and exposes its channels only to the enclosing catch lowering. */
+      readonly _tag: 'CatchEffect'
       readonly destination: LocalId
       readonly outcome: LocalId
       readonly successValue: LocalId

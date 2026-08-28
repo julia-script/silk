@@ -346,8 +346,6 @@ const storedEffectRealizationOf = (
     return storedEffectRealizationOf(expression.source, context)
   if (expression._tag === 'EffectBindRequirement')
     return storedEffectRealizationOf(expression.protected, context)
-  if (expression._tag === 'EffectResult')
-    return storedEffectRealizationOf(expression.protected, context)
   if (expression._tag !== 'Project') return undefined
   const represented = Type.substitute(expression.type, context.instance.substitution)
   const planned = Layout.entry(context.layout, represented)?.representation
@@ -400,7 +398,6 @@ const effectIdentityOf = (
   if (expression._tag === 'UnionConvert') return effectIdentityOf(expression.source, context)
   if (expression._tag === 'EffectBindRequirement')
     return effectIdentityOf(expression.protected, context)
-  if (expression._tag === 'EffectResult') return effectIdentityOf(expression.protected, context)
   if (expression._tag === 'Project') {
     const realization = storedEffectRealizationOf(expression, context)
     const represented = Type.substitute(expression.type, context.instance.substitution)
@@ -454,7 +451,6 @@ const providersOf = (
   }
   if (expression._tag === 'Move') return providersOf(expression.subject, context)
   if (expression._tag === 'UnionConvert') return providersOf(expression.source, context)
-  if (expression._tag === 'EffectResult') return providersOf(expression.protected, context)
   if (expression._tag !== 'EffectBindRequirement') return context.ambientProviders
   const proof = Instances.requirementSelection(context.instance, expression.provider)
   if (proof === undefined) return providersOf(expression.protected, context)
@@ -895,10 +891,7 @@ const controlsOf = (
           )
         }
       } else {
-        const protected_ =
-          expression.subject._tag === 'EffectResult'
-            ? expression.subject.protected
-            : expression.subject
+        const protected_ = expression.subject
         const storedSuspendable =
           storedEffectRealizationOf(protected_, context)?.suspendable === true
         const runner = runnerOf(protected_, context)
@@ -918,18 +911,15 @@ const controlsOf = (
           return
         }
         if (runner.classification !== 'Synchronous') {
-          const policy =
-            expression.subject._tag === 'EffectResult'
-              ? reifyPolicy(runner.outcome, context)
-              : Object.freeze({
-                  _tag: 'Propagate' as const,
-                  outcome: runner.outcome,
-                  failureMappings: Object.freeze(
-                    Type.failureMembers(runner.outcome).map((_failure, source) =>
-                      Object.freeze({ source: source + 1, target: source + 1 }),
-                    ),
-                  ),
-                })
+          const policy = Object.freeze({
+            _tag: 'Propagate' as const,
+            outcome: runner.outcome,
+            failureMappings: Object.freeze(
+              Type.failureMembers(runner.outcome).map((_failure, source) =>
+                Object.freeze({ source: source + 1, target: source + 1 }),
+              ),
+            ),
+          })
           if (policy !== undefined) {
             const id = controlId(execution, expression.span, idOrdinal, 'Invoke')
             const complete = controlId(execution, expression.span, idOrdinal, 'Complete')
@@ -974,10 +964,7 @@ const providedRunnersOf = (
   const visit = (expression: Hir.Expression): void => {
     if (expression._tag === 'EffectBlock') return
     if (expression._tag === 'Run') {
-      const protected_ =
-        expression.subject._tag === 'EffectResult'
-          ? expression.subject.protected
-          : expression.subject
+      const protected_ = expression.subject
       const runner = runnerOf(protected_, context)
       if (runner.execution._tag === 'ProvidedEffectRunnerExecution') runners.push(runner)
     }
