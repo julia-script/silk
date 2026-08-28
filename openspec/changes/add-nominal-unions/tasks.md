@@ -17,10 +17,10 @@
 
 ## 3. Type Application and Variant Construction
 
-- [ ] 3.1 Teach nominal-type lookup and substitution to distinguish union declarations while keeping the complete parent application as the only value type, and verify no variant type or structural member is created.
-- [ ] 3.2 Refactor struct-literal field checking into a shared aggregate-field elaborator without changing existing struct facts or diagnostics, and verify the existing struct construction and generic-inference suites remain byte-for-byte stable where golden data exists.
-- [ ] 3.3 Implement two-stage variant constructor resolution—parent declaration and explicit prefix first, field-only suffix inference second—and verify zero-prefix, partial-prefix, conflicting, and parent-only uninferred argument cases.
-- [ ] 3.4 Implement unit and named-field construction with complete field initialization, construction authority, visibility fences, type compatibility, represented fields, and precise parent result types, and verify cross-module private fields block raw construction.
+- [x] 3.1 Teach nominal-type lookup and substitution to distinguish union declarations while keeping the complete parent application as the only value type, and verify no variant type or structural member is created.
+- [x] 3.2 Refactor struct-literal field checking into a shared aggregate-field elaborator without changing existing struct facts or diagnostics, and verify the existing struct construction and generic-inference suites remain byte-for-byte stable where golden data exists.
+- [x] 3.3 Implement two-stage variant constructor resolution—parent declaration and explicit prefix first, field-only suffix inference second—and verify zero-prefix, partial-prefix, conflicting, and parent-only uninferred argument cases.
+- [x] 3.4 Implement unit and named-field construction with complete field initialization, construction authority, visibility fences, type compatibility, represented fields, and precise parent result types, and verify cross-module private fields block raw construction.
 - [ ] 3.5 Preserve every variant through generic specialization, including equal and `never` payloads while independently renormalizing structural-union fields, and verify specialization facts never collapse or flatten variants.
 - [ ] 3.6 Reject direct parent-union field projection and common-field synthesis while retaining diagnostic facts, and verify `result.value` is unavailable until a variant pattern binds its payload.
 - [ ] 3.7 Admit interface, operator, Copy, and Drop declarations against nominal union parents through the ordinary conformance/coherence path, and verify variant names do not become lookup or implementation targets.

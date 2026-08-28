@@ -324,6 +324,12 @@ export const emptyNominalUnionCode = 'SEM0164' as const
 export const duplicateUnionVariantCode = 'SEM0165' as const
 /** Stable code for a named-field variant whose braces contain no field. */
 export const emptyUnionVariantCode = 'SEM0166' as const
+/** Stable code for a variant selector absent from its resolved nominal union. */
+export const unknownUnionVariantCode = 'SEM0167' as const
+/** Stable code for a variant qualifier that does not name a nominal union. */
+export const expectedNominalUnionCode = 'SEM0168' as const
+/** Stable code for construction through an incomplete nominal union declaration. */
+export const invalidNominalUnionConstructionCode = 'SEM0169' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -526,6 +532,9 @@ export type Code =
   | typeof emptyNominalUnionCode
   | typeof duplicateUnionVariantCode
   | typeof emptyUnionVariantCode
+  | typeof unknownUnionVariantCode
+  | typeof expectedNominalUnionCode
+  | typeof invalidNominalUnionConstructionCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -590,6 +599,9 @@ export type Reason =
       readonly originalSpan: SourceSpan.SourceSpan
     }
   | { readonly _tag: 'EmptyUnionVariant'; readonly variant: string }
+  | { readonly _tag: 'UnknownUnionVariant'; readonly union: string; readonly variant: string }
+  | { readonly _tag: 'ExpectedNominalUnion'; readonly actual: string }
+  | { readonly _tag: 'InvalidNominalUnionConstruction'; readonly union: string }
   | { readonly _tag: 'UnknownModule'; readonly module: string }
   | { readonly _tag: 'SelfImport'; readonly module: string }
   | { readonly _tag: 'ReservedModuleIdentity'; readonly module: string }
@@ -1714,6 +1726,53 @@ export const emptyUnionVariant = (variantName: string, span: SourceSpan.SourceSp
     severity: 'error',
     message: `Union variant ${variantName} must omit braces or declare at least one field`,
     reason: Object.freeze({ _tag: 'EmptyUnionVariant', variant: variantName }),
+    span,
+  })
+
+/** Creates the diagnostic for selecting a missing variant from a resolved nominal union. */
+export const unknownUnionVariant = (
+  unionName: string,
+  variantName: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unknownUnionVariantCode,
+    severity: 'error',
+    message: `Union ${unionName} has no variant ${variantName}`,
+    reason: Object.freeze({
+      _tag: 'UnknownUnionVariant',
+      union: unionName,
+      variant: variantName,
+    }),
+    span,
+  })
+
+/** Creates the diagnostic for a variant qualifier that is not a nominal union. */
+export const expectedNominalUnion = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: expectedNominalUnionCode,
+    severity: 'error',
+    message: `Expected a nominal union, found ${actual}`,
+    reason: Object.freeze({ _tag: 'ExpectedNominalUnion', actual }),
+    span,
+  })
+
+/** Creates the construction fence for a nominal union with invalid declaration facts. */
+export const invalidNominalUnionConstruction = (
+  unionName: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidNominalUnionConstructionCode,
+    severity: 'error',
+    message: `Cannot construct invalid nominal union ${unionName}`,
+    reason: Object.freeze({ _tag: 'InvalidNominalUnionConstruction', union: unionName }),
     span,
   })
 

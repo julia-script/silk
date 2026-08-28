@@ -499,6 +499,16 @@ export type StructTargetFact =
     }
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
 
+export type UnionVariantTargetFact =
+  | {
+      readonly _tag: 'Resolved'
+      readonly union: DeclarationFacts.UnionFact
+      readonly variant: DeclarationFacts.UnionVariantFact
+      readonly type: Type.Nominal
+      readonly token: Token.Token
+    }
+  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
+
 export type StructInitializerState =
   | { readonly _tag: 'Resolved'; readonly field: DeclarationFacts.FieldFact }
   | { readonly _tag: 'Unknown'; readonly cause: Diagnostic.Identity }
@@ -538,6 +548,20 @@ export interface StructTypeArgumentFact {
 export interface StructLiteralExpressionFact {
   readonly _tag: 'StructLiteral'
   readonly target: StructTargetFact
+  readonly authorized: boolean
+  readonly typeArguments: ReadonlyArray<StructTypeArgumentFact>
+  readonly initializers: ReadonlyArray<StructInitializerFact>
+  readonly fields: ReadonlyArray<{
+    readonly field: DeclarationFacts.FieldFact
+    readonly initializer: StructInitializerFact
+  }>
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
+export interface UnionVariantExpressionFact {
+  readonly _tag: 'UnionVariant'
+  readonly target: UnionVariantTargetFact
   readonly authorized: boolean
   readonly typeArguments: ReadonlyArray<StructTypeArgumentFact>
   readonly initializers: ReadonlyArray<StructInitializerFact>
@@ -875,6 +899,7 @@ export type ExpressionFact =
   | BorrowExpressionFact
   | MatchExpressionFact
   | StructLiteralExpressionFact
+  | UnionVariantExpressionFact
   | ArrayLiteralExpressionFact
   | FieldProjectionExpressionFact
   | IndexProjectionExpressionFact
@@ -1383,6 +1408,7 @@ export const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.fr
   'BorrowExpression',
   'MatchExpression',
   'StructLiteralExpression',
+  'UnionVariantExpression',
   'ArrayLiteralExpression',
   'FieldProjectionExpression',
   'IndexProjectionExpression',
@@ -1406,6 +1432,7 @@ export const isRecursiveArgumentNode = (element: SyntaxTree.Element): element is
     element.kind === 'BorrowExpression' ||
     element.kind === 'MatchExpression' ||
     element.kind === 'StructLiteralExpression' ||
+    element.kind === 'UnionVariantExpression' ||
     element.kind === 'ArrayLiteralExpression' ||
     element.kind === 'FieldProjectionExpression' ||
     element.kind === 'IndexProjectionExpression' ||

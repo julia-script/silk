@@ -834,10 +834,11 @@ export const canonicalKey = (id: CanonicalId): string => `${id.module}.${id.name
 export const memberByNominal = (
   modules: ReadonlyArray<ModuleHeaders>,
   type: Type.Nominal,
-): StructFact | ServiceFact | InterfaceFact | undefined => {
+): StructFact | UnionFact | ServiceFact | InterfaceFact | undefined => {
   const module = modules.find((candidate) => candidate.module === type.module)
   return [
     ...(module?.structs ?? []),
+    ...(module?.unions ?? []),
     ...(module?.services ?? []),
     ...(module?.interfaces ?? []),
   ].find(

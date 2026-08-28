@@ -1389,7 +1389,7 @@ const analyzeLoans = (
         ? Object.freeze([site.binding.ordinal])
         : movedExecutableBindings(expression.subject)
     }
-    if (expression._tag === 'StructLiteral')
+    if (expression._tag === 'StructLiteral' || expression._tag === 'UnionVariant')
       return Object.freeze(
         expression.initializers.flatMap((initializer) =>
           movedExecutableBindings(initializer.expression),
@@ -1473,6 +1473,7 @@ const analyzeLoans = (
         scanRunEnds(expression.index, region)
         return
       case 'StructLiteral':
+      case 'UnionVariant':
         for (const initializer of expression.initializers)
           scanRunEnds(initializer.expression, region)
         return
@@ -1882,6 +1883,7 @@ const analyzeLoans = (
       // enclosing binding carries reaches the captures stored inside it too. Without this, a
       // borrow captured by a stored callable would be released while the aggregate still holds it.
       case 'StructLiteral':
+      case 'UnionVariant':
         for (const initializer of expression.initializers) {
           inspect(
             initializer.expression,

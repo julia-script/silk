@@ -984,6 +984,37 @@ const collectExpression = (
       }
       return
     }
+    case 'UnionVariant': {
+      const token = expression.target._tag === 'Resolved' ? expression.target.token : undefined
+      if (expression.target._tag === 'Resolved')
+        push(
+          pending,
+          token?.span,
+          'Value',
+          expression.target.variant.canonical._tag === 'Canonical'
+            ? available(
+                Object.freeze({
+                  _tag: 'UnionVariantIdentity',
+                  id: expression.target.variant.canonical.id,
+                }),
+              )
+            : Object.freeze({ _tag: 'Unavailable' }),
+          locationOfUnionVariant(expression.target.variant),
+        )
+      for (const initializer of expression.initializers) {
+        const fieldToken = initializer.token
+        if (initializer.state._tag === 'Resolved' || initializer.state._tag === 'Inaccessible')
+          push(
+            pending,
+            fieldToken?.span,
+            'Field',
+            available(Object.freeze({ _tag: 'FieldIdentity', id: initializer.state.field.id })),
+            locationOfField(index, initializer.state.field),
+          )
+        collectExpression(initializer.expression, index, scope, pending)
+      }
+      return
+    }
     case 'Move':
     case 'Borrow':
     case 'Run':

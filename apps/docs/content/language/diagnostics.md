@@ -16,11 +16,11 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 3 |
-| `SEM` | Semantic | 158 |
+| `SEM` | Semantic | 161 |
 | `OWN` | Ownership | 16 |
 | `LAY` | Layout | 1 |
 
-There are 189 codes in total.
+There are 192 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -213,6 +213,9 @@ There are 189 codes in total.
 | `SEM0164` | Stable code for a nominal union declaration with no variants. | `Union <unionName> must declare at least one variant` |
 | `SEM0165` | Stable code for a repeated variant name within one nominal union. | `Duplicate union variant <spelling>` |
 | `SEM0166` | Stable code for a named-field variant whose braces contain no field. | `Union variant <variantName> must omit braces or declare at least one field` |
+| `SEM0167` | Stable code for a variant selector absent from its resolved nominal union. | `Union <unionName> has no variant <variantName>` |
+| `SEM0168` | Stable code for a variant qualifier that does not name a nominal union. | `Expected a nominal union, found <actual>` |
+| `SEM0169` | Stable code for construction through an incomplete nominal union declaration. | `Cannot construct invalid nominal union <unionName>` |
 
 ## Ownership (`OWN`)
 

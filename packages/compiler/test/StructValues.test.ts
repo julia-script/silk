@@ -72,6 +72,108 @@ it.effect(
     }),
 )
 
+it.effect('elaborates nominal union variants as precise parent values', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'union-values/construction',
+      ascii(`union Option<T> { Some { value: T }, None }
+union Result<A, E> { Success { value: A }, Failure { error: E } }
+union State { Ready, Waiting { count: i32 } }
+fn some() -> Option<i32> { return Option.Some { value: 42 } }
+fn none() -> Option<i32> { return Option<i32>.None }
+fn failed() -> Result<i32, bool> { return Result<i32>.Failure { error: true } }
+fn ready() -> State { return State.Ready }`),
+    )
+    const functions = Analysis.rootAnalysis(self).functions
+    const some = functions.at(0)?.returnedExpression
+    const none = functions.at(1)?.returnedExpression
+    const failed = functions.at(2)?.returnedExpression
+    const ready = functions.at(3)?.returnedExpression
+
+    for (const [name, expression] of [
+      ['some', some],
+      ['none', none],
+      ['failed', failed],
+      ['ready', ready],
+    ] as const) {
+      assert.strictEqual(expression?._tag, 'UnionVariant', name)
+      if (expression?._tag === 'UnionVariant') assert.strictEqual(expression.type._tag, 'Available')
+    }
+    assert.strictEqual(
+      some?.type._tag === 'Available' ? Type.encode(some.type.type) : undefined,
+      'union-values/construction.Option<i32>',
+    )
+    assert.strictEqual(
+      none?.type._tag === 'Available' ? Type.encode(none.type.type) : undefined,
+      'union-values/construction.Option<i32>',
+    )
+    assert.strictEqual(
+      failed?.type._tag === 'Available' ? Type.encode(failed.type.type) : undefined,
+      'union-values/construction.Result<i32, bool>',
+    )
+    assert.strictEqual(
+      ready?.type._tag === 'Available' ? Type.encode(ready.type.type) : undefined,
+      'union-values/construction.State',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+  }),
+)
+
+it.effect('infers union arguments only from the selected variant fields', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'union-values/inference',
+      ascii(`union Option<T> { Some { value: T }, None }
+union Result<A, E> { Success { value: A }, Failure { error: E } }
+fn missingError() -> Result<i32, bool> { return Result.Success { value: 42 } }
+fn missingItem() -> Option<i32> { return Option.None }
+fn unknown() -> Option<i32> { return Option<i32>.Missing }
+fn conflict() -> Result<i32, bool> {
+  return Result<i32>.Success { value: true }
+}`),
+    )
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0099', 'SEM0099', 'SEM0099', 'SEM0167', 'SEM0100'],
+    )
+    const functions = Analysis.rootAnalysis(self).functions
+    assert.strictEqual(functions.at(0)?.returnedExpression._tag, 'UnionVariant')
+    assert.strictEqual(functions.at(1)?.returnedExpression._tag, 'UnionVariant')
+    assert.strictEqual(functions.at(2)?.returnedExpression._tag, 'UnionVariant')
+    assert.ok(
+      functions.every((fn) => fn.returnedExpression.type._tag === 'Unavailable'),
+      'expected-type context must not complete a constructor application',
+    )
+  }),
+)
+
+it.effect('uses union variant field visibility as the external construction boundary', () =>
+  Effect.gen(function* () {
+    const self = yield* multiSnapshot(
+      'app/Main',
+      new Map([
+        [
+          'model/Secret',
+          ascii(`pub union Secret { Open { pub value: i32, key: i32 }, Closed }
+pub fn make(value: i32) -> Secret { return Secret.Open { value: value, key: 7 } }`),
+        ],
+        [
+          'app/Main',
+          ascii(`import model.Secret { Secret }
+pub fn main() -> i32 { let secret = Secret.Open { value: 1, key: 2 } return 0 }`),
+        ],
+      ]),
+    )
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0021'],
+    )
+    assert.notInclude(Analysis.diagnostics(self).at(0)?.message ?? '', 'key')
+  }),
+)
+
 it.effect('evaluates initializers in source order before constructing in declaration order', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(

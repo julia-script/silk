@@ -747,6 +747,9 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       span: fact.syntax.span,
     })
   }
+  if (fact._tag === 'UnionVariant') {
+    return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+  }
   if (fact._tag === 'ArrayLiteral') {
     if (fact.state._tag !== 'Complete' || fact.type._tag !== 'Available') {
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
@@ -1588,6 +1591,7 @@ export const directExpressionChildren = (
     case 'ArrayLiteral':
       return Object.freeze(expression.elements.map((element) => element.expression))
     case 'StructLiteral':
+    case 'UnionVariant':
       return Object.freeze(expression.initializers.map((initializer) => initializer.expression))
     case 'Grouped':
       return Object.freeze([expression.expression])

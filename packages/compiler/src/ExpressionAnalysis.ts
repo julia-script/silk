@@ -51,6 +51,7 @@ import type {
   StructInitializerState,
   StructTargetFact,
   StructTypeArgumentFact,
+  UnionVariantTargetFact,
 } from './Elaboration.js'
 import {
   argumentFact,
@@ -466,7 +467,13 @@ export const analyzeEnumMember = (
   resolution: ResolutionContext,
   expected?: SemanticType,
 ): ExpressionResult | undefined => {
-  const identifiers = SyntaxTree.tokens(node).filter((token) => token.kind === 'Identifier')
+  const path = SyntaxTree.directNode(node, 'TypePath')
+  const pathIdentifiers =
+    path === undefined ? [] : SyntaxTree.tokens(path).filter((token) => token.kind === 'Identifier')
+  const identifiers =
+    pathIdentifiers.length === 2
+      ? pathIdentifiers
+      : SyntaxTree.tokens(node).filter((token) => token.kind === 'Identifier')
   const qualifierToken = identifiers.at(0)
   const memberToken = identifiers.at(1)
   if (qualifierToken === undefined || memberToken === undefined || identifiers.length !== 2)
@@ -1011,6 +1018,11 @@ export interface StructTargetResult {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
+export interface UnionVariantTargetResult {
+  readonly fact: UnionVariantTargetFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+}
+
 export const intrinsicStruct = (
   type: Type.Nominal,
   syntax: SyntaxTree.Node,
@@ -1240,6 +1252,203 @@ export const resolveStructTarget = (
     fact: Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) }),
     diagnostics: Diagnostic.merge(analyzed.diagnostics, resolved.diagnostics, [diagnostic]),
   })
+}
+
+const unavailableUnionVariantTarget = (
+  diagnostic: Diagnostic.Diagnostic,
+  diagnostics: ReadonlyArray<Diagnostic.Diagnostic> = [],
+): UnionVariantTargetResult =>
+  Object.freeze({
+    fact: Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) }),
+    diagnostics: Diagnostic.merge(diagnostics, [diagnostic]),
+  })
+
+const selectedUnionVariant = (
+  union: DeclarationFacts.UnionFact,
+  type: Type.Nominal,
+  variantName: string,
+  token: Token.Token,
+  diagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
+): UnionVariantTargetResult => {
+  const variant = DeclarationFacts.lookupUnionVariant(union.variants, variantName)
+  if (variant._tag !== 'Resolved')
+    return unavailableUnionVariantTarget(
+      Diagnostic.unknownUnionVariant(Type.encode(type), variantName, token.span),
+      diagnostics,
+    )
+  if (union.validity._tag !== 'Valid')
+    return unavailableUnionVariantTarget(
+      Diagnostic.invalidNominalUnionConstruction(Type.encode(type), token.span),
+      diagnostics,
+    )
+  return Object.freeze({
+    fact: Object.freeze({ _tag: 'Resolved', union, variant: variant.variant, type, token }),
+    diagnostics: Object.freeze(diagnostics),
+  })
+}
+
+export const resolveUnionVariantTarget = (
+  source: SourceFile.SourceFile,
+  selector: SyntaxTree.Node,
+  resolution: ResolutionContext,
+  caller?: DeclarationFact,
+): UnionVariantTargetResult => {
+  const parentSyntax =
+    SyntaxTree.directNode(selector, 'AppliedType') ?? childNode(selector, 'TypePath')
+  const variantToken = SyntaxTree.tokens(selector)
+    .filter((token) => token.kind === 'Identifier')
+    .at(-1)
+  if (parentSyntax === undefined || variantToken === undefined) {
+    const diagnostic = Diagnostic.expectedNominalUnion('unavailable selector', selector.span)
+    return unavailableUnionVariantTarget(diagnostic)
+  }
+  const environment = new Map(
+    (caller?.typeParameters ?? []).flatMap((parameter) =>
+      parameter.name._tag === 'Present' ? [[parameter.name.spelling, parameter.type] as const] : [],
+    ),
+  )
+  const analyzed = DeclarationCollection.analyzeDeclaredType(source, parentSyntax, environment)
+  const nameResolution: NameResolution.Resolution = Object.freeze({
+    _tag: 'NameResolution',
+    modules: Object.freeze([resolution.scope]),
+    diagnostics: Object.freeze([]),
+  })
+  const applied = analyzed.fact._tag === 'Applied' ? analyzed.fact : undefined
+  const targetFact = applied?.target ?? analyzed.fact
+  const path = targetFact._tag === 'Unresolved' ? targetFact.path : undefined
+  let base: Type.Nominal | undefined
+  if (path === undefined) {
+    if (targetFact._tag === 'Resolved' && Type.isNominal(targetFact.type)) base = targetFact.type
+  } else {
+    const candidate = NameResolution.resolveType(
+      nameResolution,
+      resolution.index,
+      source.id,
+      path,
+    ).fact
+    if (candidate._tag === 'Resolved' && Type.isNominal(candidate.type)) base = candidate.type
+  }
+  const declaration =
+    base === undefined
+      ? undefined
+      : DeclarationFacts.byCanonical(resolution.index, {
+          _tag: 'CanonicalDeclarationId',
+          module: base.module,
+          name: base.name,
+        })
+  if (base === undefined || declaration?._tag !== 'UnionDeclaration') {
+    const diagnostic = Diagnostic.expectedNominalUnion(
+      base === undefined ? 'unavailable type' : Type.encode(base),
+      parentSyntax.span,
+    )
+    return unavailableUnionVariantTarget(diagnostic, analyzed.diagnostics)
+  }
+  const supplied = applied?.arguments ?? []
+  const sourceParameters = declaration.typeParameters.filter(
+    (parameter) =>
+      parameter.type.kind !== 'CallableRepresentation' &&
+      parameter.type.kind !== 'EffectRepresentation',
+  )
+  if (supplied.length > sourceParameters.length) {
+    const diagnostic = Diagnostic.expectedNominalUnion(Type.encode(base), parentSyntax.span)
+    return unavailableUnionVariantTarget(diagnostic, analyzed.diagnostics)
+  }
+  const resolvedArguments = supplied.map((argument) =>
+    DeclarationResolution.resolveTypeFact(
+      resolution.index,
+      source.id,
+      argument,
+      (module, argumentPath) =>
+        NameResolution.resolveType(nameResolution, resolution.index, module, argumentPath),
+    ),
+  )
+  let suppliedOrdinal = 0
+  const arguments_ = declaration.typeParameters.flatMap(
+    (parameter): ReadonlyArray<Type.GenericArgument> => {
+      if (
+        parameter.type.kind === 'CallableRepresentation' ||
+        parameter.type.kind === 'EffectRepresentation'
+      )
+        return [Type.representationParameterArgument(parameter.type)]
+      const resolved = resolvedArguments.at(suppliedOrdinal)
+      suppliedOrdinal += 1
+      if (resolved === undefined) return [Type.parameterArgument(parameter.type)]
+      if (resolved.fact._tag !== 'Resolved') return []
+      if (parameter.type.kind === 'Value')
+        return Type.isTypeArgument(resolved.fact.type) ? [resolved.fact.type] : []
+      if (
+        parameter.type.kind === 'RequirementRow' &&
+        Type.isParameter(resolved.fact.type) &&
+        resolved.fact.type.kind === 'RequirementRow'
+      )
+        return [Type.requirementRowArgument([], [resolved.fact.type])]
+      return []
+    },
+  )
+  if (
+    arguments_.length !== declaration.typeParameters.length ||
+    TypeInference.prefixSubstitution(
+      declaration.typeParameters.map((parameter) => parameter.type),
+      arguments_,
+    ) === undefined
+  ) {
+    const diagnostic = Diagnostic.expectedNominalUnion(Type.encode(base), parentSyntax.span)
+    return unavailableUnionVariantTarget(
+      diagnostic,
+      Diagnostic.merge(
+        analyzed.diagnostics,
+        ...resolvedArguments.map((argument) => argument.diagnostics),
+      ),
+    )
+  }
+  return selectedUnionVariant(
+    declaration,
+    Type.specializeNominal(base, arguments_),
+    spelling(source, variantToken),
+    variantToken,
+    Diagnostic.merge(
+      analyzed.diagnostics,
+      ...resolvedArguments.map((argument) => argument.diagnostics),
+    ),
+  )
+}
+
+const resolveBareUnionVariantTarget = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  resolution: ResolutionContext,
+): UnionVariantTargetResult | undefined => {
+  const tokens = SyntaxTree.tokens(node)
+  const initializerStart = tokens.findIndex((token) => token.kind === 'LeftBrace')
+  const selectorTokens = initializerStart === -1 ? tokens : tokens.slice(0, initializerStart)
+  const identifiers = selectorTokens.filter((token) => token.kind === 'Identifier')
+  const parentToken = identifiers.at(0)
+  const variantToken = identifiers.at(1)
+  if (identifiers.length !== 2 || parentToken === undefined || variantToken === undefined)
+    return undefined
+  const lookup = NameResolution.lookup(
+    resolution.scope,
+    resolution.index,
+    spelling(source, parentToken),
+  )
+  if (lookup._tag !== 'Resolved' || lookup.declaration._tag !== 'UnionDeclaration') return undefined
+  const union = lookup.declaration
+  const type =
+    union.canonical._tag === 'Canonical'
+      ? Type.nominal(
+          union.canonical.id.module,
+          union.canonical.id.name,
+          union.typeParameters.map((parameter) => Type.parameterArgument(parameter.type)),
+        )
+      : undefined
+  if (type === undefined) {
+    const diagnostic = Diagnostic.invalidNominalUnionConstruction(
+      spelling(source, parentToken),
+      parentToken.span,
+    )
+    return unavailableUnionVariantTarget(diagnostic)
+  }
+  return selectedUnionVariant(union, type, spelling(source, variantToken), variantToken, [])
 }
 
 export interface PatternCounters {
@@ -2352,7 +2561,7 @@ export const isOwnStructArgument = (
   argument: Type.GenericArgument,
 ): boolean => Type.equalsGenericArgument(Type.parameterArgument(parameter), argument)
 
-export const analyzeStructLiteral = (
+export const analyzeAggregateLiteral = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
   declarations: ReadonlyArray<DeclarationFact>,
@@ -2360,17 +2569,40 @@ export const analyzeStructLiteral = (
   scope: Scope,
   resolution: ResolutionContext,
 ): ExpressionResult => {
-  const targetSyntax = SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
-  const target = resolveStructTarget(source, targetSyntax, resolution, declaration, true)
+  const selector = SyntaxTree.directNode(node, 'UnionVariantSelector')
+  const unionTarget =
+    selector === undefined
+      ? resolveBareUnionVariantTarget(source, node, resolution)
+      : resolveUnionVariantTarget(source, selector, resolution, declaration)
+  let targetSyntax: SyntaxTree.Node
+  if (selector !== undefined) {
+    targetSyntax = SyntaxTree.directNode(selector, 'AppliedType') ?? childNode(selector, 'TypePath')
+  } else if (unionTarget !== undefined && node.kind === 'FieldProjectionExpression') {
+    targetSyntax = node
+  } else {
+    targetSyntax = SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
+  }
+  const target =
+    unionTarget ?? resolveStructTarget(source, targetSyntax, resolution, declaration, true)
   const diagnostics: Array<Diagnostic.Diagnostic> = [...target.diagnostics]
-  const struct = target.fact._tag === 'Resolved' ? target.fact.struct : undefined
+  let aggregate: DeclarationFacts.StructFact | DeclarationFacts.UnionFact | undefined
+  let aggregateFields: ReadonlyArray<DeclarationFacts.FieldFact> = Object.freeze([])
+  if (target.fact._tag === 'Resolved') {
+    if ('union' in target.fact) {
+      aggregate = target.fact.union
+      aggregateFields = target.fact.variant.fields
+    } else {
+      aggregate = target.fact.struct
+      aggregateFields = target.fact.struct.fields
+    }
+  }
   const nominal = target.fact._tag === 'Resolved' ? target.fact.type : undefined
-  const nominalLabel = nominal === undefined ? 'unknown struct' : Type.encode(nominal)
+  const nominalLabel = nominal === undefined ? 'unknown aggregate' : Type.encode(nominal)
   const inferredArguments = new Map<string, InferredStructArgument>()
   const argumentOrigins = new Map<string, ReadonlyArray<SourceSpan.SourceSpan>>()
   const explicitArguments = new Set<string>()
-  if (struct !== undefined && nominal !== undefined) {
-    for (const [ordinal, parameter] of struct.typeParameters.entries()) {
+  if (aggregate !== undefined && nominal !== undefined) {
+    for (const [ordinal, parameter] of aggregate.typeParameters.entries()) {
       const argument = nominal.arguments.at(ordinal)
       if (argument === undefined || isOwnStructArgument(parameter.type, argument)) continue
       const parameterKey = Type.key(parameter.type)
@@ -2385,8 +2617,8 @@ export const analyzeStructLiteral = (
   const definingModule = nominal?.module
   const authorized =
     definingModule !== undefined &&
-    struct?.syntax.kind === 'StructDeclaration' &&
-    struct.fields.every((field) => field.visibility === 'Public' || definingModule === source.id)
+    aggregate !== undefined &&
+    aggregateFields.every((field) => field.visibility === 'Public' || definingModule === source.id)
   const accessDiagnostic =
     nominal !== undefined && !authorized
       ? Diagnostic.inaccessibleStructConstruction(Type.encode(nominal), node.span)
@@ -2399,15 +2631,17 @@ export const analyzeStructLiteral = (
       const nameToken = directToken(initializer, 'Identifier')
       const name = nameToken === undefined ? undefined : spelling(source, nameToken)
       const fieldLookup =
-        struct === undefined || name === undefined
+        aggregate === undefined || name === undefined
           ? undefined
-          : DeclarationFacts.lookupField(struct.fields, name)
-      const expected =
+          : DeclarationFacts.lookupField(aggregateFields, name)
+      const contextualFieldType =
         fieldLookup?._tag === 'Resolved' && fieldLookup.field.declaredType._tag === 'Resolved'
           ? Type.substitute(fieldLookup.field.declaredType.type, structSubstitution)
           : undefined
       const contextualExpected =
-        expected !== undefined && Type.isRepresented(expected) ? expected.contract : expected
+        contextualFieldType !== undefined && Type.isRepresented(contextualFieldType)
+          ? contextualFieldType.contract
+          : contextualFieldType
       const expressionNode = initializer.children.find(isExpressionNode)
       if (expressionNode === undefined) {
         throw new RangeError('Struct initializer requires an expression node')
@@ -2426,7 +2660,7 @@ export const analyzeStructLiteral = (
       }
       diagnostics.push(...expression.diagnostics)
       let state: StructInitializerState = Object.freeze({ _tag: 'Unavailable' })
-      if (name !== undefined && nameToken !== undefined && struct !== undefined) {
+      if (name !== undefined && nameToken !== undefined && aggregate !== undefined) {
         const previous = seen.get(name)
         if (fieldLookup?._tag !== 'Resolved') {
           const diagnostic = Diagnostic.unknownStructField(nominalLabel, name, nameToken.span)
@@ -2459,10 +2693,7 @@ export const analyzeStructLiteral = (
           fieldLookup.field.declaredType._tag === 'Resolved' &&
           expression.type !== undefined
         ) {
-          const expectedType = Type.substitute(
-            fieldLookup.field.declaredType.type,
-            structSubstitution,
-          )
+          const expectedType = fieldLookup.field.declaredType.type
           const expectedValue = Type.isRepresented(expectedType)
             ? expectedType.contract
             : expectedType
@@ -2478,7 +2709,7 @@ export const analyzeStructLiteral = (
             if (TypeInference.infer(expectedType.contract, actualValue, candidateSubstitution)) {
               const siteSubstitution = new Map<string, Type.GenericArgument>()
               TypeInference.infer(expectedType.contract, actualValue, siteSubstitution)
-              for (const parameter of struct.typeParameters) {
+              for (const parameter of aggregate.typeParameters) {
                 if (
                   parameter.type.kind === 'CallableRepresentation' ||
                   parameter.type.kind === 'EffectRepresentation'
@@ -2542,7 +2773,7 @@ export const analyzeStructLiteral = (
                   actualRepresentation,
                 )
                 if (represented.representation.admissibility._tag === 'Unavailable') {
-                  const requiredParameter = struct.typeParameters.find(
+                  const requiredParameter = aggregate.typeParameters.find(
                     (candidate) => Type.key(candidate.type) === Type.key(parameter),
                   )
                   const actualParameter =
@@ -2605,7 +2836,7 @@ export const analyzeStructLiteral = (
             if (!TypeInference.infer(expectedType, expression.type, candidateSubstitution)) {
               const impliedSubstitution = new Map<string, Type.GenericArgument>()
               if (TypeInference.infer(expectedType, expression.type, impliedSubstitution)) {
-                for (const parameter of struct.typeParameters) {
+                for (const parameter of aggregate.typeParameters) {
                   if (parameter.type.kind !== 'Value') continue
                   const parameterKey = Type.key(parameter.type)
                   const previous = inferredArguments.get(parameterKey)
@@ -2633,7 +2864,7 @@ export const analyzeStructLiteral = (
                 expression.type,
               )
               if (representationDiagnostic === undefined && divergence !== undefined) {
-                const parameter = struct.typeParameters.find((candidate) => {
+                const parameter = aggregate.typeParameters.find((candidate) => {
                   const inferred = inferredArguments.get(Type.key(candidate.type))
                   return (
                     inferred !== undefined &&
@@ -2656,7 +2887,7 @@ export const analyzeStructLiteral = (
             } else {
               const siteSubstitution = new Map<string, Type.GenericArgument>()
               TypeInference.infer(expectedType, expression.type, siteSubstitution)
-              for (const parameter of struct.typeParameters) {
+              for (const parameter of aggregate.typeParameters) {
                 const parameterKey = Type.key(parameter.type)
                 const inferred = siteSubstitution.get(parameterKey)
                 if (
@@ -2728,18 +2959,18 @@ export const analyzeStructLiteral = (
   )
 
   const completedArguments =
-    struct === undefined || nominal === undefined
+    aggregate === undefined || nominal === undefined
       ? undefined
       : nominal.arguments.map((argument, ordinal): Type.GenericArgument => {
-          const parameter = struct.typeParameters.at(ordinal)?.type
+          const parameter = aggregate.typeParameters.at(ordinal)?.type
           if (parameter === undefined) return argument
           return inferredArguments.get(Type.key(parameter))?.argument ?? argument
         })
   let unresolvedParameters: DeclarationFacts.TypeParameterFact[]
-  if (struct === undefined || completedArguments === undefined) {
+  if (aggregate === undefined || completedArguments === undefined) {
     unresolvedParameters = []
   } else {
-    unresolvedParameters = struct.typeParameters.flatMap((parameter, ordinal) => {
+    unresolvedParameters = aggregate.typeParameters.flatMap((parameter, ordinal) => {
       const argument = completedArguments.at(ordinal)
       return argument !== undefined && isOwnStructArgument(parameter.type, argument)
         ? [parameter]
@@ -2755,15 +2986,15 @@ export const analyzeStructLiteral = (
     nominal === undefined ||
     completedArguments === undefined ||
     unresolvedParameters.length > 0 ||
-    (struct !== undefined &&
+    (aggregate !== undefined &&
       TypeInference.substitution(
-        struct.typeParameters.map((parameter) => parameter.type),
+        aggregate.typeParameters.map((parameter) => parameter.type),
         completedArguments,
       ) === undefined)
       ? undefined
       : Type.nominal(nominal.module, nominal.name, completedArguments)
   const typeArguments: ReadonlyArray<StructTypeArgumentFact> = Object.freeze(
-    struct?.typeParameters.map((parameter, ordinal) => {
+    aggregate?.typeParameters.map((parameter, ordinal) => {
       const parameterKey = Type.key(parameter.type)
       const argument = completedArguments?.at(ordinal)
       const origins = argumentOrigins.get(parameterKey) ?? Object.freeze([])
@@ -2780,13 +3011,8 @@ export const analyzeStructLiteral = (
       })
     }) ?? [],
   )
-  const completedTarget: StructTargetFact =
-    completedNominal !== undefined && target.fact._tag === 'Resolved'
-      ? Object.freeze({ ...target.fact, type: completedNominal })
-      : target.fact
-
-  if (struct !== undefined && completedNominal !== undefined) {
-    for (const field of struct.fields) {
+  if (aggregate !== undefined && completedNominal !== undefined) {
+    for (const field of aggregateFields) {
       if (field.name._tag !== 'Present' || seen.has(field.name.spelling)) continue
       if (field.visibility === 'Private' && completedNominal.module !== source.id) continue
       diagnostics.push(
@@ -2800,10 +3026,10 @@ export const analyzeStructLiteral = (
   }
 
   let fields: { field: DeclarationFacts.FieldFact; initializer: StructInitializerFact }[]
-  if (struct === undefined) {
+  if (aggregate === undefined) {
     fields = []
   } else {
-    fields = struct.fields.flatMap((field) => {
+    fields = aggregateFields.flatMap((field) => {
       if (field.name._tag !== 'Present') return []
       const fieldName = field.name.spelling
       const initializer = initializers.find(
@@ -2813,28 +3039,61 @@ export const analyzeStructLiteral = (
     })
   }
   const complete =
-    struct !== undefined &&
+    aggregate !== undefined &&
     completedNominal !== undefined &&
     authorized &&
     SyntaxTree.isAvailableSyntax(node) &&
-    fields.length === struct.fields.length &&
-    initializers.length === struct.fields.length &&
+    fields.length === aggregateFields.length &&
+    initializers.length === aggregateFields.length &&
     initializers.every((initializer) => initializer.state._tag === 'Resolved')
   const type =
     complete && completedNominal !== undefined
       ? availableExpressionType(completedNominal)
       : unavailableExpressionType
-  return Object.freeze({
-    fact: Object.freeze({
+  let fact: ExpressionFact
+  if (unionTarget === undefined) {
+    let structTarget: StructTargetFact
+    if (target.fact._tag === 'Resolved' && 'struct' in target.fact) {
+      structTarget =
+        completedNominal === undefined
+          ? target.fact
+          : Object.freeze({ ...target.fact, type: completedNominal })
+    } else {
+      structTarget = Object.freeze({
+        _tag: 'Unavailable',
+        ...(target.fact._tag === 'Unavailable' && target.fact.cause !== undefined
+          ? { cause: target.fact.cause }
+          : {}),
+      })
+    }
+    fact = Object.freeze({
       _tag: 'StructLiteral',
-      target: completedTarget,
+      target: structTarget,
       authorized,
       typeArguments,
       initializers: Object.freeze(initializers),
       fields: Object.freeze(fields),
       type,
       syntax: node,
-    }),
+    })
+  } else {
+    const variantTarget: UnionVariantTargetFact =
+      completedNominal !== undefined && unionTarget.fact._tag === 'Resolved'
+        ? Object.freeze({ ...unionTarget.fact, type: completedNominal })
+        : unionTarget.fact
+    fact = Object.freeze({
+      _tag: 'UnionVariant',
+      target: variantTarget,
+      authorized,
+      typeArguments,
+      initializers: Object.freeze(initializers),
+      fields: Object.freeze(fields),
+      type,
+      syntax: node,
+    })
+  }
+  return Object.freeze({
+    fact,
     diagnostics: Object.freeze(diagnostics),
     type: complete ? completedNominal : undefined,
   })
@@ -4792,6 +5051,7 @@ export const effectCaptureFacts = (
         expression(fact.index)
         return
       case 'StructLiteral':
+      case 'UnionVariant':
         for (const item of fact.initializers) expression(item.expression)
         return
       case 'ArrayLiteral':
@@ -5407,8 +5667,8 @@ export function analyzeExpression(
     )
   }
 
-  if (node.kind === 'StructLiteralExpression') {
-    return analyzeStructLiteral(source, node, declarations, declaration, scope, resolution)
+  if (node.kind === 'StructLiteralExpression' || node.kind === 'UnionVariantExpression') {
+    return analyzeAggregateLiteral(source, node, declarations, declaration, scope, resolution)
   }
 
   if (node.kind === 'ArrayLiteralExpression') {
@@ -5416,6 +5676,8 @@ export function analyzeExpression(
   }
 
   if (node.kind === 'FieldProjectionExpression') {
+    if (resolveBareUnionVariantTarget(source, node, resolution) !== undefined)
+      return analyzeAggregateLiteral(source, node, declarations, declaration, scope, resolution)
     return (
       analyzeEnumMember(source, node, resolution, expected) ??
       analyzeConstantReference(source, node, resolution) ??
