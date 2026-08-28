@@ -5,12 +5,14 @@
 Canonical ordinary Silk `Effect.result` SHALL execute exactly one Effect layer and reify its
 completed typed outcome as direct ordinary nominal `Result<A, E>` data instead of propagating `E`.
 It SHALL construct `Result<A, E>.Success` or `Result<A, E>.Failure` without a wrapper field,
-detached member, or intermediate structural union. Its implementation MAY wrap the minimum sealed
-Effect primitive needed to distinguish a completed success from a typed failure, but the compiler
-MUST NOT recognize `Result`, its module, or either variant by spelling. The operation SHALL preserve
-`R`, ownership, cleanup, run access, and lazy timing, and its contract SHALL remain valid if execution
-can suspend before producing the Result in a future runtime. Traps and future interruption MUST NOT
-be converted into typed `E` values.
+detached member, or intermediate structural union. Its implementation SHALL first map the protected
+success through an ordinary exact `once fn(A) -> Result<A, E>` constructor, then apply the general
+`Effect.catchAll` operation with an ordinary exact `once fn(E) -> Result<A, E>` handler for the
+complete typed failure value. It MUST NOT use a completed-outcome intrinsic, and the compiler MUST
+NOT recognize `Result`, its module, or either variant by spelling. The composition SHALL preserve `R`,
+ownership, cleanup, run access, and lazy timing, and its contract SHALL remain valid if execution can
+suspend before producing the Result in a future runtime. Traps and future interruption MUST NOT be
+converted into typed `E` values.
 
 #### Scenario: Map both completed branches in library code
 
@@ -29,5 +31,15 @@ be converted into typed `E` values.
 
 #### Scenario: Rename an equivalent source wrapper
 
-- **WHEN** equivalent ordinary source wraps the same minimal Effect primitive under another legal function name
+- **WHEN** equivalent ordinary source maps success and catches failure into a user-defined result-like nominal union under another legal function name
 - **THEN** it can construct and return a user-selected nominal union without compiler registration of that union or its variants
+
+#### Scenario: Reify a compound failure union
+
+- **WHEN** the protected Effect can fail with `HttpError | OutOfMemoryError`
+- **THEN** `catchAll` passes that complete structural union to the Failure constructor without flattening the outer Result or losing either error alternative
+
+#### Scenario: Preserve affine branch values
+
+- **WHEN** either completed branch carries a move-only value and its constructor is an exact `once fn`
+- **THEN** ordinary `map` and `catchAll` transfer that value exactly once and clean only the unselected callable environment

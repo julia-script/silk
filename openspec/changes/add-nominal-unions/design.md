@@ -271,19 +271,18 @@ The selected callback is invoked exactly once; the unused callable environment i
 Integer wrappers pass `some<T>` and `none<T>`, so public operations still return `Option<T>`, while an
 equivalent user wrapper may choose another carrier without compiler registration.
 
-Completed Effect reification similarly becomes a carrier-neutral fold:
+Completed Effect reification needs no intrinsic. Ordinary Silk `Effect.result` first maps the
+protected success through a `once fn(A) -> Result<A, E>` constructor for `Result.Success`, then uses
+the general `Effect.catchAll` operation with a `once fn(E) -> Result<A, E>` handler for
+`Result.Failure`. `catchAll` already selects the complete typed failure value, including a normalized
+structural union such as `HttpError | OutOfMemoryError`, while preserving the protected requirement
+row, lazy timing, access, ownership, cleanup, and future suspension behavior. Both callbacks are
+ordinary exact callables, so the same composition can target any user-defined result-like nominal
+union without compiler registration.
 
-```text
-effectOutcome<A, E, R, B>(
-  protected: once Effect<A ! E ? R>,
-  success: once fn(A) -> B,
-  failure: once fn(E) -> B,
-) -> B ? R
-```
-
-`Effect.result` passes ordinary `succeed<A, E>` and `failResult<A, E>` functions. The primitive
-preserves lazy timing, access, ownership, cleanup, requirements, and future suspension, but contains
-no Result identity.
+The compiler therefore removes the temporary `Intrinsic.effectResult` operation and its dedicated
+analysis, HIR, MIR, evaluator, Wasm, LLVM, and suspension-metadata paths. No compatibility alias or
+replacement completed-outcome primitive remains.
 
 Unsafe host primitives that only report counts use a `bool` result plus explicit initialized
 count/reason/code outputs. Handle-producing file and directory opens cannot use an optional handle
@@ -294,10 +293,12 @@ to the selected callback; failure creates no handle. Ordinary source then constr
 data. This removes Option from low-level OS, standard-input, child-process, and process-input contracts
 without adding partial initialization semantics.
 
-Alternative rejected: resolve canonical `silk.option.Option` or `silk.result.Result` inside compiler
-phases. Even if the lookup used a declaration index, the compiler would still grant library identity
-by module/name spelling and would retain the abstraction-shaped privilege this migration is meant to
-remove.
+Alternatives rejected: resolve canonical `silk.option.Option` or `silk.result.Result` inside compiler
+phases, or retain a carrier-neutral completed-outcome fold merely because it avoids those names. The
+former grants library identity by spelling; the latter duplicates the already-general composition of
+`map` and `catchAll` and leaves unnecessary compiler privilege. Checked scalar and affine host-open
+carriers remain justified because they expose primitive success information that ordinary Silk cannot
+otherwise observe.
 
 ### 11. Option and Result migrate atomically after compiler support is complete
 

@@ -4,27 +4,27 @@
 
 No intrinsic contract SHALL name, construct, match, or recognize source-defined `Option`, `Result`,
 or their variants. Existing checked scalar primitives SHALL receive ordinary present and absent
-carrier inputs and return their shared result type. Existing completed-Effect reification SHALL
-receive ordinary success and failure carrier functions and return their shared result type while
-preserving its requirement row. The inventory, semantic analysis, HIR, MIR, evaluation, and every
-backend SHALL treat those carriers through their ordinary exact callable and value contracts. This
-change SHALL replace the abstraction-shaped existing signatures and SHALL add no new source-callable
-intrinsic operation.
+carrier inputs and return their shared result type. The inventory, semantic analysis, HIR, MIR,
+evaluation, and every backend SHALL treat those carriers through their ordinary exact callable and
+value contracts. Completed Effect outcomes SHALL be handled by ordinary Effect composition rather
+than an intrinsic. This change SHALL replace the abstraction-shaped existing signatures, SHALL remove
+`Intrinsic.effectResult` and all of its compiler support, and SHALL add no replacement source-callable
+operation.
 
 #### Scenario: Construct Option in an integer wrapper
 
 - **WHEN** an ordinary checked-integer wrapper supplies the ordinary `some<T>` and `none<T>` constructor functions to its scalar primitive
 - **THEN** the primitive selects the correct ordinary carrier and contains no canonical Option or variant identity
 
-#### Scenario: Construct Result in Effect.result
+#### Scenario: Keep completed Effect reification out of Intrinsic
 
-- **WHEN** ordinary `Effect.result` supplies the ordinary `succeed<A, E>` and `failResult<A, E>` constructor functions to completed-outcome reification
-- **THEN** the primitive invokes exactly one carrier and contains no canonical Result or variant identity
+- **WHEN** ordinary `Effect.result` maps success and catches the complete typed failure in library code
+- **THEN** the intrinsic inventory contains no completed-outcome operation and the compiler contains no dedicated HIR, MIR, evaluator, or backend path for it
 
 #### Scenario: Audit the closed inventory
 
 - **WHEN** the intrinsic inventory is compared before and after migration
-- **THEN** abstraction-shaped Option and Result result contracts are gone, no new callable operation exists, and every changed operation has one carrier-neutral contract
+- **THEN** abstraction-shaped Option and Result result contracts are gone, `Intrinsic.effectResult` is absent, no replacement callable operation exists, and every remaining changed primitive has one carrier-neutral contract
 
 ## MODIFIED Requirements
 
