@@ -24,13 +24,13 @@ into a `Result` when a caller needs to inspect or store the outcome.
 ### Transform a success and choose a fallback for failure
 
 ```silk
-import silk.result as Result
+import silk.result
 
-fn half(value: i32) -> Result.Result<i32, i32> {
+fn half(value: i32) -> result.Result<i32, i32> {
   if value == 0 {
-    return Result.failResult<i32, i32>(2)
+    return result.failResult<i32, i32>(2)
   }
-  return Result.succeed<i32, i32>(value / 2)
+  return result.succeed<i32, i32>(value / 2)
 }
 
 fn addTwo(value: i32) -> i32 {
@@ -38,14 +38,14 @@ fn addTwo(value: i32) -> i32 {
 }
 
 pub fn main() -> i32 {
-  let initial = Result.succeed<i32, i32>(80)
-  let halved = Result.flatMap<i32, i32, i32>(move initial, half)
-  let answer = Result.map<i32, i32, i32>(move halved, addTwo)
-  let failed = Result.failResult<i32, i32>(7)
-  if Result.isFailure<i32, i32>(&failed) {} else {
+  let initial = result.succeed<i32, i32>(80)
+  let halved = result.flatMap<i32, i32, i32>(move initial, half)
+  let answer = result.map<i32, i32, i32>(move halved, addTwo)
+  let failed = result.failResult<i32, i32>(7)
+  if result.isFailure<i32, i32>(&failed) {} else {
     return 0
   }
-  return Result.unwrapOr<i32, i32>(move answer, 0)
+  return result.unwrapOr<i32, i32>(move answer, 0)
 }
 ```
 

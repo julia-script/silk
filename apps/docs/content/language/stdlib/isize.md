@@ -29,7 +29,7 @@ that value.
 ### Clamp an offset at the target boundary
 
 ```silk
-import silk.isize as isize
+import silk.isize
 
 pub fn main() -> i32 {
   if isize.saturatingAdd(isize.MAX, 1) != isize.MAX {

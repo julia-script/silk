@@ -24,22 +24,22 @@
 //!
 //! import silk.effect { Effect }
 //!
-//! import silk.layout as Layout
+//! import silk.layout
 //!
-//! import silk.raw_buffer as RawBuffer
+//! import silk.raw_buffer
 //!
-//! import silk.u8 as u8
+//! import silk.u8
 //!
 //! effect fn build() -> i32
 //! ! Allocator.OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
-//!   let acquiring = Allocator.allocate(Layout.of<[u8; 3]>())
+//!   let acquiring = Allocator.allocate(layout.of<[u8; 3]>())
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let allocation = run acquiring
 //!   unsafe {
-//!     let mut buffer = RawBuffer.from<u8>(move allocation, 3)
-//!     let filled = RawBuffer.fill(&mut buffer, 0, 3, u8.toU8(14))
-//!     let values = RawBuffer.view<u8>(&buffer, 0, 3)
+//!     let mut buffer = raw_buffer.from<u8>(move allocation, 3)
+//!     let filled = raw_buffer.fill(&mut buffer, 0, 3, u8.toU8(14))
+//!     let values = raw_buffer.view<u8>(&buffer, 0, 3)
 //!     return u8.toI32(values[0] + values[1] + values[2])
 //!   }
 //!   return 0

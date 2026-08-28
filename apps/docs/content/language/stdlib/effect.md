@@ -251,7 +251,7 @@ failures and therefore are not captured.
 ```silk
 import silk.effect { Effect }
 
-import silk.result as Result
+import silk.result
 
 struct Problem {
   answer: i32
@@ -265,9 +265,9 @@ effect fn load() -> i32
 pub fn main() -> i32 {
   let completed = run Effect.result(load())
   return match move completed {
-    Result.Result<i32, Problem> {value: outcome} => match move outcome {
-      Result.Success<i32> {value} => value
-      Result.Failure<Problem> {error} => error.answer
+    result.Result<i32, Problem> {value: outcome} => match move outcome {
+      result.Success<i32> {value} => value
+      result.Failure<Problem> {error} => error.answer
     }
   }
 }

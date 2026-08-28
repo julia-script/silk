@@ -36,21 +36,21 @@ import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.vector as Vector
+import silk.vector
 
 effect fn build() -> i32
 ! Allocator.OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut values = Vector.make<i32>()
-  let first = run Vector.append<i32>(&mut values, 10)
+  let mut values = vector.make<i32>()
+  let first = run vector.append<i32>(&mut values, 10)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let second = run Vector.append<i32>(&mut values, 30)
+  let second = run vector.append<i32>(&mut values, 30)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let middle = run Vector.insert<i32>(&mut values, 1, 20)
+  let middle = run vector.insert<i32>(&mut values, 1, 20)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let changed = Vector.set<i32>(&mut values, 2, 22)
-  let removed = Vector.remove<i32>(&mut values, 0)
-  return Vector.get<i32>(&values, 0) + Vector.get<i32>(&values, 1)
+  let changed = vector.set<i32>(&mut values, 2, 22)
+  let removed = vector.remove<i32>(&mut values, 0)
+  return vector.get<i32>(&values, 0) + vector.get<i32>(&values, 1)
 }
 
 effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
@@ -69,31 +69,31 @@ import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.option as Option
+import silk.option
 
-import silk.usize as usize
+import silk.usize
 
-import silk.vector as Vector
+import silk.vector
 
 effect fn search() -> i32
 ! Allocator.OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut values = Vector.make<i32>()
-  let first = run Vector.append<i32>(&mut values, 3)
+  let mut values = vector.make<i32>()
+  let first = run vector.append<i32>(&mut values, 3)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let second = run Vector.append<i32>(&mut values, 36)
+  let second = run vector.append<i32>(&mut values, 36)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let third = run Vector.append<i32>(&mut values, 3)
+  let third = run vector.append<i32>(&mut values, 3)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let sorting = Vector.sort<i32>(&mut values)
+  let sorting = vector.sort<i32>(&mut values)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let sorted = run sorting
-  let found = Vector.binarySearch<i32>(&values, 3)
-    |> Option.unwrapOr<usize>(99)
+  let found = vector.binarySearch<i32>(&values, 3)
+    |> option.unwrapOr<usize>(99)
   if found != usize.ZERO {
     return 0
   }
-  return Vector.get<i32>(&values, 0) + Vector.get<i32>(&values, 1) + Vector.get<i32>(&values, 2)
+  return vector.get<i32>(&values, 0) + vector.get<i32>(&values, 1) + vector.get<i32>(&values, 2)
 }
 
 effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {

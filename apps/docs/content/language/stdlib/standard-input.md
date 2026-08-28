@@ -31,48 +31,48 @@ available input from end-of-input.
 ```silk
 import silk.effect { Effect }
 
-import silk.standard_input as Input
+import silk.standard_input
 
-import silk.u8 as u8
+import silk.u8
 
-import silk.usize as usize
+import silk.usize
 
 struct OneByte {
   complete: bool
 }
 
-effect fn read(self: &mut OneByte, buffer: &mut [u8]) -> Input.ReadOutcome
-! Input.StreamReadError {
+effect fn read(self: &mut OneByte, buffer: &mut [u8]) -> standard_input.ReadOutcome
+! standard_input.StreamReadError {
   if self.complete {
-    return Input.endOfInput()
+    return standard_input.endOfInput()
   }
   buffer[usize.ZERO] = u8.toU8(42)
   self.complete = true
-  return Input.filled(usize.ONE)
+  return standard_input.filled(usize.ONE)
 }
 
-impl Input.StandardInput for OneByte {
+impl standard_input.StandardInput for OneByte {
   read: OneByte.read
 }
 
 effect fn program() -> i32
-! Input.StreamReadError {
+! standard_input.StreamReadError {
   let mut provider = OneByte {complete: false}
   let mut buffer = [u8.toU8(0)]
-  let first = run Input.receive(&mut buffer)
-    |> Effect.provideMut<Input.StandardInput>(&mut provider)
-  if Input.count(&first) != usize.ONE {
+  let first = run standard_input.receive(&mut buffer)
+    |> Effect.provideMut<standard_input.StandardInput>(&mut provider)
+  if standard_input.count(&first) != usize.ONE {
     return 1
   }
-  let second = run Input.receive(&mut buffer)
-    |> Effect.provideMut<Input.StandardInput>(&mut provider)
-  if Input.isEndOfInput(&second) == false {
+  let second = run standard_input.receive(&mut buffer)
+    |> Effect.provideMut<standard_input.StandardInput>(&mut provider)
+  if standard_input.isEndOfInput(&second) == false {
     return 2
   }
   return u8.toI32(buffer[usize.ZERO])
 }
 
-effect fn recover(error: Input.StreamReadError) -> i32 {
+effect fn recover(error: standard_input.StreamReadError) -> i32 {
   return 0
 }
 

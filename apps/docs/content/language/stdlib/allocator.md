@@ -22,20 +22,20 @@ implementation lexically. Allocation failure is typed as [`OutOfMemoryError`](#d
 ```silk
 import silk.allocator { Allocator }
 
-import silk.bytes as Bytes
+import silk.bytes
 
 import silk.effect { Effect }
 
-import silk.usize as usize
+import silk.usize
 
 effect fn copyMessage() -> i32
 ! Allocator.OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let source = b"Silk"
-  let copying = Bytes.copy(&source)
+  let copying = bytes.copy(&source)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let bytes = run copying
-  return Bytes.length(&bytes)
+  return bytes.length(&bytes)
     |> usize.toI32
 }
 

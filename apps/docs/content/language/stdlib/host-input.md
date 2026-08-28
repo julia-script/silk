@@ -25,44 +25,44 @@ directory. No ambient global is consulted after a provider is supplied.
 ### Read the argument count through an application provider
 
 ```silk
-import silk.bytes as Bytes
+import silk.bytes
 
 import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.host_input as Host
+import silk.host_input
 
-import silk.option as Option
+import silk.option
 
-import silk.usize as usize
+import silk.usize
 
 struct FixedInput {}
 
 effect fn argumentCount(self: &mut FixedInput) -> usize
-! Host.HostInputError {
+! host_input.HostInputError {
   return usize.ONE
 }
 
-effect fn argument(self: &mut FixedInput, index: usize) -> Option.Option<Bytes.Bytes>
-! Host.HostInputError | Allocator.OutOfMemoryError
+effect fn argument(self: &mut FixedInput, index: usize) -> option.Option<bytes.Bytes>
+! host_input.HostInputError | Allocator.OutOfMemoryError
 ? &mut Allocator {
-  fail Host.inputFailure()
+  fail host_input.inputFailure()
 }
 
-effect fn variable(self: &mut FixedInput, name: &[u8]) -> Option.Option<Bytes.Bytes>
-! Host.HostInputError | Allocator.OutOfMemoryError
+effect fn variable(self: &mut FixedInput, name: &[u8]) -> option.Option<bytes.Bytes>
+! host_input.HostInputError | Allocator.OutOfMemoryError
 ? &mut Allocator {
-  fail Host.inputFailure()
+  fail host_input.inputFailure()
 }
 
-effect fn workingDirectory(self: &mut FixedInput) -> Bytes.Bytes
-! Host.HostInputError | Allocator.OutOfMemoryError
+effect fn workingDirectory(self: &mut FixedInput) -> bytes.Bytes
+! host_input.HostInputError | Allocator.OutOfMemoryError
 ? &mut Allocator {
-  fail Host.inputFailure()
+  fail host_input.inputFailure()
 }
 
-impl Host.HostInput for FixedInput {
+impl host_input.HostInput for FixedInput {
   argumentCount: FixedInput.argumentCount
   argument: FixedInput.argument
   variable: FixedInput.variable
@@ -70,17 +70,17 @@ impl Host.HostInput for FixedInput {
 }
 
 effect fn program() -> i32
-! Host.HostInputError {
+! host_input.HostInputError {
   let mut provider = FixedInput {}
-  let total = run Host.argumentCount()
-    |> Effect.provideMut<Host.HostInput>(&mut provider)
+  let total = run host_input.argumentCount()
+    |> Effect.provideMut<host_input.HostInput>(&mut provider)
   if total != usize.ONE {
     return 1
   }
   return 42
 }
 
-effect fn recover(error: Host.HostInputError) -> i32 {
+effect fn recover(error: host_input.HostInputError) -> i32 {
   return 0
 }
 

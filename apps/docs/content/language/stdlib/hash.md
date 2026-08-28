@@ -27,20 +27,20 @@ a key may become unreachable.
 ### Hash the fields of one key deterministically
 
 ```silk
-import silk.hash as Hash
+import silk.hash
 
-import silk.u64 as u64
+import silk.u64
 
 pub fn main() -> i32 {
-  let seed = Hash.seed(17)
-  let first = Hash.mix(&seed, 4)
-    |> Hash.combine(9)
-  let second = Hash.mix(&seed, 4)
-    |> Hash.combine(9)
+  let seed = hash.seed(17)
+  let first = hash.mix(&seed, 4)
+    |> hash.combine(9)
+  let second = hash.mix(&seed, 4)
+    |> hash.combine(9)
   if first != second {
     return 0
   }
-  return u64.toI32(Hash.word(42).value)
+  return u64.toI32(hash.word(42).value)
 }
 ```
 

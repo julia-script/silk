@@ -18,7 +18,7 @@
 //! # Examples
 //! ## Preserve the sign during a right shift
 //! ```silk
-//! import silk.i16 as i16
+//! import silk.i16
 //!
 //! pub fn main() -> i32 {
 //!   let shifted = i16.shiftRight(-84, 1)

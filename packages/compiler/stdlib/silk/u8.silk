@@ -15,14 +15,14 @@
 //! # Examples
 //! ## Choose an overflow policy instead of relying on a trap
 //! ```silk
-//! import silk.option as Option
+//! import silk.option
 //!
-//! import silk.u8 as u8
+//! import silk.u8
 //!
 //! pub fn main() -> i32 {
 //!   let checked = u8.checkedAdd(255, 1)
 //!   let recovered = move checked
-//!     |> Option.unwrapOr<u8>(42)
+//!     |> option.unwrapOr<u8>(42)
 //!   if recovered != 42 {
 //!     return 1
 //!   }

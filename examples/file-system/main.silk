@@ -2,8 +2,8 @@ import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { SystemAllocator }
 import silk.effect as Effect
-import silk.u8 as u8
-import silk.usize as usize
+import silk.u8
+import silk.usize
 import silk.filesystem {
   DirectoryEntry,
   DirectoryInfo,

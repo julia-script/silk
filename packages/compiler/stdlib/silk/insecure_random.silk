@@ -16,12 +16,12 @@
 //! ## Reproduce the first word from one seed
 //! ```silk
 //! import silk.effect { Effect }
-//! import silk.insecure_random as InsecureRandom
+//! import silk.insecure_random
 //!
 //! pub fn main() -> i32 {
-//!   let mut provider = InsecureRandom.seeded(0)
-//!   let first = run InsecureRandom.nextU64()
-//!     |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut provider)
+//!   let mut provider = insecure_random.seeded(0)
+//!   let first = run insecure_random.nextU64()
+//!     |> Effect.provideMut<insecure_random.InsecureRandom>(&mut provider)
 //!   if first != 0x99ec5f36cb75f2b4 { return 0 }
 //!   return 42
 //! }

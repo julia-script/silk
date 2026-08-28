@@ -16,13 +16,13 @@
 //! ## Provide a deterministic initialization seed
 //! ```silk
 //! import silk.effect { Effect }
-//! import silk.insecure_seed as InsecureSeed
+//! import silk.insecure_seed
 //!
 //! pub fn main() -> i32 {
-//!   let provider = InsecureSeed.fixed(20, 22)
-//!   let seed = run InsecureSeed.get()
-//!     |> Effect.provide<InsecureSeed.InsecureSeed>(&provider)
-//!   if InsecureSeed.first(&seed) + InsecureSeed.second(&seed) != 42 { return 0 }
+//!   let provider = insecure_seed.fixed(20, 22)
+//!   let seed = run insecure_seed.get()
+//!     |> Effect.provide<insecure_seed.InsecureSeed>(&provider)
+//!   if insecure_seed.first(&seed) + insecure_seed.second(&seed) != 42 { return 0 }
 //!   return 42
 //! }
 //! ```

@@ -17,11 +17,11 @@
 //! # Examples
 //! ## Request a secure word
 //! ```silk
-//! import silk.random as Random
+//! import silk.random
 //!
 //! effect fn tokenWord() -> u64
-//! ? &mut Random.Random {
-//!   return run Random.nextU64()
+//! ? &mut random.Random {
+//!   return run random.nextU64()
 //! }
 //! ```
 

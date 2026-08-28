@@ -22,17 +22,17 @@
 //!
 //! import silk.effect { Effect }
 //!
-//! import silk.string as String
+//! import silk.string { String }
 //!
-//! import silk.unicode as Unicode
+//! import silk.unicode
 //!
 //! effect fn normalize() -> i32
 //! ! Allocator.OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
-//!   let composing = Unicode.normalizeNfc("e\u{301}")
+//!   let composing = unicode.normalizeNfc("e\u{301}")
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let composed = run composing
-//!   let decomposing = Unicode.normalizeNfd("é")
+//!   let decomposing = unicode.normalizeNfd("é")
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let decomposed = run decomposing
 //!   if String.view(&composed) != "é" {

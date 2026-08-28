@@ -1,7 +1,7 @@
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
-import silk.shared as Shared
+import silk.shared
 
 struct Empty {}
 
@@ -37,19 +37,19 @@ fn recordParcelCleanup(self: &mut SignalBox) -> i32 {
 
 struct Parcel {
   value: i32
-  inbox: Shared.Shared<SignalBox>
+  inbox: shared.Shared<SignalBox>
 }
 
 impl Drop for Parcel {
   fn drop(self: &mut Parcel) -> () {
-    let recorded = Shared.withMut<SignalBox, i32>(&self.inbox, recordParcelCleanup)
+    let recorded = shared.withMut<SignalBox, i32>(&self.inbox, recordParcelCleanup)
     self.value = 0
     return ()
   }
 }
 
-fn signal(payload: i32, inbox: Shared.Shared<SignalBox>, identifier: i32) -> i32 {
-  let pushed = Shared.withMut<SignalBox, i32>(&inbox, appendFixed(identifier))
+fn signal(payload: i32, inbox: shared.Shared<SignalBox>, identifier: i32) -> i32 {
+  let pushed = shared.withMut<SignalBox, i32>(&inbox, appendFixed(identifier))
   drop inbox
   return payload + pushed - identifier
 }
@@ -59,19 +59,19 @@ struct Retained<F: once fn(i32) -> i32> {
 }
 
 pub struct SignalCapture {
-  inbox: Shared.Shared<SignalBox>
+  inbox: shared.Shared<SignalBox>
   identifier: i32
 }
 
 impl Drop for SignalCapture {
   fn drop(self: &mut SignalCapture) -> () {
-    let recorded = Shared.withMut<SignalBox, i32>(&self.inbox, recordSignalCleanup)
+    let recorded = shared.withMut<SignalBox, i32>(&self.inbox, recordSignalCleanup)
     return ()
   }
 }
 
 fn signalCaptured(payload: i32, self: SignalCapture) -> i32 {
-  return signal(payload, Shared.clone<SignalBox>(&self.inbox), self.identifier)
+  return signal(payload, shared.clone<SignalBox>(&self.inbox), self.identifier)
 }
 
 pub fn markReady(payload: i32) -> i32 { return payload }
@@ -96,11 +96,11 @@ struct FutureCell<A, F: once fn(i32) -> i32> {
 }
 
 struct Sender<F: once fn(i32) -> i32> {
-  state: Shared.Shared<FutureCell<Parcel, F>>
+  state: shared.Shared<FutureCell<Parcel, F>>
 }
 
 struct Reader<T> {
-  state: Shared.Shared<T>
+  state: shared.Shared<T>
 }
 
 struct Removed<F: once fn(i32) -> i32> {
@@ -164,7 +164,7 @@ fn deliver<F: once fn(i32) -> i32>(
   secondReplacement: SignalCallback<F>,
   thirdReplacement: SignalCallback<F>,
 ) -> i32 {
-  let extracted = Shared.withMut<FutureCell<Parcel, F>, Removed<F>>(
+  let extracted = shared.withMut<FutureCell<Parcel, F>, Removed<F>>(
     &producer.state,
     deliverState(
       move value,
@@ -191,8 +191,8 @@ fn lifecycleSignalFingerprint(self: &SignalBox) -> i32 {
   return self.cleanupFingerprint
 }
 
-fn observeOwnedSignals(inbox: Shared.Shared<SignalBox>) -> i32 {
-  let result = Shared.with<SignalBox, i32>(&inbox, signalFingerprint)
+fn observeOwnedSignals(inbox: shared.Shared<SignalBox>) -> i32 {
+  let result = shared.with<SignalBox, i32>(&inbox, signalFingerprint)
   drop inbox
   return result
 }
@@ -210,8 +210,8 @@ effect fn refuse(
 impl Allocator for EmptyAllocator { allocate: EmptyAllocator.refuse }
 
 fn linked(
-  inbox: &Shared.Shared<SignalBox>,
-  state: &Shared.Shared<FutureCell<Parcel, typeof(markReady)>>,
+  inbox: &shared.Shared<SignalBox>,
+  state: &shared.Shared<FutureCell<Parcel, typeof(markReady)>>,
   unusedParcel: Parcel,
   firstCallback: SignalCallback<typeof(markReady)>,
   secondCallback: SignalCallback<typeof(markReady)>,
@@ -221,37 +221,37 @@ fn linked(
   thirdReplacement: SignalCallback<typeof(markReady)>,
 ) -> i32 {
   let producer = Sender {
-    state: Shared.clone(state),
+    state: shared.clone(state),
   }
   let firstReader = Reader {
-    state: Shared.clone(state),
+    state: shared.clone(state),
   }
   let secondReader = Reader {
-    state: Shared.clone(state),
+    state: shared.clone(state),
   }
   let thirdReader = Reader {
-    state: Shared.clone(state),
+    state: shared.clone(state),
   }
-  let replaced1 = Shared.withMut(
+  let replaced1 = shared.withMut(
     state,
     subscribe(move firstCallback),
   )
   drop replaced1
-  let replaced2 = Shared.withMut(
+  let replaced2 = shared.withMut(
     state,
     subscribe(move secondCallback),
   )
   drop replaced2
-  let replaced3 = Shared.withMut(
+  let replaced3 = shared.withMut(
     state,
     subscribe(move thirdCallback),
   )
   drop replaced3
   let unusedSender = Sender {
-    state: Shared.clone(state),
+    state: shared.clone(state),
   }
   let secondUnusedSender = Sender {
-    state: Shared.clone(state),
+    state: shared.clone(state),
   }
   let dormantPublication = effect {
     drop unusedSender
@@ -264,14 +264,14 @@ fn linked(
   }
   drop dormantPublication
   drop pendingStateCleanup
-  let observationHandle = Shared.clone<SignalBox>(inbox)
+  let observationHandle = shared.clone<SignalBox>(inbox)
   let pendingObservation = effect {
     return observeOwnedSignals(move observationHandle)
   }
   drop pendingObservation
   let publishedParcel = Parcel {
     value: 7,
-    inbox: Shared.clone<SignalBox>(inbox),
+    inbox: shared.clone<SignalBox>(inbox),
   }
   let published = deliver(
     move producer,
@@ -280,15 +280,15 @@ fn linked(
     move secondReplacement,
     move thirdReplacement,
   )
-  let observed1 = Shared.with(
+  let observed1 = shared.with(
     &firstReader.state,
     observeParcel,
   )
-  let observed2 = Shared.with(
+  let observed2 = shared.with(
     &secondReader.state,
     observeParcel,
   )
-  let observed3 = Shared.with(
+  let observed3 = shared.with(
     &thirdReader.state,
     observeParcel,
   )
@@ -303,7 +303,7 @@ effect fn runPressure() -> i32 ! OutOfMemoryError {
   let mut firstAllocator = Allocator.systemAllocatorProvider()
   // PRESSURE_SECOND_PROVIDER
   let mut secondAllocator = Allocator.systemAllocatorProvider()
-  let inbox = run (Shared.make<SignalBox>(SignalBox {
+  let inbox = run (shared.make<SignalBox>(SignalBox {
     first: 0,
     second: 0,
     third: 0,
@@ -314,14 +314,14 @@ effect fn runPressure() -> i32 ! OutOfMemoryError {
   }) |> Effect.provideMut<Allocator>(&mut firstAllocator))
   let unusedParcel = Parcel {
     value: 99,
-    inbox: Shared.clone<SignalBox>(&inbox),
+    inbox: shared.clone<SignalBox>(&inbox),
   }
   let initialParcel = Parcel {
     value: 0,
-    inbox: Shared.clone<SignalBox>(&inbox),
+    inbox: shared.clone<SignalBox>(&inbox),
   }
   let firstPlaceholderCapture = SignalCapture {
-    inbox: Shared.clone<SignalBox>(&inbox),
+    inbox: shared.clone<SignalBox>(&inbox),
     identifier: 4,
   }
   let firstPlaceholder = SignalCallback {
@@ -329,7 +329,7 @@ effect fn runPressure() -> i32 ! OutOfMemoryError {
     capture: move firstPlaceholderCapture,
   }
   let secondPlaceholderCapture = SignalCapture {
-    inbox: Shared.clone<SignalBox>(&inbox),
+    inbox: shared.clone<SignalBox>(&inbox),
     identifier: 5,
   }
   let secondPlaceholder = SignalCallback {
@@ -337,7 +337,7 @@ effect fn runPressure() -> i32 ! OutOfMemoryError {
     capture: move secondPlaceholderCapture,
   }
   let thirdPlaceholderCapture = SignalCapture {
-    inbox: Shared.clone<SignalBox>(&inbox),
+    inbox: shared.clone<SignalBox>(&inbox),
     identifier: 6,
   }
   let thirdPlaceholder = SignalCallback {
@@ -345,7 +345,7 @@ effect fn runPressure() -> i32 ! OutOfMemoryError {
     capture: move thirdPlaceholderCapture,
   }
   let dormantCapture = SignalCapture {
-    inbox: Shared.clone<SignalBox>(&inbox),
+    inbox: shared.clone<SignalBox>(&inbox),
     identifier: 8,
   }
   let dormantCallback = SignalCallback {
@@ -353,22 +353,22 @@ effect fn runPressure() -> i32 ! OutOfMemoryError {
     capture: move dormantCapture,
   }
   let firstCapture = SignalCapture {
-    inbox: Shared.clone<SignalBox>(&inbox),
+    inbox: shared.clone<SignalBox>(&inbox),
     identifier: 1,
   }
   let firstCallback = SignalCallback { notify: markReady, capture: move firstCapture }
   let secondCapture = SignalCapture {
-    inbox: Shared.clone<SignalBox>(&inbox),
+    inbox: shared.clone<SignalBox>(&inbox),
     identifier: 2,
   }
   let secondCallback = SignalCallback { notify: markReady, capture: move secondCapture }
   let thirdCapture = SignalCapture {
-    inbox: Shared.clone<SignalBox>(&inbox),
+    inbox: shared.clone<SignalBox>(&inbox),
     identifier: 3,
   }
   let thirdCallback = SignalCallback { notify: markReady, capture: move thirdCapture }
   let firstReplacementCapture = SignalCapture {
-    inbox: Shared.clone<SignalBox>(&inbox),
+    inbox: shared.clone<SignalBox>(&inbox),
     identifier: 4,
   }
   let firstReplacement = SignalCallback {
@@ -376,7 +376,7 @@ effect fn runPressure() -> i32 ! OutOfMemoryError {
     capture: move firstReplacementCapture,
   }
   let secondReplacementCapture = SignalCapture {
-    inbox: Shared.clone<SignalBox>(&inbox),
+    inbox: shared.clone<SignalBox>(&inbox),
     identifier: 5,
   }
   let secondReplacement = SignalCallback {
@@ -384,7 +384,7 @@ effect fn runPressure() -> i32 ! OutOfMemoryError {
     capture: move secondReplacementCapture,
   }
   let thirdReplacementCapture = SignalCapture {
-    inbox: Shared.clone<SignalBox>(&inbox),
+    inbox: shared.clone<SignalBox>(&inbox),
     identifier: 6,
   }
   let thirdReplacement = SignalCallback {
@@ -400,7 +400,7 @@ effect fn runPressure() -> i32 ! OutOfMemoryError {
     registrations: 0,
     publications: 0,
   }
-  let state = run (Shared.make(move sourceState)
+  let state = run (shared.make(move sourceState)
     |> Effect.provideMut<Allocator>(&mut secondAllocator))
   let result = linked(
     &inbox,
@@ -414,15 +414,15 @@ effect fn runPressure() -> i32 ! OutOfMemoryError {
     move thirdReplacement,
   )
   let storedCapture = SignalCapture {
-    inbox: Shared.clone<SignalBox>(&inbox),
+    inbox: shared.clone<SignalBox>(&inbox),
     identifier: 9,
   }
   let dormantReady = signalCaptured(move storedCapture)
   let storedCallable = Retained { notify: move dormantReady }
   drop state
   drop storedCallable
-  let order = Shared.with<SignalBox, i32>(&inbox, signalFingerprint)
-  let lifecycle = Shared.with<SignalBox, i32>(&inbox, lifecycleSignalFingerprint)
+  let order = shared.with<SignalBox, i32>(&inbox, signalFingerprint)
+  let lifecycle = shared.with<SignalBox, i32>(&inbox, lifecycleSignalFingerprint)
   drop inbox
   if result != 42 { return 5 }
   if result != 42 { return 6 }
@@ -437,12 +437,12 @@ fn readRecovery(value: &RecoveryValue) -> i32 { return value.value }
 
 effect fn recoverLater(error: OutOfMemoryError) -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let first = run (Shared.make<RecoveryValue>(RecoveryValue { value: 20 })
+  let first = run (shared.make<RecoveryValue>(RecoveryValue { value: 20 })
     |> Effect.provideMut<Allocator>(&mut allocator))
-  let second = run (Shared.make<RecoveryValue>(RecoveryValue { value: 22 })
+  let second = run (shared.make<RecoveryValue>(RecoveryValue { value: 22 })
     |> Effect.provideMut<Allocator>(&mut allocator))
-  let firstValue = Shared.with<RecoveryValue, i32>(&first, readRecovery)
-  let secondValue = Shared.with<RecoveryValue, i32>(&second, readRecovery)
+  let firstValue = shared.with<RecoveryValue, i32>(&first, readRecovery)
+  let secondValue = shared.with<RecoveryValue, i32>(&second, readRecovery)
   drop first
   drop second
   return firstValue + secondValue + 100

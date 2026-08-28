@@ -25,19 +25,19 @@ values are incomparable, [`compare`](#declaration-73696c6b2f6f726465723a3a636f6d
 ### Classify each comparison result
 
 ```silk
-import silk.order as Order
+import silk.order
 
 pub fn main() -> i32 {
-  let low = Order.compare<i32>(2, 7)
-  let same = Order.compare<i32>(7, 7)
-  let high = Order.compare<i32>(9, 7)
-  if !Order.isLess(&low) {
+  let low = order.compare<i32>(2, 7)
+  let same = order.compare<i32>(7, 7)
+  let high = order.compare<i32>(9, 7)
+  if !order.isLess(&low) {
     return 1
   }
-  if !Order.isEqual(&same) {
+  if !order.isEqual(&same) {
     return 2
   }
-  if !Order.isGreater(&high) {
+  if !order.isGreater(&high) {
     return 3
   }
   return 42

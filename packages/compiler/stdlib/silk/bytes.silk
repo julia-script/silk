@@ -12,28 +12,28 @@
 //! # Examples
 //! ## Copy, append, and update bytes
 //! ```silk
-//! import silk.bytes as Bytes
+//! import silk.bytes
 //!
 //! import silk.allocator { Allocator }
 //!
 //! import silk.effect { Effect }
 //!
-//! import silk.u8 as u8
+//! import silk.u8
 //!
 //! effect fn build() -> i32
 //! ! Allocator.OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
 //!   let source = b"AB"
-//!   let copying = Bytes.copy(&source)
+//!   let copying = bytes.copy(&source)
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let mut bytes = run copying
 //!   let suffix = b"C"
-//!   let appending = Bytes.append(&mut bytes, &suffix)
+//!   let appending = bytes.append(&mut bytes, &suffix)
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let appended = run appending
-//!   let mut writable = Bytes.asMutSlice(&mut bytes)
+//!   let mut writable = bytes.asMutSlice(&mut bytes)
 //!   writable[1] = u8.toU8(48)
-//!   let readable = Bytes.asSlice(&bytes)
+//!   let readable = bytes.asSlice(&bytes)
 //!   return u8.toI32(readable[0]) - u8.toI32(readable[1]) + u8.toI32(readable[2]) - 42
 //! }
 //!

@@ -26,10 +26,10 @@ the mathematical result is outside the selected type's range.
 ### Add values through one generic contract
 
 ```silk
-import silk.numeric as Numeric
+import silk.numeric
 
 pub fn main() -> i32 {
-  return Numeric.add<i32>(40, 2)
+  return numeric.add<i32>(40, 2)
 }
 ```
 

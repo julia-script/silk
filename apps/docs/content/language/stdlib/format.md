@@ -26,20 +26,20 @@ import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.format as Format
+import silk.format
 
-import silk.i64 as i64
+import silk.i64
 
-import silk.result as Result
+import silk.result
 
-import silk.string as String
+import silk.string { String }
 
 effect fn convert() -> i32
 ! Allocator.OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let parsed = Format.signedValue("-42")
-    |> Result.unwrapOr<i64, Format.ParseError>(0)
-  let rendering = Format.signedText(parsed)
+  let parsed = format.signedValue("-42")
+    |> result.unwrapOr<i64, format.ParseError>(0)
+  let rendering = format.signedText(parsed)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let rendered = run rendering
   let text = String.view(&rendered)

@@ -19,16 +19,16 @@
 //! # Examples
 //! ## Parse a complete signed decimal value
 //! ```silk
-//! import silk.format as Format
+//! import silk.format
 //!
-//! import silk.i64 as i64
+//! import silk.i64
 //!
-//! import silk.result as Result
+//! import silk.result
 //!
 //! pub fn main() -> i32 {
 //!   let parsed = i64.parse("-42")
 //!   let value = move parsed
-//!     |> Result.unwrapOr<i64, Format.ParseError>(0)
+//!     |> result.unwrapOr<i64, format.ParseError>(0)
 //!   return i64.toI32(value + 84)
 //! }
 //! ```

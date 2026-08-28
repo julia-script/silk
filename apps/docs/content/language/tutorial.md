@@ -163,7 +163,7 @@ Borrows are written `&` (shared) and `&mut` (exclusive). A direct borrow express
 call argument:
 
 ```silk
-import silk.usize as usize
+import silk.usize
 
 fn total(values: &[i32], length: usize) -> i32 {
   let mut sum = 0

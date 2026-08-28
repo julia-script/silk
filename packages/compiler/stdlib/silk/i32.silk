@@ -20,14 +20,14 @@
 //! # Examples
 //! ## Select an overflow result explicitly
 //! ```silk
-//! import silk.i32 as i32
+//! import silk.i32
 //!
-//! import silk.option as Option
+//! import silk.option
 //!
 //! pub fn main() -> i32 {
 //!   let checked = i32.checkedAdd(i32.MAX, 1)
 //!   let recovered = move checked
-//!     |> Option.unwrapOr<i32>(42)
+//!     |> option.unwrapOr<i32>(42)
 //!   if i32.wrappingAdd(i32.MAX, 1) != i32.MIN {
 //!     return 1
 //!   }

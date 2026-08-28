@@ -31,48 +31,48 @@ as its entry separator, and a native provider cannot preserve an embedded NUL as
 ### Handle a nonzero child exit as outcome data
 
 ```silk
-import silk.bytes as Bytes
+import silk.bytes
 
-import silk.child_process as Process
+import silk.child_process
 
 import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.filesystem as Path
+import silk.filesystem
 
-import silk.option as Option
+import silk.option
 
 struct Completed {}
 
-effect fn execute(self: &mut Completed, request: &Process.ProcessRequest) -> Process.ProcessOutcome
-! Process.ProcessError | Allocator.OutOfMemoryError
+effect fn execute(self: &mut Completed, request: &child_process.ProcessRequest) -> child_process.ProcessOutcome
+! child_process.ProcessError | Allocator.OutOfMemoryError
 ? &mut Allocator {
-  return Process.exited(7, Bytes.make(), Bytes.make())
+  return child_process.exited(7, bytes.make(), bytes.make())
 }
 
-impl Process.ChildProcess for Completed {
+impl child_process.ChildProcess for Completed {
   execute: Completed.execute
 }
 
 effect fn program() -> i32
-! Path.FileError | Allocator.OutOfMemoryError | Process.ProcessError {
+! filesystem.FileError | Allocator.OutOfMemoryError | child_process.ProcessError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = Completed {}
-  let path = run Path.make("/tool")
+  let path = run filesystem.make("/tool")
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let request = run Process.request(&path)
+  let request = run child_process.request(&path)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let outcome = run Process.submit(&request)
-    |> Effect.provideMut<Process.ChildProcess>(&mut provider)
+  let outcome = run child_process.submit(&request)
+    |> Effect.provideMut<child_process.ChildProcess>(&mut provider)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  return match move Process.exitCode(&outcome) {
-    Option.Some<i32> {value} => 35 + value
-    Option.None {} => 1
+  return match move child_process.exitCode(&outcome) {
+    option.Some<i32> {value} => 35 + value
+    option.None {} => 1
   }
 }
 
-effect fn recover(error: Path.FileError | Allocator.OutOfMemoryError | Process.ProcessError) -> i32 {
+effect fn recover(error: filesystem.FileError | Allocator.OutOfMemoryError | child_process.ProcessError) -> i32 {
   return 0
 }
 

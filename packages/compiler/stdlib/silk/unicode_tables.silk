@@ -17,10 +17,10 @@
 //! # Examples
 //! ## Read the canonical decomposition of é
 //! ```silk
-//! import silk.unicode_tables as UnicodeTables
+//! import silk.unicode_tables
 //!
 //! pub fn main() -> i32 {
-//!   let decomposition = UnicodeTables.canonicalDecomposition(233)
+//!   let decomposition = unicode_tables.canonicalDecomposition(233)
 //!   if decomposition.first != 101 || decomposition.second != 769 {
 //!     return 0
 //!   }

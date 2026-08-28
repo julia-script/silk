@@ -38,25 +38,25 @@ import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.hash as Hash
+import silk.hash
 
-import silk.hash_map as HashMap
+import silk.hash_map
 
-import silk.option as Option
+import silk.option
 
 effect fn build() -> i32
 ! Allocator.OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut map = HashMap.make<Hash.Word, i32>(Hash.seed(17))
-  let inserting = HashMap.insert<Hash.Word, i32>(&mut map, Hash.word(7), 42)
+  let mut map = hash_map.make<hash.Word, i32>(hash.seed(17))
+  let inserting = hash_map.insert<hash.Word, i32>(&mut map, hash.word(7), 42)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let previous = run inserting
   drop previous
-  let found = HashMap.get<Hash.Word, i32>(&map, Hash.word(7))
-    |> Option.unwrapOr<i32>(0)
-  let removed = HashMap.remove<Hash.Word, i32>(&mut map, Hash.word(7))
+  let found = hash_map.get<hash.Word, i32>(&map, hash.word(7))
+    |> option.unwrapOr<i32>(0)
+  let removed = hash_map.remove<hash.Word, i32>(&mut map, hash.word(7))
   drop removed
-  if HashMap.contains<Hash.Word, i32>(&map, Hash.word(7)) {
+  if hash_map.contains<hash.Word, i32>(&map, hash.word(7)) {
     return 0
   }
   return found

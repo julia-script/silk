@@ -26,24 +26,24 @@ The module does not identify allocations or repair an unbalanced provider.
 ### Publish a snapshot of one allocation ledger
 
 ```silk
-import silk.metrics as Metrics
+import silk.metrics
 
-import silk.usize as usize
+import silk.usize
 
 pub fn main() -> i32 {
-  let mut metrics = Metrics.make()
-  Metrics.recordAcquire(&mut metrics)
-  Metrics.recordAcquire(&mut metrics)
-  Metrics.recordRelease(&mut metrics)
+  let mut metrics = metrics.make()
+  metrics.recordAcquire(&mut metrics)
+  metrics.recordAcquire(&mut metrics)
+  metrics.recordRelease(&mut metrics)
 
-  let snapshot = Metrics.copy(&metrics)
+  let snapshot = metrics.copy(&metrics)
   if snapshot.acquired != usize.add(0, 2) {
     return 1
   }
   if snapshot.released != usize.ONE {
     return 2
   }
-  if Metrics.live(&snapshot) != usize.ONE {
+  if metrics.live(&snapshot) != usize.ONE {
     return 3
   }
   if snapshot.peakLive != usize.add(0, 2) {

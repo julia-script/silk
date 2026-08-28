@@ -36,20 +36,20 @@ import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.filesystem as FileSystem
+import silk.filesystem
 
 effect fn example() -> i32
-! FileSystem.FileError | Allocator.OutOfMemoryError {
+! filesystem.FileError | Allocator.OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let path = run FileSystem.make("/workspace")
+  let path = run filesystem.make("/workspace")
     |> Effect.provideMut(&mut allocator)
-  if FileSystem.name(&path) == "workspace" {
+  if filesystem.name(&path) == "workspace" {
     return 42
   }
   return 0
 }
 
-effect fn recover(error: FileSystem.FileError | Allocator.OutOfMemoryError) -> i32 {
+effect fn recover(error: filesystem.FileError | Allocator.OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -721,14 +721,14 @@ create-or-truncate writes, and deterministic listing order described here.
 ```silk
 import silk.allocator { Allocator }
 
-import silk.filesystem as FileSystem
+import silk.filesystem
 
-import silk.usize as usize
+import silk.usize
 
-pub effect fn store(path: &FileSystem.Path, contents: &[u8]) -> usize
-! FileSystem.FileError | Allocator.OutOfMemoryError
-? &mut FileSystem.FileSystem | &mut Allocator {
-  let written = run FileSystem.writeFileWithParents(path, contents)
+pub effect fn store(path: &filesystem.Path, contents: &[u8]) -> usize
+! filesystem.FileError | Allocator.OutOfMemoryError
+? &mut filesystem.FileSystem | &mut Allocator {
+  let written = run filesystem.writeFileWithParents(path, contents)
   return contents.length
 }
 ```
