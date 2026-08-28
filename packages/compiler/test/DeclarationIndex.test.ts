@@ -1063,6 +1063,19 @@ it.effect('diagnoses private exposure and inline recursive struct components can
       ['Hidden', 'Hidden', 'Hidden'],
     )
 
+    const exposedUnion = yield* collect('union-exposure', [
+      [
+        'union-exposure',
+        'struct Hidden {}\npub union Public { Value { pub visible: Hidden, private: Hidden } }',
+      ],
+    ])
+    assert.deepEqual(
+      exposedUnion.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0019'],
+    )
+    assert.strictEqual(exposedUnion.modules.at(0)?.unions.at(0)?.validity._tag, 'Invalid')
+    assert.strictEqual(exposedUnion.modules.at(0)?.unions.at(0)?.dependency._tag, 'Unavailable')
+
     const recursiveSource = 'import b.B\npub struct A { value: B.B }'
     const recursive = yield* collect('a/A', [
       ['a/A', recursiveSource],
@@ -1090,6 +1103,16 @@ it.effect('diagnoses private exposure and inline recursive struct components can
       ['SEM0020'],
     )
     assert.strictEqual(direct.modules.at(0)?.structs.at(0)?.dependency._tag, 'Unavailable')
+
+    const mixed = yield* collect('mixed', [
+      ['mixed', 'union Link { Next { node: Node }, End }\nstruct Node { link: Link }'],
+    ])
+    assert.deepEqual(
+      mixed.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0020'],
+    )
+    assert.strictEqual(mixed.modules.at(0)?.unions.at(0)?.dependency._tag, 'Unavailable')
+    assert.strictEqual(mixed.modules.at(0)?.structs.at(0)?.dependency._tag, 'Unavailable')
   }),
 )
 

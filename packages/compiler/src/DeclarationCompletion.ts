@@ -1357,13 +1357,13 @@ export const complete = (
     })
   })
 
-  const structs = modules.flatMap((module) => module.structs)
+  const aggregates = modules.flatMap((module) => [...module.structs, ...module.unions])
   // One graph, two readers: the component walk and the self-edge test below must agree about what
   // "inline" means, or a struct that reaches itself through an indirection is a component of one
   // in the first and a cycle in the second.
-  const inlineParameters = inlineParametersOf(structs)
+  const inlineParameters = inlineParametersOf(aggregates)
   const cycleCause = new Map<string, Diagnostic.Identity>()
-  for (const component of stronglyConnected(structs, inlineParameters)) {
+  for (const component of stronglyConnected(aggregates, inlineParameters)) {
     const first = component.at(0)
     if (first === undefined) continue
     const keys = component.flatMap((struct) =>
@@ -1371,11 +1371,14 @@ export const complete = (
     )
     const selfEdge =
       keys.length === 1 &&
-      first.fields.some((field) =>
+      (first._tag === 'StructDeclaration'
+        ? first.fields
+        : first.variants.flatMap((variant) => variant.fields)
+      ).some((field) =>
         inlineNeighbors(field, inlineParameters).some((neighbor) => neighbor === keys[0]),
       )
     if (keys.length < 2 && !selfEdge) continue
-    const diagnostic = Diagnostic.inlineRecursiveStruct(
+    const diagnostic = Diagnostic.inlineRecursiveAggregate(
       Object.freeze(keys),
       first.name._tag === 'Present' ? first.name.token.span : first.syntax.span,
     )
@@ -1386,9 +1389,13 @@ export const complete = (
 
   modules = modules.map((module): ModuleHeaders => {
     const members = module.members.map((member): MemberFact => {
-      if (member._tag !== 'StructDeclaration') return member
+      if (member._tag !== 'StructDeclaration' && member._tag !== 'UnionDeclaration') return member
+      const fields =
+        member._tag === 'StructDeclaration'
+          ? member.fields
+          : member.variants.flatMap((variant) => variant.fields)
       const dependencyMap = new Map<string, Type.Nominal>()
-      for (const field of member.fields) {
+      for (const field of fields) {
         if (field.declaredType._tag === 'Resolved') {
           for (const type of Type.nominals(field.declaredType.type)) {
             dependencyMap.set(Type.key(type), type)
@@ -1396,7 +1403,7 @@ export const complete = (
         }
       }
       const dependencies = [...dependencyMap.values()].sort(Type.compare)
-      const fieldCause = member.fields.find(
+      const fieldCause = fields.find(
         (field) =>
           (field.declaredType._tag === 'Unresolved' && field.declaredType.cause !== undefined) ||
           (field.declaredType._tag === 'Resolved' &&
@@ -1411,13 +1418,26 @@ export const complete = (
         fieldDependencyCause = fieldCause.declaredType.exposureCause
       }
       const cause = (key === undefined ? undefined : cycleCause.get(key)) ?? fieldDependencyCause
+      const dependency = Object.freeze(
+        cause === undefined
+          ? { _tag: 'Available' as const, types: Object.freeze(dependencies) }
+          : { _tag: 'Unavailable' as const, types: Object.freeze(dependencies), cause },
+      )
+      if (member._tag === 'UnionDeclaration' && cause !== undefined)
+        return Object.freeze({
+          ...member,
+          dependency,
+          validity: Object.freeze({
+            _tag: 'Invalid' as const,
+            causes: Object.freeze([
+              ...(member.validity._tag === 'Invalid' ? member.validity.causes : []),
+              cause,
+            ]),
+          }),
+        })
       return Object.freeze({
         ...member,
-        dependency: Object.freeze(
-          cause === undefined
-            ? { _tag: 'Available', types: Object.freeze(dependencies) }
-            : { _tag: 'Unavailable', types: Object.freeze(dependencies), cause },
-        ),
+        dependency,
       })
     })
     const moduleDiagnostics = diagnostics.filter(

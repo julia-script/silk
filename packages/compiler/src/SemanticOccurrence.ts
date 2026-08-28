@@ -29,6 +29,10 @@ export type Identity =
   | { readonly _tag: 'BindingIdentity'; readonly id: Hir.BindingId }
   | { readonly _tag: 'PatternBindingIdentity'; readonly id: Match.BindingId }
   | { readonly _tag: 'FieldIdentity'; readonly id: DeclarationFacts.FieldId }
+  | {
+      readonly _tag: 'UnionVariantIdentity'
+      readonly id: DeclarationFacts.CanonicalUnionVariantId
+    }
   | { readonly _tag: 'EnumMemberIdentity'; readonly id: DeclarationFacts.CanonicalEnumMemberId }
   | {
       readonly _tag: 'EnumAssociatedOperationIdentity'
@@ -145,6 +149,13 @@ const locationOfEnumMember = (
 ): DeclarationLocation | undefined =>
   member.name._tag === 'Present'
     ? location(member.name.token.span.sourceId, member.syntax.span, member.name.token.span)
+    : undefined
+
+const locationOfUnionVariant = (
+  variant: DeclarationFacts.UnionVariantFact,
+): DeclarationLocation | undefined =>
+  variant.name._tag === 'Present'
+    ? location(variant.name.token.span.sourceId, variant.syntax.span, variant.name.token.span)
     : undefined
 
 const locationOfField = (
@@ -1204,10 +1215,31 @@ const collectMember = (
     return
   }
   if (member._tag === 'RoleDeclaration') return
-  const fields =
-    member._tag === 'UnionDeclaration'
-      ? member.variants.flatMap((variant) => variant.fields)
-      : member.fields
+  if (member._tag === 'UnionDeclaration') {
+    for (const variant of member.variants) {
+      if (variant.name._tag === 'Present' && variant.canonical._tag === 'Canonical')
+        push(
+          pending,
+          variant.name.token.span,
+          'Declaration',
+          available(Object.freeze({ _tag: 'UnionVariantIdentity', id: variant.canonical.id })),
+          locationOfUnionVariant(variant),
+        )
+      for (const field of variant.fields) {
+        if (field.name._tag === 'Present')
+          push(
+            pending,
+            field.name.token.span,
+            'Declaration',
+            available(Object.freeze({ _tag: 'FieldIdentity', id: field.id })),
+            locationOfField(index, field),
+          )
+        collectDeclaredType(field.declaredType, index, scope, pending)
+      }
+    }
+    return
+  }
+  const fields = member.fields
   for (const field of fields) {
     if (field.name._tag === 'Present')
       push(
@@ -1445,6 +1477,8 @@ export const identityKey = (identity: Identity): string => {
       return `pattern:${JSON.stringify(identity.id)}`
     case 'FieldIdentity':
       return `field:${DeclarationFacts.fieldIdKey(identity.id)}`
+    case 'UnionVariantIdentity':
+      return `union-variant:${identity.id.union.module}.${identity.id.union.name}.${identity.id.name}`
     case 'EnumMemberIdentity':
       return `enum-member:${identity.id.enum.module}.${identity.id.enum.name}.${identity.id.name}`
     case 'EnumAssociatedOperationIdentity':

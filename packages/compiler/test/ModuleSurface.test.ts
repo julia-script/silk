@@ -88,6 +88,38 @@ it.effect('projects scalar enum declarations deterministically into module surfa
   }),
 )
 
+it.effect('projects complete nominal union headers into deterministic module surfaces', () =>
+  Effect.gen(function* () {
+    const base = yield* surface(
+      'pub union Result<A, E> { Success { pub value: A }, Failure { error: E }, Pending }',
+    )
+    const repeated = yield* surface(
+      'pub union Result<A, E> { Success { pub value: A }, Failure { error: E }, Pending }',
+    )
+    const reordered = yield* surface(
+      'pub union Result<A, E> { Failure { error: E }, Success { pub value: A }, Pending }',
+    )
+    const changedField = yield* surface(
+      'pub union Result<A, E> { Success { pub value: E }, Failure { error: E }, Pending }',
+    )
+    const changedVisibility = yield* surface(
+      'pub union Result<A, E> { Success { value: A }, Failure { error: E }, Pending }',
+    )
+    const unitInstead = yield* surface(
+      'pub union Result<A, E> { Success, Failure { error: E }, Pending }',
+    )
+
+    assert.strictEqual(ModuleSurface.equals(base, repeated), true)
+    assert.strictEqual(ModuleSurface.equals(base, reordered), false)
+    assert.strictEqual(ModuleSurface.equals(base, changedField), false)
+    assert.strictEqual(ModuleSurface.equals(base, changedVisibility), false)
+    assert.strictEqual(ModuleSurface.equals(base, unitInstead), false)
+    assert.include(base.canonical, 'UnionDeclaration')
+    assert.include(base.canonical, 'CanonicalUnionVariant')
+    assert.include(base.canonical, 'AvailableStructDependency')
+  }),
+)
+
 it.effect('compares independently allocated equal facts exactly', () =>
   Effect.gen(function* () {
     const source = `pub fn answer(value: i32) -> i32 { return value }

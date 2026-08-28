@@ -18,6 +18,7 @@ export interface DocBlock {
 const documentableKinds: ReadonlySet<SyntaxTree.NodeKind> = new Set([
   'StructDeclaration',
   'EnumDeclaration',
+  'UnionDeclaration',
   'ServiceDeclaration',
   'InterfaceDeclaration',
   'RoleDeclaration',
@@ -26,6 +27,8 @@ const documentableKinds: ReadonlySet<SyntaxTree.NodeKind> = new Set([
   'FunctionDeclaration',
   'StructField',
   'EnumMember',
+  'UnionVariant',
+  'UnionVariantField',
   'TypeParameter',
   'ParameterDeclaration',
   'ServiceOperation',

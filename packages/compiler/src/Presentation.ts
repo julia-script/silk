@@ -20,6 +20,7 @@ export type Presentation =
     })
   | (Base & { readonly _tag: 'StructPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'UnionPresentation'; readonly name: string })
+  | (Base & { readonly _tag: 'UnionVariantPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'EnumPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'EnumMemberPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'EnumOperationPresentation'; readonly name: string })
@@ -194,6 +195,34 @@ export const unionDeclaration = (self: DeclarationFacts.UnionFact): Presentation
     _tag: 'UnionPresentation',
     name,
     text: `${visibility}union ${name}${typeParameters}`,
+  })
+}
+
+/** Renders one variant as a constructor of its complete nominal union parent. */
+export const unionVariant = (
+  union: DeclarationFacts.UnionFact,
+  variant: DeclarationFacts.UnionVariantFact,
+): Presentation => {
+  const unionName = union.name._tag === 'Present' ? union.name.spelling : '_'
+  const variantName = variant.name._tag === 'Present' ? variant.name.spelling : '_'
+  const typeParameters =
+    union.typeParameters.length === 0
+      ? ''
+      : `<${union.typeParameters.map(typeParameterName).join(', ')}>`
+  const fields =
+    variant.kind === 'Unit'
+      ? ''
+      : ` { ${variant.fields
+          .map((field) =>
+            field.name._tag === 'Present'
+              ? `${field.name.spelling}: ${declaredType(field.declaredType)}`
+              : `_: ${declaredType(field.declaredType)}`,
+          )
+          .join(', ')} }`
+  return Object.freeze({
+    _tag: 'UnionVariantPresentation',
+    name: variantName,
+    text: `${unionName}${typeParameters}.${variantName}${fields}: ${unionName}${typeParameters}`,
   })
 }
 

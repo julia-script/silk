@@ -25,6 +25,7 @@ import type {
   TypePathFact,
   TypeResolution,
   TypeResolver,
+  UnionFact,
 } from './DeclarationFacts.js'
 import {
   copyApplication,
@@ -1793,25 +1794,34 @@ const inlineReach = (
  * descents, so the sets only grow and the loop terminates. Because it is the least fixed point,
  * the answer does not depend on the order structs or modules arrive in.
  */
-export const inlineParametersOf = (structs: ReadonlyArray<StructFact>): InlineParameters => {
-  const declarations = new Map<string, StructFact>()
-  for (const struct of structs)
-    if (struct.canonical._tag === 'Canonical')
-      declarations.set(canonicalKey(struct.canonical.id), struct)
+type InlineAggregateFact = StructFact | UnionFact
+
+const aggregateFields = (self: InlineAggregateFact): ReadonlyArray<FieldFact> =>
+  self._tag === 'StructDeclaration'
+    ? self.fields
+    : self.variants.flatMap((variant) => variant.fields)
+
+export const inlineParametersOf = (
+  aggregates: ReadonlyArray<InlineAggregateFact>,
+): InlineParameters => {
+  const declarations = new Map<string, InlineAggregateFact>()
+  for (const aggregate of aggregates)
+    if (aggregate.canonical._tag === 'Canonical')
+      declarations.set(canonicalKey(aggregate.canonical.id), aggregate)
   const inline = new Map<string, Set<number>>()
   for (const key of declarations.keys()) inline.set(key, new Set())
   for (let growing = true; growing; ) {
     growing = false
-    for (const [key, struct] of declarations) {
+    for (const [key, aggregate] of declarations) {
       const reached = inline.get(key)
-      if (reached === undefined || struct.typeParameters.length === 0) continue
+      if (reached === undefined || aggregate.typeParameters.length === 0) continue
       // Keyed by position, matching how `TypeInference.substitution` binds arguments to parameters.
       const own = new Map(
-        struct.typeParameters.map(
+        aggregate.typeParameters.map(
           (parameter, position) => [Type.key(parameter.type), position] as const,
         ),
       )
-      for (const field of struct.fields) {
+      for (const field of aggregateFields(aggregate)) {
         if (field.declaredType._tag !== 'Resolved') continue
         inlineReach(field.declaredType.type, inline, (member) => {
           if (!Type.isParameter(member)) return
@@ -1841,11 +1851,11 @@ export const inlineNeighbors = (
 }
 
 export const stronglyConnected = (
-  structs: ReadonlyArray<StructFact>,
+  aggregates: ReadonlyArray<InlineAggregateFact>,
   inlineParameters: InlineParameters,
-): ReadonlyArray<ReadonlyArray<StructFact>> => {
-  const canonical = structs
-    .filter((struct) => struct.canonical._tag === 'Canonical')
+): ReadonlyArray<ReadonlyArray<InlineAggregateFact>> => {
+  const canonical = aggregates
+    .filter((aggregate) => aggregate.canonical._tag === 'Canonical')
     .sort((left, right) => {
       const leftId = left.canonical._tag === 'Canonical' ? left.canonical.id : undefined
       const rightId = right.canonical._tag === 'Canonical' ? right.canonical.id : undefined
@@ -1854,16 +1864,16 @@ export const stronglyConnected = (
         : canonicalKey(leftId).localeCompare(canonicalKey(rightId))
     })
   const byKey = new Map(
-    canonical.flatMap((struct) =>
-      struct.canonical._tag === 'Canonical'
-        ? [[canonicalKey(struct.canonical.id), struct] as const]
+    canonical.flatMap((aggregate) =>
+      aggregate.canonical._tag === 'Canonical'
+        ? [[canonicalKey(aggregate.canonical.id), aggregate] as const]
         : [],
     ),
   )
   return Object.freeze(
     Graph.stronglyConnected(byKey.keys(), (key) => {
-      const struct = byKey.get(key)
-      return (struct?.fields ?? [])
+      const aggregate = byKey.get(key)
+      return (aggregate === undefined ? [] : aggregateFields(aggregate))
         .flatMap((field) => inlineNeighbors(field, inlineParameters))
         .filter((neighbor) => byKey.has(neighbor))
         .sort()

@@ -1743,6 +1743,25 @@ export const struct = (self: Index, module: string, name: string): StructLookup 
     name,
   )
 
+export const unionByName = (self: Index, module: string, name: string): UnionLookup => {
+  const result = member(self, module, name)
+  if (result._tag === 'Missing') return result
+  if (result._tag === 'Resolved')
+    return result.declaration._tag === 'UnionDeclaration'
+      ? Object.freeze({ _tag: 'Resolved', spelling: name, declaration: result.declaration })
+      : Object.freeze({ _tag: 'Missing', spelling: name })
+  const declarations = result.declarations.filter(
+    (declaration): declaration is UnionFact => declaration._tag === 'UnionDeclaration',
+  )
+  return declarations.length === 0
+    ? Object.freeze({ _tag: 'Missing', spelling: name })
+    : Object.freeze({
+        _tag: 'Ambiguous',
+        spelling: name,
+        declarations: Object.freeze(declarations),
+      })
+}
+
 /** Looks up one completed declaration by canonical identity. */
 export const byCanonical = (self: Index, id: CanonicalId): MemberFact | undefined => {
   const result = member(self, id.module, id.name)

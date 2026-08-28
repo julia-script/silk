@@ -11,8 +11,8 @@
 
 - [x] 2.1 Add canonical `UnionFact`, subordinate variant identities, and variant-scoped field ownership while generalizing shared field facts away from struct-only owners, and verify identity tests distinguish same-spelled variants and fields under different parents.
 - [x] 2.2 Collect unions in the ordinary cross-kind module namespace with parent parameters and source-ordered variants before bodies, and verify forward declarations, duplicates, empty unions, and cross-kind collisions in declaration-index tests.
-- [ ] 2.3 Resolve every variant field type, visibility exposure, generic reference, and inline aggregate dependency before body analysis, and verify invalid fields preserve sibling facts while making the complete parent non-executable.
-- [ ] 2.4 Encode union declarations in deterministic module semantic surfaces, and verify encode/decode, equality, and dependency invalidation respond to variant order, kind, field, type, visibility, bound, and availability changes but ignore body-only edits.
+- [x] 2.3 Resolve every variant field type, visibility exposure, generic reference, and inline aggregate dependency before body analysis, and verify invalid fields preserve sibling facts while making the complete parent non-executable.
+- [x] 2.4 Encode union declarations in deterministic module semantic surfaces, and verify encode/decode, equality, and dependency invalidation respond to variant order, kind, field, type, visibility, bound, and availability changes but ignore body-only edits.
 - [ ] 2.5 Extend semantic occurrence, navigation, completion, documentation, and Analysis facade queries for parent, variant, and field identities, and verify go-to-definition/reference tests use canonical facts rather than syntax reconstruction.
 
 ## 3. Type Application and Variant Construction

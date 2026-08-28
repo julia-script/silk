@@ -284,6 +284,26 @@ const enumCandidates = (enum_: DeclarationFacts.EnumFact): ReadonlyArray<Candida
     ),
   ])
 
+const unionCandidates = (union: DeclarationFacts.UnionFact): ReadonlyArray<Candidate> =>
+  Object.freeze(
+    union.variants.flatMap(
+      (variant): ReadonlyArray<Candidate> =>
+        variant.name._tag !== 'Present' || variant.canonical._tag !== 'Canonical'
+          ? []
+          : [
+              candidate({
+                identity: semantic(
+                  Object.freeze({ _tag: 'UnionVariantIdentity', id: variant.canonical.id }),
+                ),
+                kind: 'Constructor',
+                label: variant.name.spelling,
+                detail: PresentationRenderer.unionVariant(union, variant),
+                sortGroup: 0,
+              }),
+            ],
+    ),
+  )
+
 const serviceCandidates = (service: DeclarationFacts.ServiceFact): ReadonlyArray<Candidate> =>
   Object.freeze(
     service.operations.flatMap(
@@ -700,6 +720,19 @@ export const complete = (options: {
         }),
         replacement: replacement.span,
         candidates: stable(enumCandidates(lookup.declaration)),
+      })
+    if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'UnionDeclaration')
+      return Object.freeze({
+        _tag: 'CompletionResult',
+        context: Object.freeze({
+          _tag: 'ActorMemberContext',
+          actor:
+            lookup.declaration.name._tag === 'Present'
+              ? lookup.declaration.name.spelling
+              : (qualifier ?? 'union'),
+        }),
+        replacement: replacement.span,
+        candidates: stable(unionCandidates(lookup.declaration)),
       })
     if (
       lookup?._tag === 'Resolved' &&

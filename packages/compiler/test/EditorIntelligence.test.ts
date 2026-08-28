@@ -109,6 +109,77 @@ pub fn main() -> i32 { return 0 }`
   )
 })
 
+it.effect('presents nominal unions, variants, and variant fields from canonical facts', () => {
+  const source = `/// A computation outcome.
+pub union Result<A, E> {
+  /// A successful payload.
+  Success { pub value: A },
+  Failure { pub error: E },
+}
+pub fn main() -> i32 { return 0 }`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const declaration = occurrenceAt(snapshot, source, 'Result')
+      const variant = occurrenceAt(snapshot, source, 'Success')
+      const field = occurrenceAt(snapshot, source, 'value')
+      const union = Analysis.unionByName(snapshot, 'main', 'Result')
+
+      assert.strictEqual(declaration?.role, 'Declaration')
+      assert.strictEqual(variant?.role, 'Declaration')
+      assert.strictEqual(field?.role, 'Declaration')
+      assert.strictEqual(variant?.resolution._tag, 'Available')
+      assert.strictEqual(
+        declaration === undefined
+          ? undefined
+          : Analysis.occurrencePresentation(snapshot, 'main', declaration)?.text,
+        'pub union Result<A, E>',
+      )
+      assert.strictEqual(
+        variant === undefined
+          ? undefined
+          : Analysis.occurrencePresentation(snapshot, 'main', variant)?.text,
+        'Result<A, E>.Success { value: A }: Result<A, E>',
+      )
+      assert.strictEqual(
+        documentationText(
+          snapshot,
+          Analysis.documentationAt(snapshot, 'main', source.indexOf('Success')),
+        ),
+        '/// A successful payload.',
+      )
+      assert.strictEqual(union._tag, 'Resolved')
+      if (union._tag !== 'Resolved') return undefined
+      const selected = Analysis.unionVariantByName(union.declaration, 'Success')
+      assert.strictEqual(selected._tag, 'Resolved')
+      if (selected._tag !== 'Resolved') return undefined
+      assert.strictEqual(
+        Analysis.unionVariantFieldByName(selected.variant, 'value')._tag,
+        'Resolved',
+      )
+      return undefined
+    }),
+  )
+})
+
+it.effect('completes variants from a nominal union qualifier', () => {
+  const source = `union State { Ready, Waiting { count: i32 } }
+pub fn main() -> i32 { let state = State. return 0 }`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const offset = source.indexOf('State.') + 'State.'.length
+      const completion = Analysis.completionAt(snapshot, 'main', offset)
+      assert.deepEqual(
+        completion?.candidates.map((candidate) => [candidate.label, candidate.kind]),
+        [
+          ['Ready', 'Constructor'],
+          ['Waiting', 'Constructor'],
+        ],
+      )
+      return undefined
+    }),
+  )
+})
+
 it.effect('answers raw documentation for modules, declarations, children, and references', () => {
   const source = `//! Recovery module.
 /// A recoverable problem.
