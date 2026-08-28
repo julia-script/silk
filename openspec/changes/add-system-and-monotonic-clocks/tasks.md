@@ -1,8 +1,8 @@
 ## 1. Portable clock contracts
 
-- [ ] 1.1 Add `packages/compiler/stdlib/silk/system_clock.silk` with private canonical `Instant` fields, trapping `make`, read-only component accessors, the exclusive `SystemClock` service, wrappers, and source documentation; verify focused analysis tests cover epoch zero, `{ -1, 999_999_999 }`, invalid fractions, accessor visibility, and an ordinary fixed provider.
-- [ ] 1.2 Add `packages/compiler/stdlib/silk/monotonic_clock.silk` with the public exclusive `MonotonicClock` service and all four wrappers over the shared `Instant`; verify focused analysis tests cover equal/advancing marks, independent provision, same-provider documentation, zero waits, past deadlines, and a stateful scripted provider.
-- [ ] 1.3 Register both portable modules in `packages/compiler/stdlib/manifest.json` with only portable dependencies, namespace `SystemClock` plus alias `Instant` for `silk/system_clock`, and namespace `MonotonicClock` for `silk/monotonic_clock`; verify auto-import metadata and an ordinary pure provider analyze for `wasm32-unknown-unknown` without an OS intrinsic or host import.
+- [x] 1.1 Add `packages/compiler/stdlib/silk/system_clock.silk` with private canonical `Instant` fields, trapping `make`, read-only component accessors, the exclusive `SystemClock` service, wrappers, and source documentation; verify focused analysis tests cover epoch zero, `{ -1, 999_999_999 }`, invalid fractions, accessor visibility, and an ordinary fixed provider.
+- [x] 1.2 Add `packages/compiler/stdlib/silk/monotonic_clock.silk` with the public exclusive `MonotonicClock` service and all four wrappers over the shared `Instant`; verify focused analysis tests cover equal/advancing marks, independent provision, same-provider documentation, zero waits, past deadlines, and a stateful scripted provider.
+- [x] 1.3 Register both portable modules in `packages/compiler/stdlib/manifest.json` with only portable dependencies, namespace `SystemClock` plus alias `Instant` for `silk/system_clock`, and namespace `MonotonicClock` for `silk/monotonic_clock`; verify auto-import metadata and an ordinary pure provider analyze for `wasm32-unknown-unknown` without an OS intrinsic or host import.
 
 ## 2. Native intrinsic and provider boundary
 

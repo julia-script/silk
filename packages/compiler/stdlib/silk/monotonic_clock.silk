@@ -1,0 +1,67 @@
+//! Provider-replaceable monotonic marks, resolution, and deadline waits.
+//!
+//! # When to use
+//! Require [`MonotonicClock`] to measure elapsed time or wait for a provider-local deadline. Use
+//! `silk.system_clock` when a value must correspond to a human date or external Unix timestamp.
+//!
+//! # Details
+//! A monotonic mark uses [`Instant`] with an unspecified origin. Successive reads from one unchanged
+//! provider are non-decreasing, although equal marks are permitted. Marks and absolute deadlines
+//! are meaningful only on the logical provider timeline that produced them.
+//!
+//! # Gotchas
+//! The shared [`Instant`] representation cannot statically prevent mixing system time or marks from
+//! different providers. Native OS waits block the calling host thread and do not park one Fiber;
+//! virtual providers may satisfy a wait by advancing their own timeline without sleeping.
+
+import silk.system_clock { Instant }
+
+/// An explicit provider of monotonic marks, nominal resolution, and deadline waits.
+///
+/// # Details
+///
+/// Exclusive access permits deterministic providers to advance their timeline and record waits.
+/// Every operation belongs to the same logical provider timeline.
+pub service MonotonicClock {
+  /// Reads a canonical mark on the active provider's unspecified timeline.
+  ///
+  /// Successive reads are non-decreasing but may be equal.
+  effect fn now() -> Instant ? &mut MonotonicClock
+
+  /// Returns the provider-reported positive nominal resolution in whole nanoseconds.
+  ///
+  /// The value may be a lower bound on actual observable precision.
+  effect fn getResolution() -> u64 ? &mut MonotonicClock
+
+  /// Waits until the provider's logical mark is at least `when`.
+  ///
+  /// `when` must be a canonical mark from the same logical provider. A reached or past deadline
+  /// returns immediately. The official native provider blocks its calling host thread.
+  effect fn waitUntil(when: Instant) -> () ? &mut MonotonicClock
+
+  /// Waits for at least `howLong` nanoseconds on the provider's logical timeline.
+  ///
+  /// A zero duration requires no positive timeline advance. An implementation traps rather than
+  /// wrapping when the derived absolute deadline cannot be represented.
+  effect fn waitFor(howLong: u64) -> () ? &mut MonotonicClock
+}
+
+/// Reads the current mark from the active [`MonotonicClock`] provider.
+pub effect fn now() -> Instant ? &mut MonotonicClock {
+  return run MonotonicClock.now()
+}
+
+/// Returns the active provider's positive nominal resolution in whole nanoseconds.
+pub effect fn getResolution() -> u64 ? &mut MonotonicClock {
+  return run MonotonicClock.getResolution()
+}
+
+/// Waits until the active provider reaches the same-provider mark `when`.
+pub effect fn waitUntil(when: Instant) -> () ? &mut MonotonicClock {
+  return run MonotonicClock.waitUntil(move when)
+}
+
+/// Waits for `howLong` nanoseconds on the active provider's logical timeline.
+pub effect fn waitFor(howLong: u64) -> () ? &mut MonotonicClock {
+  return run MonotonicClock.waitFor(howLong)
+}

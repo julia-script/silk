@@ -191,6 +191,12 @@
     "namespace": "AllocationMetrics"
   },
   {
+    "module": "silk/monotonic_clock",
+    "path": "silk/monotonic_clock.silk",
+    "layer": "portable",
+    "namespace": "MonotonicClock"
+  },
+  {
     "module": "silk/numeric",
     "path": "silk/numeric.silk",
     "layer": "portable",
@@ -296,6 +302,13 @@
     "layer": "portable",
     "namespace": "String",
     "aliases": ["InvalidUtf8", "ScalarCursor", "ScalarStep"]
+  },
+  {
+    "module": "silk/system_clock",
+    "path": "silk/system_clock.silk",
+    "layer": "portable",
+    "namespace": "SystemClock",
+    "aliases": ["Instant"]
   },
   {
     "module": "silk/u16",
