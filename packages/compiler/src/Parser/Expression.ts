@@ -94,6 +94,50 @@ export const hasCompleteAppliedPostfix = (
   return false
 }
 
+/** True for a complete applied parent followed by one subordinate variant name. */
+export const hasAppliedUnionVariant = (state: State): boolean => {
+  let index = state.index
+  const significant = (): Token.Token | undefined => {
+    let token = state.lexical.tokens.at(index)
+    while (token !== undefined && isTrivia(token.kind)) {
+      index += 1
+      token = state.lexical.tokens.at(index)
+    }
+    return token
+  }
+  if (significant()?.kind !== 'Identifier') return false
+  index += 1
+  if (significant()?.kind === 'Dot') {
+    index += 1
+    if (significant()?.kind !== 'Identifier') return false
+    index += 1
+  }
+  if (significant()?.kind !== 'Less') return false
+  let depth = 0
+  while (index < state.lexical.tokens.length) {
+    const token = significant()
+    if (token === undefined) return false
+    if (token.kind === 'Less') depth += 1
+    else if (token.kind === 'Greater') {
+      depth -= 1
+      if (depth === 0) {
+        index += 1
+        if (significant()?.kind !== 'Dot') return false
+        index += 1
+        return significant()?.kind === 'Identifier'
+      }
+    }
+    index += 1
+  }
+  return false
+}
+
+export const hasBareUnionVariantFields = (state: State): boolean =>
+  nextSignificantKind(state) === 'Identifier' &&
+  peek(state, 1) === 'Dot' &&
+  peek(state, 2) === 'Identifier' &&
+  peek(state, 3) === 'LeftBrace'
+
 export const parseIntegerLiteralExpression = (initial: State): NodeResult => {
   if (nextSignificantKind(initial) === 'Minus') {
     const minus = expect(initial, 'Minus', ['DecimalInteger', ...expressionFollowing])
@@ -200,6 +244,7 @@ export const primaryKind = (
   | 'Unsafe'
   | 'Call'
   | 'StructLiteral'
+  | 'UnionVariant'
   | 'ArrayLiteral'
   | 'Match'
   | 'Grouped'
@@ -234,6 +279,7 @@ export const primaryKind = (
     if (token.kind === 'MatchKeyword') return 'Match'
     if (token.kind === 'LeftBracket') return 'ArrayLiteral'
     if (token.kind === 'Identifier') {
+      if (hasAppliedUnionVariant(state)) return 'UnionVariant'
       const following = peek(state, 1)
       if (hasCompleteAppliedPostfix(state, 'LeftParenthesis')) return 'Call'
       if (hasCompleteAppliedPostfix(state, 'LeftBrace')) {
@@ -246,7 +292,7 @@ export const primaryKind = (
         if (member === 'LeftParenthesis') return 'Call'
         const afterMember = peek(state, 3)
         if (afterMember === 'LeftParenthesis') return 'Call'
-        if (afterMember === 'LeftBrace') return allowStructLiteral ? 'StructLiteral' : 'Identifier'
+        if (afterMember === 'LeftBrace') return allowStructLiteral ? 'UnionVariant' : 'Identifier'
       }
       return 'Identifier'
     }
@@ -265,6 +311,7 @@ export const primaryKind = (
       token.kind === 'PubKeyword' ||
       token.kind === 'StructKeyword' ||
       token.kind === 'EnumKeyword' ||
+      token.kind === 'UnionKeyword' ||
       token.kind === 'FnKeyword' ||
       token.kind === 'EffectKeyword' ||
       token.kind === 'ImportKeyword' ||
@@ -290,6 +337,7 @@ export const remainingRightParentheses = (state: State): number => {
       token.kind === 'PubKeyword' ||
       token.kind === 'StructKeyword' ||
       token.kind === 'EnumKeyword' ||
+      token.kind === 'UnionKeyword' ||
       token.kind === 'FnKeyword' ||
       token.kind === 'ImportKeyword' ||
       token.kind === 'EndOfFile'
@@ -324,6 +372,7 @@ export const expectCallRightParenthesis = (
     'PubKeyword',
     'StructKeyword',
     'EnumKeyword',
+    'UnionKeyword',
     'FnKeyword',
     'ImportKeyword',
   ])
@@ -337,6 +386,7 @@ export function parseArgumentList(initial: State, reservedForEnclosingCalls: num
     'PubKeyword',
     'StructKeyword',
     'EnumKeyword',
+    'UnionKeyword',
     'FnKeyword',
     'ImportKeyword',
   ])
@@ -351,6 +401,7 @@ export function parseArgumentList(initial: State, reservedForEnclosingCalls: num
     kind !== 'PubKeyword' &&
     kind !== 'StructKeyword' &&
     kind !== 'EnumKeyword' &&
+    kind !== 'UnionKeyword' &&
     kind !== 'FnKeyword' &&
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
@@ -366,6 +417,7 @@ export function parseArgumentList(initial: State, reservedForEnclosingCalls: num
       kind === 'PubKeyword' ||
       kind === 'StructKeyword' ||
       kind === 'EnumKeyword' ||
+      kind === 'UnionKeyword' ||
       kind === 'FnKeyword' ||
       kind === 'ImportKeyword'
     )
@@ -378,6 +430,7 @@ export function parseArgumentList(initial: State, reservedForEnclosingCalls: num
       'PubKeyword',
       'StructKeyword',
       'EnumKeyword',
+      'UnionKeyword',
       'FnKeyword',
       'ImportKeyword',
     ])
@@ -477,6 +530,7 @@ export function parseStructLiteralExpression(
     kind !== 'PubKeyword' &&
     kind !== 'StructKeyword' &&
     kind !== 'EnumKeyword' &&
+    kind !== 'UnionKeyword' &&
     kind !== 'FnKeyword' &&
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
@@ -507,6 +561,78 @@ export function parseStructLiteralExpression(
       ...children,
       ...rightBrace.elements,
     ]),
+  })
+}
+
+export const parseUnionVariantSelector = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind>,
+): NodeResult => {
+  const parent = hasAppliedUnionVariant(initial)
+    ? parseTypePrimary(initial, ['Dot', ...following])
+    : (() => {
+        const name = expect(initial, 'Identifier', ['Dot', ...following])
+        return Object.freeze({
+          state: name.state,
+          node: syntaxNode(name.state, 'TypePath', name.elements),
+        })
+      })()
+  const dot = expect(parent.state, 'Dot', ['Identifier', ...following])
+  const variant = expect(dot.state, 'Identifier', following)
+  return Object.freeze({
+    state: variant.state,
+    node: syntaxNode(variant.state, 'UnionVariantSelector', [
+      parent.node,
+      ...dot.elements,
+      ...variant.elements,
+    ]),
+  })
+}
+
+export function parseUnionVariantExpression(
+  initial: State,
+  reservedForEnclosingCalls: number,
+): NodeResult {
+  const selector = parseUnionVariantSelector(initial, ['LeftBrace', ...expressionFollowing])
+  if (nextSignificantKind(selector.state) !== 'LeftBrace') {
+    return Object.freeze({
+      state: selector.state,
+      node: syntaxNode(selector.state, 'UnionVariantExpression', [selector.node]),
+    })
+  }
+  const left = expect(selector.state, 'LeftBrace', [
+    'Identifier',
+    'RightBrace',
+    ...expressionFollowing,
+  ])
+  let state = left.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([selector.node, ...left.elements])
+  while (
+    nextSignificantKind(state) !== 'RightBrace' &&
+    nextSignificantKind(state) !== 'EndOfFile' &&
+    !expressionFollowing.includes(nextSignificantKind(state) ?? 'EndOfFile')
+  ) {
+    const field = expect(state, 'Identifier', ['Colon', ...expressionStarts, 'RightBrace'])
+    const colon = expect(field.state, 'Colon', [...expressionStarts, 'Comma', 'RightBrace'])
+    const value = parseExpression(colon.state, reservedForEnclosingCalls, 'Identifier')
+    children = Object.freeze([
+      ...children,
+      syntaxNode(value.state, 'StructFieldInitializer', [
+        ...field.elements,
+        ...colon.elements,
+        value.node,
+      ]),
+    ])
+    state = value.state
+    if (nextSignificantKind(state) === 'RightBrace') break
+    const comma = expect(state, 'Comma', ['Identifier', 'RightBrace', ...expressionFollowing])
+    children = Object.freeze([...children, ...comma.elements])
+    state = comma.state
+  }
+  const right = expect(state, 'RightBrace', expressionFollowing)
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'UnionVariantExpression', [...children, ...right.elements]),
   })
 }
 
@@ -616,6 +742,8 @@ export const isRowWithoutStart = (state: State): boolean =>
 
 export const isNominalPatternStart = (state: State): boolean => {
   if (nextSignificantKind(state) !== 'Identifier') return false
+  if (hasAppliedUnionVariant(state)) return true
+  if (hasBareUnionVariantFields(state)) return true
   if (hasCompleteAppliedPostfix(state, 'LeftBrace')) return true
   const following = peek(state, 1)
   if (following === 'LeftBrace') return true
@@ -715,6 +843,8 @@ export function parsePattern(
     })
   }
   if (isEnumMemberPatternStart(initial)) return parseEnumMemberPattern(initial)
+  if (hasAppliedUnionVariant(initial) || hasBareUnionVariantFields(initial))
+    return parseUnionVariantPattern(initial)
   const kind = nextSignificantKind(initial)
   if (kind === 'DecimalInteger' || (kind === 'Minus' && peek(initial, 1) === 'DecimalInteger'))
     return parseIntegerPattern(initial)
@@ -730,6 +860,95 @@ export function parsePattern(
   return nonNominalTypePrimary
     ? parseErrorPattern(initial, following)
     : parseNominalPattern(initial)
+}
+
+export function parseUnionVariantPattern(initial: State): NodeResult {
+  const selector = parseUnionVariantSelector(initial, [
+    'LeftBrace',
+    'IfKeyword',
+    'FatArrow',
+    'RightBrace',
+  ])
+  if (nextSignificantKind(selector.state) !== 'LeftBrace') {
+    return Object.freeze({
+      state: selector.state,
+      node: syntaxNode(selector.state, 'UnionVariantPattern', [selector.node]),
+    })
+  }
+  const left = expect(selector.state, 'LeftBrace', [
+    'Identifier',
+    'DotDot',
+    'RightBrace',
+    'IfKeyword',
+    'FatArrow',
+  ])
+  let state = left.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([selector.node, ...left.elements])
+  while (
+    nextSignificantKind(state) !== 'RightBrace' &&
+    nextSignificantKind(state) !== 'IfKeyword' &&
+    nextSignificantKind(state) !== 'FatArrow' &&
+    nextSignificantKind(state) !== 'EndOfFile'
+  ) {
+    if (nextSignificantKind(state) === 'DotDot') {
+      const rest = expect(state, 'DotDot', ['Comma', 'RightBrace', 'IfKeyword', 'FatArrow'])
+      children = Object.freeze([...children, syntaxNode(rest.state, 'RestPattern', rest.elements)])
+      state = rest.state
+    } else {
+      const name = expect(state, 'Identifier', [
+        'Colon',
+        'Comma',
+        'RightBrace',
+        'IfKeyword',
+        'FatArrow',
+      ])
+      state = name.state
+      let fieldChildren: ReadonlyArray<SyntaxTree.Element> = name.elements
+      if (nextSignificantKind(state) === 'Colon' || isNominalPatternStart(state)) {
+        const colon = expect(state, 'Colon', [
+          'Identifier',
+          'Comma',
+          'RightBrace',
+          'IfKeyword',
+          'FatArrow',
+        ])
+        state = colon.state
+        if (isNominalPatternStart(state)) {
+          const nested =
+            hasAppliedUnionVariant(state) || hasBareUnionVariantFields(state)
+              ? parseUnionVariantPattern(state)
+              : parseNominalPattern(state)
+          fieldChildren = Object.freeze([...fieldChildren, ...colon.elements, nested.node])
+          state = nested.state
+        } else {
+          const binding = expect(state, 'Identifier', [
+            'Comma',
+            'RightBrace',
+            'IfKeyword',
+            'FatArrow',
+          ])
+          fieldChildren = Object.freeze([...fieldChildren, ...colon.elements, ...binding.elements])
+          state = binding.state
+        }
+      }
+      children = Object.freeze([...children, syntaxNode(state, 'PatternField', fieldChildren)])
+    }
+    if (nextSignificantKind(state) === 'RightBrace') break
+    const comma = expect(state, 'Comma', [
+      'Identifier',
+      'DotDot',
+      'RightBrace',
+      'IfKeyword',
+      'FatArrow',
+    ])
+    children = Object.freeze([...children, ...comma.elements])
+    state = comma.state
+  }
+  const right = expect(state, 'RightBrace', ['IfKeyword', 'FatArrow', 'Identifier', 'RightBrace'])
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'UnionVariantPattern', [...children, ...right.elements]),
+  })
 }
 
 export function parseNominalPattern(initial: State): NodeResult {
@@ -900,6 +1119,7 @@ export const reservedTemplateBoundaries: ReadonlyArray<Token.TokenKind> = Object
   'PubKeyword',
   'StructKeyword',
   'EnumKeyword',
+  'UnionKeyword',
   'FnKeyword',
   'ImportKeyword',
   'EndOfFile',
@@ -987,6 +1207,8 @@ export function parsePrimaryExpression(
   if (kind === 'Call') return parseCallExpression(initial, reservedForEnclosingCalls)
   if (kind === 'StructLiteral')
     return parseStructLiteralExpression(initial, reservedForEnclosingCalls)
+  if (kind === 'UnionVariant')
+    return parseUnionVariantExpression(initial, reservedForEnclosingCalls)
   if (kind === 'ArrayLiteral')
     return parseArrayLiteralExpression(initial, reservedForEnclosingCalls)
   if (kind === 'Match') return parseMatchExpression(initial, reservedForEnclosingCalls)

@@ -400,6 +400,76 @@ const printEnumDeclaration = (
   )
 }
 
+const printUnionVariant = (
+  context: Context,
+  node: SyntaxTree.Node,
+  prefix: FormatDocument.Document,
+): FormatDocument.Document => {
+  const fields = directNodes(node).filter((child) => child.kind === 'UnionVariantField')
+  const name = printToken(context, tokenOf(node, 'Identifier'), prefix, true)
+  const open = directTokens(node).find((token) => token.kind === 'LeftBrace')
+  if (open === undefined) return name
+  return FormatDocument.concat(
+    name,
+    printDelimited(
+      context,
+      open,
+      fields,
+      commaTokens(node),
+      tokenOf(node, 'RightBrace'),
+      FormatDocument.text(' '),
+    ),
+  )
+}
+
+const printUnionDeclaration = (
+  context: Context,
+  node: SyntaxTree.Node,
+  prefix: FormatDocument.Document,
+): FormatDocument.Document => {
+  const variants = directNodes(node).filter((child) => child.kind === 'UnionVariant')
+  const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
+  const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
+  const head = FormatDocument.concat(
+    ...(publicKeyword === undefined
+      ? []
+      : [printToken(context, publicKeyword, prefix), FormatDocument.text(' ')]),
+    printToken(
+      context,
+      tokenOf(node, 'UnionKeyword'),
+      publicKeyword === undefined ? prefix : FormatDocument.empty,
+    ),
+    printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+    ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
+  )
+  const open = tokenOf(node, 'LeftBrace')
+  const close = tokenOf(node, 'RightBrace')
+  if (variants.length === 0) {
+    return FormatDocument.concat(
+      head,
+      printToken(context, open, FormatDocument.text(' ')),
+      printToken(context, close),
+    )
+  }
+  const commas = commaTokens(node)
+  return FormatDocument.concat(
+    head,
+    printToken(context, open, FormatDocument.text(' ')),
+    FormatDocument.indent(
+      FormatDocument.concat(
+        ...variants.flatMap((variant, index) => {
+          const comma = commas.at(index)
+          return [
+            printUnionVariant(context, variant, FormatDocument.hardLine),
+            comma === undefined ? FormatDocument.text(',') : printToken(context, comma),
+          ]
+        }),
+      ),
+    ),
+    printToken(context, close, FormatDocument.hardLine),
+  )
+}
+
 const printServiceOperation = (
   context: Context,
   node: SyntaxTree.Node,
@@ -803,6 +873,8 @@ const printNode = (
       return printStructDeclaration(context, node, prefix)
     case 'EnumDeclaration':
       return printEnumDeclaration(context, node, prefix)
+    case 'UnionDeclaration':
+      return printUnionDeclaration(context, node, prefix)
     case 'ServiceDeclaration':
     case 'InterfaceDeclaration':
       return printServiceDeclaration(context, node, prefix)
@@ -855,6 +927,70 @@ const printNode = (
         printNode(
           context,
           directNodes(node).at(-1) ?? nodeOf(node, 'TypePath'),
+          FormatDocument.text(' '),
+        ),
+      )
+    }
+    case 'UnionVariant':
+      return printUnionVariant(context, node, prefix)
+    case 'UnionVariantField': {
+      const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
+      return FormatDocument.concat(
+        ...(publicKeyword === undefined
+          ? []
+          : [printToken(context, publicKeyword, prefix, preserveBlank), FormatDocument.text(' ')]),
+        printToken(
+          context,
+          tokenOf(node, 'Identifier'),
+          publicKeyword === undefined ? prefix : FormatDocument.empty,
+          preserveBlank,
+        ),
+        printToken(context, tokenOf(node, 'Colon')),
+        printNode(
+          context,
+          directNodes(node).at(-1) ?? nodeOf(node, 'TypePath'),
+          FormatDocument.text(' '),
+        ),
+      )
+    }
+    case 'UnionVariantSelector': {
+      const parent = directNodes(node)[0] ?? nodeOf(node, 'AppliedType')
+      return FormatDocument.concat(
+        printNode(context, parent, prefix, preserveBlank),
+        printToken(context, tokenOf(node, 'Dot')),
+        printToken(context, tokenOf(node, 'Identifier')),
+      )
+    }
+    case 'UnionVariantExpression': {
+      const nodes = directNodes(node)
+      const selector = nodes[0] ?? nodeOf(node, 'UnionVariantSelector')
+      const open = directTokens(node).find((token) => token.kind === 'LeftBrace')
+      if (open === undefined) return printNode(context, selector, prefix, preserveBlank)
+      return FormatDocument.concat(
+        printNode(context, selector, prefix, preserveBlank),
+        printDelimited(
+          context,
+          open,
+          nodes.slice(1),
+          commaTokens(node),
+          tokenOf(node, 'RightBrace'),
+          FormatDocument.text(' '),
+        ),
+      )
+    }
+    case 'UnionVariantPattern': {
+      const nodes = directNodes(node)
+      const selector = nodes[0] ?? nodeOf(node, 'UnionVariantSelector')
+      const open = directTokens(node).find((token) => token.kind === 'LeftBrace')
+      if (open === undefined) return printNode(context, selector, prefix, preserveBlank)
+      return FormatDocument.concat(
+        printNode(context, selector, prefix, preserveBlank),
+        printDelimited(
+          context,
+          open,
+          nodes.slice(1),
+          commaTokens(node),
+          tokenOf(node, 'RightBrace'),
           FormatDocument.text(' '),
         ),
       )
@@ -1371,7 +1507,10 @@ const printNode = (
     case 'PatternField': {
       const identifiers = directTokens(node).filter((token) => token.kind === 'Identifier')
       const nested = directNodes(node).find(
-        (child) => child.kind === 'NominalPattern' || child.kind === 'BindingPattern',
+        (child) =>
+          child.kind === 'NominalPattern' ||
+          child.kind === 'UnionVariantPattern' ||
+          child.kind === 'BindingPattern',
       )
       const colon = directTokens(node).find((token) => token.kind === 'Colon')
       const name = identifiers[0] ?? tokenOf(node, 'Identifier')

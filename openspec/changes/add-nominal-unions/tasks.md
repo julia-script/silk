@@ -1,10 +1,10 @@
 ## 1. Syntax, Recovery, and Formatting
 
-- [ ] 1.1 Add the complete-identifier `union` token to lexical, token-presentation, and generated token consumers, and verify lexer tests distinguish `union` from identifier prefixes.
-- [ ] 1.2 Add lossless CST nodes for union declarations, unit variants, named-field variants, and parent-qualified variant selectors, and verify syntax snapshots retain trivia, separators, fields, and exact spans.
-- [ ] 1.3 Implement parser entry points for generic union declarations, constructor qualifiers with explicit argument prefixes, and fully applied variant patterns, and verify focused parser tests cover valid mixed variants and reject empty named-field bodies.
-- [ ] 1.4 Implement variant-local parser recovery for missing names, types, separators, and braces, and verify damaged-variant tests preserve valid siblings and following declarations.
-- [ ] 1.5 Extend the formatter, syntax correspondence, and source presentation for union declarations, constructors, and patterns, and verify formatting is idempotent and preserves comments.
+- [x] 1.1 Add the complete-identifier `union` token to lexical, token-presentation, and generated token consumers, and verify lexer tests distinguish `union` from identifier prefixes.
+- [x] 1.2 Add lossless CST nodes for union declarations, unit variants, named-field variants, and parent-qualified variant selectors, and verify syntax snapshots retain trivia, separators, fields, and exact spans.
+- [x] 1.3 Implement parser entry points for generic union declarations, constructor qualifiers with explicit argument prefixes, and fully applied variant patterns, and verify focused parser tests cover valid mixed variants and reject empty named-field bodies.
+- [x] 1.4 Implement variant-local parser recovery for missing names, types, separators, and braces, and verify damaged-variant tests preserve valid siblings and following declarations.
+- [x] 1.5 Extend the formatter, syntax correspondence, and source presentation for union declarations, constructors, and patterns, and verify formatting is idempotent and preserves comments.
 - [ ] 1.6 Add stable structured diagnostic catalog entries for union-specific syntax and semantic failures, regenerate catalog artifacts, and verify diagnostic tests assert codes, spans, related spans, and details rather than message text.
 
 ## 2. Canonical Declarations and Module Surfaces

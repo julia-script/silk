@@ -6,6 +6,7 @@ const reservedSegmentKinds: ReadonlySet<Token.TokenKind> = new Set([
   'PubKeyword',
   'StructKeyword',
   'EnumKeyword',
+  'UnionKeyword',
   'ServiceKeyword',
   'InterfaceKeyword',
   'RoleKeyword',

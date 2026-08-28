@@ -78,6 +78,7 @@ const nodeKinds = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.NodeKind> =>
 ]
 
 const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
+  'AppliedType',
   'ArgumentList',
   'ArrayLiteralExpression',
   'AssignmentStatement',
@@ -98,6 +99,12 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'EffectExpression',
   'EnumDeclaration',
   'EnumMember',
+  'UnionDeclaration',
+  'UnionVariant',
+  'UnionVariantField',
+  'UnionVariantSelector',
+  'UnionVariantExpression',
+  'UnionVariantPattern',
   'FieldProjectionExpression',
   'FailStatement',
   'FailureRow',
@@ -141,6 +148,9 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'StructField',
   'StructFieldInitializer',
   'StructLiteralExpression',
+  'TypeArgumentList',
+  'TypeParameter',
+  'TypeParameterList',
   'TypePath',
   'UnionType',
   'UnitExpression',
@@ -195,6 +205,56 @@ pub enum(u8) ExitCode {
     const second = yield* SyntaxFormatter.format(parse('memory://enum-format.silk', text))
     assert.strictEqual(formattedText(second), text)
     assert.strictEqual(second.changed, false)
+  }),
+)
+
+it.effect('formats nominal unions, constructors, and patterns canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source =
+      'pub union Result<A,E>{Success{pub value:A},Failure{pub error:E}} fn inspect(value:Result<i32,bool>)->i32{return match move value{Result<i32,bool>.Success{value}=>value Result<i32,bool>.Failure{error:_}=>0}}'
+    const first = yield* SyntaxFormatter.format(parse('memory://nominal-union-format.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `pub union Result<A, E> {
+  Success {pub value: A},
+  Failure {pub error: E},
+}
+
+fn inspect(value: Result<i32, bool>) -> i32 {
+  return match move value {
+    Result<i32, bool>.Success {value} => value
+    Result<i32, bool>.Failure {error: _} => 0
+  }
+}
+`,
+    )
+    const second = yield* SyntaxFormatter.format(parse('memory://nominal-union-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
+it.effect('preserves nominal union comments idempotently', () =>
+  Effect.gen(function* () {
+    const source = `// union docs
+pub union Maybe<T> {
+  // unit
+  None,
+  // payload
+  Some { pub value: T },
+}`
+    const first = yield* SyntaxFormatter.format(
+      parse('memory://nominal-union-comments.silk', source),
+    )
+    const text = formattedText(first)
+    assert.strictEqual(text.includes('// union docs'), true)
+    assert.strictEqual(text.includes('// unit'), true)
+    assert.strictEqual(text.includes('// payload'), true)
+    const second = yield* SyntaxFormatter.format(
+      parse('memory://nominal-union-comments.silk', text),
+    )
+    assert.strictEqual(formattedText(second), text)
   }),
 )
 
@@ -935,6 +995,7 @@ pub struct Token { span: Span }
 pub struct End {}
 enum AssertionResult { Pass, Fail, Skip }
 pub enum(u8) ExitCode { Success = 0, Failure = 1 }
+pub union Maybe<T> { None, Some { pub value: T } }
 pub role Clock
 fn helper(value: i32, other: i32) -> i32 {
   let mut moved = move value
@@ -973,6 +1034,13 @@ fn execute(problem: Token, borrowed: &End) -> i32 {
 }
 fn selected() -> typeof(helper) {
   return helper
+}
+fn selectMaybe(value: Maybe<i32>) -> Maybe<i32> {
+  let fallback = Maybe<i32>.None
+  return match move value {
+    Maybe<i32>.Some { value } => Maybe<i32>.Some { value: value }
+    Maybe<i32>.None => move fallback
+  }
 }
 fn borrow(values: [i32; 2], output: [i32; 2]) -> i32 {
   let mut target = move output
