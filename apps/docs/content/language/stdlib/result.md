@@ -12,7 +12,7 @@ success continuation that already returns a result.
 
 ## Details
 
-`Result<A, F>` owns either `Success` or `Failure`. Its combinators move the selected payload
+`Result<A, F>` owns either [`Success`](#declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a30) or [`Failure`](#declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a31). Its combinators move the selected payload
 forward and preserve the other arm without inventing a runtime failure-row descriptor.
 
 Unlike an `Effect<A ! F>`, a `Result<A, F>` is already completed ordinary data: it does not run,
@@ -119,7 +119,7 @@ Applies `transform` once to a success value and carries a failure through unchan
 
 ### Details
 
-The callback is never called for `Failure`. This consumes the result and may change only its
+The callback is never called for [`Failure`](#declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a31). This consumes the result and may change only its
 success type; use [`mapError`](#declaration-73696c6b2f726573756c743a3a6d61704572726f72) to change the failure type instead.
 
 <a id="declaration-73696c6b2f726573756c743a3a6d61704572726f72"></a>
@@ -134,7 +134,7 @@ Applies `transform` once to a failure value and carries a success through unchan
 
 ### Details
 
-The callback is never called for `Success`. This consumes the result and may change only its
+The callback is never called for [`Success`](#declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a30). This consumes the result and may change only its
 failure type.
 
 <a id="declaration-73696c6b2f726573756c743a3a666c61744d6170"></a>

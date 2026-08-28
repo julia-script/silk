@@ -20,7 +20,9 @@ export interface LinkTarget {
     | 'Function'
     | 'Struct'
     | 'Enum'
+    | 'EnumMember'
     | 'Union'
+    | 'UnionVariant'
     | 'Service'
     | 'Interface'
     | 'Constant'
@@ -201,7 +203,9 @@ const linkKindOf = (value: unknown): LinkTarget['kind'] | undefined => {
     case 'Function':
     case 'Struct':
     case 'Enum':
+    case 'EnumMember':
     case 'Union':
+    case 'UnionVariant':
     case 'Service':
     case 'Interface':
     case 'Constant':

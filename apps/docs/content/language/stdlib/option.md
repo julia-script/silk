@@ -57,7 +57,7 @@ Public declarations: 6.
 pub union Option<T>
 ```
 
-An owned value that is either `Some` or `None`.
+An owned value that is either [`Some`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a31) or [`None`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a30).
 
 ### Details
 
@@ -116,7 +116,7 @@ Applies `transform` once to a present value and keeps an absent value absent.
 
 ### Details
 
-The callback is not called for `None`. This operation consumes `self`; use a shared borrow and
+The callback is not called for [`None`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a30). This operation consumes `self`; use a shared borrow and
 `match` instead when the original option must remain available.
 
 <a id="declaration-73696c6b2f6f7074696f6e3a3a666c61744d6170"></a>
@@ -132,7 +132,7 @@ outcome stays one Option deep instead of nesting.
 
 ### Details
 
-The callback runs once for `Some` and not at all for `None`. Use this when the next step may
+The callback runs once for [`Some`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a31) and not at all for [`None`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a30). Use this when the next step may
 reject the value without needing to explain why; use a `Result` when rejection needs an error.
 
 <a id="declaration-73696c6b2f6f7074696f6e3a3a756e777261704f72"></a>

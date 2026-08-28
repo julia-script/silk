@@ -129,17 +129,73 @@ const targetOf = (
   spelling: string,
 ): Document.LinkTarget | undefined => {
   const lookup = Analysis.lookupName(snapshot, module, spelling)
-  if (lookup._tag !== 'Resolved') return undefined
+  if (lookup._tag === 'Resolved') {
+    const targetModule =
+      lookup.declaration.canonical._tag === 'Canonical'
+        ? lookup.declaration.canonical.id.module
+        : lookup.declaration.id.sourceId
+    const targetName = nameOf(lookup.declaration.name, spelling)
+    return Object.freeze({
+      id: declarationId(targetModule, lookup.declaration),
+      module: targetModule,
+      name: targetName,
+      kind: linkTargetKind(lookup.declaration),
+    })
+  }
+
+  const index = Analysis.declarationIndex(snapshot)
+  const parentIsVisible = (parent: DeclarationFacts.MemberFact): boolean => {
+    if (parent.name._tag !== 'Present') return false
+    const visible = Analysis.lookupName(snapshot, module, parent.name.spelling)
+    return visible._tag === 'Resolved' && visible.declaration === parent
+  }
+  const enumMembers = index.modules.flatMap((headers) =>
+    headers.enums.flatMap((enum_) =>
+      parentIsVisible(enum_)
+        ? enum_.members.flatMap((member) =>
+            member.name._tag === 'Present' && member.name.spelling === spelling
+              ? [Object.freeze({ enum_, member })]
+              : [],
+          )
+        : [],
+    ),
+  )
+  const unionVariants = index.modules.flatMap((headers) =>
+    headers.unions.flatMap((union) =>
+      parentIsVisible(union)
+        ? union.variants.flatMap((variant) =>
+            variant.name._tag === 'Present' && variant.name.spelling === spelling
+              ? [Object.freeze({ union, variant })]
+              : [],
+          )
+        : [],
+    ),
+  )
+  if (enumMembers.length + unionVariants.length !== 1) return undefined
+  const enumMember = enumMembers.at(0)
+  if (enumMember !== undefined) {
+    const targetModule =
+      enumMember.enum_.canonical._tag === 'Canonical'
+        ? enumMember.enum_.canonical.id.module
+        : enumMember.enum_.id.sourceId
+    return Object.freeze({
+      id: `${declarationId(targetModule, enumMember.enum_)}::member:${enumMember.member.id.ordinal}`,
+      module: targetModule,
+      name: spelling,
+      kind: 'EnumMember',
+    })
+  }
+  const unionVariant = unionVariants.at(0)
+  if (unionVariant === undefined) return undefined
   const targetModule =
-    lookup.declaration.canonical._tag === 'Canonical'
-      ? lookup.declaration.canonical.id.module
-      : lookup.declaration.id.sourceId
-  const targetName = nameOf(lookup.declaration.name, spelling)
+    unionVariant.union.canonical._tag === 'Canonical'
+      ? unionVariant.union.canonical.id.module
+      : unionVariant.union.id.sourceId
   return Object.freeze({
-    id: declarationId(targetModule, lookup.declaration),
+    id: `${declarationId(targetModule, unionVariant.union)}::variant:${unionVariant.variant.id.ordinal}`,
     module: targetModule,
-    name: targetName,
-    kind: linkTargetKind(lookup.declaration),
+    name: spelling,
+    kind: 'UnionVariant',
   })
 }
 

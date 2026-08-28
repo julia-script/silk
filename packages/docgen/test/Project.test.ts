@@ -41,7 +41,7 @@ pub enum State {
   Ready
 }
 
-/// A computation outcome.
+/// A computation with a [\`Success\`] variant.
 pub union Outcome<T> {
   /// A successful payload.
   Success { pub value: T },
@@ -91,6 +91,14 @@ pub union Outcome<T> {
     )
     assert.strictEqual(variants?.at(0)?.documentation?.markdown, 'A successful payload.')
     assert.strictEqual(variants?.at(0)?.children.at(0)?.name, 'value')
+    const outcomeLink = outcome?.documentation?.blocks
+      .flatMap((block) => (block._tag === 'Paragraph' ? block.children : []))
+      .find((inline) => inline._tag === 'SymbolLink')
+    assert.strictEqual(outcomeLink?._tag, 'SymbolLink')
+    if (outcomeLink?._tag === 'SymbolLink') {
+      assert.strictEqual(outcomeLink.target?.kind, 'UnionVariant')
+      assert.strictEqual(outcomeLink.target?.id, 'project/main::Outcome::variant:0')
+    }
 
     const privateProject = Project.make(snapshot, { includePrivate: true })
     assert.isTrue(privateProject.modules[0]?.items.some((item) => item.name === 'helper'))

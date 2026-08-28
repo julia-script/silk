@@ -241,7 +241,7 @@ Executes `protected` once and converts its success or typed failure into ordinar
 ### Details
 
 The returned Effect still requires `R`, because conversion does not provide services. Its typed
-failure row is empty: an `E` becomes `Failure` data instead of propagating. Traps are not typed
+failure row is empty: an `E` becomes [`Failure`](./result.md#declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a31) data instead of propagating. Traps are not typed
 failures and therefore are not captured.
 
 ### Examples

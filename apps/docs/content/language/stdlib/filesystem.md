@@ -691,7 +691,7 @@ fails with the `InvalidPath` reason. Resolution is lexical and never accesses th
 pub effect fn parent(self: &silk/filesystem.Path) -> silk/option.Option<silk/filesystem.Path> ! OutOfMemoryError ? &mut Allocator
 ```
 
-Allocates an independently owned parent path, or `None` when `self` is root.
+Allocates an independently owned parent path, or [`None`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a30) when `self` is root.
 
 ### Details
 
