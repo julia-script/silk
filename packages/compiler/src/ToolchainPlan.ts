@@ -157,6 +157,25 @@ const commandLineStateSource = `int silk_host_argc_v1 = 0;
 char **silk_host_argv_v1 = 0;
 `
 
+/*
+ * This is the sole owner of feature-test macros for the generated translation unit. Keep it
+ * immediately after the leading comment: libc examines these macros while processing its first
+ * header, so defining them in a later capability fragment is too late when fragments are mixed.
+ */
+const translationUnitPreamble = `#if defined(__APPLE__)
+#ifndef _DARWIN_C_SOURCE
+#define _DARWIN_C_SOURCE 1
+#endif
+#elif defined(__linux__)
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+#endif
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+`
+
 const failureBytes = (identity: string): ReadonlyArray<number> =>
   Array.from(new TextEncoder().encode(`Error: ${identity}\n`))
 
@@ -179,6 +198,7 @@ export const shimSource = (
     : ''
   if (termination.failures.length === 0)
     return `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
+${translationUnitPreamble}
 ${needsStandardStreams ? standardStreamsShimSource : ''}
 ${commandLine}
 ${osRuntime}
@@ -199,6 +219,7 @@ ${initializeCommandLine}
       `    case ${failure.tag}:\n      return silk_write_all(silk_failure_${failure.tag}, sizeof(silk_failure_${failure.tag})) ? 1 : 2;`,
   )
   return `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
+${translationUnitPreamble}
 ${standardStreamsShimSource}
 ${commandLine}
 ${osRuntime}

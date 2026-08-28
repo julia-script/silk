@@ -1,6 +1,6 @@
 /**
- * Compiler-owned native runtime symbols for the sealed OS filesystem, byte-input, and
- * child-process protocols.
+ * Compiler-owned native runtime symbols for the sealed OS filesystem, byte-input,
+ * child-process, host-input, and clock protocols.
  */
 export const symbols = Object.freeze([
   'silk_os_file_open_v1',
@@ -21,32 +21,16 @@ export const symbols = Object.freeze([
   'silk_os_host_argument_v1',
   'silk_os_host_variable_v1',
   'silk_os_host_working_directory_v1',
+  'silk_os_system_clock_now_v1',
+  'silk_os_system_clock_resolution_v1',
+  'silk_os_monotonic_clock_now_v1',
+  'silk_os_monotonic_clock_resolution_v1',
+  'silk_os_monotonic_clock_wait_until_v1',
 ] as const)
 
 export type Symbol = (typeof symbols)[number]
 
-const common = `#if defined(__APPLE__)
-#define _DARWIN_C_SOURCE
-#elif defined(__linux__)
-#define _GNU_SOURCE
-#endif
-#define _POSIX_C_SOURCE 200809L
-#include <dirent.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
-#ifndef O_NOFOLLOW
-#error "Silk OS filesystem requires O_NOFOLLOW"
-#endif
-
+const statusPrelude = `
 enum {
   SILK_NOT_FOUND = 0,
   SILK_ALREADY_EXISTS = 1,
@@ -61,21 +45,7 @@ enum {
   SILK_OTHER = 10
 };
 
-/* Suffix width for provider-chosen unique directory names, and the retry ceiling for collisions. */
-#define SILK_UNIQUE_SUFFIX 8
-#define SILK_UNIQUE_ATTEMPTS 128
-
-typedef struct { size_t identity; int kind; int active; } silk_os_handle;
 typedef struct { int tag; size_t value; } silk_option_usize;
-
-typedef struct {
-  int kind;
-  int fd;
-  DIR *directory;
-  unsigned char *pending_name;
-  size_t pending_length;
-  int pending_kind;
-} silk_native_handle;
 
 static int silk_reason_from_errno(int value) {
   switch (value) {
@@ -114,6 +84,48 @@ static void silk_success(int *reason, uint32_t *native_code) {
   *native_code = 0;
 }
 
+static silk_option_usize silk_transfer(size_t count) {
+  silk_option_usize result = { 1, count };
+  return result;
+}
+
+static silk_option_usize silk_transfer_failure(void) {
+  silk_option_usize result = { 0, 0 };
+  return result;
+}
+`
+
+const stringPrelude = `
+static char *silk_string(const unsigned char *bytes, size_t length) {
+  if (length == SIZE_MAX) return NULL;
+  char *value = (char *)malloc(length + 1);
+  if (value == NULL) return NULL;
+  memcpy(value, bytes, length);
+  value[length] = 0;
+  return value;
+}
+`
+
+const filesystemPrelude = `
+#ifndef O_NOFOLLOW
+#error "Silk OS filesystem requires O_NOFOLLOW"
+#endif
+
+/* Suffix width for provider-chosen unique directory names, and the retry ceiling for collisions. */
+#define SILK_UNIQUE_SUFFIX 8
+#define SILK_UNIQUE_ATTEMPTS 128
+
+typedef struct { size_t identity; int kind; int active; } silk_os_handle;
+
+typedef struct {
+  int kind;
+  int fd;
+  DIR *directory;
+  unsigned char *pending_name;
+  size_t pending_length;
+  int pending_kind;
+} silk_native_handle;
+
 static int silk_utf8(const unsigned char *bytes, size_t length) {
   size_t index = 0;
   while (index < length) {
@@ -145,15 +157,6 @@ static int silk_component_valid(const unsigned char *bytes, size_t length) {
   if (length == 1 && bytes[0] == '.') return 0;
   if (length == 2 && bytes[0] == '.' && bytes[1] == '.') return 0;
   return 1;
-}
-
-static char *silk_string(const unsigned char *bytes, size_t length) {
-  if (length == SIZE_MAX) return NULL;
-  char *value = (char *)malloc(length + 1);
-  if (value == NULL) return NULL;
-  memcpy(value, bytes, length);
-  value[length] = 0;
-  return value;
 }
 
 /* Resolve a normalized provider-absolute path to an opened parent plus an owned final name. */
@@ -278,16 +281,6 @@ static silk_native_handle *silk_live(silk_os_handle *handle, int kind,
   return native;
 }
 
-static silk_option_usize silk_transfer(size_t count) {
-  silk_option_usize result = { 1, count };
-  return result;
-}
-
-static silk_option_usize silk_transfer_failure(void) {
-  silk_option_usize result = { 0, 0 };
-  return result;
-}
-
 static silk_native_handle *silk_allocate_handle(int kind, int fd, DIR *directory) {
   silk_native_handle *native = (silk_native_handle *)calloc(1, sizeof(silk_native_handle));
   if (native == NULL) return NULL;
@@ -296,7 +289,9 @@ static silk_native_handle *silk_allocate_handle(int kind, int fd, DIR *directory
   native->directory = directory;
   return native;
 }
+`
 
+const childProcessPrelude = `
 /*
  * One completed child execution retains its captured streams here until the next execute replaces
  * them. The service is blocking and single-child by contract, so exactly one capture is live at a
@@ -357,6 +352,9 @@ static void silk_child_failed(int channel, int value) {
   (void)ignored;
   _exit(127);
 }
+`
+
+const hostInputPrelude = `
 /* The command line the entry point captured. The shim defines the storage and fills it before it
    calls silk_main, so a host-input read never consults an ambient global of its own. */
 extern int silk_host_argc_v1;
@@ -385,6 +383,59 @@ static silk_option_usize silk_host_copy(const unsigned char *value, size_t lengt
 static silk_option_usize silk_host_absent(int *reason, uint32_t *native_code) {
   silk_protocol_failure(reason, native_code, SILK_NOT_FOUND);
   return silk_transfer_failure();
+}
+`
+
+const clockPrelude = `
+#define SILK_CLOCK_NANOSECONDS_PER_SECOND UINT64_C(1000000000)
+`
+
+const clockReadPrelude = `
+static int silk_clock_read(clockid_t clock, int64_t *seconds, int64_t *nanoseconds) {
+  struct timespec value;
+  if (clock_gettime(clock, &value) != 0 || value.tv_nsec < 0 ||
+      value.tv_nsec >= (long)SILK_CLOCK_NANOSECONDS_PER_SECOND) return 0;
+  int64_t checked_seconds = (int64_t)value.tv_sec;
+  if ((time_t)checked_seconds != value.tv_sec) return 0;
+  int64_t checked_nanoseconds = (int64_t)value.tv_nsec;
+  *seconds = checked_seconds;
+  *nanoseconds = checked_nanoseconds;
+  return 1;
+}
+`
+
+const clockResolutionPrelude = `
+static int silk_clock_resolution(clockid_t clock, uint64_t *nanoseconds) {
+  struct timespec value;
+  if (clock_getres(clock, &value) != 0 || value.tv_sec < 0 || value.tv_nsec < 0 ||
+      value.tv_nsec >= (long)SILK_CLOCK_NANOSECONDS_PER_SECOND) return 0;
+  uint64_t seconds = (uint64_t)value.tv_sec;
+  if ((time_t)seconds != value.tv_sec ||
+      seconds > UINT64_MAX / SILK_CLOCK_NANOSECONDS_PER_SECOND) return 0;
+  uint64_t total = seconds * SILK_CLOCK_NANOSECONDS_PER_SECOND;
+  uint64_t fraction = (uint64_t)value.tv_nsec;
+  if (fraction > UINT64_MAX - total) return 0;
+  total += fraction;
+  if (total == 0) return 0;
+  *nanoseconds = total;
+  return 1;
+}
+`
+
+const clockWaitPrelude = `
+static int silk_clock_fraction_valid(int64_t nanoseconds) {
+  return nanoseconds >= 0 && nanoseconds < (int64_t)SILK_CLOCK_NANOSECONDS_PER_SECOND;
+}
+
+static int silk_clock_deadline(int64_t seconds, int64_t nanoseconds,
+                               struct timespec *deadline) {
+  if (seconds < 0 || !silk_clock_fraction_valid(nanoseconds)) return 0;
+  time_t checked_seconds = (time_t)seconds;
+  long checked_nanoseconds = (long)nanoseconds;
+  if ((int64_t)checked_seconds != seconds || (int64_t)checked_nanoseconds != nanoseconds) return 0;
+  deadline->tv_sec = checked_seconds;
+  deadline->tv_nsec = checked_nanoseconds;
+  return 1;
 }
 `
 
@@ -937,11 +988,172 @@ silk_option_usize silk_os_host_working_directory_v1(unsigned char *output, size_
   return silk_transfer_failure();
 }
 `,
+  silk_os_system_clock_now_v1: `
+int32_t silk_os_system_clock_now_v1(int64_t *seconds, int64_t *nanoseconds) {
+  return (int32_t)silk_clock_read(CLOCK_REALTIME, seconds, nanoseconds);
+}
+`,
+  silk_os_system_clock_resolution_v1: `
+int32_t silk_os_system_clock_resolution_v1(uint64_t *nanoseconds) {
+  return (int32_t)silk_clock_resolution(CLOCK_REALTIME, nanoseconds);
+}
+`,
+  silk_os_monotonic_clock_now_v1: `
+int32_t silk_os_monotonic_clock_now_v1(int64_t *seconds, int64_t *nanoseconds) {
+  return (int32_t)silk_clock_read(CLOCK_MONOTONIC, seconds, nanoseconds);
+}
+`,
+  silk_os_monotonic_clock_resolution_v1: `
+int32_t silk_os_monotonic_clock_resolution_v1(uint64_t *nanoseconds) {
+  return (int32_t)silk_clock_resolution(CLOCK_MONOTONIC, nanoseconds);
+}
+`,
+  silk_os_monotonic_clock_wait_until_v1: `
+int32_t silk_os_monotonic_clock_wait_until_v1(int64_t seconds, int64_t nanoseconds) {
+  struct timespec deadline;
+  if (!silk_clock_deadline(seconds, nanoseconds, &deadline)) return 0;
+#if defined(__linux__)
+  for (;;) {
+    int status = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &deadline, NULL);
+    if (status == 0) return 1;
+    if (status != EINTR) return 0;
+  }
+#else
+  for (;;) {
+    int64_t now_seconds;
+    int64_t now_nanoseconds;
+    if (!silk_clock_read(CLOCK_MONOTONIC, &now_seconds, &now_nanoseconds) || now_seconds < 0)
+      return 0;
+    if (now_seconds > seconds ||
+        (now_seconds == seconds && now_nanoseconds >= nanoseconds)) return 1;
+    int64_t remaining_seconds = seconds - now_seconds;
+    int64_t remaining_nanoseconds = nanoseconds - now_nanoseconds;
+    if (remaining_nanoseconds < 0) {
+      remaining_seconds -= 1;
+      remaining_nanoseconds += (int64_t)SILK_CLOCK_NANOSECONDS_PER_SECOND;
+    }
+    struct timespec remaining = {
+      .tv_sec = (time_t)remaining_seconds,
+      .tv_nsec = (long)remaining_nanoseconds,
+    };
+    if ((int64_t)remaining.tv_sec != remaining_seconds ||
+        (int64_t)remaining.tv_nsec != remaining_nanoseconds) return 0;
+    int status = nanosleep(&remaining, NULL);
+    if (status == 0) continue;
+    if (status == -1 && errno == EINTR) continue;
+    return 0;
+  }
+#endif
+}
+`,
 })
 
-/** Generates only the selected native filesystem entry points plus their private shared helpers. */
+const filesystemSymbols: ReadonlySet<Symbol> = new Set([
+  'silk_os_file_open_v1',
+  'silk_os_file_read_v1',
+  'silk_os_file_write_v1',
+  'silk_os_directory_open_v1',
+  'silk_os_directory_next_v1',
+  'silk_os_path_inspect_v1',
+  'silk_os_directory_create_v1',
+  'silk_os_directory_create_unique_v1',
+  'silk_os_file_remove_v1',
+  'silk_os_directory_remove_v1',
+  'silk_os_handle_close_v1',
+])
+
+const standardInputSymbols: ReadonlySet<Symbol> = new Set(['silk_os_standard_input_read_v1'])
+const childProcessSymbols: ReadonlySet<Symbol> = new Set([
+  'silk_os_process_execute_v1',
+  'silk_os_process_capture_v1',
+])
+const hostInputSymbols: ReadonlySet<Symbol> = new Set([
+  'silk_os_host_argument_count_v1',
+  'silk_os_host_argument_v1',
+  'silk_os_host_variable_v1',
+  'silk_os_host_working_directory_v1',
+])
+const clockSymbols: ReadonlySet<Symbol> = new Set([
+  'silk_os_system_clock_now_v1',
+  'silk_os_system_clock_resolution_v1',
+  'silk_os_monotonic_clock_now_v1',
+  'silk_os_monotonic_clock_resolution_v1',
+  'silk_os_monotonic_clock_wait_until_v1',
+])
+const clockReadSymbols: ReadonlySet<Symbol> = new Set([
+  'silk_os_system_clock_now_v1',
+  'silk_os_monotonic_clock_now_v1',
+])
+const clockResolutionSymbols: ReadonlySet<Symbol> = new Set([
+  'silk_os_system_clock_resolution_v1',
+  'silk_os_monotonic_clock_resolution_v1',
+])
+const clockWaitSymbols: ReadonlySet<Symbol> = new Set(['silk_os_monotonic_clock_wait_until_v1'])
+
+const includes = (groups: {
+  readonly filesystem: boolean
+  readonly standardInput: boolean
+  readonly childProcess: boolean
+  readonly hostInput: boolean
+  readonly clock: boolean
+  readonly clockWait: boolean
+}): string => {
+  const legacy =
+    groups.filesystem || groups.standardInput || groups.childProcess || groups.hostInput
+  const selected: ReadonlyArray<readonly [boolean, string]> = [
+    [groups.filesystem, '<dirent.h>'],
+    [legacy || groups.clockWait, '<errno.h>'],
+    [groups.filesystem || groups.childProcess, '<fcntl.h>'],
+    [groups.childProcess, '<poll.h>'],
+    [legacy, '<stddef.h>'],
+    [legacy || groups.clock, '<stdint.h>'],
+    [groups.filesystem || groups.childProcess || groups.hostInput, '<stdlib.h>'],
+    [groups.filesystem || groups.childProcess || groups.hostInput, '<string.h>'],
+    [groups.filesystem, '<sys/stat.h>'],
+    [groups.filesystem || groups.childProcess, '<sys/types.h>'],
+    [groups.childProcess, '<sys/wait.h>'],
+    [groups.clock, '<time.h>'],
+    [
+      groups.filesystem || groups.standardInput || groups.childProcess || groups.hostInput,
+      '<unistd.h>',
+    ],
+  ]
+  return selected
+    .filter(([needed]) => needed)
+    .map(([, header]) => `#include ${header}`)
+    .join('\n')
+}
+
+/** Generates only the selected native OS entry points and capability-scoped private helpers. */
 export const source = (selected: ReadonlyArray<string>): string => {
   const retained = symbols.filter((symbol) => selected.includes(symbol))
   if (retained.length === 0) return ''
-  return `${common}\n${retained.map((symbol) => implementations[symbol]).join('\n')}`
+  const has = (group: ReadonlySet<Symbol>): boolean => retained.some((symbol) => group.has(symbol))
+  const groups = Object.freeze({
+    filesystem: has(filesystemSymbols),
+    standardInput: has(standardInputSymbols),
+    childProcess: has(childProcessSymbols),
+    hostInput: has(hostInputSymbols),
+    clock: has(clockSymbols),
+    clockRead: has(clockReadSymbols),
+    clockResolution: has(clockResolutionSymbols),
+    clockWait: has(clockWaitSymbols),
+  })
+  const legacy =
+    groups.filesystem || groups.standardInput || groups.childProcess || groups.hostInput
+  return [
+    includes(groups),
+    legacy ? statusPrelude : '',
+    groups.filesystem || groups.childProcess ? stringPrelude : '',
+    groups.filesystem ? filesystemPrelude : '',
+    groups.childProcess ? childProcessPrelude : '',
+    groups.hostInput ? hostInputPrelude : '',
+    groups.clock ? clockPrelude : '',
+    groups.clockRead || groups.clockWait ? clockReadPrelude : '',
+    groups.clockResolution ? clockResolutionPrelude : '',
+    groups.clockWait ? clockWaitPrelude : '',
+    ...retained.map((symbol) => implementations[symbol]),
+  ]
+    .filter((fragment) => fragment.length > 0)
+    .join('\n')
 }

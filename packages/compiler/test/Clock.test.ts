@@ -3,6 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as InspectorFlowModel from '../src/InspectorFlowModel.js'
 import * as InspectorProjectBackend from '../src/InspectorProjectBackend.js'
+import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as MonotonicClockHost from '../src/MonotonicClock.js'
 import * as Stdlib from '../src/Stdlib.js'
@@ -290,6 +291,54 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('rejects every reachable clock intrinsic before direct-Wasm emission', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(
+      `import silk.effect as Effect
+import silk.monotonic_clock as MonotonicClock
+import silk.os_monotonic_clock as OsMonotonicClock
+import silk.os_system_clock as OsSystemClock
+import silk.system_clock as SystemClock
+pub fn main() -> i32 {
+  let mut system = OsSystemClock.make()
+  let wall = run Effect.provideMut(SystemClock.now(), &mut system)
+  let systemResolution = run Effect.provideMut(SystemClock.getResolution(), &mut system)
+  let mut monotonic = OsMonotonicClock.make()
+  let mark = run Effect.provideMut(MonotonicClock.now(), &mut monotonic)
+  let monotonicResolution = run Effect.provideMut(
+    MonotonicClock.getResolution(),
+    &mut monotonic
+  )
+  run Effect.provideMut(MonotonicClock.waitUntil(move mark), &mut monotonic)
+  drop wall
+  if systemResolution > 0 {
+    if monotonicResolution > 0 { return 42 }
+  }
+  return 0
+}`,
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const availability = IntrinsicAvailability.select(self.instances.intrinsics, 'Wasm')
+    assert.strictEqual(availability._tag, 'Unavailable')
+    if (availability._tag !== 'Unavailable') return
+    assert.deepEqual(availability.operations, [
+      'Intrinsic.osMonotonicClockNow',
+      'Intrinsic.osMonotonicClockResolution',
+      'Intrinsic.osMonotonicClockWaitUntil',
+      'Intrinsic.osSystemClockNow',
+      'Intrinsic.osSystemClockResolution',
+    ])
+    assert.deepEqual(
+      availability.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0093', 'SEM0093', 'SEM0093', 'SEM0093', 'SEM0093'],
+    )
+    const emitted = yield* Effect.result(Analysis.codegenWasm(self, { mode: 'release' }))
+    assert.strictEqual(emitted._tag, 'Failure')
+    if (emitted._tag === 'Failure') assert.strictEqual(emitted.failure._tag, 'CodegenUnavailable')
+  }),
+)
+
 it.effect('lowers each native clock provider only to its own intrinsic operations', () =>
   Effect.gen(function* () {
     const system = yield* snapshot(`import silk.effect as Effect
@@ -312,6 +361,11 @@ pub fn main() -> i32 {
       'osSystemClockNow',
       'osSystemClockResolution',
     ])
+    const systemArtifact = yield* Analysis.codegen(system, { mode: 'release' })
+    assert.deepEqual([...systemArtifact.nativeRuntimeSymbols].sort(), [
+      'silk_os_system_clock_now_v1',
+      'silk_os_system_clock_resolution_v1',
+    ])
 
     const monotonic = yield* snapshot(`import silk.effect as Effect
 import silk.monotonic_clock as MonotonicClock
@@ -332,6 +386,12 @@ pub fn main() -> i32 {
       'osMonotonicClockNow',
       'osMonotonicClockResolution',
       'osMonotonicClockWaitUntil',
+    ])
+    const monotonicArtifact = yield* Analysis.codegen(monotonic, { mode: 'release' })
+    assert.deepEqual([...monotonicArtifact.nativeRuntimeSymbols].sort(), [
+      'silk_os_monotonic_clock_now_v1',
+      'silk_os_monotonic_clock_resolution_v1',
+      'silk_os_monotonic_clock_wait_until_v1',
     ])
   }),
 )

@@ -99,6 +99,25 @@ jobs:
           path: packages/compiler/compiler-shard-${{ matrix.shard }}.json
           if-no-files-found: warn
 
+  macos-native-clocks:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @silklang/compiler... run build
+      - run: >
+          pnpm --filter @silklang/compiler exec vitest run test/OsClockRuntime.test.ts
+          -t 'runs the forced non-Linux absolute-deadline fallback harness' --maxWorkers=1
+      - run: >
+          pnpm --filter @silklang/compiler exec vitest run test/DriverNativeAcceptance.test.ts
+          -t 'links and runs the native system and monotonic clock ABI' --maxWorkers=1
+
   webcontainer-browser:
     runs-on: ubuntu-latest
     timeout-minutes: 15

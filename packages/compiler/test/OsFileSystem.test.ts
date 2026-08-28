@@ -10,6 +10,8 @@ import type * as OsFileSystemHost from '../src/OsFileSystemHost.js'
 import * as OsRuntime from '../src/OsRuntime.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import type * as Termination from '../src/Termination.js'
+import * as ToolchainPlan from '../src/ToolchainPlan.js'
 import * as WasmBackend from '../src/WasmBackend.js'
 import * as Driver from './support/TestDriver.js'
 
@@ -54,6 +56,12 @@ const inspected: OsFileSystemHost.InspectResult = Object.freeze({
 const unsupported: OsFileSystemHost.Failure = Object.freeze({
   _tag: 'Failure',
   reason: 'Unsupported',
+})
+const returnedStatusTermination: Termination.Contract = Object.freeze({
+  _tag: 'EntryTermination',
+  success: 'ReturnedStatus',
+  failures: Object.freeze([]),
+  logicalFrames: Object.freeze([]),
 })
 const provider: OsFileSystemHost.Provider = Object.freeze({
   fileOpen: () => unsupported,
@@ -545,11 +553,16 @@ it.effect('keeps the evaluator boundary browser-safe and native runtime pay-for-
         '-fsyntax-only',
         '-',
       ],
-      { input: selected, encoding: 'utf8' },
+      {
+        input: ToolchainPlan.shimSource(returnedStatusTermination, ['silk_os_path_inspect_v1']),
+        encoding: 'utf8',
+      },
     )
     assert.strictEqual(checked.status, 0, checked.stderr)
 
-    const securitySource = `${selected}
+    const securitySource = `${ToolchainPlan.shimSource(returnedStatusTermination, [
+      'silk_os_path_inspect_v1',
+    ])}
 static int rejected(const unsigned char *root, size_t root_length,
                     const unsigned char *path, size_t path_length) {
   int kind = 0;
@@ -562,7 +575,7 @@ static int rejected(const unsigned char *root, size_t root_length,
   return inspected == 0;
 }
 
-int main(void) {
+int silk_main(void) {
   static const unsigned char root[] = "${nativeRoot}";
   static const unsigned char dot[] = "/./outside";
   static const unsigned char dotdot[] = "/nested/../../outside";

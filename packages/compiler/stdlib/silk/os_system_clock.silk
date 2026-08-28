@@ -1,4 +1,4 @@
-//! Native Unix-epoch clock provider for [`SystemClock`].
+//! Native Unix-epoch clock provider for `SystemClock`.
 //!
 //! # When to use
 //! Construct [`OsSystemClock`] at a native application edge and provide it to portable code that
@@ -11,18 +11,21 @@
 //!
 //! # Gotchas
 //! The clock may move backwards when the operating system adjusts its external reference. Reachable
-//! operations support Unix-family native targets and evaluator hosts; direct WebAssembly rejects
-//! them rather than inventing an ambient time import.
+//! operations support the current Unix-family native targets and evaluator hosts. Linux requires
+//! `glibc` 2.17 or later and needs no `librt` link. Direct WebAssembly rejects reachable operations
+//! and does not add an ambient time import.
 
 import silk.i64 as i64
 import silk.system_clock as SystemClock
 import silk.system_clock { Instant }
 import silk.u64 as u64
 
-/// A stateless native provider of Unix-epoch time.
+/// A stateless Unix-family native provider of Unix-epoch time.
+/// A failed, invalid, or unrepresentable clock result traps. Direct WebAssembly does not support a
+/// reachable operation on this provider.
 pub struct OsSystemClock {}
 
-/// Creates a native system-clock provider without reading the clock.
+/// Creates a native system-clock provider without reading the clock or installing it as a default.
 pub fn make() -> OsSystemClock {
   return OsSystemClock {}
 }

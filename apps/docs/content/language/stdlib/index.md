@@ -32,13 +32,16 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/local_scheduler`](./local-scheduler.md) | `LocalScheduler` | 4 | Deterministic single-threaded execution for structured Fibers. |
 | [`silk/logger`](./logger.md) | `Logger` | 14 | Typed semantic logging with replaceable stdout and bounded in-memory providers. |
 | [`silk/metrics`](./metrics.md) | `AllocationMetrics` | 6 | Provider-owned allocation counters that can be published as ordinary copyable data. |
+| [`silk/monotonic_clock`](./monotonic-clock.md) | `MonotonicClock` | 5 | Provider-replaceable monotonic marks, resolution, and deadline waits. |
 | [`silk/numeric`](./numeric.md) | `Integer` | 2 | Shared compile-time addition witness for generic algorithms over primitive integers. |
 | [`silk/option`](./option.md) | `Option` | 8 | Optional owned values that distinguish presence from absence without a failure channel. |
 | [`silk/order`](./order.md) | `Order` | 11 | Compile-time ordering witnesses and a three-way result derived from strict comparison. |
 | [`silk/os_child_process`](./os-child-process.md) | `OsChildProcess` | 2 | Native ChildProcess provider that executes directly through the platform process boundary. |
 | [`silk/os_filesystem`](./os-filesystem.md) | `OsFileSystem` | 2 | Native FileSystem provider confined beneath one explicitly owned platform root. |
 | [`silk/os_host_input`](./os-host-input.md) | `OsHostInput` | 2 | Native HostInput provider for the process command line, environment, and working directory. |
+| [`silk/os_monotonic_clock`](./os-monotonic-clock.md) | `OsMonotonicClock` | 2 | Native monotonic clock provider with source-derived relative waiting. |
 | [`silk/os_standard_input`](./os-standard-input.md) | `OsStandardInput` | 2 | Native StandardInput provider backed by the process standard-input descriptor. |
+| [`silk/os_system_clock`](./os-system-clock.md) | `OsSystemClock` | 2 | Native Unix-epoch clock provider for SystemClock. |
 | [`silk/random`](./random.md) | `Random` | 7 | Provider-replaceable pseudorandom words, booleans, bounded values, and byte filling. |
 | [`silk/raw_buffer`](./raw-buffer.md) | `RawBuffer` | 8 | Low-level typed views over owned allocations for implementing collections and storage actors. |
 | [`silk/result`](./result.md) | `Result` | 11 | Completed success-or-failure values that can be inspected and transformed as ordinary data. |
@@ -48,6 +51,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/standard_input`](./standard-input.md) | `StandardInput` | 11 | Portable blocking reads of raw standard-input bytes through an explicit provider. |
 | [`silk/standard_streams`](./standard-streams.md) | `StandardStreams` | 7 | Complete-message standard-output and standard-error writes through a replaceable service. |
 | [`silk/string`](./string.md) | `String` | 22 | Valid UTF-8 text, including owned storage, byte validation, and scalar-by-scalar traversal. |
+| [`silk/system_clock`](./system-clock.md) | `SystemClock` | 7 | Provider-replaceable Unix-epoch time with canonical split-second instants. |
 | [`silk/u16`](./u16.md) | `u16` | 57 | Sixteen-bit unsigned integers with explicit arithmetic and conversion failure policies. |
 | [`silk/u32`](./u32.md) | `u32` | 57 | Thirty-two-bit unsigned integers for fixed-width counts, masks, and binary fields. |
 | [`silk/u64`](./u64.md) | `u64` | 57 | Sixty-four-bit unsigned integers for wide masks, counters, hashes, and exact interchange values. |

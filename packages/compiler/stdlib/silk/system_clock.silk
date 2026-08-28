@@ -12,9 +12,9 @@
 //! ambient clock.
 //!
 //! # Gotchas
-//! [`getResolution`] reports a provider's positive nominal tick in whole nanoseconds. It may be a
-//! lower bound on observable precision. A provider that cannot produce a canonical representable
-//! result traps because this service has no typed failure channel.
+//! [`getResolution`] reports a positive nominal tick in whole nanoseconds. The tick may be a lower
+//! bound on observable precision. An invalid or unrepresentable provider result traps because this
+//! service has no typed failure channel.
 //!
 //! # Examples
 //! ## Read a fixed instant through an ordinary provider
@@ -92,23 +92,24 @@ pub fn nanoseconds(self: &Instant) -> i64 {
 /// service does not install an implementation or expose a clock-setting operation.
 pub service SystemClock {
   /// Reads the current Unix-epoch instant.
-  ///
   /// The result is canonical but need not be greater than an earlier read because the external
   /// reference may be adjusted.
   effect fn now() -> Instant ? &mut SystemClock
 
   /// Returns the provider-reported positive nominal resolution in whole nanoseconds.
-  ///
   /// The value may be a lower bound on actual observable precision.
   effect fn getResolution() -> u64 ? &mut SystemClock
 }
 
-/// Reads the current instant from the active [`SystemClock`] provider.
+/// Reads the current Unix-epoch instant from the active [`SystemClock`] provider.
+/// The result can precede an earlier result. An invalid or unrepresentable provider result traps.
 pub effect fn now() -> Instant ? &mut SystemClock {
   return run SystemClock.now()
 }
 
 /// Returns the active [`SystemClock`] provider's positive nominal resolution in nanoseconds.
+/// The result may be a lower bound on observable precision. An invalid or unrepresentable result
+/// traps.
 pub effect fn getResolution() -> u64 ? &mut SystemClock {
   return run SystemClock.getResolution()
 }
