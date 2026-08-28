@@ -801,16 +801,16 @@ pub fn main() -> i32 {
 
 /** Fixed-seed xoshiro256** known answers shared by evaluator, Wasm, and native execution. */
 export const seededRandomFingerprint = `import silk.effect as Effect
-import silk.random as Random
+import silk.insecure_random as InsecureRandom
 import silk.u64 as u64
 import silk.usize as usize
 
 fn matches(seed: u64, expected: &[u64]) -> bool {
-  let mut provider = Random.seeded(seed)
+  let mut provider = InsecureRandom.seeded(seed)
   let mut index = usize.ZERO
   while index < expected.length {
-    let actual = run Random.nextU64()
-      |> Effect.provideMut<Random.Random>(&mut provider)
+    let actual = run InsecureRandom.nextU64()
+      |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut provider)
     if actual != expected[index] { return false }
     index = index + usize.ONE
   }
@@ -829,6 +829,51 @@ pub fn main() -> i32 {
     u64.toU64(0xd99a2743ebe60087)
   ]
   if !matches(42, &expected) { return 1 }
+  return 42
+}`
+
+/** Portable secure-provider and stable insecure-seed behavior shared by evaluator and Wasm. */
+export const portableRandomCapabilities = `import silk.effect as Effect
+import silk.insecure_seed as InsecureSeed
+import silk.random as Random
+import silk.u64 as u64
+import silk.usize as usize
+
+struct ScriptedRandom {
+  first: u64
+  second: u64
+  calls: usize
+}
+
+effect fn fill(self: &mut ScriptedRandom, output: &mut [u8]) -> () {
+  if output.length == usize.ZERO { return () }
+  let mut word = self.second
+  if self.calls == usize.ZERO { word = self.first }
+  self.calls = self.calls + usize.ONE
+  let mut index = usize.ZERO
+  while index < output.length {
+    output[index] = u64.toU8(u64.bitAnd(word, 255))
+    word = u64.shiftRight(word, 8)
+    index = index + usize.ONE
+  }
+  return ()
+}
+
+impl Random.Random for ScriptedRandom { fillBytes: ScriptedRandom.fill }
+
+pub fn main() -> i32 {
+  let fixed = InsecureSeed.fixed(40, 2)
+  let fixedSeed = run InsecureSeed.get()
+    |> Effect.provide<InsecureSeed.InsecureSeed>(&fixed)
+  if InsecureSeed.first(&fixedSeed) + InsecureSeed.second(&fixedSeed) != 42 { return 1 }
+
+  let mut random = ScriptedRandom { first: u64.toU64(20), second: u64.toU64(22), calls: usize.ZERO }
+  let sampled = run InsecureSeed.fromRandom()
+    |> Effect.provideMut<Random.Random>(&mut random)
+  let sampledSeed = run InsecureSeed.get()
+    |> Effect.provide<InsecureSeed.InsecureSeed>(&sampled)
+  if random.calls != 2 { return 2 }
+  if InsecureSeed.first(&sampledSeed) + InsecureSeed.second(&sampledSeed) != 42 { return 3 }
   return 42
 }`
 
@@ -2593,8 +2638,49 @@ const localSharedPressureFailure = (ordinal: 0 | 1): string =>
       : 'let mut secondAllocator = ExhaustedAllocator {}',
   )
 
+const deterministicSecureRandom = `import silk.effect as Effect
+import silk.random as Random
+import silk.u8 as u8
+import silk.usize as usize
+struct FixedRandom {}
+effect fn fixedFill(self: &mut FixedRandom, output: &mut [u8]) -> () {
+  let mut index = usize.ZERO
+  while index < output.length {
+    output[index] = u8.toU8(7)
+    index = index + usize.ONE
+  }
+  return ()
+}
+impl Random.Random for FixedRandom { fillBytes: FixedRandom.fixedFill }
+pub fn main() -> i32 {
+  let mut provider = FixedRandom {}
+  let mut output = [u8.toU8(0), u8.toU8(0), u8.toU8(0)]
+  run Effect.provideMut(Random.fillBytes(&mut output), &mut provider)
+  if output[0] != 7 { return 1 }
+  if output[1] != 7 { return 2 }
+  if output[2] != 7 { return 3 }
+  return 42
+}`
+
+const nativeSecureRandom = `import silk.effect as Effect
+import silk.os_random as OsRandom
+import silk.random as Random
+import silk.u8 as u8
+pub fn main() -> i32 {
+  let mut provider = OsRandom.make()
+  let mut output = [u8.toU8(0), u8.toU8(0), u8.toU8(0)]
+  run Effect.provideMut(Random.fillBytes(&mut output), &mut provider)
+  return 42
+}`
+
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   ...corpus,
+  {
+    name: 'secure-random-provider',
+    source: deterministicSecureRandom,
+    nativeSource: nativeSecureRandom,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // These two canonical programs cover the public single-threaded Fiber story through the shared
   // evaluator/native differential: root/fork/join, FIFO siblings, repeated yield, nested forks,
   // completion-before-join, typed child failure, structured cancellation, and reuse of one

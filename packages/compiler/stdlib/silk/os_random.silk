@@ -1,0 +1,42 @@
+//! Native Unix-family cryptographically secure random provider.
+//!
+//! # When to use
+//! Construct [`OsRandom`] at a native application edge and provide it to portable code requiring
+//! `&mut Random`. Use an ordinary scripted provider in deterministic tests.
+//!
+//! # Details
+//! Construction is stateless and performs no host call. Each nonempty fill crosses one native
+//! boundary and succeeds only after the complete slice contains fresh CSPRNG bytes. GNU/Linux uses
+//! nonblocking `getrandom`; macOS uses `arc4random_buf`.
+//!
+//! # Gotchas
+//! Host failure is a fatal trap because continuing with weak or partial bytes would violate the
+//! service contract. GNU/Linux requires glibc 2.25 and Linux 3.17 or later. Direct WebAssembly and
+//! Windows do not provide this implementation.
+
+import silk.random as Random
+
+/// A stateless Unix-family provider of fresh cryptographically secure bytes.
+pub struct OsRandom {}
+
+/// Creates a native random provider without reading randomness or installing an ambient default.
+pub fn make() -> OsRandom {
+  return OsRandom {}
+}
+
+effect fn rawFill(output: &mut [u8]) -> bool {
+  if output.length == 0 { return true }
+  unsafe { return run Intrinsic.osRandomFill(move output) }
+  return false
+}
+
+effect fn fillBytes(self: &mut OsRandom, output: &mut [u8]) -> () {
+  if output.length == 0 { return () }
+  if run rawFill(move output) { return () }
+  let invalid = 1 / 0
+  return ()
+}
+
+impl Random.Random for OsRandom {
+  fillBytes: OsRandom.fillBytes
+}

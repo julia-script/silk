@@ -266,6 +266,10 @@ effect fn monotonicClockWaitUntil(seconds: i64, nanoseconds: i64) -> bool {
   unsafe { return run Intrinsic.osMonotonicClockWaitUntil(seconds, nanoseconds) }
   return false
 }
+effect fn randomFill(output: &mut [u8]) -> bool {
+  unsafe { return run Intrinsic.osRandomFill(move output) }
+  return false
+}
 effect fn fileOpen(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> Option<OsHandle> {
   unsafe { return run Intrinsic.osFileOpen(root, path, 0, reason, code) }
   return none<OsHandle>()

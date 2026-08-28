@@ -1,6 +1,6 @@
 /**
  * Compiler-owned native runtime symbols for the sealed OS filesystem, byte-input,
- * child-process, host-input, and clock protocols.
+ * child-process, host-input, clock, and secure-random protocols.
  */
 export const symbols = Object.freeze([
   'silk_os_file_open_v1',
@@ -26,6 +26,7 @@ export const symbols = Object.freeze([
   'silk_os_monotonic_clock_now_v1',
   'silk_os_monotonic_clock_resolution_v1',
   'silk_os_monotonic_clock_wait_until_v1',
+  'silk_os_random_fill_v1',
 ] as const)
 
 export type Symbol = (typeof symbols)[number]
@@ -104,6 +105,22 @@ static char *silk_string(const unsigned char *bytes, size_t length) {
   value[length] = 0;
   return value;
 }
+`
+
+const randomPrelude = `
+#include <stddef.h>
+#include <stdint.h>
+#if defined(__linux__)
+#include <errno.h>
+#include <sys/random.h>
+#elif defined(__APPLE__)
+#include <stdlib.h>
+#else
+#error "Silk OS random supports only GNU/Linux and macOS"
+#endif
+
+/* Linux documents at most 32 MiB minus one byte per getrandom call. */
+#define SILK_GETRANDOM_MAX ((size_t)33554431)
 `
 
 const filesystemPrelude = `
@@ -1046,6 +1063,29 @@ int32_t silk_os_monotonic_clock_wait_until_v1(int64_t seconds, int64_t nanosecon
 #endif
 }
 `,
+  silk_os_random_fill_v1: `
+int32_t silk_os_random_fill_v1(unsigned char *output, size_t length) {
+  if (length == 0) return 1;
+#if defined(__linux__)
+  size_t filled = 0;
+  while (filled < length) {
+    size_t remaining = length - filled;
+    size_t requested = remaining < SILK_GETRANDOM_MAX ? remaining : SILK_GETRANDOM_MAX;
+    ssize_t count = getrandom(output + filled, requested, GRND_NONBLOCK);
+    if (count > 0) {
+      filled += (size_t)count;
+      continue;
+    }
+    if (count < 0 && errno == EINTR) continue;
+    return 0;
+  }
+  return 1;
+#else
+  arc4random_buf(output, length);
+  return 1;
+#endif
+}
+`,
 })
 
 const filesystemSymbols: ReadonlySet<Symbol> = new Set([
@@ -1089,6 +1129,7 @@ const clockResolutionSymbols: ReadonlySet<Symbol> = new Set([
   'silk_os_monotonic_clock_resolution_v1',
 ])
 const clockWaitSymbols: ReadonlySet<Symbol> = new Set(['silk_os_monotonic_clock_wait_until_v1'])
+const randomSymbols: ReadonlySet<Symbol> = new Set(['silk_os_random_fill_v1'])
 
 const includes = (groups: {
   readonly filesystem: boolean
@@ -1097,6 +1138,7 @@ const includes = (groups: {
   readonly hostInput: boolean
   readonly clock: boolean
   readonly clockWait: boolean
+  readonly random: boolean
 }): string => {
   const legacy =
     groups.filesystem || groups.standardInput || groups.childProcess || groups.hostInput
@@ -1138,6 +1180,7 @@ export const source = (selected: ReadonlyArray<string>): string => {
     clockRead: has(clockReadSymbols),
     clockResolution: has(clockResolutionSymbols),
     clockWait: has(clockWaitSymbols),
+    random: has(randomSymbols),
   })
   const legacy =
     groups.filesystem || groups.standardInput || groups.childProcess || groups.hostInput
@@ -1152,6 +1195,7 @@ export const source = (selected: ReadonlyArray<string>): string => {
     groups.clockRead || groups.clockWait ? clockReadPrelude : '',
     groups.clockResolution ? clockResolutionPrelude : '',
     groups.clockWait ? clockWaitPrelude : '',
+    groups.random ? randomPrelude : '',
     ...retained.map((symbol) => implementations[symbol]),
   ]
     .filter((fragment) => fragment.length > 0)

@@ -239,6 +239,7 @@ const nonScalarBuiltinOperations = Object.freeze([
   'OsMonotonicClockNow',
   'OsMonotonicClockResolution',
   'OsMonotonicClockWaitUntil',
+  'OsRandomFill',
   'OsFileOpen',
   'OsFileRead',
   'OsFileWrite',

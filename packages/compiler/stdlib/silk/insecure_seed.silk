@@ -1,0 +1,85 @@
+//! One provider-stable 128-bit value for initialization-time hash-flood hardening.
+//!
+//! # When to use
+//! Read [`InsecureSeed`] once while initializing a language runtime or application data structure.
+//! Use [`fixed`] in deterministic environments or [`fromRandom`] when secure randomness is present.
+//!
+//! # Details
+//! A provider returns the same copyable [`Seed`] on every shared read. [`fromRandom`] consumes two
+//! secure words exactly once and stores them in an immutable provider.
+//!
+//! # Gotchas
+//! This capability is not a reusable stream and makes no cryptographic promise. Current Silk hash
+//! collections use a different one-word hash policy and do not consume this seed automatically.
+//!
+//! # Examples
+//! ## Provide a deterministic initialization seed
+//! ```silk
+//! import silk.effect { Effect }
+//! import silk.insecure_seed as InsecureSeed
+//!
+//! pub fn main() -> i32 {
+//!   let provider = InsecureSeed.fixed(20, 22)
+//!   let seed = run InsecureSeed.get()
+//!     |> Effect.provide<InsecureSeed.InsecureSeed>(&provider)
+//!   if InsecureSeed.first(&seed) + InsecureSeed.second(&seed) != 42 { return 0 }
+//!   return 42
+//! }
+//! ```
+
+import silk.random as Random
+import silk.u64 as u64
+
+/// A copyable pair of initialization seed words with private representation.
+pub struct Seed {
+  first: u64
+  second: u64
+}
+
+impl Copy for Seed {}
+
+/// Returns the first word of `seed`.
+pub fn first(seed: &Seed) -> u64 {
+  return seed.first
+}
+
+/// Returns the second word of `seed`.
+pub fn second(seed: &Seed) -> u64 {
+  return seed.second
+}
+
+/// A shared capability that returns one provider-stable [`Seed`].
+pub service InsecureSeed {
+  /// Returns a copy of the provider's stable seed.
+  effect fn get() -> Seed ? &InsecureSeed
+}
+
+/// An immutable provider containing one fixed seed.
+pub struct FixedInsecureSeed {
+  seed: Seed
+}
+
+/// Creates a deterministic provider from two explicit words without requiring secure randomness.
+pub fn fixed(first: u64, second: u64) -> FixedInsecureSeed {
+  return FixedInsecureSeed { seed: Seed { first: first, second: second } }
+}
+
+/// Samples two secure words once and returns an immutable seed provider.
+pub effect fn fromRandom() -> FixedInsecureSeed ? &mut Random.Random {
+  let first = run Random.nextU64()
+  let second = run Random.nextU64()
+  return fixed(first, second)
+}
+
+effect fn fixedGet(self: &FixedInsecureSeed) -> Seed {
+  return self.seed
+}
+
+impl InsecureSeed for FixedInsecureSeed {
+  get: FixedInsecureSeed.fixedGet
+}
+
+/// Returns a copy of the active provider's stable seed.
+pub effect fn get() -> Seed ? &InsecureSeed {
+  return run InsecureSeed.get()
+}

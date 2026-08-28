@@ -2,7 +2,7 @@
 
 The first three changes establish the language boundary, ordinary standard-library actor, and
 project command. This final slice supplies connected evidence against the concrete goal that
-motivated SLP-0004: test current standard-library operations, especially seeded Random, through the
+motivated SLP-0004: test current standard-library operations, especially seeded InsecureRandom, through the
 same surface available to users.
 
 ## Goals / Non-Goals
@@ -20,7 +20,7 @@ same surface available to users.
 
 ## Decisions
 
-### Use seeded Random as the connected standard-library witness
+### Use seeded InsecureRandom as the connected standard-library witness
 
 The standard-library catalog adds closed marked tests beside the existing Random actor. One test
 constructs the documented seeded provider inside its body and uses `Test.assert` on the published

@@ -142,6 +142,10 @@
       "types": "./dist/MonotonicClock.d.ts",
       "import": "./dist/MonotonicClock.js"
     },
+    "./RandomHost": {
+      "types": "./dist/RandomHost.d.ts",
+      "import": "./dist/RandomHost.js"
+    },
     "./HeapObservation": {
       "types": "./dist/HeapObservation.d.ts",
       "import": "./dist/HeapObservation.js"

@@ -226,7 +226,7 @@ pub fn main() -> i32 {
 
 const randomServiceSource = `import silk.effect as Effect
 import silk.option as Option
-import silk.random as Random
+import silk.insecure_random as InsecureRandom
 import silk.u64 as u64
 import silk.u8 as u8
 import silk.usize as usize
@@ -250,19 +250,19 @@ effect fn scriptedNext(self: &mut Scripted) -> u64 {
   return value
 }
 
-impl Random.Random for Scripted { nextU64: Scripted.scriptedNext }
+impl InsecureRandom.InsecureRandom for Scripted { nextU64: Scripted.scriptedNext }
 
 fn next(provider: &mut Scripted) -> u64 {
-  return run Random.nextU64()
-    |> Effect.provideMut<Random.Random>(provider)
+  return run InsecureRandom.nextU64()
+    |> Effect.provideMut<InsecureRandom.InsecureRandom>(provider)
 }
 
 fn matches(seed: u64, expected: &[u64]) -> bool {
-  let mut provider = Random.seeded(seed)
+  let mut provider = InsecureRandom.seeded(seed)
   let mut index = usize.ZERO
   while index < expected.length {
-    let actual = run Random.nextU64()
-      |> Effect.provideMut<Random.Random>(&mut provider)
+    let actual = run InsecureRandom.nextU64()
+      |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut provider)
     if actual != expected[index] { return false }
     index = index + usize.ONE
   }
@@ -290,14 +290,14 @@ fn knownAnswers() -> bool {
 }
 
 fn reproducible() -> bool {
-  let mut left = Random.seeded(42)
-  let mut right = Random.seeded(42)
+  let mut left = InsecureRandom.seeded(42)
+  let mut right = InsecureRandom.seeded(42)
   let mut index = usize.ZERO
   while index < 16 {
-    let leftWord = run Random.nextU64()
-      |> Effect.provideMut<Random.Random>(&mut left)
-    let rightWord = run Random.nextU64()
-      |> Effect.provideMut<Random.Random>(&mut right)
+    let leftWord = run InsecureRandom.nextU64()
+      |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut left)
+    let rightWord = run InsecureRandom.nextU64()
+      |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut right)
     if leftWord != rightWord { return false }
     index = index + usize.ONE
   }
@@ -329,33 +329,33 @@ fn derivedOperations() -> bool {
   if direct.index != 2 { return false }
 
   let mut booleans = scripted(0, 0x8000000000000000, 99)
-  let low = run Random.nextBool()
-    |> Effect.provideMut<Random.Random>(&mut booleans)
-  let high = run Random.nextBool()
-    |> Effect.provideMut<Random.Random>(&mut booleans)
+  let low = run InsecureRandom.nextBool()
+    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut booleans)
+  let high = run InsecureRandom.nextBool()
+    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut booleans)
   if low || !high || booleans.index != 2 { return false }
 
   let mut zeroBound = scripted(41, 99, 99)
-  let absent = run Random.below(0)
-    |> Effect.provideMut<Random.Random>(&mut zeroBound)
+  let absent = run InsecureRandom.below(0)
+    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut zeroBound)
   if Option.unwrapOr<u64>(move absent, 42) != 42 { return false }
   if next(&mut zeroBound) != 41 || zeroBound.index != 1 { return false }
 
   let mut rejected = scripted(5, 17, 99)
-  let bounded = run Random.below(10)
-    |> Effect.provideMut<Random.Random>(&mut rejected)
+  let bounded = run InsecureRandom.below(10)
+    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut rejected)
   if Option.unwrapOr<u64>(move bounded, 99) != 7 { return false }
   if rejected.index != 2 { return false }
 
   let mut bytesProvider = scripted(0x0807060504030201, 0x11100f0e0d0c0b0a, 99)
   let mut empty = emptyBytes()
-  run Random.fillBytes(&mut empty)
-    |> Effect.provideMut<Random.Random>(&mut bytesProvider)
+  run InsecureRandom.fillBytes(&mut empty)
+    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut bytesProvider)
   if bytesProvider.index != usize.ZERO { return false }
 
   let mut full = zeroBytes8()
-  run Random.fillBytes(&mut full)
-    |> Effect.provideMut<Random.Random>(&mut bytesProvider)
+  run InsecureRandom.fillBytes(&mut full)
+    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut bytesProvider)
   if bytesProvider.index != usize.ONE { return false }
   let expectedFull = [
     u8.toU8(1),
@@ -374,8 +374,8 @@ fn derivedOperations() -> bool {
   }
 
   let mut partial = zeroBytes3()
-  run Random.fillBytes(&mut partial)
-    |> Effect.provideMut<Random.Random>(&mut bytesProvider)
+  run InsecureRandom.fillBytes(&mut partial)
+    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut bytesProvider)
   if bytesProvider.index != 2 { return false }
   if partial[0] != u8.toU8(10) || partial[1] != u8.toU8(11) || partial[2] != u8.toU8(12) {
     return false
@@ -391,7 +391,7 @@ pub fn main() -> i32 {
 }`
 
 it.effect(
-  'runs seeded and scripted Random providers through ordinary exclusive service dispatch',
+  'runs seeded and scripted InsecureRandom providers through ordinary exclusive service dispatch',
   () =>
     Effect.gen(function* () {
       const { self, outcome } = yield* evaluate(randomServiceSource)
@@ -399,13 +399,147 @@ it.effect(
       assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
       if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
 
-      const randomHir = Projections.hirOf(self, 'silk/random')
+      const randomHir = Projections.hirOf(self, 'silk/insecure_random')
       assert.include(
         randomHir === undefined ? '' : Hir.encode(randomHir),
-        'service-call silk/random.Random.nextU64',
+        'service-call silk/insecure_random.InsecureRandom.nextU64',
       )
       assert.notInclude(randomServiceSource, 'Xoshiro256StarStar')
     }),
+)
+
+const randomCapabilitiesSource = `import silk.effect as Effect
+import silk.insecure_seed as InsecureSeed
+import silk.option as Option
+import silk.random as Random
+import silk.u64 as u64
+import silk.u8 as u8
+import silk.usize as usize
+
+struct ScriptedRandom {
+  first: u64
+  second: u64
+  third: u64
+  fourth: u64
+  fifth: u64
+  sixth: u64
+  index: usize
+}
+
+fn scriptedRandom() -> ScriptedRandom {
+  return ScriptedRandom {
+    first: u64.toU64(0x0807060504030201),
+    second: u64.toU64(0x8000000000000000),
+    third: u64.toU64(5),
+    fourth: u64.toU64(17),
+    fifth: u64.toU64(20),
+    sixth: u64.toU64(22),
+    index: usize.ZERO,
+  }
+}
+
+effect fn scriptedFill(self: &mut ScriptedRandom, output: &mut [u8]) -> () {
+  if output.length == usize.ZERO { return () }
+  let mut word = self.sixth
+  if self.index == usize.ZERO { word = self.first }
+  if self.index == usize.ONE { word = self.second }
+  if self.index == 2 { word = self.third }
+  if self.index == 3 { word = self.fourth }
+  if self.index == 4 { word = self.fifth }
+  self.index = self.index + usize.ONE
+  let mut cursor = usize.ZERO
+  while cursor < output.length {
+    output[cursor] = u64.toU8(u64.bitAnd(word, 255))
+    word = u64.shiftRight(word, 8)
+    cursor = cursor + usize.ONE
+  }
+  return ()
+}
+
+impl Random.Random for ScriptedRandom {
+  fillBytes: ScriptedRandom.scriptedFill
+}
+
+fn emptyBytes() -> [u8; 0] { return [] }
+
+fn values() -> bool {
+  let mut provider = scriptedRandom()
+  let mut firstEmpty = emptyBytes()
+  run Random.fillBytes(&mut firstEmpty)
+    |> Effect.provideMut<Random.Random>(&mut provider)
+  let mut secondEmpty = emptyBytes()
+  run Random.Random.fillBytes(&mut secondEmpty)
+    |> Effect.provideMut<Random.Random>(&mut provider)
+  if provider.index != usize.ZERO { return false }
+
+  let word = run Random.nextU64()
+    |> Effect.provideMut<Random.Random>(&mut provider)
+  if word != u64.toU64(0x0807060504030201) { return false }
+  let flag = run Random.nextBool()
+    |> Effect.provideMut<Random.Random>(&mut provider)
+  if !flag { return false }
+  let absent = run Random.below(0)
+    |> Effect.provideMut<Random.Random>(&mut provider)
+  if Option.unwrapOr<u64>(move absent, 42) != 42 { return false }
+  if provider.index != 2 { return false }
+  let bounded = run Random.below(10)
+    |> Effect.provideMut<Random.Random>(&mut provider)
+  if Option.unwrapOr<u64>(move bounded, 99) != 7 { return false }
+  if provider.index != 4 { return false }
+
+  let seedProvider = run InsecureSeed.fromRandom()
+    |> Effect.provideMut<Random.Random>(&mut provider)
+  if provider.index != 6 { return false }
+  let firstSeed = run InsecureSeed.get()
+    |> Effect.provide<InsecureSeed.InsecureSeed>(&seedProvider)
+  let secondSeed = run InsecureSeed.get()
+    |> Effect.provide<InsecureSeed.InsecureSeed>(&seedProvider)
+  if InsecureSeed.first(&firstSeed) != 20 { return false }
+  if InsecureSeed.second(&firstSeed) != 22 { return false }
+  if InsecureSeed.first(&secondSeed) != 20 { return false }
+  if InsecureSeed.second(&secondSeed) != 22 { return false }
+  if provider.index != 6 { return false }
+
+  let fixed = InsecureSeed.fixed(40, 2)
+  let fixedSeed = run InsecureSeed.get()
+    |> Effect.provide<InsecureSeed.InsecureSeed>(&fixed)
+  return InsecureSeed.first(&fixedSeed) + InsecureSeed.second(&fixedSeed) == 42
+}
+
+pub fn main() -> i32 {
+  if !values() { return 1 }
+  return 42
+}`
+
+it.effect('derives secure random values and initializes one stable shared insecure seed', () =>
+  Effect.gen(function* () {
+    const { self, outcome } = yield* evaluate(randomCapabilitiesSource)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+    const randomHir = Projections.hirOf(self, 'silk/random')
+    assert.include(
+      randomHir === undefined ? '' : Hir.encode(randomHir),
+      'service-call silk/random.Random.fillBytes',
+    )
+  }),
+)
+
+it.effect('keeps InsecureSeed fields private', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'insecure-seed/private',
+      encoder.encode(`import silk.insecure_seed as InsecureSeed
+pub fn main() -> i32 {
+  let provider = InsecureSeed.fixed(1, 2)
+  return provider.seed.first
+}`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0028'],
+    )
+  }),
 )
 
 for (const provider of [

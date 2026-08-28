@@ -158,6 +158,20 @@
     "namespace": "i8"
   },
   {
+    "module": "silk/insecure_random",
+    "path": "silk/insecure_random.silk",
+    "layer": "portable",
+    "namespace": "InsecureRandom",
+    "aliases": ["Xoshiro256StarStar"]
+  },
+  {
+    "module": "silk/insecure_seed",
+    "path": "silk/insecure_seed.silk",
+    "layer": "portable",
+    "namespace": "InsecureSeed",
+    "aliases": ["FixedInsecureSeed", "Seed"]
+  },
+  {
     "module": "silk/isize",
     "path": "silk/isize.silk",
     "layer": "portable",
@@ -245,6 +259,13 @@
     "namespace": "OsMonotonicClock"
   },
   {
+    "module": "silk/os_random",
+    "path": "silk/os_random.silk",
+    "layer": "target-provider",
+    "providerTargets": ["Evaluator", "LLVM"],
+    "namespace": "OsRandom"
+  },
+  {
     "module": "silk/os_standard_input",
     "path": "silk/os_standard_input.silk",
     "layer": "target-provider",
@@ -262,8 +283,7 @@
     "module": "silk/random",
     "path": "silk/random.silk",
     "layer": "portable",
-    "namespace": "Random",
-    "aliases": ["Xoshiro256StarStar"]
+    "namespace": "Random"
   },
   {
     "module": "silk/raw_buffer",

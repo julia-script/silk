@@ -29,6 +29,7 @@ import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
 import type * as MonotonicClock from './MonotonicClock.js'
 import type * as OsFileSystemHost from './OsFileSystemHost.js'
+import type * as RandomHost from './RandomHost.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StandardInput from './StandardInput.js'
@@ -253,6 +254,7 @@ interface EvaluationState {
   readonly osFileSystem?: OsFileSystemHost.Provider
   readonly systemClock?: SystemClock.Provider
   readonly monotonicClock?: MonotonicClock.Provider
+  readonly randomHost?: RandomHost.Provider
   readonly executionMachines: Map<number, IndependentMachine>
 }
 
@@ -5049,6 +5051,7 @@ export interface Options {
   readonly osFileSystem?: OsFileSystemHost.Provider
   readonly systemClock?: SystemClock.Provider
   readonly monotonicClock?: MonotonicClock.Provider
+  readonly randomHost?: RandomHost.Provider
   readonly maxSteps?: number
   readonly maxCallDepth?: number
   /** Host-only deterministic bound for compiler-private coroutine-frame storage. */
@@ -5143,6 +5146,7 @@ export const evaluate = (
     ...(options.osFileSystem === undefined ? {} : { osFileSystem: options.osFileSystem }),
     ...(options.systemClock === undefined ? {} : { systemClock: options.systemClock }),
     ...(options.monotonicClock === undefined ? {} : { monotonicClock: options.monotonicClock }),
+    ...(options.randomHost === undefined ? {} : { randomHost: options.randomHost }),
   })
   if (result._tag === 'Blocked') {
     if (result.reason._tag === 'Trap') {
