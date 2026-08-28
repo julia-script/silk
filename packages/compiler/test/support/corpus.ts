@@ -1460,13 +1460,13 @@ pub fn main() -> i32 {
   {
     name: 'arith-convergence-checked-remainder-min-none',
     source: `import silk.i32 as i32
-import silk.option { Option }
+import silk.option { Option, unwrapOr }
 pub fn main() -> i32 {
   let minimum = i32.subtract(-2147483647, 1)
-  if Option.unwrapOr<i32>(i32.checkedRemainder(minimum, -1), 42) != 42 { return 1 }
-  if Option.unwrapOr<i32>(i32.checkedRemainder(7, -1), -1) != 0 { return 2 }
-  if Option.unwrapOr<i32>(i32.checkedRemainder(minimum, 2), -1) != 0 { return 3 }
-  if Option.unwrapOr<i32>(i32.checkedRemainder(7, 0), 42) != 42 { return 4 }
+  if unwrapOr<i32>(i32.checkedRemainder(minimum, -1), 42) != 42 { return 1 }
+  if unwrapOr<i32>(i32.checkedRemainder(7, -1), -1) != 0 { return 2 }
+  if unwrapOr<i32>(i32.checkedRemainder(minimum, 2), -1) != 0 { return 3 }
+  if unwrapOr<i32>(i32.checkedRemainder(7, 0), 42) != 42 { return 4 }
   return 42
 }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -1783,7 +1783,7 @@ import silk.string {
   scalarValue,
   nextCursor
 }
-import silk.option { Option }
+import silk.option { Option, unwrapOr }
 import silk.char { toU32 as charToU32 }
 
 fn scalarSum(value: string, cursor: ScalarCursor) -> u32 {
@@ -1956,7 +1956,7 @@ effect fn build() -> i32 ! OutOfMemoryError {
   let mut probe = 0
   let mut total = 0
   while probe < 40 {
-    let found = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(i32.toU64(probe))), -1)
+    let found = unwrapOr<i32>(get<Word, i32>(&map, Hash.word(i32.toU64(probe))), -1)
     if found != probe * 3 { return 3 }
     total = total + found
     probe = probe + 1

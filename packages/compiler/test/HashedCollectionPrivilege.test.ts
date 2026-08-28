@@ -35,7 +35,7 @@ import silk.i32 as i32
 import silk.hash as Hash
 import silk.hash { HashKey, HashSeed, Word }
 import silk.hash_map { HashMap, contains, get, insert, length, make, remove }
-import silk.option { Option }
+import silk.option { Option, unwrapOr }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -48,10 +48,10 @@ effect fn build() -> i32 ! OutOfMemoryError {
     key = key + 1
   }
   let taken = remove<Word, i32>(&mut map, Hash.word(3))
-  let removed = Option.unwrapOr<i32>(move taken, -1)
+  let removed = unwrapOr<i32>(move taken, -1)
   if removed != 3 { return 1 }
   if !contains<Word, i32>(&map, Hash.word(4)) { return 2 }
-  let held = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(4)), -1)
+  let held = unwrapOr<i32>(get<Word, i32>(&map, Hash.word(4)), -1)
   if held != 4 { return 3 }
   return 42
 }

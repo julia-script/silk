@@ -1839,19 +1839,34 @@ export const storedCallable = (
     module: type.module,
     name: type.name,
   })
-  if (declaration?._tag !== 'StructDeclaration') return undefined
+  if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration')
+    return undefined
   const substitution =
     TypeInference.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),
       type.arguments,
     ) ?? new Map()
   const next = new Set(seen).add(key)
-  for (const field of declaration.fields) {
+  const fields =
+    declaration._tag === 'StructDeclaration'
+      ? declaration.fields.map((field) => Object.freeze({ field, path: Object.freeze([]) }))
+      : declaration.variants.flatMap((variant) =>
+          variant.fields.map((field) =>
+            Object.freeze({
+              field,
+              path:
+                variant.name._tag === 'Present'
+                  ? Object.freeze([variant.name.spelling])
+                  : Object.freeze([]),
+            }),
+          ),
+        )
+  for (const { field, path } of fields) {
     if (field.declaredType._tag !== 'Resolved' || field.name._tag !== 'Present') continue
     const found = storedCallable(self, Type.substitute(field.declaredType.type, substitution), next)
     if (found !== undefined)
       return Object.freeze({
-        path: Object.freeze([field.name.spelling, ...found.path]),
+        path: Object.freeze([...path, field.name.spelling, ...found.path]),
         callable: found.callable,
       })
   }

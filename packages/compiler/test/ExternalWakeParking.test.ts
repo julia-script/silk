@@ -926,7 +926,7 @@ struct Holder { wake: Intrinsic.Wake }
 fn intrinsic(value: Intrinsic.Wake) -> () { drop value return () }
 fn ordinary(value: Wake) -> () { drop value return () }
 fn aggregate(value: Holder) -> () { drop value return () }
-fn union(value: Intrinsic.Wake | Empty) -> () { drop value return () }
+fn unionValue(value: Intrinsic.Wake | Empty) -> () { drop value return () }
 fn array(value: [Intrinsic.Wake; 1]) -> () { drop value return () }
 fn shared(value: Shared.Shared<Holder>) -> () { drop value return () }
 pub fn main() -> i32 { return 42 }`),
@@ -956,7 +956,7 @@ pub fn main() -> i32 { return 42 }`),
       ordinary === undefined ? 'Missing' : ExecutionAffinity.ofType(snapshot.index, ordinary)._tag,
       'Unrestricted',
     )
-    for (const name of ['aggregate', 'union', 'array', 'shared']) {
+    for (const name of ['aggregate', 'unionValue', 'array', 'shared']) {
       const type = parameter(name)
       assert.strictEqual(
         type === undefined ? 'Missing' : ExecutionAffinity.ofType(snapshot.index, type)._tag,
