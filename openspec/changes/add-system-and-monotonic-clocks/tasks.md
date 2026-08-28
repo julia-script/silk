@@ -41,6 +41,6 @@
 
 ## 7. Repository verification
 
-- [ ] 7.1 Run the required sequence `pnpm typecheck`, `pnpm exec biome check .`, and `pnpm test`; fix every regression caused by the clock change and record any demonstrably pre-existing failure with its exact command and output.
-- [ ] 7.2 Run `pnpm check` after the focused suites pass and verify the complete compiler, documentation, script, and native-acceptance graph succeeds.
-- [ ] 7.3 Run `pnpm release:candidate` because compiler package exports and packaged standard-library contents change, and verify the release artifact contains the new public host subpaths and four canonical clock modules without an ambient provider or compatibility path.
+- [x] 7.1 Run the required sequence `pnpm typecheck`, `pnpm exec biome check .`, and `pnpm test`; fix every regression caused by the clock change and record any demonstrably pre-existing failure with its exact command and output.
+- [x] 7.2 Run `pnpm check` after the focused suites pass and verify the complete compiler, documentation, script, and native-acceptance graph succeeds.
+- [x] 7.3 Run `pnpm release:candidate` because compiler package exports and packaged standard-library contents change, and verify the release artifact contains the new public host subpaths and four canonical clock modules without an ambient provider or compatibility path.

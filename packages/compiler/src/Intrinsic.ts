@@ -161,8 +161,7 @@ const osConsumer = (spelling: string): string => {
   if (spelling === 'systemClockNow') return 'silk/os_system_clock.now'
   if (spelling === 'systemClockResolution') return 'silk/os_system_clock.getResolution'
   if (spelling === 'monotonicClockNow') return 'silk/os_monotonic_clock.now'
-  if (spelling === 'monotonicClockResolution')
-    return 'silk/os_monotonic_clock.getResolution'
+  if (spelling === 'monotonicClockResolution') return 'silk/os_monotonic_clock.getResolution'
   if (spelling === 'monotonicClockWaitUntil') return 'silk/os_monotonic_clock.waitUntil'
   if (spelling === 'standardInputRead') return 'silk/os_standard_input.read'
   if (spelling === 'processExecute') return 'silk/os_child_process.execute'
