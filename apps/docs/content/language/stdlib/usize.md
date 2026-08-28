@@ -115,7 +115,7 @@ this function when an out-of-range value is a program error.
 ## `checkedToU8`
 
 ```silk
-pub fn checkedToU8(value: usize) -> Option<u8>
+pub fn checkedToU8(value: usize) -> silk/option.Option<u8>
 ```
 
 Converts `value` to `u8`, or returns `None` if `value` is outside the `u8`
@@ -137,7 +137,7 @@ this function when an out-of-range value is a program error.
 ## `checkedToU16`
 
 ```silk
-pub fn checkedToU16(value: usize) -> Option<u16>
+pub fn checkedToU16(value: usize) -> silk/option.Option<u16>
 ```
 
 Converts `value` to `u16`, or returns `None` if `value` is outside the `u16`
@@ -159,7 +159,7 @@ this function when an out-of-range value is a program error.
 ## `checkedToU32`
 
 ```silk
-pub fn checkedToU32(value: usize) -> Option<u32>
+pub fn checkedToU32(value: usize) -> silk/option.Option<u32>
 ```
 
 Converts `value` to `u32`, or returns `None` if `value` is outside the `u32`
@@ -180,7 +180,7 @@ Converts `value` exactly to `u64`. Every `usize` value is representable.
 ## `checkedToU64`
 
 ```silk
-pub fn checkedToU64(value: usize) -> Option<u64>
+pub fn checkedToU64(value: usize) -> silk/option.Option<u64>
 ```
 
 Converts `value` exactly to `u64` and returns `Some`. Every `usize` value is
@@ -202,7 +202,7 @@ can select `usize` as both source and destination.
 ## `checkedToUsize`
 
 ```silk
-pub fn checkedToUsize(value: usize) -> Option<usize>
+pub fn checkedToUsize(value: usize) -> silk/option.Option<usize>
 ```
 
 Returns `Some` with `value` unchanged as `usize`. Use this function when generic
@@ -224,7 +224,7 @@ this function when an out-of-range value is a program error.
 ## `checkedToI8`
 
 ```silk
-pub fn checkedToI8(value: usize) -> Option<i8>
+pub fn checkedToI8(value: usize) -> silk/option.Option<i8>
 ```
 
 Converts `value` to `i8`, or returns `None` if `value` is outside the `i8`
@@ -246,7 +246,7 @@ this function when an out-of-range value is a program error.
 ## `checkedToI16`
 
 ```silk
-pub fn checkedToI16(value: usize) -> Option<i16>
+pub fn checkedToI16(value: usize) -> silk/option.Option<i16>
 ```
 
 Converts `value` to `i16`, or returns `None` if `value` is outside the `i16`
@@ -268,7 +268,7 @@ this function when an out-of-range value is a program error.
 ## `checkedToI32`
 
 ```silk
-pub fn checkedToI32(value: usize) -> Option<i32>
+pub fn checkedToI32(value: usize) -> silk/option.Option<i32>
 ```
 
 Converts `value` to `i32`, or returns `None` if `value` is outside the `i32`
@@ -290,7 +290,7 @@ this function when an out-of-range value is a program error.
 ## `checkedToI64`
 
 ```silk
-pub fn checkedToI64(value: usize) -> Option<i64>
+pub fn checkedToI64(value: usize) -> silk/option.Option<i64>
 ```
 
 Converts `value` to `i64`, or returns `None` if `value` is outside the `i64`
@@ -312,7 +312,7 @@ this function when an out-of-range value is a program error.
 ## `checkedToIsize`
 
 ```silk
-pub fn checkedToIsize(value: usize) -> Option<isize>
+pub fn checkedToIsize(value: usize) -> silk/option.Option<isize>
 ```
 
 Converts `value` to `isize`, or returns `None` if `value` is outside the `isize`
@@ -545,7 +545,7 @@ boundary value is the required overflow result.
 ## `checkedAdd`
 
 ```silk
-pub fn checkedAdd(left: usize, right: usize) -> Option<usize>
+pub fn checkedAdd(left: usize, right: usize) -> silk/option.Option<usize>
 ```
 
 Returns `Some` with `left + right`, or `None` if the result is outside the `usize` range.
@@ -556,7 +556,7 @@ Use this function when overflow is input data.
 ## `checkedSubtract`
 
 ```silk
-pub fn checkedSubtract(left: usize, right: usize) -> Option<usize>
+pub fn checkedSubtract(left: usize, right: usize) -> silk/option.Option<usize>
 ```
 
 Returns `Some` with `left - right`, or `None` if the result is outside the `usize` range.
@@ -567,7 +567,7 @@ Use this function when overflow is input data.
 ## `checkedMultiply`
 
 ```silk
-pub fn checkedMultiply(left: usize, right: usize) -> Option<usize>
+pub fn checkedMultiply(left: usize, right: usize) -> silk/option.Option<usize>
 ```
 
 Returns `Some` with `left * right`, or `None` if the result is outside the `usize` range.
@@ -578,7 +578,7 @@ Use this function when overflow is input data.
 ## `checkedDivide`
 
 ```silk
-pub fn checkedDivide(left: usize, right: usize) -> Option<usize>
+pub fn checkedDivide(left: usize, right: usize) -> silk/option.Option<usize>
 ```
 
 Returns `Some` with `left / right`, or `None` if `right` is zero. Use this
@@ -589,7 +589,7 @@ function when a zero divisor is input data.
 ## `checkedRemainder`
 
 ```silk
-pub fn checkedRemainder(left: usize, right: usize) -> Option<usize>
+pub fn checkedRemainder(left: usize, right: usize) -> silk/option.Option<usize>
 ```
 
 Returns `Some` with the remainder, or `None` if `right` is zero. Use this function

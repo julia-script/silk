@@ -425,6 +425,61 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('realizes callable and Effect fields only in their active nominal variant', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-values/represented-fields',
+      ascii(`union Parser<F: once fn(i32) -> i32> { Empty, Ready { parse: F } }
+union Deferred<F: once Effect<i32>> { Empty, Ready { operation: F } }
+
+fn increment(value: i32) -> i32 { return value + 1 }
+
+fn parse<F: once fn(i32) -> i32>(parser: Parser<F>) -> i32 {
+  return match move parser {
+    Parser<F>.Empty => 0
+    Parser<F>.Ready { parse } => parse(20)
+  }
+}
+
+fn force<F: once Effect<i32>>(deferred: Deferred<F>) -> i32 {
+  return match move deferred {
+    Deferred<F>.Empty => 0
+    Deferred<F>.Ready { operation } => run operation
+  }
+}
+
+pub fn main() -> i32 {
+  let parser = Parser.Ready { parse: increment }
+  let deferred = Deferred.Ready { operation: effect { return 21 } }
+  return parse(move parser) + force(move deferred)
+}`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const constructions = Analysis.loweredMir(self)
+      .functions.flatMap(MirVerification.operations)
+      .filter((operation) => operation._tag === 'ConstructUnionVariant')
+    assert.deepEqual(
+      constructions.flatMap((operation) =>
+        operation._tag === 'ConstructUnionVariant'
+          ? operation.fields.flatMap((field) =>
+              field.stored === undefined ? [] : [field.stored._tag],
+            )
+          : [],
+      ),
+      ['StoredCallableField', 'StoredEffectField'],
+    )
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
 it.effect('evaluates initializers in source order before constructing in declaration order', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(

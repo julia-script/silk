@@ -28,7 +28,7 @@ owned provider bindings have distinct borrowing and capture behavior.
 
 ## Gotchas
 
-Typed failures are outcomes that combinators can reify and recover. Traps are not: they bypass
+Typed failures are outcomes that combinators can materialize and recover. Traps are not: they bypass
 [`catchAll`](#declaration-73696c6b2f6566666563743a3a6361746368416c6c), [`ensuring`](#declaration-73696c6b2f6566666563743a3a656e737572696e67), and Drop hooks. [`suspend`](#declaration-73696c6b2f6566666563743a3a73757370656e64) crosses the stack-safe execution boundary
 while preserving all three channels exactly; frame exhaustion is fatal.
 
@@ -240,8 +240,8 @@ Executes `protected` once and converts its success or typed failure into ordinar
 
 ### Details
 
-The returned Effect still requires `R`, because reification does not provide services. Its typed
-failure row is empty: an `E` becomes [`Failure`](./result.md#declaration-73696c6b2f726573756c743a3a4661696c757265) data instead of propagating. Traps are not typed
+The returned Effect still requires `R`, because conversion does not provide services. Its typed
+failure row is empty: an `E` becomes `Failure` data instead of propagating. Traps are not typed
 failures and therefore are not captured.
 
 ### Examples
@@ -265,13 +265,15 @@ effect fn load() -> i32
 pub fn main() -> i32 {
   let completed = run Effect.result(load())
   return match move completed {
-    Result.Result<i32, Problem> {value: outcome} => match move outcome {
-      Result.Success<i32> {value} => value
-      Result.Failure<Problem> {error} => error.answer
-    }
+    Result.Result<i32, Problem>.Success {value} => value
+    Result.Result<i32, Problem>.Failure {error} => error.answer
   }
 }
 ```
+
+This is ordinary Silk composition: success is mapped into `Result.Success`, then `catchAll`
+maps the complete typed failure value into `Result.Failure`. Compound failure unions and
+requirements are preserved, and the exact `once fn` adapters transfer affine payloads once.
 
 <a id="declaration-73696c6b2f6566666563743a3a6d6170426f7468"></a>
 
@@ -518,7 +520,7 @@ Runs a finalizer after the Effect completes, whatever its outcome, and preserves
 
 ### Details
 
-The protected Effect is reified into Result data before the finalizer runs, which is what fixes
+The protected Effect is converted into Result data before the finalizer runs, which is what fixes
 the order: a typed failure reaches this body as data rather than as a propagation, so the
 protected Effect's own frame — and every local it cleans up — is already gone by the time the
 finalizer starts. The finalizer therefore exits last, in reverse acquisition order against the

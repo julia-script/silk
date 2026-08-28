@@ -137,7 +137,7 @@ Returns whether bit 63 of the next deterministic provider word is set.
 ## `below`
 
 ```silk
-pub effect fn below(upperExclusive: u64) -> Option<u64> ? &mut InsecureRandom
+pub effect fn below(upperExclusive: u64) -> silk/option.Option<u64> ? &mut InsecureRandom
 ```
 
 Returns a deterministic value below `upperExclusive`, or `None` when the bound is zero.

@@ -45,6 +45,7 @@ import {
   topologicalRegions,
   typeText,
 } from './Mir.js'
+import * as RepresentationField from './RepresentationField.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type {
@@ -4554,7 +4555,10 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                       arm.member === undefined
                         ? undefined
                         : coverageFieldPathType(self.layout, arm.member, entry.path)
-                    return selected !== undefined && SilkType.equals(selected, entry.cleanup.type)
+                    return (
+                      selected !== undefined &&
+                      cleanupMatchesSemanticType(self.layout, entry.cleanup, selected)
+                    )
                   })
                 : arm.selected.cleanup.length === 0)
             if (!cleanupValid) {
@@ -4770,7 +4774,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                   valueType.target,
                   field.stored.realization.target,
                 ) &&
-                field.stored.realization.field.ordinal === field.field.ordinal &&
+                RepresentationField.belongsTo(field.stored.realization.field, field.field) &&
                 field.stored.realization.instance.module === operation.type.type.module &&
                 field.stored.realization.instance.name === operation.type.type.name
               const storedEffectValid =
@@ -4786,7 +4790,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                   .module === field.stored.realization.runner.module &&
                 Hir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
                   .name === field.stored.realization.runner.name &&
-                field.stored.realization.field.ordinal === field.field.ordinal &&
+                RepresentationField.belongsTo(field.stored.realization.field, field.field) &&
                 field.stored.realization.instance.module === operation.type.type.module &&
                 field.stored.realization.instance.name === operation.type.type.name
               return (
@@ -4831,12 +4835,45 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             operation.fields.every((field, ordinal) => {
               const declared = expected.fields.at(ordinal)
               const valueType = fn.localTypes.at(field.value.ordinal)
+              const storedCallableValid =
+                field.stored?._tag === 'StoredCallableField' &&
+                declared !== undefined &&
+                valueType?._tag === 'CallableValue' &&
+                SilkType.equals(field.stored.type, declared.type) &&
+                TypeCompatibility.isCompatible(
+                  TypeCompatibility.check(valueType.type, field.stored.realization.contract),
+                ) &&
+                Hir.matchesCallableTargetIdentity(
+                  valueType.target,
+                  field.stored.realization.target,
+                ) &&
+                RepresentationField.belongsTo(field.stored.realization.field, field.field) &&
+                field.stored.realization.instance.module === operation.type.type.module &&
+                field.stored.realization.instance.name === operation.type.type.name
+              const storedEffectValid =
+                field.stored?._tag === 'StoredEffectField' &&
+                declared !== undefined &&
+                valueType?._tag === 'EffectValue' &&
+                SilkType.equals(field.stored.type, declared.type) &&
+                TypeCompatibility.isCompatible(
+                  TypeCompatibility.check(valueType.type, field.stored.realization.contract),
+                ) &&
+                Hir.sameExecutableSite(valueType.site, field.stored.realization.site) &&
+                Hir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
+                  .module === field.stored.realization.runner.module &&
+                Hir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
+                  .name === field.stored.realization.runner.name &&
+                RepresentationField.belongsTo(field.stored.realization.field, field.field) &&
+                field.stored.realization.instance.module === operation.type.type.module &&
+                field.stored.realization.instance.name === operation.type.type.name
               return (
                 declared !== undefined &&
                 DeclarationFacts.sameFieldId(declared.id, field.field) &&
                 valueType !== undefined &&
-                field.stored === undefined &&
-                SilkType.equals(semanticType(valueType), declared.type)
+                ((field.stored === undefined &&
+                  SilkType.equals(semanticType(valueType), declared.type)) ||
+                  storedCallableValid ||
+                  storedEffectValid)
               )
             })
           if (!valid) {

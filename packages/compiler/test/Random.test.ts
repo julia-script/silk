@@ -284,9 +284,6 @@ it.effect('stages every evaluator failure before touching caller storage', () =>
           writes.push(bytes)
           for (const [index, byte] of bytes.entries()) output[index] = byte
         },
-        optionValue: () => {
-          throw new Error('unexpected option')
-        },
         handleValue: () => {
           throw new Error('unexpected handle')
         },
@@ -324,9 +321,6 @@ it.effect('stages every evaluator failure before touching caller storage', () =>
       byteView: () => Object.freeze([]),
       writeByteView: () => {
         emptyByteWrites += 1
-      },
-      optionValue: () => {
-        throw new Error('unexpected option')
       },
       handleValue: () => {
         throw new Error('unexpected handle')

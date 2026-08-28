@@ -102,7 +102,7 @@ Returns whether bit 63 of one secure provider word is set.
 ## `below`
 
 ```silk
-pub effect fn below(upperExclusive: u64) -> Option<u64> ? &mut Random
+pub effect fn below(upperExclusive: u64) -> silk/option.Option<u64> ? &mut Random
 ```
 
 Returns an unbiased secure value below `upperExclusive`, or `None` for zero.

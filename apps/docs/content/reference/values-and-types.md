@@ -277,15 +277,16 @@ fn scalarNumber(value: char) -> u32 {
 }
 ```
 
-`fromU32` returns `Some<char>` for `0...0xd7ff` and `0xe000...0x10ffff`. It returns
-`None` for surrogate values and larger integers, without truncating or trapping. `toU32` is total
+`fromU32` returns `Option<char>.Some` for `0...0xd7ff` and `0xe000...0x10ffff`. It returns
+`Option<char>.None` for surrogate values and larger integers, without truncating or trapping. `toU32` is total
 because every existing `char` is already a valid scalar. Canonical string traversal returns
 `char`; callers choose `toU32` explicitly when they need its integer value.
 
 **Diagnostics:** A literal containing zero or multiple scalar values reports `LEX0007`. Malformed
 escapes and invalid scalar spellings receive their literal diagnostic without constructing a
 partial `char`. Supplying `u32` where `char` is required, or `char` where `u32` is required, uses
-the ordinary type-mismatch diagnostic; `fromU32` represents an invalid integer as `None` rather
+the ordinary type-mismatch diagnostic; `fromU32` represents an invalid integer as
+`Option<char>.None` rather
 than a diagnostic or trap.
 
 **Evidence:** [character literal specification](../../../../openspec/specs/bootstrap-lexer/spec.md),
@@ -555,6 +556,173 @@ memory cannot request Copy merely because its physical representation contains a
 `SEM0083` and identifies the first affine, cleanup-bearing, cyclic, or unavailable reason.
 
 **Evidence:** [owned value classification](ownership-and-borrowing.md#own-001--every-value-type-is-either-copy-or-affine).
+
+## Nominal union values
+
+### NUNION-001 — A `union` declaration creates one nominal tagged sum
+
+**Status:** Confirmed
+
+`union Name { ... }` declares one nonempty, source-ordered set of variants under a single nominal
+parent type. A variant is either a unit variant or a named-field variant with at least one field.
+Generic parameters belong to the parent and are available in every variant field.
+
+```silk
+union Option<T> {
+  Some { value: T },
+  None
+}
+
+union HttpErrorCode {
+  DNSTimeout,
+  DNSError { rcode: Option<string>, infoCode: Option<u16> }
+}
+```
+
+`Option<i32>` is the value type. `Option<i32>.Some` and `Option<i32>.None` are constructors and
+pattern selectors, not detached types or structural-union members. Two union declarations remain
+different types even when their variants have identical names and fields.
+
+A nominal union is distinct from both other sum forms:
+
+- `enum Status { Ready, Waiting }` is a scalar enum: its members carry no payload and it has a
+  fixed-width integer representation.
+- `A | B` is a structural union of already complete types: its members have independent identities
+  and the set normalizes without a declaring parent.
+
+**Boundary:** Named-field variants cannot use `{}`; use a unit variant instead. Variants have no
+independent generic parameters, explicit discriminants, or standalone type identity. Raw C unions
+and external linkage are outside this declaration form.
+
+**Diagnostics:** An empty union reports `SEM0165`; duplicate variants report `SEM0166`; an empty
+named-field variant reports `PAR0026`. Invalid variant fields preserve declaration facts for
+tooling but make the complete parent unavailable for execution.
+
+**Evidence:** [nominal union specification](../../../../openspec/changes/add-nominal-unions/specs/nominal-unions/spec.md),
+[declaration tests](../../../../packages/compiler/test/DeclarationIndex.test.ts).
+
+### NUNION-002 — Construction selects a qualified variant of one complete parent
+
+**Status:** Confirmed
+
+A constructor first resolves its nominal parent and any explicit parent-argument prefix, then uses
+only the selected variant's field initializers to infer the remaining arguments.
+
+```silk
+union Result<A, E> {
+  Success { value: A },
+  Failure { error: E }
+}
+
+fn succeed() -> Result<i32, string> {
+  return Result<i32, string>.Success { value: 42 }
+}
+
+fn fail(error: string) -> Result<i32, string> {
+  return Result<i32>.Failure { error: move error }
+}
+```
+
+`Result<i32>.Success` fixes `A` and cannot infer `E` from a field the `Success` variant does not
+have; the declared result type supplies no implicit inference. The success constructor therefore
+writes both arguments. The failure constructor writes `A` and infers `E` from its `error` field.
+
+Every named field must be initialized exactly once. Initializers evaluate in source order and are
+stored in declaration order. A unit variant has no initializer body. Parent and field visibility
+use the same module rules as structs: a private required field prevents raw construction outside
+the defining module without disclosing hidden field details.
+
+**Boundary:** A parent value has no directly projectable fields, even when every variant declares a
+same-spelled field. Bind a selected variant before using its payload. Construction never creates a
+variant subtype and never flattens the parent into `A | B`.
+
+**Evidence:** [constructor and visibility tests](../../../../packages/compiler/test/StructValues.test.ts),
+[generic inference rules](../../../../openspec/changes/add-nominal-unions/specs/generic-inference/spec.md).
+
+### NUNION-003 — Patterns select variants hierarchically and exhaustively
+
+**Status:** Confirmed
+
+Variant patterns spell the fully applied parent and then the variant. Named fields bind like struct
+fields; unit variants have no payload pattern.
+
+```silk
+fn unwrap(option: Option<i32>) -> i32 {
+  return match move option {
+    Option<i32>.Some { value } => value
+    Option<i32>.None => 0
+  }
+}
+```
+
+When a nominal union is itself a member of `A | B`, matching keeps both levels. A direct variant arm
+first selects the structural member, then the nominal variant:
+
+```silk
+struct OutOfMemoryError {}
+
+fn classify(error: HttpErrorCode | OutOfMemoryError) -> i32 {
+  return match move error {
+    HttpErrorCode.DNSError { rcode: _, infoCode: _ } => 2
+    HttpErrorCode.DNSTimeout => 1
+    OutOfMemoryError other => 0
+  }
+}
+```
+
+Exhaustiveness retains the complete applied parent identity. `Option<i32>` and `Option<bool>` have
+distinct variant leaves when both occur in a structural union. A declared variant with a `never`
+payload remains a required coverage leaf even though source cannot construct it.
+
+**Boundary:** Pattern arguments are explicit; they are not inferred from the scrutinee. A guarded
+move remains provisional until the guard succeeds, so a false guard leaves the complete payload
+available to later arms.
+
+**Evidence:** [hierarchical match tests](../../../../packages/compiler/test/StructValues.test.ts),
+[pattern rules](patterns-and-destructuring.md).
+
+### NUNION-004 — Ownership and represented fields follow aggregate rules per active variant
+
+**Status:** Confirmed
+
+A nominal union is affine by default, even if every payload is Copy. `impl Copy` is admitted only
+when every specialized field in every variant is Copy and no cleanup behavior conflicts. `impl
+Drop`, interfaces, and operators target the complete parent type, never an individual variant.
+
+Moving a variant binding transfers the selected payload. Borrowed patterns preserve the parent
+owner. Cleanup dispatches on the private active tag and releases only initialized fields of that
+variant, in the ordinary aggregate order, exactly once.
+
+Callable- and Effect-bounded generic fields use the same exact represented-storage rules as struct
+fields. Their environment, runner, access, suspension, and cleanup facts exist only for the variant
+that declares the field; an inactive variant has no speculative payload to evaluate or release.
+
+**Boundary:** All-Copy fields do not imply Copy for the parent. Extracting one owned represented
+field as an arbitrary partial move remains invalid; consume it through a variant pattern whose
+ownership accounts for the rest of the active payload.
+
+**Evidence:** [ownership tests](../../../../packages/compiler/test/Ownership.test.ts),
+[represented variant tests](../../../../packages/compiler/test/StructValues.test.ts),
+[active cleanup tests](../../../../packages/compiler/test/BoxHeapIndirection.test.ts).
+
+### NUNION-005 — Tag and payload layout are private implementation facts
+
+**Status:** Confirmed
+
+Each concrete nominal-union application has one target layout containing a private tag and enough
+aligned payload storage for its largest variant. Source order determines private variant ordinals.
+Generic applications receive concrete layouts only when reachable and fully specialized.
+
+No source operation observes a tag value, payload offset, padding, or ABI choice. Construction,
+calls, returns, matching, copying, and cleanup all use the compiler's verified calling shape. Inline
+cycles across structs and unions are rejected unless source names an explicit finite indirection.
+
+**Boundary:** Layout equivalence does not create type compatibility, serialization stability, a C
+ABI, or permission to reinterpret values. A backend cannot invent a fallback tag or offset that is
+absent from the verified layout plan.
+
+**Evidence:** [layout tests](../../../../packages/compiler/test/Layout.test.ts),
+[MIR verification](../../../../packages/compiler/src/MirVerification.ts).
 
 ## Scalar enum values
 

@@ -11,6 +11,8 @@ export type ItemKind =
   | 'Struct'
   | 'Enum'
   | 'EnumMember'
+  | 'Union'
+  | 'UnionVariant'
   | 'Service'
   | 'Interface'
   | 'Constant'
@@ -68,6 +70,10 @@ const linkTargetKind = (member: DeclarationFacts.MemberFact): Document.LinkTarge
       return 'Function'
     case 'StructDeclaration':
       return 'Struct'
+    case 'EnumDeclaration':
+      return 'Enum'
+    case 'UnionDeclaration':
+      return 'Union'
     case 'ServiceDeclaration':
       return 'Service'
     case 'InterfaceDeclaration':
@@ -87,6 +93,8 @@ const itemKind = (member: DeclarationFacts.MemberFact): ItemKind => {
       return 'Struct'
     case 'EnumDeclaration':
       return 'Enum'
+    case 'UnionDeclaration':
+      return 'Union'
     case 'ServiceDeclaration':
       return 'Service'
     case 'InterfaceDeclaration':
@@ -279,6 +287,38 @@ const enumMemberItem = (
   })
 }
 
+const unionVariantItem = (
+  snapshot: Analysis.FrontendSnapshot,
+  module: string,
+  source: SourceFile.SourceFile,
+  parent: string,
+  union: DeclarationFacts.UnionFact,
+  variant: DeclarationFacts.UnionVariantFact,
+  options: Options,
+): Item => {
+  const name = nameOf(variant.name, '_')
+  const documentation = resolveDocumentation(
+    snapshot,
+    module,
+    parsedDocumentation(snapshot, module, source, variant.syntax),
+  )
+  const id = `${parent}::variant:${variant.id.ordinal}`
+  return Object.freeze({
+    id,
+    kind: 'UnionVariant',
+    name,
+    visibility: 'Inherited',
+    signature: Object.freeze({ text: Presentation.unionVariant(union, variant).text }),
+    source: rangeOf(variant.syntax),
+    ...(documentation === undefined ? {} : { documentation }),
+    children: Object.freeze(
+      variant.fields
+        .filter((field) => options.includePrivate === true || field.visibility === 'Public')
+        .map((field) => fieldItem(snapshot, module, source, id, field)),
+    ),
+  })
+}
+
 const memberPresentation = (member: DeclarationFacts.MemberFact) => {
   switch (member._tag) {
     case 'FunctionDeclaration':
@@ -287,6 +327,8 @@ const memberPresentation = (member: DeclarationFacts.MemberFact) => {
       return Presentation.structDeclaration(member)
     case 'EnumDeclaration':
       return Presentation.enumDeclaration(member)
+    case 'UnionDeclaration':
+      return Presentation.unionDeclaration(member)
     case 'ServiceDeclaration':
     case 'InterfaceDeclaration':
       return Presentation.serviceDeclaration(member)
@@ -317,6 +359,10 @@ const ownedChildren = (
     case 'EnumDeclaration':
       return member.members.map((enumMember) =>
         enumMemberItem(snapshot, module, source, id, enumMember),
+      )
+    case 'UnionDeclaration':
+      return member.variants.map((variant) =>
+        unionVariantItem(snapshot, module, source, id, member, variant, options),
       )
     case 'ServiceDeclaration':
     case 'InterfaceDeclaration':

@@ -117,7 +117,7 @@ pub union Result<A, E> {
   Failure { pub error: E },
 }
 pub fn main() -> i32 { return 0 }`
-  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       const declaration = occurrenceAt(snapshot, source, 'Result')
       const variant = occurrenceAt(snapshot, source, 'Success')
@@ -175,6 +175,33 @@ pub fn main() -> i32 { let state = State. return 0 }`
           ['Waiting', 'Constructor'],
         ],
       )
+      return undefined
+    }),
+  )
+})
+
+it.effect('navigates constructor and pattern variants through one canonical identity', () => {
+  const source = `union Option<T> { Some { value: T }, None }
+fn unwrap(option: Option<i32>) -> i32 {
+  return match move option {
+    Option<i32>.Some { value } => value
+    Option<i32>.None => 0
+  }
+}
+pub fn main() -> i32 { return unwrap(Option<i32>.Some { value: 42 }) }`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const declaration = occurrenceAt(snapshot, source, 'Some')
+      const pattern = occurrenceAt(snapshot, source, 'Some', 1)
+      const construction = occurrenceAt(snapshot, source, 'Some', 2)
+
+      assert.strictEqual(declaration?.role, 'Declaration')
+      assert.strictEqual(pattern?.role, 'Value')
+      assert.strictEqual(construction?.role, 'Value')
+      assert.deepEqual(pattern?.resolution, declaration?.resolution)
+      assert.deepEqual(construction?.resolution, declaration?.resolution)
+      assert.deepEqual(pattern?.declaration, declaration?.declaration)
+      assert.deepEqual(construction?.declaration, declaration?.declaration)
       return undefined
     }),
   )

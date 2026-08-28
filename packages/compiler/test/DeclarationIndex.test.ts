@@ -1016,7 +1016,7 @@ struct Damaged {}`
     )
     const duplicate = index.diagnostics.find((diagnostic) => diagnostic.code === 'SEM0165')
     assert.deepEqual(
-      duplicate?.relatedSpans.map((related) => source.slice(related.span.start, related.span.end)),
+      duplicate?.relatedSpans?.map((related) => source.slice(related.span.start, related.span.end)),
       ['Same'],
     )
     assert.strictEqual(

@@ -285,7 +285,7 @@ Use this function for a `Copy` element. Use [`asSlice`](#declaration-73696c6b2f7
 ## `pop`
 
 ```silk
-pub fn pop<T>(self: &mut silk/vector.Vector<T>) -> Option<T>
+pub fn pop<T>(self: &mut silk/vector.Vector<T>) -> silk/option.Option<T>
 ```
 
 Removes the last element and returns it. Returns an absent value for an empty vector.
@@ -377,7 +377,7 @@ storage. If allocation fails, the vector remains unchanged.
 ## `binarySearch`
 
 ```silk
-pub fn binarySearch<T>(self: &silk/vector.Vector<T>, target: T) -> Option<usize>
+pub fn binarySearch<T>(self: &silk/vector.Vector<T>, target: T) -> silk/option.Option<usize>
 ```
 
 Returns the index of a matching element in a sorted vector, or an absent value when none matches.

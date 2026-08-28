@@ -13,7 +13,7 @@
 - [x] 2.2 Collect unions in the ordinary cross-kind module namespace with parent parameters and source-ordered variants before bodies, and verify forward declarations, duplicates, empty unions, and cross-kind collisions in declaration-index tests.
 - [x] 2.3 Resolve every variant field type, visibility exposure, generic reference, and inline aggregate dependency before body analysis, and verify invalid fields preserve sibling facts while making the complete parent non-executable.
 - [x] 2.4 Encode union declarations in deterministic module semantic surfaces, and verify encode/decode, equality, and dependency invalidation respond to variant order, kind, field, type, visibility, bound, and availability changes but ignore body-only edits.
-- [ ] 2.5 Extend semantic occurrence, navigation, completion, documentation, and Analysis facade queries for parent, variant, and field identities, and verify go-to-definition/reference tests use canonical facts rather than syntax reconstruction.
+- [x] 2.5 Extend semantic occurrence, navigation, completion, documentation, and Analysis facade queries for parent, variant, and field identities, and verify go-to-definition/reference tests use canonical facts rather than syntax reconstruction.
 
 ## 3. Type Application and Variant Construction
 
@@ -37,10 +37,10 @@
 ## 5. Ownership, Represented Fields, and Cleanup
 
 - [x] 5.1 Apply affine-by-default ownership and explicit Copy validation across every specialized variant field, and verify all-Copy payloads remain affine without `impl Copy` while one affine field rejects the implementation.
-- [ ] 5.2 Build active-variant cleanup plans that reuse nominal Drop ordering and clean only initialized fields of the selected variant, and verify success, typed-failure, and ordinary scope exits release each owned payload exactly once.
-- [ ] 5.3 Implement moved and borrowed variant-pattern ownership, including branch-local cleanup of omitted fields and rejection of invalid partial moves, and verify extracted and omitted fields have one final owner.
-- [ ] 5.4 Realize callable-bounded fields only inside the active variant using exact static callable storage and access rules, and verify unsupported representations retain the pre-MIR storage fence.
-- [ ] 5.5 Realize Effect-bounded fields only inside the active variant with lazy runner, environment, suspension, access, and cleanup facts, and verify unsupported shapes retain the pre-MIR storage fence.
+- [x] 5.2 Build active-variant cleanup plans that reuse nominal Drop ordering and clean only initialized fields of the selected variant, and verify success, typed-failure, and ordinary scope exits release each owned payload exactly once.
+- [x] 5.3 Implement moved and borrowed variant-pattern ownership, including branch-local cleanup of omitted fields and rejection of invalid partial moves, and verify extracted and omitted fields have one final owner.
+- [x] 5.4 Realize callable-bounded fields only inside the active variant using exact static callable storage and access rules, and verify unsupported representations retain the pre-MIR storage fence.
+- [x] 5.5 Realize Effect-bounded fields only inside the active variant with lazy runner, environment, suspension, access, and cleanup facts, and verify unsupported shapes retain the pre-MIR storage fence.
 
 ## 6. Target Layout and Calling Shapes
 
@@ -52,18 +52,18 @@
 
 ## 7. HIR, MIR, and Verification
 
-- [ ] 7.1 Add explicit HIR construction and variant-selection nodes carrying applied parent, canonical variant, specialized fields, source mapping, access, selection path, and cleanup identity, and verify HIR snapshots retain both outer and inner selections.
-- [ ] 7.2 Lower union construction and hierarchical patterns through the verified layout and ownership plans, and verify a direct nested arm produces an outer structural decision followed by the nominal variant decision.
-- [ ] 7.3 Add monomorphic MIR operations for nominal construction, tag selection, dominated payload projection, and active copy/drop dispatch, and verify MIR rejects foreign parents, fields, layouts, tags, and inactive cleanup.
-- [ ] 7.4 Extend MIR verification with selection-dominance and hierarchical-coverage checks, and verify an incomplete path or backend-default fallback is rejected before execution.
-- [ ] 7.5 Add deterministic nominal-union MIR encoding and committed in-process goldens, and verify equivalent discovery traversals produce identical instance, variant, field, path, layout, and cleanup ordering.
+- [x] 7.1 Add explicit HIR construction and variant-selection nodes carrying applied parent, canonical variant, specialized fields, source mapping, access, selection path, and cleanup identity, and verify HIR snapshots retain both outer and inner selections.
+- [x] 7.2 Lower union construction and hierarchical patterns through the verified layout and ownership plans, and verify a direct nested arm produces an outer structural decision followed by the nominal variant decision.
+- [x] 7.3 Add monomorphic MIR operations for nominal construction, tag selection, dominated payload projection, and active copy/drop dispatch, and verify MIR rejects foreign parents, fields, layouts, tags, and inactive cleanup.
+- [x] 7.4 Extend MIR verification with selection-dominance and hierarchical-coverage checks, and verify an incomplete path or backend-default fallback is rejected before execution.
+- [x] 7.5 Add deterministic nominal-union MIR encoding and committed in-process goldens, and verify equivalent discovery traversals produce identical instance, variant, field, path, layout, and cleanup ordering.
 
 ## 8. Evaluation and Backends
 
-- [ ] 8.1 Represent evaluator values by semantic parent, active variant, and complete payload, and verify construction, movement, matching, storage, calls, returns, and active cleanup without evaluating inactive storage.
-- [ ] 8.2 Implement direct WebAssembly nominal-union construction, transport, nested tag dispatch, payload mapping, and active cleanup from verified MIR/layout plans, and verify focused Wasm tests cover codegen-specific representation claims.
-- [ ] 8.3 Implement native LLVM nominal-union construction, transport, nested tag dispatch, payload mapping, and active cleanup from the same plans, and verify target-specific lowering tests contain no backend-owned tag or offset decisions.
-- [ ] 8.4 Add representative unit, payload, generic, represented-field, structural-root, and cleanup programs to the shared evaluator/Wasm assertions and native differential corpus, and verify all engines agree without adding per-feature native-agreement tests.
+- [x] 8.1 Represent evaluator values by semantic parent, active variant, and complete payload, and verify construction, movement, matching, storage, calls, returns, and active cleanup without evaluating inactive storage.
+- [x] 8.2 Implement direct WebAssembly nominal-union construction, transport, nested tag dispatch, payload mapping, and active cleanup from verified MIR/layout plans, and verify focused Wasm tests cover codegen-specific representation claims.
+- [x] 8.3 Implement native LLVM nominal-union construction, transport, nested tag dispatch, payload mapping, and active cleanup from the same plans, and verify target-specific lowering tests contain no backend-owned tag or offset decisions.
+- [x] 8.4 Add representative unit, payload, generic, represented-field, structural-root, and cleanup programs to the shared evaluator/Wasm assertions and native differential corpus, and verify all engines agree without adding per-feature native-agreement tests.
 
 ## 9. Carrier-Neutral Intrinsic Migration
 
@@ -85,17 +85,17 @@
 
 ## 11. Tooling, Documentation, and Acceptance
 
-- [ ] 11.1 Extend syntax highlighting/token consumers, hover, completion, signature help, rename, references, and inspector/labs projections for union declarations and qualified variants, and verify LSP and tooling snapshots navigate through canonical parent/variant/field facts.
-- [ ] 11.2 Add the prescriptive nominal-union reference documentation covering declaration syntax, generic qualification/inference, visibility, ownership, layout abstraction, matching, and distinction from `enum` and `A | B`, and verify documentation examples compile as doctests where supported.
-- [ ] 11.3 Rewrite Option, Result, Effect, integer, and error-model documentation/examples for qualified direct variants and structural error composition, and verify no documentation search finds detached member types or wrapper `.value` matches.
-- [ ] 11.4 Add or update acceptance corpus cases for `Result<Data, HttpError | OutOfMemoryError>`, direct hierarchical matching, generic variants, Copy/Drop, recursion rejection, represented fields, and diagnostics, and verify each claim is tested at the cheapest policy-approved tier.
+- [x] 11.1 Extend syntax highlighting/token consumers, hover, completion, signature help, rename, references, and inspector/labs projections for union declarations and qualified variants, and verify LSP and tooling snapshots navigate through canonical parent/variant/field facts.
+- [x] 11.2 Add the prescriptive nominal-union reference documentation covering declaration syntax, generic qualification/inference, visibility, ownership, layout abstraction, matching, and distinction from `enum` and `A | B`, and verify documentation examples compile as doctests where supported.
+- [x] 11.3 Rewrite Option, Result, Effect, integer, and error-model documentation/examples for qualified direct variants and structural error composition, and verify no documentation search finds detached member types or wrapper `.value` matches.
+- [x] 11.4 Add or update acceptance corpus cases for `Result<Data, HttpError | OutOfMemoryError>`, direct hierarchical matching, generic variants, Copy/Drop, recursion rejection, represented fields, and diagnostics, and verify each claim is tested at the cheapest policy-approved tier.
 
 ## 12. Final Verification
 
 - [ ] 12.1 Run the focused lexer, parser, formatter, declaration, semantic, matching, ownership, layout, HIR, MIR, evaluator, Wasm, native-corpus, intrinsic, stdlib, LSP, and doctest suites and verify every delta-spec scenario has direct evidence.
-- [ ] 12.2 Run `pnpm typecheck` and fix every introduced type error, recording any unrelated pre-existing failure exactly.
-- [ ] 12.3 Run `pnpm exec biome check .` and fix every introduced formatting or lint failure, recording any unrelated pre-existing failure exactly.
+- [x] 12.2 Run `pnpm typecheck` and fix every introduced type error, recording any unrelated pre-existing failure exactly.
+- [x] 12.3 Run `pnpm exec biome check .` and fix every introduced formatting or lint failure, recording any unrelated pre-existing failure exactly.
 - [ ] 12.4 Run `pnpm test` and fix every introduced test failure, recording any unrelated pre-existing failure exactly.
 - [ ] 12.5 Run `pnpm check` and verify the repository-wide required gate completes, or report the exact pre-existing blocker without describing the change as complete.
 - [ ] 12.6 Run `pnpm release:candidate` because compiler package contents change, and verify package contents, exports, stdlib embeddings, and release artifacts are internally consistent.
-- [ ] 12.7 Run `openspec validate add-nominal-unions --strict` and verify proposal, all delta specs, design, and tasks remain coherent after implementation discoveries.
+- [x] 12.7 Run `openspec validate add-nominal-unions --strict` and verify proposal, all delta specs, design, and tasks remain coherent after implementation discoveries.

@@ -16,7 +16,15 @@ export interface LinkTarget {
   readonly id: string
   readonly module: string
   readonly name: string
-  readonly kind: 'Function' | 'Struct' | 'Service' | 'Interface' | 'Constant' | 'Role'
+  readonly kind:
+    | 'Function'
+    | 'Struct'
+    | 'Enum'
+    | 'Union'
+    | 'Service'
+    | 'Interface'
+    | 'Constant'
+    | 'Role'
 }
 
 export type Inline =
@@ -100,6 +108,8 @@ export type ItemKind =
   | 'Struct'
   | 'Enum'
   | 'EnumMember'
+  | 'Union'
+  | 'UnionVariant'
   | 'Service'
   | 'Interface'
   | 'Constant'
@@ -190,6 +200,8 @@ const linkKindOf = (value: unknown): LinkTarget['kind'] | undefined => {
   switch (value) {
     case 'Function':
     case 'Struct':
+    case 'Enum':
+    case 'Union':
     case 'Service':
     case 'Interface':
     case 'Constant':
@@ -405,6 +417,8 @@ const itemKindOf = (value: unknown): ItemKind | undefined => {
     case 'Struct':
     case 'Enum':
     case 'EnumMember':
+    case 'Union':
+    case 'UnionVariant':
     case 'Service':
     case 'Interface':
     case 'Constant':

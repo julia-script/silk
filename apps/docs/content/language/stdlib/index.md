@@ -36,7 +36,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/metrics`](./metrics.md) | `AllocationMetrics` | 6 | Provider-owned allocation counters that can be published as ordinary copyable data. |
 | [`silk/monotonic_clock`](./monotonic-clock.md) | `MonotonicClock` | 5 | Provider-replaceable monotonic marks, resolution, and deadline waits. |
 | [`silk/numeric`](./numeric.md) | `Integer` | 2 | Shared compile-time addition witness for generic algorithms over primitive integers. |
-| [`silk/option`](./option.md) | `Option` | 8 | Optional owned values that distinguish presence from absence without a failure channel. |
+| [`silk/option`](./option.md) | `Option` | 6 | Optional owned values that distinguish presence from absence without a failure channel. |
 | [`silk/order`](./order.md) | `Order` | 11 | Compile-time ordering witnesses and a three-way result derived from strict comparison. |
 | [`silk/os_child_process`](./os-child-process.md) | `OsChildProcess` | 2 | Native ChildProcess provider that executes directly through the platform process boundary. |
 | [`silk/os_filesystem`](./os-filesystem.md) | `OsFileSystem` | 2 | Native FileSystem provider confined beneath one explicitly owned platform root. |
@@ -47,7 +47,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/os_system_clock`](./os-system-clock.md) | `OsSystemClock` | 2 | Native Unix-epoch clock provider for SystemClock. |
 | [`silk/random`](./random.md) | `Random` | 5 | Provider-replaceable cryptographically secure random bytes and derived values. |
 | [`silk/raw_buffer`](./raw-buffer.md) | `RawBuffer` | 8 | Low-level typed views over owned allocations for implementing collections and storage actors. |
-| [`silk/result`](./result.md) | `Result` | 11 | Completed success-or-failure values that can be inspected and transformed as ordinary data. |
+| [`silk/result`](./result.md) | `Result` | 7 | Completed success-or-failure values that can be inspected and transformed as ordinary data. |
 | [`silk/scheduler`](./scheduler.md) | `Scheduler` | 17 | Provider protocol for preparing and atomically publishing child Fibers. |
 | [`silk/shared`](./shared.md) | `Shared` | 5 | Explicitly allocated, single-threaded shared ownership with callback-scoped access. |
 | [`silk/slot`](./slot.md) | `Slot` | 4 | Explicit initialization-state transitions for one slot selected from raw storage. |

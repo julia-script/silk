@@ -534,7 +534,7 @@ the fields callers should use for recovery.
 ## `providerCode`
 
 ```silk
-pub fn providerCode(error: &silk/filesystem.FileError) -> Option<i32>
+pub fn providerCode(error: &silk/filesystem.FileError) -> silk/option.Option<i32>
 ```
 
 Borrows an error and returns its provider-specific numeric detail, if one was retained.
@@ -688,10 +688,10 @@ fails with the `InvalidPath` reason. Resolution is lexical and never accesses th
 ## `parent`
 
 ```silk
-pub effect fn parent(self: &silk/filesystem.Path) -> Option<silk/filesystem.Path> ! OutOfMemoryError ? &mut Allocator
+pub effect fn parent(self: &silk/filesystem.Path) -> silk/option.Option<silk/filesystem.Path> ! OutOfMemoryError ? &mut Allocator
 ```
 
-Allocates an independently owned parent path, or [`None`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4e6f6e65) when `self` is root.
+Allocates an independently owned parent path, or `None` when `self` is root.
 
 ### Details
 

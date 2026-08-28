@@ -12,7 +12,7 @@ import * as WorkspaceInventory from '@silklang/compiler/WorkspaceInventory'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
-import { SymbolKind } from 'vscode-languageserver-types'
+import { CompletionItemKind, SymbolKind } from 'vscode-languageserver-types'
 import * as Document from '../src/Document.js'
 import * as EmbeddedFormatting from './fixtures/embeddedFormatting.js'
 
@@ -676,6 +676,79 @@ pub fn main() -> i32 {
           ['Unknown', SymbolKind.EnumMember],
           ['Ready', SymbolKind.EnumMember],
         ],
+      )
+    }),
+)
+
+it.effect(
+  'uses canonical nominal union identities for editor navigation and constructor help',
+  () =>
+    Effect.gen(function* () {
+      const source = `union Option<T> { Some { value: T }, None }
+fn unwrap(option: Option<i32>) -> i32 {
+  return match move option { Option<i32>.Some { value } => value Option<i32>.None => 0 }
+}
+pub fn main() -> i32 {
+  let option = Option<i32>.Some { value: 42 }
+  return unwrap(move option)
+}`
+      const { document, snapshot } = yield* open(source)
+      const someReference = positionOf(source, 'Some', 1)
+      const hover = Document.hover(document, snapshot, someReference)
+      assert.deepEqual(hover?.contents, {
+        kind: 'markdown',
+        value: '```silk\nOption<T>.Some { value: T }: Option<T>\n```',
+      })
+
+      const completionSource = `union Option<T> { Some { value: T }, None }
+pub fn main() -> i32 { let option = Option. return 0 }`
+      const completionState = yield* open(completionSource)
+      const completion = Document.completion(
+        completionState.document,
+        completionState.snapshot,
+        positionAt(completionSource, completionSource.indexOf('Option.') + 'Option.'.length),
+      )
+      assert.deepEqual(
+        completion.items
+          .filter((item) => item.kind === CompletionItemKind.Constructor)
+          .map((item) => item.label),
+        ['None', 'Some'],
+      )
+
+      const definition = Document.definition(document, snapshot, someReference, () => undefined)
+      assert.deepEqual(definition?.targetSelectionRange.start, positionOf(source, 'Some', 0))
+      assert.deepEqual(
+        Document.references(document, snapshot, someReference, true, () => undefined)?.map(
+          ({ range }) => range.start,
+        ),
+        [positionOf(source, 'Some', 0), someReference, positionOf(source, 'Some', 2)],
+      )
+
+      const help = Document.signatureHelp(
+        document,
+        snapshot,
+        positionAt(source, source.indexOf('value: 42') + 'value:'.length),
+      )
+      assert.strictEqual(help?.signatures.at(0)?.label, 'Option<T>.Some { value: T }: Option<T>')
+      assert.deepEqual(
+        help?.signatures.at(0)?.parameters?.map((parameter) => parameter.label),
+        ['value: T'],
+      )
+
+      const symbols = Document.symbols(document, snapshot)
+      assert.deepEqual(
+        symbols.at(0)?.children?.map((symbol) => [symbol.name, symbol.kind]),
+        [
+          ['Some', SymbolKind.EnumMember],
+          ['None', SymbolKind.EnumMember],
+        ],
+      )
+      assert.deepEqual(
+        symbols
+          .at(0)
+          ?.children?.at(0)
+          ?.children?.map((symbol) => [symbol.name, symbol.kind]),
+        [['value', SymbolKind.Field]],
       )
     }),
 )

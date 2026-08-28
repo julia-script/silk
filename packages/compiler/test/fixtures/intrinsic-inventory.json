@@ -1,9 +1,5 @@
 {
-  "targets": [
-    "Evaluator",
-    "LLVM",
-    "Wasm"
-  ],
+  "targets": ["Evaluator", "LLVM", "Wasm"],
   "entries": [
     {
       "operation": "Intrinsic.boolEquals",

@@ -8,6 +8,7 @@ import * as Type from './Type.js'
 export interface Id {
   readonly _tag: 'RepresentedFieldId'
   readonly nominal: DeclarationFacts.CanonicalId
+  readonly variantOrdinal?: number
   readonly ordinal: number
   readonly useOrdinal: number
 }
@@ -78,17 +79,26 @@ export const makeId = (
   nominal: DeclarationFacts.CanonicalId,
   ordinal: number,
   useOrdinal: number,
+  variantOrdinal?: number,
 ): Id =>
   Object.freeze({
     _tag: 'RepresentedFieldId',
     nominal: Object.freeze({ ...nominal }),
+    ...(variantOrdinal === undefined ? {} : { variantOrdinal }),
     ordinal,
     useOrdinal,
   })
 
 /** Canonical identity key; source provenance is intentionally absent. */
 export const idKey = (self: Id): string =>
-  `${self.nominal.module}.${self.nominal.name}:field:${self.ordinal}:representation:${self.useOrdinal}`
+  `${self.nominal.module}.${self.nominal.name}${self.variantOrdinal === undefined ? '' : `:variant:${self.variantOrdinal}`}:field:${self.ordinal}:representation:${self.useOrdinal}`
+
+/** Tests whether one represented-use identity belongs to a canonical aggregate field owner. */
+export const belongsTo = (self: Id, field: DeclarationFacts.FieldId): boolean =>
+  self.ordinal === field.ordinal &&
+  (field.owner._tag === 'StructFieldOwnerId'
+    ? self.variantOrdinal === undefined
+    : self.variantOrdinal === field.owner.variant.ordinal)
 
 /** Complete specialization key for one represented field. */
 export const key = (instance: Type.Nominal, id: Id): string => `${Type.key(instance)}:${idKey(id)}`
@@ -118,7 +128,7 @@ const plansOfInternal = (
   const canonicalKey = `${canonical.module}.${canonical.name}`
   if (seen.has(canonicalKey)) return Object.freeze([])
   const declaration = declarations.modules
-    .flatMap((module) => module.structs)
+    .flatMap((module) => [...module.structs, ...module.unions])
     .find(
       (candidate) =>
         candidate.canonical._tag === 'Canonical' &&
@@ -143,7 +153,7 @@ const plansOfInternal = (
     if (Type.isUnion(type)) return Object.freeze(type.members.flatMap(symbolicUses))
     if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return Object.freeze([])
     const nested = declarations.modules
-      .flatMap((module) => module.structs)
+      .flatMap((module) => [...module.structs, ...module.unions])
       .find(
         (candidate) =>
           candidate.canonical._tag === 'Canonical' &&
@@ -168,13 +178,24 @@ const plansOfInternal = (
       }),
     )
   }
+  const fields: ReadonlyArray<{
+    readonly field: DeclarationFacts.FieldFact
+    readonly variantOrdinal?: number
+  }> =
+    declaration._tag === 'StructDeclaration'
+      ? declaration.fields.map((field) => Object.freeze({ field }))
+      : declaration.variants.flatMap((variant) =>
+          variant.fields.map((field) =>
+            Object.freeze({ field, variantOrdinal: variant.id.ordinal }),
+          ),
+        )
   return Object.freeze(
-    declaration.fields.flatMap((field, ordinal): ReadonlyArray<Plan> => {
+    fields.flatMap(({ field, variantOrdinal }): ReadonlyArray<Plan> => {
       if (field.declaredType._tag !== 'Resolved') return []
       return symbolicUses(field.declaredType.type).map((use, useOrdinal) =>
         Object.freeze({
           _tag: 'RepresentationFieldPlan' as const,
-          id: makeId(canonical, ordinal, useOrdinal),
+          id: makeId(canonical, field.id.ordinal, useOrdinal, variantOrdinal),
           parameter: use.parameter,
           requiredBound: use.requiredBound,
         }),
@@ -191,14 +212,19 @@ export const plansOf = (
 
 const provenanceOf = (declarations: DeclarationIndex.Index, plan: Plan): Provenance | undefined => {
   const declaration = declarations.modules
-    .flatMap((module) => module.structs)
+    .flatMap((module) => [...module.structs, ...module.unions])
     .find(
       (candidate) =>
         candidate.canonical._tag === 'Canonical' &&
         candidate.canonical.id.module === plan.id.nominal.module &&
         candidate.canonical.id.name === plan.id.nominal.name,
     )
-  const field = declaration?.fields.at(plan.id.ordinal)
+  const field =
+    declaration?._tag === 'StructDeclaration'
+      ? declaration.fields.at(plan.id.ordinal)
+      : declaration?.variants
+          .find((variant) => variant.id.ordinal === plan.id.variantOrdinal)
+          ?.fields.at(plan.id.ordinal)
   const parameter = declaration?.typeParameters.find(
     (candidate) => Type.key(candidate.type) === Type.key(plan.parameter),
   )
@@ -208,7 +234,7 @@ const provenanceOf = (declarations: DeclarationIndex.Index, plan: Plan): Provena
 }
 
 const resolvePlan = (
-  declaration: DeclarationFacts.StructFact,
+  declaration: DeclarationFacts.StructFact | DeclarationFacts.UnionFact,
   instance: Type.Nominal,
   plan: Plan,
   provenance: Provenance,
@@ -269,7 +295,7 @@ export const resolveFields = (
   const resolutions = new Map<string, Resolution>()
   for (const instance of instances) {
     const declaration = declarations.modules
-      .flatMap((module) => module.structs)
+      .flatMap((module) => [...module.structs, ...module.unions])
       .find(
         (candidate) =>
           candidate.canonical._tag === 'Canonical' &&

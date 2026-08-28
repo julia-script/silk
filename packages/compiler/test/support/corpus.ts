@@ -1059,6 +1059,73 @@ export const corpus: ReadonlyArray<CorpusProgram> = [
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'nominal-result-compound-error',
+    source: `struct Data { value: i32 }
+union HttpErrorCode { DNSTimeout, DNSError { rcode: i32 } }
+struct OutOfMemoryError {}
+union Result<A, E> { Success { value: A }, Failure { error: E } }
+
+fn inspect(result: Result<Data, HttpErrorCode | OutOfMemoryError>) -> i32 {
+  return match move result {
+    Result<Data, HttpErrorCode | OutOfMemoryError>.Success { value } => value.value
+    Result<Data, HttpErrorCode | OutOfMemoryError>.Failure { error } => match move error {
+      HttpErrorCode.DNSTimeout => 1
+      HttpErrorCode.DNSError { rcode } => rcode
+      OutOfMemoryError other => 0
+    }
+  }
+}
+
+pub fn main() -> i32 {
+  let success = Result<Data, HttpErrorCode | OutOfMemoryError>.Success {
+    value: Data { value: 21 },
+  }
+  let failure = Result<Data, HttpErrorCode | OutOfMemoryError>.Failure {
+    error: HttpErrorCode.DNSError { rcode: 21 },
+  }
+  return inspect(move success) + inspect(move failure)
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'nominal-union-represented-copy-drop',
+    source: `union Parser<F: once fn(i32) -> i32> { Empty, Ready { parse: F } }
+union Deferred<F: once Effect<i32>> { Empty, Ready { operation: F } }
+union Flag { Empty, Value { value: i32 } }
+impl Copy for Flag {}
+struct Token {}
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+union Owner { Empty, Present { token: Token, value: i32 } }
+
+fn increment(value: i32) -> i32 { return value + 1 }
+fn parse<F: once fn(i32) -> i32>(parser: Parser<F>) -> i32 {
+  return match move parser {
+    Parser<F>.Empty => 0
+    Parser<F>.Ready { parse } => parse(19)
+  }
+}
+fn force<F: once Effect<i32>>(deferred: Deferred<F>) -> i32 {
+  return match move deferred {
+    Deferred<F>.Empty => 0
+    Deferred<F>.Ready { operation } => run operation
+  }
+}
+fn copyFlag(flag: Flag) -> i32 {
+  let copied = flag
+  return match move copied { Flag.Empty => 0 Flag.Value { value } => value }
+}
+fn consume(owner: Owner) -> i32 {
+  return match move owner { Owner.Empty => 0 Owner.Present { value, .. } => value }
+}
+pub fn main() -> i32 {
+  let parser = Parser.Ready { parse: increment }
+  let deferred = Deferred.Ready { operation: effect { return 18 } }
+  let owner = Owner.Present { token: Token {}, value: 2 }
+  return parse(move parser) + force(move deferred) + copyFlag(Flag.Value { value: 2 }) + consume(move owner)
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'seeded-random-fingerprint',
     source: seededRandomFingerprint,
     expected: { _tag: 'Completes', result: 42 },

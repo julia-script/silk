@@ -53,7 +53,8 @@ export const storedRepresentation = (
     module: type.module,
     name: type.name,
   })
-  if (declaration?._tag !== 'StructDeclaration') return undefined
+  if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration')
+    return undefined
   const substitution =
     TypeInference.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),
@@ -62,9 +63,22 @@ export const storedRepresentation = (
   const fieldIndex = RepresentationField.resolveFields(index, [type])
   const plans = RepresentationField.plansOf(index, type)
   const next = new Set(seen).add(typeKey)
-  for (const [ordinal, field] of declaration.fields.entries()) {
+  const fields =
+    declaration._tag === 'StructDeclaration'
+      ? declaration.fields.map((field) => Object.freeze({ field, prefix: Object.freeze([]) }))
+      : declaration.variants.flatMap((variant) =>
+          variant.fields.map((field) =>
+            Object.freeze({
+              field,
+              prefix: Object.freeze(variant.name._tag === 'Present' ? [variant.name.spelling] : []),
+            }),
+          ),
+        )
+  for (const { field, prefix } of fields) {
     if (field.declaredType._tag !== 'Resolved' || field.name._tag !== 'Present') continue
-    const fieldPlans = plans.filter((candidate) => candidate.id.ordinal === ordinal)
+    const fieldPlans = plans.filter((candidate) =>
+      RepresentationField.belongsTo(candidate.id, field.id),
+    )
     for (const plan of fieldPlans) {
       const resolution = RepresentationField.lookup(fieldIndex, type, plan.id)
       if (resolution !== undefined) {
@@ -77,7 +91,7 @@ export const storedRepresentation = (
           (kind === 'Effect' && Type.isEffect(contract))
         )
           return Object.freeze({
-            path: Object.freeze([field.name.spelling]),
+            path: Object.freeze([...prefix, field.name.spelling]),
             contract,
             open: resolution._tag === 'UnavailableRepresentationField',
           })
@@ -91,7 +105,7 @@ export const storedRepresentation = (
     )
     if (nested !== undefined)
       return Object.freeze({
-        path: Object.freeze([field.name.spelling, ...nested.path]),
+        path: Object.freeze([...prefix, field.name.spelling, ...nested.path]),
         contract: nested.contract,
         open: nested.open,
       })
@@ -124,13 +138,17 @@ const collectNominals = (
     module: type.module,
     name: type.name,
   })
-  if (declaration?._tag !== 'StructDeclaration') return
+  if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration') return
   const substitution =
     TypeInference.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),
       type.arguments,
     ) ?? new Map()
-  for (const field of declaration.fields) {
+  const fields =
+    declaration._tag === 'StructDeclaration'
+      ? declaration.fields
+      : declaration.variants.flatMap((variant) => variant.fields)
+  for (const field of fields) {
     if (field.declaredType._tag !== 'Resolved') continue
     collectNominals(index, Type.substitute(field.declaredType.type, substitution), into, seen)
   }

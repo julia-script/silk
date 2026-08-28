@@ -1391,6 +1391,26 @@ export const resolveUnionVariantTarget = (
     )
     return unavailableUnionVariantTarget(diagnostic, analyzed.diagnostics)
   }
+  const fullyResolved = DeclarationResolution.resolveTypeFact(
+    resolution.index,
+    source.id,
+    analyzed.fact,
+    (module, argumentPath) =>
+      NameResolution.resolveType(nameResolution, resolution.index, module, argumentPath),
+  )
+  if (
+    fullyResolved.fact._tag === 'Resolved' &&
+    Type.isNominal(fullyResolved.fact.type) &&
+    fullyResolved.fact.type.module === base.module &&
+    fullyResolved.fact.type.name === base.name
+  )
+    return selectedUnionVariant(
+      declaration,
+      fullyResolved.fact.type,
+      spelling(source, variantToken),
+      variantToken,
+      Diagnostic.merge(analyzed.diagnostics, fullyResolved.diagnostics),
+    )
   const supplied = applied?.arguments ?? []
   const sourceParameters = declaration.typeParameters.filter(
     (parameter) =>
@@ -2961,7 +2981,10 @@ export const analyzeAggregateLiteral = (
             for (const [parameterKey, inferred] of inferredArguments)
               currentSubstitution.set(parameterKey, inferred.argument)
             const candidateSubstitution = new Map(currentSubstitution)
-            if (!TypeInference.infer(expectedType, expression.type, candidateSubstitution)) {
+            if (
+              !TypeInference.infer(expectedType, expression.type, candidateSubstitution) &&
+              !typesCompatible(actualValue, Type.substitute(expectedType, currentSubstitution))
+            ) {
               const impliedSubstitution = new Map<string, Type.GenericArgument>()
               if (TypeInference.infer(expectedType, expression.type, impliedSubstitution)) {
                 for (const parameter of aggregate.typeParameters) {

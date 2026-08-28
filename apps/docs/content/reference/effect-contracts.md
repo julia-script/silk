@@ -338,3 +338,54 @@ contract, access, ownership, lifetime, or finite-representation boundary that fa
 
 Typed-failure compatibility, requirement membership, and Effect execution access intentionally
 remain for their own reference areas.
+
+## EFF-014 — Completed outcomes are reified by ordinary composition
+
+**Status:** Confirmed
+
+`Effect.result` runs one protected `Effect<A ! E ? R>` and returns
+`Result<A, E>` while preserving `R`. It first maps success into
+`Result<A, E>.Success`, then uses the general `Effect.catchAll` operation to map the complete failure
+value into `Result<A, E>.Failure`.
+
+```silk
+import silk.effect as Effect
+import silk.result as Result
+
+struct HttpError {}
+struct OutOfMemoryError {}
+
+effect fn fetch() -> i32 ! HttpError | OutOfMemoryError {
+  fail HttpError {}
+}
+
+effect fn inspect() -> Result.Result<i32, HttpError | OutOfMemoryError> {
+  return run Effect.result(fetch())
+}
+```
+
+The outer `Result` remains one nominal union. Its `Failure` payload is the ordinary structural union
+`HttpError | OutOfMemoryError`; reification does not flatten either layer. The two constructor
+adapters are exact `once fn` values, so success and failure payloads may be move-only and are
+transferred exactly once. Traps are not typed failures and are not converted into `Failure`.
+
+This behavior is not privileged. Another library can define a generic result-like nominal union and
+compose the same `map` followed by `catchAll` under any legal function name. The compiler recognizes
+neither `Effect.result`, `Result`, nor its variants by spelling, and exposes no completed-outcome
+intrinsic.
+
+**Boundary:** `Effect.result` handles the complete declared failure type `E`; selective recovery
+remains the role of `Effect.catch`. Reification does not execute more than one Effect layer, remove
+requirements, erase ownership, expose a pending state, or catch traps and future interruption.
+
+**Diagnostics:** Invalid callbacks, failure carriers, ownership transfers, or requirement rows use
+the ordinary callable, Effect, ownership, and row diagnostics. There is no diagnostic or semantic
+branch specific to the names `Effect.result`, `Result`, `Success`, or `Failure`.
+
+**Current compiler:** Aligned. The standard-library implementation is ordinary Silk source over
+`map` and `catchAll`; the compiler has no `Intrinsic.effectResult` operation or replacement
+completed-outcome primitive.
+
+**Evidence:** [ordinary source implementation](../../../../packages/compiler/stdlib/silk/effect.silk),
+[Result and alternate-carrier regressions](../../../../packages/compiler/test/ResultStdlib.test.ts),
+[minimal intrinsic boundary](../../../../openspec/changes/add-nominal-unions/specs/bootstrap-intrinsic-boundary/spec.md).

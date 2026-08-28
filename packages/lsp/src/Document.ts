@@ -1,6 +1,6 @@
 import * as Analysis from '@silklang/compiler/Analysis'
 import type * as AutoImport from '@silklang/compiler/AutoImport'
-import type * as DeclarationFacts from '@silklang/compiler/DeclarationFacts'
+import * as DeclarationFacts from '@silklang/compiler/DeclarationFacts'
 import * as Diagnostic from '@silklang/compiler/Diagnostic'
 import * as FormattedDocument from '@silklang/compiler/FormattedDocument'
 import * as ImportPath from '@silklang/compiler/ImportPath'
@@ -760,7 +760,7 @@ const enclosingStructLiteral = (
       }
     | undefined
   const visit = (node: SyntaxTree.Node): void => {
-    if (node.kind === 'StructLiteralExpression') {
+    if (node.kind === 'StructLiteralExpression' || node.kind === 'UnionVariantExpression') {
       const target = node.children[0]
       const leftBrace = node.children.find(
         (child) => SyntaxTree.isToken(child) && child.kind === 'LeftBrace',
@@ -821,10 +821,16 @@ export const signatureHelp = (
   if (call === undefined) {
     const structLiteral = enclosingStructLiteral(syntax.root, offset)
     if (structLiteral === undefined) return undefined
-    const targetPath =
-      SyntaxTree.isNode(structLiteral.target) && structLiteral.target.kind === 'AppliedType'
-        ? (SyntaxTree.directNode(structLiteral.target, 'TypePath') ?? structLiteral.target)
-        : structLiteral.target
+    const variantSelector =
+      SyntaxTree.directNode(structLiteral.literal, 'UnionVariantSelector') ??
+      (SyntaxTree.isNode(structLiteral.target) &&
+      structLiteral.target.kind === 'UnionVariantSelector'
+        ? structLiteral.target
+        : undefined)
+    let targetPath = structLiteral.target
+    if (variantSelector !== undefined) targetPath = variantSelector
+    else if (SyntaxTree.isNode(targetPath) && targetPath.kind === 'AppliedType')
+      targetPath = SyntaxTree.directNode(targetPath, 'TypePath') ?? targetPath
     const occurrence = Analysis.semanticOccurrenceAt(
       snapshot,
       self.module,
@@ -832,12 +838,48 @@ export const signatureHelp = (
     )
     if (occurrence?.resolution._tag !== 'Available') return undefined
     const identity = occurrence.resolution.identity
-    if (identity._tag !== 'DeclarationIdentity') return undefined
-    const declaration = Analysis.declarationForIdentity(snapshot, identity)
-    if (declaration?._tag !== 'StructDeclaration') return undefined
-    const fields = declaration.fields.filter(
+    const selected = (() => {
+      if (identity._tag === 'DeclarationIdentity') {
+        const declaration = Analysis.declarationForIdentity(snapshot, identity)
+        return declaration?._tag === 'StructDeclaration'
+          ? Object.freeze({
+              fields: declaration.fields,
+              kind: 'Struct' as const,
+              presentation: Presentation.structDeclaration(declaration).text,
+            })
+          : undefined
+      }
+      if (identity._tag !== 'UnionVariantIdentity') return undefined
+      const resolvedUnion = Analysis.unionByName(
+        snapshot,
+        identity.id.union.module,
+        identity.id.union.name,
+      )
+      if (resolvedUnion._tag !== 'Resolved') return undefined
+      const resolvedVariant = Analysis.unionVariantByName(
+        resolvedUnion.declaration,
+        identity.id.name,
+      )
+      return resolvedVariant._tag === 'Resolved'
+        ? Object.freeze({
+            fields: resolvedVariant.variant.fields,
+            kind: 'UnionVariant' as const,
+            presentation: Presentation.unionVariant(
+              resolvedUnion.declaration,
+              resolvedVariant.variant,
+            ).text,
+          })
+        : undefined
+    })()
+    if (selected === undefined) return undefined
+    const fields = selected.fields.filter(
       (field) => field.visibility === 'Public' || occurrence.declaration?.module === self.module,
     )
+    const fieldList = fields.map((field) => Presentation.field(field).text).join(', ')
+    const label =
+      selected.kind === 'Struct'
+        ? `${selected.presentation} { ${fieldList} }`
+        : selected.presentation.replace(/\{[^}]*\}/, `{ ${fieldList} }`)
     const activeInitializer = structLiteral.initializers.find(
       (initializer) => offset >= initializer.span.start && offset <= initializer.span.end,
     )
@@ -853,7 +895,7 @@ export const signatureHelp = (
     const activeField =
       fieldIdentity === undefined
         ? -1
-        : fields.findIndex((field) => field.id.ordinal === fieldIdentity.id.ordinal)
+        : fields.findIndex((field) => DeclarationFacts.sameFieldId(field.id, fieldIdentity.id))
     const precedingInitializers = structLiteral.initializers.filter(
       (initializer) => initializer.span.end < offset,
     ).length
@@ -865,9 +907,7 @@ export const signatureHelp = (
     return {
       signatures: [
         {
-          label: `${Presentation.structDeclaration(declaration).text} { ${fields
-            .map((field) => Presentation.field(field).text)
-            .join(', ')} }`,
+          label,
           parameters: fields.map((field) => ({ label: Presentation.field(field).text })),
           ...(documentation === undefined || documentation.length === 0
             ? {}
@@ -1617,6 +1657,48 @@ export const symbols = (
         },
       ]
     }
+    if (member._tag === 'UnionDeclaration') {
+      const children = member.variants.flatMap((variant) =>
+        variant.name._tag === 'Present'
+          ? [
+              {
+                name: variant.name.spelling,
+                kind: SymbolKind.EnumMember,
+                range: LineIndex.rangeOf(self.index, SyntaxTree.span(variant.syntax)),
+                selectionRange: LineIndex.rangeOf(self.index, variant.name.token.span),
+                ...(variant.fields.length === 0
+                  ? {}
+                  : {
+                      children: variant.fields.flatMap((field) =>
+                        field.name._tag === 'Present'
+                          ? [
+                              {
+                                name: field.name.spelling,
+                                kind: SymbolKind.Field,
+                                range: LineIndex.rangeOf(self.index, SyntaxTree.span(field.syntax)),
+                                selectionRange: LineIndex.rangeOf(
+                                  self.index,
+                                  field.name.token.span,
+                                ),
+                              },
+                            ]
+                          : [],
+                      ),
+                    }),
+              },
+            ]
+          : [],
+      )
+      return [
+        {
+          name: member.name.spelling,
+          kind: SymbolKind.Enum,
+          range,
+          selectionRange,
+          ...(children.length > 0 ? { children } : {}),
+        },
+      ]
+    }
     const fields = member.fields.flatMap((field) =>
       field.name._tag === 'Present'
         ? [
@@ -1849,6 +1931,8 @@ export const semanticTokens = (
 const foldableKinds: ReadonlySet<SyntaxTree.NodeKind> = new Set([
   'Block',
   'StructDeclaration',
+  'UnionDeclaration',
+  'UnionVariant',
   'ServiceDeclaration',
   'InterfaceDeclaration',
   'ImplDeclaration',

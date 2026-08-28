@@ -1129,6 +1129,53 @@ export const catalog = (
       completed.set(key, entry)
       return entry
     }
+    const layoutAggregateField = (
+      fieldType: DeclarationFacts.SemanticType,
+      fieldId: DeclarationFacts.FieldId,
+    ): CatalogEntry => {
+      const representationPlans = RepresentationField.plansOf(index, type).filter((plan) =>
+        RepresentationField.belongsTo(plan.id, fieldId),
+      )
+      let representationOrdinal = 0
+      const visit = (candidate: DeclarationFacts.SemanticType): CatalogEntry => {
+        if (Type.isRepresented(candidate)) {
+          const plan = representationPlans.at(representationOrdinal)
+          representationOrdinal += 1
+          const realization =
+            plan === undefined || callableRealizations === undefined
+              ? undefined
+              : FieldRealization.realizationOf(callableRealizations, type, plan.id)
+          if (realization === undefined) {
+            return unavailable(candidate, Object.freeze(Type.nominals(candidate)), {
+              _tag: 'InvalidDeclaration',
+              detail: 'represented executable values remain unavailable to layout',
+            })
+          }
+          return FieldRealization.isCallableRealization(realization)
+            ? layoutRepresentedCallable(candidate, realization)
+            : layoutRepresentedEffect(candidate, realization)
+        }
+        if (Type.isFixedArray(candidate)) {
+          const element = visit(candidate.element)
+          if (element._tag === 'UnavailableLayoutEntry') return element
+          return (
+            repeatedEntry(candidate, element) ??
+            unavailable(candidate, Object.freeze(Type.nominals(candidate.element)), {
+              _tag: 'InvalidDeclaration',
+              detail: `array layout overflows for ${Type.encode(candidate)}`,
+            })
+          )
+        }
+        if (Type.isSlice(candidate)) {
+          const element = visit(candidate.element)
+          return element._tag === 'UnavailableLayoutEntry'
+            ? element
+            : sliceEntry(target, candidate, element)
+        }
+        return layoutType(candidate)
+      }
+      return visit(fieldType)
+    }
     const unionDeclaration = unionByType.get(`${type.module}\u0000${type.name}`)
     if (unionDeclaration !== undefined) {
       const union = unionDeclaration.union
@@ -1210,7 +1257,7 @@ export const catalog = (
             break
           }
           const fieldType = Type.substitute(field.declaredType.type, substitution)
-          const fieldLayout = layoutType(fieldType)
+          const fieldLayout = layoutAggregateField(fieldType, field.id)
           if (fieldLayout._tag === 'UnavailableLayoutEntry') {
             failure = unavailable(
               type,
@@ -1358,48 +1405,7 @@ export const catalog = (
         break
       }
       const fieldType = Type.substitute(field.declaredType.type, substitution)
-      const representationPlans = RepresentationField.plansOf(index, type).filter(
-        (plan) => plan.id.ordinal === field.id.ordinal,
-      )
-      let representationOrdinal = 0
-      const layoutFieldType = (candidate: DeclarationFacts.SemanticType): CatalogEntry => {
-        if (Type.isRepresented(candidate)) {
-          const plan = representationPlans.at(representationOrdinal)
-          representationOrdinal += 1
-          const realization =
-            plan === undefined || callableRealizations === undefined
-              ? undefined
-              : FieldRealization.realizationOf(callableRealizations, type, plan.id)
-          if (realization === undefined) {
-            return unavailable(candidate, Object.freeze(Type.nominals(candidate)), {
-              _tag: 'InvalidDeclaration',
-              detail: 'represented executable values remain unavailable to layout',
-            })
-          }
-          return FieldRealization.isCallableRealization(realization)
-            ? layoutRepresentedCallable(candidate, realization)
-            : layoutRepresentedEffect(candidate, realization)
-        }
-        if (Type.isFixedArray(candidate)) {
-          const element = layoutFieldType(candidate.element)
-          if (element._tag === 'UnavailableLayoutEntry') return element
-          return (
-            repeatedEntry(candidate, element) ??
-            unavailable(candidate, Object.freeze(Type.nominals(candidate.element)), {
-              _tag: 'InvalidDeclaration',
-              detail: `array layout overflows for ${Type.encode(candidate)}`,
-            })
-          )
-        }
-        if (Type.isSlice(candidate)) {
-          const element = layoutFieldType(candidate.element)
-          return element._tag === 'UnavailableLayoutEntry'
-            ? element
-            : sliceEntry(target, candidate, element)
-        }
-        return layoutType(candidate)
-      }
-      const fieldLayout = layoutFieldType(fieldType)
+      const fieldLayout = layoutAggregateField(fieldType, field.id)
       if (fieldLayout._tag === 'UnavailableLayoutEntry') {
         failure = unavailable(
           type,

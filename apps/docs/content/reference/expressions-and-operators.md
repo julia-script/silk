@@ -444,7 +444,7 @@ Effect failure channel. When overflow or invalid division is recoverable applica
 named `checked*` operation returning `Option<T>`. When modular or clamped arithmetic is intended,
 use the corresponding named `wrapping*` or `saturating*` operation where supplied.
 
-For every signed width, `checkedRemainder(MIN, -1)` returns `None` on every executor exactly where
+For every signed width, `checkedRemainder(MIN, -1)` returns `Option<T>.None` on every executor exactly where
 ordinary `%` traps. It never reaches a backend remainder instruction whose behavior differs at that
 boundary.
 
@@ -1034,7 +1034,7 @@ functions use the ordinary actor-operation diagnostic.
 
 An integer actor's `toX` operation returns the destination integer type and traps when the source
 value is outside its range. The corresponding `checkedToX` operation returns `Option<X>`, producing
-`Some<X>` when representable and `None` otherwise.
+`Option<X>.Some` when representable and `Option<X>.None` otherwise.
 
 ```silk
 import silk.option { Option }
@@ -1057,7 +1057,7 @@ happen to have equal width.
 
 **Diagnostics:** A trapping conversion with statically compatible source and destination types has
 no compile-time range diagnostic for a dynamic value. An out-of-range execution traps at the
-conversion operation. A checked conversion returns `None` rather than reporting a diagnostic or
+conversion operation. A checked conversion returns `Option<X>.None` rather than reporting a diagnostic or
 typed failure.
 
 **Evidence:** [integer scalar specification](../../../../openspec/specs/bootstrap-integer-scalars/spec.md),
