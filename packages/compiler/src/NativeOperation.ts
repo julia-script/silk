@@ -69,6 +69,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'Allocate':
     case 'HostWrite':
     case 'OsCall':
+    case 'OsOpenOutcome':
     case 'RawBufferFrom':
     case 'SharedFromAllocation':
     case 'SharedClone':

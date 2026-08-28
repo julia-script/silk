@@ -1123,95 +1123,6 @@ function* executeFunction(
       )
       return Object.freeze({ _tag: 'Value', value: floatValue(floatTarget.spelling, encoded.bits) })
     }
-    if (operation === 'CheckedConvertToChar') {
-      const subject = arguments_.at(0)
-      if (actorScalar?.category !== 'Character' || subject?._tag !== 'IntegerValue')
-        throw new RangeError('MIR verifier allowed an invalid checked char callable')
-      const exact = BigInt(subject.value)
-      const succeeded = Scalar.isUnicodeScalarValue(exact)
-      const semantic = Type.option('char')
-      if (!Type.isUnion(semantic))
-        throw new RangeError('Canonical Option did not normalize to a structural union')
-      const member = succeeded ? Type.some('char') : Type.none
-      const entry = program.layout.entries.find((candidate) => Type.equals(candidate.type, member))
-      if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate')
-        throw new RangeError('Target plan omitted a canonical callable Option member')
-      return Object.freeze({
-        _tag: 'Value',
-        value: Object.freeze({
-          _tag: 'UnionValue',
-          type: semantic,
-          member,
-          payload: Object.freeze({
-            _tag: 'AggregateValue',
-            type: member,
-            fields: Object.freeze(
-              succeeded
-                ? entry.representation.fields.map((field) =>
-                    Object.freeze({ field: field.id, value: characterValue(Number(exact)) }),
-                  )
-                : [],
-            ),
-          }),
-        }),
-      })
-    }
-    if (Scalar.isCheckedOperation(operation)) {
-      const source = Scalar.find(target.actor)
-      const resultScalar = conversionTarget ?? source
-      const leftValue = arguments_.at(0)
-      const rightValue = arguments_.at(1)
-      if (
-        source?.category !== 'Integer' ||
-        resultScalar?.category !== 'Integer' ||
-        leftValue === undefined ||
-        leftValue._tag !== 'IntegerValue'
-      )
-        throw new RangeError('MIR verifier allowed an invalid checked callable')
-      const left = BigInt(leftValue.value)
-      const right =
-        rightValue !== undefined && rightValue._tag === 'IntegerValue'
-          ? BigInt(rightValue.value)
-          : undefined
-      const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
-      const exact = BootstrapArithmetic.checked(
-        operation,
-        left,
-        right,
-        Scalar.range(source, pointerBits).minimum,
-      )
-      const range = Scalar.range(resultScalar, pointerBits)
-      const succeeded = exact !== undefined && exact >= range.minimum && exact <= range.maximum
-      const semantic = Type.option(resultScalar.spelling)
-      if (!Type.isUnion(semantic))
-        throw new RangeError('Canonical Option did not normalize to a structural union')
-      const member = succeeded ? Type.some(resultScalar.spelling) : Type.none
-      const entry = program.layout.entries.find((candidate) => Type.equals(candidate.type, member))
-      if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate')
-        throw new RangeError('Target plan omitted a canonical callable Option member')
-      return Object.freeze({
-        _tag: 'Value',
-        value: Object.freeze({
-          _tag: 'UnionValue',
-          type: semantic,
-          member,
-          payload: Object.freeze({
-            _tag: 'AggregateValue',
-            type: member,
-            fields: Object.freeze(
-              succeeded
-                ? entry.representation.fields.map((field) =>
-                    Object.freeze({
-                      field: field.id,
-                      value: integerValue(resultScalar.spelling, exact),
-                    }),
-                  )
-                : [],
-            ),
-          }),
-        }),
-      })
-    }
     if (conversionTarget !== undefined) {
       const subject = arguments_.at(0)
       if (actorScalar?.category === 'Character' && subject?._tag === 'CharacterValue')
@@ -1477,31 +1388,6 @@ function* executeFunction(
       ),
     })
     state.cells.set(key, { value: next, fromCall: backing.fromCall })
-  }
-
-  const optionValue = (element: Type.Type, payload?: Value): UnionValue => {
-    const semantic = Type.option(element)
-    if (!Type.isUnion(semantic)) throw new RangeError('OS Option result did not normalize')
-    const member = payload === undefined ? Type.none : Type.some(element)
-    const entry = program.layout.entries.find((candidate) => Type.equals(candidate.type, member))
-    if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate')
-      throw new RangeError('Target plan omitted an OS Option member')
-    return Object.freeze({
-      _tag: 'UnionValue',
-      type: semantic,
-      member,
-      payload: Object.freeze({
-        _tag: 'AggregateValue',
-        type: member,
-        fields: Object.freeze(
-          payload === undefined
-            ? []
-            : entry.representation.fields.map((field) =>
-                Object.freeze({ field: field.id, value: payload }),
-              ),
-        ),
-      }),
-    })
   }
 
   const handleValue = (handle: OsFileSystemHost.Handle): AggregateValue => {
@@ -2589,6 +2475,7 @@ function* executeFunction(
             break
           }
           case 'HostWrite':
+          case 'OsOpen':
           case 'OsCall': {
             const boundary = BootstrapOsIntrinsics.execute(
               {
@@ -2602,13 +2489,48 @@ function* executeFunction(
                 replaceReferenced,
                 byteView,
                 writeByteView,
-                optionValue,
                 handleValue,
                 hostHandle,
               },
               operation,
             )
             if (boundary !== undefined) return boundary
+            if (operation._tag === 'OsOpen') {
+              const succeeded = readInteger(operation.valid).value !== 0n
+              const callable = succeeded ? operation.success : operation.failure
+              const unused = succeeded ? operation.failure : operation.success
+              const cleanup = succeeded ? operation.failureCleanup : operation.successCleanup
+              const callableType = fn.localTypes.at(callable.ordinal)
+              if (callableType?._tag !== 'CallableValue')
+                throw new RangeError('MIR OS open lost its carrier callable')
+              const carrier = yield* executeOperations([
+                Object.freeze({
+                  _tag: 'Drop' as const,
+                  local: unused,
+                  cleanup,
+                  provenance: operation.provenance,
+                }),
+                Object.freeze({
+                  _tag: 'ApplyCallable' as const,
+                  destination: operation.destination,
+                  callable,
+                  typeArguments:
+                    callableType.environment?.callable.typeArguments ??
+                    callableType.storage?.realization.targetArguments ??
+                    callableType.typeArguments ??
+                    Object.freeze([]),
+                  captures: Object.freeze([]),
+                  arguments: succeeded ? Object.freeze([operation.handle]) : Object.freeze([]),
+                  callableType: callableType.type,
+                  access: callableType.type.mode,
+                  evaluation: 'CalleeThenArguments' as const,
+                  realization: 'Environment' as const,
+                  type: operation.type,
+                  provenance: operation.provenance,
+                }),
+              ])
+              if (carrier !== undefined) return carrier
+            }
             break
           }
           case 'RawBufferFrom': {

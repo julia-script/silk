@@ -67,21 +67,21 @@
 
 ## 9. Carrier-Neutral Intrinsic Migration
 
-- [ ] 9.1 Replace checked scalar intrinsic result contracts with generic present/absent exact `once fn` carriers while keeping the intrinsic operation inventory count unchanged, and verify catalog audit tests contain no Option identity or spelling.
-- [ ] 9.2 Lower and execute checked carrier selection with exactly one callback invocation and cleanup of the unused callable environment, and verify evaluator, Wasm, and native tests cover success, absence, affine captures, and traps.
+- [x] 9.1 Replace checked scalar intrinsic result contracts with generic present/absent exact `once fn` carriers while keeping the intrinsic operation inventory count unchanged, and verify catalog audit tests contain no Option identity or spelling.
+- [x] 9.2 Lower and execute checked carrier selection with exactly one callback invocation and cleanup of the unused callable environment, and verify evaluator, Wasm, and native tests cover success, absence, affine captures, and traps.
 - [x] 9.3 Delete `Intrinsic.effectResult` and its analysis, HIR, MIR, evaluator, Wasm, LLVM, layout-discovery, and suspension-metadata support without replacement, and verify the intrinsic inventory plus repository searches contain no completed-outcome primitive or compatibility path.
-- [ ] 9.4 Replace handle-producing file and directory open results with affine-safe success/failure `once fn` carriers, and verify success transfers one initialized `OsHandle` plus close obligation while failure creates no handle or optionally initialized place.
-- [ ] 9.5 Replace optional count-producing OS filesystem, standard-input, child-process, and process-input results with primitive `bool` plus initialized count/reason/code outputs, and verify host-boundary tests distinguish zero-length success, absence, and refusal without constructing Option in compiler code.
-- [ ] 9.6 Remove `Type.option`, old Result/member helpers, detached outcome construction, and Option/Result-specific branches from analysis, HIR, MIR, evaluation, and backends, and verify repository searches plus intrinsic audits find no compiler recognition by standard-library module or declaration spelling.
+- [x] 9.4 Replace handle-producing file and directory open results with affine-safe success/failure `once fn` carriers, and verify success transfers one initialized `OsHandle` plus close obligation while failure creates no handle or optionally initialized place.
+- [x] 9.5 Replace optional count-producing OS filesystem, standard-input, child-process, and process-input results with primitive `bool` plus initialized count/reason/code outputs, and verify host-boundary tests distinguish zero-length success, absence, and refusal without constructing Option in compiler code.
+- [x] 9.6 Remove `Type.option`, old Result/member helpers, detached outcome construction, and Option/Result-specific branches from analysis, HIR, MIR, evaluation, and backends, and verify repository searches plus intrinsic audits find no compiler recognition by standard-library module or declaration spelling.
 
 ## 10. Atomic Standard-Library Migration
 
-- [ ] 10.1 Replace `option.silk` with the public nominal union and direct `some`/`none` helpers, and verify its combinators construct and match direct variants with public payload access and no wrapper field.
-- [ ] 10.2 Replace `result.silk` with the public nominal union and direct `succeed`/`failResult` helpers, and verify its combinators accept structural error unions without flattening Success or Failure.
-- [ ] 10.3 Update integer, character, string, allocation, and other checked wrappers to supply carrier-neutral intrinsic adapters and return direct Option variants, and verify checked success/absence tests use the canonical nominal representation.
+- [x] 10.1 Replace `option.silk` with the public nominal union and direct `some`/`none` helpers, and verify its combinators construct and match direct variants with public payload access and no wrapper field.
+- [x] 10.2 Replace `result.silk` with the public nominal union and direct `succeed`/`failResult` helpers, and verify its combinators accept structural error unions without flattening Success or Failure.
+- [x] 10.3 Update integer, character, string, allocation, and other checked wrappers to supply carrier-neutral intrinsic adapters and return direct Option variants, and verify checked success/absence tests use the canonical nominal representation.
 - [x] 10.4 Implement ordinary Silk `Effect.result` by mapping success into `Result.Success` and applying general `Effect.catchAll` to map the complete typed failure into `Result.Failure`; migrate direct consumers and verify one nominal layer, compound failure unions, preserved requirements, move-only branch values, and an equivalent user-defined result-like union.
-- [ ] 10.5 Migrate filesystem, process, formatting, random, collection, and remaining canonical Silk modules from detached member imports and wrapper-field matches to qualified parent variants, and verify the complete stdlib source closure compiles.
-- [ ] 10.6 Delete detached `Some`, `None`, `Success`, and `Failure` declarations, wrapper structs, aliases, dual paths, stale imports, and old generated embeddings, then regenerate the deterministic stdlib manifest and verify a repository-wide removal test finds no superseded representation.
+- [x] 10.5 Migrate filesystem, process, formatting, random, collection, and remaining canonical Silk modules from detached member imports and wrapper-field matches to qualified parent variants, and verify the complete stdlib source closure compiles.
+- [x] 10.6 Delete detached `Some`, `None`, `Success`, and `Failure` declarations, wrapper structs, aliases, dual paths, stale imports, and old generated embeddings, then regenerate the deterministic stdlib manifest and verify a repository-wide removal test finds no superseded representation.
 
 ## 11. Tooling, Documentation, and Acceptance
 

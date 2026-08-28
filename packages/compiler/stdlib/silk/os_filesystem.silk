@@ -176,13 +176,13 @@ effect fn raise(operation: FileOperation, lowReason: i32, nativeCode: u32) -> ne
 }
 
 effect fn rawFileOpen(root: &[u8], path: &[u8], mode: i32, lowReason: &mut i32, nativeCode: &mut u32) -> Option<OsHandle> {
-  unsafe { return run Intrinsic.osFileOpen(root, path, mode, lowReason, nativeCode) }
+  unsafe { return run Intrinsic.osFileOpen<Option<OsHandle>>(root, path, mode, lowReason, nativeCode, some, none) }
   let impossible = 1 / 0
   return none<OsHandle>()
 }
 
 effect fn rawDirectoryOpen(root: &[u8], path: &[u8], lowReason: &mut i32, nativeCode: &mut u32) -> Option<OsHandle> {
-  unsafe { return run Intrinsic.osDirectoryOpen(root, path, lowReason, nativeCode) }
+  unsafe { return run Intrinsic.osDirectoryOpen<Option<OsHandle>>(root, path, lowReason, nativeCode, some, none) }
   let impossible = 1 / 0
   return none<OsHandle>()
 }

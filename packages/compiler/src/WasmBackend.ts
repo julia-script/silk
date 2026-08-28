@@ -3396,7 +3396,7 @@ const emitHostWriteOperation = (
 }
 
 const emitOsCallOperation = (
-  _operation: Extract<Mir.Operation, { readonly _tag: 'OsCall' }>,
+  _operation: Extract<Mir.Operation, { readonly _tag: 'OsOpen' | 'OsCall' }>,
   _state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
   throw new RangeError('Target validation allowed a native-only OS operation into Wasm')
@@ -7289,6 +7289,7 @@ const emitOperationWithContext = (
       return emitAllocateOperation(operation, context)
     case 'HostWrite':
       return emitHostWriteOperation(operation, context)
+    case 'OsOpen':
     case 'OsCall':
       return emitOsCallOperation(operation, context)
     case 'RawBufferFrom':

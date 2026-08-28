@@ -620,6 +620,42 @@ const osBuiltin = (options: {
     invariant: options.invariant,
   })
 
+const osOpen = (options: {
+  readonly name: 'fileOpen' | 'directoryOpen'
+  readonly operation: 'OsFileOpen' | 'OsDirectoryOpen'
+  readonly parameters: ReadonlyArray<ValueParameter>
+  readonly semanticParameters: ReadonlyArray<Type.Type>
+  readonly invariant: string
+}): Operation => {
+  const carrierOwner = Object.freeze({
+    module: 'Intrinsic',
+    name: `$Os.${options.name}`,
+  })
+  const carrierResult = Type.parameter(carrierOwner, 0, 'R')
+  const success = Type.callable(Object.freeze([Type.osHandle]), carrierResult, 'Take')
+  const failure = Type.callable(Object.freeze([]), carrierResult, 'Take')
+  return Object.freeze({
+    ...builtin({
+      actor: 'Os',
+      name: options.name,
+      operation: options.operation,
+      typeParameters: Object.freeze(['R']),
+      semanticTypeParameters: Object.freeze([carrierResult]),
+      parameters: Object.freeze([
+        ...options.parameters,
+        valueParameter('success', 'once fn(OsHandle) -> R'),
+        valueParameter('failure', 'once fn() -> R'),
+      ]),
+      semanticParameters: Object.freeze([...options.semanticParameters, success, failure]),
+      result: 'Effect<R>',
+      semanticResult: osEffect(carrierResult),
+      unsafe: true,
+      targets: nativeTargets,
+    }),
+    invariant: options.invariant,
+  })
+}
+
 const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Operation => {
   let concreteResult: Type.Type
   switch (operation.result) {
@@ -844,7 +880,7 @@ const intrinsicOperations = Object.freeze([
       invariant:
         'true means the complete initialized output contains fresh cryptographically secure bytes; false exposes no recoverable output',
     }),
-    osBuiltin({
+    osOpen({
       name: 'fileOpen',
       operation: 'OsFileOpen',
       parameters: Object.freeze([
@@ -855,10 +891,8 @@ const intrinsicOperations = Object.freeze([
         valueParameter('nativeCode', '&mut u32'),
       ]),
       semanticParameters: Object.freeze([byteSlice, byteSlice, 'i32', mutableI32, mutableU32]),
-      result: 'Effect<Option<OsHandle>>',
-      semanticResult: Type.option(Type.osHandle),
       invariant:
-        'root is an absolute native path; path is normalized provider-absolute; outputs are initialized; traversal rejects symlinks and namespace escape',
+        'root is an absolute native path; path is normalized provider-absolute; status outputs are initialized; traversal rejects symlinks and namespace escape; success transfers one live handle only to the selected carrier',
     }),
     osBuiltin({
       name: 'fileRead',
@@ -906,7 +940,7 @@ const intrinsicOperations = Object.freeze([
       invariant:
         'handle is a live file; input is initialized; success reports the exact transferred byte count and may be partial',
     }),
-    osBuiltin({
+    osOpen({
       name: 'directoryOpen',
       operation: 'OsDirectoryOpen',
       parameters: Object.freeze([
@@ -916,9 +950,8 @@ const intrinsicOperations = Object.freeze([
         valueParameter('nativeCode', '&mut u32'),
       ]),
       semanticParameters: Object.freeze([byteSlice, byteSlice, mutableI32, mutableU32]),
-      result: 'Effect<Option<OsHandle>>',
-      semanticResult: Type.option(Type.osHandle),
-      invariant: 'root and path satisfy confined traversal and outputs are initialized',
+      invariant:
+        'root and path satisfy confined traversal; status outputs are initialized; success transfers one live handle only to the selected carrier',
     }),
     osBuiltin({
       name: 'directoryNext',

@@ -242,8 +242,10 @@ pub effect fn main() -> () ! StreamWriteError {
   return ()
 }`,
   `import silk.usize as usize
-import silk.option { Option, none }
+import silk.option { Option, none, some }
 fn absurd<T>() -> T { let boom = 1 / 0 return absurd<T>() }
+fn opened(handle: OsHandle) -> Option<OsHandle> { return some<OsHandle>(move handle) }
+fn refused() -> Option<OsHandle> { return none<OsHandle>() }
 effect fn systemClockNow(seconds: &mut i64, nanoseconds: &mut i64) -> bool {
   unsafe { return run Intrinsic.osSystemClockNow(seconds, nanoseconds) }
   return false
@@ -269,7 +271,7 @@ effect fn randomFill(output: &mut [u8]) -> bool {
   return false
 }
 effect fn fileOpen(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> Option<OsHandle> {
-  unsafe { return run Intrinsic.osFileOpen(root, path, 0, reason, code) }
+  unsafe { return run Intrinsic.osFileOpen<Option<OsHandle>>(root, path, 0, reason, code, opened, refused) }
   return none<OsHandle>()
 }
 effect fn fileRead(handle: &mut OsHandle, output: &mut [u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
@@ -281,7 +283,7 @@ effect fn fileWrite(handle: &mut OsHandle, input: &[u8], count: &mut usize, reas
   return false
 }
 effect fn directoryOpen(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> Option<OsHandle> {
-  unsafe { return run Intrinsic.osDirectoryOpen(root, path, reason, code) }
+  unsafe { return run Intrinsic.osDirectoryOpen<Option<OsHandle>>(root, path, reason, code, opened, refused) }
   return none<OsHandle>()
 }
 effect fn directoryNext(handle: &mut OsHandle, output: &mut [u8], count: &mut usize, kind: &mut i32, required: &mut usize, reason: &mut i32, code: &mut u32) -> bool {

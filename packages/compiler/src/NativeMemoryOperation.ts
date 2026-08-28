@@ -24,6 +24,7 @@ type Operation = Extract<
       | 'Allocate'
       | 'HostWrite'
       | 'OsCall'
+      | 'OsOpenOutcome'
       | 'RawBufferFrom'
       | 'SharedFromAllocation'
       | 'SharedClone'
@@ -243,6 +244,53 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([]))
       break
     }
+    case 'OsOpenOutcome': {
+      const runtime = osRuntimes.get(operation.operation.name)
+      if (runtime === undefined || runtime.abi !== 'OpenOut')
+        throw new RangeError(`LLVM OS open runtime ${operation.operation.name} is unavailable`)
+      const arguments_ = operation.arguments.flatMap((argument) => [
+        ...NativeStorage.readLocal(nativeStorage, argument),
+      ])
+      const handleLanes = NativeType.lanesFor(types, operation.handleType)
+      const outputs = yield* Effect.forEach(handleLanes, (lane, ordinal) =>
+        Effect.gen(function* () {
+          const type = NativeType.laneType(types, lane)
+          const output = yield* FunctionBody.alloca(
+            body,
+            type,
+            `os${operation.valid.ordinal}_out${ordinal}`,
+          )
+          yield* FunctionBody.store(body, yield* Constant.zero(builder, type), output)
+          return output
+        }),
+      )
+      const result = yield* FunctionBody.callDirect(
+        body,
+        runtime.handle,
+        [...arguments_, ...outputs],
+        `os${operation.valid.ordinal}`,
+      )
+      for (const root of [...nativeStorage.addressRoots].sort((left, right) => left - right)) {
+        yield* NativeStorage.reloadAddressRoot(nativeStorage, root)
+      }
+      if (result === undefined) throw new RangeError('LLVM OS open runtime returned no status')
+      const handle: Array<Value.Input> = []
+      for (const [ordinal, output] of outputs.entries()) {
+        const lane = handleLanes.at(ordinal)
+        if (lane === undefined) throw new RangeError('LLVM OS open runtime lost an output lane')
+        handle.push(
+          yield* FunctionBody.load(
+            body,
+            NativeType.laneType(types, lane),
+            output,
+            `os${operation.valid.ordinal}_out${ordinal}_value`,
+          ),
+        )
+      }
+      nativeStorage.locals.set(operation.valid.ordinal, Object.freeze([result]))
+      nativeStorage.locals.set(operation.handle.ordinal, Object.freeze(handle))
+      break
+    }
     case 'OsCall': {
       const runtime = osRuntimes.get(operation.operation.name)
       if (runtime === undefined) {
@@ -251,21 +299,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const arguments_ = operation.arguments.flatMap((argument) => [
         ...NativeStorage.readLocal(nativeStorage, argument),
       ])
-      const resultLanes = NativeType.lanesFor(types, operation.type)
-      const openOutputs =
-        runtime.abi === 'OpenOut'
-          ? yield* Effect.forEach(resultLanes.slice(1), (lane, ordinal) =>
-              FunctionBody.alloca(
-                body,
-                NativeType.laneType(types, lane),
-                `os${operation.destination.ordinal}_out${ordinal}`,
-              ),
-            )
-          : Object.freeze([])
       const result = yield* FunctionBody.callDirect(
         body,
         runtime.handle,
-        [...arguments_, ...openOutputs],
+        arguments_,
         `os${operation.destination.ordinal}`,
       )
       for (const root of [...nativeStorage.addressRoots].sort((left, right) => left - right)) {
@@ -276,23 +313,6 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         break
       }
       if (result === undefined) throw new RangeError('LLVM OS runtime returned no value')
-      if (runtime.abi === 'OpenOut') {
-        const values: Array<Value.Input> = [result]
-        for (const [ordinal, output] of openOutputs.entries()) {
-          const lane = resultLanes.at(ordinal + 1)
-          if (lane === undefined) throw new RangeError('LLVM OS open runtime lost an output lane')
-          values.push(
-            yield* FunctionBody.load(
-              body,
-              NativeType.laneType(types, lane),
-              output,
-              `os${operation.destination.ordinal}_out${ordinal}_value`,
-            ),
-          )
-        }
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(values))
-        break
-      }
       if (runtime.resultLaneCount === 1) {
         nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
         break

@@ -267,12 +267,15 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     }
   >()
   for (const operation of program.functions.flatMap((fn) => MirVerification.operations(fn))) {
-    if (operation._tag !== 'OsCall' || osRuntimes.has(operation.operation.name)) continue
-    const resultLanes = lanesFor(operation.type)
-    const abi =
-      operation.operation.name === 'osFileOpen' || operation.operation.name === 'osDirectoryOpen'
-        ? 'OpenOut'
-        : 'Direct'
+    if (
+      (operation._tag !== 'OsCall' && operation._tag !== 'OsOpen') ||
+      osRuntimes.has(operation.operation.name)
+    )
+      continue
+    const resultLanes = lanesFor(
+      operation._tag === 'OsOpen' ? operation.handleType : operation.type,
+    )
+    const abi = operation._tag === 'OsOpen' ? 'OpenOut' : 'Direct'
     const singleResultLane = resultLanes.at(0)
     let resultType: LlvmType.Type
     if (abi === 'OpenOut') {
@@ -301,7 +304,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
           yield* LlvmType.functionType(
             builder,
             resultType,
-            abi === 'OpenOut' ? [...parameters, pointer, pointer, pointer] : parameters,
+            abi === 'OpenOut' ? [...parameters, ...resultLanes.map(() => pointer)] : parameters,
           ),
         ),
         resultLaneCount: resultLanes.length,

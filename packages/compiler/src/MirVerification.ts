@@ -696,6 +696,15 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
       return [operation.destination, operation.layout]
     case 'HostWrite':
       return [operation.destination, operation.stream, operation.bytes]
+    case 'OsOpen':
+      return [
+        operation.destination,
+        operation.valid,
+        operation.handle,
+        ...operation.arguments,
+        operation.success,
+        operation.failure,
+      ]
     case 'OsCall':
       return [operation.destination, ...operation.arguments]
     case 'RawBufferFrom':
@@ -1558,6 +1567,14 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
         ...cleanupTypes(operation.presentCleanup),
         ...cleanupTypes(operation.absentCleanup),
       ]
+    case 'OsOpen':
+      return [
+        semanticType(operation.handleType),
+        semanticType(operation.type),
+        'bool',
+        ...cleanupTypes(operation.successCleanup),
+        ...cleanupTypes(operation.failureCleanup),
+      ]
     case 'RawBufferFrom':
       return [semanticType(operation.type), operation.element]
     case 'SharedFromAllocation':
@@ -1782,6 +1799,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.layout]
     case 'HostWrite':
       return [operation.stream, operation.bytes]
+    case 'OsOpen':
+      return [...operation.arguments, operation.success, operation.failure]
     case 'OsCall':
       return operation.arguments
     case 'RawBufferFrom':
@@ -3448,6 +3467,53 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 region: region.id,
                 detail:
                   'standard-stream write does not preserve destination, byte-view, unit, or typed-failure contracts',
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'OsOpen') {
+          const catalog = Intrinsic.findOperationById(operation.operation)
+          const rule = catalog?.rule._tag === 'BuiltinRule' ? catalog.rule : undefined
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const valid = fn.localTypes.at(operation.valid.ordinal)
+          const handle = fn.localTypes.at(operation.handle.ordinal)
+          const success = fn.localTypes.at(operation.success.ordinal)
+          const failure = fn.localTypes.at(operation.failure.ordinal)
+          const parameters = rule?.parameters.slice(0, -2)
+          const argumentsValid =
+            rule !== undefined &&
+            (rule.operation === 'OsFileOpen' || rule.operation === 'OsDirectoryOpen') &&
+            parameters?.length === operation.arguments.length &&
+            parameters.every((expected, ordinal) => {
+              const argument = operation.arguments.at(ordinal)
+              const actual = argument === undefined ? undefined : fn.localTypes.at(argument.ordinal)
+              return actual !== undefined && SilkType.equals(semanticType(actual), expected)
+            })
+          if (
+            catalog?.unsafe !== true ||
+            catalog.targets.includes('Wasm') ||
+            destination === undefined ||
+            valid?._tag !== 'bool' ||
+            handle?._tag !== 'Nominal' ||
+            !SilkType.equals(handle.type, SilkType.osHandle) ||
+            !SilkType.equals(operation.handleType.type, SilkType.osHandle) ||
+            success?._tag !== 'CallableValue' ||
+            success.type.parameters.length !== 1 ||
+            !SilkType.equals(success.type.parameters[0] ?? 'never', SilkType.osHandle) ||
+            !SilkType.equals(success.type.result, semanticType(operation.type)) ||
+            failure?._tag !== 'CallableValue' ||
+            failure.type.parameters.length !== 0 ||
+            !SilkType.equals(failure.type.result, semanticType(operation.type)) ||
+            !SilkType.equals(semanticType(destination), semanticType(operation.type)) ||
+            !argumentsValid
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidOsOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'OS open does not match its affine carrier signature',
               }),
             )
           }

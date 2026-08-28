@@ -5038,12 +5038,12 @@
     },
     {
       "operation": "Intrinsic.osFileOpen",
-      "signature": "unsafe fn Intrinsic.osFileOpen(root: &[u8], path: &[u8], mode: i32, reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<OsHandle>>",
+      "signature": "unsafe fn Intrinsic.osFileOpen<R>(root: &[u8], path: &[u8], mode: i32, reason: &mut i32, nativeCode: &mut u32, success: once fn(OsHandle) -> R, failure: once fn() -> R) -> Effect<R>",
       "unsafe": true,
       "admission": "Platform",
       "consumer": "silk/os_filesystem.fileOpen",
       "identity": "OsFileOpen",
-      "invariant": "root is an absolute native path; path is normalized provider-absolute; outputs are initialized; traversal rejects symlinks and namespace escape"
+      "invariant": "root is an absolute native path; path is normalized provider-absolute; status outputs are initialized; traversal rejects symlinks and namespace escape; success transfers one live handle only to the selected carrier"
     },
     {
       "operation": "Intrinsic.osFileRead",
@@ -5065,12 +5065,12 @@
     },
     {
       "operation": "Intrinsic.osDirectoryOpen",
-      "signature": "unsafe fn Intrinsic.osDirectoryOpen(root: &[u8], path: &[u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<OsHandle>>",
+      "signature": "unsafe fn Intrinsic.osDirectoryOpen<R>(root: &[u8], path: &[u8], reason: &mut i32, nativeCode: &mut u32, success: once fn(OsHandle) -> R, failure: once fn() -> R) -> Effect<R>",
       "unsafe": true,
       "admission": "Platform",
       "consumer": "silk/os_filesystem.directoryOpen",
       "identity": "OsDirectoryOpen",
-      "invariant": "root and path satisfy confined traversal and outputs are initialized"
+      "invariant": "root and path satisfy confined traversal; status outputs are initialized; success transfers one live handle only to the selected carrier"
     },
     {
       "operation": "Intrinsic.osDirectoryNext",

@@ -134,6 +134,75 @@ it.effect('lets checked scalar intrinsics choose a generic nominal carrier', () 
   }),
 )
 
+const affineCheckedCarrier = `import silk.u8 as u8
+
+union Checked<T> {
+  Present { value: T },
+  Absent
+}
+
+struct Token { marker: i32 }
+
+fn present(value: u8, token: Token) -> Checked<u8> {
+  let observed = token.marker
+  return Checked<u8>.Present { value: value }
+}
+
+fn absent() -> Checked<u8> {
+  return Checked<u8>.Absent
+}
+
+fn presentWith(token: Token) -> some<F: once fn(u8) -> Checked<u8>> F {
+  return present(move token)
+}
+
+fn value(self: Checked<u8>) -> i32 {
+  return match move self {
+    Checked<u8>.Present { value } => u8.toI32(value)
+    Checked<u8>.Absent => 0
+  }
+}
+
+pub fn main() -> i32 {
+  let firstPresent = Token { marker: 1 }
+  let secondPresent = Token { marker: 2 }
+  let succeeded = Intrinsic.u8CheckedAdd<Checked<u8>>(
+    u8.toU8(40),
+    u8.toU8(2),
+    presentWith(move firstPresent),
+    absent
+  )
+  let failed = Intrinsic.u8CheckedAdd<Checked<u8>>(
+    u8.toU8(255),
+    u8.toU8(1),
+    presentWith(move secondPresent),
+    absent
+  )
+  return value(move succeeded) + value(move failed)
+}`
+
+it.effect('cleans the unused affine carrier and invokes the selected carrier exactly once', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'integer/affine-checked-carrier',
+      new TextEncoder().encode(affineCheckedCarrier),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(
+      evaluated._tag,
+      'Completed',
+      JSON.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? `${value}n` : value), 2),
+    )
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+    assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'CallableApply').length, 2)
+    assert.strictEqual(
+      evaluated.trace.filter((event) => event._tag === 'CallableCleanup').length,
+      1,
+    )
+  }),
+)
+
 const characters = `import silk.u32 as u32
 import silk.char { fromU32, toU32 }
 import silk.option { Option }

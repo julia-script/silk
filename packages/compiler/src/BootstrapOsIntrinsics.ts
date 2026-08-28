@@ -1,11 +1,5 @@
 import type { BlockedReason, TraceEvent } from './BootstrapTrace.js'
-import type {
-  AggregateValue,
-  IntegerValue,
-  SliceValue,
-  UnionValue,
-  Value,
-} from './BootstrapValue.js'
+import type { AggregateValue, IntegerValue, SliceValue, Value } from './BootstrapValue.js'
 import type * as ChildProcess from './ChildProcess.js'
 import type * as HostInput from './HostInput.js'
 import type * as Mir from './Mir.js'
@@ -84,7 +78,6 @@ export interface ExecutionContext {
   readonly replaceReferenced: (local: Mir.LocalId, replacement: Value) => void
   readonly byteView: (local: Mir.LocalId) => ReadonlyArray<number>
   readonly writeByteView: (local: Mir.LocalId, bytes: ReadonlyArray<number>) => void
-  readonly optionValue: (element: Type.Type, payload?: Value) => UnionValue
   readonly handleValue: (handle: OsFileSystemHost.Handle) => AggregateValue
   readonly hostHandle: (local: Mir.LocalId) => OsFileSystemHost.Handle
 }
@@ -98,7 +91,7 @@ const blockedStep = (reason: BlockedReason): BoundaryStep =>
 /** Executes the host/OS boundary operations owned by the bootstrap OS actor. */
 export const execute = (
   context: ExecutionContext,
-  operation: Extract<Mir.Operation, { readonly _tag: 'HostWrite' | 'OsCall' }>,
+  operation: Extract<Mir.Operation, { readonly _tag: 'HostWrite' | 'OsOpen' | 'OsCall' }>,
 ): BoundaryStep | undefined => {
   const {
     state,
@@ -111,7 +104,6 @@ export const execute = (
     replaceReferenced,
     byteView,
     writeByteView,
-    optionValue,
     handleValue,
     hostHandle,
   } = context
@@ -180,10 +172,14 @@ export const execute = (
       })
       break
     }
+    case 'OsOpen':
     case 'OsCall': {
       const arguments_ = operation.arguments
       const commit = (result: Value): void =>
-        write(operation.destination, { value: result, fromCall: false })
+        write(operation._tag === 'OsOpen' ? operation.valid : operation.destination, {
+          value: result,
+          fromCall: false,
+        })
       const name = operation.operation.name
       const clockResult = (
         completed: boolean,
@@ -589,10 +585,13 @@ export const execute = (
               : invoke(() => host.directoryOpen(byteView(root), byteView(path)))
           if (result._tag === 'Failure') {
             status(result)
-            commit(optionValue(Type.osHandle))
+            commit(integerValue('i32', 0))
           } else {
             status()
-            commit(optionValue(Type.osHandle, handleValue(result.handle)))
+            if (operation._tag !== 'OsOpen')
+              throw new RangeError('OS handle open lost its affine carrier operation')
+            write(operation.handle, { value: handleValue(result.handle), fromCall: false })
+            commit(integerValue('i32', 1))
           }
           break
         }
@@ -780,17 +779,7 @@ export const execute = (
       } catch (cause) {
         const failure = osFailure(cause)
         status(failure)
-        commit(
-          operation.type._tag === 'Union'
-            ? optionValue(
-                operation.type.type.members.some((member) =>
-                  Type.equals(member, Type.some(Type.osHandle)),
-                )
-                  ? Type.osHandle
-                  : 'usize',
-              )
-            : integerValue('i32', 0),
-        )
+        commit(integerValue('i32', 0))
       }
       break
     }

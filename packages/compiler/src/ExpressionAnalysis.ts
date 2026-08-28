@@ -1101,7 +1101,10 @@ export const intrinsicStruct = (
         name: type.name,
       }),
     }),
-    visibility: 'Public',
+    visibility:
+      Type.equals(type, Type.layout) || Type.equals(type, Type.invalidAlignment)
+        ? 'Public'
+        : 'Private',
     typeParameters: Object.freeze([]),
     name: Object.freeze({ _tag: 'Present', spelling: type.name, token }),
     fields: Object.freeze(
@@ -2742,6 +2745,7 @@ export const analyzeAggregateLiteral = (
   const authorized =
     definingModule !== undefined &&
     aggregate !== undefined &&
+    (aggregate.visibility === 'Public' || definingModule === source.id) &&
     aggregateFields.every((field) => field.visibility === 'Public' || definingModule === source.id)
   const accessDiagnostic =
     nominal !== undefined && !authorized
