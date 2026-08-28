@@ -226,10 +226,6 @@ pub effect fn logError(
 ///   }
 /// }
 /// ```
-///
-/// This is ordinary Silk composition: success is mapped into `Result.Success`, then `catchAll`
-/// maps the complete typed failure value into `Result.Failure`. Compound failure unions and
-/// requirements are preserved, and the exact `once fn` adapters transfer affine payloads once.
 pub effect fn result<A, E, ?R>(
   protected: once Effect<A ! E ? R>
 ) -> Result<A, E> ? R {

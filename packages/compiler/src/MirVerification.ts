@@ -2450,13 +2450,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           region.runner.classification === 'Unknown'
         )
           return []
-        const declaration = region.runner.declaration
-        return declaration === undefined ||
-          !self.functions.some(
-            (candidate) =>
-              originReachable.has(instanceText(candidate.instance)) &&
-              matchesInstance(candidate, declaration, region.runner.typeArguments),
-          )
+        return !originReachable.has(instanceText(fn.instance))
           ? [Object.freeze({ fn, region })]
           : []
       }),
@@ -2468,7 +2462,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         _tag: 'Violation',
         rule: 'OrphanSuspensionMachinery',
         function: orphanRelay.fn.id,
-        detail: `suspendable runner ${orphanRelay.region.runner.declaration === undefined ? 'unknown' : targetText(orphanRelay.region.runner.declaration)} has no reachable explicit transfer origin (origin-reachable: ${
+        detail: `suspendable relay through ${orphanRelay.region.runner.declaration === undefined ? 'an unknown runner' : targetText(orphanRelay.region.runner.declaration)} belongs to a function with no reachable explicit transfer origin (origin-reachable: ${
           self.functions
             .filter((fn) => originReachable.has(instanceText(fn.instance)))
             .map((fn) => targetText(fn.id))
@@ -4557,7 +4551,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                         : coverageFieldPathType(self.layout, arm.member, entry.path)
                     return (
                       selected !== undefined &&
-                      cleanupMatchesSemanticType(self.layout, entry.cleanup, selected)
+                      (arm.member?._tag === 'NominalUnionVariant'
+                        ? cleanupMatchesSemanticType(self.layout, entry.cleanup, selected)
+                        : SilkType.equals(selected, entry.cleanup.type))
                     )
                   })
                 : arm.selected.cleanup.length === 0)

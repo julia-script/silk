@@ -271,10 +271,6 @@ pub fn main() -> i32 {
 }
 ```
 
-This is ordinary Silk composition: success is mapped into `Result.Success`, then `catchAll`
-maps the complete typed failure value into `Result.Failure`. Compound failure unions and
-requirements are preserved, and the exact `once fn` adapters transfer affine payloads once.
-
 <a id="declaration-73696c6b2f6566666563743a3a6d6170426f7468"></a>
 
 ## `mapBoth`
