@@ -106,7 +106,8 @@ Notes on what is *not* here:
   and `continue`.
 - `if` is a statement, not an expression. There is no `let x = if ...`. Declare the binding `mut`
   and assign it in each branch, or `return` from the branches. (`match` *is* an expression, but its
-  scrutinee must be a struct or union — it cannot branch on a scalar comparison.)
+  scrutinee must be a struct, structural union, or scalar enum — it does not replace a scalar
+  comparison.)
 - Conditions take no parentheses and the braces are mandatory.
 
 Arithmetic is homogeneous: both operands must already be the *same* integer type. Silk performs no
@@ -206,10 +207,38 @@ bind that returned view while its source remains live. This deliberately narrow 
 operations such as collection access without named lifetime annotations; a returned view cannot be
 placed inside owned data or an Effect result.
 
-## Unions and match
+## Enums, unions, and match
 
-Silk has no `enum`. Instead, a value can have a *union* type written `A | B`, and `match`
-takes it apart. `match` is an expression, so it can produce a value:
+Silk has two ways to model a closed set of alternatives. A scalar `enum` is a nominal set of named,
+fieldless members. Qualify each member with its enum name, including in a `match`:
+
+```silk
+enum Status {
+  Pending,
+  Ready,
+  Done,
+}
+
+fn statusCode(status: Status) -> i32 {
+  return match status {
+    Status.Pending => 0
+    Status.Ready => 1
+    Status.Done => 2
+  }
+}
+
+pub fn main() -> i32 {
+  return statusCode(Status.Ready)
+}
+```
+
+Scalar enums are copyable and use `u8` as their backing representation by default. You can select
+another fixed-width integer with a declaration such as `enum(i16) Status`, assign explicit integer
+discriminants to members, and read a member's backing value with `Status.value(status)`. Enums do
+not carry payloads or convert implicitly to or from integers.
+
+When alternatives need data, use a *structural union* written `A | B`. A union value has one active
+member, and `match` takes it apart. `match` is an expression, so it can produce a value:
 
 ```silk
 pub struct Empty {}
@@ -239,8 +268,8 @@ Points worth noting:
 - `Empty nothing` binds the whole member rather than its fields.
 - `match move state` states the access mode. The alternatives are `match value` (only for copyable
   values), `match &value`, and `match &mut value`.
-- Matches are checked for exhaustiveness. Leaving out `Empty` is a compile error naming the
-  member you missed, so adding a member to a union tells you every place that must change.
+- Matches are checked for exhaustiveness. Leaving out `Empty` or `Status.Done` is a compile error
+  naming the member you missed, so changing an enum or union tells you every match that must change.
 
 ## Effects: failure in the type
 

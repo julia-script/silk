@@ -24,7 +24,8 @@ defined by [ownership and borrowing](ownership-and-borrowing.md).
 - A **reachable path** is a possible route through the body that has not already returned, failed,
   diverged, broken, or continued.
 - A **guard** is the optional boolean expression between a match pattern and `=>`.
-- **Coverage** is the set of possible nominal alternatives handled by a match's arms.
+- **Coverage** is the set of possible structural-union members or scalar-enum members handled by a
+  match's arms.
 - **Narrowing** gives a value a more precise type within one proven branch without changing its
   declared type outside that branch.
 
