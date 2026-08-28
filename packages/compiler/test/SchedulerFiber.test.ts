@@ -917,7 +917,9 @@ it.effect(
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
     }),
-  { timeout: 120_000 },
+  // This is the suite's largest scheduler program and can exceed two minutes while the compiler's
+  // parallel acceptance workers contend for CPU; focused runs remain substantially faster.
+  { timeout: 240_000 },
 )
 
 it.effect(
