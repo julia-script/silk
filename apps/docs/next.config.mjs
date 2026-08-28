@@ -22,6 +22,18 @@ const config = {
         source: '/editor/:path*',
         headers: editorIsolationHeaders,
       },
+      {
+        source: '/docs/:path*',
+        headers: [{ key: 'Vary', value: 'Accept' }],
+      },
+    ];
+  },
+  async rewrites() {
+    return [
+      {
+        source: '/docs/:path*.md',
+        destination: '/llms.mdx/docs/:path*',
+      },
     ];
   },
 };
