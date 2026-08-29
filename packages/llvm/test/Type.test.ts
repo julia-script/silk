@@ -97,6 +97,83 @@ it.effect('matches pinned LLVM aggregate alignment for structures and arrays', (
   }),
 )
 
+it.effect('matches pinned LLVM 22.1.8 integer allocation size and aggregate propagation', () =>
+  Effect.gen(function* () {
+    const cases = [
+      { name: 'complete empty', dataLayout: '' },
+      { name: 'endian only', dataLayout: 'e' },
+      { name: 'sparse override', dataLayout: 'e-i16:32-i32:64' },
+    ] as const
+
+    for (const testCase of cases) {
+      const builder = yield* Builder.make({ dataLayout: testCase.dataLayout })
+      const i9 = yield* Type.integer(builder, 9)
+      const i24 = yield* Type.integer(builder, 24)
+      const i40 = yield* Type.integer(builder, 40)
+      const i65 = yield* Type.integer(builder, 65)
+
+      const expected =
+        testCase.name === 'sparse override'
+          ? [
+              [4n, 4n],
+              [8n, 8n],
+              [8n, 4n],
+              [12n, 4n],
+            ]
+          : [
+              [2n, 2n],
+              [4n, 4n],
+              [8n, 4n],
+              [12n, 4n],
+            ]
+
+      const types = [i9, i24, i40, i65]
+      for (const [index, type] of types.entries()) {
+        const result = expected[index]
+        assert.isDefined(result, `${testCase.name}: missing expected layout for type ${index}`)
+        assert.strictEqual(yield* Type.sizeOf(builder, type), result[0], testCase.name)
+        assert.strictEqual(
+          (yield* Type.alignmentOf(builder, type)).byteUnits,
+          result[1],
+          testCase.name,
+        )
+      }
+
+      if (testCase.name === 'sparse override') {
+        const array = yield* Type.array(builder, i9, 3)
+        const vector = yield* Type.vector(builder, i9, 3)
+        const naturallyAlignedVector = yield* Type.vector(builder, i9, 8)
+        const explicitVectorBuilder = yield* Builder.make({
+          dataLayout: 'e-i16:32-i32:64-v27:64',
+        })
+        const explicitVectorElement = yield* Type.integer(explicitVectorBuilder, 9)
+        const explicitlyAlignedVector = yield* Type.vector(
+          explicitVectorBuilder,
+          explicitVectorElement,
+          3,
+        )
+        const structure = yield* Type.structure(builder, [i9, i40])
+        assert.strictEqual(yield* Type.sizeOf(builder, array), 12n)
+        assert.strictEqual((yield* Type.alignmentOf(builder, array)).byteUnits, 4n)
+        assert.strictEqual(yield* Type.sizeOf(builder, vector), 4n)
+        assert.strictEqual((yield* Type.alignmentOf(builder, vector)).byteUnits, 4n)
+        assert.strictEqual(yield* Type.sizeOf(builder, naturallyAlignedVector), 16n)
+        assert.strictEqual(
+          (yield* Type.alignmentOf(builder, naturallyAlignedVector)).byteUnits,
+          16n,
+        )
+        assert.strictEqual(yield* Type.sizeOf(explicitVectorBuilder, explicitlyAlignedVector), 8n)
+        assert.strictEqual(
+          (yield* Type.alignmentOf(explicitVectorBuilder, explicitlyAlignedVector)).byteUnits,
+          8n,
+        )
+        assert.strictEqual(yield* Type.sizeOf(builder, structure), 12n)
+        assert.strictEqual((yield* Type.alignmentOf(builder, structure)).byteUnits, 4n)
+      }
+    }
+  }),
+)
+
 it.effect('accepts boundary widths and rejects invalid widths before mutation', () =>
   Effect.gen(function* () {
     const builder = yield* Builder.make()
