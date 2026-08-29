@@ -68,7 +68,13 @@ Integer literals SHALL retain exact magnitude until typed. An immediate integer 
 
 ### Requirement: Integer operations are homogeneous and explicit
 
-Ordinary arithmetic SHALL accept one identical integer type and trap on overflow, invalid division/remainder, or invalid shift counts. Comparisons SHALL return `bool`. Every integer SHALL expose bitwise operations, shifts, and rotates. Named recoverable checked operations SHALL return `Option<T>`; wrapping and saturating variants SHALL return `T`. No numeric conversion SHALL be implicit.
+Ordinary arithmetic SHALL accept one identical integer type and trap on overflow, invalid
+division/remainder, or invalid shift counts. Comparisons SHALL return `bool`. Every integer SHALL
+expose bitwise operations, shifts, and rotates. Named recoverable checked operations SHALL remain
+ordinary standard-library wrappers returning direct nominal `Option<T>` values; their sealed scalar
+primitives SHALL report only the low-level present-or-absent outcome through carrier-neutral inputs
+and MUST NOT construct or recognize `Option` by spelling. Wrapping and saturating variants SHALL
+return `T`. No numeric conversion SHALL be implicit.
 
 #### Scenario: Trap ordinary byte overflow
 
@@ -78,12 +84,17 @@ Ordinary arithmetic SHALL accept one identical integer type and trap on overflow
 #### Scenario: Recover checked overflow
 
 - **WHEN** `u8.checkedAdd(255, 1)` executes
-- **THEN** it returns `None`, while representable addition returns `Some<u8>`
+- **THEN** it returns `Option<u8>.None`, while representable addition returns `Option<u8>.Some`
 
 #### Scenario: Reject mixed arithmetic
 
 - **WHEN** an expression combines `i32` and `i64` without conversion
 - **THEN** analysis rejects it without choosing a wider type
+
+#### Scenario: Rename a checked wrapper and carrier
+
+- **WHEN** ordinary source calls the same checked scalar primitive with equivalent present and absent constructors for another nominal union
+- **THEN** the primitive reports the same arithmetic outcome without compiler registration of either carrier or variant spelling
 
 ### Requirement: Every admitted integer operation has engine parity
 
@@ -172,4 +183,3 @@ Rotate-left and rotate-right SHALL interpret the count modulo the operand's bit 
 #### Scenario: Rotate by a negative count wraps
 - **WHEN** a program evaluates `rotate_left(x, -1)` on an odd `i32` value on any executor
 - **THEN** the result equals `rotate_left(x, 31)` — the low bit wraps into bit 31 — identically on the interpreter, the wasm backend, and the native backend
-

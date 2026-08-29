@@ -94,11 +94,12 @@ valid UTF-8, and it SHALL NOT have an absent case: a host that cannot answer is 
 
 Canonical standard-library source SHALL define `OsHostInput` as an ordinary provider reading the
 process command line, environment block, and working directory through unsafe `Intrinsic` operations
-using the same `Option<usize>` result with low-level reason and native-code outputs as the OS
-filesystem operations. A success SHALL report the value's complete byte length and copy the prefix
-that fits, so an undersized buffer is completed by one exactly sized second pass. The not-found
-reason SHALL become absence and any other reason SHALL become `HostInputError`. No compiler phase
-MAY recognize the `HostInput`, `OsHostInput`, or operation spellings to select special behavior.
+returning `bool` and writing complete length, low-level reason, and native code to explicit initialized
+scalar outputs. Success SHALL report the value's complete byte length and copy the prefix that fits,
+so an undersized buffer is completed by one exactly sized second pass. A `false` result with the
+not-found reason SHALL become ordinary absence through the nominal `Option` declaration; any other
+`false` result SHALL become `HostInputError`. No compiler phase MAY construct Option or recognize the
+`HostInput`, `OsHostInput`, or operation spellings to select special behavior.
 
 #### Scenario: Complete a value longer than the provider buffer
 

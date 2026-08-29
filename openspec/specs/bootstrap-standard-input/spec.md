@@ -69,11 +69,12 @@ distinct from the write-side stream failure and SHALL NOT be used to signal the 
 ### Requirement: The native provider reads through one unsafe OS primitive
 
 Canonical standard-library source SHALL define `OsStandardInput` as an ordinary provider that reads
-the process standard-input descriptor through one unsafe `Intrinsic` operation using the same
-`Option<usize>` result with low-level reason and native-code outputs as the OS filesystem
-operations. A zero-length transfer SHALL become `EndOfInput` and an absent result SHALL become
-`StreamReadError`. No compiler phase MAY recognize the `StandardInput`, `OsStandardInput`,
-`ReadOutcome`, or `read` spellings to select special behavior.
+the process standard-input descriptor through one unsafe `Intrinsic` operation returning `bool` and
+writing transferred count, low-level reason, and native code to explicit initialized scalar outputs.
+A successful zero-length transfer SHALL become `EndOfInput`; a successful positive count SHALL become
+`Filled`; and `false` SHALL become `StreamReadError`. No compiler phase MAY construct Option or
+recognize the `StandardInput`, `OsStandardInput`, `ReadOutcome`, or `read` spellings to select special
+behavior.
 
 #### Scenario: Read through the native implementation
 
