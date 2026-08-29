@@ -56,6 +56,7 @@ import {
   heapBase,
   heapHeaderBytes,
   heapReleaseBody,
+  operationCleanupPlans,
   stackLimit,
 } from './WasmMemory.js'
 import * as WasmSuspension from './WasmSuspension.js'
@@ -909,34 +910,6 @@ const localSharedCleanupDepth = (cleanup: CleanupPlan.CleanupPlan): number => {
       return Math.max(0, ...cleanup.alternatives.map(localSharedCleanupDepth))
     default:
       return 0
-  }
-}
-
-const operationCleanupPlans = (
-  operation: Mir.Operation,
-): ReadonlyArray<CleanupPlan.CleanupPlan> => {
-  switch (operation._tag) {
-    case 'SlotDrop':
-    case 'Drop':
-      return Object.freeze([operation.cleanup])
-    case 'SharedWithMut':
-      return Object.freeze([operation.useCleanup, operation.conflictCleanup])
-    case 'ExecutionPark':
-      return Object.freeze([operation.guardCleanup, operation.registerCleanup])
-    case 'PropagateEffectFailure':
-    case 'RunEffect':
-    case 'RunEffectValue':
-    case 'RunEffectComposite':
-    case 'RunStaticEffect':
-      return Object.freeze((operation.releases ?? []).map((release) => release.cleanup))
-    case 'CloseEffectEntry':
-      return Object.freeze(operation.failures.map((failure) => failure.cleanup))
-    case 'Match':
-      return Object.freeze(
-        operation.arms.flatMap((arm) => arm.selected.cleanup.map((entry) => entry.cleanup)),
-      )
-    default:
-      return Object.freeze([])
   }
 }
 
@@ -7666,6 +7639,86 @@ const branchDepth = (
   return depth
 }
 
+const restoreInvocationFrame = (
+  layout: Layout,
+  memory: MemoryContext | undefined,
+): ReadonlyArray<Instr.Instr> =>
+  memory === undefined || layout.frameBase === undefined
+    ? []
+    : [Instr.localGet(layout.frameBase), Instr.globalSet(memory.stackPointer)]
+
+const reserveInvocationFrame = (
+  layout: Layout,
+  memory: MemoryContext | undefined,
+): ReadonlyArray<Instr.Instr> => {
+  if (
+    memory === undefined ||
+    layout.frameBase === undefined ||
+    layout.frameEnd === undefined ||
+    layout.framePages === undefined
+  ) {
+    return []
+  }
+  if (memory.frame.size === 0) {
+    return [Instr.globalGet(memory.stackPointer), Instr.localSet(layout.frameBase)]
+  }
+  const report = (reason: number): ReadonlyArray<Instr.Instr> => [
+    Instr.i32Const(statusAddress),
+    Instr.i32Const(reason),
+    Instr.memoryAccess('i32.store', memory.memory),
+    Instr.i32Const(memory.stackBase),
+    Instr.globalSet(memory.stackPointer),
+    Instr.op('unreachable'),
+  ]
+  const boundCheck =
+    memory.stackLimit === undefined
+      ? []
+      : [
+          Instr.localGet(layout.frameEnd),
+          Instr.i32Const(memory.stackLimit),
+          Instr.op('i32.gt_u'),
+          Instr.ifElse(Instr.emptyBlockType, report(statusStackOverflow), []),
+        ]
+  return [
+    Instr.globalGet(memory.stackPointer),
+    Instr.localSet(layout.frameBase),
+    Instr.localGet(layout.frameBase),
+    Instr.i32Const(memory.frame.size),
+    Instr.op('i32.add'),
+    Instr.localTee(layout.frameEnd),
+    Instr.localGet(layout.frameBase),
+    Instr.op('i32.lt_u'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    ...boundCheck,
+    Instr.localGet(layout.frameEnd),
+    Instr.i32Const(1),
+    Instr.op('i32.sub'),
+    Instr.i32Const(16),
+    Instr.op('i32.shr_u'),
+    Instr.i32Const(1),
+    Instr.op('i32.add'),
+    Instr.localSet(layout.framePages),
+    Instr.localGet(layout.framePages),
+    Instr.memorySize(memory.memory),
+    Instr.op('i32.gt_u'),
+    Instr.ifElse(
+      Instr.emptyBlockType,
+      [
+        Instr.localGet(layout.framePages),
+        Instr.memorySize(memory.memory),
+        Instr.op('i32.sub'),
+        Instr.memoryGrow(memory.memory),
+        Instr.i32Const(-1),
+        Instr.op('i32.eq'),
+        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+      ],
+      [],
+    ),
+    Instr.localGet(layout.frameEnd),
+    Instr.globalSet(memory.stackPointer),
+  ]
+}
+
 /** Direct structured emission from canonical regions; no CFG recovery or dispatch loop exists. */
 const emitBody = (
   context: WasmEmitContext.WasmEmitContext<Layout, WasmSuspensionRuntime>,
@@ -7692,90 +7745,8 @@ const emitBody = (
     }
     return first
   }
-  const restoreFrame = (): ReadonlyArray<Instr.Instr> =>
-    memory === undefined || layout.frameBase === undefined
-      ? []
-      : [Instr.localGet(layout.frameBase), Instr.globalSet(memory.stackPointer)]
-  const reserveFrame = (): ReadonlyArray<Instr.Instr> => {
-    if (
-      memory === undefined ||
-      layout.frameBase === undefined ||
-      layout.frameEnd === undefined ||
-      layout.framePages === undefined
-    ) {
-      return []
-    }
-    if (memory.frame.size === 0) {
-      return [Instr.globalGet(memory.stackPointer), Instr.localSet(layout.frameBase)]
-    }
-    /**
-     * Report a deliberate trap rather than just taking one: name the reason in the status word, and
-     * rewind the stack pointer to the base so the trap is a single legible event instead of a
-     * module that answers every later call with the same trap. Whatever the abandoned frames owned
-     * is leaked — no cleanup ran — but the allocator's own structures are untouched, so a host that
-     * catches this can still read the heap back and get true answers out of it.
-     */
-    const report = (reason: number): ReadonlyArray<Instr.Instr> => [
-      Instr.i32Const(statusAddress),
-      Instr.i32Const(reason),
-      Instr.memoryAccess('i32.store', memory.memory),
-      Instr.i32Const(memory.stackBase),
-      Instr.globalSet(memory.stackPointer),
-      Instr.op('unreachable'),
-    ]
-    /**
-     * One comparison against an address known at emission, on the path that already computed
-     * `frameEnd`. A reservation that would cross into the heap reports here, before the stack
-     * pointer moves, instead of being noticed downstream as corrupted memory.
-     */
-    const boundCheck =
-      memory.stackLimit === undefined
-        ? []
-        : [
-            Instr.localGet(layout.frameEnd),
-            Instr.i32Const(memory.stackLimit),
-            Instr.op('i32.gt_u'),
-            Instr.ifElse(Instr.emptyBlockType, report(statusStackOverflow), []),
-          ]
-    return [
-      Instr.globalGet(memory.stackPointer),
-      Instr.localSet(layout.frameBase),
-      Instr.localGet(layout.frameBase),
-      Instr.i32Const(memory.frame.size),
-      Instr.op('i32.add'),
-      Instr.localTee(layout.frameEnd),
-      Instr.localGet(layout.frameBase),
-      Instr.op('i32.lt_u'),
-      Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
-      ...boundCheck,
-      Instr.localGet(layout.frameEnd),
-      Instr.i32Const(1),
-      Instr.op('i32.sub'),
-      Instr.i32Const(16),
-      Instr.op('i32.shr_u'),
-      Instr.i32Const(1),
-      Instr.op('i32.add'),
-      Instr.localSet(layout.framePages),
-      Instr.localGet(layout.framePages),
-      Instr.memorySize(memory.memory),
-      Instr.op('i32.gt_u'),
-      Instr.ifElse(
-        Instr.emptyBlockType,
-        [
-          Instr.localGet(layout.framePages),
-          Instr.memorySize(memory.memory),
-          Instr.op('i32.sub'),
-          Instr.memoryGrow(memory.memory),
-          Instr.i32Const(-1),
-          Instr.op('i32.eq'),
-          Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
-        ],
-        [],
-      ),
-      Instr.localGet(layout.frameEnd),
-      Instr.globalSet(memory.stackPointer),
-    ]
-  }
+  const restoreFrame = (): ReadonlyArray<Instr.Instr> => restoreInvocationFrame(layout, memory)
+  const reserveFrame = (): ReadonlyArray<Instr.Instr> => reserveInvocationFrame(layout, memory)
   const loadBorrowedParameters = (): ReadonlyArray<Instr.Instr> => {
     if (layout.borrowPointers.size === 0) return []
     if (memory === undefined) throw new RangeError('Wasm Effect borrow has no private memory')
@@ -9047,7 +9018,15 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         }),
       ]),
     })
-    const helperFrame = framePlan(helperFunction, program.layout)
+    const helperFrame = framePlan(
+      helperFunction,
+      program.layout,
+      [...executionPackageCleanups.values()].flatMap((packageCleanup) => [
+        packageCleanup.body,
+        packageCleanup.endpoint,
+        packageCleanup.callback,
+      ]),
+    )
     const helperLayout = layoutOf(helperFunction, program.layout, helperFrame, debug, false)
     const helperMemory: MemoryContext = Object.freeze({
       memory: privateMemory,
@@ -9079,7 +9058,11 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     )
     yield* FuncActor.define(builder, executionCleanupHelper, {
       locals: helperLayout.declared,
-      body: operation.releaseExecutionBaseInline(0),
+      body: [
+        ...reserveInvocationFrame(helperLayout, helperMemory),
+        ...operation.releaseExecutionBaseInline(0),
+        ...restoreInvocationFrame(helperLayout, helperMemory),
+      ],
     })
   }
 
@@ -9192,7 +9175,11 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     })
     yield* FuncActor.define(builder, handle, {
       locals: cleanupLayout.declared,
-      body,
+      body: [
+        ...reserveInvocationFrame(cleanupLayout, memory),
+        ...body,
+        ...restoreInvocationFrame(cleanupLayout, memory),
+      ],
     })
   }
 

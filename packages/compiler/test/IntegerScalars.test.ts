@@ -203,6 +203,86 @@ it.effect('cleans the unused affine carrier and invokes the selected carrier exa
   }),
 )
 
+const checkedScalarNominalUnionCleanup = `import silk.i8 as i8
+import silk.u8 as u8
+
+union Checked<T> {
+  Present { value: T },
+  Absent
+}
+
+struct Guard {
+  left: i8
+  right: i8
+}
+
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let observed = i8.toI32(self.left) + i8.toI32(self.right)
+    if observed != 42 {
+      let boom = 1 / 0
+    }
+    return ()
+  }
+}
+
+union Choice {
+  Small { marker: i8, guard: Guard },
+  Wide { value: i64 }
+}
+
+fn present(value: u8, choice: Choice) -> Checked<u8> {
+  drop choice
+  return Checked<u8>.Present { value: value }
+}
+
+fn absent() -> Checked<u8> {
+  return Checked<u8>.Absent
+}
+
+fn presentWith(choice: Choice) -> some<F: once fn(u8) -> Checked<u8>> F {
+  return present(move choice)
+}
+
+fn value(self: Checked<u8>) -> i32 {
+  return match move self {
+    Checked<u8>.Present { value } => u8.toI32(value)
+    Checked<u8>.Absent => 42
+  }
+}
+
+pub fn main() -> i32 {
+  let choice = Choice.Small {
+    marker: i8.toI8(7),
+    guard: Guard { left: i8.toI8(19), right: i8.toI8(23) }
+  }
+  let failed = Intrinsic.u8CheckedAdd<Checked<u8>>(
+    u8.toU8(255),
+    u8.toU8(1),
+    presentWith(move choice),
+    absent
+  )
+  return value(move failed)
+}`
+
+it.effect('reserves roots and nominal-union scratch for unused checked-scalar callbacks', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'integer/checked-scalar-nominal-union-cleanup',
+      new TextEncoder().encode(checkedScalarNominalUnionCleanup),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
 const characters = `import silk.u32 as u32
 import silk.char { fromU32, toU32 }
 import silk.option { Option }

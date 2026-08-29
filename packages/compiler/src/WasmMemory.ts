@@ -38,33 +38,67 @@ export interface FramePlan {
   readonly alignment: number
 }
 
-const operationCleanupPlans = (
+export interface OperationCleanupEntry {
+  readonly cleanup: CleanupPlan.CleanupPlan
+  readonly local?: Mir.LocalId
+}
+
+export const operationCleanupEntries = (
   operation: Mir.Operation,
-): ReadonlyArray<CleanupPlan.CleanupPlan> => {
+): ReadonlyArray<OperationCleanupEntry> => {
   switch (operation._tag) {
-    case 'SlotDrop':
     case 'Drop':
-      return Object.freeze([operation.cleanup])
+      return Object.freeze([Object.freeze({ cleanup: operation.cleanup, local: operation.local })])
+    case 'SlotDrop':
+      return Object.freeze([Object.freeze({ cleanup: operation.cleanup })])
+    case 'CheckedScalar':
+      return Object.freeze([
+        Object.freeze({ cleanup: operation.presentCleanup, local: operation.present }),
+        Object.freeze({ cleanup: operation.absentCleanup, local: operation.absent }),
+      ])
     case 'SharedWithMut':
-      return Object.freeze([operation.useCleanup, operation.conflictCleanup])
+      return Object.freeze([
+        Object.freeze({ cleanup: operation.useCleanup, local: operation.use }),
+        Object.freeze({ cleanup: operation.conflictCleanup, local: operation.onConflict }),
+      ])
     case 'ExecutionPark':
-      return Object.freeze([operation.guardCleanup, operation.registerCleanup])
+      return Object.freeze([
+        Object.freeze({ cleanup: operation.guardCleanup, local: operation.guard }),
+        Object.freeze({ cleanup: operation.registerCleanup, local: operation.register }),
+      ])
     case 'PropagateEffectFailure':
     case 'RunEffect':
     case 'RunEffectValue':
     case 'RunEffectComposite':
     case 'RunStaticEffect':
-      return Object.freeze((operation.releases ?? []).map((release) => release.cleanup))
+      return Object.freeze(
+        (operation.releases ?? []).map((release) =>
+          Object.freeze({ cleanup: release.cleanup, local: release.local }),
+        ),
+      )
     case 'CloseEffectEntry':
-      return Object.freeze(operation.failures.map((failure) => failure.cleanup))
+      return Object.freeze(
+        operation.failures.map((failure) =>
+          Object.freeze({ cleanup: failure.cleanup, local: failure.payload }),
+        ),
+      )
     case 'Match':
       return Object.freeze(
-        operation.arms.flatMap((arm) => arm.selected.cleanup.map((entry) => entry.cleanup)),
+        operation.arms.flatMap((arm) =>
+          arm.selected.cleanup.map((entry) =>
+            Object.freeze({ cleanup: entry.cleanup, local: entry.destination }),
+          ),
+        ),
       )
     default:
       return Object.freeze([])
   }
 }
+
+export const operationCleanupPlans = (
+  operation: Mir.Operation,
+): ReadonlyArray<CleanupPlan.CleanupPlan> =>
+  Object.freeze(operationCleanupEntries(operation).map((entry) => entry.cleanup))
 
 const nominalUnionScratchRequirements = (
   cleanups: ReadonlyArray<CleanupPlan.CleanupPlan>,
@@ -119,7 +153,11 @@ const nominalUnionScratchRequirements = (
   return Object.freeze(requirements.map((requirement) => Object.freeze(requirement)))
 }
 
-export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
+export const framePlan = (
+  fn: Mir.MirFunction,
+  plan: LayoutPlan.Plan,
+  additionalCleanups: ReadonlyArray<CleanupPlan.CleanupPlan> = Object.freeze([]),
+): FramePlan => {
   const formations = MirVerification.operations(fn).filter(
     (operation): operation is Extract<Mir.Operation, { readonly _tag: 'BeginLoan' }> =>
       operation._tag === 'BeginLoan',
@@ -147,62 +185,16 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
   ])
   const rootOrdinals = new Set([
     ...escaping,
-    // A hook-bearing drop passes `&mut self` into its hook, so the owner needs frame storage.
-    ...MirVerification.operations(fn).flatMap((operation) => {
-      const droppedOrdinals: Array<number> = []
-      if (operation._tag === 'Drop') {
-        if (
-          CleanupPlan.hasHook(operation.cleanup) &&
-          fn.localTypes.at(operation.local.ordinal)?._tag !== 'EffectBorrow'
-        ) {
-          droppedOrdinals.push(operation.local.ordinal)
-        }
-      } else if (
-        operation._tag === 'RunEffect' ||
-        operation._tag === 'RunEffectValue' ||
-        operation._tag === 'RunEffectComposite' ||
-        operation._tag === 'RunStaticEffect'
-      ) {
-        for (const release of operation.releases ?? []) {
-          if (
-            CleanupPlan.hasHook(release.cleanup) &&
-            fn.localTypes.at(release.local.ordinal)?._tag !== 'EffectBorrow'
-          ) {
-            droppedOrdinals.push(release.local.ordinal)
-          }
-        }
-      }
-      return [
-        ...droppedOrdinals,
-        ...(operation._tag === 'CloseEffectEntry'
-          ? operation.failures.flatMap((failure) =>
-              CleanupPlan.hasHook(failure.cleanup) ? [failure.payload.ordinal] : [],
-            )
-          : []),
-        ...(operation._tag === 'SharedWithMut'
-          ? [
-              ...(CleanupPlan.hasHook(operation.useCleanup) &&
-              fn.localTypes.at(operation.use.ordinal)?._tag !== 'EffectBorrow'
-                ? [operation.use.ordinal]
-                : []),
-              ...(CleanupPlan.hasHook(operation.conflictCleanup) &&
-              fn.localTypes.at(operation.onConflict.ordinal)?._tag !== 'EffectBorrow'
-                ? [operation.onConflict.ordinal]
-                : []),
-            ]
-          : []),
-        ...(operation._tag === 'Match'
-          ? operation.arms.flatMap((arm) =>
-              arm.selected.cleanup.flatMap((entry) =>
-                CleanupPlan.hasHook(entry.cleanup) &&
-                fn.localTypes.at(entry.destination.ordinal)?._tag !== 'EffectBorrow'
-                  ? [entry.destination.ordinal]
-                  : [],
-              ),
-            )
-          : []),
-      ]
-    }),
+    // A hook-bearing release passes `&mut self` into its hook, so its MIR owner needs frame storage.
+    ...MirVerification.operations(fn).flatMap((operation) =>
+      operationCleanupEntries(operation).flatMap((entry) =>
+        entry.local !== undefined &&
+        CleanupPlan.hasHook(entry.cleanup) &&
+        fn.localTypes.at(entry.local.ordinal)?._tag !== 'EffectBorrow'
+          ? [entry.local.ordinal]
+          : [],
+      ),
+    ),
   ])
   const roots = new Map<number, FrameRoot>()
   let cursor = 0
@@ -352,7 +344,7 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
     }
   }
   const nominalUnionCleanupScratch = nominalUnionScratchRequirements(
-    operations.flatMap(operationCleanupPlans),
+    [...operations.flatMap(operationCleanupPlans), ...additionalCleanups],
     plan,
   ).map((requirement) => {
     cursor = alignUp(cursor, requirement.alignment)

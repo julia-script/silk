@@ -64,6 +64,60 @@ effect fn program() -> () ! Allocator.OutOfMemoryError {
 effect fn recover(error: Allocator.OutOfMemoryError) -> () { return () }
 pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
 
+const nominalUnionExecutionCleanup = `import silk.allocator { Allocator }
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.i8 as i8
+import silk.layout { Layout }
+
+struct Guard {
+  left: i8
+  right: i8
+  storage: Allocation
+}
+
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let observed = i8.toI32(self.left) + i8.toI32(self.right)
+    if observed != 42 {
+      let boom = 1 / 0
+    }
+    return ()
+  }
+}
+
+union Ready {
+  Small { marker: i8, guard: Guard },
+  Wide { value: i64 }
+}
+
+fn ready(state: &Ready) -> () { return () }
+
+effect fn packaged() -> () ! Allocator.OutOfMemoryError ? &mut Allocator {
+  let cleanupLayout = Layout.of<i32>()
+  let cleanupStorage = run Allocator.allocate(move cleanupLayout)
+  let state = Ready.Small {
+    marker: i8.toI8(7),
+    guard: Guard {
+      left: i8.toI8(19),
+      right: i8.toI8(23),
+      storage: move cleanupStorage
+    }
+  }
+  let execution = run Execution.make(effect { return 42 }, move state, ready)
+  drop execution
+  return ()
+}
+
+effect fn program() -> () ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run packaged() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn recover(error: Allocator.OutOfMemoryError) -> () { return () }
+
+pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
+
 it('plans exact direct, nested, and externally parkable combined packages', () => {
   const target = Target.wasm32UnknownUnknown
   const layouts = Object.freeze({
@@ -265,6 +319,23 @@ it.effect('executes exact stored body and endpoint cleanup on WebAssembly packag
       const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
       assert.throws(() => (instance.exports.silk_main as () => void)(), WebAssembly.RuntimeError)
     }
+  }),
+)
+
+it.effect('reserves nominal-union scratch for synthetic execution cleanup helpers', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'execution-package/nominal-union-cleanup-frame',
+      new TextEncoder().encode(nominalUnionExecutionCleanup),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    ;(instance.exports.silk_main as () => void)()
   }),
 )
 
