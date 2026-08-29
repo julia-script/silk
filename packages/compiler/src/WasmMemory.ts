@@ -28,8 +28,99 @@ export interface FramePlan {
   readonly escaping: ReadonlySet<number>
   /** Address-taken frame roots reachable through each MIR local's stored pointer lanes. */
   readonly localRoots: ReadonlyMap<number, ReadonlySet<number>>
+  /** Depth-indexed canonical variant storage used while cleaning widened nominal-union carriers. */
+  readonly nominalUnionCleanupScratch: ReadonlyArray<{
+    readonly offset: number
+    readonly size: number
+    readonly alignment: number
+  }>
   readonly size: number
   readonly alignment: number
+}
+
+const operationCleanupPlans = (
+  operation: Mir.Operation,
+): ReadonlyArray<CleanupPlan.CleanupPlan> => {
+  switch (operation._tag) {
+    case 'SlotDrop':
+    case 'Drop':
+      return Object.freeze([operation.cleanup])
+    case 'SharedWithMut':
+      return Object.freeze([operation.useCleanup, operation.conflictCleanup])
+    case 'ExecutionPark':
+      return Object.freeze([operation.guardCleanup, operation.registerCleanup])
+    case 'PropagateEffectFailure':
+    case 'RunEffect':
+    case 'RunEffectValue':
+    case 'RunEffectComposite':
+    case 'RunStaticEffect':
+      return Object.freeze((operation.releases ?? []).map((release) => release.cleanup))
+    case 'CloseEffectEntry':
+      return Object.freeze(operation.failures.map((failure) => failure.cleanup))
+    case 'Match':
+      return Object.freeze(
+        operation.arms.flatMap((arm) => arm.selected.cleanup.map((entry) => entry.cleanup)),
+      )
+    default:
+      return Object.freeze([])
+  }
+}
+
+const nominalUnionScratchRequirements = (
+  cleanups: ReadonlyArray<CleanupPlan.CleanupPlan>,
+  plan: LayoutPlan.Plan,
+): ReadonlyArray<{ readonly size: number; readonly alignment: number }> => {
+  const requirements: Array<{ size: number; alignment: number }> = []
+  const visit = (cleanup: CleanupPlan.CleanupPlan, depth: number): void => {
+    switch (cleanup._tag) {
+      case 'HookCleanup':
+        visit(cleanup.inner, depth)
+        return
+      case 'StructCleanup':
+        for (const field of cleanup.fields) visit(field.cleanup, depth)
+        return
+      case 'NominalUnionCleanup': {
+        const entry = LayoutPlan.entry(plan, cleanup.type)
+        if (entry?.representation._tag !== 'NominalUnion') return
+        const payloadSize = entry.representation.variants.reduce(
+          (maximum, variant) => Math.max(maximum, variant.size),
+          0,
+        )
+        const size = alignUp(entry.representation.payloadOffset + payloadSize, entry.alignment)
+        const current = requirements.at(depth)
+        requirements[depth] = {
+          size: Math.max(current?.size ?? 0, size),
+          alignment: Math.max(current?.alignment ?? 1, entry.alignment),
+        }
+        for (const variant of cleanup.variants)
+          for (const field of variant.fields) visit(field.cleanup, depth + 1)
+        return
+      }
+      case 'ArrayCleanup':
+        visit(cleanup.element, depth)
+        return
+      case 'UnionCleanup':
+        for (const entry of cleanup.cases) visit(entry.cleanup, depth)
+        return
+      case 'CallableCleanup':
+      case 'EffectCleanup':
+        for (const slot of cleanup.slots) visit(slot.cleanup, depth)
+        return
+      case 'EffectCompositeCleanup':
+        for (const alternative of cleanup.alternatives) visit(alternative, depth)
+        return
+      case 'RawBufferCleanup':
+      case 'LocalSharedCoreCleanup':
+      case 'ExecutionCleanup':
+      case 'WakeCleanup':
+        visit(cleanup.allocation, depth)
+        return
+      default:
+        return
+    }
+  }
+  for (const cleanup of cleanups) visit(cleanup, 0)
+  return Object.freeze(requirements.map((requirement) => Object.freeze(requirement)))
 }
 
 export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
@@ -264,6 +355,16 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
       }
     }
   }
+  const nominalUnionCleanupScratch = nominalUnionScratchRequirements(
+    operations.flatMap(operationCleanupPlans),
+    plan,
+  ).map((requirement) => {
+    cursor = alignUp(cursor, requirement.alignment)
+    const scratch = Object.freeze({ ...requirement, offset: cursor })
+    cursor += requirement.size
+    alignment = Math.max(alignment, requirement.alignment)
+    return scratch
+  })
   const frozenLocalRoots = new Map(
     [...localRoots].map(([local, reachable]) => [local, new Set(reachable)] as const),
   )
@@ -271,6 +372,7 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
     roots,
     escaping,
     localRoots: frozenLocalRoots,
+    nominalUnionCleanupScratch: Object.freeze(nominalUnionCleanupScratch),
     size: alignUp(cursor, alignment),
     alignment,
   })

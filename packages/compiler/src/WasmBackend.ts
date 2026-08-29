@@ -1366,9 +1366,9 @@ const layoutOf = (
     nextInternal += 2
   }
   const internalCount = nextInternal - physical
-  const frameBase = frame.roots.size === 0 ? undefined : physical + internalCount
-  const frameEnd = frame.roots.size === 0 ? undefined : physical + internalCount + 1
-  const framePages = frame.roots.size === 0 ? undefined : physical + internalCount + 2
+  const frameBase = frame.size === 0 ? undefined : physical + internalCount
+  const frameEnd = frame.size === 0 ? undefined : physical + internalCount + 1
+  const framePages = frame.size === 0 ? undefined : physical + internalCount + 2
   if (frameBase !== undefined && frameEnd !== undefined && framePages !== undefined) {
     declared.push(named(i32, 'frame_base'), named(i32, 'frame_end'), named(i32, 'frame_pages'))
   }
@@ -1728,86 +1728,154 @@ const makeOperationContext = (
     if (environment !== undefined) return environment
     throw new RangeError('Wasm Effect cleanup lost its exact stored environment')
   }
+  interface AddressCleanupState {
+    readonly addressAt: (byteOffset: number) => ReadonlyArray<Instr.Instr>
+    readonly byteOffset: number
+    readonly nominalDepth: number
+  }
+  const transferNominalUnionStorage = (
+    cleanup: Extract<CleanupPlan.CleanupPlan, { readonly _tag: 'NominalUnionCleanup' }>,
+    carrierAddressAt: (byteOffset: number) => ReadonlyArray<Instr.Instr>,
+    rawAddressAt: (byteOffset: number) => ReadonlyArray<Instr.Instr>,
+    direction: 'CarrierToRaw' | 'RawToCarrier',
+  ): ReadonlyArray<Instr.Instr> => {
+    if (memory === undefined) throw new RangeError('Wasm nominal union transfer has no memory')
+    const representation = LayoutPlan.entry(memory.plan, cleanup.type)?.representation
+    const shape = LayoutPlan.callingShape(memory.plan, cleanup.type)
+    if (representation?._tag !== 'NominalUnion' || shape?.tree._tag !== 'NominalUnionShape') {
+      throw new RangeError('Wasm nominal union transfer lost its layout')
+    }
+    const sourceAddressAt = direction === 'CarrierToRaw' ? carrierAddressAt : rawAddressAt
+    const targetAddressAt = direction === 'CarrierToRaw' ? rawAddressAt : carrierAddressAt
+    const variants = cleanup.variants.flatMap((variant) => {
+      const layoutVariant = representation.variants.find(
+        (candidate) => candidate.ordinal === variant.ordinal,
+      )
+      if (layoutVariant === undefined) {
+        throw new RangeError('Wasm nominal union transfer lost its active variant layout')
+      }
+      const identity = Match.nominalUnionVariant(
+        cleanup.type,
+        cleanup.type,
+        variant.variant,
+        variant.ordinal,
+      )
+      const transfers = layoutVariant.fields.flatMap((layoutField) => {
+        const physical = LayoutPlan.coverageFieldSlots(shape, identity, [layoutField.id])
+        const fieldLanes = semanticLanesOf(layoutField.type)
+        if (physical === undefined || physical.length !== fieldLanes.length) {
+          throw new RangeError('Wasm nominal union transfer lost its complete field mapping')
+        }
+        return physical.flatMap((physicalOrdinal, fieldOrdinal) => {
+          const carrierLane = shape.lanes.at(physicalOrdinal)
+          const fieldLane = fieldLanes.at(fieldOrdinal)
+          const carrierOffset =
+            carrierLane === undefined
+              ? undefined
+              : LayoutVerify.laneOffset(memory.plan, cleanup.type, carrierLane.path)
+          const nestedOffset =
+            fieldLane === undefined
+              ? undefined
+              : LayoutVerify.laneOffset(memory.plan, layoutField.type, fieldLane.path)
+          if (
+            carrierLane === undefined ||
+            fieldLane === undefined ||
+            carrierOffset === undefined ||
+            nestedOffset === undefined
+          ) {
+            throw new RangeError('Wasm nominal union transfer lost a field lane')
+          }
+          const rawOffset = representation.payloadOffset + layoutField.offset + nestedOffset
+          const sourceLane = direction === 'CarrierToRaw' ? carrierLane : fieldLane
+          const targetLane = direction === 'CarrierToRaw' ? fieldLane : carrierLane
+          const sourceOffset = direction === 'CarrierToRaw' ? carrierOffset : rawOffset
+          const targetOffset = direction === 'CarrierToRaw' ? rawOffset : carrierOffset
+          return [
+            ...targetAddressAt(targetOffset),
+            ...sourceAddressAt(sourceOffset),
+            Instr.memoryAccess(laneLoadMnemonic(memory.plan, sourceLane), memory.memory),
+            ...laneBridge(
+              laneValueType(memory.plan, sourceLane),
+              laneValueType(memory.plan, targetLane),
+            ),
+            Instr.memoryAccess(laneStoreMnemonic(memory.plan, targetLane), memory.memory),
+          ]
+        })
+      })
+      return [
+        ...sourceAddressAt(0),
+        Instr.memoryAccess('i32.load', memory.memory),
+        Instr.i32Const(variant.ordinal),
+        Instr.op('i32.eq'),
+        Instr.ifElse(Instr.emptyBlockType, transfers, []),
+      ]
+    })
+    return [
+      ...targetAddressAt(0),
+      ...sourceAddressAt(0),
+      Instr.memoryAccess('i32.load', memory.memory),
+      Instr.memoryAccess('i32.store', memory.memory),
+      ...variants,
+    ]
+  }
   const hookReleaseWalk = (
     cleanup: CleanupPlan.CleanupPlan,
     addressAt: (byteOffset: number) => ReadonlyArray<Instr.Instr>,
   ): ReadonlyArray<Instr.Instr> => {
     if (!CleanupPlan.hasHook(cleanup)) return []
     if (memory === undefined) throw new RangeError('Wasm hook cleanup has no private memory')
-    return WasmCleanup.emitCleanupWalk(cleanup, 0, (plan_, byteOffset) => {
-      switch (plan_._tag) {
-        case 'HookCleanup':
-          return Object.freeze({
-            before: Object.freeze([
-              ...addressAt(byteOffset),
-              Instr.call(resolve(plan_.hook, plan_.typeArguments)),
-            ]),
-            children: Object.freeze([Object.freeze({ cleanup: plan_.inner, state: byteOffset })]),
-          })
-        case 'CallableCleanup':
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.slots.map((slot) =>
-                Object.freeze({
-                  cleanup: slot.cleanup,
-                  state: byteOffset + callableCaptureRange(plan_, slot.ordinal).byteOffset,
+    return WasmCleanup.emitCleanupWalk<AddressCleanupState>(
+      cleanup,
+      Object.freeze({ addressAt, byteOffset: 0, nominalDepth: 0 }),
+      (plan_, state) => {
+        const child = (nestedOffset: number): AddressCleanupState =>
+          Object.freeze({ ...state, byteOffset: state.byteOffset + nestedOffset })
+        switch (plan_._tag) {
+          case 'HookCleanup':
+            return Object.freeze({
+              before: Object.freeze([
+                ...state.addressAt(state.byteOffset),
+                Instr.call(resolve(plan_.hook, plan_.typeArguments)),
+              ]),
+              children: Object.freeze([Object.freeze({ cleanup: plan_.inner, state })]),
+            })
+          case 'CallableCleanup':
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.slots.map((slot) =>
+                  Object.freeze({
+                    cleanup: slot.cleanup,
+                    state: child(callableCaptureRange(plan_, slot.ordinal).byteOffset),
+                  }),
+                ),
+              ),
+            })
+          case 'EffectCleanup': {
+            const environment = effectEnvironmentForCleanup(plan_)
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.slots.flatMap((slot) => {
+                  const field = environment.fields.at(slot.ordinal)
+                  return field === undefined
+                    ? []
+                    : [
+                        Object.freeze({
+                          cleanup: slot.cleanup,
+                          state: child(field.offset),
+                        }),
+                      ]
                 }),
               ),
-            ),
-          })
-        case 'EffectCleanup': {
-          const environment = effectEnvironmentForCleanup(plan_)
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.slots.flatMap((slot) => {
-                const field = environment.fields.at(slot.ordinal)
-                return field === undefined
-                  ? []
-                  : [
-                      Object.freeze({
-                        cleanup: slot.cleanup,
-                        state: byteOffset + field.offset,
-                      }),
-                    ]
-              }),
-            ),
-          })
-        }
-        case 'StructCleanup': {
-          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
-          if (representation?._tag !== 'Aggregate') return Object.freeze({})
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.fields.flatMap((field) => {
-                if (!CleanupPlan.hasHook(field.cleanup)) return []
-                const layoutField = representation.fields.find((candidate) =>
-                  DeclarationFacts.sameFieldId(candidate.id, field.field),
-                )
-                return layoutField === undefined
-                  ? []
-                  : [
-                      Object.freeze({
-                        cleanup: field.cleanup,
-                        state: byteOffset + layoutField.offset,
-                      }),
-                    ]
-              }),
-            ),
-          })
-        }
-        case 'NominalUnionCleanup': {
-          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
-          if (representation?._tag !== 'NominalUnion') return Object.freeze({})
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.variants.flatMap((variant) => {
-                const layoutVariant = representation.variants.find(
-                  (candidate) => candidate.ordinal === variant.ordinal,
-                )
-                if (layoutVariant === undefined) return []
-                return variant.fields.flatMap((field) => {
+            })
+          }
+          case 'StructCleanup': {
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'Aggregate') return Object.freeze({})
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.fields.flatMap((field) => {
                   if (!CleanupPlan.hasHook(field.cleanup)) return []
-                  const layoutField = layoutVariant.fields.find((candidate) =>
+                  const layoutField = representation.fields.find((candidate) =>
                     DeclarationFacts.sameFieldId(candidate.id, field.field),
                   )
                   return layoutField === undefined
@@ -1815,67 +1883,113 @@ const makeOperationContext = (
                     : [
                         Object.freeze({
                           cleanup: field.cleanup,
-                          state: byteOffset + representation.payloadOffset + layoutField.offset,
+                          state: child(layoutField.offset),
+                        }),
+                      ]
+                }),
+              ),
+            })
+          }
+          case 'NominalUnionCleanup': {
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'NominalUnion') return Object.freeze({})
+            const scratch = memory.frame.nominalUnionCleanupScratch.at(state.nominalDepth)
+            if (scratch === undefined) {
+              throw new RangeError('Wasm nominal union hook cleanup lost its canonical scratch')
+            }
+            const carrierAddressAt = (offset: number): ReadonlyArray<Instr.Instr> =>
+              state.addressAt(state.byteOffset + offset)
+            const rawAddressAt = (offset: number): ReadonlyArray<Instr.Instr> =>
+              frameAddress(scratch.offset + offset)
+            return Object.freeze({
+              before: Object.freeze(
+                transferNominalUnionStorage(plan_, carrierAddressAt, rawAddressAt, 'CarrierToRaw'),
+              ),
+              children: Object.freeze(
+                plan_.variants.flatMap((variant) => {
+                  const layoutVariant = representation.variants.find(
+                    (candidate) => candidate.ordinal === variant.ordinal,
+                  )
+                  if (layoutVariant === undefined) return []
+                  return variant.fields.flatMap((field) => {
+                    if (!CleanupPlan.hasHook(field.cleanup)) return []
+                    const layoutField = layoutVariant.fields.find((candidate) =>
+                      DeclarationFacts.sameFieldId(candidate.id, field.field),
+                    )
+                    return layoutField === undefined
+                      ? []
+                      : [
+                          Object.freeze({
+                            cleanup: field.cleanup,
+                            state: Object.freeze({
+                              addressAt: rawAddressAt,
+                              byteOffset: representation.payloadOffset + layoutField.offset,
+                              nominalDepth: state.nominalDepth + 1,
+                            }),
+                            wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                              Object.freeze([
+                                ...rawAddressAt(0),
+                                Instr.memoryAccess('i32.load', memory.memory),
+                                Instr.i32Const(variant.ordinal),
+                                Instr.op('i32.eq'),
+                                Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                              ]),
+                          }),
+                        ]
+                  })
+                }),
+              ),
+              after: Object.freeze(
+                transferNominalUnionStorage(plan_, carrierAddressAt, rawAddressAt, 'RawToCarrier'),
+              ),
+            })
+          }
+          case 'ArrayCleanup': {
+            if (!CleanupPlan.hasHook(plan_.element)) return Object.freeze({})
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'Repeated') return Object.freeze({})
+            return Object.freeze({
+              children: Object.freeze(
+                Array.from({ length: plan_.length }, (_, index) =>
+                  Object.freeze({
+                    cleanup: plan_.element,
+                    state: child(index * representation.stride),
+                  }),
+                ),
+              ),
+            })
+          }
+          case 'UnionCleanup': {
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'Union') return Object.freeze({})
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.cases.flatMap((caseEntry) =>
+                  CleanupPlan.hasHook(caseEntry.cleanup)
+                    ? [
+                        Object.freeze({
+                          cleanup: caseEntry.cleanup,
+                          state: child(representation.payloadOffset),
                           wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
                             Object.freeze([
-                              ...addressAt(byteOffset),
+                              ...state.addressAt(state.byteOffset),
                               Instr.memoryAccess('i32.load', memory.memory),
-                              Instr.i32Const(variant.ordinal),
+                              Instr.i32Const(caseEntry.ordinal),
                               Instr.op('i32.eq'),
                               Instr.ifElse(Instr.emptyBlockType, instructions, []),
                             ]),
                         }),
                       ]
-                })
-              }),
-            ),
-          })
-        }
-        case 'ArrayCleanup': {
-          if (!CleanupPlan.hasHook(plan_.element)) return Object.freeze({})
-          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
-          if (representation?._tag !== 'Repeated') return Object.freeze({})
-          return Object.freeze({
-            children: Object.freeze(
-              Array.from({ length: plan_.length }, (_, index) =>
-                Object.freeze({
-                  cleanup: plan_.element,
-                  state: byteOffset + index * representation.stride,
-                }),
+                    : [],
+                ),
               ),
-            ),
-          })
+            })
+          }
+          default:
+            return Object.freeze({})
         }
-        case 'UnionCleanup': {
-          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
-          if (representation?._tag !== 'Union') return Object.freeze({})
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.cases.flatMap((caseEntry) =>
-                CleanupPlan.hasHook(caseEntry.cleanup)
-                  ? [
-                      Object.freeze({
-                        cleanup: caseEntry.cleanup,
-                        state: byteOffset + representation.payloadOffset,
-                        wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
-                          Object.freeze([
-                            ...addressAt(byteOffset),
-                            Instr.memoryAccess('i32.load', memory.memory),
-                            Instr.i32Const(caseEntry.ordinal),
-                            Instr.op('i32.eq'),
-                            Instr.ifElse(Instr.emptyBlockType, instructions, []),
-                          ]),
-                      }),
-                    ]
-                  : [],
-              ),
-            ),
-          })
-        }
-        default:
-          return Object.freeze({})
-      }
-    })
+      },
+    )
   }
   /**
    * Runs every Drop hook one cleanup plan invokes: the owner materializes to its frame root,
@@ -2414,116 +2528,98 @@ const makeOperationContext = (
   ): ReadonlyArray<Instr.Instr> => {
     if (!CleanupPlan.reclaims(cleanup)) return []
     if (memory === undefined) throw new RangeError('Wasm slot reclaim has no private memory')
-    return WasmCleanup.emitCleanupWalk(cleanup, byteOffset, (plan_, currentOffset) => {
-      if (!CleanupPlan.reclaims(plan_)) return Object.freeze({})
-      switch (plan_._tag) {
-        case 'ExecutionCleanup': {
-          const scratch = layout.executionCleanupScratch.at(0)
-          if (scratch === undefined) {
-            throw new RangeError('Wasm Execution cleanup lost its package authority local')
+    const addressAt = (offset: number): ReadonlyArray<Instr.Instr> => [
+      Instr.localGet(address),
+      ...(offset === 0 ? [] : [Instr.i32Const(offset), Instr.op('i32.add')]),
+    ]
+    return WasmCleanup.emitCleanupWalk<AddressCleanupState>(
+      cleanup,
+      Object.freeze({ addressAt, byteOffset, nominalDepth: 0 }),
+      (plan_, state) => {
+        const child = (nestedOffset: number): AddressCleanupState =>
+          Object.freeze({ ...state, byteOffset: state.byteOffset + nestedOffset })
+        const load = (nestedOffset = 0): ReadonlyArray<Instr.Instr> => [
+          ...state.addressAt(state.byteOffset + nestedOffset),
+          Instr.memoryAccess('i32.load', memory.memory),
+        ]
+        if (!CleanupPlan.reclaims(plan_)) return Object.freeze({})
+        switch (plan_._tag) {
+          case 'ExecutionCleanup': {
+            const scratch = layout.executionCleanupScratch.at(0)
+            if (scratch === undefined) {
+              throw new RangeError('Wasm Execution cleanup lost its package authority local')
+            }
+            return Object.freeze({
+              before: Object.freeze([
+                ...load(),
+                Instr.localSet(scratch.package),
+                ...releaseExecutionBase(scratch.package),
+              ]),
+            })
           }
-          return Object.freeze({
-            before: Object.freeze([
-              ...loadAt(address, currentOffset),
-              Instr.localSet(scratch.package),
-              ...releaseExecutionBase(scratch.package),
-            ]),
-          })
-        }
-        case 'WakeCleanup': {
-          const scratch = layout.executionCleanupScratch.at(0)
-          if (scratch === undefined) {
-            throw new RangeError('Wasm Wake cleanup lost its package authority local')
+          case 'WakeCleanup': {
+            const scratch = layout.executionCleanupScratch.at(0)
+            if (scratch === undefined) {
+              throw new RangeError('Wasm Wake cleanup lost its package authority local')
+            }
+            return Object.freeze({
+              before: Object.freeze([
+                ...load(),
+                Instr.localSet(scratch.package),
+                ...releaseWakeBase(scratch.package),
+              ]),
+            })
           }
-          return Object.freeze({
-            before: Object.freeze([
-              ...loadAt(address, currentOffset),
-              Instr.localSet(scratch.package),
-              ...releaseWakeBase(scratch.package),
-            ]),
-          })
-        }
-        case 'AllocationCleanup':
-        case 'RawBufferCleanup': {
-          const contextOffset = SilkType.isRawBuffer(plan_.type)
-            ? aggregateFieldOffset(plan_.type, '$allocation') +
-              aggregateFieldOffset(SilkType.allocation, '$context')
-            : aggregateFieldOffset(SilkType.allocation, '$context')
-          return Object.freeze({
-            before: Object.freeze([
-              ...loadAt(address, currentOffset + contextOffset),
-              Instr.call(requireRelease()),
-            ]),
-          })
-        }
-        case 'HookCleanup':
-          return Object.freeze({
-            children: Object.freeze([
-              Object.freeze({ cleanup: plan_.inner, state: currentOffset }),
-            ]),
-          })
-        case 'CallableCleanup':
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.slots.map((slot) =>
-                Object.freeze({
-                  cleanup: slot.cleanup,
-                  state: currentOffset + callableCaptureRange(plan_, slot.ordinal).byteOffset,
+          case 'AllocationCleanup':
+          case 'RawBufferCleanup': {
+            const contextOffset = SilkType.isRawBuffer(plan_.type)
+              ? aggregateFieldOffset(plan_.type, '$allocation') +
+                aggregateFieldOffset(SilkType.allocation, '$context')
+              : aggregateFieldOffset(SilkType.allocation, '$context')
+            return Object.freeze({
+              before: Object.freeze([...load(contextOffset), Instr.call(requireRelease())]),
+            })
+          }
+          case 'HookCleanup':
+            return Object.freeze({
+              children: Object.freeze([Object.freeze({ cleanup: plan_.inner, state })]),
+            })
+          case 'CallableCleanup':
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.slots.map((slot) =>
+                  Object.freeze({
+                    cleanup: slot.cleanup,
+                    state: child(callableCaptureRange(plan_, slot.ordinal).byteOffset),
+                  }),
+                ),
+              ),
+            })
+          case 'EffectCleanup': {
+            const environment = effectEnvironmentForCleanup(plan_)
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.slots.flatMap((slot) => {
+                  const field = environment.fields.at(slot.ordinal)
+                  return field === undefined
+                    ? []
+                    : [
+                        Object.freeze({
+                          cleanup: slot.cleanup,
+                          state: child(field.offset),
+                        }),
+                      ]
                 }),
               ),
-            ),
-          })
-        case 'EffectCleanup': {
-          const environment = effectEnvironmentForCleanup(plan_)
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.slots.flatMap((slot) => {
-                const field = environment.fields.at(slot.ordinal)
-                return field === undefined
-                  ? []
-                  : [
-                      Object.freeze({
-                        cleanup: slot.cleanup,
-                        state: currentOffset + field.offset,
-                      }),
-                    ]
-              }),
-            ),
-          })
-        }
-        case 'StructCleanup': {
-          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
-          if (representation?._tag !== 'Aggregate') return Object.freeze({})
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.fields.flatMap((field) => {
-                const layoutField = representation.fields.find((candidate) =>
-                  DeclarationFacts.sameFieldId(candidate.id, field.field),
-                )
-                return layoutField === undefined
-                  ? []
-                  : [
-                      Object.freeze({
-                        cleanup: field.cleanup,
-                        state: currentOffset + layoutField.offset,
-                      }),
-                    ]
-              }),
-            ),
-          })
-        }
-        case 'NominalUnionCleanup': {
-          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
-          if (representation?._tag !== 'NominalUnion') return Object.freeze({})
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.variants.flatMap((variant) => {
-                const layoutVariant = representation.variants.find(
-                  (candidate) => candidate.ordinal === variant.ordinal,
-                )
-                if (layoutVariant === undefined) return []
-                return variant.fields.flatMap((field) => {
-                  const layoutField = layoutVariant.fields.find((candidate) =>
+            })
+          }
+          case 'StructCleanup': {
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'Aggregate') return Object.freeze({})
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.fields.flatMap((field) => {
+                  const layoutField = representation.fields.find((candidate) =>
                     DeclarationFacts.sameFieldId(candidate.id, field.field),
                   )
                   return layoutField === undefined
@@ -2531,64 +2627,107 @@ const makeOperationContext = (
                     : [
                         Object.freeze({
                           cleanup: field.cleanup,
-                          state: currentOffset + representation.payloadOffset + layoutField.offset,
-                          wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
-                            instructions.length === 0
-                              ? Object.freeze([])
-                              : Object.freeze([
-                                  ...loadAt(address, currentOffset),
-                                  Instr.i32Const(variant.ordinal),
-                                  Instr.op('i32.eq'),
-                                  Instr.ifElse(Instr.emptyBlockType, instructions, []),
-                                ]),
+                          state: child(layoutField.offset),
                         }),
                       ]
-                })
-              }),
-            ),
-          })
-        }
-        case 'ArrayCleanup': {
-          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
-          if (representation?._tag !== 'Repeated') return Object.freeze({})
-          return Object.freeze({
-            children: Object.freeze(
-              Array.from({ length: plan_.length }, (_, index) =>
-                Object.freeze({
-                  cleanup: plan_.element,
-                  state: currentOffset + index * representation.stride,
                 }),
               ),
-            ),
-          })
-        }
-        case 'UnionCleanup': {
-          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
-          if (representation?._tag !== 'Union') return Object.freeze({})
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.cases.map((caseEntry) =>
-                Object.freeze({
-                  cleanup: caseEntry.cleanup,
-                  state: currentOffset + representation.payloadOffset,
-                  wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
-                    instructions.length === 0
-                      ? Object.freeze([])
-                      : Object.freeze([
-                          ...loadAt(address, currentOffset),
-                          Instr.i32Const(caseEntry.ordinal),
-                          Instr.op('i32.eq'),
-                          Instr.ifElse(Instr.emptyBlockType, instructions, []),
-                        ]),
+            })
+          }
+          case 'NominalUnionCleanup': {
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'NominalUnion') return Object.freeze({})
+            const scratch = memory.frame.nominalUnionCleanupScratch.at(state.nominalDepth)
+            if (scratch === undefined) {
+              throw new RangeError('Wasm nominal union reclaim lost its canonical scratch')
+            }
+            const carrierAddressAt = (offset: number): ReadonlyArray<Instr.Instr> =>
+              state.addressAt(state.byteOffset + offset)
+            const rawAddressAt = (offset: number): ReadonlyArray<Instr.Instr> =>
+              frameAddress(scratch.offset + offset)
+            return Object.freeze({
+              before: Object.freeze(
+                transferNominalUnionStorage(plan_, carrierAddressAt, rawAddressAt, 'CarrierToRaw'),
+              ),
+              children: Object.freeze(
+                plan_.variants.flatMap((variant) => {
+                  const layoutVariant = representation.variants.find(
+                    (candidate) => candidate.ordinal === variant.ordinal,
+                  )
+                  if (layoutVariant === undefined) return []
+                  return variant.fields.flatMap((field) => {
+                    const layoutField = layoutVariant.fields.find((candidate) =>
+                      DeclarationFacts.sameFieldId(candidate.id, field.field),
+                    )
+                    return layoutField === undefined
+                      ? []
+                      : [
+                          Object.freeze({
+                            cleanup: field.cleanup,
+                            state: Object.freeze({
+                              addressAt: rawAddressAt,
+                              byteOffset: representation.payloadOffset + layoutField.offset,
+                              nominalDepth: state.nominalDepth + 1,
+                            }),
+                            wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                              instructions.length === 0
+                                ? Object.freeze([])
+                                : Object.freeze([
+                                    ...rawAddressAt(0),
+                                    Instr.memoryAccess('i32.load', memory.memory),
+                                    Instr.i32Const(variant.ordinal),
+                                    Instr.op('i32.eq'),
+                                    Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                                  ]),
+                          }),
+                        ]
+                  })
                 }),
               ),
-            ),
-          })
+            })
+          }
+          case 'ArrayCleanup': {
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'Repeated') return Object.freeze({})
+            return Object.freeze({
+              children: Object.freeze(
+                Array.from({ length: plan_.length }, (_, index) =>
+                  Object.freeze({
+                    cleanup: plan_.element,
+                    state: child(index * representation.stride),
+                  }),
+                ),
+              ),
+            })
+          }
+          case 'UnionCleanup': {
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'Union') return Object.freeze({})
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.cases.map((caseEntry) =>
+                  Object.freeze({
+                    cleanup: caseEntry.cleanup,
+                    state: child(representation.payloadOffset),
+                    wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                      instructions.length === 0
+                        ? Object.freeze([])
+                        : Object.freeze([
+                            ...load(),
+                            Instr.i32Const(caseEntry.ordinal),
+                            Instr.op('i32.eq'),
+                            Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                          ]),
+                  }),
+                ),
+              ),
+            })
+          }
+          default:
+            return Object.freeze({})
         }
-        default:
-          return Object.freeze({})
-      }
-    })
+      },
+    )
   }
   /**
    * One owned value's complete release: its Drop hooks, then the blocks its reclaim tickets still
@@ -7550,13 +7689,13 @@ const emitBody = (
     return first
   }
   const restoreFrame = (): ReadonlyArray<Instr.Instr> =>
-    memory === undefined || memory.frame.roots.size === 0 || layout.frameBase === undefined
+    memory === undefined || memory.frame.size === 0 || layout.frameBase === undefined
       ? []
       : [Instr.localGet(layout.frameBase), Instr.globalSet(memory.stackPointer)]
   const reserveFrame = (): ReadonlyArray<Instr.Instr> => {
     if (
       memory === undefined ||
-      memory.frame.roots.size === 0 ||
+      memory.frame.size === 0 ||
       layout.frameBase === undefined ||
       layout.frameEnd === undefined ||
       layout.framePages === undefined

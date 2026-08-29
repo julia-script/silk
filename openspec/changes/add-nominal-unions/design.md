@@ -209,27 +209,35 @@ For each concrete parent application, target planning builds:
 NominalUnionLayout
   parent
   private tag representation
-  payload offset, size, alignment
+  stored carrier payload offset, size, alignment
   total size, alignment, padding
   variants[]
     variant identity, source ordinal, private tag
-    aggregate payload layout
+    canonical aggregate payload layout
     logical-field-to-fixed-slot calling mapping
 ```
 
 Each field variant's payload uses the existing declaration-ordered struct field offset and padding
 algorithm, including concrete callable and Effect realizations. The enclosing payload uses the
-maximum variant size and alignment. The private tag uses the existing deterministic private-tag
-width policy and source-order ordinal; no source or external ABI observes it.
+deterministic fixed carrier slots obtained by unifying every variant's logical calling lanes. Its
+size and alignment cover those slots, but its offsets are compiler-owned and need not equal a
+particular variant's struct-like offsets. The plan separately retains the maximum canonical payload
+size and alignment needed for materialization. When a Drop hook or
+other address-based operation needs the selected variant's fields, the backend materializes the
+active carrier into canonical aggregate storage, performs the operation there, and writes any hook
+mutation back through the same field-to-slot mapping before structural reclamation. The private tag
+uses the existing deterministic private-tag width policy and source-order ordinal; no source or
+external ABI observes it.
 
 Complete non-generic unions enter the nominal layout catalog before runtime reachability, including
 unavailable and unused private declarations. Open generics get no speculative layout. Reachable
 concrete generic applications receive canonical specialized entries. Mixed struct/union recursion is
 checked in one inline dependency graph, with explicit existing indirection as the only cycle break.
 
-The calling shape is a tag lane plus fixed payload slots and a complete mapping from every variant's
-logical aggregate lanes. MIR, evaluation, Wasm, and LLVM consume this one plan; backends do not infer
-offsets, tag order, or call ABI independently.
+The calling shape is a tag lane plus those same fixed payload slots and a complete mapping from every
+variant's logical aggregate lanes. MIR, evaluation, Wasm, and LLVM consume this one plan; backends do
+not infer offsets, tag order, or call ABI independently. Canonical aggregate offsets remain the
+authority only while a selected variant is materialized for struct-like address semantics.
 
 ### 9. HIR and MIR use explicit nominal-union operations
 

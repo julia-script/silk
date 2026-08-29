@@ -45,7 +45,7 @@
 ## 6. Target Layout and Calling Shapes
 
 - [x] 6.1 Extend the inline dependency graph and nominal layout catalog to include complete non-generic unions and mixed struct/union cycles, and verify unused private and unavailable union entries appear before runtime reachability.
-- [x] 6.2 Add a distinct nominal-union representation plan with deterministic private tags, source-order ordinals, payload offset, maximum size/alignment, total padding, and per-variant aggregate layouts, and verify unit, padded multi-field, and `never` payload cases.
+- [x] 6.2 Add a distinct nominal-union representation plan with deterministic private tags, source-order ordinals, a fixed unified carrier payload, total padding, complete per-variant canonical aggregate layouts, and bidirectional field mappings for address materialization, and verify unit, padded multi-field, cleanup, and `never` payload cases.
 - [x] 6.3 Specialize reachable generic union layouts without speculative open-generic entries, and verify equivalent concrete applications reuse one catalog identity while distinct applications receive distinct physical plans.
 - [x] 6.4 Publish a backend-neutral tag-plus-payload calling shape with complete per-variant logical-field mappings, and verify call/return plans for heterogeneous variants are deterministic and unavailable dependencies stop before MIR.
 - [x] 6.5 Extend layout encoding, verification, and Analysis projections with nominal-union facts under unambiguous internal names, and verify no nominal tag, padding, or ABI detail becomes source-observable.

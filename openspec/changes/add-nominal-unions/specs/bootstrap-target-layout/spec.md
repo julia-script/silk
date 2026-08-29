@@ -6,15 +6,17 @@ Every complete non-generic nominal union SHALL receive a target-aware catalog en
 reachability, including unused private declarations. Every reachable concrete generic application
 SHALL receive one specialized entry, while an open generic declaration SHALL receive no speculative
 physical layout. Each available entry SHALL contain an inaccessible variant tag, one payload offset,
-and storage aligned and sized for its largest concrete variant payload. Unit variants SHALL require
-no payload bytes. The plan SHALL retain canonical parent, variant, field, ordinal, availability,
-size, alignment, and padding metadata; source semantics SHALL expose no numeric tag, stable external
-ABI, or serialization representation.
+and a deterministic fixed carrier payload whose slots unify every variant's logical calling lanes.
+The carrier SHALL be aligned and sized for all mapped lanes. Unit variants SHALL add no logical
+payload lanes. The plan SHALL separately retain every concrete canonical variant payload layout and
+the maximum materialization size and alignment. The plan SHALL retain canonical parent,
+variant, field, ordinal, availability, size, alignment, and padding metadata; source semantics SHALL
+expose no numeric tag, stable external ABI, or serialization representation.
 
 #### Scenario: Plan mixed unit and payload variants
 
 - **WHEN** a concrete union contains one unit variant and payload variants with distinct sizes and alignments
-- **THEN** the layout contains one tag and one correctly aligned payload region sufficient for every variant with deterministic padding
+- **THEN** the layout contains one tag and one correctly aligned fixed carrier region sufficient for every variant with deterministic padding
 
 #### Scenario: Specialize a generic union layout
 
@@ -35,22 +37,27 @@ ABI, or serialization representation.
 
 Each named-field variant SHALL lay out its specialized fields in declaration order under the same
 target-aware offset, alignment, padding, represented-callable, represented-Effect, and unavailable-
-dependency rules as a nominal struct. The enclosing union payload region SHALL satisfy the maximum
-size and alignment of those complete variant payload layouts. Unit variants SHALL contribute an
-empty payload layout and SHALL NOT create source-visible fields.
+dependency rules as a nominal struct. The representation plan SHALL retain the maximum size and
+alignment of those complete variant payload layouts for materialization while stored values use the
+compiler-owned fixed carrier mapping rather than one variant's raw field offsets. An address-based
+operation on the active payload SHALL materialize its fields at the canonical aggregate offsets; a
+Drop hook's mutations SHALL be transferred back to the carrier before structural reclamation. Unit
+variants SHALL contribute an empty payload layout and SHALL NOT create source-visible fields.
 
 #### Scenario: Lay out a padded multi-field variant
 
 - **WHEN** one variant contains multiple fields whose target alignments require internal and tail padding
-- **THEN** its variant plan records the ordinary declaration-ordered field offsets and the union payload region preserves that complete aligned layout
+- **THEN** its variant plan records the ordinary declaration-ordered field offsets and address-based operations observe that complete aligned layout after active-variant materialization
 
 ### Requirement: Nominal union calling shape is compiler-owned target data
 
 For every reachable nominal-union parameter or result, target planning SHALL publish one
 backend-neutral tag-plus-payload calling shape and a complete canonical mapping from every variant's
 logical field calling shape into fixed payload slots. Construction, calls, returns, matching, and
-cleanup SHALL consume that same mapping. An unavailable variant layout or impossible mapping SHALL
-make the calling shape unavailable before MIR or backend emission.
+cleanup SHALL consume that same mapping. Cleanup requiring canonical field addresses SHALL use the
+mapping in both directions rather than interpreting carrier offsets as variant field offsets. An
+unavailable variant layout or impossible mapping SHALL make the calling shape unavailable before
+MIR or backend emission.
 
 #### Scenario: Plan a nominal union call boundary
 
