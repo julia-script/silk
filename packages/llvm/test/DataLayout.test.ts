@@ -3,6 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as AddrSpace from '../src/AddrSpace.js'
 import * as Alignment from '../src/Alignment.js'
 import * as Builder from '../src/Builder.js'
+import * as ByteString from '../src/ByteString.js'
 import * as DataLayout from '../src/DataLayout.js'
 import { LlvmError } from '../src/LlvmError.js'
 
@@ -35,6 +36,43 @@ it.effect('rejects malformed layouts through LlvmError, including Builder.make',
     assert.strictEqual(parseError._tag, 'LlvmError')
     assert.strictEqual(parseError.operation, 'DataLayout.parse')
     assert.strictEqual(builderError.operation, 'DataLayout.parse')
+  }),
+)
+
+it.effect('matches pinned LLVM aggregate alignment parsing and validation', () =>
+  Effect.gen(function* () {
+    const absent = yield* DataLayout.parse('e')
+    const zero = yield* DataLayout.parse('e-a:0')
+    const zeroWithPreferred = yield* DataLayout.parse('e-a:0:64')
+    const nonzero = yield* DataLayout.parse('e-a:64:128')
+    const maximum = yield* DataLayout.parse('e-a:32768:32768')
+    const repeatedSource = 'e-a:64:128-a:0:64'
+    const repeated = yield* DataLayout.parse(repeatedSource)
+
+    assert.strictEqual(absent.aggregate.abiAlignment.byteUnits, 1n)
+    assert.strictEqual(absent.aggregate.preferredAlignment.byteUnits, 8n)
+    assert.strictEqual(zero.aggregate.abiAlignment.byteUnits, 1n)
+    assert.strictEqual(zero.aggregate.preferredAlignment.byteUnits, 1n)
+    assert.strictEqual(zeroWithPreferred.aggregate.abiAlignment.byteUnits, 1n)
+    assert.strictEqual(zeroWithPreferred.aggregate.preferredAlignment.byteUnits, 8n)
+    assert.strictEqual(nonzero.aggregate.abiAlignment.byteUnits, 8n)
+    assert.strictEqual(nonzero.aggregate.preferredAlignment.byteUnits, 16n)
+    assert.strictEqual(maximum.aggregate.abiAlignment.byteUnits, 4096n)
+    assert.strictEqual(maximum.aggregate.preferredAlignment.byteUnits, 4096n)
+    assert.strictEqual(repeated.aggregate.abiAlignment.byteUnits, 1n)
+    assert.strictEqual(repeated.aggregate.preferredAlignment.byteUnits, 8n)
+    assert.strictEqual(
+      ByteString.equals(DataLayout.render(repeated), ByteString.fromString(repeatedSource)),
+      true,
+    )
+
+    for (const malformed of ['e-a:0:0', 'e-a:24', 'e-a:64:32', 'e-a:65536', 'e-a:0:65536']) {
+      const error = yield* Effect.flip(DataLayout.parse(malformed))
+      assert.instanceOf(error, LlvmError)
+      assert.strictEqual(error.operation, 'DataLayout.parse')
+      assert.deepEqual(error.reason, { _tag: 'InvalidInput', input: malformed.slice(2) })
+      assert.include(error.message, malformed.slice(2))
+    }
   }),
 )
 
