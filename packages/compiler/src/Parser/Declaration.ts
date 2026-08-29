@@ -19,6 +19,7 @@ import {
   parseExpression,
   parseIntegerLiteralExpression,
 } from './Expression.js'
+import * as ExpressionNesting from './ExpressionNesting.js'
 import { expressionStarts, topLevelFollowing, typeStarts } from './Grammar.js'
 import { parseImportDeclaration } from './Import.js'
 import { parseBlock } from './Statement.js'
@@ -81,7 +82,7 @@ export const parseConstantDeclaration = (initial: State): NodeResult => {
   const colon = expect(name.state, 'Colon', [...typeStarts, 'Equals', ...topLevelFollowing])
   const type = parseType(colon.state, ['Equals', ...topLevelFollowing])
   const equals = expect(type.state, 'Equals', [...expressionStarts, ...topLevelFollowing])
-  const initializer = parseExpression(equals.state, 0, 'Integer', false)
+  const initializer = parseExpression(equals.state, 0, 'Integer', false, ExpressionNesting.root)
   return Object.freeze({
     state: initializer.state,
     node: syntaxNode(initializer.state, 'ConstantDeclaration', [

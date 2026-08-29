@@ -281,6 +281,27 @@ it('describes reserved template syntax with a stable parser diagnostic', () => {
   )
 })
 
+it('describes excessive expression nesting with structured depths and an exact token span', () => {
+  const diagnostic = Diagnostic.expressionNestingLimitExceeded(256, 257, spanAt(11, 12))
+
+  assert.deepEqual(
+    {
+      phase: diagnostic.phase,
+      code: diagnostic.code,
+      severity: diagnostic.severity,
+      reason: diagnostic.reason,
+      span: [diagnostic.span.start, diagnostic.span.end],
+    },
+    {
+      phase: 'parser',
+      code: 'PAR0005',
+      severity: 'error',
+      reason: { _tag: 'ExpressionNestingLimitExceeded', limit: 256, attemptedDepth: 257 },
+      span: [11, 12],
+    },
+  )
+})
+
 it('publishes stable lexical identities for modifier and delimiter failures', () => {
   const span = spanAt(8, 24)
   const diagnostics = [
