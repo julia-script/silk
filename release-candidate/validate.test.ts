@@ -432,13 +432,13 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       'pub service Logger',
     )
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/option.silk'), 'utf8')).toContain(
-      'pub struct Option<T>',
+      'pub union Option<T>',
     )
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/os_filesystem.silk'), 'utf8')).toContain(
       'pub struct OsFileSystem',
     )
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/result.silk'), 'utf8')).toContain(
-      'pub struct Result<A, F>',
+      'pub union Result<A, F>',
     )
     expect(
       readFileSync(resolve(packedRoot, 'stdlib/silk/standard_streams.silk'), 'utf8'),

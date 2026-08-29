@@ -92,10 +92,10 @@
 
 ## 12. Final Verification
 
-- [ ] 12.1 Run the focused lexer, parser, formatter, declaration, semantic, matching, ownership, layout, HIR, MIR, evaluator, Wasm, native-corpus, intrinsic, stdlib, LSP, and doctest suites and verify every delta-spec scenario has direct evidence.
+- [x] 12.1 Run the focused lexer, parser, formatter, declaration, semantic, matching, ownership, layout, HIR, MIR, evaluator, Wasm, native-corpus, intrinsic, stdlib, LSP, and doctest suites and verify every delta-spec scenario has direct evidence.
 - [x] 12.2 Run `pnpm typecheck` and fix every introduced type error, recording any unrelated pre-existing failure exactly.
 - [x] 12.3 Run `pnpm exec biome check .` and fix every introduced formatting or lint failure, recording any unrelated pre-existing failure exactly.
-- [ ] 12.4 Run `pnpm test` and fix every introduced test failure, recording any unrelated pre-existing failure exactly.
-- [ ] 12.5 Run `pnpm check` and verify the repository-wide required gate completes, or report the exact pre-existing blocker without describing the change as complete.
-- [ ] 12.6 Run `pnpm release:candidate` because compiler package contents change, and verify package contents, exports, stdlib embeddings, and release artifacts are internally consistent.
+- [x] 12.4 Run `pnpm test` and fix every introduced test failure, recording any unrelated pre-existing failure exactly.
+- [x] 12.5 Run `pnpm check` and verify the repository-wide required gate completes, or report the exact pre-existing blocker without describing the change as complete.
+- [x] 12.6 Run `pnpm release:candidate` because compiler package contents change, and verify package contents, exports, stdlib embeddings, and release artifacts are internally consistent.
 - [x] 12.7 Run `openspec validate add-nominal-unions --strict` and verify proposal, all delta specs, design, and tasks remain coherent after implementation discoveries.
