@@ -480,8 +480,8 @@ fn silk/logger.record params=3 locals=4 -> once Effect<() ! silk/logger.LogError
     return %3 [7718, 8870)
 fn silk/string.utf8Bytes params=1 locals=2 -> &[u8] entry=r0
   r0 operation:
-    %1 = string-utf8-bytes %0 loans=none : &[u8] [10437, 10470)
-    return %1 [10437, 10470)
+    %1 = string-utf8-bytes %0 loans=none : &[u8] [10465, 10498)
+    return %1 [10465, 10498)
 fn silk/u8.toI32 params=1 locals=2 -> i32 entry=r0
   r0 operation:
     %1 = convert %0 u8 -> i32 [4964, 4989)
