@@ -1366,9 +1366,10 @@ const layoutOf = (
     nextInternal += 2
   }
   const internalCount = nextInternal - physical
-  const frameBase = frame.size === 0 ? undefined : physical + internalCount
-  const frameEnd = frame.size === 0 ? undefined : physical + internalCount + 1
-  const framePages = frame.size === 0 ? undefined : physical + internalCount + 2
+  const needsFrame = frame.roots.size !== 0 || frame.nominalUnionCleanupScratch.length !== 0
+  const frameBase = needsFrame ? physical + internalCount : undefined
+  const frameEnd = needsFrame ? physical + internalCount + 1 : undefined
+  const framePages = needsFrame ? physical + internalCount + 2 : undefined
   if (frameBase !== undefined && frameEnd !== undefined && framePages !== undefined) {
     declared.push(named(i32, 'frame_base'), named(i32, 'frame_end'), named(i32, 'frame_pages'))
   }
@@ -7689,13 +7690,12 @@ const emitBody = (
     return first
   }
   const restoreFrame = (): ReadonlyArray<Instr.Instr> =>
-    memory === undefined || memory.frame.size === 0 || layout.frameBase === undefined
+    memory === undefined || layout.frameBase === undefined
       ? []
       : [Instr.localGet(layout.frameBase), Instr.globalSet(memory.stackPointer)]
   const reserveFrame = (): ReadonlyArray<Instr.Instr> => {
     if (
       memory === undefined ||
-      memory.frame.size === 0 ||
       layout.frameBase === undefined ||
       layout.frameEnd === undefined ||
       layout.framePages === undefined
