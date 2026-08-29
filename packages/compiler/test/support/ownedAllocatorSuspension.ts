@@ -4,7 +4,7 @@ import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 struct OwnedAllocator { storage: Allocation }
 effect fn allocate(self: &mut OwnedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   let mut inner = Allocator.systemAllocatorProvider()
@@ -28,10 +28,8 @@ effect fn program() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let inspected = inspect(protected())
   let completed = run Intrinsic.bindRequirementOwned<Allocator>(move inspected, move provider)
   return match move completed {
-    Result<i32, never> { value: outcome } => match move outcome {
-      Success<i32> { value } => move value
-      Failure<never> { error } => move error
-    }
+      Result<i32, never>.Success { value } => move value
+      Result<i32, never>.Failure { error } => move error
   }
 }
 effect fn outerRecover(error: OutOfMemoryError) -> i32 { return 9 }
@@ -49,7 +47,7 @@ import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 struct Problem { code: i32 }
 struct OwnedAllocator { storage: Allocation }
 effect fn allocate(self: &mut OwnedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
@@ -77,10 +75,8 @@ effect fn program() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let inspected = inspect(Intrinsic.catchFailure<Problem>(protected(), recover))
   let completed = run Intrinsic.bindRequirementOwned<Allocator>(move inspected, move provider)
   return match move completed {
-    Result<i32, never> { value: outcome } => match move outcome {
-      Success<i32> { value } => move value
-      Failure<never> { error } => move error
-    }
+      Result<i32, never>.Success { value } => move value
+      Result<i32, never>.Failure { error } => move error
   }
 }
 effect fn outerRecover(error: OutOfMemoryError) -> i32 { return 9 }

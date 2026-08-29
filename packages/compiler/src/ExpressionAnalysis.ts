@@ -51,6 +51,7 @@ import type {
   StructInitializerState,
   StructTargetFact,
   StructTypeArgumentFact,
+  UnionVariantTargetFact,
 } from './Elaboration.js'
 import {
   argumentFact,
@@ -460,13 +461,64 @@ export const enumFactByType = (
         )
     : undefined
 
+export const unionFactByType = (
+  index: DeclarationIndex.Index,
+  type: SemanticType,
+): DeclarationFacts.UnionFact | undefined => {
+  if (!Type.isNominal(type)) return undefined
+  const declaration = DeclarationFacts.byCanonical(index, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
+  return declaration?._tag === 'UnionDeclaration' ? declaration : undefined
+}
+
+const nominalUnionCoverage = (
+  index: DeclarationIndex.Index,
+  type: Type.Nominal,
+  root: Type.Type,
+): ReadonlyArray<Match.CoverageIdentity> => {
+  const union = unionFactByType(index, type)
+  return Object.freeze(
+    union?.variants.flatMap((variant) =>
+      variant.canonical._tag === 'Canonical'
+        ? [Match.nominalUnionVariant(root, type, variant.canonical.id, variant.id.ordinal)]
+        : [],
+    ) ?? [],
+  )
+}
+
+export const coverageMembersOf = (
+  index: DeclarationIndex.Index,
+  type: Type.Type,
+): ReadonlyArray<Match.CoverageIdentity> => {
+  if (Type.isUnion(type))
+    return Object.freeze(
+      type.members.flatMap((member) =>
+        Type.isNominal(member) && unionFactByType(index, member) !== undefined
+          ? nominalUnionCoverage(index, member, member)
+          : [Match.structuralMember(member)],
+      ),
+    )
+  if (Type.isNominal(type) && unionFactByType(index, type) !== undefined)
+    return nominalUnionCoverage(index, type, type)
+  return Match.membersOf(type)
+}
+
 export const analyzeEnumMember = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
   resolution: ResolutionContext,
   expected?: SemanticType,
 ): ExpressionResult | undefined => {
-  const identifiers = SyntaxTree.tokens(node).filter((token) => token.kind === 'Identifier')
+  const path = SyntaxTree.directNode(node, 'TypePath')
+  const pathIdentifiers =
+    path === undefined ? [] : SyntaxTree.tokens(path).filter((token) => token.kind === 'Identifier')
+  const identifiers =
+    pathIdentifiers.length === 2
+      ? pathIdentifiers
+      : SyntaxTree.tokens(node).filter((token) => token.kind === 'Identifier')
   const qualifierToken = identifiers.at(0)
   const memberToken = identifiers.at(1)
   if (qualifierToken === undefined || memberToken === undefined || identifiers.length !== 2)
@@ -1011,6 +1063,11 @@ export interface StructTargetResult {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
+export interface UnionVariantTargetResult {
+  readonly fact: UnionVariantTargetFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+}
+
 export const intrinsicStruct = (
   type: Type.Nominal,
   syntax: SyntaxTree.Node,
@@ -1044,17 +1101,28 @@ export const intrinsicStruct = (
         name: type.name,
       }),
     }),
-    visibility: 'Public',
+    visibility:
+      Type.equals(type, Type.layout) || Type.equals(type, Type.invalidAlignment)
+        ? 'Public'
+        : 'Private',
     typeParameters: Object.freeze([]),
     name: Object.freeze({ _tag: 'Present', spelling: type.name, token }),
     fields: Object.freeze(
       fieldTypes.map(([name, fieldType], fieldOrdinal) =>
         Object.freeze({
-          _tag: 'StructField' as const,
-          id: Object.freeze({ _tag: 'FieldId' as const, struct: id, ordinal: fieldOrdinal }),
+          _tag: 'AggregateField' as const,
+          id: Object.freeze({
+            _tag: 'FieldId' as const,
+            owner: Object.freeze({ _tag: 'StructFieldOwnerId' as const, declaration: id }),
+            ordinal: fieldOrdinal,
+          }),
           state: Object.freeze({
             _tag: 'Unique' as const,
-            id: Object.freeze({ _tag: 'FieldId' as const, struct: id, ordinal: fieldOrdinal }),
+            id: Object.freeze({
+              _tag: 'FieldId' as const,
+              owner: Object.freeze({ _tag: 'StructFieldOwnerId' as const, declaration: id }),
+              ordinal: fieldOrdinal,
+            }),
           }),
           visibility: 'Public' as const,
           name: Object.freeze({ _tag: 'Present' as const, spelling: name, token }),
@@ -1234,6 +1302,223 @@ export const resolveStructTarget = (
   })
 }
 
+const unavailableUnionVariantTarget = (
+  diagnostic: Diagnostic.Diagnostic,
+  diagnostics: ReadonlyArray<Diagnostic.Diagnostic> = [],
+): UnionVariantTargetResult =>
+  Object.freeze({
+    fact: Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) }),
+    diagnostics: Diagnostic.merge(diagnostics, [diagnostic]),
+  })
+
+const selectedUnionVariant = (
+  union: DeclarationFacts.UnionFact,
+  type: Type.Nominal,
+  variantName: string,
+  token: Token.Token,
+  diagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
+): UnionVariantTargetResult => {
+  const variant = DeclarationFacts.lookupUnionVariant(union.variants, variantName)
+  if (variant._tag !== 'Resolved')
+    return unavailableUnionVariantTarget(
+      Diagnostic.unknownUnionVariant(Type.encode(type), variantName, token.span),
+      diagnostics,
+    )
+  if (union.validity._tag !== 'Valid')
+    return unavailableUnionVariantTarget(
+      Diagnostic.invalidNominalUnionConstruction(Type.encode(type), token.span),
+      diagnostics,
+    )
+  return Object.freeze({
+    fact: Object.freeze({ _tag: 'Resolved', union, variant: variant.variant, type, token }),
+    diagnostics: Object.freeze(diagnostics),
+  })
+}
+
+export const resolveUnionVariantTarget = (
+  source: SourceFile.SourceFile,
+  selector: SyntaxTree.Node,
+  resolution: ResolutionContext,
+  caller?: DeclarationFact,
+): UnionVariantTargetResult => {
+  const parentSyntax =
+    SyntaxTree.directNode(selector, 'AppliedType') ?? childNode(selector, 'TypePath')
+  const variantToken = SyntaxTree.tokens(selector)
+    .filter((token) => token.kind === 'Identifier')
+    .at(-1)
+  if (parentSyntax === undefined || variantToken === undefined) {
+    const diagnostic = Diagnostic.expectedNominalUnion('unavailable selector', selector.span)
+    return unavailableUnionVariantTarget(diagnostic)
+  }
+  const environment = new Map(
+    (caller?.typeParameters ?? []).flatMap((parameter) =>
+      parameter.name._tag === 'Present' ? [[parameter.name.spelling, parameter.type] as const] : [],
+    ),
+  )
+  const analyzed = DeclarationCollection.analyzeDeclaredType(source, parentSyntax, environment)
+  const nameResolution: NameResolution.Resolution = Object.freeze({
+    _tag: 'NameResolution',
+    modules: Object.freeze([resolution.scope]),
+    diagnostics: Object.freeze([]),
+  })
+  const applied = analyzed.fact._tag === 'Applied' ? analyzed.fact : undefined
+  const targetFact = applied?.target ?? analyzed.fact
+  const path = targetFact._tag === 'Unresolved' ? targetFact.path : undefined
+  let base: Type.Nominal | undefined
+  if (path === undefined) {
+    if (targetFact._tag === 'Resolved' && Type.isNominal(targetFact.type)) base = targetFact.type
+  } else {
+    const candidate = NameResolution.resolveType(
+      nameResolution,
+      resolution.index,
+      source.id,
+      path,
+    ).fact
+    if (candidate._tag === 'Resolved' && Type.isNominal(candidate.type)) base = candidate.type
+  }
+  const declaration =
+    base === undefined
+      ? undefined
+      : DeclarationFacts.byCanonical(resolution.index, {
+          _tag: 'CanonicalDeclarationId',
+          module: base.module,
+          name: base.name,
+        })
+  if (base === undefined || declaration?._tag !== 'UnionDeclaration') {
+    const diagnostic = Diagnostic.expectedNominalUnion(
+      base === undefined ? 'unavailable type' : Type.encode(base),
+      parentSyntax.span,
+    )
+    return unavailableUnionVariantTarget(diagnostic, analyzed.diagnostics)
+  }
+  const fullyResolved = DeclarationResolution.resolveTypeFact(
+    resolution.index,
+    source.id,
+    analyzed.fact,
+    (module, argumentPath) =>
+      NameResolution.resolveType(nameResolution, resolution.index, module, argumentPath),
+  )
+  if (
+    fullyResolved.fact._tag === 'Resolved' &&
+    Type.isNominal(fullyResolved.fact.type) &&
+    fullyResolved.fact.type.module === base.module &&
+    fullyResolved.fact.type.name === base.name
+  )
+    return selectedUnionVariant(
+      declaration,
+      fullyResolved.fact.type,
+      spelling(source, variantToken),
+      variantToken,
+      Diagnostic.merge(analyzed.diagnostics, fullyResolved.diagnostics),
+    )
+  const supplied = applied?.arguments ?? []
+  const sourceParameters = declaration.typeParameters.filter(
+    (parameter) =>
+      parameter.type.kind !== 'CallableRepresentation' &&
+      parameter.type.kind !== 'EffectRepresentation',
+  )
+  if (supplied.length > sourceParameters.length) {
+    const diagnostic = Diagnostic.expectedNominalUnion(Type.encode(base), parentSyntax.span)
+    return unavailableUnionVariantTarget(diagnostic, analyzed.diagnostics)
+  }
+  const resolvedArguments = supplied.map((argument) =>
+    DeclarationResolution.resolveTypeFact(
+      resolution.index,
+      source.id,
+      argument,
+      (module, argumentPath) =>
+        NameResolution.resolveType(nameResolution, resolution.index, module, argumentPath),
+    ),
+  )
+  let suppliedOrdinal = 0
+  const arguments_ = declaration.typeParameters.flatMap(
+    (parameter): ReadonlyArray<Type.GenericArgument> => {
+      if (
+        parameter.type.kind === 'CallableRepresentation' ||
+        parameter.type.kind === 'EffectRepresentation'
+      )
+        return [Type.representationParameterArgument(parameter.type)]
+      const resolved = resolvedArguments.at(suppliedOrdinal)
+      suppliedOrdinal += 1
+      if (resolved === undefined) return [Type.parameterArgument(parameter.type)]
+      if (resolved.fact._tag !== 'Resolved') return []
+      if (parameter.type.kind === 'Value')
+        return Type.isTypeArgument(resolved.fact.type) ? [resolved.fact.type] : []
+      if (
+        parameter.type.kind === 'RequirementRow' &&
+        Type.isParameter(resolved.fact.type) &&
+        resolved.fact.type.kind === 'RequirementRow'
+      )
+        return [Type.requirementRowArgument([], [resolved.fact.type])]
+      return []
+    },
+  )
+  if (
+    arguments_.length !== declaration.typeParameters.length ||
+    TypeInference.prefixSubstitution(
+      declaration.typeParameters.map((parameter) => parameter.type),
+      arguments_,
+    ) === undefined
+  ) {
+    const diagnostic = Diagnostic.expectedNominalUnion(Type.encode(base), parentSyntax.span)
+    return unavailableUnionVariantTarget(
+      diagnostic,
+      Diagnostic.merge(
+        analyzed.diagnostics,
+        ...resolvedArguments.map((argument) => argument.diagnostics),
+      ),
+    )
+  }
+  return selectedUnionVariant(
+    declaration,
+    Type.specializeNominal(base, arguments_),
+    spelling(source, variantToken),
+    variantToken,
+    Diagnostic.merge(
+      analyzed.diagnostics,
+      ...resolvedArguments.map((argument) => argument.diagnostics),
+    ),
+  )
+}
+
+const resolveBareUnionVariantTarget = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  resolution: ResolutionContext,
+): UnionVariantTargetResult | undefined => {
+  const tokens = SyntaxTree.tokens(node)
+  const initializerStart = tokens.findIndex((token) => token.kind === 'LeftBrace')
+  const selectorTokens = initializerStart === -1 ? tokens : tokens.slice(0, initializerStart)
+  const identifiers = selectorTokens.filter((token) => token.kind === 'Identifier')
+  const parentToken = identifiers.at(0)
+  const variantToken = identifiers.at(1)
+  if (identifiers.length !== 2 || parentToken === undefined || variantToken === undefined)
+    return undefined
+  const lookup = NameResolution.lookup(
+    resolution.scope,
+    resolution.index,
+    spelling(source, parentToken),
+  )
+  if (lookup._tag !== 'Resolved' || lookup.declaration._tag !== 'UnionDeclaration') return undefined
+  const union = lookup.declaration
+  const type =
+    union.canonical._tag === 'Canonical'
+      ? Type.nominal(
+          union.canonical.id.module,
+          union.canonical.id.name,
+          union.typeParameters.map((parameter) => Type.parameterArgument(parameter.type)),
+        )
+      : undefined
+  if (type === undefined) {
+    const diagnostic = Diagnostic.invalidNominalUnionConstruction(
+      spelling(source, parentToken),
+      parentToken.span,
+    )
+    return unavailableUnionVariantTarget(diagnostic)
+  }
+  return selectedUnionVariant(union, type, spelling(source, variantToken), variantToken, [])
+}
+
 export interface PatternCounters {
   pattern: number
   binding: number
@@ -1381,7 +1666,12 @@ export const analyzePattern = (
     })
   }
 
-  if (node.kind === 'EnumMemberPattern') {
+  const bareUnionPatternTarget =
+    node.kind === 'EnumMemberPattern' || node.kind === 'NominalPattern'
+      ? resolveBareUnionVariantTarget(source, node, resolution)
+      : undefined
+
+  if (node.kind === 'EnumMemberPattern' && bareUnionPatternTarget === undefined) {
     const identifiers = SyntaxTree.tokens(node).filter((token) => token.kind === 'Identifier')
     const qualifierToken = identifiers.at(0)
     const memberToken = identifiers.at(1)
@@ -1515,19 +1805,62 @@ export const analyzePattern = (
     })
   }
 
-  const targetSyntax = SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
-  const target = resolveStructTarget(source, targetSyntax, resolution, declaration)
+  const variantSelector = SyntaxTree.directNode(node, 'UnionVariantSelector')
+  const unionTarget =
+    variantSelector === undefined
+      ? bareUnionPatternTarget
+      : resolveUnionVariantTarget(source, variantSelector, resolution, declaration)
+  let targetSyntax: SyntaxTree.Node
+  if (variantSelector === undefined && unionTarget !== undefined) {
+    targetSyntax = node
+  } else if (variantSelector === undefined) {
+    targetSyntax = SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
+  } else {
+    targetSyntax =
+      SyntaxTree.directNode(variantSelector, 'AppliedType') ??
+      childNode(variantSelector, 'TypePath')
+  }
+  const structTarget =
+    unionTarget === undefined
+      ? resolveStructTarget(source, targetSyntax, resolution, declaration)
+      : undefined
+  const target = unionTarget ?? structTarget
+  if (target === undefined) throw new RangeError('Pattern target resolution is unavailable')
   const diagnostics: Array<Diagnostic.Diagnostic> = [...target.diagnostics]
-  const struct = target.fact._tag === 'Resolved' ? target.fact.struct : undefined
+  const struct =
+    target.fact._tag === 'Resolved' && 'struct' in target.fact ? target.fact.struct : undefined
+  const union =
+    target.fact._tag === 'Resolved' && 'union' in target.fact ? target.fact.union : undefined
+  const variant =
+    target.fact._tag === 'Resolved' && 'variant' in target.fact ? target.fact.variant : undefined
+  const aggregate = struct ?? union
+  const aggregateFields = struct?.fields ?? variant?.fields ?? Object.freeze([])
   const nominal = target.fact._tag === 'Resolved' ? target.fact.type : undefined
   const structSubstitution =
-    struct === undefined || nominal === undefined
+    aggregate === undefined || nominal === undefined
       ? new Map<string, SemanticType>()
       : (TypeInference.substitution(
-          struct.typeParameters.map((parameter) => parameter.type),
+          aggregate.typeParameters.map((parameter) => parameter.type),
           nominal.arguments,
         ) ?? new Map())
-  const label = nominal === undefined ? 'unknown struct' : Type.encode(nominal)
+  const unresolvedParameters =
+    aggregate === undefined || nominal === undefined
+      ? []
+      : aggregate.typeParameters.filter((parameter, ordinal) => {
+          const argument = nominal.arguments.at(ordinal)
+          return argument === undefined || isOwnStructArgument(parameter.type, argument)
+        })
+  for (const parameter of unresolvedParameters) {
+    diagnostics.push(
+      Diagnostic.uninferredTypeParameter(
+        nominal === undefined ? 'unknown aggregate' : Type.encode(nominal),
+        parameter.type.name,
+        parameter.syntax.span,
+      ),
+    )
+  }
+  const label = nominal === undefined ? 'unknown aggregate' : Type.encode(nominal)
+  const outsideDefiningModule = nominal !== undefined && nominal.module !== source.id
   const seen = new Map<string, PatternFieldFact>()
   const bindings: Array<PatternBindingFact> = []
   const fields = SyntaxTree.directNodes(node, 'PatternField').map((fieldNode): PatternFieldFact => {
@@ -1538,12 +1871,25 @@ export const analyzePattern = (
     const nameToken = identifiers.at(0)
     const name = nameToken === undefined ? undefined : spelling(source, nameToken)
     const lookup =
-      struct === undefined || name === undefined
+      aggregate === undefined || name === undefined
         ? undefined
-        : DeclarationFacts.lookupField(struct.fields, name)
+        : DeclarationFacts.lookupField(aggregateFields, name)
     let state: PatternFieldState = Object.freeze({ _tag: 'Unavailable' })
     let resolvedField: DeclarationFacts.FieldFact | undefined
-    if (lookup?._tag === 'Resolved') {
+    if (
+      lookup?._tag === 'Resolved' &&
+      lookup.field.visibility === 'Private' &&
+      outsideDefiningModule
+    ) {
+      const diagnostic = Diagnostic.inaccessibleProjectedField(
+        label,
+        name ?? '',
+        nameToken?.span ?? fieldNode.span,
+      )
+      diagnostics.push(diagnostic)
+      counters.invalid = true
+      state = Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) })
+    } else if (lookup?._tag === 'Resolved') {
       const original = seen.get(name ?? '')
       if (original === undefined) {
         resolvedField = lookup.field
@@ -1572,6 +1918,7 @@ export const analyzePattern = (
     }
 
     const nestedNode =
+      SyntaxTree.directNode(fieldNode, 'UnionVariantPattern') ??
       SyntaxTree.directNode(fieldNode, 'NominalPattern') ??
       SyntaxTree.directNode(fieldNode, 'BindingPattern')
     let nested: PatternFact | undefined
@@ -1598,7 +1945,9 @@ export const analyzePattern = (
           : undefined
       if (
         expected !== undefined &&
-        (nested._tag === 'NominalPattern' || nested._tag === 'TypePattern') &&
+        (nested._tag === 'NominalPattern' ||
+          nested._tag === 'UnionVariantPattern' ||
+          nested._tag === 'TypePattern') &&
         nested.member !== undefined &&
         !Type.equals(expected, nested.member)
       ) {
@@ -1670,37 +2019,69 @@ export const analyzePattern = (
   const omitted: Array<ReadonlyArray<DeclarationFacts.FieldId>> = fields.flatMap(
     (field) => field.nested?.omitted ?? [],
   )
-  if (struct !== undefined && !rest) {
-    for (const field of struct.fields) {
+  if (aggregate !== undefined && !rest) {
+    let omittedInaccessible = false
+    for (const field of aggregateFields) {
       if (field.name._tag !== 'Present' || seen.has(field.name.spelling)) continue
+      if (field.visibility === 'Private' && outsideDefiningModule) {
+        omittedInaccessible = true
+        continue
+      }
       diagnostics.push(Diagnostic.missingPatternField(label, field.name.spelling, node.span))
     }
-  } else if (struct !== undefined && rest) {
-    for (const field of struct.fields) {
+    if (omittedInaccessible)
+      diagnostics.push(Diagnostic.inaccessiblePatternFields(label, node.span))
+  } else if (aggregate !== undefined && rest) {
+    for (const field of aggregateFields) {
       if (field.name._tag === 'Present' && seen.has(field.name.spelling)) continue
       omitted.push(Object.freeze([...prefix, field.id]))
     }
   }
   const complete =
     target.fact._tag === 'Resolved' &&
+    unresolvedParameters.length === 0 &&
     !counters.invalid &&
     isAvailableSyntax(node) &&
     fields.every(
       (field) =>
         field.state._tag === 'Resolved' &&
         (field.nested === undefined ||
-          ((field.nested._tag === 'NominalPattern' || field.nested._tag === 'TypePattern') &&
+          ((field.nested._tag === 'NominalPattern' ||
+            field.nested._tag === 'UnionVariantPattern' ||
+            field.nested._tag === 'TypePattern') &&
             field.nested.complete)),
     ) &&
     (rest ||
-      struct?.fields.every(
+      aggregateFields.every(
         (field) => field.name._tag !== 'Present' || seen.has(field.name.spelling),
       ) === true)
+  if (unionTarget !== undefined) {
+    const coverage =
+      nominal !== undefined && variant?.canonical._tag === 'Canonical'
+        ? Match.nominalUnionVariant(nominal, nominal, variant.canonical.id, variant.id.ordinal)
+        : undefined
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'UnionVariantPattern',
+        id,
+        target: unionTarget.fact,
+        ...(nominal === undefined ? {} : { member: nominal }),
+        ...(coverage === undefined ? {} : { coverage }),
+        fields: Object.freeze(fields),
+        bindings: Object.freeze(bindings),
+        omitted: Object.freeze(omitted),
+        rest,
+        complete,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze(diagnostics),
+    })
+  }
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'NominalPattern',
       id,
-      target: target.fact,
+      target: structTarget?.fact ?? Object.freeze({ _tag: 'Unavailable' }),
       ...(nominal === undefined ? {} : { member: nominal }),
       fields: Object.freeze(fields),
       bindings: Object.freeze(bindings),
@@ -1758,7 +2139,7 @@ export const analyzeMatch = (
   if (scrutinee?.type === undefined) {
     members = undefined
   } else if (enumScrutinee === undefined) {
-    members = Match.membersOf(scrutinee.type)
+    members = coverageMembersOf(resolution.index, scrutinee.type)
   } else {
     members = Match.enumMembersOf(enumScrutinee)
   }
@@ -1769,6 +2150,7 @@ export const analyzeMatch = (
       SyntaxTree.directNode(armNode, 'ErrorPattern') ??
       SyntaxTree.directNode(armNode, 'EnumMemberPattern') ??
       SyntaxTree.directNode(armNode, 'IntegerPattern') ??
+      SyntaxTree.directNode(armNode, 'UnionVariantPattern') ??
       SyntaxTree.directNode(armNode, 'NominalPattern') ??
       SyntaxTree.directNode(armNode, 'BindingPattern') ??
       SyntaxTree.directNode(armNode, 'UniversalPattern')
@@ -1793,6 +2175,7 @@ export const analyzeMatch = (
   })
   const coverageIdentity = (pattern: PatternFact): Match.CoverageIdentity | undefined => {
     if (pattern._tag === 'EnumMemberPattern') return pattern.coverage
+    if (pattern._tag === 'UnionVariantPattern') return pattern.coverage
     return (pattern._tag === 'NominalPattern' || pattern._tag === 'TypePattern') &&
       pattern.member !== undefined
       ? Match.structuralMember(pattern.member)
@@ -1839,10 +2222,10 @@ export const analyzeMatch = (
     const member = coverageIdentity(pattern)
     const guarded = directToken(armNode, 'IfKeyword') !== undefined
     const memberInDomain =
-      member !== undefined && members?.some((candidate) => Match.identityEquals(candidate, member))
+      member !== undefined && members?.some((candidate) => Match.selects(member, candidate))
     if (
       enumScrutinee === undefined &&
-      member?._tag === 'StructuralTypeMember' &&
+      member !== undefined &&
       members !== undefined &&
       !memberInDomain
     ) {
@@ -2079,7 +2462,9 @@ export const analyzeMatch = (
         arm.reachable &&
         (arm.pattern._tag === 'UniversalPattern' ||
           (arm.pattern._tag === 'EnumMemberPattern' && arm.pattern.complete) ||
-          ((arm.pattern._tag === 'NominalPattern' || arm.pattern._tag === 'TypePattern') &&
+          ((arm.pattern._tag === 'NominalPattern' ||
+            arm.pattern._tag === 'UnionVariantPattern' ||
+            arm.pattern._tag === 'TypePattern') &&
             arm.pattern.complete)),
     ) &&
     !unavailableReachableResult &&
@@ -2344,7 +2729,7 @@ export const isOwnStructArgument = (
   argument: Type.GenericArgument,
 ): boolean => Type.equalsGenericArgument(Type.parameterArgument(parameter), argument)
 
-export const analyzeStructLiteral = (
+export const analyzeAggregateLiteral = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
   declarations: ReadonlyArray<DeclarationFact>,
@@ -2352,17 +2737,40 @@ export const analyzeStructLiteral = (
   scope: Scope,
   resolution: ResolutionContext,
 ): ExpressionResult => {
-  const targetSyntax = SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
-  const target = resolveStructTarget(source, targetSyntax, resolution, declaration, true)
+  const selector = SyntaxTree.directNode(node, 'UnionVariantSelector')
+  const unionTarget =
+    selector === undefined
+      ? resolveBareUnionVariantTarget(source, node, resolution)
+      : resolveUnionVariantTarget(source, selector, resolution, declaration)
+  let targetSyntax: SyntaxTree.Node
+  if (selector !== undefined) {
+    targetSyntax = SyntaxTree.directNode(selector, 'AppliedType') ?? childNode(selector, 'TypePath')
+  } else if (unionTarget !== undefined && node.kind === 'FieldProjectionExpression') {
+    targetSyntax = node
+  } else {
+    targetSyntax = SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
+  }
+  const target =
+    unionTarget ?? resolveStructTarget(source, targetSyntax, resolution, declaration, true)
   const diagnostics: Array<Diagnostic.Diagnostic> = [...target.diagnostics]
-  const struct = target.fact._tag === 'Resolved' ? target.fact.struct : undefined
+  let aggregate: DeclarationFacts.StructFact | DeclarationFacts.UnionFact | undefined
+  let aggregateFields: ReadonlyArray<DeclarationFacts.FieldFact> = Object.freeze([])
+  if (target.fact._tag === 'Resolved') {
+    if ('union' in target.fact) {
+      aggregate = target.fact.union
+      aggregateFields = target.fact.variant.fields
+    } else {
+      aggregate = target.fact.struct
+      aggregateFields = target.fact.struct.fields
+    }
+  }
   const nominal = target.fact._tag === 'Resolved' ? target.fact.type : undefined
-  const nominalLabel = nominal === undefined ? 'unknown struct' : Type.encode(nominal)
+  const nominalLabel = nominal === undefined ? 'unknown aggregate' : Type.encode(nominal)
   const inferredArguments = new Map<string, InferredStructArgument>()
   const argumentOrigins = new Map<string, ReadonlyArray<SourceSpan.SourceSpan>>()
   const explicitArguments = new Set<string>()
-  if (struct !== undefined && nominal !== undefined) {
-    for (const [ordinal, parameter] of struct.typeParameters.entries()) {
+  if (aggregate !== undefined && nominal !== undefined) {
+    for (const [ordinal, parameter] of aggregate.typeParameters.entries()) {
       const argument = nominal.arguments.at(ordinal)
       if (argument === undefined || isOwnStructArgument(parameter.type, argument)) continue
       const parameterKey = Type.key(parameter.type)
@@ -2377,8 +2785,9 @@ export const analyzeStructLiteral = (
   const definingModule = nominal?.module
   const authorized =
     definingModule !== undefined &&
-    struct?.syntax.kind === 'StructDeclaration' &&
-    struct.fields.every((field) => field.visibility === 'Public' || definingModule === source.id)
+    aggregate !== undefined &&
+    (aggregate.visibility === 'Public' || definingModule === source.id) &&
+    aggregateFields.every((field) => field.visibility === 'Public' || definingModule === source.id)
   const accessDiagnostic =
     nominal !== undefined && !authorized
       ? Diagnostic.inaccessibleStructConstruction(Type.encode(nominal), node.span)
@@ -2391,15 +2800,17 @@ export const analyzeStructLiteral = (
       const nameToken = directToken(initializer, 'Identifier')
       const name = nameToken === undefined ? undefined : spelling(source, nameToken)
       const fieldLookup =
-        struct === undefined || name === undefined
+        aggregate === undefined || name === undefined
           ? undefined
-          : DeclarationFacts.lookupField(struct.fields, name)
-      const expected =
+          : DeclarationFacts.lookupField(aggregateFields, name)
+      const contextualFieldType =
         fieldLookup?._tag === 'Resolved' && fieldLookup.field.declaredType._tag === 'Resolved'
           ? Type.substitute(fieldLookup.field.declaredType.type, structSubstitution)
           : undefined
       const contextualExpected =
-        expected !== undefined && Type.isRepresented(expected) ? expected.contract : expected
+        contextualFieldType !== undefined && Type.isRepresented(contextualFieldType)
+          ? contextualFieldType.contract
+          : contextualFieldType
       const expressionNode = initializer.children.find(isExpressionNode)
       if (expressionNode === undefined) {
         throw new RangeError('Struct initializer requires an expression node')
@@ -2418,7 +2829,7 @@ export const analyzeStructLiteral = (
       }
       diagnostics.push(...expression.diagnostics)
       let state: StructInitializerState = Object.freeze({ _tag: 'Unavailable' })
-      if (name !== undefined && nameToken !== undefined && struct !== undefined) {
+      if (name !== undefined && nameToken !== undefined && aggregate !== undefined) {
         const previous = seen.get(name)
         if (fieldLookup?._tag !== 'Resolved') {
           const diagnostic = Diagnostic.unknownStructField(nominalLabel, name, nameToken.span)
@@ -2451,10 +2862,7 @@ export const analyzeStructLiteral = (
           fieldLookup.field.declaredType._tag === 'Resolved' &&
           expression.type !== undefined
         ) {
-          const expectedType = Type.substitute(
-            fieldLookup.field.declaredType.type,
-            structSubstitution,
-          )
+          const expectedType = fieldLookup.field.declaredType.type
           const expectedValue = Type.isRepresented(expectedType)
             ? expectedType.contract
             : expectedType
@@ -2470,7 +2878,7 @@ export const analyzeStructLiteral = (
             if (TypeInference.infer(expectedType.contract, actualValue, candidateSubstitution)) {
               const siteSubstitution = new Map<string, Type.GenericArgument>()
               TypeInference.infer(expectedType.contract, actualValue, siteSubstitution)
-              for (const parameter of struct.typeParameters) {
+              for (const parameter of aggregate.typeParameters) {
                 if (
                   parameter.type.kind === 'CallableRepresentation' ||
                   parameter.type.kind === 'EffectRepresentation'
@@ -2534,7 +2942,7 @@ export const analyzeStructLiteral = (
                   actualRepresentation,
                 )
                 if (represented.representation.admissibility._tag === 'Unavailable') {
-                  const requiredParameter = struct.typeParameters.find(
+                  const requiredParameter = aggregate.typeParameters.find(
                     (candidate) => Type.key(candidate.type) === Type.key(parameter),
                   )
                   const actualParameter =
@@ -2594,10 +3002,13 @@ export const analyzeStructLiteral = (
             for (const [parameterKey, inferred] of inferredArguments)
               currentSubstitution.set(parameterKey, inferred.argument)
             const candidateSubstitution = new Map(currentSubstitution)
-            if (!TypeInference.infer(expectedType, expression.type, candidateSubstitution)) {
+            if (
+              !TypeInference.infer(expectedType, expression.type, candidateSubstitution) &&
+              !typesCompatible(actualValue, Type.substitute(expectedType, currentSubstitution))
+            ) {
               const impliedSubstitution = new Map<string, Type.GenericArgument>()
               if (TypeInference.infer(expectedType, expression.type, impliedSubstitution)) {
-                for (const parameter of struct.typeParameters) {
+                for (const parameter of aggregate.typeParameters) {
                   if (parameter.type.kind !== 'Value') continue
                   const parameterKey = Type.key(parameter.type)
                   const previous = inferredArguments.get(parameterKey)
@@ -2625,7 +3036,7 @@ export const analyzeStructLiteral = (
                 expression.type,
               )
               if (representationDiagnostic === undefined && divergence !== undefined) {
-                const parameter = struct.typeParameters.find((candidate) => {
+                const parameter = aggregate.typeParameters.find((candidate) => {
                   const inferred = inferredArguments.get(Type.key(candidate.type))
                   return (
                     inferred !== undefined &&
@@ -2648,7 +3059,7 @@ export const analyzeStructLiteral = (
             } else {
               const siteSubstitution = new Map<string, Type.GenericArgument>()
               TypeInference.infer(expectedType, expression.type, siteSubstitution)
-              for (const parameter of struct.typeParameters) {
+              for (const parameter of aggregate.typeParameters) {
                 const parameterKey = Type.key(parameter.type)
                 const inferred = siteSubstitution.get(parameterKey)
                 if (
@@ -2720,18 +3131,18 @@ export const analyzeStructLiteral = (
   )
 
   const completedArguments =
-    struct === undefined || nominal === undefined
+    aggregate === undefined || nominal === undefined
       ? undefined
       : nominal.arguments.map((argument, ordinal): Type.GenericArgument => {
-          const parameter = struct.typeParameters.at(ordinal)?.type
+          const parameter = aggregate.typeParameters.at(ordinal)?.type
           if (parameter === undefined) return argument
           return inferredArguments.get(Type.key(parameter))?.argument ?? argument
         })
   let unresolvedParameters: DeclarationFacts.TypeParameterFact[]
-  if (struct === undefined || completedArguments === undefined) {
+  if (aggregate === undefined || completedArguments === undefined) {
     unresolvedParameters = []
   } else {
-    unresolvedParameters = struct.typeParameters.flatMap((parameter, ordinal) => {
+    unresolvedParameters = aggregate.typeParameters.flatMap((parameter, ordinal) => {
       const argument = completedArguments.at(ordinal)
       return argument !== undefined && isOwnStructArgument(parameter.type, argument)
         ? [parameter]
@@ -2747,15 +3158,15 @@ export const analyzeStructLiteral = (
     nominal === undefined ||
     completedArguments === undefined ||
     unresolvedParameters.length > 0 ||
-    (struct !== undefined &&
+    (aggregate !== undefined &&
       TypeInference.substitution(
-        struct.typeParameters.map((parameter) => parameter.type),
+        aggregate.typeParameters.map((parameter) => parameter.type),
         completedArguments,
       ) === undefined)
       ? undefined
       : Type.nominal(nominal.module, nominal.name, completedArguments)
   const typeArguments: ReadonlyArray<StructTypeArgumentFact> = Object.freeze(
-    struct?.typeParameters.map((parameter, ordinal) => {
+    aggregate?.typeParameters.map((parameter, ordinal) => {
       const parameterKey = Type.key(parameter.type)
       const argument = completedArguments?.at(ordinal)
       const origins = argumentOrigins.get(parameterKey) ?? Object.freeze([])
@@ -2772,13 +3183,8 @@ export const analyzeStructLiteral = (
       })
     }) ?? [],
   )
-  const completedTarget: StructTargetFact =
-    completedNominal !== undefined && target.fact._tag === 'Resolved'
-      ? Object.freeze({ ...target.fact, type: completedNominal })
-      : target.fact
-
-  if (struct !== undefined && completedNominal !== undefined) {
-    for (const field of struct.fields) {
+  if (aggregate !== undefined && completedNominal !== undefined) {
+    for (const field of aggregateFields) {
       if (field.name._tag !== 'Present' || seen.has(field.name.spelling)) continue
       if (field.visibility === 'Private' && completedNominal.module !== source.id) continue
       diagnostics.push(
@@ -2792,10 +3198,10 @@ export const analyzeStructLiteral = (
   }
 
   let fields: { field: DeclarationFacts.FieldFact; initializer: StructInitializerFact }[]
-  if (struct === undefined) {
+  if (aggregate === undefined) {
     fields = []
   } else {
-    fields = struct.fields.flatMap((field) => {
+    fields = aggregateFields.flatMap((field) => {
       if (field.name._tag !== 'Present') return []
       const fieldName = field.name.spelling
       const initializer = initializers.find(
@@ -2805,28 +3211,61 @@ export const analyzeStructLiteral = (
     })
   }
   const complete =
-    struct !== undefined &&
+    aggregate !== undefined &&
     completedNominal !== undefined &&
     authorized &&
     SyntaxTree.isAvailableSyntax(node) &&
-    fields.length === struct.fields.length &&
-    initializers.length === struct.fields.length &&
+    fields.length === aggregateFields.length &&
+    initializers.length === aggregateFields.length &&
     initializers.every((initializer) => initializer.state._tag === 'Resolved')
   const type =
     complete && completedNominal !== undefined
       ? availableExpressionType(completedNominal)
       : unavailableExpressionType
-  return Object.freeze({
-    fact: Object.freeze({
+  let fact: ExpressionFact
+  if (unionTarget === undefined) {
+    let structTarget: StructTargetFact
+    if (target.fact._tag === 'Resolved' && 'struct' in target.fact) {
+      structTarget =
+        completedNominal === undefined
+          ? target.fact
+          : Object.freeze({ ...target.fact, type: completedNominal })
+    } else {
+      structTarget = Object.freeze({
+        _tag: 'Unavailable',
+        ...(target.fact._tag === 'Unavailable' && target.fact.cause !== undefined
+          ? { cause: target.fact.cause }
+          : {}),
+      })
+    }
+    fact = Object.freeze({
       _tag: 'StructLiteral',
-      target: completedTarget,
+      target: structTarget,
       authorized,
       typeArguments,
       initializers: Object.freeze(initializers),
       fields: Object.freeze(fields),
       type,
       syntax: node,
-    }),
+    })
+  } else {
+    const variantTarget: UnionVariantTargetFact =
+      completedNominal !== undefined && unionTarget.fact._tag === 'Resolved'
+        ? Object.freeze({ ...unionTarget.fact, type: completedNominal })
+        : unionTarget.fact
+    fact = Object.freeze({
+      _tag: 'UnionVariant',
+      target: variantTarget,
+      authorized,
+      typeArguments,
+      initializers: Object.freeze(initializers),
+      fields: Object.freeze(fields),
+      type,
+      syntax: node,
+    })
+  }
+  return Object.freeze({
+    fact,
     diagnostics: Object.freeze(diagnostics),
     type: complete ? completedNominal : undefined,
   })
@@ -4637,75 +5076,6 @@ export const intrinsicReference = (
       })
 }
 
-export const isEffectResultTarget = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
-): boolean => {
-  const rule = intrinsicOperationTarget(source, node)?.rule
-  return rule?._tag === 'EffectRule' && rule.operation === 'Result'
-}
-
-export const analyzeEffectResult = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
-  declarations: ReadonlyArray<DeclarationFact>,
-  declaration: DeclarationFact,
-  scope: Scope,
-  resolution: ResolutionContext,
-): ExpressionResult => {
-  const pipelined = node.kind === 'PipelineExpression'
-  const target = pipelined ? (pipelineCallable(node) ?? node) : node
-  const list = SyntaxTree.directNode(target, 'ArgumentList')
-  const argumentNodes =
-    list?.children.filter((element): element is SyntaxTree.Node =>
-      isRecursiveArgumentNode(element),
-    ) ?? []
-  const protectedNode = pipelined ? pipelineInput(node) : argumentNodes.at(0)
-  const protectedResult =
-    protectedNode === undefined
-      ? undefined
-      : analyzeExpression(source, protectedNode, declarations, declaration, scope, resolution)
-  const protectedEffect =
-    protectedResult?.type !== undefined && Type.isEffect(protectedResult.type)
-      ? protectedResult.type
-      : undefined
-  const diagnostics: Array<Diagnostic.Diagnostic> = [...(protectedResult?.diagnostics ?? [])]
-  if (argumentNodes.length !== (pipelined ? 0 : 1))
-    diagnostics.push(
-      Diagnostic.invalidEffectHandler('result requires exactly one Effect', node.span),
-    )
-  if (protectedEffect === undefined)
-    diagnostics.push(
-      Diagnostic.invalidEffectHandler(
-        'the protected argument is not an Effect',
-        protectedNode?.span ?? node.span,
-      ),
-    )
-  const failureValue = protectedEffect === undefined ? 'never' : Type.failureType(protectedEffect)
-  const type =
-    protectedEffect === undefined
-      ? unavailableExpressionType
-      : availableExpressionType(
-          Type.effectWithRows(
-            Type.result(protectedEffect.success, failureValue),
-            RowAlgebra.concrete(Type.failureRowPolicy(), []),
-            protectedEffect.access,
-            protectedEffect.requirementRow,
-          ),
-        )
-  return Object.freeze({
-    fact: Object.freeze({
-      _tag: 'EffectResult',
-      reference: intrinsicReference(source, target),
-      protected: protectedResult?.fact ?? unavailableExpression(node),
-      type,
-      syntax: node,
-    }),
-    diagnostics: Object.freeze(diagnostics),
-    type: type._tag === 'Available' ? type.type : undefined,
-  })
-}
-
 /** Finalizes ordinary lexical captures for one source Effect body. */
 export const effectCaptureFacts = (
   statements: ReadonlyArray<StatementFact>,
@@ -4784,6 +5154,7 @@ export const effectCaptureFacts = (
         expression(fact.index)
         return
       case 'StructLiteral':
+      case 'UnionVariant':
         for (const item of fact.initializers) expression(item.expression)
         return
       case 'ArrayLiteral':
@@ -4816,9 +5187,6 @@ export const effectCaptureFacts = (
         return
       case 'Run':
         expression(fact.subject)
-        return
-      case 'EffectResult':
-        expression(fact.protected)
         return
       case 'EffectCatch':
         expression(fact.protected)
@@ -5248,7 +5616,7 @@ export function analyzeExpression(
       return value
     return (
       analyzeConstantReference(source, node, resolution) ??
-      analyzeFunctionItem(source, node, declarations, resolution) ??
+      analyzeFunctionItem(source, node, declarations, resolution, expected) ??
       value
     )
   }
@@ -5399,8 +5767,8 @@ export function analyzeExpression(
     )
   }
 
-  if (node.kind === 'StructLiteralExpression') {
-    return analyzeStructLiteral(source, node, declarations, declaration, scope, resolution)
+  if (node.kind === 'StructLiteralExpression' || node.kind === 'UnionVariantExpression') {
+    return analyzeAggregateLiteral(source, node, declarations, declaration, scope, resolution)
   }
 
   if (node.kind === 'ArrayLiteralExpression') {
@@ -5408,10 +5776,12 @@ export function analyzeExpression(
   }
 
   if (node.kind === 'FieldProjectionExpression') {
+    if (resolveBareUnionVariantTarget(source, node, resolution) !== undefined)
+      return analyzeAggregateLiteral(source, node, declarations, declaration, scope, resolution)
     return (
       analyzeEnumMember(source, node, resolution, expected) ??
       analyzeConstantReference(source, node, resolution) ??
-      analyzeFunctionItem(source, node, declarations, resolution) ??
+      analyzeFunctionItem(source, node, declarations, resolution, expected) ??
       analyzeProjection(source, node, declarations, declaration, scope, resolution)
     )
   }
@@ -5446,9 +5816,6 @@ export function analyzeExpression(
   }
 
   if (node.kind === 'PipelineExpression' || node.kind === 'CallExpression') {
-    const operationTarget = node.kind === 'PipelineExpression' ? pipelineCallable(node) : node
-    if (operationTarget !== undefined && isEffectResultTarget(source, operationTarget))
-      return analyzeEffectResult(source, node, declarations, declaration, scope, resolution)
     if (node.kind === 'PipelineExpression')
       return analyzePipelineExpression(source, node, declarations, declaration, scope, resolution)
   }
@@ -5629,6 +5996,7 @@ export function analyzeExpression(
     if (
       qualifierLookup._tag === 'Resolved' &&
       (qualifierLookup.declaration._tag === 'StructDeclaration' ||
+        qualifierLookup.declaration._tag === 'UnionDeclaration' ||
         qualifierLookup.declaration._tag === 'ServiceDeclaration' ||
         qualifierLookup.declaration._tag === 'InterfaceDeclaration') &&
       qualifierLookup.declaration.canonical._tag === 'Canonical'

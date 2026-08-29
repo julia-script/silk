@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import type * as CleanupPlan from '../src/CleanupPlan.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -134,6 +135,45 @@ it.effect(
       assert.strictEqual((instance.exports.silk_main as () => number)(), 127)
     }),
   120_000,
+)
+
+it.effect('releases only the active nominal union variant payload', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'box-heap-indirection/nominal-union',
+      ascii(`import silk.allocator { OutOfMemoryError, Allocator, SystemAllocator }
+import silk.effect as Effect
+import silk.box { Box, make as boxMake }
+
+union Owner { Empty, Full { boxed: Box<i32> } }
+
+effect fn useOwner() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let boxed = run boxMake<i32>(42) |> Effect.provideMut(&mut allocator)
+  let owner = Owner.Full { boxed: move boxed }
+  drop owner
+  return 42
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(useOwner(), recover) }`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+    assert.deepEqual(counts(Projections.allocationTraceEventsOf(evaluated)), {
+      acquires: 1,
+      releases: 1,
+    })
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
 )
 
 /**

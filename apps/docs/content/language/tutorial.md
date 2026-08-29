@@ -106,7 +106,7 @@ Notes on what is *not* here:
   and `continue`.
 - `if` is a statement, not an expression. There is no `let x = if ...`. Declare the binding `mut`
   and assign it in each branch, or `return` from the branches. (`match` *is* an expression, but its
-  scrutinee must be a struct, structural union, or scalar enum — it does not replace a scalar
+  scrutinee must be a struct, nominal union, structural union, or scalar enum — it does not replace a scalar
   comparison.)
 - Conditions take no parentheses and the braces are mandatory.
 
@@ -209,8 +209,8 @@ placed inside owned data or an Effect result.
 
 ## Enums, unions, and match
 
-Silk has two ways to model a closed set of alternatives. A scalar `enum` is a nominal set of named,
-fieldless members. Qualify each member with its enum name, including in a `match`:
+Silk has three sum forms with different jobs. A scalar `enum` is a nominal set of named, fieldless
+members. Qualify each member with its enum name, including in a `match`:
 
 ```silk
 enum Status {
@@ -237,8 +237,31 @@ another fixed-width integer with a declaration such as `enum(i16) Status`, assig
 discriminants to members, and read a member's backing value with `Status.value(status)`. Enums do
 not carry payloads or convert implicitly to or from integers.
 
-When alternatives need data, use a *structural union* written `A | B`. A union value has one active
-member, and `match` takes it apart. `match` is an expression, so it can produce a value:
+When variants belong to one named type and may carry data, declare a nominal `union`. Generic
+arguments belong to the parent union, and constructors and patterns name that parent:
+
+```silk
+union LoadState<T> {
+  Idle,
+  Loaded { value: T }
+}
+
+fn loadedValue(state: LoadState<i32>) -> i32 {
+  return match move state {
+    LoadState<i32>.Idle => 0
+    LoadState<i32>.Loaded { value } => value
+  }
+}
+
+pub fn main() -> i32 {
+  let state = LoadState<i32>.Loaded { value: 42 }
+  return loadedValue(move state)
+}
+```
+
+When already-independent types need to compose without a declaring parent, use a *structural union*
+written `A | B`. A structural union value has one active member, and `match` takes it apart. `match`
+is an expression, so it can produce a value:
 
 ```silk
 pub struct Empty {}
@@ -268,8 +291,9 @@ Points worth noting:
 - `Empty nothing` binds the whole member rather than its fields.
 - `match move state` states the access mode. The alternatives are `match value` (only for copyable
   values), `match &value`, and `match &mut value`.
-- Matches are checked for exhaustiveness. Leaving out `Empty` or `Status.Done` is a compile error
-  naming the member you missed, so changing an enum or union tells you every match that must change.
+- Matches are checked for exhaustiveness. Leaving out `Empty`, `Status.Done`, or
+  `LoadState<i32>.Idle` is a compile error naming the member you missed, so changing any sum tells
+  you every match that must change.
 
 ## Effects: failure in the type
 

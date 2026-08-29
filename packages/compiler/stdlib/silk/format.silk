@@ -71,8 +71,8 @@ import silk.i32 as i32
 import silk.i64 as i64
 import silk.i8 as i8
 import silk.isize as isize
-import silk.option { Option, Some, None }
-import silk.result { Result, Success, Failure, failResult, succeed }
+import silk.option { Option }
+import silk.result { Result, failResult, succeed }
 import silk.string {
   String,
   make as stringMake,
@@ -261,87 +261,81 @@ pub fn signedValue(text: string) -> Result<i64, ParseError> {
 
 fn narrowU8(value: u64) -> Result<u8, ParseError> {
   return match move u64.checkedToU8(value) {
-    None {} => outOfRange<u8>()
-    Some<u8> { value: narrowed } => succeed<u8, ParseError>(narrowed)
+    Option<u8>.None => outOfRange<u8>()
+    Option<u8>.Some { value: narrowed } => succeed<u8, ParseError>(narrowed)
   }
 }
 
 fn narrowU16(value: u64) -> Result<u16, ParseError> {
   return match move u64.checkedToU16(value) {
-    None {} => outOfRange<u16>()
-    Some<u16> { value: narrowed } => succeed<u16, ParseError>(narrowed)
+    Option<u16>.None => outOfRange<u16>()
+    Option<u16>.Some { value: narrowed } => succeed<u16, ParseError>(narrowed)
   }
 }
 
 fn narrowU32(value: u64) -> Result<u32, ParseError> {
   return match move u64.checkedToU32(value) {
-    None {} => outOfRange<u32>()
-    Some<u32> { value: narrowed } => succeed<u32, ParseError>(narrowed)
+    Option<u32>.None => outOfRange<u32>()
+    Option<u32>.Some { value: narrowed } => succeed<u32, ParseError>(narrowed)
   }
 }
 
 fn narrowUsize(value: u64) -> Result<usize, ParseError> {
   return match move u64.checkedToUsize(value) {
-    None {} => outOfRange<usize>()
-    Some<usize> { value: narrowed } => succeed<usize, ParseError>(narrowed)
+    Option<usize>.None => outOfRange<usize>()
+    Option<usize>.Some { value: narrowed } => succeed<usize, ParseError>(narrowed)
   }
 }
 
 fn narrowI8(value: i64) -> Result<i8, ParseError> {
   return match move i64.checkedToI8(value) {
-    None {} => outOfRange<i8>()
-    Some<i8> { value: narrowed } => succeed<i8, ParseError>(narrowed)
+    Option<i8>.None => outOfRange<i8>()
+    Option<i8>.Some { value: narrowed } => succeed<i8, ParseError>(narrowed)
   }
 }
 
 fn narrowI16(value: i64) -> Result<i16, ParseError> {
   return match move i64.checkedToI16(value) {
-    None {} => outOfRange<i16>()
-    Some<i16> { value: narrowed } => succeed<i16, ParseError>(narrowed)
+    Option<i16>.None => outOfRange<i16>()
+    Option<i16>.Some { value: narrowed } => succeed<i16, ParseError>(narrowed)
   }
 }
 
 fn narrowI32(value: i64) -> Result<i32, ParseError> {
   return match move i64.checkedToI32(value) {
-    None {} => outOfRange<i32>()
-    Some<i32> { value: narrowed } => succeed<i32, ParseError>(narrowed)
+    Option<i32>.None => outOfRange<i32>()
+    Option<i32>.Some { value: narrowed } => succeed<i32, ParseError>(narrowed)
   }
 }
 
 fn narrowIsize(value: i64) -> Result<isize, ParseError> {
   return match move i64.checkedToIsize(value) {
-    None {} => outOfRange<isize>()
-    Some<isize> { value: narrowed } => succeed<isize, ParseError>(narrowed)
+    Option<isize>.None => outOfRange<isize>()
+    Option<isize>.Some { value: narrowed } => succeed<isize, ParseError>(narrowed)
   }
 }
 
 /// Reads complete decimal text as a `u8`, rejecting a value above `u8.MAX`.
 pub fn u8Value(text: string) -> Result<u8, ParseError> {
   return match move unsignedValue(text) {
-    Result<u64, ParseError> { value: outcome } => match move outcome {
-      Success<u64> { value } => narrowU8(value)
-      Failure<ParseError> { error } => failResult<u8, ParseError>(move error)
-    }
+    Result<u64, ParseError>.Success { value } => narrowU8(value)
+    Result<u64, ParseError>.Failure { error } => failResult<u8, ParseError>(move error)
   }
 }
 
 /// Reads complete decimal text as a `u16`, rejecting a value above `u16.MAX`.
 pub fn u16Value(text: string) -> Result<u16, ParseError> {
   return match move unsignedValue(text) {
-    Result<u64, ParseError> { value: outcome } => match move outcome {
-      Success<u64> { value } => narrowU16(value)
-      Failure<ParseError> { error } => failResult<u16, ParseError>(move error)
-    }
+    Result<u64, ParseError>.Success { value } => narrowU16(value)
+    Result<u64, ParseError>.Failure { error } => failResult<u16, ParseError>(move error)
   }
 }
 
 /// Reads complete decimal text as a `u32`, rejecting a value above `u32.MAX`.
 pub fn u32Value(text: string) -> Result<u32, ParseError> {
   return match move unsignedValue(text) {
-    Result<u64, ParseError> { value: outcome } => match move outcome {
-      Success<u64> { value } => narrowU32(value)
-      Failure<ParseError> { error } => failResult<u32, ParseError>(move error)
-    }
+    Result<u64, ParseError>.Success { value } => narrowU32(value)
+    Result<u64, ParseError>.Failure { error } => failResult<u32, ParseError>(move error)
   }
 }
 
@@ -354,40 +348,32 @@ pub fn u64Value(text: string) -> Result<u64, ParseError> {
 /// hold.
 pub fn usizeValue(text: string) -> Result<usize, ParseError> {
   return match move unsignedValue(text) {
-    Result<u64, ParseError> { value: outcome } => match move outcome {
-      Success<u64> { value } => narrowUsize(value)
-      Failure<ParseError> { error } => failResult<usize, ParseError>(move error)
-    }
+    Result<u64, ParseError>.Success { value } => narrowUsize(value)
+    Result<u64, ParseError>.Failure { error } => failResult<usize, ParseError>(move error)
   }
 }
 
 /// Reads complete decimal text as an `i8`, rejecting a value outside `i8.MIN`–`i8.MAX`.
 pub fn i8Value(text: string) -> Result<i8, ParseError> {
   return match move signedValue(text) {
-    Result<i64, ParseError> { value: outcome } => match move outcome {
-      Success<i64> { value } => narrowI8(value)
-      Failure<ParseError> { error } => failResult<i8, ParseError>(move error)
-    }
+    Result<i64, ParseError>.Success { value } => narrowI8(value)
+    Result<i64, ParseError>.Failure { error } => failResult<i8, ParseError>(move error)
   }
 }
 
 /// Reads complete decimal text as an `i16`, rejecting a value outside `i16.MIN`–`i16.MAX`.
 pub fn i16Value(text: string) -> Result<i16, ParseError> {
   return match move signedValue(text) {
-    Result<i64, ParseError> { value: outcome } => match move outcome {
-      Success<i64> { value } => narrowI16(value)
-      Failure<ParseError> { error } => failResult<i16, ParseError>(move error)
-    }
+    Result<i64, ParseError>.Success { value } => narrowI16(value)
+    Result<i64, ParseError>.Failure { error } => failResult<i16, ParseError>(move error)
   }
 }
 
 /// Reads complete decimal text as an `i32`, rejecting a value outside `i32.MIN`–`i32.MAX`.
 pub fn i32Value(text: string) -> Result<i32, ParseError> {
   return match move signedValue(text) {
-    Result<i64, ParseError> { value: outcome } => match move outcome {
-      Success<i64> { value } => narrowI32(value)
-      Failure<ParseError> { error } => failResult<i32, ParseError>(move error)
-    }
+    Result<i64, ParseError>.Success { value } => narrowI32(value)
+    Result<i64, ParseError>.Failure { error } => failResult<i32, ParseError>(move error)
   }
 }
 
@@ -400,9 +386,7 @@ pub fn i64Value(text: string) -> Result<i64, ParseError> {
 /// hold.
 pub fn isizeValue(text: string) -> Result<isize, ParseError> {
   return match move signedValue(text) {
-    Result<i64, ParseError> { value: outcome } => match move outcome {
-      Success<i64> { value } => narrowIsize(value)
-      Failure<ParseError> { error } => failResult<isize, ParseError>(move error)
-    }
+    Result<i64, ParseError>.Success { value } => narrowIsize(value)
+    Result<i64, ParseError>.Failure { error } => failResult<isize, ParseError>(move error)
   }
 }

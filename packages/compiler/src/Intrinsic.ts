@@ -65,10 +65,6 @@ export type Rule =
       readonly result: Type.Type
     }
   | {
-      readonly _tag: 'EffectRule'
-      readonly operation: 'Result'
-    }
-  | {
       readonly _tag: 'ContractRule'
       readonly contract: CallableContract.CallableContract
       readonly post: 'BindRequirement' | 'CatchFailure'
@@ -259,32 +255,6 @@ const builtin = (options: {
 
 export const isBuiltinOperation = (operation: Operation): operation is BuiltinOperation =>
   operation.rule._tag === 'BuiltinRule' && 'callParameters' in operation
-
-const effect = (options: {
-  readonly name: string
-  readonly operation: Extract<Rule, { readonly _tag: 'EffectRule' }>['operation']
-  readonly typeParameters: ReadonlyArray<string>
-  readonly parameters: ReadonlyArray<ValueParameter>
-  readonly result: string
-}): Operation => {
-  const spelling = intrinsicSpelling('Effect', options.name)
-  return Object.freeze({
-    _tag: 'IntrinsicOperation',
-    id: operationId('Intrinsic', spelling),
-    spelling,
-    typeParameters: Object.freeze(options.typeParameters.map(typeParameter)),
-    parameters: Object.freeze(Array.from(options.parameters)),
-    result: options.result,
-    unsafe: false,
-    admission: admission('Effect'),
-    consumer: consumer('Effect', options.name),
-    targets: executionTargets,
-    rule: Object.freeze({
-      _tag: 'EffectRule',
-      operation: options.operation,
-    }),
-  })
-}
 
 const contractEffect = (options: {
   readonly name: string
@@ -650,6 +620,42 @@ const osBuiltin = (options: {
     invariant: options.invariant,
   })
 
+const osOpen = (options: {
+  readonly name: 'fileOpen' | 'directoryOpen'
+  readonly operation: 'OsFileOpen' | 'OsDirectoryOpen'
+  readonly parameters: ReadonlyArray<ValueParameter>
+  readonly semanticParameters: ReadonlyArray<Type.Type>
+  readonly invariant: string
+}): Operation => {
+  const carrierOwner = Object.freeze({
+    module: 'Intrinsic',
+    name: `$Os.${options.name}`,
+  })
+  const carrierResult = Type.parameter(carrierOwner, 0, 'R')
+  const success = Type.callable(Object.freeze([Type.osHandle]), carrierResult, 'Take')
+  const failure = Type.callable(Object.freeze([]), carrierResult, 'Take')
+  return Object.freeze({
+    ...builtin({
+      actor: 'Os',
+      name: options.name,
+      operation: options.operation,
+      typeParameters: Object.freeze(['R']),
+      semanticTypeParameters: Object.freeze([carrierResult]),
+      parameters: Object.freeze([
+        ...options.parameters,
+        valueParameter('success', 'once fn(OsHandle) -> R'),
+        valueParameter('failure', 'once fn() -> R'),
+      ]),
+      semanticParameters: Object.freeze([...options.semanticParameters, success, failure]),
+      result: 'Effect<R>',
+      semanticResult: osEffect(carrierResult),
+      unsafe: true,
+      targets: nativeTargets,
+    }),
+    invariant: options.invariant,
+  })
+}
+
 const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Operation => {
   let concreteResult: Type.Type
   switch (operation.result) {
@@ -668,8 +674,13 @@ const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Op
       break
   }
   const checked = operation.result === 'OptionSelf' || operation.result === 'OptionTarget'
-  const result = checked ? `Option<${concreteResult}>` : concreteResult
-  const semanticResult = checked ? Type.option(concreteResult) : concreteResult
+  const carrierOwner = Object.freeze({
+    module: 'Intrinsic',
+    name: `$${scalar.spelling}.${operation.spelling}`,
+  })
+  const carrierResult = Type.parameter(carrierOwner, 0, 'R')
+  const result = checked ? 'R' : concreteResult
+  const semanticResult = checked ? carrierResult : concreteResult
   const parameterNames =
     operation.arity === 1 ? Object.freeze(['value']) : Object.freeze(['left', 'right'])
   const semanticParameters =
@@ -678,18 +689,37 @@ const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Op
   const contractParameters = borrowed
     ? Object.freeze(semanticParameters.map((type) => Type.reference('Shared', type)))
     : semanticParameters
+  const carrierParameters = checked
+    ? Object.freeze([
+        valueParameter('present', `once fn(${concreteResult}) -> R`),
+        valueParameter('absent', 'once fn() -> R'),
+      ])
+    : Object.freeze([])
+  const semanticCarrierParameters = checked
+    ? Object.freeze([
+        Type.callable(Object.freeze([concreteResult]), carrierResult, 'Take'),
+        Type.callable(Object.freeze([]), carrierResult, 'Take'),
+      ])
+    : Object.freeze([])
   return builtin({
     actor: scalar.spelling,
     name: operation.spelling,
     operation: operation.code,
-    parameters: Object.freeze(
-      parameterNames.map((name, ordinal) => {
+    ...(checked
+      ? {
+          typeParameters: Object.freeze(['R']),
+          semanticTypeParameters: Object.freeze([carrierResult]),
+        }
+      : {}),
+    parameters: Object.freeze([
+      ...parameterNames.map((name, ordinal) => {
         const type = semanticParameters.at(ordinal) ?? scalar.spelling
         return valueParameter(name, borrowed ? `&${type}` : type)
       }),
-    ),
-    semanticParameters,
-    callParameters: contractParameters,
+      ...carrierParameters,
+    ]),
+    semanticParameters: Object.freeze([...semanticParameters, ...semanticCarrierParameters]),
+    callParameters: Object.freeze([...contractParameters, ...semanticCarrierParameters]),
     result,
     semanticResult,
   })
@@ -850,7 +880,7 @@ const intrinsicOperations = Object.freeze([
       invariant:
         'true means the complete initialized output contains fresh cryptographically secure bytes; false exposes no recoverable output',
     }),
-    osBuiltin({
+    osOpen({
       name: 'fileOpen',
       operation: 'OsFileOpen',
       parameters: Object.freeze([
@@ -861,10 +891,8 @@ const intrinsicOperations = Object.freeze([
         valueParameter('nativeCode', '&mut u32'),
       ]),
       semanticParameters: Object.freeze([byteSlice, byteSlice, 'i32', mutableI32, mutableU32]),
-      result: 'Effect<Option<OsHandle>>',
-      semanticResult: Type.option(Type.osHandle),
       invariant:
-        'root is an absolute native path; path is normalized provider-absolute; outputs are initialized; traversal rejects symlinks and namespace escape',
+        'root is an absolute native path; path is normalized provider-absolute; status outputs are initialized; traversal rejects symlinks and namespace escape; success transfers one live handle only to the selected carrier',
     }),
     osBuiltin({
       name: 'fileRead',
@@ -872,17 +900,19 @@ const intrinsicOperations = Object.freeze([
       parameters: Object.freeze([
         valueParameter('handle', '&mut OsHandle'),
         valueParameter('output', '&mut [u8]'),
+        valueParameter('count', '&mut usize'),
         valueParameter('reason', '&mut i32'),
         valueParameter('nativeCode', '&mut u32'),
       ]),
       semanticParameters: Object.freeze([
         mutableHandle,
         Type.slice('Exclusive', 'u8'),
+        mutableUsize,
         mutableI32,
         mutableU32,
       ]),
-      result: 'Effect<Option<usize>>',
-      semanticResult: Type.option('usize'),
+      result: 'Effect<bool>',
+      semanticResult: 'bool',
       invariant:
         'handle is a live file; output is initialized writable storage; success reports the exact transferred byte count',
     }),
@@ -893,6 +923,7 @@ const intrinsicOperations = Object.freeze([
         valueParameter('handle', '&mut OsHandle'),
         valueParameter('input', '&[u8]'),
         valueParameter('offset', 'usize'),
+        valueParameter('count', '&mut usize'),
         valueParameter('reason', '&mut i32'),
         valueParameter('nativeCode', '&mut u32'),
       ]),
@@ -900,15 +931,16 @@ const intrinsicOperations = Object.freeze([
         mutableHandle,
         byteSlice,
         'usize',
+        mutableUsize,
         mutableI32,
         mutableU32,
       ]),
-      result: 'Effect<Option<usize>>',
-      semanticResult: Type.option('usize'),
+      result: 'Effect<bool>',
+      semanticResult: 'bool',
       invariant:
         'handle is a live file; input is initialized; success reports the exact transferred byte count and may be partial',
     }),
-    osBuiltin({
+    osOpen({
       name: 'directoryOpen',
       operation: 'OsDirectoryOpen',
       parameters: Object.freeze([
@@ -918,9 +950,8 @@ const intrinsicOperations = Object.freeze([
         valueParameter('nativeCode', '&mut u32'),
       ]),
       semanticParameters: Object.freeze([byteSlice, byteSlice, mutableI32, mutableU32]),
-      result: 'Effect<Option<OsHandle>>',
-      semanticResult: Type.option(Type.osHandle),
-      invariant: 'root and path satisfy confined traversal and outputs are initialized',
+      invariant:
+        'root and path satisfy confined traversal; status outputs are initialized; success transfers one live handle only to the selected carrier',
     }),
     osBuiltin({
       name: 'directoryNext',
@@ -928,6 +959,7 @@ const intrinsicOperations = Object.freeze([
       parameters: Object.freeze([
         valueParameter('handle', '&mut OsHandle'),
         valueParameter('output', '&mut [u8]'),
+        valueParameter('count', '&mut usize'),
         valueParameter('kind', '&mut i32'),
         valueParameter('requiredCapacity', '&mut usize'),
         valueParameter('reason', '&mut i32'),
@@ -936,13 +968,14 @@ const intrinsicOperations = Object.freeze([
       semanticParameters: Object.freeze([
         mutableHandle,
         Type.slice('Exclusive', 'u8'),
+        mutableUsize,
         mutableI32,
         mutableUsize,
         mutableI32,
         mutableU32,
       ]),
-      result: 'Effect<Option<usize>>',
-      semanticResult: Type.option('usize'),
+      result: 'Effect<bool>',
+      semanticResult: 'bool',
       invariant:
         'handle is a live directory; buffer-too-small does not advance and reports required capacity; zero means end',
     }),
@@ -978,6 +1011,7 @@ const intrinsicOperations = Object.freeze([
         valueParameter('parent', '&[u8]'),
         valueParameter('prefix', '&[u8]'),
         valueParameter('output', '&mut [u8]'),
+        valueParameter('count', '&mut usize'),
         valueParameter('requiredCapacity', '&mut usize'),
         valueParameter('reason', '&mut i32'),
         valueParameter('nativeCode', '&mut u32'),
@@ -988,11 +1022,12 @@ const intrinsicOperations = Object.freeze([
         byteSlice,
         Type.slice('Exclusive', 'u8'),
         mutableUsize,
+        mutableUsize,
         mutableI32,
         mutableU32,
       ]),
-      result: 'Effect<Option<usize>>',
-      semanticResult: Type.option('usize'),
+      result: 'Effect<bool>',
+      semanticResult: 'bool',
       invariant:
         'root and parent satisfy confined traversal; prefix is one valid final component fragment; the provider chooses the unique suffix, creates exactly one directory no other caller holds, and writes its complete final component name; buffer-too-small creates nothing and reports required capacity',
     }),
@@ -1037,12 +1072,18 @@ const intrinsicOperations = Object.freeze([
       operation: 'OsStandardInputRead',
       parameters: Object.freeze([
         valueParameter('output', '&mut [u8]'),
+        valueParameter('count', '&mut usize'),
         valueParameter('reason', '&mut i32'),
         valueParameter('nativeCode', '&mut u32'),
       ]),
-      semanticParameters: Object.freeze([Type.slice('Exclusive', 'u8'), mutableI32, mutableU32]),
-      result: 'Effect<Option<usize>>',
-      semanticResult: Type.option('usize'),
+      semanticParameters: Object.freeze([
+        Type.slice('Exclusive', 'u8'),
+        mutableUsize,
+        mutableI32,
+        mutableU32,
+      ]),
+      result: 'Effect<bool>',
+      semanticResult: 'bool',
       invariant:
         'output is initialized writable storage; success reports the exact transferred byte count and zero means end of input',
     }),
@@ -1085,6 +1126,7 @@ const intrinsicOperations = Object.freeze([
         valueParameter('stream', 'i32'),
         valueParameter('offset', 'usize'),
         valueParameter('output', '&mut [u8]'),
+        valueParameter('count', '&mut usize'),
         valueParameter('reason', '&mut i32'),
         valueParameter('nativeCode', '&mut u32'),
       ]),
@@ -1092,11 +1134,12 @@ const intrinsicOperations = Object.freeze([
         'i32',
         'usize',
         Type.slice('Exclusive', 'u8'),
+        mutableUsize,
         mutableI32,
         mutableU32,
       ]),
-      result: 'Effect<Option<usize>>',
-      semanticResult: Type.option('usize'),
+      result: 'Effect<bool>',
+      semanticResult: 'bool',
       invariant:
         'stream selects zero for standard output or one for standard error, offset is within the retained capture of the immediately preceding execute, and output is initialized writable storage',
     }),
@@ -1119,17 +1162,19 @@ const intrinsicOperations = Object.freeze([
       parameters: Object.freeze([
         valueParameter('index', 'usize'),
         valueParameter('output', '&mut [u8]'),
+        valueParameter('count', '&mut usize'),
         valueParameter('reason', '&mut i32'),
         valueParameter('nativeCode', '&mut u32'),
       ]),
       semanticParameters: Object.freeze([
         'usize',
         Type.slice('Exclusive', 'u8'),
+        mutableUsize,
         mutableI32,
         mutableU32,
       ]),
-      result: 'Effect<Option<usize>>',
-      semanticResult: Type.option('usize'),
+      result: 'Effect<bool>',
+      semanticResult: 'bool',
       invariant:
         'output is initialized writable storage; success reports the complete argument byte length and copies the prefix that fits, and absence reports the not-found reason',
     }),
@@ -1139,17 +1184,19 @@ const intrinsicOperations = Object.freeze([
       parameters: Object.freeze([
         valueParameter('name', '&[u8]'),
         valueParameter('output', '&mut [u8]'),
+        valueParameter('count', '&mut usize'),
         valueParameter('reason', '&mut i32'),
         valueParameter('nativeCode', '&mut u32'),
       ]),
       semanticParameters: Object.freeze([
         byteSlice,
         Type.slice('Exclusive', 'u8'),
+        mutableUsize,
         mutableI32,
         mutableU32,
       ]),
-      result: 'Effect<Option<usize>>',
-      semanticResult: Type.option('usize'),
+      result: 'Effect<bool>',
+      semanticResult: 'bool',
       invariant:
         'output is initialized writable storage; success reports the complete value byte length and copies the prefix that fits, and an unset name reports the not-found reason',
     }),
@@ -1158,12 +1205,18 @@ const intrinsicOperations = Object.freeze([
       operation: 'OsHostWorkingDirectory',
       parameters: Object.freeze([
         valueParameter('output', '&mut [u8]'),
+        valueParameter('count', '&mut usize'),
         valueParameter('reason', '&mut i32'),
         valueParameter('nativeCode', '&mut u32'),
       ]),
-      semanticParameters: Object.freeze([Type.slice('Exclusive', 'u8'), mutableI32, mutableU32]),
-      result: 'Effect<Option<usize>>',
-      semanticResult: Type.option('usize'),
+      semanticParameters: Object.freeze([
+        Type.slice('Exclusive', 'u8'),
+        mutableUsize,
+        mutableI32,
+        mutableU32,
+      ]),
+      result: 'Effect<bool>',
+      semanticResult: 'bool',
       invariant:
         'output is initialized writable storage; success reports the complete working-directory byte length and copies the prefix that fits',
     }),
@@ -1589,13 +1642,6 @@ const intrinsicOperations = Object.freeze([
         suspensionRequirementRow,
       ),
     }),
-    effect({
-      name: 'result',
-      operation: 'Result',
-      typeParameters: Object.freeze([]),
-      parameters: Object.freeze([valueParameter('protected', 'Effect<A ! E ? R>')]),
-      result: 'Effect<Result<A, E> ? R>',
-    }),
     contractEffect({
       name: 'bindRequirement',
       post: 'BindRequirement',
@@ -1733,9 +1779,6 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
       switch (operation.rule._tag) {
         case 'BuiltinRule':
           identity = operation.rule.operation
-          break
-        case 'EffectRule':
-          identity = `${operation.rule._tag}.${operation.rule.operation}`
           break
         case 'ContractRule':
           identity = `${operation.rule._tag}.${operation.rule.post}`

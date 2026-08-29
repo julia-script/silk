@@ -573,7 +573,7 @@ for (const provider of [
     () =>
       Effect.gen(function* () {
         const source = `import silk.effect as Effect
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 struct Token { value: i32 }
 service Counter {
   effect fn increment(token: ${provider.access === 'Exclusive' ? '&mut Token' : '&Token'}) -> i32 ? ${provider.access === 'Exclusive' ? '&mut Counter' : '&Counter'}
@@ -617,18 +617,14 @@ pub fn main() -> i32 {
 
   let ${provider.access === 'Exclusive' ? 'mut ' : ''}secondToken = Token { value: 0 }
   let mut secondCell = Cell { value: ${provider.access === 'Exclusive' ? '30' : '31'} }
-  let secondBound = ${provider.call}(read(${provider.access === 'Exclusive' ? '&mut secondToken' : '&secondToken'}), ${provider.access === 'Exclusive' ? '&mut secondCell' : '&secondCell'})
+  let secondReified = Effect.result(read(${provider.access === 'Exclusive' ? '&mut secondToken' : '&secondToken'}))
+  let secondBound = ${provider.call}(move secondReified, ${provider.access === 'Exclusive' ? '&mut secondCell' : '&secondCell'})
   let secondHop = move secondBound
   let secondAlias = move secondHop
-  let reified = Effect.result(move secondAlias)
-  let reifiedHop = move reified
-  let reifiedAlias = move reifiedHop
-  let completed = run move reifiedAlias
+  let completed = run move secondAlias
   let second = match move completed {
-    Result<i32, never> { value: outcome } => match move outcome {
-      Success<i32> { value: answer } => answer
-      Failure<never> { error: impossible } => 0
-    }
+      Result<i32, never>.Success { value: answer } => answer
+      Result<i32, never>.Failure { error: impossible } => 0
   }
   let branches = branchRead(true, 40)
     + branchRead(false, 50)
@@ -737,6 +733,15 @@ it.effect('releases an affine owned provider after a pre-read scalar suspends an
   Effect.gen(function* () {
     const self = yield* snapshot(ownedProviderSuspendedFailure, 'wasm32-unknown-unknown')
     assert.deepEqual(Analysis.diagnostics(self), [])
+    const catchRunner = Analysis.loweredMir(self).functions.find((fn) =>
+      fn.id.name.startsWith('catchAll$effect$'),
+    )
+    const caught = catchRunner?.suspension?.regions.find(
+      (region) =>
+        region._tag === 'RunSuspendableEffectRegion' && region.completion._tag === 'Reify',
+    )
+    assert.isDefined(caught)
+    assert.strictEqual(caught?.operation._tag, 'CatchEffect')
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(
       outcome._tag,

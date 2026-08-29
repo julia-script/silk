@@ -55,7 +55,7 @@ Public declarations: 8.
 ## `fromU32`
 
 ```silk
-pub fn fromU32(value: u32) -> Option<char>
+pub fn fromU32(value: u32) -> silk/option.Option<char>
 ```
 
 Converts an integer to a Unicode scalar. Returns `None` for `0xD800` through `0xDFFF` and values

@@ -82,6 +82,7 @@ export type Type =
       readonly _tag: 'CallableValue'
       readonly type: SilkType.Callable
       readonly target: Hir.CallableTarget
+      readonly typeArguments?: ReadonlyArray<SilkType.GenericArgument>
       readonly site?: Hir.CallableSiteId
       readonly environment?: Extract<
         Layout.CallableEnvironment,
@@ -423,12 +424,16 @@ export type Operation =
       readonly _tag: 'CheckedScalar'
       readonly operation: Scalar.OperationCode
       readonly destination: LocalId
+      readonly valid: LocalId
+      readonly value: LocalId
       readonly operands: ReadonlyArray<LocalId>
+      readonly present: LocalId
+      readonly absent: LocalId
+      readonly presentCleanup: CleanupPlan.CleanupPlan
+      readonly absentCleanup: CleanupPlan.CleanupPlan
       readonly sourceType: ScalarType
       readonly valueType: ScalarType
-      readonly type: Extract<Type, { readonly _tag: 'Union' }>
-      readonly success: SilkType.Nominal
-      readonly failure: SilkType.Nominal
+      readonly type: Type
       readonly provenance: Provenance
     }
   | {
@@ -468,6 +473,22 @@ export type Operation =
       readonly failure: SilkType.Nominal
       readonly propagationType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly failureTag: number
+      readonly provenance: Provenance
+    }
+  | {
+      /** Opens one affine OS handle and transfers it only through the selected exact carrier. */
+      readonly _tag: 'OsOpen'
+      readonly operation: Intrinsic.OperationId
+      readonly destination: LocalId
+      readonly valid: LocalId
+      readonly handle: LocalId
+      readonly arguments: ReadonlyArray<LocalId>
+      readonly success: LocalId
+      readonly failure: LocalId
+      readonly successCleanup: CleanupPlan.CleanupPlan
+      readonly failureCleanup: CleanupPlan.CleanupPlan
+      readonly handleType: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly type: Type
       readonly provenance: Provenance
     }
   | {
@@ -970,29 +991,22 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
-      /** Runs one Effect and materializes only its completed typed channel as silk/result data. */
-      readonly _tag: 'ReifyEffect'
+      /** Runs the protected Effect and exposes its channels only to the enclosing catch lowering. */
+      readonly _tag: 'CatchEffect'
       readonly destination: LocalId
       readonly outcome: LocalId
+      readonly successValue: LocalId
+      readonly failureValue: LocalId
       readonly effect: LocalId
       readonly runner: DeclarationFacts.CanonicalId
       readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly arguments: ReadonlyArray<LocalId>
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
-      readonly resultType: Extract<Type, { readonly _tag: 'Nominal' }>
-      readonly resultField: DeclarationFacts.FieldId
-      readonly resultUnion: SilkType.StructuralUnion
-      readonly successType: SilkType.Nominal
-      readonly successField: DeclarationFacts.FieldId
-      readonly successTag: number
-      readonly failureType: SilkType.Nominal
-      readonly failureField: DeclarationFacts.FieldId
-      readonly failureTag: number
       readonly failureValueType: SilkType.Type
-      readonly resultShape: Layout.CallingShape
+      readonly successShape: Layout.CallingShape
       readonly outcomeShape: Layout.CallingShape
       readonly failureValueShape: Layout.CallingShape
-      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly type: Extract<Type, { readonly _tag: 'bool' }>
       readonly provenance: Provenance
     }
   | {
@@ -1020,6 +1034,21 @@ export type Operation =
       readonly _tag: 'Construct'
       readonly destination: LocalId
       readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly fields: ReadonlyArray<{
+        readonly field: DeclarationFacts.FieldId
+        readonly value: LocalId
+        readonly stored?:
+          | Extract<Type, { readonly _tag: 'CallableValue' }>['storage']
+          | Extract<Type, { readonly _tag: 'EffectValue' }>['storage']
+      }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'ConstructUnionVariant'
+      readonly destination: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly variant: DeclarationFacts.CanonicalUnionVariantId
+      readonly variantOrdinal: number
       readonly fields: ReadonlyArray<{
         readonly field: DeclarationFacts.FieldId
         readonly value: LocalId
@@ -1075,7 +1104,26 @@ export type Operation =
     }
   | DropOperation
   | MatchOperation
+  | ConditionalOperation
   | ShortCircuitOperation
+
+/** One compiler-owned structured conditional whose branches may produce any value type. */
+export interface ConditionalOperation {
+  readonly _tag: 'Conditional'
+  readonly destination: LocalId
+  readonly condition: LocalId
+  readonly taken: {
+    readonly operations: ReadonlyArray<Operation>
+    readonly result: LocalId
+  }
+  readonly otherwise: {
+    readonly operations: ReadonlyArray<Operation>
+    readonly result: LocalId
+  }
+  readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' }>
+  readonly resultShape: Layout.CallingShape
+  readonly provenance: Provenance
+}
 
 /**
  * One compiler-owned conditional evaluation: `&&` and `||`. `left` is already evaluated when the
@@ -1143,6 +1191,7 @@ export interface MatchArm {
     readonly operations: ReadonlyArray<Operation>
     readonly result: LocalId
     readonly cleanup: ReadonlyArray<{
+      readonly destination: LocalId
       readonly path: ReadonlyArray<DeclarationFacts.FieldId>
       readonly cleanup: CleanupPlan.CleanupPlan
     }>
@@ -1622,6 +1671,8 @@ export const operationsOf = (region: Region): ReadonlyArray<Operation> => {
 }
 
 export const operationChildren = (operation: Operation): ReadonlyArray<Operation> => {
+  if (operation._tag === 'Conditional')
+    return [...operation.taken.operations, ...operation.otherwise.operations]
   if (operation._tag === 'ShortCircuit') return operation.right.operations
   if (operation._tag === 'Match') {
     return operation.arms.flatMap((arm) => [

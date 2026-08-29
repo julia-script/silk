@@ -60,8 +60,8 @@ import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.effect { Effect }
 import silk.i32 as i32
-import silk.option { None, Option, Some, none, some }
-import silk.result { Failure, Result, Success }
+import silk.option { Option, none, some }
+import silk.result { Result }
 import silk.string {
   InvalidUtf8,
   fromUtf8 as stringFromUtf8,
@@ -280,10 +280,8 @@ fn containsNul(values: &[u8]) -> bool {
 fn validUtf8(values: &[u8]) -> bool {
   let decoded = stringFromUtf8(values)
   return match move decoded {
-    Result<string, InvalidUtf8> { value: outcome } => match move outcome {
-      Success<string> { value: text } => true
-      Failure<InvalidUtf8> { error: invalid } => false
-    }
+    Result<string, InvalidUtf8>.Success { value: text } => true
+    Result<string, InvalidUtf8>.Failure { error: invalid } => false
   }
 }
 
@@ -882,8 +880,8 @@ pub effect fn removeDirectoryRecursively(
   while usize.ZERO < vectorLength<Path>(&recorded) {
     let taken = vectorPop<Path>(&mut recorded)
     let emptied = match move taken {
-      Some<Path> { value: selected } => move selected
-      None {} => run fromBytes(rawBytes(path))
+      Option<Path>.Some { value: selected } => move selected
+      Option<Path>.None => run fromBytes(rawBytes(path))
     }
     let removed = run FileSystem.removeDirectory(&emptied)
   }
@@ -903,15 +901,26 @@ fn classifyStatFailure(
 }
 
 fn classifyDirectory(
-  outcome: Success<FileInfo | DirectoryInfo> | Failure<FileError>
+  outcome: Result<FileInfo | DirectoryInfo, FileError>
 ) -> DirectoryPresent | DirectoryMissing | DirectoryWrongType | DirectoryStatFailure {
   return match move outcome {
-    Success<FileInfo | DirectoryInfo> { value: info } => match move info {
+    Result<FileInfo | DirectoryInfo, FileError>.Success { value: info } => match move info {
       DirectoryInfo {} => DirectoryPresent {}
       FileInfo { byteLength } => DirectoryWrongType {}
     }
-    Failure<FileError> { error: failure } => classifyStatFailure(move failure)
+    Result<FileInfo | DirectoryInfo, FileError>.Failure { error: failure } => classifyStatFailure(move failure)
   }
+}
+
+fn retainStatInfo(info: FileInfo | DirectoryInfo) -> FileInfo | DirectoryInfo {
+  return move info
+}
+
+effect fn statForResult(
+  path: &Path
+) -> FileInfo | DirectoryInfo ! FileError ? &mut FileSystem {
+  let info = run FileSystem.stat(path)
+  return retainStatInfo(move info)
 }
 
 /// Ensures that `path` and every missing ancestor exist as directories.
@@ -936,11 +945,8 @@ pub effect fn createDirectoriesRecursively(
     if boundary {
       let prefixBytes = run appendRange(bytesMake(), values, usize.ZERO, index)
       let prefix = run finishPath(move prefixBytes)
-      let completed = run Intrinsic.effectResult(FileSystem.stat(&prefix))
-      let decision = match move completed {
-        Result<FileInfo | DirectoryInfo, FileError> { value: outcome } =>
-          classifyDirectory(move outcome)
-      }
+      let completed = run Effect.result(statForResult(&prefix))
+      let decision = classifyDirectory(move completed)
       let ensured = match move decision {
         DirectoryPresent {} => ()
         DirectoryMissing {} => run FileSystem.createDirectory(&prefix)
@@ -983,11 +989,8 @@ pub effect fn writeFileWithParents(
     if boundary {
       let prefixBytes = run appendRange(bytesMake(), values, usize.ZERO, index)
       let prefix = run finishPath(move prefixBytes)
-      let completed = run Intrinsic.effectResult(FileSystem.stat(&prefix))
-      let decision = match move completed {
-        Result<FileInfo | DirectoryInfo, FileError> { value: outcome } =>
-          classifyDirectory(move outcome)
-      }
+      let completed = run Effect.result(statForResult(&prefix))
+      let decision = classifyDirectory(move completed)
       let ensured = match move decision {
         DirectoryPresent {} => ()
         DirectoryMissing {} => run FileSystem.createDirectory(&prefix)
@@ -1012,11 +1015,9 @@ effect fn existsFailure(failure: FileError) -> bool ! FileError {
 /// Only the portable `NotFound` reason becomes `false`. Permission, I/O, and every other provider
 /// failure propagate so callers cannot mistake an inaccessible path for an absent one.
 pub effect fn exists(path: &Path) -> bool ! FileError ? &mut FileSystem {
-  let completed = run Intrinsic.effectResult(FileSystem.stat(path))
+  let completed = run Effect.result(statForResult(path))
   return match move completed {
-    Result<FileInfo | DirectoryInfo, FileError> { value: outcome } => match move outcome {
-      Success<FileInfo | DirectoryInfo> { value: info } => true
-      Failure<FileError> { error: failure } => run existsFailure(move failure)
-    }
+    Result<FileInfo | DirectoryInfo, FileError>.Success { value: info } => true
+    Result<FileInfo | DirectoryInfo, FileError>.Failure { error: failure } => run existsFailure(move failure)
   }
 }

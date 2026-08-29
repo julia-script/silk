@@ -30,13 +30,14 @@ afterAll(() => {
  * being handed to `Effect.ensuring`, whose finalizer is typed `! never`.
  */
 const prelude = `import silk.os_filesystem { make as osMake }
+import silk.effect as Effect
 import silk.filesystem {
   FileError, FileSystem, Path, TemporaryDirectory,
   createDirectoriesRecursively, exists, fromBytes as pathFromBytes, join as pathJoin,
   make as pathMake, rawBytes as pathRawBytes, release, releaseIgnored,
   removeDirectoryRecursively, temporaryDirectory, view as pathView
 }
-import silk.result { Failure, Result, Success }
+import silk.result { Result }
 
 struct Sentinel { code: i32 }
 
@@ -50,15 +51,13 @@ const epilogue = `import silk.allocator { OutOfMemoryError }
 import silk.filesystem { FileError }
 import silk.result { Result }
 pub fn main() -> i32 {
-  let completed = run Intrinsic.effectResult(program())
+  let completed = run Effect.result(program())
   return match move completed {
-    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<FileError | OutOfMemoryError> { error } => match move error {
+      Result<i32, FileError | OutOfMemoryError>.Success { value } => value
+      Result<i32, FileError | OutOfMemoryError>.Failure { error } => match move error {
         FileError failure => 100 + failure.reason.code
         OutOfMemoryError exhausted => 99
       }
-    }
   }
 }`
 

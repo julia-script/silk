@@ -1,11 +1,5 @@
 import type { BlockedReason, TraceEvent } from './BootstrapTrace.js'
-import type {
-  AggregateValue,
-  IntegerValue,
-  SliceValue,
-  UnionValue,
-  Value,
-} from './BootstrapValue.js'
+import type { AggregateValue, IntegerValue, SliceValue, Value } from './BootstrapValue.js'
 import type * as ChildProcess from './ChildProcess.js'
 import type * as HostInput from './HostInput.js'
 import type * as Mir from './Mir.js'
@@ -84,7 +78,6 @@ export interface ExecutionContext {
   readonly replaceReferenced: (local: Mir.LocalId, replacement: Value) => void
   readonly byteView: (local: Mir.LocalId) => ReadonlyArray<number>
   readonly writeByteView: (local: Mir.LocalId, bytes: ReadonlyArray<number>) => void
-  readonly optionValue: (element: Type.Type, payload?: Value) => UnionValue
   readonly handleValue: (handle: OsFileSystemHost.Handle) => AggregateValue
   readonly hostHandle: (local: Mir.LocalId) => OsFileSystemHost.Handle
 }
@@ -98,7 +91,7 @@ const blockedStep = (reason: BlockedReason): BoundaryStep =>
 /** Executes the host/OS boundary operations owned by the bootstrap OS actor. */
 export const execute = (
   context: ExecutionContext,
-  operation: Extract<Mir.Operation, { readonly _tag: 'HostWrite' | 'OsCall' }>,
+  operation: Extract<Mir.Operation, { readonly _tag: 'HostWrite' | 'OsOpen' | 'OsCall' }>,
 ): BoundaryStep | undefined => {
   const {
     state,
@@ -111,7 +104,6 @@ export const execute = (
     replaceReferenced,
     byteView,
     writeByteView,
-    optionValue,
     handleValue,
     hostHandle,
   } = context
@@ -180,10 +172,14 @@ export const execute = (
       })
       break
     }
+    case 'OsOpen':
     case 'OsCall': {
       const arguments_ = operation.arguments
       const commit = (result: Value): void =>
-        write(operation.destination, { value: result, fromCall: false })
+        write(operation._tag === 'OsOpen' ? operation.valid : operation.destination, {
+          value: result,
+          fromCall: false,
+        })
       const name = operation.operation.name
       const clockResult = (
         completed: boolean,
@@ -382,19 +378,22 @@ export const execute = (
         const input = state.standardInput
         if (input === undefined) return blockedStep({ _tag: 'MissingStandardInput' })
         const output = arguments_.at(0)
-        if (output === undefined) throw new RangeError('OS read omitted its output buffer')
+        const count = arguments_.at(1)
+        if (output === undefined || count === undefined)
+          throw new RangeError('OS read omitted its outputs')
         const capacity = byteView(output).length
         const result = input.read(capacity)
         if (result._tag === 'ReadFailure') {
           status({ _tag: 'Failure', reason: 'Other' })
-          commit(optionValue('usize'))
+          commit(integerValue('i32', 0))
           break
         }
         if (result.bytes.length > capacity)
           throw new RangeError('standard-input provider overran the caller buffer')
         writeByteView(output, result.bytes)
+        replaceReferenced(count, integerValue('usize', BigInt(result.bytes.length)))
         status()
-        commit(optionValue('usize', integerValue('usize', BigInt(result.bytes.length))))
+        commit(integerValue('i32', 1))
         break
       }
       if (name === 'osProcessExecute') {
@@ -488,25 +487,32 @@ export const execute = (
         const stream = arguments_.at(0)
         const offset = arguments_.at(1)
         const output = arguments_.at(2)
-        if (stream === undefined || offset === undefined || output === undefined)
+        const count = arguments_.at(3)
+        if (
+          stream === undefined ||
+          offset === undefined ||
+          output === undefined ||
+          count === undefined
+        )
           throw new RangeError('OS capture omitted arguments')
         const selector = readInteger(stream, 'i32').value
         const captured = state.processCaptures.at(Number(selector))
         const start = Number(readInteger(offset, 'usize').value)
         if (selector !== 0n && selector !== 1n) {
           status({ _tag: 'Failure', reason: 'WrongType' })
-          commit(optionValue('usize'))
+          commit(integerValue('i32', 0))
           break
         }
         if (captured === undefined || start > captured.length) {
           status({ _tag: 'Failure', reason: 'InvalidPath' })
-          commit(optionValue('usize'))
+          commit(integerValue('i32', 0))
           break
         }
         const transferred = captured.slice(start, start + byteView(output).length)
         writeByteView(output, transferred)
+        replaceReferenced(count, integerValue('usize', BigInt(transferred.length)))
         status()
-        commit(optionValue('usize', integerValue('usize', BigInt(transferred.length))))
+        commit(integerValue('i32', 1))
         break
       }
       if (name.startsWith('osHost')) {
@@ -527,7 +533,9 @@ export const execute = (
           break
         }
         const output = arguments_.at(name === 'osHostWorkingDirectory' ? 0 : 1)
-        if (output === undefined) throw new RangeError('OS lookup omitted its output buffer')
+        const count = arguments_.at(name === 'osHostWorkingDirectory' ? 1 : 2)
+        if (output === undefined || count === undefined)
+          throw new RangeError('OS lookup omitted its outputs')
         const selector = arguments_.at(0)
         if (selector === undefined) throw new RangeError('OS lookup omitted its subject')
         let result: HostInput.Lookup
@@ -545,15 +553,16 @@ export const execute = (
             _tag: 'Failure',
             reason: result._tag === 'Absent' ? 'NotFound' : 'Other',
           })
-          commit(optionValue('usize'))
+          commit(integerValue('i32', 0))
           break
         }
         // The complete byte length is the result even when only a prefix fit, so the caller
         // can size an exact buffer and ask again.
         const capacity = byteView(output).length
         writeByteView(output, result.bytes.slice(0, capacity))
+        replaceReferenced(count, integerValue('usize', BigInt(result.bytes.length)))
         status()
-        commit(optionValue('usize', integerValue('usize', BigInt(result.bytes.length))))
+        commit(integerValue('i32', 1))
         break
       }
       const host = state.osFileSystem
@@ -576,27 +585,32 @@ export const execute = (
               : invoke(() => host.directoryOpen(byteView(root), byteView(path)))
           if (result._tag === 'Failure') {
             status(result)
-            commit(optionValue(Type.osHandle))
+            commit(integerValue('i32', 0))
           } else {
             status()
-            commit(optionValue(Type.osHandle, handleValue(result.handle)))
+            if (operation._tag !== 'OsOpen')
+              throw new RangeError('OS handle open lost its affine carrier operation')
+            write(operation.handle, { value: handleValue(result.handle), fromCall: false })
+            commit(integerValue('i32', 1))
           }
           break
         }
         if (name === 'osFileRead') {
           const handle = arguments_.at(0)
           const output = arguments_.at(1)
-          if (handle === undefined || output === undefined)
+          const count = arguments_.at(2)
+          if (handle === undefined || output === undefined || count === undefined)
             throw new RangeError('OS read omitted arguments')
           const capacity = byteView(output).length
           const result = invoke(() => host.fileRead(hostHandle(handle), capacity))
           if (result._tag === 'Failure') {
             status(result)
-            commit(optionValue('usize'))
+            commit(integerValue('i32', 0))
           } else {
             writeByteView(output, result.bytes)
+            replaceReferenced(count, integerValue('usize', BigInt(result.bytes.length)))
             status()
-            commit(optionValue('usize', integerValue('usize', BigInt(result.bytes.length))))
+            commit(integerValue('i32', 1))
           }
           break
         }
@@ -604,7 +618,13 @@ export const execute = (
           const handle = arguments_.at(0)
           const input = arguments_.at(1)
           const offset = arguments_.at(2)
-          if (handle === undefined || input === undefined || offset === undefined)
+          const count = arguments_.at(3)
+          if (
+            handle === undefined ||
+            input === undefined ||
+            offset === undefined ||
+            count === undefined
+          )
             throw new RangeError('OS write omitted arguments')
           const result = invoke(() =>
             host.fileWrite(
@@ -614,21 +634,24 @@ export const execute = (
           )
           if (result._tag === 'Failure') {
             status(result)
-            commit(optionValue('usize'))
+            commit(integerValue('i32', 0))
           } else {
+            replaceReferenced(count, integerValue('usize', BigInt(result.count)))
             status()
-            commit(optionValue('usize', integerValue('usize', BigInt(result.count))))
+            commit(integerValue('i32', 1))
           }
           break
         }
         if (name === 'osDirectoryNext') {
           const handle = arguments_.at(0)
           const output = arguments_.at(1)
-          const kind = arguments_.at(2)
-          const required = arguments_.at(3)
+          const count = arguments_.at(2)
+          const kind = arguments_.at(3)
+          const required = arguments_.at(4)
           if (
             handle === undefined ||
             output === undefined ||
+            count === undefined ||
             kind === undefined ||
             required === undefined
           )
@@ -642,15 +665,17 @@ export const execute = (
             status(failure)
             if (result._tag === 'BufferTooSmall')
               replaceReferenced(required, integerValue('usize', BigInt(result.requiredCapacity)))
-            commit(optionValue('usize'))
+            commit(integerValue('i32', 0))
           } else if (result._tag === 'End') {
+            replaceReferenced(count, integerValue('usize', 0n))
             status()
-            commit(optionValue('usize', integerValue('usize', 0n)))
+            commit(integerValue('i32', 1))
           } else {
             writeByteView(output, result.name)
+            replaceReferenced(count, integerValue('usize', BigInt(result.name.length)))
             replaceReferenced(kind, integerValue('i32', result.kind === 'File' ? 0 : 1))
             status()
-            commit(optionValue('usize', integerValue('usize', BigInt(result.name.length))))
+            commit(integerValue('i32', 1))
           }
           break
         }
@@ -659,12 +684,14 @@ export const execute = (
           const parent = arguments_.at(1)
           const prefix = arguments_.at(2)
           const output = arguments_.at(3)
-          const required = arguments_.at(4)
+          const count = arguments_.at(4)
+          const required = arguments_.at(5)
           if (
             root === undefined ||
             parent === undefined ||
             prefix === undefined ||
             output === undefined ||
+            count === undefined ||
             required === undefined
           )
             throw new RangeError('OS unique directory create omitted arguments')
@@ -682,11 +709,12 @@ export const execute = (
             )
             if (result._tag === 'BufferTooSmall')
               replaceReferenced(required, integerValue('usize', BigInt(result.requiredCapacity)))
-            commit(optionValue('usize'))
+            commit(integerValue('i32', 0))
           } else {
             writeByteView(output, result.name)
+            replaceReferenced(count, integerValue('usize', BigInt(result.name.length)))
             status()
-            commit(optionValue('usize', integerValue('usize', BigInt(result.name.length))))
+            commit(integerValue('i32', 1))
           }
           break
         }
@@ -751,17 +779,7 @@ export const execute = (
       } catch (cause) {
         const failure = osFailure(cause)
         status(failure)
-        commit(
-          operation.type._tag === 'Union'
-            ? optionValue(
-                operation.type.type.members.some((member) =>
-                  Type.equals(member, Type.some(Type.osHandle)),
-                )
-                  ? Type.osHandle
-                  : 'usize',
-              )
-            : integerValue('i32', 0),
-        )
+        commit(integerValue('i32', 0))
       }
       break
     }

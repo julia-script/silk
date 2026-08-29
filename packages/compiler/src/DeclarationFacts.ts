@@ -70,11 +70,59 @@ export interface ParameterId {
   readonly ordinal: number
 }
 
-/** A deterministic field identity nested under its owning struct declaration. */
+/** A deterministic variant identity nested under its owning nominal union declaration. */
+export interface UnionVariantId {
+  readonly _tag: 'UnionVariantId'
+  readonly union: DeclarationId
+  readonly ordinal: number
+}
+
+/** The aggregate declaration scope that owns one field identity. */
+export type FieldOwnerId =
+  | { readonly _tag: 'StructFieldOwnerId'; readonly declaration: DeclarationId }
+  | { readonly _tag: 'UnionVariantFieldOwnerId'; readonly variant: UnionVariantId }
+
+/** A deterministic field identity nested under one struct or nominal-union variant. */
 export interface FieldId {
   readonly _tag: 'FieldId'
-  readonly struct: DeclarationId
+  readonly owner: FieldOwnerId
   readonly ordinal: number
+}
+
+/** Returns the top-level declaration that transitively owns one aggregate field. */
+export const fieldDeclaration = (self: FieldId): DeclarationId =>
+  self.owner._tag === 'StructFieldOwnerId' ? self.owner.declaration : self.owner.variant.union
+
+/** Tests canonical local field identity without relying on object reference equality. */
+export const sameFieldId = (left: FieldId, right: FieldId): boolean => {
+  if (left.ordinal !== right.ordinal || left.owner._tag !== right.owner._tag) return false
+  if (left.owner._tag === 'StructFieldOwnerId' && right.owner._tag === 'StructFieldOwnerId') {
+    return (
+      left.owner.declaration.sourceId === right.owner.declaration.sourceId &&
+      left.owner.declaration.ordinal === right.owner.declaration.ordinal
+    )
+  }
+  if (
+    left.owner._tag === 'UnionVariantFieldOwnerId' &&
+    right.owner._tag === 'UnionVariantFieldOwnerId'
+  ) {
+    return (
+      left.owner.variant.union.sourceId === right.owner.variant.union.sourceId &&
+      left.owner.variant.union.ordinal === right.owner.variant.union.ordinal &&
+      left.owner.variant.ordinal === right.owner.variant.ordinal
+    )
+  }
+  return false
+}
+
+/** Encodes one field identity as a stable key for maps, diagnostics, and backend selectors. */
+export const fieldIdKey = (self: FieldId): string => {
+  if (self.owner._tag === 'StructFieldOwnerId') {
+    const declaration = self.owner.declaration
+    return `struct:${declaration.sourceId}:${declaration.ordinal}:${self.ordinal}`
+  }
+  const variant = self.owner.variant
+  return `union:${variant.union.sourceId}:${variant.union.ordinal}:${variant.ordinal}:${self.ordinal}`
 }
 
 /** The canonical identity of one declaration: canonical module identity plus name. */
@@ -522,9 +570,9 @@ export type FieldState =
   | { readonly _tag: 'Duplicate'; readonly original: FieldId; readonly cause: Diagnostic.Identity }
   | { readonly _tag: 'Unidentified' }
 
-/** One ordered nominal struct field header. */
+/** One ordered aggregate field header shared by structs and nominal-union variants. */
 export interface FieldFact {
-  readonly _tag: 'StructField'
+  readonly _tag: 'AggregateField'
   readonly id: FieldId
   readonly state: FieldState
   readonly visibility: 'Public' | 'Private'
@@ -552,6 +600,51 @@ export interface StructFact {
   readonly name: DeclaredName
   readonly fields: ReadonlyArray<FieldFact>
   readonly dependency: StructDependency
+  readonly syntax: SyntaxTree.Node
+}
+
+/** The canonical identity of one uniquely named variant of a canonical nominal union. */
+export interface CanonicalUnionVariantId {
+  readonly _tag: 'CanonicalUnionVariantId'
+  readonly union: CanonicalId
+  readonly name: string
+}
+
+export type UnionVariantCanonicalState =
+  | { readonly _tag: 'Canonical'; readonly id: CanonicalUnionVariantId }
+  | {
+      readonly _tag: 'Duplicate'
+      readonly original: CanonicalUnionVariantId
+      readonly cause: Diagnostic.Identity
+    }
+  | { readonly _tag: 'Unidentified' }
+
+/** One source-ordered unit or named-field variant subordinate to a nominal union. */
+export interface UnionVariantFact {
+  readonly _tag: 'UnionVariant'
+  readonly id: UnionVariantId
+  readonly canonical: UnionVariantCanonicalState
+  readonly name: DeclaredName
+  readonly kind: 'Unit' | 'Fields'
+  readonly fields: ReadonlyArray<FieldFact>
+  readonly syntax: SyntaxTree.Node
+}
+
+export type UnionValidity =
+  | { readonly _tag: 'Valid' }
+  | { readonly _tag: 'Invalid'; readonly causes: ReadonlyArray<Diagnostic.Identity> }
+
+/** One nominal tagged union declaration and its subordinate ordered variants. */
+export interface UnionFact {
+  readonly _tag: 'UnionDeclaration'
+  readonly id: DeclarationId
+  readonly canonical: CanonicalState
+  readonly visibility: 'Public' | 'Private'
+  readonly typeParameters: ReadonlyArray<TypeParameterFact>
+  readonly name: DeclaredName
+  readonly variants: ReadonlyArray<UnionVariantFact>
+  readonly dependency: StructDependency
+  readonly validity: UnionValidity
   readonly syntax: SyntaxTree.Node
 }
 
@@ -1338,6 +1431,7 @@ export type MemberFact =
   | DeclarationFact
   | StructFact
   | EnumFact
+  | UnionFact
   | ServiceFact
   | InterfaceFact
   | ConstantFact
@@ -1397,6 +1491,24 @@ export type StructLookup =
       readonly declarations: ReadonlyArray<StructFact>
     }
 
+export type UnionLookup =
+  | { readonly _tag: 'Resolved'; readonly spelling: string; readonly declaration: UnionFact }
+  | { readonly _tag: 'Missing'; readonly spelling: string }
+  | {
+      readonly _tag: 'Ambiguous'
+      readonly spelling: string
+      readonly declarations: ReadonlyArray<UnionFact>
+    }
+
+export type UnionVariantLookup =
+  | { readonly _tag: 'Resolved'; readonly spelling: string; readonly variant: UnionVariantFact }
+  | { readonly _tag: 'Missing'; readonly spelling: string }
+  | {
+      readonly _tag: 'Ambiguous'
+      readonly spelling: string
+      readonly variants: ReadonlyArray<UnionVariantFact>
+    }
+
 export type FieldLookup =
   | { readonly _tag: 'Resolved'; readonly spelling: string; readonly field: FieldFact }
   | { readonly _tag: 'Missing'; readonly spelling: string }
@@ -1414,6 +1526,7 @@ export interface ModuleHeaders {
   readonly declarations: ReadonlyArray<DeclarationFact>
   readonly structs: ReadonlyArray<StructFact>
   readonly enums: ReadonlyArray<EnumFact>
+  readonly unions: ReadonlyArray<UnionFact>
   readonly services: ReadonlyArray<ServiceFact>
   readonly interfaces: ReadonlyArray<InterfaceFact>
   readonly constants: ReadonlyArray<ConstantFact>
@@ -1556,6 +1669,31 @@ export const lookupStruct = (structs: ReadonlyArray<StructFact>, name: string): 
     : Object.freeze({ _tag: 'Ambiguous', spelling: name, declarations: Object.freeze(matches) })
 }
 
+export const lookupUnion = (unions: ReadonlyArray<UnionFact>, name: string): UnionLookup => {
+  const matches = unions.filter(
+    (union) => union.name._tag === 'Present' && union.name.spelling === name,
+  )
+  const first = matches.at(0)
+  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: name })
+  return matches.length === 1
+    ? Object.freeze({ _tag: 'Resolved', spelling: name, declaration: first })
+    : Object.freeze({ _tag: 'Ambiguous', spelling: name, declarations: Object.freeze(matches) })
+}
+
+export const lookupUnionVariant = (
+  variants: ReadonlyArray<UnionVariantFact>,
+  name: string,
+): UnionVariantLookup => {
+  const matches = variants.filter(
+    (variant) => variant.name._tag === 'Present' && variant.name.spelling === name,
+  )
+  const first = matches.at(0)
+  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: name })
+  return matches.length === 1
+    ? Object.freeze({ _tag: 'Resolved', spelling: name, variant: first })
+    : Object.freeze({ _tag: 'Ambiguous', spelling: name, variants: Object.freeze(matches) })
+}
+
 export const lookupField = (fields: ReadonlyArray<FieldFact>, name: string): FieldLookup => {
   const matches = fields.filter(
     (field) => field.name._tag === 'Present' && field.name.spelling === name,
@@ -1605,6 +1743,25 @@ export const struct = (self: Index, module: string, name: string): StructLookup 
     name,
   )
 
+export const unionByName = (self: Index, module: string, name: string): UnionLookup => {
+  const result = member(self, module, name)
+  if (result._tag === 'Missing') return result
+  if (result._tag === 'Resolved')
+    return result.declaration._tag === 'UnionDeclaration'
+      ? Object.freeze({ _tag: 'Resolved', spelling: name, declaration: result.declaration })
+      : Object.freeze({ _tag: 'Missing', spelling: name })
+  const declarations = result.declarations.filter(
+    (declaration): declaration is UnionFact => declaration._tag === 'UnionDeclaration',
+  )
+  return declarations.length === 0
+    ? Object.freeze({ _tag: 'Missing', spelling: name })
+    : Object.freeze({
+        _tag: 'Ambiguous',
+        spelling: name,
+        declarations: Object.freeze(declarations),
+      })
+}
+
 /** Looks up one completed declaration by canonical identity. */
 export const byCanonical = (self: Index, id: CanonicalId): MemberFact | undefined => {
   const result = member(self, id.module, id.name)
@@ -1636,7 +1793,7 @@ export const containsLexicalBorrow = (
     module: type.module,
     name: type.name,
   })
-  if (declaration?._tag !== 'StructDeclaration')
+  if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration')
     return type.arguments
       .filter(Type.isTypeArgument)
       .some((argument) => containsLexicalBorrow(self, argument, seen))
@@ -1646,7 +1803,11 @@ export const containsLexicalBorrow = (
       type.arguments,
     ) ?? new Map()
   const next = new Set(seen).add(key)
-  return declaration.fields.some(
+  const fields =
+    declaration._tag === 'StructDeclaration'
+      ? declaration.fields
+      : declaration.variants.flatMap((variant) => variant.fields)
+  return fields.some(
     (field) =>
       field.declaredType._tag === 'Resolved' &&
       containsLexicalBorrow(self, Type.substitute(field.declaredType.type, substitution), next),
@@ -1682,19 +1843,34 @@ export const storedCallable = (
     module: type.module,
     name: type.name,
   })
-  if (declaration?._tag !== 'StructDeclaration') return undefined
+  if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration')
+    return undefined
   const substitution =
     TypeInference.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),
       type.arguments,
     ) ?? new Map()
   const next = new Set(seen).add(key)
-  for (const field of declaration.fields) {
+  const fields =
+    declaration._tag === 'StructDeclaration'
+      ? declaration.fields.map((field) => Object.freeze({ field, path: Object.freeze([]) }))
+      : declaration.variants.flatMap((variant) =>
+          variant.fields.map((field) =>
+            Object.freeze({
+              field,
+              path:
+                variant.name._tag === 'Present'
+                  ? Object.freeze([variant.name.spelling])
+                  : Object.freeze([]),
+            }),
+          ),
+        )
+  for (const { field, path } of fields) {
     if (field.declaredType._tag !== 'Resolved' || field.name._tag !== 'Present') continue
     const found = storedCallable(self, Type.substitute(field.declaredType.type, substitution), next)
     if (found !== undefined)
       return Object.freeze({
-        path: Object.freeze([field.name.spelling, ...found.path]),
+        path: Object.freeze([...path, field.name.spelling, ...found.path]),
         callable: found.callable,
       })
   }

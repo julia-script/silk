@@ -99,6 +99,7 @@ const tokenKinds = [
   'CharLiteral',
   'RoleKeyword',
   'EnumKeyword',
+  'UnionKeyword',
 ] as const satisfies ReadonlyArray<Token.TokenKind>
 
 const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
@@ -180,6 +181,7 @@ const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
   CharLiteral: 75,
   RoleKeyword: 76,
   EnumKeyword: 77,
+  UnionKeyword: 78,
 })
 
 interface ExpectedToken {
@@ -312,7 +314,7 @@ const corpus = [
   Object.freeze({
     id: 'keywords',
     input:
-      'pub struct enum service interface role effect fn run fail drop unsafe impl for return import as let mut once move match if else while break continue true false const name _x2',
+      'pub struct enum union service interface role effect fn run fail drop unsafe impl for return import as let mut once move match if else while break continue true false const name _x2',
   }),
   Object.freeze({ id: 'numbers', input: '0 42 1.25 2e3 3E+4 4e- 5..6' }),
   Object.freeze({

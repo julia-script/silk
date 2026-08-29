@@ -18,7 +18,7 @@
 //! ```silk
 //! import silk.result { Result }
 //!
-//! fn half(value: i32) -> Result.Result<i32, i32> {
+//! fn half(value: i32) -> Result<i32, i32> {
 //!   if value == 0 {
 //!     return Result.failResult<i32, i32>(2)
 //!   }
@@ -33,10 +33,6 @@
 //!   let initial = Result.succeed<i32, i32>(80)
 //!   let halved = Result.flatMap<i32, i32, i32>(move initial, half)
 //!   let answer = Result.map<i32, i32, i32>(move halved, addTwo)
-//!   let failed = Result.failResult<i32, i32>(7)
-//!   if Result.isFailure<i32, i32>(&failed) {} else {
-//!     return 0
-//!   }
 //!   return Result.unwrapOr<i32, i32>(move answer, 0)
 //! }
 //! ```
@@ -46,18 +42,6 @@
 
 import silk.bool as bool
 
-/// The successful member of a completed [`Result`].
-pub struct Success<A> {
-  /// The produced success value.
-  value: A
-}
-
-/// The failed member of a completed [`Result`].
-pub struct Failure<F> {
-  /// The produced failure value.
-  error: F
-}
-
 /// One completed outcome: either a success carrying `A` or a failure carrying `F`.
 ///
 /// # Details
@@ -65,21 +49,29 @@ pub struct Failure<F> {
 /// `Result` is the reified form of an Effect that has already run. Reifying an Effect turns its
 /// failure row into ordinary value data, which is what lets the failure combinators in
 /// `silk.effect` be written as ordinary Silk source instead of compiler built-ins.
-/// A `Result` is consumed when matched or passed to a transforming combinator; borrow it for
-/// [`isSuccess`] and [`isFailure`] when the payload must remain available.
-pub struct Result<A, F> {
-  /// The completed outcome, narrowed with `match`.
-  value: Success<A> | Failure<F>
+/// A `Result` is consumed when matched or passed to a transforming combinator. Use a borrowed
+/// match when the payload must remain available.
+pub union Result<A, F> {
+  /// A completed success.
+  Success {
+    /// The produced success value.
+    pub value: A
+  },
+  /// A completed failure.
+  Failure {
+    /// The produced failure value.
+    pub error: F
+  }
 }
 
 /// Constructs a completed success by moving `value` into the success arm.
 pub fn succeed<A, F>(value: A) -> Result<A, F> {
-  return Result<A, F> { value: Success<A> { value: move value } }
+  return Result<A, F>.Success { value: move value }
 }
 
 /// Constructs a completed failure by moving `error` into the failure arm.
 pub fn failResult<A, F>(error: F) -> Result<A, F> {
-  return Result<A, F> { value: Failure<F> { error: move error } }
+  return Result<A, F>.Failure { error: move error }
 }
 
 /// Applies `transform` once to a success value and carries a failure through unchanged.
@@ -90,10 +82,8 @@ pub fn failResult<A, F>(error: F) -> Result<A, F> {
 /// success type; use [`mapError`] to change the failure type instead.
 pub fn map<A, B, F>(self: Result<A, F>, transform: once fn(A) -> B) -> Result<B, F> {
   return match move self {
-    Result<A, F> { value: outcome } => match move outcome {
-      Success<A> { value } => succeed<B, F>(transform(move value))
-      Failure<F> { error } => failResult<B, F>(move error)
-    }
+    Result<A, F>.Success { value } => succeed<B, F>(transform(move value))
+    Result<A, F>.Failure { error } => failResult<B, F>(move error)
   }
 }
 
@@ -105,10 +95,8 @@ pub fn map<A, B, F>(self: Result<A, F>, transform: once fn(A) -> B) -> Result<B,
 /// failure type.
 pub fn mapError<A, F, G>(self: Result<A, F>, transform: once fn(F) -> G) -> Result<A, G> {
   return match move self {
-    Result<A, F> { value: outcome } => match move outcome {
-      Success<A> { value } => succeed<A, G>(move value)
-      Failure<F> { error } => failResult<A, G>(transform(move error))
-    }
+    Result<A, F>.Success { value } => succeed<A, G>(move value)
+    Result<A, F>.Failure { error } => failResult<A, G>(transform(move error))
   }
 }
 
@@ -121,10 +109,8 @@ pub fn mapError<A, F, G>(self: Result<A, F>, transform: once fn(F) -> G) -> Resu
 /// use [`mapError`] before or after this operation when the steps use different error types.
 pub fn flatMap<A, B, F>(self: Result<A, F>, transform: once fn(A) -> Result<B, F>) -> Result<B, F> {
   return match move self {
-    Result<A, F> { value: outcome } => match move outcome {
-      Success<A> { value } => transform(move value)
-      Failure<F> { error } => failResult<B, F>(move error)
-    }
+    Result<A, F>.Success { value } => transform(move value)
+    Result<A, F>.Failure { error } => failResult<B, F>(move error)
   }
 }
 
@@ -141,26 +127,8 @@ pub fn unwrapOr<A, F>(
   fallback: A,
 ) -> A {
   return match move self {
-    Result<A, F> { value: outcome } => match move outcome {
-      Success<A> { value } => keepSuccess<A>(move value, move fallback)
-      Failure<F> { error } => keepFallback<A, F>(move fallback, move error)
-    }
-  }
-}
-
-/// Returns `true` when the borrowed outcome is [`Success`], without consuming either payload.
-pub fn isSuccess<A, F>(self: &Result<A, F>) -> bool {
-  return match &self.value {
-    Success<A> succeeded => true
-    Failure<F> failed => false
-  }
-}
-
-/// Returns `true` when the borrowed outcome is [`Failure`], without consuming either payload.
-pub fn isFailure<A, F>(self: &Result<A, F>) -> bool {
-  return match &self.value {
-    Success<A> succeeded => false
-    Failure<F> failed => true
+    Result<A, F>.Success { value } => keepSuccess<A>(move value, move fallback)
+    Result<A, F>.Failure { error } => keepFallback<A, F>(move fallback, move error)
   }
 }
 

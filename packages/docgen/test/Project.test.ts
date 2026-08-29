@@ -40,6 +40,14 @@ pub enum State {
   /// The operation can start.
   Ready
 }
+
+/// A computation with a [\`Success\`] variant.
+pub union Outcome<T> {
+  /// A successful payload.
+  Success { pub value: T },
+  /// No payload is available.
+  Empty
+}
 `
     const snapshot = yield* Analysis.ofSource('project/main', encode(source))
     const publicProject = Project.make(snapshot)
@@ -48,7 +56,7 @@ pub enum State {
     assert.strictEqual(module.documentation?.markdown, 'Recovery utilities.')
     assert.deepStrictEqual(
       module.items.filter((item) => item.kind !== 'Implementation').map((item) => item.name),
-      ['defaultCode', 'Primary', 'recover', 'Problem', 'State'],
+      ['defaultCode', 'Primary', 'recover', 'Problem', 'State', 'Outcome'],
     )
     const defaultCode = module.items.find((item) => item.name === 'defaultCode')
     assert.strictEqual(defaultCode?.kind, 'Constant')
@@ -70,6 +78,27 @@ pub enum State {
     assert.strictEqual(state?.documentation?.markdown, 'One recovery state.')
     assert.strictEqual(state?.children.at(0)?.name, 'Ready')
     assert.strictEqual(state?.children.at(0)?.documentation?.markdown, 'The operation can start.')
+    const outcome = module.items.find((item) => item.name === 'Outcome')
+    assert.strictEqual(outcome?.kind, 'Union')
+    assert.strictEqual(outcome?.signature.text, 'pub union Outcome<T>')
+    const variants = outcome?.children.filter((item) => item.kind === 'UnionVariant')
+    assert.deepEqual(
+      variants?.map((item) => [item.kind, item.name, item.children.length]),
+      [
+        ['UnionVariant', 'Success', 1],
+        ['UnionVariant', 'Empty', 0],
+      ],
+    )
+    assert.strictEqual(variants?.at(0)?.documentation?.markdown, 'A successful payload.')
+    assert.strictEqual(variants?.at(0)?.children.at(0)?.name, 'value')
+    const outcomeLink = outcome?.documentation?.blocks
+      .flatMap((block) => (block._tag === 'Paragraph' ? block.children : []))
+      .find((inline) => inline._tag === 'SymbolLink')
+    assert.strictEqual(outcomeLink?._tag, 'SymbolLink')
+    if (outcomeLink?._tag === 'SymbolLink') {
+      assert.strictEqual(outcomeLink.target?.kind, 'UnionVariant')
+      assert.strictEqual(outcomeLink.target?.id, 'project/main::Outcome::variant:0')
+    }
 
     const privateProject = Project.make(snapshot, { includePrivate: true })
     assert.isTrue(privateProject.modules[0]?.items.some((item) => item.name === 'helper'))

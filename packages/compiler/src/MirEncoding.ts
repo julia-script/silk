@@ -1,4 +1,4 @@
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as LayoutEncode from './LayoutEncode.js'
 import * as Match from './Match.js'
@@ -93,6 +93,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = allocate ${localText(operation.layout)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'HostWrite':
       return `${localText(operation.destination)} = standard-stream-write destination=${localText(operation.stream)} bytes=${localText(operation.bytes)} failure=${SilkType.encode(operation.failure)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'OsOpen':
+      return `${localText(operation.destination)} = os-open ${operation.operation.actor}.${operation.operation.name}(${operation.arguments.map(localText).join(', ')}) success=${localText(operation.success)} failure=${localText(operation.failure)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'OsCall':
       return `${localText(operation.destination)} = os-call ${operation.operation.actor}.${operation.operation.name}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferFrom':
@@ -175,12 +177,14 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = run-effect-composite ${localText(operation.effect)} alternatives=${operation.alternatives.map((alternative) => targetText(alternative.runner)).join(',')} arguments=${operation.arguments.map(localText).join(',') || 'none'} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RunStaticEffect':
       return `${localText(operation.destination)} = run-static-effect runner=${targetText(operation.runner)} captures=${operation.captures.map((capture) => `${localText(capture.source)}:${capture.access.toLowerCase()}`).join(',') || 'none'} arguments=${operation.arguments.map(localText).join(',') || 'none'} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.failureLoanEnds === undefined || operation.failureLoanEnds.length === 0 ? '' : `failure-loans=${operation.failureLoanEnds.map((ending) => `l${ending.borrow.ordinal}:${localText(ending.slice)}`).join(',')} `}${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
-    case 'ReifyEffect':
-      return `${localText(operation.destination)} = effect-result ${localText(operation.effect)} runner=${targetText(operation.runner)} arguments=${operation.arguments.map(localText).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'CatchEffect':
+      return `${localText(operation.destination)} = catch-effect ${localText(operation.effect)} runner=${targetText(operation.runner)} arguments=${operation.arguments.map(localText).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'CloseEffectEntry':
       return `${localText(operation.destination)} = close-effect-entry ${targetText(operation.target)} effect=${localText(operation.effect)} runner=${targetText(operation.runner)} outcome=${localText(operation.outcome)} failures=${operation.failures.map((failure) => `${failure.tag}:${SilkType.encode(failure.type)}->${localText(failure.payload)}:${failure.cleanup._tag}`).join(',') || 'none'} : i32 ${provenanceText(operation.provenance)}`
     case 'Construct':
       return `${localText(operation.destination)} = construct ${typeText(operation.type)} { ${operation.fields.map(({ field, value, stored }) => `#${field.ordinal}: ${localText(value)}${stored === undefined ? '' : ` stored=${storedExecutableText(stored)}`}`).join(', ')} } ${provenanceText(operation.provenance)}`
+    case 'ConstructUnionVariant':
+      return `${localText(operation.destination)} = construct-variant ${typeText(operation.type)}.${operation.variant.name}#${operation.variantOrdinal} { ${operation.fields.map(({ field, value, stored }) => `${DeclarationFacts.fieldIdKey(field)}: ${localText(value)}${stored === undefined ? '' : ` stored=${storedExecutableText(stored)}`}`).join(', ')} } ${provenanceText(operation.provenance)}`
     case 'ConstructArray':
       return `${localText(operation.destination)} = construct-array ${typeText(operation.type)} [${operation.elements.map(localText).join(', ')}] ${provenanceText(operation.provenance)}`
     case 'Project':
@@ -195,6 +199,8 @@ const operationText = (operation: Operation): string => {
       return `drop ${localText(operation.local)}${operation.cleanup._tag === 'NoCleanup' ? '' : ` cleanup=${operation.cleanup._tag}`}${operation.localShared === undefined ? '' : ` element=${SilkType.encode(operation.localShared.element)} layout=${operation.localShared.block.provenance} transition=decrement-or-cleanup-release`} ${provenanceText(operation.provenance)}`
     case 'Match':
       return `${localText(operation.destination)} = match#${operation.id.span.start} ${operation.access.toLowerCase()} ${localText(operation.scrutinee)} : ${typeText(operation.scrutineeType)} -> ${typeText(operation.type)}${operation.retainsBindings ? ' retain-bindings' : ''} ${provenanceText(operation.provenance)}`
+    case 'Conditional':
+      return `${localText(operation.destination)} = conditional ${localText(operation.condition)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ShortCircuit':
       return `${localText(operation.destination)} = short-circuit ${operation.operator === 'And' ? '&&' : '||'} ${localText(operation.left)} : bool ${provenanceText(operation.provenance)}`
   }
@@ -204,6 +210,15 @@ const fieldPathText = (path: ReadonlyArray<DeclarationFacts.FieldId>): string =>
   path.length === 0 ? 'payload' : path.map((field) => `#${field.ordinal}`).join('.')
 
 const operationLines = (operation: Operation, indent: string): ReadonlyArray<string> => {
+  if (operation._tag === 'Conditional') {
+    return [
+      `${indent}${operationText(operation)}`,
+      `${indent}  taken -> ${localText(operation.taken.result)}`,
+      ...operation.taken.operations.flatMap((child) => operationLines(child, `${indent}    `)),
+      `${indent}  otherwise -> ${localText(operation.otherwise.result)}`,
+      ...operation.otherwise.operations.flatMap((child) => operationLines(child, `${indent}    `)),
+    ]
+  }
   if (operation._tag === 'ShortCircuit') {
     return [
       `${indent}${operationText(operation)}`,
@@ -238,7 +253,8 @@ const operationLines = (operation: Operation, indent: string): ReadonlyArray<str
         `${indent}    selected access=${arm.selected.access} result=${localText(arm.selected.result)} end-borrow=${arm.selected.endBorrow}`,
         ...arm.selected.operations.flatMap((child) => operationLines(child, `${indent}      `)),
         ...arm.selected.cleanup.map(
-          (entry) => `${indent}      cleanup ${fieldPathText(entry.path)} ${entry.cleanup._tag}`,
+          (entry) =>
+            `${indent}      cleanup ${localText(entry.destination)} <- ${fieldPathText(entry.path)} ${entry.cleanup._tag}`,
         ),
       ]
     }),
@@ -326,7 +342,7 @@ const suspensionLines = (fn: MirFunction): ReadonlyArray<string> => {
         ...suspensionRunnerLines(region.runner),
         region.completion._tag === 'Propagate'
           ? `    completion propagate outcome=${SilkType.encode(region.completion.outcome)} mappings=${region.completion.failureMappings.map((mapping) => `${mapping.source}:${mapping.target}`).join(',') || 'none'}`
-          : `    completion reify outcome=${SilkType.encode(region.completion.outcome)} result=${SilkType.encode(region.completion.resultType)} success-tag=${region.completion.successTag} failure-tag=${region.completion.failureTag}`,
+          : `    completion reify outcome=${SilkType.encode(region.completion.outcome)} success=${SilkType.encode(region.completion.successType)} failure=${SilkType.encode(region.completion.failureValueType)}`,
         `    live ${region.liveLocals.map(localText).join(',') || 'none'}`,
         ...(descriptor === undefined
           ? []

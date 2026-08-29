@@ -2486,6 +2486,62 @@ pub enum(u8) ExitCode {
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
 
+it('parses generic nominal unions, applied constructors, and patterns losslessly', () => {
+  const source = `pub union Result<A, E> {
+  Success { pub value: A },
+  Failure { pub error: E },
+}
+pub fn inspect(result: Result<i32, bool>) -> i32 {
+  let fallback = Result<i32, bool>.Failure { error: true }
+  return match move result {
+    Result<i32, bool>.Success { value } => value
+    Result<i32, bool>.Failure { error: _ } => 0
+  }
+}`
+  const result = parseText('memory/nominal-union', source)
+  const declaration = SyntaxTree.directNode(result.root, 'UnionDeclaration')
+  const variants =
+    declaration === undefined ? [] : SyntaxTree.directNodes(declaration, 'UnionVariant')
+  const fields = variants.flatMap((variant) => SyntaxTree.directNodes(variant, 'UnionVariantField'))
+  const constructors = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'UnionVariantExpression',
+  )
+  const patterns = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'UnionVariantPattern',
+  )
+
+  assert.strictEqual(variants.length, 2)
+  assert.strictEqual(fields.length, 2)
+  assert.strictEqual(constructors.length, 1)
+  assert.strictEqual(patterns.length, 2)
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('rejects empty field variants and recovers at sibling variants and declarations', () => {
+  const source =
+    'union Broken { Empty {}, Good, Bad { value: }, Last { value: i32 } } pub fn after() -> i32 { return 1 }'
+  const result = parseText('memory/damaged-nominal-union', source)
+  const declaration = SyntaxTree.directNode(result.root, 'UnionDeclaration')
+  const variants =
+    declaration === undefined ? [] : SyntaxTree.directNodes(declaration, 'UnionVariant')
+
+  assert.deepEqual(
+    variants.map((variant) => directTokenText(result, variant, 'Identifier')),
+    ['Empty', 'Good', 'Bad', 'Last'],
+  )
+  assert.strictEqual(missingLeaves(variants[0] ?? result.root).length > 0, true)
+  assert.strictEqual(missingLeaves(variants[2] ?? result.root).length > 0, true)
+  assert.deepEqual(missingLeaves(variants[1] ?? result.root), [])
+  assert.deepEqual(missingLeaves(variants[3] ?? result.root), [])
+  assert.notStrictEqual(SyntaxTree.directNode(result.root, 'FunctionDeclaration'), undefined)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('recovers damaged enum members before the following declaration', () => {
   const source = 'enum Broken { Pass Fail = } pub fn after() -> i32 { return 1 }'
   const result = parseText('memory/damaged-enum', source)

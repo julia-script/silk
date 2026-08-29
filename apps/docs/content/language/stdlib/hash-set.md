@@ -214,7 +214,7 @@ This function consumes the probe element. It does not change the set or move a s
 ## `indexOf`
 
 ```silk
-pub fn indexOf<T>(self: &silk/hash_set.HashSet<T>, value: T) -> Option<usize>
+pub fn indexOf<T>(self: &silk/hash_set.HashSet<T>, value: T) -> silk/option.Option<usize>
 ```
 
 Returns the bucket holding an element equivalent to one probe element, or an absent value.
@@ -229,7 +229,7 @@ This function consumes the probe element.
 ## `remove`
 
 ```silk
-pub fn remove<T>(self: &mut silk/hash_set.HashSet<T>, value: T) -> Option<T>
+pub fn remove<T>(self: &mut silk/hash_set.HashSet<T>, value: T) -> silk/option.Option<T>
 ```
 
 Removes the element equivalent to one probe element and answers with it.

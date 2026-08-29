@@ -59,8 +59,8 @@
 //!     |> Effect.provideMut<Process.ChildProcess>(&mut provider)
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   return match move Process.exitCode(&outcome) {
-//!     Option.Some<i32> {value} => 35 + value
-//!     Option.None {} => 1
+//!     Option.Option<i32>.Some {value} => 35 + value
+//!     Option.Option<i32>.None => 1
 //!   }
 //! }
 //!
@@ -91,7 +91,7 @@ import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.filesystem { Path, rawBytes as pathRawBytes }
 import silk.i32 as i32
-import silk.option { None, Option, Some, none, some }
+import silk.option { Option, none, some }
 import silk.u8 as u8
 import silk.usize as usize
 

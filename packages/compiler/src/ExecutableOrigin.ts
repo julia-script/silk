@@ -236,6 +236,10 @@ export const make = (operations: Operations) => {
         ]
       case 'StructCleanup':
         return cleanup.fields.flatMap((field) => hookCalls(field.cleanup, index))
+      case 'NominalUnionCleanup':
+        return cleanup.variants.flatMap((variant) =>
+          variant.fields.flatMap((field) => hookCalls(field.cleanup, index)),
+        )
       case 'ArrayCleanup':
         return hookCalls(cleanup.element, index)
       case 'UnionCleanup':
@@ -285,8 +289,6 @@ export const make = (operations: Operations) => {
     substitution: Type.Substitution,
   ): ReadonlyArray<CallTarget> => {
     if (expression._tag === 'Run') return callTargets(expression.subject, index, substitution)
-    if (expression._tag === 'EffectResult')
-      return callTargets(expression.protected, index, substitution)
     if (expression._tag === 'EffectCatch')
       return [
         ...callTargets(expression.protected, index, substitution),
@@ -332,7 +334,7 @@ export const make = (operations: Operations) => {
         ...callTargets(expression.index, index, substitution),
       ]
     }
-    if (expression._tag === 'Construct') {
+    if (expression._tag === 'Construct' || expression._tag === 'ConstructUnionVariant') {
       return expression.fields.flatMap((field) => callTargets(field.value, index, substitution))
     }
     if (expression._tag === 'ArrayConstruct') {
@@ -692,11 +694,14 @@ export const make = (operations: Operations) => {
   ): Type.CallableIdentityArgument | undefined => {
     if (expression._tag === 'FunctionItem') {
       const target = Hir.callableTargetIdentity(expression.target)
+      const typeArguments = expression.typeArguments.map((argument) =>
+        Type.substituteGenericArgument(argument, context.substitution),
+      )
       const identity =
         target._tag === 'Declaration'
           ? `declaration:${target.module}:${target.name}`
           : `builtin:${target.actor}:${target.operation}`
-      return Type.callableIdentityArgument(identity, target)
+      return Type.callableIdentityArgument(identity, target, typeArguments)
     }
     if (expression._tag === 'CallableSection') {
       const typeArguments = expression.typeArguments.map((argument) =>
@@ -875,15 +880,7 @@ export const make = (operations: Operations) => {
             ? undefined
             : resultEffectIdentity(serviceFunction, serviceTarget, context.results, context.index)
       }
-      if (identity === undefined) {
-        if (
-          forwardedEffectResultParameter(target) === ordinal &&
-          argument !== undefined &&
-          requirementBoundEffectRecipe(argument, context)
-        )
-          continue
-        return undefined
-      }
+      if (identity === undefined) return undefined
       hiddenArguments.push(Type.effectIdentityArgument(identity))
     }
     for (const ordinal of callableParameterOrdinals(target, targetSubstitution)) {
@@ -948,46 +945,6 @@ export const make = (operations: Operations) => {
     })
   }
 
-  const forwardedEffectResultParameter = (target: Hir.HirFunction): number | undefined => {
-    const returned = target.statements.at(-1)
-    if (target.statements.length !== 1 || returned?._tag !== 'Return') return undefined
-    const block = returned.expression
-    const completed = block._tag === 'EffectBlock' ? block.statements.at(-1) : undefined
-    const run = completed?._tag === 'Return' ? completed.expression : undefined
-    const result = run?._tag === 'Run' ? run.subject : undefined
-    const protected_ = result?._tag === 'EffectResult' ? result.protected : undefined
-    const parameter = protected_?._tag === 'Move' ? protected_.subject : protected_
-    return block._tag === 'EffectBlock' &&
-      block.statements.length === 1 &&
-      parameter?._tag === 'ParameterReference'
-      ? parameter.parameter.ordinal
-      : undefined
-  }
-
-  const requirementBoundEffectRecipe = (
-    expression: Hir.Expression,
-    context: EffectOriginContext,
-    resolving: ReadonlySet<number> = new Set(),
-  ): boolean => {
-    if (expression._tag === 'Move')
-      return requirementBoundEffectRecipe(expression.subject, context, resolving)
-    if (expression._tag === 'UnionConvert')
-      return requirementBoundEffectRecipe(expression.source, context, resolving)
-    if (expression._tag === 'BindingReference') {
-      const ordinal = expression.binding.ordinal
-      if (resolving.has(ordinal)) return false
-      const initializer = callableBindings(context.fn).get(ordinal)
-      return (
-        initializer !== undefined &&
-        requirementBoundEffectRecipe(initializer, context, new Set(resolving).add(ordinal))
-      )
-    }
-    if (expression._tag === 'EffectBindRequirement') return true
-    if (expression._tag !== 'Call' && expression._tag !== 'EffectConstruct') return false
-    const target = targetFunction(context.results, expression.target)
-    return target !== undefined && forwardedRequirementBinding(target) !== undefined
-  }
-
   function serviceEffectRecipes(
     expression: Hir.Expression,
     context: EffectOriginContext,
@@ -1005,8 +962,6 @@ export const make = (operations: Operations) => {
       )
     if (expression._tag === 'Run')
       return serviceEffectRecipes(expression.subject, context, resolving)
-    if (expression._tag === 'EffectResult')
-      return serviceEffectRecipes(expression.protected, context, resolving)
     if (expression._tag === 'Move')
       return serviceEffectRecipes(expression.subject, context, resolving)
     if (expression._tag === 'UnionConvert')
@@ -1297,15 +1252,7 @@ export const make = (operations: Operations) => {
             ? undefined
             : resultEffectIdentity(serviceFunction, serviceTarget, context.results, context.index)
       }
-      if (identity === undefined) {
-        if (
-          forwardedEffectResultParameter(target) === ordinal &&
-          argument !== undefined &&
-          requirementBoundEffectRecipe(argument, context)
-        )
-          continue
-        return undefined
-      }
+      if (identity === undefined) return undefined
       hiddenArguments.push(Type.effectIdentityArgument(identity))
     }
     for (const ordinal of callableParameterOrdinals(target, targetSubstitution)) {
@@ -1581,7 +1528,6 @@ export const make = (operations: Operations) => {
           const targetFn = targetFunction(results, target.declaration)
           if (targetFn === undefined) return []
           const resultEffect = resultEffectIdentity(targetFn, target, results, index)
-          const reifiedParameter = forwardedEffectResultParameter(targetFn)
           return [
             Object.freeze({
               _tag: 'CallInstance',
@@ -1589,9 +1535,6 @@ export const make = (operations: Operations) => {
               span: expression.span,
               target,
               ...(resultEffect === undefined ? {} : { resultEffect }),
-              ...(reifiedParameter === undefined
-                ? {}
-                : { effectResultParameter: reifiedParameter }),
             }),
           ]
         }
@@ -1605,7 +1548,6 @@ export const make = (operations: Operations) => {
           target === undefined ? undefined : targetFunction(results, expression.target)
         if (target === undefined || targetFn === undefined) return []
         const resultEffect = resultEffectIdentity(targetFn, target, results, index)
-        const reifiedParameter = forwardedEffectResultParameter(targetFn)
         return [
           Object.freeze({
             _tag: 'CallInstance',
@@ -1613,7 +1555,6 @@ export const make = (operations: Operations) => {
             span: expression.span,
             target,
             ...(resultEffect === undefined ? {} : { resultEffect }),
-            ...(reifiedParameter === undefined ? {} : { effectResultParameter: reifiedParameter }),
           }),
         ]
       })
@@ -1735,10 +1676,21 @@ export const make = (operations: Operations) => {
         continue
       const declaration = declarationTarget(value.target)
       if (declaration === undefined) continue
-      const substitution = value._tag === 'CallableSection' ? value.substitution : new Map()
-      const arguments_ = targetArguments(value.target, substitution, results)
       const target = targetFunction(results, declaration)
-      if (arguments_ === undefined || target === undefined) continue
+      if (target === undefined) continue
+      const substitution = value._tag === 'CallableSection' ? value.substitution : new Map()
+      let arguments_: ReadonlyArray<Type.GenericArgument> | undefined
+      if (value._tag === 'FunctionItem') {
+        if (value.typeArguments.length === target.declaration.typeParameters.length)
+          arguments_ = Object.freeze(
+            value.typeArguments.map((argument) =>
+              Type.substituteGenericArgument(argument, ownerSubstitution),
+            ),
+          )
+      } else {
+        arguments_ = targetArguments(value.target, substitution, results)
+      }
+      if (arguments_ === undefined) continue
       const targetSubstitution = TypeInference.substitution(
         target.declaration.typeParameters.map((parameter) => parameter.type),
         arguments_,
@@ -2445,7 +2397,6 @@ export const make = (operations: Operations) => {
       const executionTargets = (expression: Hir.Expression): ReadonlyArray<string> => {
         if (expression._tag === 'EffectBindRequirement')
           return Object.freeze([providerBindingNode(instance.key, expression)])
-        if (expression._tag === 'EffectResult') return executionTargets(expression.protected)
         if (expression._tag === 'BindingReference') {
           const initializer = bindings.get(expression.binding.ordinal)
           return initializer === undefined ? [] : executionTargets(initializer)

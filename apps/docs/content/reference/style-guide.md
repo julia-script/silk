@@ -34,9 +34,9 @@ filesystem.NotFoundError
 filesystem.PermissionDeniedError
 ```
 
-Use `Failure` for an unsuccessful outcome that carries an error, not for the error payload type
-itself. For example, `NotFoundError` names a value while `Failure<NotFoundError>` names an outcome
-containing that value.
+Use `Failure` for an unsuccessful outcome variant that carries an error, not for the error payload
+type itself. For example, `NotFoundError` names a value while
+`Result<A, NotFoundError>.Failure` selects an outcome containing that value.
 
 **Boundary:** The suffix communicates API intent only. `NotFoundError` remains an ordinary value
 type and may be stored, passed, returned, or inspected outside an Effect. Conversely, every valid
@@ -51,7 +51,7 @@ failure type. Such tooling must not imply that the name changes the type's seman
 
 **Current standard library:** Consistent. Public error payloads include `FileError`, `LogError`,
 `ProcessError`, `ParseError`, `HostInputError`, `StreamReadError`, `StreamWriteError`,
-`OutOfMemoryError`, `StalledError`, and `TaskIdExhaustedError`. The `Failure<F>` result outcome
+`OutOfMemoryError`, `StalledError`, and `TaskIdExhaustedError`. The `Result<A, F>.Failure` variant
 keeps its existing name because it is ordinary result data rather than an error declaration, and
 the fiber `Cancelled` outcome keeps its name for the same reason: it is the third arm of `Outcome`
 alongside `Success` and `Failure`, not an error payload type.

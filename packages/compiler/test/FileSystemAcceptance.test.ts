@@ -51,7 +51,7 @@ import silk.filesystem {
   unsupported
 }
 import silk.bytes { Bytes, asSlice as bytesSlice, copy as bytesCopy }
-import silk.result { Failure, Result, Success }
+import silk.result { Result }
 import silk.vector {
   Vector,
   append as vectorAppend,
@@ -238,12 +238,10 @@ effect fn program() -> i32 ! FileError | OutOfMemoryError {
 }
 
 pub fn main() -> i32 {
-  let completed = run Intrinsic.effectResult(program())
+  let completed = run Effect.result(program())
   return match move completed {
-    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<FileError | OutOfMemoryError> { error } => 10
-    }
+      Result<i32, FileError | OutOfMemoryError>.Success { value } => value
+      Result<i32, FileError | OutOfMemoryError>.Failure { error } => 10
   }
 }`
 
@@ -255,12 +253,12 @@ import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.filesystem { FileError }
 import silk.filesystem { Path, isRoot, make, name, parent, resolve, root, view }
-import silk.option { None, Option, Some }
-import silk.result { Failure, Result, Success }
+import silk.option { Option }
+import silk.result { Result }
 fn matchesParent(possible: Option<Path>, expected: string) -> bool {
   return match move possible {
-    None {} => false
-    Some<Path> { value } => view(&value) == expected
+    Option<Path>.None => false
+    Option<Path>.Some { value } => view(&value) == expected
   }
 }
 
@@ -282,12 +280,10 @@ effect fn check() -> i32 ! FileError | OutOfMemoryError {
 }
 
 pub fn main() -> i32 {
-  let completed = run Intrinsic.effectResult(check())
+  let completed = run Effect.result(check())
   return match move completed {
-    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<FileError | OutOfMemoryError> { error } => 2
-    }
+      Result<i32, FileError | OutOfMemoryError>.Success { value } => value
+      Result<i32, FileError | OutOfMemoryError>.Failure { error } => 2
   }
 }`
     const snapshot = yield* Analysis.ofSourceRealized(

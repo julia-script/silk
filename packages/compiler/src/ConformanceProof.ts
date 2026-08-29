@@ -6,6 +6,8 @@ import type {
   ConformanceFact,
   ConformanceWitness,
   ContractFact,
+  FieldFact,
+  UnionVariantFact,
 } from './DeclarationFacts.js'
 import { byCanonical } from './DeclarationFacts.js'
 import type { Index } from './DeclarationIndex.js'
@@ -284,8 +286,8 @@ export const copyProof = (
       _tag: 'NotCopy',
       reason: `${Type.encode(type)} also implements Drop`,
     })
-  if (declaration?._tag !== 'StructDeclaration')
-    return Object.freeze({ _tag: 'NotCopy', reason: `${Type.encode(type)} is not a struct` })
+  if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration')
+    return Object.freeze({ _tag: 'NotCopy', reason: `${Type.encode(type)} is not an aggregate` })
   if (declaration.dependency._tag === 'Unavailable')
     return Object.freeze({
       _tag: 'UnavailableCopy',
@@ -298,7 +300,16 @@ export const copyProof = (
     ) ?? new Map()
   const nestedAssumptions = new Set([...assumptions, ...copyAssumptions(selected.conformance)])
   const nestedActive = new Set(active).add(key)
-  for (const field of declaration.fields) {
+  const fields: ReadonlyArray<{
+    readonly field: FieldFact
+    readonly variant?: UnionVariantFact
+  }> =
+    declaration._tag === 'StructDeclaration'
+      ? declaration.fields.map((field) => Object.freeze({ field }))
+      : declaration.variants.flatMap((variant) =>
+          variant.fields.map((field) => Object.freeze({ field, variant })),
+        )
+  for (const { field, variant } of fields) {
     if (field.declaredType._tag !== 'Resolved')
       return Object.freeze({
         _tag: 'UnavailableCopy',
@@ -309,7 +320,7 @@ export const copyProof = (
     if (proof._tag !== 'Copy')
       return Object.freeze({
         ...proof,
-        reason: `field ${field.name._tag === 'Present' ? field.name.spelling : `#${field.id.ordinal}`} (${Type.encode(fieldType)}): ${proof.reason}`,
+        reason: `${variant === undefined ? '' : `variant ${variant.name._tag === 'Present' ? variant.name.spelling : `#${variant.id.ordinal}`} `}field ${field.name._tag === 'Present' ? field.name.spelling : `#${field.id.ordinal}`} (${Type.encode(fieldType)}): ${proof.reason}`,
       })
   }
   return provedCopy

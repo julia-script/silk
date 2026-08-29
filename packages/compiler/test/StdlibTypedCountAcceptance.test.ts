@@ -154,13 +154,13 @@ import silk.string {
   fromUtf8,
   utf8Bytes
 }
-import silk.option { Some, None }
+import silk.option { Option }
 import silk.char { toU32 as charToU32 }
 
 fn scalarSum(value: string, cursor: ScalarCursor) -> u32 {
   return match move nextScalar(value, move cursor) {
-    Some<ScalarStep> { value: step } => continueSum(value, move step)
-    None nothing => u32.toU32(0)
+    Option<ScalarStep>.Some { value: step } => continueSum(value, move step)
+    Option<ScalarStep>.None => u32.toU32(0)
   }
 }
 

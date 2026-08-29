@@ -391,9 +391,9 @@ it.effect('blocks a deep recursive traversal on the evaluator call-depth limit',
     assert.strictEqual(evaluated.reason._tag, 'EvaluationLimit')
     if (evaluated.reason._tag !== 'EvaluationLimit') return
     assert.strictEqual(evaluated.reason.kind, 'CallDepth')
-    // The blocked frame names the innermost helper reached by the recursive walk, which is the
-    // provenance a reader needs to recognise the shape rather than guess at an unrelated limit.
-    assert.strictEqual(evaluated.reason.function.name, 'get')
+    // The blocked frame names the recursive walk itself after Option became an ordinary nominal
+    // union and no longer inserts a separate accessor frame.
+    assert.strictEqual(evaluated.reason.function.name, 'stepDepth')
   }),
 )
 
@@ -514,10 +514,10 @@ it.effect('blocks a deep recursive Drop on the evaluator call-depth limit', () =
     assert.strictEqual(evaluated.reason._tag, 'EvaluationLimit')
     if (evaluated.reason._tag !== 'EvaluationLimit') return
     assert.strictEqual(evaluated.reason.kind, 'CallDepth')
-    // The frame that ran out belongs to the standard library, not to the program: the recursive
-    // drop has reached the slot helper used by `Box`, which no call site wrote.
-    assert.strictEqual(evaluated.reason.function.module, 'silk/slot')
-    assert.strictEqual(evaluated.reason.function.name, 'dropValue')
+    // The frame that ran out belongs to the standard library, not to the program: recursive drop
+    // remains at the owning `Box` actor now that its optional link is an ordinary union.
+    assert.strictEqual(evaluated.reason.function.module, 'silk/box')
+    assert.strictEqual(evaluated.reason.function.name, 'drop@impl#0')
   }),
 )
 

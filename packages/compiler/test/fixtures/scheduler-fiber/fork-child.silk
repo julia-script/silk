@@ -171,13 +171,12 @@ fn completeChild<A, E>(
   completed: Result.Result<A, E>,
   producer: Fiber.CompletionProducer<A, E>,
 ) -> () {
-  let Result.Result<A, E> { value } = move completed
-  return match move value {
-    Result.Success<A> { value: success } => Fiber.completeSuccess<A, E>(
+  return match move completed {
+    Result.Result<A, E>.Success { value: success } => Fiber.completeSuccess<A, E>(
       move producer,
       move success,
     )
-    Result.Failure<E> { error } => Fiber.completeFailure<A, E>(move producer, move error)
+    Result.Result<A, E>.Failure { error } => Fiber.completeFailure<A, E>(move producer, move error)
   }
 }
 

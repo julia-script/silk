@@ -105,6 +105,7 @@ const declarationKind = (
     case 'InterfaceDeclaration':
     case 'RoleDeclaration':
     case 'EnumDeclaration':
+    case 'UnionDeclaration':
       return 'Type'
     case 'StructDeclaration':
       return aggregateKind
@@ -126,6 +127,8 @@ const declarationDetail = (declaration: DeclarationFacts.MemberFact): Presentati
       return PresentationRenderer.enumDeclaration(declaration)
     case 'StructDeclaration':
       return PresentationRenderer.structDeclaration(declaration)
+    case 'UnionDeclaration':
+      return PresentationRenderer.unionDeclaration(declaration)
   }
 }
 
@@ -280,6 +283,26 @@ const enumCandidates = (enum_: DeclarationFacts.EnumFact): ReadonlyArray<Candida
       }),
     ),
   ])
+
+const unionCandidates = (union: DeclarationFacts.UnionFact): ReadonlyArray<Candidate> =>
+  Object.freeze(
+    union.variants.flatMap(
+      (variant): ReadonlyArray<Candidate> =>
+        variant.name._tag !== 'Present' || variant.canonical._tag !== 'Canonical'
+          ? []
+          : [
+              candidate({
+                identity: semantic(
+                  Object.freeze({ _tag: 'UnionVariantIdentity', id: variant.canonical.id }),
+                ),
+                kind: 'Constructor',
+                label: variant.name.spelling,
+                detail: PresentationRenderer.unionVariant(union, variant),
+                sortGroup: 0,
+              }),
+            ],
+    ),
+  )
 
 const serviceCandidates = (service: DeclarationFacts.ServiceFact): ReadonlyArray<Candidate> =>
   Object.freeze(
@@ -441,6 +464,7 @@ const typeCandidates = (
       )
   for (const declaration of [
     ...(index.modules.find((headers) => headers.module === module)?.structs ?? []),
+    ...(index.modules.find((headers) => headers.module === module)?.unions ?? []),
     ...(index.modules.find((headers) => headers.module === module)?.enums ?? []),
     ...(index.modules.find((headers) => headers.module === module)?.services ?? []),
     ...(index.modules.find((headers) => headers.module === module)?.interfaces ?? []),
@@ -471,6 +495,7 @@ const typeCandidates = (
     const declaration = DeclarationFacts.byCanonical(index, binding.declaration)
     if (
       declaration?._tag !== 'StructDeclaration' &&
+      declaration?._tag !== 'UnionDeclaration' &&
       declaration?._tag !== 'EnumDeclaration' &&
       declaration?._tag !== 'ServiceDeclaration' &&
       declaration?._tag !== 'InterfaceDeclaration'
@@ -698,6 +723,24 @@ export const complete = (options: {
         replacement: replacement.span,
         candidates: stable(enumCandidates(lookup.declaration)),
       })
+    if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'UnionDeclaration') {
+      const scoped = NameResolution.scopedModule(lookup.declaration)
+      return Object.freeze({
+        _tag: 'CompletionResult',
+        context: Object.freeze({
+          _tag: 'ActorMemberContext',
+          actor:
+            lookup.declaration.name._tag === 'Present'
+              ? lookup.declaration.name.spelling
+              : (qualifier ?? 'union'),
+        }),
+        replacement: replacement.span,
+        candidates: stable([
+          ...unionCandidates(lookup.declaration),
+          ...(scoped === undefined ? [] : namespaceCandidates(options.index, scoped)),
+        ]),
+      })
+    }
     if (
       lookup?._tag === 'Resolved' &&
       (lookup.declaration._tag === 'StructDeclaration' ||

@@ -1,4 +1,4 @@
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as FieldRealization from './FieldRealization.js'
 import { alignUp } from './internal/Align.js'
@@ -28,6 +28,21 @@ import {
 import * as Scalar from './Scalar.js'
 import * as Target from './Target.js'
 import * as Type from './Type.js'
+
+const cleanupHooksEqual = (
+  leftHook: Extract<Representation, { readonly _tag: 'Aggregate' }>['cleanupHook'],
+  rightHook: Extract<Representation, { readonly _tag: 'Aggregate' }>['cleanupHook'],
+): boolean =>
+  leftHook === undefined
+    ? rightHook === undefined
+    : rightHook !== undefined &&
+      leftHook.hook.module === rightHook.hook.module &&
+      leftHook.hook.name === rightHook.hook.name &&
+      leftHook.typeArguments.length === rightHook.typeArguments.length &&
+      leftHook.typeArguments.every((argument, ordinal) => {
+        const other = rightHook.typeArguments.at(ordinal)
+        return other !== undefined && Type.equalsGenericArgument(argument, other)
+      })
 
 const representationEquals = (left: Representation, right: Representation): boolean => {
   if (left._tag !== right._tag) return false
@@ -185,20 +200,47 @@ const representationEquals = (left: Representation, right: Representation): bool
       })
     )
   }
-  const cleanupHooksEqual = (
-    leftHook: Extract<Representation, { readonly _tag: 'Aggregate' }>['cleanupHook'],
-    rightHook: Extract<Representation, { readonly _tag: 'Aggregate' }>['cleanupHook'],
-  ): boolean =>
-    leftHook === undefined
-      ? rightHook === undefined
-      : rightHook !== undefined &&
-        leftHook.hook.module === rightHook.hook.module &&
-        leftHook.hook.name === rightHook.hook.name &&
-        leftHook.typeArguments.length === rightHook.typeArguments.length &&
-        leftHook.typeArguments.every((argument, ordinal) => {
-          const other = rightHook.typeArguments.at(ordinal)
-          return other !== undefined && Type.equalsGenericArgument(argument, other)
-        })
+  if (left._tag === 'NominalUnion') {
+    return (
+      right._tag === 'NominalUnion' &&
+      left.union.module === right.union.module &&
+      left.union.name === right.union.name &&
+      left.payloadOffset === right.payloadOffset &&
+      left.payloadSize === right.payloadSize &&
+      left.payloadAlignment === right.payloadAlignment &&
+      left.tagPadding === right.tagPadding &&
+      left.tailPadding === right.tailPadding &&
+      cleanupHooksEqual(left.cleanupHook, right.cleanupHook) &&
+      left.variants.length === right.variants.length &&
+      left.variants.every((variant, ordinal) => {
+        const other = right.variants.at(ordinal)
+        return (
+          other !== undefined &&
+          variant.variant.union.module === other.variant.union.module &&
+          variant.variant.union.name === other.variant.union.name &&
+          variant.variant.name === other.variant.name &&
+          variant.ordinal === other.ordinal &&
+          variant.size === other.size &&
+          variant.alignment === other.alignment &&
+          variant.tailPadding === other.tailPadding &&
+          variant.fields.length === other.fields.length &&
+          variant.fields.every((field, fieldOrdinal) => {
+            const otherField = other.fields.at(fieldOrdinal)
+            return (
+              otherField !== undefined &&
+              DeclarationFacts.sameFieldId(field.id, otherField.id) &&
+              field.name === otherField.name &&
+              Type.equals(field.type, otherField.type) &&
+              field.offset === otherField.offset &&
+              field.size === otherField.size &&
+              field.alignment === otherField.alignment &&
+              field.padding === otherField.padding
+            )
+          })
+        )
+      })
+    )
+  }
   return (
     right._tag === 'Aggregate' &&
     cleanupHooksEqual(left.cleanupHook, right.cleanupHook) &&
@@ -692,6 +734,135 @@ const verifyEntry = (
           ),
         ])
   }
+  if (candidate.representation._tag === 'NominalUnion') {
+    const representation = candidate.representation
+    const unionViolations: Array<Violation> = []
+    if (!Type.isNominal(candidate.type)) {
+      return Object.freeze([
+        invalid(
+          'InvalidAggregate',
+          candidate.type,
+          `${Type.encode(candidate.type)} uses nominal-union storage without a nominal type`,
+        ),
+      ])
+    }
+    const nominal = candidate.type
+    if (
+      representation.union.module !== nominal.module ||
+      representation.union.name !== nominal.name ||
+      representation.tag.bits !== 32 ||
+      representation.tag.size !== 4
+    ) {
+      unionViolations.push(
+        invalid(
+          'InvalidAggregate',
+          candidate.type,
+          `${Type.encode(candidate.type)} has a foreign nominal-union identity or tag`,
+        ),
+      )
+    }
+    let variantFieldsValid = true
+    for (const [ordinal, variant] of representation.variants.entries()) {
+      const expected = variant.fields.map((field) => {
+        const fieldLayout = Type.isBuiltin(field.type)
+          ? scalarEntry(target, field.type)
+          : available.get(Type.key(field.type))
+        return Object.freeze({
+          value: field,
+          size: fieldLayout?.size ?? 0,
+          alignment: fieldLayout?.alignment ?? 1,
+          available: fieldLayout !== undefined,
+        })
+      })
+      const packed = Packing.pack(expected)
+      const fieldsValid = variant.fields.every((field, fieldOrdinal) => {
+        const facts = expected.at(fieldOrdinal)
+        const placement = packed.fields.at(fieldOrdinal)
+        return (
+          facts?.available === true &&
+          placement !== undefined &&
+          field.offset === placement.offset &&
+          field.size === facts.size &&
+          field.alignment === facts.alignment &&
+          field.padding === placement.padding
+        )
+      })
+      if (
+        variant.ordinal !== ordinal ||
+        variant.variant.union.module !== representation.union.module ||
+        variant.variant.union.name !== representation.union.name ||
+        !fieldsValid ||
+        variant.size !== packed.size ||
+        variant.alignment !== packed.alignment ||
+        variant.tailPadding !== packed.tailPadding
+      ) {
+        variantFieldsValid = false
+        unionViolations.push(
+          invalid(
+            'InvalidAggregate',
+            candidate.type,
+            `${Type.encode(candidate.type)} variant ${variant.variant.name} has non-canonical physical facts`,
+          ),
+        )
+      }
+    }
+    const unionShape = variantFieldsValid
+      ? callingShapes(target, [...available.values()], [candidate.type]).at(0)?.tree
+      : undefined
+    const payload =
+      unionShape?._tag === 'NominalUnionShape'
+        ? Packing.pack(
+            unionShape.payloadTypes.map((payloadType) => {
+              const scalar = scalarEntry(target, payloadType)
+              return Object.freeze({
+                value: payloadType,
+                size: scalar.size,
+                alignment: scalar.alignment,
+              })
+            }),
+          )
+        : undefined
+    const payloadAlignment = payload?.alignment ?? 1
+    const payloadSize = payload?.size ?? 0
+    const payloadOffset = alignUp(4, payloadAlignment)
+    const alignment = Math.max(4, payloadAlignment)
+    const size = alignUp(payloadOffset + payloadSize, alignment)
+    if (
+      representation.payloadAlignment !== payloadAlignment ||
+      representation.payloadSize !== payloadSize ||
+      representation.payloadOffset !== payloadOffset ||
+      representation.tagPadding !== payloadOffset - 4 ||
+      representation.tailPadding !== size - (payloadOffset + payloadSize) ||
+      candidate.alignment !== alignment ||
+      candidate.size !== size
+    ) {
+      unionViolations.push(
+        invalid(
+          'InvalidAggregate',
+          candidate.type,
+          `${Type.encode(candidate.type)} has non-canonical nominal-union size or alignment`,
+        ),
+      )
+    }
+    const cleanupHook = representation.cleanupHook
+    if (
+      cleanupHook !== undefined &&
+      (cleanupHook.hook.module.length === 0 ||
+        cleanupHook.hook.name.length === 0 ||
+        cleanupHook.typeArguments.some(
+          (argument) => !Type.isRuntimeConcreteGenericArgument(argument),
+        ))
+    ) {
+      unionViolations.push(
+        invalid(
+          'InvalidAggregate',
+          candidate.type,
+          `${Type.encode(candidate.type)} has a non-canonical cleanup hook`,
+        ),
+      )
+    }
+    return Object.freeze(unionViolations)
+  }
   if (candidate.representation._tag !== 'Aggregate') {
     return Object.freeze([
       invalid(
@@ -839,9 +1010,7 @@ const commonViolations = (
 }
 
 const fieldIdEquals = (left: DeclarationFacts.FieldId, right: DeclarationFacts.FieldId): boolean =>
-  left.ordinal === right.ordinal &&
-  left.struct.sourceId === right.struct.sourceId &&
-  left.struct.ordinal === right.struct.ordinal
+  DeclarationFacts.sameFieldId(left, right)
 
 /** Compares two compiler-planned physical selectors. */
 export const selectorEquals = (left: Selector, right: Selector): boolean => {
@@ -856,6 +1025,10 @@ export const selectorEquals = (left: Selector, right: Selector): boolean => {
       return right._tag === 'UnionTagSelector'
     case 'UnionPayloadSelector':
       return right._tag === 'UnionPayloadSelector' && left.slot === right.slot
+    case 'NominalUnionTagSelector':
+      return right._tag === 'NominalUnionTagSelector'
+    case 'NominalUnionPayloadSelector':
+      return right._tag === 'NominalUnionPayloadSelector' && left.slot === right.slot
     case 'SliceAddressSelector':
       return right._tag === 'SliceAddressSelector'
     case 'SliceLengthSelector':
@@ -946,6 +1119,31 @@ export const laneOffset = (
       }
       const shape = callingShape(self, current)
       if (shape?.tree._tag !== 'SumShape') return undefined
+      let payloadOffset = 0
+      for (let slot = 0; slot <= selector.slot; slot += 1) {
+        const type = shape.tree.payloadTypes.at(slot)
+        if (type === undefined) return undefined
+        const scalar = entry(self, type)
+        if (scalar === undefined) return undefined
+        payloadOffset = alignUp(payloadOffset, scalar.alignment)
+        if (slot === selector.slot) {
+          return offset + candidate.representation.payloadOffset + payloadOffset
+        }
+        payloadOffset += scalar.size
+      }
+      return undefined
+    }
+    if (selector._tag === 'NominalUnionTagSelector') {
+      return ordinal === path.length - 1 && candidate.representation._tag === 'NominalUnion'
+        ? offset
+        : undefined
+    }
+    if (selector._tag === 'NominalUnionPayloadSelector') {
+      if (ordinal !== path.length - 1 || candidate.representation._tag !== 'NominalUnion') {
+        return undefined
+      }
+      const shape = callingShape(self, current)
+      if (shape?.tree._tag !== 'NominalUnionShape') return undefined
       let payloadOffset = 0
       for (let slot = 0; slot <= selector.slot; slot += 1) {
         const type = shape.tree.payloadTypes.at(slot)

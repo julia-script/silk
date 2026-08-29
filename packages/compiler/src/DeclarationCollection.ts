@@ -5,6 +5,7 @@ import type {
   CanonicalEnumMemberId,
   CanonicalId,
   CanonicalState,
+  CanonicalUnionVariantId,
   ConformanceFact,
   ConformanceRequirementFact,
   ConstantFact,
@@ -22,6 +23,7 @@ import type {
   FailureRowFact,
   FieldFact,
   FieldId,
+  FieldOwnerId,
   FieldState,
   InterfaceFact,
   MemberFact,
@@ -40,6 +42,9 @@ import type {
   TypeParameterFact,
   TypePathFact,
   TypeResolution,
+  UnionFact,
+  UnionVariantFact,
+  UnionVariantId,
 } from './DeclarationFacts.js'
 import {
   enumValueOperation,
@@ -1105,50 +1110,49 @@ const duplicateParameterDiagnostics = (parameters: ReadonlyArray<ParameterFact>)
 const collectFields = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
-  structId: DeclarationId,
+  owner: FieldOwnerId,
+  nodeKind: 'StructField' | 'UnionVariantField',
   typeParameters: ReadonlyMap<string, Type.Parameter>,
 ) => {
   const first = new Map<string, { readonly id: FieldId; readonly token: Token.Token }>()
   const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const fields = SyntaxTree.directNodes(node, 'StructField').map(
-    (fieldNode, ordinal): FieldFact => {
-      const id: FieldId = Object.freeze({ _tag: 'FieldId', struct: structId, ordinal })
-      const name = presentName(source, fieldNode)
-      const type = analyzeDeclaredType(source, declaredTypeNode(fieldNode), typeParameters)
-      diagnostics.push(...type.diagnostics)
-      let state: FieldState
-      if (name._tag !== 'Present') state = Object.freeze({ _tag: 'Unidentified' })
-      else {
-        const original = first.get(name.spelling)
-        if (original === undefined) {
-          first.set(name.spelling, Object.freeze({ id, token: name.token }))
-          state = Object.freeze({ _tag: 'Unique', id })
-        } else {
-          const diagnostic = Diagnostic.duplicateFieldName(
-            name.spelling,
-            original.token.span,
-            name.token.span,
-          )
-          diagnostics.push(diagnostic)
-          state = Object.freeze({
-            _tag: 'Duplicate',
-            original: original.id,
-            cause: Diagnostic.identity(diagnostic),
-          })
-        }
+  const fields = SyntaxTree.directNodes(node, nodeKind).map((fieldNode, ordinal): FieldFact => {
+    const id: FieldId = Object.freeze({ _tag: 'FieldId', owner, ordinal })
+    const name = presentName(source, fieldNode)
+    const type = analyzeDeclaredType(source, declaredTypeNode(fieldNode), typeParameters)
+    diagnostics.push(...type.diagnostics)
+    let state: FieldState
+    if (name._tag !== 'Present') state = Object.freeze({ _tag: 'Unidentified' })
+    else {
+      const original = first.get(name.spelling)
+      if (original === undefined) {
+        first.set(name.spelling, Object.freeze({ id, token: name.token }))
+        state = Object.freeze({ _tag: 'Unique', id })
+      } else {
+        const diagnostic = Diagnostic.duplicateFieldName(
+          name.spelling,
+          original.token.span,
+          name.token.span,
+        )
+        diagnostics.push(diagnostic)
+        state = Object.freeze({
+          _tag: 'Duplicate',
+          original: original.id,
+          cause: Diagnostic.identity(diagnostic),
+        })
       }
-      return Object.freeze({
-        _tag: 'StructField',
-        id,
-        state,
-        visibility:
-          SyntaxTree.directToken(fieldNode, 'PubKeyword') === undefined ? 'Private' : 'Public',
-        name,
-        declaredType: type.fact,
-        syntax: fieldNode,
-      })
-    },
-  )
+    }
+    return Object.freeze({
+      _tag: 'AggregateField',
+      id,
+      state,
+      visibility:
+        SyntaxTree.directToken(fieldNode, 'PubKeyword') === undefined ? 'Private' : 'Public',
+      name,
+      declaredType: type.fact,
+      syntax: fieldNode,
+    })
+  })
   return Object.freeze({ fields: Object.freeze(fields), diagnostics: Object.freeze(diagnostics) })
 }
 
@@ -2097,6 +2101,150 @@ const collectEnum = (
   })
 }
 
+const collectUnion = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  id: DeclarationId,
+  canonical: CanonicalState,
+  visibility: 'Private' | 'Public',
+  name: DeclaredName,
+  typeParameters: ReturnType<typeof collectTypeParameters>,
+  diagnostics: Array<Diagnostic.Diagnostic>,
+): UnionFact => {
+  const unionDiagnostics: Array<Diagnostic.Diagnostic> = []
+  const variantNodes = SyntaxTree.directNodes(node, 'UnionVariant')
+  if (variantNodes.length === 0) {
+    unionDiagnostics.push(
+      Diagnostic.emptyNominalUnion(
+        name._tag === 'Present' ? name.spelling : '<anonymous>',
+        tightSpan(node),
+      ),
+    )
+  }
+  const first = new Map<
+    string,
+    {
+      readonly id: UnionVariantId
+      readonly canonical?: CanonicalUnionVariantId
+      readonly token: Token.Token
+    }
+  >()
+  const variants = variantNodes.map((variantNode, ordinal): UnionVariantFact => {
+    const variantId: UnionVariantId = Object.freeze({ _tag: 'UnionVariantId', union: id, ordinal })
+    const variantName = presentName(source, variantNode)
+    let variantCanonical: UnionVariantFact['canonical'] = Object.freeze({
+      _tag: 'Unidentified',
+    })
+    if (variantName._tag === 'Present') {
+      const original = first.get(variantName.spelling)
+      if (original === undefined) {
+        const canonicalVariant =
+          canonical._tag === 'Canonical'
+            ? Object.freeze({
+                _tag: 'CanonicalUnionVariantId' as const,
+                union: canonical.id,
+                name: variantName.spelling,
+              })
+            : undefined
+        first.set(
+          variantName.spelling,
+          Object.freeze({
+            id: variantId,
+            token: variantName.token,
+            ...(canonicalVariant === undefined ? {} : { canonical: canonicalVariant }),
+          }),
+        )
+        if (canonicalVariant !== undefined) {
+          variantCanonical = Object.freeze({ _tag: 'Canonical', id: canonicalVariant })
+        }
+      } else {
+        const diagnostic = Diagnostic.duplicateUnionVariant(
+          variantName.spelling,
+          original.token.span,
+          variantName.token.span,
+        )
+        unionDiagnostics.push(diagnostic)
+        if (original.canonical !== undefined) {
+          variantCanonical = Object.freeze({
+            _tag: 'Duplicate',
+            original: original.canonical,
+            cause: Diagnostic.identity(diagnostic),
+          })
+        }
+      }
+    }
+    const hasFieldBody = SyntaxTree.directToken(variantNode, 'LeftBrace') !== undefined
+    const fieldNodes = SyntaxTree.directNodes(variantNode, 'UnionVariantField')
+    if (
+      hasFieldBody &&
+      fieldNodes.every(
+        (fieldNode) =>
+          SyntaxTree.tokens(fieldNode).filter(
+            (token) =>
+              token.kind !== 'Whitespace' &&
+              token.kind !== 'LineComment' &&
+              token.kind !== 'DocComment' &&
+              token.kind !== 'ModuleDocComment',
+          ).length === 0,
+      )
+    ) {
+      unionDiagnostics.push(
+        Diagnostic.emptyUnionVariant(
+          variantName._tag === 'Present' ? variantName.spelling : '<anonymous>',
+          tightSpan(variantNode),
+        ),
+      )
+    }
+    const collected = collectFields(
+      source,
+      variantNode,
+      Object.freeze({ _tag: 'UnionVariantFieldOwnerId', variant: variantId }),
+      'UnionVariantField',
+      typeParameters.environment,
+    )
+    unionDiagnostics.push(...collected.diagnostics)
+    return Object.freeze({
+      _tag: 'UnionVariant',
+      id: variantId,
+      canonical: variantCanonical,
+      name: variantName,
+      kind: hasFieldBody ? 'Fields' : 'Unit',
+      fields: collected.fields,
+      syntax: variantNode,
+    })
+  })
+  diagnostics.push(...unionDiagnostics)
+  const valid =
+    unionDiagnostics.length === 0 &&
+    SyntaxTree.isAvailableSyntax(node) &&
+    variants.length > 0 &&
+    variants.every(
+      (variant) =>
+        variant.name._tag === 'Present' &&
+        variant.canonical._tag === 'Canonical' &&
+        variant.fields.every((field) => field.state._tag === 'Unique'),
+    )
+  return Object.freeze({
+    _tag: 'UnionDeclaration',
+    id,
+    canonical,
+    visibility,
+    typeParameters: typeParameters.facts,
+    name,
+    variants: Object.freeze(variants),
+    dependency: Object.freeze({ _tag: 'Available', types: Object.freeze([]) }),
+    validity: valid
+      ? Object.freeze({ _tag: 'Valid' })
+      : Object.freeze({
+          _tag: 'Invalid',
+          causes: Object.freeze(
+            unionDiagnostics.map((diagnostic) => Diagnostic.identity(diagnostic)),
+          ),
+        }),
+    syntax: node,
+  })
+}
+
 const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
   const source = syntax.source
   const nodes = syntax.root.children.filter(
@@ -2105,6 +2253,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       (element.kind === 'FunctionDeclaration' ||
         element.kind === 'StructDeclaration' ||
         element.kind === 'EnumDeclaration' ||
+        element.kind === 'UnionDeclaration' ||
         element.kind === 'ServiceDeclaration' ||
         element.kind === 'InterfaceDeclaration' ||
         element.kind === 'RoleDeclaration' ||
@@ -2382,8 +2531,25 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
     }
     if (node.kind === 'EnumDeclaration')
       return collectEnum(source, node, id, canonical, visibility, name, diagnostics)
+    if (node.kind === 'UnionDeclaration')
+      return collectUnion(
+        source,
+        node,
+        id,
+        canonical,
+        visibility,
+        name,
+        typeParameters,
+        diagnostics,
+      )
     if (node.kind === 'StructDeclaration') {
-      const collected = collectFields(source, node, id, typeParameters.environment)
+      const collected = collectFields(
+        source,
+        node,
+        Object.freeze({ _tag: 'StructFieldOwnerId', declaration: id }),
+        'StructField',
+        typeParameters.environment,
+      )
       diagnostics.push(...collected.diagnostics)
       return Object.freeze({
         _tag: 'StructDeclaration',
@@ -2871,6 +3037,9 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
     ),
     enums: Object.freeze(
       members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
+    ),
+    unions: Object.freeze(
+      members.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
     ),
     services: Object.freeze(
       members.filter((member): member is ServiceFact => member._tag === 'ServiceDeclaration'),

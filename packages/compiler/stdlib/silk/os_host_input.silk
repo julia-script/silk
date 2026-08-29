@@ -46,7 +46,7 @@ import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.host_input { HostInput, HostInputError, inputFailure }
 import silk.i32 as i32
-import silk.option { None, Option, Some, none, some }
+import silk.option { Option, none, some }
 import silk.string { utf8Bytes as stringUtf8Bytes }
 import silk.u32 as u32
 import silk.u8 as u8
@@ -87,33 +87,33 @@ effect fn rawArgumentCount(count: &mut usize, lowReason: &mut i32, nativeCode: &
 effect fn rawArgument(
   index: usize,
   output: &mut [u8],
+  count: &mut usize,
   lowReason: &mut i32,
   nativeCode: &mut u32
-) -> Option<usize> {
-  unsafe { return run Intrinsic.osHostArgument(index, output, lowReason, nativeCode) }
-  let impossible = 1 / 0
-  return none<usize>()
+) -> bool {
+  unsafe { return run Intrinsic.osHostArgument(index, output, count, lowReason, nativeCode) }
+  return false
 }
 
 effect fn rawVariable(
   name: &[u8],
   output: &mut [u8],
+  count: &mut usize,
   lowReason: &mut i32,
   nativeCode: &mut u32
-) -> Option<usize> {
-  unsafe { return run Intrinsic.osHostVariable(name, output, lowReason, nativeCode) }
-  let impossible = 1 / 0
-  return none<usize>()
+) -> bool {
+  unsafe { return run Intrinsic.osHostVariable(name, output, count, lowReason, nativeCode) }
+  return false
 }
 
 effect fn rawWorkingDirectory(
   output: &mut [u8],
+  count: &mut usize,
   lowReason: &mut i32,
   nativeCode: &mut u32
-) -> Option<usize> {
-  unsafe { return run Intrinsic.osHostWorkingDirectory(output, lowReason, nativeCode) }
-  let impossible = 1 / 0
-  return none<usize>()
+) -> bool {
+  unsafe { return run Intrinsic.osHostWorkingDirectory(output, count, lowReason, nativeCode) }
+  return false
 }
 
 effect fn ownedPrefix(view: &[u8], length: usize) -> Bytes ! OutOfMemoryError ? &mut Allocator {
@@ -145,25 +145,38 @@ effect fn fetch(
   while complete == false {
     let mut lowReason = 0
     let mut nativeCode = u32.toU32(0)
-    let mut received = none<usize>()
+    let mut total = usize.ZERO
+    let mut received = false
     if selector == 0 {
-      received = run rawArgument(index, bytesMutSlice(&mut buffer), &mut lowReason, &mut nativeCode)
+      received = run rawArgument(
+        index,
+        bytesMutSlice(&mut buffer),
+        &mut total,
+        &mut lowReason,
+        &mut nativeCode
+      )
     } else {
       if selector == 1 {
-        received = run rawVariable(name, bytesMutSlice(&mut buffer), &mut lowReason, &mut nativeCode)
+        received = run rawVariable(
+          name,
+          bytesMutSlice(&mut buffer),
+          &mut total,
+          &mut lowReason,
+          &mut nativeCode
+        )
       } else {
-        received = run rawWorkingDirectory(bytesMutSlice(&mut buffer), &mut lowReason, &mut nativeCode)
+        received = run rawWorkingDirectory(
+          bytesMutSlice(&mut buffer),
+          &mut total,
+          &mut lowReason,
+          &mut nativeCode
+        )
       }
     }
-    let encoded = match move received {
-      Some<usize> { value: total } => total + usize.ONE
-      None {} => usize.ZERO
-    }
-    if encoded == usize.ZERO {
+    if received == false {
       if lowReason != 0 { return run raise() }
       complete = true
     } else {
-      let total = encoded - usize.ONE
       if total <= bytesLength(&buffer) {
         let owned = run ownedPrefix(bytesSlice(&buffer), total)
         result = some<Bytes>(move owned)
@@ -213,8 +226,8 @@ effect fn workingDirectory(
 ) -> Bytes ! HostInputError | OutOfMemoryError ? &mut Allocator {
   let found = run fetch(2, usize.ZERO, stringUtf8Bytes(""))
   return match move found {
-    Some<Bytes> { value: bytes } => move bytes
-    None {} => run raise()
+    Option<Bytes>.Some { value: bytes } => move bytes
+    Option<Bytes>.None => run raise()
   }
 }
 

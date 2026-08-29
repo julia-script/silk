@@ -208,14 +208,14 @@ pub fn main() -> i32 {
 
 it.effect('points a stdlib construction reached through inference at the user call', () =>
   Effect.gen(function* () {
-    // `Option.some(i32.add(1))` specializes `Some<T>` with a callable argument. The construction
+    // `some(i32.add(1))` specializes `Option<T>.Some` with a callable argument. The construction
     // that cannot receive a layout lives inside silk/option, but the callable was written at the
     // user's call, so the primary span is the user source and the stdlib construction is related
     // provenance.
     const source = `import silk.i32 as i32
-import silk.option { Option }
+import silk.option { some }
 pub fn main() -> i32 {
-  let optional = Option.some(i32.add(1))
+  let optional = some(i32.add(1))
   return 42
 }`
     const snapshot = yield* analyzed('stored-callable/stdlib-inference', source)

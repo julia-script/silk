@@ -70,6 +70,8 @@ export const hirPatternSelection = (selection: PatternSelectionFact): Hir.Patter
   let member: Match.CoverageIdentity | undefined
   if (selection.pattern._tag === 'EnumMemberPattern') {
     member = selection.pattern.coverage
+  } else if (selection.pattern._tag === 'UnionVariantPattern') {
+    member = selection.pattern.coverage
   } else if (
     (selection.pattern._tag === 'NominalPattern' || selection.pattern._tag === 'TypePattern') &&
     selection.pattern.member !== undefined
@@ -571,21 +573,6 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       span: fact.syntax.span,
     })
   }
-  if (fact._tag === 'EffectResult') {
-    const protected_ = hirExpression(fact.protected)
-    if (
-      protected_._tag === 'Unavailable' ||
-      fact.type._tag !== 'Available' ||
-      !Type.isEffect(fact.type.type)
-    )
-      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
-    return Object.freeze({
-      _tag: 'EffectResult',
-      protected: protected_,
-      type: fact.type.type,
-      span: fact.syntax.span,
-    })
-  }
   if (fact._tag === 'EffectCatch') {
     const protected_ = hirExpression(fact.protected)
     const handler = hirExpression(fact.handler)
@@ -659,6 +646,8 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
           let member: Match.CoverageIdentity | undefined
           if (arm.pattern._tag === 'EnumMemberPattern') {
             member = arm.pattern.coverage
+          } else if (arm.pattern._tag === 'UnionVariantPattern') {
+            member = arm.pattern.coverage
           } else if (
             (arm.pattern._tag === 'NominalPattern' || arm.pattern._tag === 'TypePattern') &&
             arm.pattern.member !== undefined
@@ -724,6 +713,54 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     return Object.freeze({
       _tag: 'Construct',
       nominal: fact.target.type,
+      evaluationOrder: Object.freeze(
+        fact.initializers.flatMap((initializer) =>
+          initializer.state._tag === 'Resolved' ? [initializer.state.field.id] : [],
+        ),
+      ),
+      fields: Object.freeze(
+        fact.fields.map(({ field, initializer }) => {
+          const value =
+            field.declaredType._tag === 'Resolved'
+              ? hirExpectedExpression(
+                  initializer.expression,
+                  Type.substitute(field.declaredType.type, substitution),
+                  'StructField',
+                  field.syntax.span,
+                )
+              : hirExpression(initializer.expression)
+          return Object.freeze({ field: field.id, value })
+        }),
+      ),
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
+  if (fact._tag === 'UnionVariant') {
+    if (
+      fact.target._tag !== 'Resolved' ||
+      fact.target.variant.canonical._tag !== 'Canonical' ||
+      fact.type._tag !== 'Available' ||
+      fact.fields.length !== fact.target.variant.fields.length
+    ) {
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: fact.syntax.span,
+        ...(fact.target._tag === 'Unavailable' && fact.target.cause !== undefined
+          ? { cause: fact.target.cause }
+          : {}),
+      })
+    }
+    const substitution =
+      TypeInference.substitution(
+        fact.target.union.typeParameters.map((parameter) => parameter.type),
+        fact.target.type.arguments,
+      ) ?? new Map()
+    return Object.freeze({
+      _tag: 'ConstructUnionVariant',
+      nominal: fact.target.type,
+      variant: fact.target.variant.canonical.id,
+      variantOrdinal: fact.target.variant.id.ordinal,
       evaluationOrder: Object.freeze(
         fact.initializers.flatMap((initializer) =>
           initializer.state._tag === 'Resolved' ? [initializer.state.field.id] : [],
@@ -969,6 +1006,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     return Object.freeze({
       _tag: 'FunctionItem',
       target,
+      typeArguments: fact.typeArguments,
       type: fact.type.type,
       span: fact.syntax.span,
     })
@@ -1588,11 +1626,10 @@ export const directExpressionChildren = (
     case 'ArrayLiteral':
       return Object.freeze(expression.elements.map((element) => element.expression))
     case 'StructLiteral':
+    case 'UnionVariant':
       return Object.freeze(expression.initializers.map((initializer) => initializer.expression))
     case 'Grouped':
       return Object.freeze([expression.expression])
-    case 'EffectResult':
-      return Object.freeze([expression.protected])
     case 'EffectBindRequirement':
       return Object.freeze([expression.protected])
     case 'EffectCatch':

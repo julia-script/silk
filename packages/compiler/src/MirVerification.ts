@@ -1,5 +1,5 @@
 import type * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as FieldRealization from './FieldRealization.js'
@@ -45,6 +45,7 @@ import {
   topologicalRegions,
   typeText,
 } from './Mir.js'
+import * as RepresentationField from './RepresentationField.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type {
@@ -123,6 +124,11 @@ const structuredCfgPathsValid = <State>(
       }
       return incoming
     }
+    if (operation._tag === 'Conditional')
+      return semantics.merge(
+        sequence(operation.taken.operations, incoming),
+        sequence(operation.otherwise.operations, incoming),
+      )
     if (operation._tag === 'ShortCircuit')
       return semantics.merge(incoming, sequence(operation.right.operations, incoming))
     if (operation._tag === 'Match') {
@@ -496,7 +502,7 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
         invalid('InvalidSuspension', 'suspension runner identity disagrees with its exact MIR call')
       if (
         (region.completion._tag === 'Propagate' &&
-          (effectOperation._tag === 'ReifyEffect' ||
+          (effectOperation._tag === 'CatchEffect' ||
             region.completion.failureMappings.length !==
               SilkType.failureMembers(effectOperation.outcomeType.type).length ||
             region.completion.failureMappings.some((mapping, ordinal) => {
@@ -521,11 +527,12 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
               )
             }))) ||
         (region.completion._tag === 'Reify' &&
-          (effectOperation._tag !== 'ReifyEffect' ||
-            !SilkType.equals(region.completion.resultType, effectOperation.resultType.type) ||
-            region.completion.resultField.ordinal !== effectOperation.resultField.ordinal ||
-            region.completion.successTag !== effectOperation.successTag ||
-            region.completion.failureTag !== effectOperation.failureTag))
+          (effectOperation._tag !== 'CatchEffect' ||
+            !SilkType.equals(
+              region.completion.successType,
+              effectOperation.outcomeType.type.success,
+            ) ||
+            !SilkType.equals(region.completion.failureValueType, effectOperation.failureValueType)))
       )
         invalid('InvalidSuspension', 'typed completion mapping disagrees with its MIR operation')
     }
@@ -674,7 +681,14 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
     case 'FloatTranscendental':
       return [operation.destination, operation.source]
     case 'CheckedScalar':
-      return [operation.destination, ...operation.operands]
+      return [
+        operation.destination,
+        operation.valid,
+        operation.value,
+        ...operation.operands,
+        operation.present,
+        operation.absent,
+      ]
     case 'ValidateLayout':
       return [operation.destination, operation.bytes, operation.alignment]
     case 'RepeatLayout':
@@ -683,6 +697,15 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
       return [operation.destination, operation.layout]
     case 'HostWrite':
       return [operation.destination, operation.stream, operation.bytes]
+    case 'OsOpen':
+      return [
+        operation.destination,
+        operation.valid,
+        operation.handle,
+        ...operation.arguments,
+        operation.success,
+        operation.failure,
+      ]
     case 'OsCall':
       return [operation.destination, ...operation.arguments]
     case 'RawBufferFrom':
@@ -800,8 +823,15 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         ...operation.captures.map((capture) => capture.source),
         ...operation.arguments,
       ]
-    case 'ReifyEffect':
-      return [operation.destination, operation.outcome, operation.effect, ...operation.arguments]
+    case 'CatchEffect':
+      return [
+        operation.destination,
+        operation.outcome,
+        operation.successValue,
+        operation.failureValue,
+        operation.effect,
+        ...operation.arguments,
+      ]
     case 'CloseEffectEntry':
       return [
         operation.destination,
@@ -810,6 +840,7 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         ...operation.failures.map((failure) => failure.payload),
       ]
     case 'Construct':
+    case 'ConstructUnionVariant':
       return [operation.destination, ...operation.fields.map((field) => field.value)]
     case 'ConstructArray':
       return [operation.destination, ...operation.elements]
@@ -831,7 +862,15 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
           ...arm.bindings.map((binding) => binding.destination),
           ...(arm.guard === undefined ? [] : [arm.guard.result]),
           arm.selected.result,
+          ...arm.selected.cleanup.map((entry) => entry.destination),
         ]),
+      ]
+    case 'Conditional':
+      return [
+        operation.destination,
+        operation.condition,
+        operation.taken.result,
+        operation.otherwise.result,
       ]
     case 'ShortCircuit':
       return [operation.destination, operation.left, operation.right.result]
@@ -881,11 +920,8 @@ const placeType = (
           : undefined
       const field =
         entry?.representation._tag === 'Aggregate'
-          ? entry.representation.fields.find(
-              (candidate) =>
-                candidate.id.ordinal === selector.field.ordinal &&
-                candidate.id.struct.sourceId === selector.field.struct.sourceId &&
-                candidate.id.struct.ordinal === selector.field.struct.ordinal,
+          ? entry.representation.fields.find((candidate) =>
+              DeclarationFacts.sameFieldId(candidate.id, selector.field),
             )
           : undefined
       current = field?.type
@@ -930,14 +966,45 @@ const fieldPathType = (
       : undefined
     const field: Layout.Field | undefined =
       entry?.representation._tag === 'Aggregate'
-        ? entry.representation.fields.find(
-            (candidate) =>
-              candidate.id.ordinal === selector.ordinal &&
-              candidate.id.struct.sourceId === selector.struct.sourceId &&
-              candidate.id.struct.ordinal === selector.struct.ordinal,
+        ? entry.representation.fields.find((candidate) =>
+            DeclarationFacts.sameFieldId(candidate.id, selector),
           )
         : undefined
     current = field?.type
+    if (current === undefined) return undefined
+  }
+  return current
+}
+
+const coverageFieldPathType = (
+  layout: Layout.Plan,
+  member: Match.CoverageIdentity,
+  path: ReadonlyArray<DeclarationFacts.FieldId>,
+): DeclarationFacts.SemanticType | undefined => {
+  if (member._tag !== 'NominalUnionVariant')
+    return fieldPathType(layout, Match.sourceType(member), path)
+  let current: DeclarationFacts.SemanticType | undefined = member.type
+  let variant = Layout.entry(layout, member.type)?.representation
+  for (const [ordinal, selector] of path.entries()) {
+    let field: Layout.Field | undefined
+    if (ordinal === 0 && variant?._tag === 'NominalUnion') {
+      field = variant.variants
+        .find((candidate) => candidate.ordinal === member.variantOrdinal)
+        ?.fields.find((candidate) => DeclarationFacts.sameFieldId(candidate.id, selector))
+    } else if (SilkType.isNominal(current)) {
+      const representation: Layout.Representation | undefined = Layout.entry(
+        layout,
+        current,
+      )?.representation
+      field =
+        representation?._tag === 'Aggregate'
+          ? representation.fields.find((candidate) =>
+              DeclarationFacts.sameFieldId(candidate.id, selector),
+            )
+          : undefined
+    }
+    current = field?.type
+    variant = undefined
     if (current === undefined) return undefined
   }
   return current
@@ -1059,6 +1126,13 @@ const cleanupTypes = (cleanup: CleanupPlan.CleanupPlan): ReadonlyArray<SilkType.
       return [cleanup.type, ...cleanupTypes(cleanup.inner)]
     case 'StructCleanup':
       return [cleanup.type, ...cleanup.fields.flatMap((field) => cleanupTypes(field.cleanup))]
+    case 'NominalUnionCleanup':
+      return [
+        cleanup.type,
+        ...cleanup.variants.flatMap((variant) =>
+          variant.fields.flatMap((field) => cleanupTypes(field.cleanup)),
+        ),
+      ]
     case 'ArrayCleanup':
       return [cleanup.type, ...cleanupTypes(cleanup.element)]
     case 'UnionCleanup':
@@ -1338,6 +1412,48 @@ const cleanupMatchesSemanticType = (
   const key = SilkType.key(type)
   if (seen.has(key)) return cleanup._tag === 'NoCleanup'
   const representation = Layout.entry(layout, type)?.representation
+  if (representation?._tag === 'NominalUnion') {
+    const requiredHook = representation.cleanupHook
+    if (requiredHook !== undefined) {
+      if (
+        cleanup._tag !== 'HookCleanup' ||
+        cleanup.hook.module !== requiredHook.hook.module ||
+        cleanup.hook.name !== requiredHook.hook.name ||
+        cleanup.typeArguments.length !== requiredHook.typeArguments.length ||
+        !cleanup.typeArguments.every((argument, ordinal) => {
+          const expected = requiredHook.typeArguments.at(ordinal)
+          return expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
+        })
+      )
+        return false
+    } else if (cleanup._tag === 'HookCleanup') return false
+    const concrete = cleanup._tag === 'HookCleanup' ? cleanup.inner : cleanup
+    if (
+      concrete._tag !== 'NominalUnionCleanup' ||
+      concrete.variants.length !== representation.variants.length
+    )
+      return false
+    const next = new Set(seen).add(key)
+    return concrete.variants.every((variant, ordinal) => {
+      const expected = representation.variants.at(ordinal)
+      return (
+        expected !== undefined &&
+        variant.ordinal === expected.ordinal &&
+        variant.variant.union.module === expected.variant.union.module &&
+        variant.variant.union.name === expected.variant.union.name &&
+        variant.variant.name === expected.variant.name &&
+        variant.fields.length === expected.fields.length &&
+        variant.fields.every((field, fieldOrdinal) => {
+          const expectedField = expected.fields.at(fieldOrdinal)
+          return (
+            expectedField !== undefined &&
+            DeclarationFacts.sameFieldId(field.field, expectedField.id) &&
+            cleanupMatchesSemanticType(layout, field.cleanup, expectedField.type, next)
+          )
+        })
+      )
+    })
+  }
   if (representation?._tag !== 'Aggregate') return cleanup._tag === 'NoCleanup'
   const requiredHook = representation.cleanupHook
   if (requiredHook !== undefined) {
@@ -1361,9 +1477,7 @@ const cleanupMatchesSemanticType = (
     const expected = representation.fields.at(ordinal)
     return (
       expected !== undefined &&
-      field.field.ordinal === expected.id.ordinal &&
-      field.field.struct.sourceId === expected.id.struct.sourceId &&
-      field.field.struct.ordinal === expected.id.struct.ordinal &&
+      DeclarationFacts.sameFieldId(field.field, expected.id) &&
       cleanupMatchesSemanticType(layout, field.cleanup, expected.type, next)
     )
   })
@@ -1466,8 +1580,17 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
         semanticType(operation.sourceType),
         semanticType(operation.valueType),
         semanticType(operation.type),
-        operation.success,
-        operation.failure,
+        'bool',
+        ...cleanupTypes(operation.presentCleanup),
+        ...cleanupTypes(operation.absentCleanup),
+      ]
+    case 'OsOpen':
+      return [
+        semanticType(operation.handleType),
+        semanticType(operation.type),
+        'bool',
+        ...cleanupTypes(operation.successCleanup),
+        ...cleanupTypes(operation.failureCleanup),
       ]
     case 'RawBufferFrom':
       return [semanticType(operation.type), operation.element]
@@ -1600,13 +1723,9 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
         semanticType(operation.type),
         ...operation.runnerTypeArguments.filter(SilkType.isTypeArgument),
       ]
-    case 'ReifyEffect':
+    case 'CatchEffect':
       return [
         semanticType(operation.outcomeType),
-        operation.resultType.type,
-        operation.resultUnion,
-        operation.successType,
-        operation.failureType,
         operation.failureValueType,
         ...operation.runnerTypeArguments.filter(SilkType.isTypeArgument),
       ]
@@ -1622,6 +1741,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
         ]),
       ]
     case 'Construct':
+    case 'ConstructUnionVariant':
     case 'ConstructArray':
       return [semanticType(operation.type)]
     case 'ConvertUnion':
@@ -1642,6 +1762,12 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
           ...arm.selected.operations.flatMap(operationTypes),
           ...arm.selected.cleanup.flatMap((entry) => cleanupTypes(entry.cleanup)),
         ]),
+      ]
+    case 'Conditional':
+      return [
+        semanticType(operation.type),
+        ...operation.taken.operations.flatMap(operationTypes),
+        ...operation.otherwise.operations.flatMap(operationTypes),
       ]
     case 'ShortCircuit':
       return [semanticType(operation.type), ...operation.right.operations.flatMap(operationTypes)]
@@ -1681,7 +1807,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'FloatTranscendental':
       return [operation.source]
     case 'CheckedScalar':
-      return operation.operands
+      return [...operation.operands, operation.present, operation.absent]
     case 'ValidateLayout':
       return [operation.bytes, operation.alignment]
     case 'RepeatLayout':
@@ -1690,6 +1816,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.layout]
     case 'HostWrite':
       return [operation.stream, operation.bytes]
+    case 'OsOpen':
+      return [...operation.arguments, operation.success, operation.failure]
     case 'OsCall':
       return operation.arguments
     case 'RawBufferFrom':
@@ -1761,11 +1889,12 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       ]
     case 'RunStaticEffect':
       return [...operation.captures.map((capture) => capture.source), ...operation.arguments]
-    case 'ReifyEffect':
+    case 'CatchEffect':
       return [operation.effect, ...operation.arguments]
     case 'CloseEffectEntry':
       return []
     case 'Construct':
+    case 'ConstructUnionVariant':
       return operation.fields.map((field) => field.value)
     case 'ConstructArray':
       return operation.elements
@@ -1779,6 +1908,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.local]
     case 'Match':
       return [operation.scrutinee]
+    case 'Conditional':
+      return [operation.condition]
     case 'ShortCircuit':
       return [operation.left]
     case 'Literal':
@@ -1964,6 +2095,10 @@ const loanViolations = (
           process(arm.selected.operations, active)
         }
       }
+      if (operation._tag === 'Conditional') {
+        process(operation.taken.operations, new Map(active))
+        process(operation.otherwise.operations, new Map(active))
+      }
     }
     for (const [key] of active) {
       if (!inheritedKeys.has(key) && !globalEndings.has(key)) {
@@ -1989,7 +2124,7 @@ const suspensionCallTargets = (operation: Operation): ReadonlyArray<SuspensionCa
       ]
     case 'RunEffectValue':
     case 'RunStaticEffect':
-    case 'ReifyEffect':
+    case 'CatchEffect':
       return [
         Object.freeze({
           declaration: operation.runner,
@@ -2085,10 +2220,7 @@ const suspensionTypes = (fn: MirFunction): ReadonlyArray<SilkType.Type> =>
         ? [region.completion.outcome]
         : [
             region.completion.outcome,
-            region.completion.resultType,
-            region.completion.resultUnion,
             region.completion.successType,
-            region.completion.failureType,
             region.completion.failureValueType,
           ]
     const descriptor = region.relay.state
@@ -2352,7 +2484,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         _tag: 'Violation',
         rule: 'OrphanSuspensionMachinery',
         function: orphanRelay.fn.id,
-        detail: `suspendable runner ${orphanRelay.region.runner.declaration === undefined ? 'unknown' : targetText(orphanRelay.region.runner.declaration)} has no reachable explicit transfer origin (origin-reachable: ${
+        detail: `suspendable relay through ${orphanRelay.region.runner.declaration === undefined ? 'an unknown runner' : targetText(orphanRelay.region.runner.declaration)} belongs to a function with no reachable explicit transfer origin (origin-reachable: ${
           self.functions
             .filter((fn) => originReachable.has(instanceText(fn.instance)))
             .map((fn) => targetText(fn.id))
@@ -2674,6 +2806,13 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
     >()
     const localUseCounts = new Map<number, number>()
     const successPathOperations = (operation: Operation): ReadonlyArray<Operation> => {
+      if (operation._tag === 'Conditional') {
+        return [
+          operation,
+          ...operation.taken.operations.flatMap(successPathOperations),
+          ...operation.otherwise.operations.flatMap(successPathOperations),
+        ]
+      }
       if (operation._tag === 'ShortCircuit') {
         return [operation, ...operation.right.operations.flatMap(successPathOperations)]
       }
@@ -3198,6 +3337,10 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         }
         if (operation._tag === 'CheckedScalar') {
           const destination = fn.localTypes.at(operation.destination.ordinal)
+          const valid = fn.localTypes.at(operation.valid.ordinal)
+          const value = fn.localTypes.at(operation.value.ordinal)
+          const present = fn.localTypes.at(operation.present.ordinal)
+          const absent = fn.localTypes.at(operation.absent.ordinal)
           const operands = operation.operands.map((operand) => fn.localTypes.at(operand.ordinal))
           const sourceScalar = Scalar.find(operation.sourceType._tag)
           const valueScalar = Scalar.find(operation.valueType._tag)
@@ -3210,19 +3353,22 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           if (
             (!characterConversion && !integerOperation) ||
             destination === undefined ||
+            valid?._tag !== 'bool' ||
+            value?._tag !== operation.valueType._tag ||
+            present?._tag !== 'CallableValue' ||
+            absent?._tag !== 'CallableValue' ||
             operands.length < 1 ||
             operands.some(
               (operand) =>
                 operand === undefined ||
                 !SilkType.equals(semanticType(operand), operation.sourceType._tag),
             ) ||
-            !SilkType.equals(semanticType(destination), operation.type.type) ||
-            !operation.type.type.members.some((member) =>
-              SilkType.equals(member, operation.success),
-            ) ||
-            !operation.type.type.members.some((member) =>
-              SilkType.equals(member, operation.failure),
-            )
+            !SilkType.equals(semanticType(destination), semanticType(operation.type)) ||
+            present.type.parameters.length !== 1 ||
+            !SilkType.equals(present.type.parameters[0] ?? 'never', operation.valueType._tag) ||
+            !SilkType.equals(present.type.result, semanticType(operation.type)) ||
+            absent.type.parameters.length !== 0 ||
+            !SilkType.equals(absent.type.result, semanticType(operation.type))
           )
             violations.push(
               Object.freeze({
@@ -3230,7 +3376,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidIntegerOperation',
                 function: fn.id,
                 region: region.id,
-                detail: 'checked scalar operation has inconsistent operands or Option result',
+                detail: 'checked scalar operation has inconsistent operands or carrier result',
               }),
             )
         }
@@ -3338,6 +3484,53 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 region: region.id,
                 detail:
                   'standard-stream write does not preserve destination, byte-view, unit, or typed-failure contracts',
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'OsOpen') {
+          const catalog = Intrinsic.findOperationById(operation.operation)
+          const rule = catalog?.rule._tag === 'BuiltinRule' ? catalog.rule : undefined
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const valid = fn.localTypes.at(operation.valid.ordinal)
+          const handle = fn.localTypes.at(operation.handle.ordinal)
+          const success = fn.localTypes.at(operation.success.ordinal)
+          const failure = fn.localTypes.at(operation.failure.ordinal)
+          const parameters = rule?.parameters.slice(0, -2)
+          const argumentsValid =
+            rule !== undefined &&
+            (rule.operation === 'OsFileOpen' || rule.operation === 'OsDirectoryOpen') &&
+            parameters?.length === operation.arguments.length &&
+            parameters.every((expected, ordinal) => {
+              const argument = operation.arguments.at(ordinal)
+              const actual = argument === undefined ? undefined : fn.localTypes.at(argument.ordinal)
+              return actual !== undefined && SilkType.equals(semanticType(actual), expected)
+            })
+          if (
+            catalog?.unsafe !== true ||
+            catalog.targets.includes('Wasm') ||
+            destination === undefined ||
+            valid?._tag !== 'bool' ||
+            handle?._tag !== 'Nominal' ||
+            !SilkType.equals(handle.type, SilkType.osHandle) ||
+            !SilkType.equals(operation.handleType.type, SilkType.osHandle) ||
+            success?._tag !== 'CallableValue' ||
+            success.type.parameters.length !== 1 ||
+            !SilkType.equals(success.type.parameters[0] ?? 'never', SilkType.osHandle) ||
+            !SilkType.equals(success.type.result, semanticType(operation.type)) ||
+            failure?._tag !== 'CallableValue' ||
+            failure.type.parameters.length !== 0 ||
+            !SilkType.equals(failure.type.result, semanticType(operation.type)) ||
+            !SilkType.equals(semanticType(destination), semanticType(operation.type)) ||
+            !argumentsValid
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidOsOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'OS open does not match its affine carrier signature',
               }),
             )
           }
@@ -4266,9 +4459,12 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               operation.arms.every(
                 (arm) => arm.member === undefined || arm.member._tag === 'EnumMember',
               ))
+          const plannedMembers = Layout.coverageMembers(operation.scrutineeShape)
           const decisionsValid =
             coverage.exhaustive &&
             enumCoverageValid &&
+            (operation.scrutineeType._tag === 'Enum' ||
+              sameCoverage(operation.members, plannedMembers)) &&
             operation.decisions.length === operation.members.length &&
             operation.decisions.every((decision, ordinal) => {
               const member = operation.members.at(ordinal)
@@ -4277,7 +4473,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                   arm.universal ||
                   (arm.member !== undefined &&
                     member !== undefined &&
-                    Match.identityEquals(arm.member, member)),
+                    Match.selects(arm.member, member)),
               )
               return (
                 member !== undefined &&
@@ -4314,8 +4510,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               const localType = fn.localTypes.at(binding.destination.ordinal)
               const selected =
                 arm.member === undefined
-                  ? undefined
-                  : fieldPathType(self.layout, Match.sourceType(arm.member), binding.path)
+                  ? fieldPathType(self.layout, semanticType(operation.scrutineeType), binding.path)
+                  : coverageFieldPathType(self.layout, arm.member, binding.path)
               if (
                 localType === undefined ||
                 selected === undefined ||
@@ -4373,9 +4569,21 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 ? arm.selected.cleanup.every((entry) => {
                     const selected =
                       arm.member === undefined
-                        ? undefined
-                        : fieldPathType(self.layout, Match.sourceType(arm.member), entry.path)
-                    return selected !== undefined && SilkType.equals(selected, entry.cleanup.type)
+                        ? fieldPathType(
+                            self.layout,
+                            semanticType(operation.scrutineeType),
+                            entry.path,
+                          )
+                        : coverageFieldPathType(self.layout, arm.member, entry.path)
+                    const destinationType = fn.localTypes.at(entry.destination.ordinal)
+                    return (
+                      selected !== undefined &&
+                      destinationType !== undefined &&
+                      SilkType.equals(semanticType(destinationType), entry.cleanup.type) &&
+                      (arm.member?._tag === 'NominalUnionVariant'
+                        ? cleanupMatchesSemanticType(self.layout, entry.cleanup, selected)
+                        : SilkType.equals(selected, entry.cleanup.type))
+                    )
                   })
                 : arm.selected.cleanup.length === 0)
             if (!cleanupValid) {
@@ -4591,7 +4799,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                   valueType.target,
                   field.stored.realization.target,
                 ) &&
-                field.stored.realization.field.ordinal === field.field.ordinal &&
+                RepresentationField.belongsTo(field.stored.realization.field, field.field) &&
                 field.stored.realization.instance.module === operation.type.type.module &&
                 field.stored.realization.instance.name === operation.type.type.name
               const storedEffectValid =
@@ -4607,7 +4815,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                   .module === field.stored.realization.runner.module &&
                 Hir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
                   .name === field.stored.realization.runner.name &&
-                field.stored.realization.field.ordinal === field.field.ordinal &&
+                RepresentationField.belongsTo(field.stored.realization.field, field.field) &&
                 field.stored.realization.instance.module === operation.type.type.module &&
                 field.stored.realization.instance.name === operation.type.type.name
               return (
@@ -4628,6 +4836,79 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 function: fn.id,
                 region: region.id,
                 detail: `construction of ${typeText(operation.type)} does not match its canonical fields`,
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'ConstructUnionVariant') {
+          const layout = Layout.entry(self.layout, operation.type.type)
+          const representation =
+            layout?.representation._tag === 'NominalUnion' ? layout.representation : undefined
+          const expected = representation?.variants.find(
+            (variant) =>
+              variant.ordinal === operation.variantOrdinal &&
+              variant.variant.union.module === operation.variant.union.module &&
+              variant.variant.union.name === operation.variant.union.name &&
+              variant.variant.name === operation.variant.name,
+          )
+          const valid =
+            representation !== undefined &&
+            expected !== undefined &&
+            representation.union.module === operation.type.type.module &&
+            representation.union.name === operation.type.type.name &&
+            expected.fields.length === operation.fields.length &&
+            operation.fields.every((field, ordinal) => {
+              const declared = expected.fields.at(ordinal)
+              const valueType = fn.localTypes.at(field.value.ordinal)
+              const storedCallableValid =
+                field.stored?._tag === 'StoredCallableField' &&
+                declared !== undefined &&
+                valueType?._tag === 'CallableValue' &&
+                SilkType.equals(field.stored.type, declared.type) &&
+                TypeCompatibility.isCompatible(
+                  TypeCompatibility.check(valueType.type, field.stored.realization.contract),
+                ) &&
+                Hir.matchesCallableTargetIdentity(
+                  valueType.target,
+                  field.stored.realization.target,
+                ) &&
+                RepresentationField.belongsTo(field.stored.realization.field, field.field) &&
+                field.stored.realization.instance.module === operation.type.type.module &&
+                field.stored.realization.instance.name === operation.type.type.name
+              const storedEffectValid =
+                field.stored?._tag === 'StoredEffectField' &&
+                declared !== undefined &&
+                valueType?._tag === 'EffectValue' &&
+                SilkType.equals(field.stored.type, declared.type) &&
+                TypeCompatibility.isCompatible(
+                  TypeCompatibility.check(valueType.type, field.stored.realization.contract),
+                ) &&
+                Hir.sameExecutableSite(valueType.site, field.stored.realization.site) &&
+                Hir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
+                  .module === field.stored.realization.runner.module &&
+                Hir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
+                  .name === field.stored.realization.runner.name &&
+                RepresentationField.belongsTo(field.stored.realization.field, field.field) &&
+                field.stored.realization.instance.module === operation.type.type.module &&
+                field.stored.realization.instance.name === operation.type.type.name
+              return (
+                declared !== undefined &&
+                DeclarationFacts.sameFieldId(declared.id, field.field) &&
+                valueType !== undefined &&
+                ((field.stored === undefined &&
+                  SilkType.equals(semanticType(valueType), declared.type)) ||
+                  storedCallableValid ||
+                  storedEffectValid)
+              )
+            })
+          if (!valid) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidAggregateOperation',
+                function: fn.id,
+                region: region.id,
+                detail: `construction of ${typeText(operation.type)}.${operation.variant.name} does not match its canonical variant layout`,
               }),
             )
           }
@@ -5482,42 +5763,30 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidNormalization',
                 function: fn.id,
                 region: region.id,
-                detail:
-                  'direct static Effect run disagrees with its runner, captures, outcome, or propagation contract',
+                detail: `direct static Effect run disagrees: ${[
+                  runnerResultValid ? undefined : 'runner',
+                  outcomeValid ? undefined : 'outcome',
+                  destinationValid ? undefined : 'destination',
+                  parametersValid ? undefined : 'parameters',
+                  propagationValid ? undefined : 'propagation',
+                ]
+                  .filter((part): part is string => part !== undefined)
+                  .join(', ')}`,
               }),
             )
         }
-        if (operation._tag === 'ReifyEffect') {
+        if (operation._tag === 'CatchEffect') {
           const runner = self.functions.find((candidate) =>
             matchesInstance(candidate, operation.runner, operation.runnerTypeArguments),
           )
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const effect = fn.localTypes.at(operation.effect.ordinal)
           const outcome = fn.localTypes.at(operation.outcome.ordinal)
+          const success = fn.localTypes.at(operation.successValue.ordinal)
+          const failure = fn.localTypes.at(operation.failureValue.ordinal)
           const expectedFailureValue = SilkType.failureValue(
             SilkType.failureMembers(operation.outcomeType.type),
           )
-          const expectedResult = SilkType.result(
-            operation.outcomeType.type.success,
-            expectedFailureValue,
-          )
-          const expectedSuccess = SilkType.resultSuccess(operation.outcomeType.type.success)
-          const expectedFailure = SilkType.resultFailure(expectedFailureValue)
-          const selectedSuccess = SilkType.failureCarrierMember(
-            operation.resultUnion,
-            operation.successTag,
-            'ZeroBased',
-          )
-          const selectedFailure = SilkType.failureCarrierMember(
-            operation.resultUnion,
-            operation.failureTag,
-            'ZeroBased',
-          )
-          const tagsValid =
-            selectedSuccess !== undefined &&
-            selectedFailure !== undefined &&
-            SilkType.equals(selectedSuccess, expectedSuccess) &&
-            SilkType.equals(selectedFailure, expectedFailure)
           const disagreements = [
             runner?.result._tag === 'EffectOutcome' &&
             SilkType.equals(runner.result.type, operation.outcomeType.type)
@@ -5531,25 +5800,26 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             SilkType.equals(outcome.type, operation.outcomeType.type)
               ? undefined
               : 'outcome',
-            destination?._tag === 'Nominal' && SilkType.equals(destination.type, expectedResult)
+            destination?._tag === 'bool' ? undefined : 'destination',
+            success !== undefined &&
+            SilkType.equals(semanticType(success), operation.outcomeType.type.success)
               ? undefined
-              : 'destination',
-            SilkType.equals(operation.resultType.type, expectedResult) ? undefined : 'result-type',
+              : 'success',
+            failure !== undefined && SilkType.equals(semanticType(failure), expectedFailureValue)
+              ? undefined
+              : 'failure',
             SilkType.equals(operation.failureValueType, expectedFailureValue)
               ? undefined
               : 'failure-value',
-            SilkType.equals(operation.successType, expectedSuccess) ? undefined : 'success',
-            SilkType.equals(operation.failureType, expectedFailure) ? undefined : 'failure',
-            SilkType.equals(operation.resultShape.type, expectedResult)
+            SilkType.equals(operation.successShape.type, operation.outcomeType.type.success)
               ? undefined
-              : 'result-shape',
+              : 'success-shape',
             SilkType.equals(operation.outcomeShape.type, operation.outcomeType.type)
               ? undefined
               : 'outcome-shape',
             SilkType.equals(operation.failureValueShape.type, expectedFailureValue)
               ? undefined
               : 'failure-shape',
-            tagsValid ? undefined : 'tags',
           ].filter((disagreement): disagreement is string => disagreement !== undefined)
           if (disagreements.length > 0) {
             violations.push(
@@ -5558,7 +5828,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidEffectOperation',
                 function: fn.id,
                 region: region.id,
-                detail: `effect result runner, channel data, tags, or calling shapes disagree: ${disagreements.join(', ')}`,
+                detail: `effect result runner, channel data, or calling shapes disagree: ${disagreements.join(', ')}`,
               }),
             )
           }

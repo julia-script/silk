@@ -40,7 +40,7 @@ const runnerOf = (
   index: DeclarationIndex.Index,
   operation?: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' | 'ExecutionPark' }
   >,
   functions: ReadonlyArray<Mir.MirFunction> = [],
 ): Mir.SuspensionRunner => {
@@ -181,7 +181,7 @@ interface LocatedOperation {
   readonly region: Mir.RegionId
   readonly operation: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' | 'ExecutionPark' }
   >
 }
 
@@ -200,7 +200,7 @@ const operationsOf = (fn: Mir.MirFunction): ReadonlyArray<LocatedOperation> =>
       .flatMap((operation) =>
         operation._tag === 'RunEffect' ||
         operation._tag === 'RunEffectValue' ||
-        operation._tag === 'ReifyEffect' ||
+        operation._tag === 'CatchEffect' ||
         operation._tag === 'ExecutionPark'
           ? [Object.freeze({ region: region.id, operation })]
           : [],
@@ -255,8 +255,8 @@ const regionsOf = (
         (entry) =>
           sameSpan(entry.operation, outcome) &&
           (outcome.completion._tag === 'Reify'
-            ? entry.operation._tag === 'ReifyEffect'
-            : entry.operation._tag !== 'ReifyEffect') &&
+            ? entry.operation._tag === 'CatchEffect'
+            : entry.operation._tag !== 'CatchEffect') &&
           (entry.operation._tag === 'ExecutionPark'
             ? Type.equals(outcome.runner.outcome.success, Type.unit)
             : true),

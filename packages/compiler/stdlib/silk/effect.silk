@@ -21,7 +21,7 @@
 //! owned provider bindings have distinct borrowing and capture behavior.
 //!
 //! # Gotchas
-//! Typed failures are outcomes that combinators can reify and recover. Traps are not: they bypass
+//! Typed failures are outcomes that combinators can materialize and recover. Traps are not: they bypass
 //! [`catchAll`], [`ensuring`], and Drop hooks. [`suspend`] crosses the stack-safe execution boundary
 //! while preserving all three channels exactly; frame exhaustion is fatal.
 //!
@@ -116,12 +116,12 @@
 //! }
 //! ```
 
-// Familiar channel transformations derived from the closed compiler core. The core executes one
-// Effect into Result data and binds one typed requirement; everything here is ordinary Silk.
+// Familiar channel transformations derived from the closed compiler core. The core catches typed
+// failures and binds typed requirements; everything here is ordinary Silk.
 
 import silk.bool as bool
 import silk.logger { LogError, LogLevel, Logger }
-import silk.result { Result, Success, Failure }
+import silk.result { Result, failResult, succeed }
 import silk.usize as usize
 
 /// The importable name of the `silk.effect` module scope.
@@ -198,7 +198,7 @@ pub effect fn logError(
 ///
 /// # Details
 ///
-/// The returned Effect still requires `R`, because reification does not provide services. Its typed
+/// The returned Effect still requires `R`, because conversion does not provide services. Its typed
 /// failure row is empty: an `E` becomes [`Failure`] data instead of propagating. Traps are not typed
 /// failures and therefore are not captured.
 ///
@@ -221,21 +221,28 @@ pub effect fn logError(
 /// pub fn main() -> i32 {
 ///   let completed = run Effect.result(load())
 ///   return match move completed {
-///     Result.Result<i32, Problem> {value: outcome} => match move outcome {
-///       Result.Success<i32> {value} => value
-///       Result.Failure<Problem> {error} => error.answer
-///     }
+///     Result.Result<i32, Problem>.Success {value} => value
+///     Result.Result<i32, Problem>.Failure {error} => error.answer
 ///   }
 /// }
 /// ```
 pub effect fn result<A, E, ?R>(
   protected: once Effect<A ! E ? R>
 ) -> Result<A, E> ? R {
-  return run Intrinsic.effectResult(move protected)
+  let succeeded = map<A, Result<A, E>, E>(move protected, succeedCompleted)
+  return run catchAll<Result<A, E>, Result<A, E>, E, never>(move succeeded, failCompleted)
 }
 
 effect fn raise<E>(error: E) -> never ! E {
   fail move error
+}
+
+fn succeedCompleted<A, E>(value: A) -> Result<A, E> {
+  return succeed<A, E>(move value)
+}
+
+effect fn failCompleted<A, E>(error: E) -> Result<A, E> {
+  return failResult<A, E>(move error)
 }
 
 /// Transforms both possible typed outcomes with pure callbacks.
@@ -251,10 +258,8 @@ pub effect fn mapBoth<A, B, E, F, ?R>(
 ) -> B ! F ? R {
   let completed = run result(move self)
   return match move completed {
-    Result<A, E> { value: outcome } => match move outcome {
-      Success<A> { value: success } => onSuccess(move success)
-      Failure<E> { error } => run raise(onFailure(move error))
-    }
+    Result<A, E>.Success { value: success } => onSuccess(move success)
+    Result<A, E>.Failure { error } => run raise(onFailure(move error))
   }
 }
 
@@ -268,13 +273,8 @@ pub effect fn map<A, B, E, ?R>(
   self: once Effect<A ! E ? R>,
   onSuccess: once fn(A) -> B
 ) -> B ! E ? R {
-  let completed = run result(move self)
-  return match move completed {
-    Result<A, E> { value: outcome } => match move outcome {
-      Success<A> { value: success } => onSuccess(move success)
-      Failure<E> { error } => run raise(move error)
-    }
-  }
+  let success = run move self
+  return onSuccess(move success)
 }
 
 /// Applies a pure callback to typed failure while preserving success and requirements.
@@ -289,10 +289,8 @@ pub effect fn mapError<A, E, F, ?R>(
 ) -> A ! F ? R {
   let completed = run result(move self)
   return match move completed {
-    Result<A, E> { value: outcome } => match move outcome {
-      Success<A> { value: success } => move success
-      Failure<E> { error } => run raise(onFailure(move error))
-    }
+    Result<A, E>.Success { value: success } => move success
+    Result<A, E>.Failure { error } => run raise(onFailure(move error))
   }
 }
 
@@ -309,10 +307,8 @@ pub effect fn flatMap<A, B, E, F, ?R, ?S>(
 ) -> B ! E | F ? R | S {
   let completed = run result(move self)
   return match move completed {
-    Result<A, E> { value: outcome } => match move outcome {
-      Success<A> { value: success } => run onSuccess(move success)
-      Failure<E> { error } => run raise(move error)
-    }
+    Result<A, E>.Success { value: success } => run onSuccess(move success)
+    Result<A, E>.Failure { error } => run raise(move error)
   }
 }
 
@@ -399,10 +395,8 @@ pub effect fn tap<A, E, F, ?R, ?S>(
 ) -> A ! E | F ? R | S {
   let completed = run result(move self)
   return match move completed {
-    Result<A, E> { value: outcome } => match move outcome {
-      Success<A> { value: success } => run callback(move success)
-      Failure<E> { error } => run raise(move error)
-    }
+    Result<A, E>.Success { value: success } => run callback(move success)
+    Result<A, E>.Failure { error } => run raise(move error)
   }
 }
 
@@ -418,13 +412,7 @@ pub effect fn catchAll<A, B, E, F, ?R, ?S>(
   self: once Effect<A ! E ? R>,
   onFailure: once fn(E) -> Effect<B ! F ? S>
 ) -> A | B ! F ? R | S {
-  let completed = run result(move self)
-  return match move completed {
-    Result<A, E> { value: outcome } => match move outcome {
-      Success<A> { value: success } => move success
-      Failure<E> { error } => run onFailure(move error)
-    }
-  }
+  return run Intrinsic.catchFailure<E>(move self, move onFailure)
 }
 
 /// Recovers one selected typed failure.
@@ -451,7 +439,7 @@ where S in E {
 ///
 /// # Details
 ///
-/// The protected Effect is reified into Result data before the finalizer runs, which is what fixes
+/// The protected Effect is converted into Result data before the finalizer runs, which is what fixes
 /// the order: a typed failure reaches this body as data rather than as a propagation, so the
 /// protected Effect's own frame — and every local it cleans up — is already gone by the time the
 /// finalizer starts. The finalizer therefore exits last, in reverse acquisition order against the
@@ -471,10 +459,8 @@ pub effect fn ensuring<A, E, ?R, ?S>(
   let completed = run result(move self)
   let finalized = run move finalizer
   return match move completed {
-    Result<A, E> { value: outcome } => match move outcome {
-      Success<A> { value: success } => move success
-      Failure<E> { error } => run raise(move error)
-    }
+    Result<A, E>.Success { value: success } => move success
+    Result<A, E>.Failure { error } => run raise(move error)
   }
 }
 
@@ -529,10 +515,8 @@ effect fn retryLoop<A, E, ?R>(
 ) -> A ! E ? R {
   let completed = run result(self)
   return match move completed {
-    Result<A, E> { value: outcome } => match move outcome {
-      Success<A> { value: success } => move success
-      Failure<E> { error } => run retryFailure(self, move error, retries)
-    }
+    Result<A, E>.Success { value: success } => move success
+    Result<A, E>.Failure { error } => run retryFailure(self, move error, retries)
   }
 }
 
@@ -691,10 +675,8 @@ pub effect fn provideEffect<?S, A, P, E, F, ?R, ?Q>(
 where &mut P provides S from R {
   let completed = run acquireProvider<S>(move self, acquire)
   return match move completed {
-    Result<A, E> { value: outcome } => match move outcome {
-      Success<A> { value: success } => move success
-      Failure<E> { error } => run raise(move error)
-    }
+    Result<A, E>.Success { value: success } => move success
+    Result<A, E>.Failure { error } => run raise(move error)
   }
 }
 

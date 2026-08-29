@@ -107,7 +107,7 @@ import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.layout { Layout }
 import silk.layout { LayoutOverflow }
-import silk.option { Option }
+import silk.option { Option, none, some }
 import silk.order { Order }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
@@ -505,7 +505,7 @@ fn takeSlot<T>(buffer: RawBuffer<T>, index: usize) -> Taken<T> {
 /// A present result transfers ownership of the removed element. Capacity does not change.
 pub fn pop<T>(self: &mut Vector<T>) -> Option<T> {
   if self.length == usize.ZERO {
-    return Option.none<T>()
+    return none<T>()
   }
   let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
   let taken = match move storage {
@@ -521,7 +521,7 @@ pub fn pop<T>(self: &mut Vector<T>) -> Option<T> {
 // Commits the storage back into the vector and yields the removed element as a present optional.
 fn finish<T>(self: &mut Vector<T>, storage: Full<T>, value: T) -> Option<T> {
   self.storage = move storage
-  return Option.some<T>(move value)
+  return some<T>(move value)
 }
 
 /// Removes the element at one index, shifting the later elements down. Traps out of range.
@@ -883,8 +883,8 @@ pub fn binarySearch<T: Order>(self: &Vector<T>, target: T) -> Option<usize> {
   }
   if low < self.length {
     if !((&target) < (&values[low])) {
-      return Option.some<usize>(low)
+      return some<usize>(low)
     }
   }
-  return Option.none<usize>()
+  return none<usize>()
 }

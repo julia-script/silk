@@ -47,6 +47,17 @@ export interface AggregateValue {
   }>
 }
 
+export interface NominalUnionValue {
+  readonly _tag: 'NominalUnionValue'
+  readonly type: Type.Nominal
+  readonly variant: DeclarationFacts.CanonicalUnionVariantId
+  readonly variantOrdinal: number
+  readonly fields: ReadonlyArray<{
+    readonly field: DeclarationFacts.FieldId
+    readonly value: Value
+  }>
+}
+
 export interface ArrayValue {
   readonly _tag: 'ArrayValue'
   readonly type: Type.FixedArray
@@ -248,6 +259,7 @@ export type Value =
   | CharacterValue
   | FloatValue
   | AggregateValue
+  | NominalUnionValue
   | ArrayValue
   | SliceValue
   | StaticViewValue

@@ -524,6 +524,17 @@ it('recognizes struct only as a complete keyword', () => {
   )
 })
 
+it('recognizes union only as a complete keyword', () => {
+  const result = Lexer.lex(
+    SourceFile.make('memory://union-keyword.silk', ascii('union unionize unions')),
+  )
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['UnionKeyword', 'Identifier', 'Identifier', 'EndOfFile'],
+  )
+})
+
 it('recognizes the effect execution and failure keywords without prefix capture', () => {
   const result = Lexer.lex(
     SourceFile.make(

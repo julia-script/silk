@@ -70,17 +70,9 @@ export type SuspensionCompletion =
   | {
       readonly _tag: 'Reify'
       readonly outcome: Type.Effect
-      readonly resultType: Type.Nominal
-      readonly resultField: DeclarationFacts.FieldId
-      readonly resultUnion: Type.StructuralUnion
-      readonly successType: Type.Nominal
-      readonly successField: DeclarationFacts.FieldId
-      readonly successTag: number
-      readonly failureType: Type.Nominal
-      readonly failureField: DeclarationFacts.FieldId
-      readonly failureTag: number
+      readonly successType: Type.Type
       readonly failureValueType: Type.Type
-      readonly resultShape: Layout.CallingShape
+      readonly successShape: Layout.CallingShape
       readonly outcomeShape: Layout.CallingShape
       readonly failureValueShape: Layout.CallingShape
     }
@@ -92,7 +84,7 @@ export type SuspensionRegion =
       readonly ownerRegion: Mir.RegionId
       readonly operation: Extract<
         Mir.Operation,
-        { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
+        { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' }
       >
       readonly deferred: SuspensionRunner
       readonly transfer: { readonly _tag: 'OriginateTransfer' }
@@ -104,7 +96,7 @@ export type SuspensionRegion =
       readonly ownerRegion: Mir.RegionId
       readonly operation: Extract<
         Mir.Operation,
-        { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
+        { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' | 'ExecutionPark' }
       >
       readonly runner: SuspensionRunner
       readonly completion: SuspensionCompletion

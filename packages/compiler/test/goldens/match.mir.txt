@@ -7,8 +7,8 @@ layout golden/program.Box size=4 align=4 repr=aggregate cleanup-hook=none tail-p
 layout golden/program.Token size=4 align=4 repr=aggregate cleanup-hook=none tail-padding=0
   field 0 kind: i32 offset=0 size=4 align=4 padding=0
 calling i32 lanes=1 i32[]
-calling golden/program.Box lanes=1 i32[golden/program#1.0.golden/program#0.0]
-calling golden/program.Token lanes=1 i32[golden/program#0.0]
+calling golden/program.Box lanes=1 i32[struct:golden/program:1:0.struct:golden/program:0:0]
+calling golden/program.Token lanes=1 i32[struct:golden/program:0:0]
 fn golden/program.main params=0 locals=9 -> i32 entry=r0
   r0 operation:
     %0 = literal 41 : i32 [180, 183)

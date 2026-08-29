@@ -441,6 +441,19 @@ export type PatternFact =
       readonly syntax: SyntaxTree.Node
     }
   | {
+      readonly _tag: 'UnionVariantPattern'
+      readonly id: Match.PatternId
+      readonly target: UnionVariantTargetFact
+      readonly member?: Type.Nominal
+      readonly coverage?: Match.CoverageIdentity
+      readonly fields: ReadonlyArray<PatternFieldFact>
+      readonly bindings: ReadonlyArray<PatternBindingFact>
+      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
+      readonly rest: boolean
+      readonly complete: boolean
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
       readonly _tag: 'UniversalPattern'
       readonly id: Match.PatternId
       readonly bindings: ReadonlyArray<PatternBindingFact>
@@ -499,6 +512,16 @@ export type StructTargetFact =
     }
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
 
+export type UnionVariantTargetFact =
+  | {
+      readonly _tag: 'Resolved'
+      readonly union: DeclarationFacts.UnionFact
+      readonly variant: DeclarationFacts.UnionVariantFact
+      readonly type: Type.Nominal
+      readonly token: Token.Token
+    }
+  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
+
 export type StructInitializerState =
   | { readonly _tag: 'Resolved'; readonly field: DeclarationFacts.FieldFact }
   | { readonly _tag: 'Unknown'; readonly cause: Diagnostic.Identity }
@@ -538,6 +561,20 @@ export interface StructTypeArgumentFact {
 export interface StructLiteralExpressionFact {
   readonly _tag: 'StructLiteral'
   readonly target: StructTargetFact
+  readonly authorized: boolean
+  readonly typeArguments: ReadonlyArray<StructTypeArgumentFact>
+  readonly initializers: ReadonlyArray<StructInitializerFact>
+  readonly fields: ReadonlyArray<{
+    readonly field: DeclarationFacts.FieldFact
+    readonly initializer: StructInitializerFact
+  }>
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
+export interface UnionVariantExpressionFact {
+  readonly _tag: 'UnionVariant'
+  readonly target: UnionVariantTargetFact
   readonly authorized: boolean
   readonly typeArguments: ReadonlyArray<StructTypeArgumentFact>
   readonly initializers: ReadonlyArray<StructInitializerFact>
@@ -728,6 +765,7 @@ export interface FunctionItemExpressionFact {
   readonly _tag: 'FunctionItem'
   readonly reference: CallReferenceFact
   readonly path: ReferencePathFact
+  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
 }
@@ -875,6 +913,7 @@ export type ExpressionFact =
   | BorrowExpressionFact
   | MatchExpressionFact
   | StructLiteralExpressionFact
+  | UnionVariantExpressionFact
   | ArrayLiteralExpressionFact
   | FieldProjectionExpressionFact
   | IndexProjectionExpressionFact
@@ -888,14 +927,6 @@ export type ExpressionFact =
   | {
       readonly _tag: 'Run'
       readonly subject: ExpressionFact
-      readonly type: ExpressionTypeFact
-      readonly syntax: SyntaxTree.Node
-    }
-  | {
-      /** Executes one typed Effect into ordinary Result data without catching traps. */
-      readonly _tag: 'EffectResult'
-      readonly reference: IntrinsicReferenceFact
-      readonly protected: ExpressionFact
       readonly type: ExpressionTypeFact
       readonly syntax: SyntaxTree.Node
     }
@@ -1383,6 +1414,7 @@ export const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.fr
   'BorrowExpression',
   'MatchExpression',
   'StructLiteralExpression',
+  'UnionVariantExpression',
   'ArrayLiteralExpression',
   'FieldProjectionExpression',
   'IndexProjectionExpression',
@@ -1406,6 +1438,7 @@ export const isRecursiveArgumentNode = (element: SyntaxTree.Element): element is
     element.kind === 'BorrowExpression' ||
     element.kind === 'MatchExpression' ||
     element.kind === 'StructLiteralExpression' ||
+    element.kind === 'UnionVariantExpression' ||
     element.kind === 'ArrayLiteralExpression' ||
     element.kind === 'FieldProjectionExpression' ||
     element.kind === 'IndexProjectionExpression' ||
@@ -1694,7 +1727,7 @@ const constrainedCallableEscapeDiagnostics = (
           reject(statement._tag === 'ReturnStatement' ? statement.expression : statement.value)
       },
       expression: (expression) => {
-        if (expression._tag === 'StructLiteral') {
+        if (expression._tag === 'StructLiteral' || expression._tag === 'UnionVariant') {
           for (const initializer of expression.initializers)
             if (constrainedCallableSchema(initializer.expression) !== undefined)
               reject(initializer.expression)

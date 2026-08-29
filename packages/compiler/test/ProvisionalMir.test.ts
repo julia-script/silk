@@ -56,7 +56,7 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('retains Reify completion for ordinary source-defined combinators', () =>
+it.effect('uses ordinary propagation for source-defined combinators', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`import silk.effect as Effect
 effect fn seed(value: i32) -> i32 {
@@ -72,12 +72,11 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(self), [])
     const provisional = available(self)
     assert.deepEqual(ProvisionalMir.verify(provisional), [])
-    assert.isTrue(
-      outcomes(provisional).some(
-        (control) => control._tag === 'RunSuspendableEffect' && control.completion._tag === 'Reify',
-      ),
-      ProvisionalMir.encode(provisional),
+    const relays = outcomes(provisional).filter(
+      (control) => control._tag === 'RunSuspendableEffect',
     )
+    assert.isAtLeast(relays.length, 1)
+    assert.isTrue(relays.every((control) => control.completion._tag === 'Propagate'))
   }),
 )
 

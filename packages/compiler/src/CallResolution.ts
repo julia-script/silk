@@ -199,10 +199,11 @@ export function analyzeArguments(
       }
     } else if (
       qualifier._tag === 'Resolved' &&
-      qualifier.declaration._tag === 'StructDeclaration' &&
+      (qualifier.declaration._tag === 'StructDeclaration' ||
+        qualifier.declaration._tag === 'UnionDeclaration') &&
       NameResolution.scopedModule(qualifier.declaration) !== undefined
     ) {
-      // A nominal type doubles as the scope of the module it names: `Vector.length(...)` names a
+      // A nominal aggregate doubles as the scope of the module it names: `Vector.length(...)` names a
       // public function of `silk/vector` because `Vector` matches that module's basename. The call
       // itself already resolves that way, but arguments are analyzed first, and without the same
       // lookup they get no expected types — which reads to a borrow argument as "no borrow is
@@ -1747,6 +1748,7 @@ export const analyzeFunctionItem = (
   node: SyntaxTree.Node,
   declarations: ReadonlyArray<DeclarationFact>,
   resolution: ResolutionContext,
+  expected?: SemanticType,
 ): ExpressionResult | undefined => {
   const reference = resolvedFunctionReference(source, node, declarations, resolution)
   if (reference === undefined) {
@@ -1787,6 +1789,7 @@ export const analyzeFunctionItem = (
         _tag: 'FunctionItem',
         reference: missing,
         path: referencePath(node),
+        typeArguments: Object.freeze([]),
         type: unavailableExpressionType,
         syntax: node,
       }),
@@ -1794,7 +1797,64 @@ export const analyzeFunctionItem = (
       type: undefined,
     })
   }
-  const callable = callableTypeOfReference(reference)
+  const unresolvedCallable = callableTypeOfReference(reference)
+  const contract = resolvedCallableContract(reference)
+  const contextual = new Map<string, Type.GenericArgument>()
+  const expectedCallable =
+    expected !== undefined && Type.isCallable(expected) ? expected : undefined
+  const contextualPattern =
+    unresolvedCallable === undefined || expectedCallable === undefined
+      ? undefined
+      : Type.callable(
+          unresolvedCallable.parameters,
+          unresolvedCallable.result,
+          expectedCallable.mode,
+          unresolvedCallable.schema,
+          unresolvedCallable.unsafe,
+        )
+  let specialized =
+    contextualPattern !== undefined &&
+    expectedCallable !== undefined &&
+    TypeInference.infer(contextualPattern, expectedCallable, contextual)
+  if (!specialized && contextualPattern !== undefined && expectedCallable !== undefined) {
+    const partial = new Map<string, Type.GenericArgument>()
+    const parametersCompatible =
+      contextualPattern.parameters.length === expectedCallable.parameters.length &&
+      contextualPattern.parameters.every((parameter, ordinal) => {
+        const expectedParameter = expectedCallable.parameters.at(ordinal)
+        return (
+          expectedParameter !== undefined &&
+          TypeInference.infer(parameter, expectedParameter, partial)
+        )
+      })
+    const patternResult = contextualPattern.result
+    const expectedResult = expectedCallable.result
+    const resultCompatible =
+      Type.isEffect(patternResult) && Type.isEffect(expectedResult)
+        ? TypeInference.infer(patternResult.success, expectedResult.success, partial)
+        : TypeInference.infer(patternResult, expectedResult, partial)
+    const allBindersDetermined = (contract?.binders ?? []).every((parameter) =>
+      partial.has(Type.key(parameter)),
+    )
+    if (parametersCompatible && resultCompatible && allBindersDetermined) {
+      contextual.clear()
+      for (const [key, argument] of partial) contextual.set(key, argument)
+      specialized = true
+    }
+  }
+  let callable = unresolvedCallable
+  if (callable !== undefined && specialized) {
+    const contextualCallable = Type.substitute(callable, contextual)
+    callable = Type.isCallable(contextualCallable) ? contextualCallable : undefined
+  }
+  const typeArguments = Object.freeze(
+    specialized
+      ? (contract?.binders ?? []).flatMap((parameter) => {
+          const argument = contextual.get(Type.key(parameter))
+          return argument === undefined ? [] : [argument]
+        })
+      : [],
+  )
   const type =
     callable === undefined ? unavailableExpressionType : availableExpressionType(callable)
   return Object.freeze({
@@ -1802,6 +1862,7 @@ export const analyzeFunctionItem = (
       _tag: 'FunctionItem',
       reference,
       path: referencePath(node),
+      typeArguments,
       type,
       syntax: node,
     }),

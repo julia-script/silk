@@ -30,6 +30,11 @@ pub enum(u8) ExitCode {
   Failure = 1,
 }
 
+pub union Maybe<T> {
+  None,
+  Some {pub value: T},
+}
+
 pub role Clock
 
 fn helper(value: i32, other: i32) -> i32 {
@@ -106,6 +111,14 @@ fn execute(problem: Token, borrowed: &End) -> i32 {
 
 fn selected() -> typeof(helper) {
   return helper
+}
+
+fn selectMaybe(value: Maybe<i32>) -> Maybe<i32> {
+  let fallback = Maybe<i32>.None
+  return match move value {
+    Maybe<i32>.Some {value} => Maybe<i32>.Some {value: value}
+    Maybe<i32>.None => move fallback
+  }
 }
 
 fn borrow(values: [i32; 2], output: [i32; 2]) -> i32 {

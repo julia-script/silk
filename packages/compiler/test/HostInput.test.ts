@@ -114,9 +114,7 @@ impl HostInput for Broken {
 /** Shared readers. Owned host bytes are read through a stable binding, never through an index. */
 const support = `import silk.bytes { Bytes }
 import silk.host_input { HostInputError }
-import silk.option { None }
 import silk.option { Option }
-import silk.option { Some }
 import silk.result { Result }
 import silk.string { InvalidUtf8 }
 import silk.usize as usize
@@ -130,17 +128,15 @@ fn byteAt(entry: &Bytes, index: usize) -> u8 {
 
 fn present(value: Option<Bytes>) -> bool {
   return match move value {
-    Some<Bytes> { value: bytes } => true
-    None {} => false
+    Option<Bytes>.Some { value: bytes } => true
+    Option<Bytes>.None => false
   }
 }
 
 fn decodes(entry: &Bytes) -> bool {
   return match move text(bytesSlice(entry)) {
-    Result<string, InvalidUtf8> { value: outcome } => match move outcome {
-      Success<string> { value: view } => true
-      Failure<InvalidUtf8> { error: invalid } => false
-    }
+      Result<string, InvalidUtf8>.Success { value: view } => true
+      Result<string, InvalidUtf8>.Failure { error: invalid } => false
   }
 }
 
@@ -150,8 +146,8 @@ effect fn raiseMissing() -> never ! HostInputError {
 
 effect fn required(found: Option<Bytes>) -> Bytes ! HostInputError {
   return match move found {
-    Some<Bytes> { value: bytes } => move bytes
-    None {} => run raiseMissing()
+    Option<Bytes>.Some { value: bytes } => move bytes
+    Option<Bytes>.None => run raiseMissing()
   }
 }
 `
@@ -169,8 +165,8 @@ import silk.host_input {
   variableNamed,
   workingDirectory
 }
-import silk.option { None, Option, Some, none, some }
-import silk.result { Failure, Result, Success }
+import silk.option { Option, none, some }
+import silk.result { Result }
 import silk.string { InvalidUtf8 }
 import silk.vector { Vector, length as vectorLength, remove as vectorRemove }
 

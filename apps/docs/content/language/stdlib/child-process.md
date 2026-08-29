@@ -67,8 +67,8 @@ effect fn program() -> i32
     |> Effect.provideMut<Process.ChildProcess>(&mut provider)
     |> Effect.provideMut<Allocator>(&mut allocator)
   return match move Process.exitCode(&outcome) {
-    Option.Some<i32> {value} => 35 + value
-    Option.None {} => 1
+    Option.Option<i32>.Some {value} => 35 + value
+    Option.Option<i32>.None => 1
   }
 }
 
@@ -297,7 +297,7 @@ Creates a process failure with a provider-defined numeric code for diagnostics.
 ## `providerCode`
 
 ```silk
-pub fn providerCode(error: &silk/child_process.ProcessError) -> Option<i32>
+pub fn providerCode(error: &silk/child_process.ProcessError) -> silk/option.Option<i32>
 ```
 
 Returns the provider-defined numeric code, or `None` when the failure has no such code.
@@ -629,7 +629,7 @@ Reports whether a signal terminated the child instead of an exit code.
 ## `exitCode`
 
 ```silk
-pub fn exitCode(outcome: &silk/child_process.ProcessOutcome) -> Option<i32>
+pub fn exitCode(outcome: &silk/child_process.ProcessOutcome) -> silk/option.Option<i32>
 ```
 
 Returns the exit code, or `None` when a signal terminated the child.
@@ -639,7 +639,7 @@ Returns the exit code, or `None` when a signal terminated the child.
 ## `terminatingSignal`
 
 ```silk
-pub fn terminatingSignal(outcome: &silk/child_process.ProcessOutcome) -> Option<i32>
+pub fn terminatingSignal(outcome: &silk/child_process.ProcessOutcome) -> silk/option.Option<i32>
 ```
 
 Returns the terminating signal number, or `None` when the child returned an exit code.

@@ -50,8 +50,9 @@
 //! ```
 
 import silk.bool as bool
+import silk.effect { Effect }
 import silk.i32 as i32
-import silk.result { Failure, Result, Success }
+import silk.result { Result }
 import silk.standard_streams {
   NativeStandardStreams,
   StreamWriteError,
@@ -153,12 +154,10 @@ effect fn writeStdout(
 ) -> () ! LogError {
   let mut streams = nativeStreams()
   let bytes = stringUtf8Bytes(message)
-  let completed = run Intrinsic.effectResult(writeStdoutCounted(&mut streams, bytes))
+  let completed = run Effect.result(writeStdoutCounted(&mut streams, bytes))
   return match move completed {
-    Result<i32, StreamWriteError> { value: outcome } => match move outcome {
-      Success<i32> { value: success } => ()
-      Failure<StreamWriteError> { error: failure } => run reject(3)
-    }
+    Result<i32, StreamWriteError>.Success { value: success } => ()
+    Result<i32, StreamWriteError>.Failure { error: failure } => run reject(3)
   }
 }
 

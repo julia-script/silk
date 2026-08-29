@@ -34,13 +34,13 @@ import silk.usize
 pub fn main() -> i32 {
   let valid = String.fromUtf8(b"Silk")
     |> Result.unwrapOr<string, String.InvalidUtf8>("")
-  let invalid = String.fromUtf8(b"a\x80")
-  if !Result.isFailure<string, String.InvalidUtf8>(&invalid) {
-    return 0
-  }
+  let rejected = String.fromUtf8(b"a\x80")
+    |> Result.unwrapOr<string, String.InvalidUtf8>("")
   let length = String.byteLength(valid)
     |> usize.toI32
-  return length + 38
+  let rejectedLength = String.byteLength(rejected)
+    |> usize.toI32
+  return length + rejectedLength + 38
 }
 ```
 
@@ -359,7 +359,7 @@ Consumes one scalar step and returns the cursor immediately after that scalar.
 ## `nextScalar`
 
 ```silk
-pub fn nextScalar(value: string, cursor: ScalarCursor) -> Option<silk/string.ScalarStep>
+pub fn nextScalar(value: string, cursor: ScalarCursor) -> silk/option.Option<silk/string.ScalarStep>
 ```
 
 Decodes the scalar at a cursor, or returns `None` at the end of the string.

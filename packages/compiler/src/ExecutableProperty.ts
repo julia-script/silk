@@ -80,26 +80,38 @@ const nestedLoanCauses = (
     module: type.module,
     name: type.name,
   })
-  if (declaration?._tag !== 'StructDeclaration') return []
+  if (
+    declaration === undefined ||
+    (declaration._tag !== 'StructDeclaration' && declaration._tag !== 'UnionDeclaration')
+  )
+    return []
   const substitution =
     TypeInference.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),
       type.arguments,
     ) ?? new Map()
   const next = new Set(active).add(identity)
-  return declaration.fields.flatMap((field) => {
+  const fields =
+    declaration._tag === 'StructDeclaration'
+      ? declaration.fields.map((field) => ({ field, owner: identity }))
+      : declaration.variants.flatMap((variant) => {
+          const variantName =
+            variant.name._tag === 'Present' ? variant.name.spelling : `#${variant.id.ordinal}`
+          return variant.fields.map((field) => ({ field, owner: `${identity}.${variantName}` }))
+        })
+  return fields.flatMap(({ field, owner }) => {
     if (field.declaredType._tag === 'Resolved') {
       return nestedLoanCauses(
         index,
         Type.substitute(field.declaredType.type, substitution),
         [
           ...path,
-          `${identity}.${field.name._tag === 'Present' ? field.name.spelling : `#${field.id.ordinal}`}`,
+          `${owner}.${field.name._tag === 'Present' ? field.name.spelling : `#${field.id.ordinal}`}`,
         ],
         next,
       )
     }
-    return [cause('Unavailable', [...path, `${identity}.#${field.id.ordinal}`])]
+    return [cause('Unavailable', [...path, `${owner}.#${field.id.ordinal}`])]
   })
 }
 
@@ -230,14 +242,22 @@ const representedSubjectsOfType = (
     module: type.module,
     name: type.name,
   })
-  if (declaration?._tag !== 'StructDeclaration') return []
+  if (
+    declaration === undefined ||
+    (declaration._tag !== 'StructDeclaration' && declaration._tag !== 'UnionDeclaration')
+  )
+    return []
   const substitution =
     TypeInference.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),
       type.arguments,
     ) ?? new Map()
   const next = new Set(active).add(identity)
-  return declaration.fields.flatMap((field) =>
+  const fields =
+    declaration._tag === 'StructDeclaration'
+      ? declaration.fields
+      : declaration.variants.flatMap((variant) => variant.fields)
+  return fields.flatMap((field) =>
     field.declaredType._tag === 'Resolved'
       ? representedSubjectsOfType(
           discovery,

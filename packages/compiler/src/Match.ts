@@ -38,6 +38,13 @@ export interface BindingId {
 export type CoverageIdentity =
   | { readonly _tag: 'StructuralTypeMember'; readonly type: Type.Type }
   | {
+      readonly _tag: 'NominalUnionVariant'
+      readonly root: Type.Type
+      readonly type: Type.Nominal
+      readonly variant: DeclarationFacts.CanonicalUnionVariantId
+      readonly variantOrdinal: number
+    }
+  | {
       readonly _tag: 'EnumMember'
       readonly enum: DeclarationFacts.CanonicalId
       readonly member: DeclarationFacts.CanonicalEnumMemberId
@@ -60,23 +67,48 @@ export const enumMember = (
     type: Type.nominal(enum_.module, enum_.name),
   })
 
+/** Creates one leaf selection beneath a nominal-union parent and optional structural root. */
+export const nominalUnionVariant = (
+  root: Type.Type,
+  type: Type.Nominal,
+  variant: DeclarationFacts.CanonicalUnionVariantId,
+  variantOrdinal: number,
+): CoverageIdentity =>
+  Object.freeze({ _tag: 'NominalUnionVariant', root, type, variant, variantOrdinal })
+
 /** Tests canonical coverage identity without erasing enum members to types or integers. */
-export const identityEquals = (self: CoverageIdentity, other: CoverageIdentity): boolean =>
-  self._tag === 'StructuralTypeMember'
-    ? other._tag === 'StructuralTypeMember' && Type.equals(self.type, other.type)
-    : other._tag === 'EnumMember' &&
-      self.enum.module === other.enum.module &&
-      self.enum.name === other.enum.name &&
-      self.member.name === other.member.name
+export const identityEquals = (self: CoverageIdentity, other: CoverageIdentity): boolean => {
+  if (self._tag === 'StructuralTypeMember')
+    return other._tag === 'StructuralTypeMember' && Type.equals(self.type, other.type)
+  if (self._tag === 'NominalUnionVariant')
+    return (
+      other._tag === 'NominalUnionVariant' &&
+      Type.equals(self.root, other.root) &&
+      Type.equals(self.type, other.type) &&
+      self.variant.union.module === other.variant.union.module &&
+      self.variant.union.name === other.variant.union.name &&
+      self.variant.name === other.variant.name &&
+      self.variantOrdinal === other.variantOrdinal
+    )
+  return (
+    other._tag === 'EnumMember' &&
+    self.enum.module === other.enum.module &&
+    self.enum.name === other.enum.name &&
+    self.member.name === other.member.name
+  )
+}
 
 /** Returns the source type selected by one coverage identity. */
-export const sourceType = (self: CoverageIdentity): Type.Type => self.type
+export const sourceType = (self: CoverageIdentity): Type.Type =>
+  self._tag === 'NominalUnionVariant' ? self.root : self.type
 
 /** Encodes one coverage identity for diagnostics and deterministic snapshots. */
-export const encodeIdentity = (self: CoverageIdentity): string =>
-  self._tag === 'StructuralTypeMember'
-    ? Type.encode(self.type)
-    : `${self.enum.module}.${self.enum.name}.${self.member.name}`
+export const encodeIdentity = (self: CoverageIdentity): string => {
+  if (self._tag === 'StructuralTypeMember') return Type.encode(self.type)
+  if (self._tag === 'NominalUnionVariant')
+    return `${Type.encode(self.root)}::${Type.encode(self.type)}.${self.variant.name}`
+  return `${self.enum.module}.${self.enum.name}.${self.member.name}`
+}
 
 /** One source decision reduced to the facts that affect coverage. */
 export interface Decision {
@@ -101,7 +133,14 @@ export interface Coverage {
 }
 
 const contains = (members: ReadonlyArray<CoverageIdentity>, member: CoverageIdentity): boolean =>
-  members.some((candidate) => identityEquals(candidate, member))
+  members.some((candidate) => selects(member, candidate))
+
+/** Tests whether one authored pattern identity selects one canonical coverage leaf. */
+export const selects = (pattern: CoverageIdentity, candidate: CoverageIdentity): boolean =>
+  identityEquals(pattern, candidate) ||
+  (pattern._tag === 'StructuralTypeMember' &&
+    candidate._tag === 'NominalUnionVariant' &&
+    Type.equals(pattern.type, candidate.root))
 
 /** Returns the canonical structural exact-member set observed by a pattern decision. */
 export const membersOf = (type: Type.Type): ReadonlyArray<CoverageIdentity> => {
@@ -142,8 +181,7 @@ export const cover = (
         ? Object.freeze([])
         : Object.freeze(
             before.filter(
-              (candidate) =>
-                decision.member === undefined || !identityEquals(candidate, decision.member),
+              (candidate) => decision.member === undefined || !selects(decision.member, candidate),
             ),
           )
     }

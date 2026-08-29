@@ -99,7 +99,8 @@ not belong in a language rule unless a program can observe them.
   union-member matches, scalar enum member matches, irrefutable local destructuring, and
   conditional `if let`.
 - [Values and types](values-and-types.md) — foundational scalars, literals, nominal structs, fixed
-  arrays, lexical views, structural unions, scalar enums, precise inference, and compatibility.
+  arrays, lexical views, nominal and structural unions, scalar enums, precise inference, and
+  compatibility.
 - [Expressions and operators](expressions-and-operators.md) — deterministic evaluation, expression
   composition, scalar and explicitly declared custom operators, scalar enum equality,
   short-circuiting, assignment, atomic replacement, and explicit conversion.

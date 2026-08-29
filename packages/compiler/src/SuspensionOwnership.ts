@@ -162,10 +162,14 @@ const operationDefinitions = (operation: Mir.Operation): ReadonlySet<number> => 
       nested._tag === 'RunEffect' ||
       nested._tag === 'RunEffectValue' ||
       nested._tag === 'RunStaticEffect' ||
-      nested._tag === 'ReifyEffect' ||
+      nested._tag === 'CatchEffect' ||
       nested._tag === 'CloseEffectEntry'
     )
       definitions.add(nested.outcome.ordinal)
+    if (nested._tag === 'CatchEffect') {
+      definitions.add(nested.successValue.ordinal)
+      definitions.add(nested.failureValue.ordinal)
+    }
     if (nested._tag === 'Match')
       for (const arm of nested.arms)
         for (const binding of arm.bindings) definitions.add(binding.destination.ordinal)
@@ -571,7 +575,7 @@ export const plan = (
         if (
           operation._tag !== 'RunEffect' &&
           operation._tag !== 'RunEffectValue' &&
-          operation._tag !== 'ReifyEffect' &&
+          operation._tag !== 'CatchEffect' &&
           operation._tag !== 'ExecutionPark'
         )
           continue

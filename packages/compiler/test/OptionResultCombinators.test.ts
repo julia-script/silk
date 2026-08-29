@@ -13,7 +13,7 @@ const ascii = (value: string): Uint8Array =>
  * transform runs on exactly one of the two arms. `unwrapOr` then answers with the fallback only
  * for the absent option.
  */
-const optionMap = `import silk.option { Option }
+const optionMap = `import silk.option as Option
 fn double(value: i32) -> i32 { return value * 2 }
 
 pub fn main() -> i32 {
@@ -29,14 +29,14 @@ pub fn main() -> i32 {
  * `flatMap` keeps the outcome one Option deep. `oneLayer` names `Option<i32>` exactly, so a
  * combinator that nested its result into `Option<Option<i32>>` would not typecheck here.
  */
-const optionFlatMap = `import silk.option { Option }
+const optionFlatMap = `import silk.option as Option
 
-fn halve(value: i32) -> Option<i32> {
+fn halve(value: i32) -> Option.Option<i32> {
   if value == 0 { return Option.none<i32>() }
   return Option.some<i32>(value / 2)
 }
 
-fn oneLayer(self: Option<i32>) -> Option<i32> { return move self }
+fn oneLayer(self: Option.Option<i32>) -> Option.Option<i32> { return move self }
 
 pub fn main() -> i32 {
   let present = Option.some<i32>(80)
@@ -50,7 +50,7 @@ pub fn main() -> i32 {
  * `mapError` rewrites a failure value and carries a success through untouched, including across a
  * change of failure type: `widen` never runs on the success arm.
  */
-const resultMapError = `import silk.result { Result, Success, Failure }
+const resultMapError = `import silk.result as Result
 
 struct Wide { code: i32 }
 
@@ -58,12 +58,10 @@ fn widen(error: i32) -> Wide {
   return Wide { code: error + 30 }
 }
 
-fn observe(self: Result<i32, Wide>) -> i32 {
+fn observe(self: Result.Result<i32, Wide>) -> i32 {
   return match move self {
-    Result<i32, Wide> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<Wide> { error } => error.code
-    }
+    Result.Result<i32, Wide>.Success { value } => value
+    Result.Result<i32, Wide>.Failure { error } => error.code
   }
 }
 
@@ -76,14 +74,14 @@ pub fn main() -> i32 {
 }`
 
 /**
- * `map`, `flatMap`, and `unwrapOr` over both channels, with `isSuccess` and `isFailure` testing an
- * outcome through a shared borrow that leaves it usable afterwards.
+ * `map`, `flatMap`, and `unwrapOr` over both channels, with borrowed matches testing an outcome
+ * while leaving it usable afterwards.
  */
-const resultCombinators = `import silk.result { Result }
+const resultCombinators = `import silk.result as Result
 
 fn addTwo(value: i32) -> i32 { return value + 2 }
 
-fn halve(value: i32) -> Result<i32, i32> {
+fn halve(value: i32) -> Result.Result<i32, i32> {
   if value == 0 { return Result.failResult<i32, i32>(9) }
   return Result.succeed<i32, i32>(value / 2)
 }
@@ -91,12 +89,19 @@ fn halve(value: i32) -> Result<i32, i32> {
 pub fn main() -> i32 {
   let succeeded = Result.succeed<i32, i32>(36)
   let mapped = Result.map<i32, i32, i32>(move succeeded, addTwo)
-  if Result.isSuccess<i32, i32>(&mapped) {} else { return 1 }
-  if Result.isFailure<i32, i32>(&mapped) { return 2 }
+  let successCheck = match &mapped {
+    Result.Result<i32, i32>.Success { value } => true
+    Result.Result<i32, i32>.Failure { error } => false
+  }
+  if successCheck {} else { return 1 }
   let chained = Result.flatMap<i32, i32, i32>(move mapped, halve)
   let failed = Result.failResult<i32, i32>(7)
   let mappedFailure = Result.map<i32, i32, i32>(move failed, addTwo)
-  if Result.isFailure<i32, i32>(&mappedFailure) {} else { return 3 }
+  let failureCheck = match &mappedFailure {
+    Result.Result<i32, i32>.Success { value } => false
+    Result.Result<i32, i32>.Failure { error } => true
+  }
+  if failureCheck {} else { return 3 }
   return Result.unwrapOr<i32, i32>(move chained, 0)
     + Result.unwrapOr<i32, i32>(move mappedFailure, 23)
 }`
@@ -113,7 +118,7 @@ import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
-import silk.option { Option }
+import silk.option as Option
 
 struct Token { storage: Allocation }
 

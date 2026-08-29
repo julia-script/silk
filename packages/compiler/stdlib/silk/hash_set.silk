@@ -75,7 +75,7 @@ import silk.allocator { OutOfMemoryError }
 import silk.hash { HashKey, HashSeed }
 import silk.layout { Layout }
 import silk.layout { LayoutOverflow }
-import silk.option { Option, Some, None }
+import silk.option { Option, none, some }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 import silk.u64 as u64
@@ -515,7 +515,7 @@ pub fn contains<T: HashKey>(self: &HashSet<T>, value: T) -> bool {
 /// This function consumes the probe element.
 pub fn indexOf<T: HashKey>(self: &HashSet<T>, value: T) -> Option<usize> {
   if self.capacity == usize.ZERO {
-    return Option.none<usize>()
+    return none<usize>()
   }
   let hashed = HashKey.hash(&value, &self.seed)
   let mut index = bucketOf(hashed, self.capacity)
@@ -523,20 +523,20 @@ pub fn indexOf<T: HashKey>(self: &HashSet<T>, value: T) -> Option<usize> {
   while scanned < self.capacity {
     let state = stateAt<T>(self, index)
     if state == VACANT {
-      return Option.none<usize>()
+      return none<usize>()
     }
     if state == OCCUPIED {
       let held = memberAt<T>(self, index)
       if held[usize.ZERO].hash == hashed {
         if (&held[usize.ZERO].value) == (&value) {
-          return Option.some<usize>(index)
+          return some<usize>(index)
         }
       }
     }
     index = advance(index, self.capacity)
     scanned = scanned + usize.ONE
   }
-  return Option.none<usize>()
+  return none<usize>()
 }
 
 /// Removes the element equivalent to one probe element and answers with it.
@@ -546,7 +546,7 @@ pub fn indexOf<T: HashKey>(self: &HashSet<T>, value: T) -> Option<usize> {
 /// Ownership passes to the caller; the set does not also release it. The probe element is released.
 pub fn remove<T: HashKey>(self: &mut HashSet<T>, value: T) -> Option<T> {
   if self.capacity == usize.ZERO {
-    return Option.none<T>()
+    return none<T>()
   }
   let hashed = HashKey.hash(&value, &self.seed)
   let storage = Intrinsic.replace(self.storage, Unseeded<T> { anchor: [] })
@@ -574,13 +574,13 @@ pub fn remove<T: HashKey>(self: &mut HashSet<T>, value: T) -> Option<T> {
   }
   if self.capacity <= found {
     self.storage = move owned
-    return Option.none<T>()
+    return none<T>()
   }
   let carried = evict<T>(&mut owned, found)
   let marked = markRemoved<T>(&mut owned, found)
   self.storage = move owned
   self.length = self.length - usize.ONE
-  return Option.some<T>(move carried)
+  return some<T>(move carried)
 }
 
 fn evict<T>(owned: &mut Slots<T>, index: usize) -> T {

@@ -551,6 +551,20 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'ConstructUnionVariant'
+      readonly nominal: Type.Nominal
+      readonly variant: DeclarationFacts.CanonicalUnionVariantId
+      readonly variantOrdinal: number
+      /** Field identities in language evaluation order; `fields` remains variant storage order. */
+      readonly evaluationOrder: ReadonlyArray<DeclarationFacts.FieldId>
+      readonly fields: ReadonlyArray<{
+        readonly field: DeclarationFacts.FieldId
+        readonly value: Expression
+      }>
+      readonly type: DeclarationFacts.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'ArrayConstruct'
       readonly elements: ReadonlyArray<Expression>
       readonly type: Type.FixedArray
@@ -643,6 +657,7 @@ export type Expression =
   | {
       readonly _tag: 'FunctionItem'
       readonly target: CallableTarget
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly type: Type.Callable
       readonly span: SourceSpan.SourceSpan
     }
@@ -715,12 +730,6 @@ export type Expression =
       readonly _tag: 'Run'
       readonly subject: Expression
       readonly type: DeclarationFacts.SemanticType
-      readonly span: SourceSpan.SourceSpan
-    }
-  | {
-      readonly _tag: 'EffectResult'
-      readonly protected: Expression
-      readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -1010,6 +1019,7 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
           ),
         ]
       case 'Construct':
+      case 'ConstructUnionVariant':
         return expression.fields.map((field) => field.value)
       case 'ArrayConstruct':
         return expression.elements
@@ -1029,8 +1039,6 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
         return expression.statements.flatMap(statementExpressions)
       case 'Run':
         return [expression.subject]
-      case 'EffectResult':
-        return [expression.protected]
       case 'EffectBindRequirement':
         return [expression.protected]
       case 'EffectCatch':
@@ -1085,7 +1093,8 @@ export const firstUnavailable = (
         return walk(expression.slice)
       case 'SliceIndexPlace':
         return walk(expression.slice) ?? walk(expression.index)
-      case 'Construct': {
+      case 'Construct':
+      case 'ConstructUnionVariant': {
         for (const field of expression.fields) {
           const found = walk(field.value)
           if (found !== undefined) return found
@@ -1128,8 +1137,6 @@ export const firstUnavailable = (
       }
       case 'Run':
         return walk(expression.subject)
-      case 'EffectResult':
-        return walk(expression.protected)
       case 'EffectBindRequirement':
         return walk(expression.protected)
       case 'EffectCatch':
@@ -1578,11 +1585,6 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         `${indent}run : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.subject, depth + 1),
       ].join('\n')
-    case 'EffectResult':
-      return [
-        `${indent}effect-result : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
-        encodeExpression(expression.protected, depth + 1),
-      ].join('\n')
     case 'EffectCatch':
       return [
         `${indent}effect-catch intrinsic=${Intrinsic.operationText(expression.intrinsic)} ${Type.encode(expression.selected)} protected=${RowAlgebra.encode(
@@ -1666,6 +1668,15 @@ const encodeExpression = (expression: Expression, depth: number): string => {
             `${indent}  field #${field.ordinal}\n${encodeExpression(value, depth + 2)}`,
         ),
       ].join('\n')
+    case 'ConstructUnionVariant':
+      return [
+        `${indent}construct-variant ${Type.encode(expression.nominal)}.${expression.variant.name}#${expression.variantOrdinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}  evaluation-order ${expression.evaluationOrder.map((field) => `#${field.ordinal}`).join(', ') || 'empty'}`,
+        ...expression.fields.map(
+          ({ field, value }) =>
+            `${indent}  field #${field.ordinal}\n${encodeExpression(value, depth + 2)}`,
+        ),
+      ].join('\n')
     case 'ArrayConstruct':
       return [
         `${indent}construct-array ${Type.encode(expression.type)} elements=${expression.elements.length} ${spanText(expression.span)}`,
@@ -1722,7 +1733,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         expression.target._tag === 'DeclarationCallableTarget'
           ? `${expression.target.declaration.module}.${expression.target.declaration.name}`
           : `${expression.target.actor}.${expression.target.operation}`
-      } : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      }<${expression.typeArguments.map(Type.genericArgumentKey).join(',')}> : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'CallableSection':
       return [
         `${indent}callable-section site=${executableSiteLabel(expression.site)} mode=${expression.mode.toLowerCase()} remaining=${expression.remainingParameters.map((ordinal) => `p${ordinal}`).join(',')} target=${

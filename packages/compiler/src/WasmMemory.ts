@@ -28,11 +28,141 @@ export interface FramePlan {
   readonly escaping: ReadonlySet<number>
   /** Address-taken frame roots reachable through each MIR local's stored pointer lanes. */
   readonly localRoots: ReadonlyMap<number, ReadonlySet<number>>
+  /** Depth-indexed canonical variant storage used while cleaning widened nominal-union carriers. */
+  readonly nominalUnionCleanupScratch: ReadonlyArray<{
+    readonly offset: number
+    readonly size: number
+    readonly alignment: number
+  }>
   readonly size: number
   readonly alignment: number
 }
 
-export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
+export interface OperationCleanupEntry {
+  readonly cleanup: CleanupPlan.CleanupPlan
+  readonly local?: Mir.LocalId
+}
+
+export const operationCleanupEntries = (
+  operation: Mir.Operation,
+): ReadonlyArray<OperationCleanupEntry> => {
+  switch (operation._tag) {
+    case 'Drop':
+      return Object.freeze([Object.freeze({ cleanup: operation.cleanup, local: operation.local })])
+    case 'SlotDrop':
+      return Object.freeze([Object.freeze({ cleanup: operation.cleanup })])
+    case 'CheckedScalar':
+      return Object.freeze([
+        Object.freeze({ cleanup: operation.presentCleanup, local: operation.present }),
+        Object.freeze({ cleanup: operation.absentCleanup, local: operation.absent }),
+      ])
+    case 'ExecutionDrive':
+      return Object.freeze([
+        Object.freeze({ cleanup: operation.completionCleanup, local: operation.onComplete }),
+        Object.freeze({ cleanup: operation.suspensionCleanup, local: operation.onSuspend }),
+      ])
+    case 'SharedWithMut':
+      return Object.freeze([
+        Object.freeze({ cleanup: operation.useCleanup, local: operation.use }),
+        Object.freeze({ cleanup: operation.conflictCleanup, local: operation.onConflict }),
+      ])
+    case 'ExecutionPark':
+      return Object.freeze([
+        Object.freeze({ cleanup: operation.guardCleanup, local: operation.guard }),
+        Object.freeze({ cleanup: operation.registerCleanup, local: operation.register }),
+      ])
+    case 'PropagateEffectFailure':
+    case 'RunEffect':
+    case 'RunEffectValue':
+    case 'RunEffectComposite':
+    case 'RunStaticEffect':
+      return Object.freeze(
+        (operation.releases ?? []).map((release) =>
+          Object.freeze({ cleanup: release.cleanup, local: release.local }),
+        ),
+      )
+    case 'CloseEffectEntry':
+      return Object.freeze(
+        operation.failures.map((failure) =>
+          Object.freeze({ cleanup: failure.cleanup, local: failure.payload }),
+        ),
+      )
+    case 'Match':
+      return Object.freeze(
+        operation.arms.flatMap((arm) =>
+          arm.selected.cleanup.map((entry) =>
+            Object.freeze({ cleanup: entry.cleanup, local: entry.destination }),
+          ),
+        ),
+      )
+    default:
+      return Object.freeze([])
+  }
+}
+
+export const operationCleanupPlans = (
+  operation: Mir.Operation,
+): ReadonlyArray<CleanupPlan.CleanupPlan> =>
+  Object.freeze(operationCleanupEntries(operation).map((entry) => entry.cleanup))
+
+const nominalUnionScratchRequirements = (
+  cleanups: ReadonlyArray<CleanupPlan.CleanupPlan>,
+  plan: LayoutPlan.Plan,
+): ReadonlyArray<{ readonly size: number; readonly alignment: number }> => {
+  const requirements: Array<{ size: number; alignment: number }> = []
+  const visit = (cleanup: CleanupPlan.CleanupPlan, depth: number): void => {
+    switch (cleanup._tag) {
+      case 'HookCleanup':
+        visit(cleanup.inner, depth)
+        return
+      case 'StructCleanup':
+        for (const field of cleanup.fields) visit(field.cleanup, depth)
+        return
+      case 'NominalUnionCleanup': {
+        const entry = LayoutPlan.entry(plan, cleanup.type)
+        if (entry?.representation._tag !== 'NominalUnion') return
+        const materialization = LayoutPlan.nominalUnionMaterialization(entry.representation)
+        const current = requirements.at(depth)
+        requirements[depth] = {
+          size: Math.max(current?.size ?? 0, materialization.size),
+          alignment: Math.max(current?.alignment ?? 1, materialization.alignment),
+        }
+        for (const variant of cleanup.variants)
+          for (const field of variant.fields) visit(field.cleanup, depth + 1)
+        return
+      }
+      case 'ArrayCleanup':
+        visit(cleanup.element, depth)
+        return
+      case 'UnionCleanup':
+        for (const entry of cleanup.cases) visit(entry.cleanup, depth)
+        return
+      case 'CallableCleanup':
+      case 'EffectCleanup':
+        for (const slot of cleanup.slots) visit(slot.cleanup, depth)
+        return
+      case 'EffectCompositeCleanup':
+        for (const alternative of cleanup.alternatives) visit(alternative, depth)
+        return
+      case 'RawBufferCleanup':
+      case 'LocalSharedCoreCleanup':
+      case 'ExecutionCleanup':
+      case 'WakeCleanup':
+        visit(cleanup.allocation, depth)
+        return
+      default:
+        return
+    }
+  }
+  for (const cleanup of cleanups) visit(cleanup, 0)
+  return Object.freeze(requirements.map((requirement) => Object.freeze(requirement)))
+}
+
+export const framePlan = (
+  fn: Mir.MirFunction,
+  plan: LayoutPlan.Plan,
+  additionalCleanups: ReadonlyArray<CleanupPlan.CleanupPlan> = Object.freeze([]),
+): FramePlan => {
   const formations = MirVerification.operations(fn).filter(
     (operation): operation is Extract<Mir.Operation, { readonly _tag: 'BeginLoan' }> =>
       operation._tag === 'BeginLoan',
@@ -60,52 +190,16 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
   ])
   const rootOrdinals = new Set([
     ...escaping,
-    // A hook-bearing drop passes `&mut self` into its hook, so the owner needs frame storage.
-    ...MirVerification.operations(fn).flatMap((operation) => {
-      const droppedOrdinals: Array<number> = []
-      if (operation._tag === 'Drop') {
-        if (
-          CleanupPlan.hasHook(operation.cleanup) &&
-          fn.localTypes.at(operation.local.ordinal)?._tag !== 'EffectBorrow'
-        ) {
-          droppedOrdinals.push(operation.local.ordinal)
-        }
-      } else if (
-        operation._tag === 'RunEffect' ||
-        operation._tag === 'RunEffectValue' ||
-        operation._tag === 'RunEffectComposite' ||
-        operation._tag === 'RunStaticEffect'
-      ) {
-        for (const release of operation.releases ?? []) {
-          if (
-            CleanupPlan.hasHook(release.cleanup) &&
-            fn.localTypes.at(release.local.ordinal)?._tag !== 'EffectBorrow'
-          ) {
-            droppedOrdinals.push(release.local.ordinal)
-          }
-        }
-      }
-      return [
-        ...droppedOrdinals,
-        ...(operation._tag === 'CloseEffectEntry'
-          ? operation.failures.flatMap((failure) =>
-              CleanupPlan.hasHook(failure.cleanup) ? [failure.payload.ordinal] : [],
-            )
-          : []),
-        ...(operation._tag === 'SharedWithMut'
-          ? [
-              ...(CleanupPlan.hasHook(operation.useCleanup) &&
-              fn.localTypes.at(operation.use.ordinal)?._tag !== 'EffectBorrow'
-                ? [operation.use.ordinal]
-                : []),
-              ...(CleanupPlan.hasHook(operation.conflictCleanup) &&
-              fn.localTypes.at(operation.onConflict.ordinal)?._tag !== 'EffectBorrow'
-                ? [operation.onConflict.ordinal]
-                : []),
-            ]
-          : []),
-      ]
-    }),
+    // A hook-bearing release passes `&mut self` into its hook, so its MIR owner needs frame storage.
+    ...MirVerification.operations(fn).flatMap((operation) =>
+      operationCleanupEntries(operation).flatMap((entry) =>
+        entry.local !== undefined &&
+        CleanupPlan.hasHook(entry.cleanup) &&
+        fn.localTypes.at(entry.local.ordinal)?._tag !== 'EffectBorrow'
+          ? [entry.local.ordinal]
+          : [],
+      ),
+    ),
   ])
   const roots = new Map<number, FrameRoot>()
   let cursor = 0
@@ -186,6 +280,7 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
           changed = include(operation.root, [operation.source]) || changed
           break
         case 'Construct':
+        case 'ConstructUnionVariant':
           changed =
             include(
               operation.destination,
@@ -225,7 +320,7 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
               ...operation.arguments,
             ]) || changed
           break
-        case 'ReifyEffect':
+        case 'CatchEffect':
           changed =
             include(operation.destination, [operation.effect, ...operation.arguments]) || changed
           break
@@ -253,6 +348,16 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
       }
     }
   }
+  const nominalUnionCleanupScratch = nominalUnionScratchRequirements(
+    [...operations.flatMap(operationCleanupPlans), ...additionalCleanups],
+    plan,
+  ).map((requirement) => {
+    cursor = alignUp(cursor, requirement.alignment)
+    const scratch = Object.freeze({ ...requirement, offset: cursor })
+    cursor += requirement.size
+    alignment = Math.max(alignment, requirement.alignment)
+    return scratch
+  })
   const frozenLocalRoots = new Map(
     [...localRoots].map(([local, reachable]) => [local, new Set(reachable)] as const),
   )
@@ -260,6 +365,7 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
     roots,
     escaping,
     localRoots: frozenLocalRoots,
+    nominalUnionCleanupScratch: Object.freeze(nominalUnionCleanupScratch),
     size: alignUp(cursor, alignment),
     alignment,
   })

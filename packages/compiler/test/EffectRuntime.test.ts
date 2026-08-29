@@ -822,7 +822,7 @@ it.effect('resolves flatten through the ordinary declaration path without an int
     const catalog = Intrinsic.all().flatMap((actor) =>
       actor.operations.map((operation) => operation.spelling),
     )
-    assert.include(catalog, 'effectResult')
+    assert.notInclude(catalog, 'effectResult')
     assert.notInclude(catalog, 'flatten')
   }),
 )

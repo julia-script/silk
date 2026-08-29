@@ -385,6 +385,7 @@ export const scopedModule = (declaration: DeclarationFacts.MemberFact): string |
   if (
     declaration._tag !== 'StructDeclaration' &&
     declaration._tag !== 'EnumDeclaration' &&
+    declaration._tag !== 'UnionDeclaration' &&
     declaration._tag !== 'ServiceDeclaration' &&
     declaration._tag !== 'InterfaceDeclaration'
   )
@@ -538,6 +539,7 @@ const resolvedType = (
 const nominalOf = (declaration: DeclarationFacts.MemberFact): Type.Nominal | undefined =>
   (declaration._tag === 'StructDeclaration' ||
     declaration._tag === 'EnumDeclaration' ||
+    declaration._tag === 'UnionDeclaration' ||
     declaration._tag === 'ServiceDeclaration' ||
     declaration._tag === 'InterfaceDeclaration') &&
   declaration.canonical._tag === 'Canonical'

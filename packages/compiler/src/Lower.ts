@@ -438,7 +438,7 @@ export const lowerProgram = (
       if (
         operation._tag !== 'RunEffectValue' &&
         operation._tag !== 'RunStaticEffect' &&
-        operation._tag !== 'ReifyEffect'
+        operation._tag !== 'CatchEffect'
       )
         continue
       const key = runnerKey(operation.runner, operation.runnerTypeArguments)

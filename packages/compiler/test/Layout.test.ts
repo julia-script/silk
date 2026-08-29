@@ -403,8 +403,10 @@ enum Good { Only }
 pub fn main() -> i32 { return 0 }`),
     )
     const catalog = Analysis.layoutCatalogOf(snapshot)
+    const plan = Analysis.layoutOf(snapshot)
     assert.strictEqual(catalog._tag, 'Available')
-    if (catalog._tag !== 'Available') return
+    assert.strictEqual(plan._tag, 'Available')
+    if (catalog._tag !== 'Available' || plan._tag !== 'Available') return
     assert.strictEqual(
       Layout.catalogEntry(catalog.value, Type.nominal('layout/invalid-scalar-enum', 'Broken'))
         ?._tag,
@@ -676,6 +678,92 @@ pub fn main() -> i32 { let outer = make() return outer.pair.left }`),
         undefined,
       )
     }),
+)
+
+it.effect('plans nominal union tags and variant-local payload layouts', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'layout/nominal-union',
+      ascii(`union State { Ready, Data { flag: bool, value: i64 }, Empty { impossible: never } }
+union Box<T> { Full { value: T }, Vacant }
+fn retain(value: Box<i32>) -> Box<i32> { return move value }
+pub fn main() -> i32 { return 0 }`),
+      'wasm32-unknown-unknown',
+    )
+    const catalog = Analysis.layoutCatalogOf(snapshot)
+    const plan = Analysis.layoutOf(snapshot)
+    assert.strictEqual(catalog._tag, 'Available')
+    assert.strictEqual(plan._tag, 'Available')
+    if (catalog._tag !== 'Available' || plan._tag !== 'Available') return
+
+    const state = Layout.catalogEntry(catalog.value, Type.nominal('layout/nominal-union', 'State'))
+    const box = Layout.catalogEntry(
+      catalog.value,
+      Type.nominal('layout/nominal-union', 'Box', ['i32']),
+    )
+    assert.strictEqual(state?._tag, 'LayoutEntry')
+    assert.strictEqual(box?._tag, 'LayoutEntry')
+    if (
+      state?._tag !== 'LayoutEntry' ||
+      state.representation._tag !== 'NominalUnion' ||
+      box?._tag !== 'LayoutEntry' ||
+      box.representation._tag !== 'NominalUnion'
+    )
+      return
+
+    assert.deepEqual(
+      state.representation.variants.map((variant) => [
+        variant.variant.name,
+        variant.ordinal,
+        variant.fields.map((field) => [field.name, field.offset]),
+      ]),
+      [
+        ['Ready', 0, []],
+        [
+          'Data',
+          1,
+          [
+            ['flag', 0],
+            ['value', 8],
+          ],
+        ],
+        ['Empty', 2, [['impossible', 0]]],
+      ],
+    )
+    assert.deepEqual(
+      [
+        state.representation.payloadOffset,
+        state.representation.payloadSize,
+        state.size,
+        state.alignment,
+      ],
+      [8, 16, 24, 8],
+    )
+    assert.deepEqual(
+      box.representation.variants.map((variant) => [variant.variant.name, variant.size]),
+      [
+        ['Full', 4],
+        ['Vacant', 0],
+      ],
+    )
+    const boxType = Type.nominal('layout/nominal-union', 'Box', ['i32'])
+    const boxShape = Layout.callingShapes(
+      Target.wasm32UnknownUnknown,
+      catalog.value.entries.flatMap((entry) => (entry._tag === 'LayoutEntry' ? [entry] : [])),
+      [boxType],
+    ).at(0)
+    assert.strictEqual(boxShape?.tree._tag, 'NominalUnionShape')
+    assert.deepEqual(
+      boxShape?.lanes.map((lane) => lane.path.at(0)?._tag),
+      ['NominalUnionTagSelector', 'NominalUnionPayloadSelector'],
+    )
+    assert.include(
+      LayoutEncode.encodeCatalog(catalog.value),
+      'repr=nominal-union layout/nominal-union.State',
+    )
+    assert.deepEqual(LayoutVerify.verifyCatalog(catalog.value), [])
+    assert.deepEqual(LayoutVerify.verify(plan.value), [])
+  }),
 )
 
 it.effect(

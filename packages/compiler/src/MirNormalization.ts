@@ -190,7 +190,7 @@ const operationClassification = (
   fn: Mir.MirFunction,
   operation: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'CloseEffectEntry' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' | 'CloseEffectEntry' }
   >,
 ): ProvisionalMir.Classification =>
   operation._tag === 'CloseEffectEntry'
@@ -272,7 +272,7 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
       for (const operation of region.operations) {
         if (
           operation._tag !== 'RunEffect' &&
-          operation._tag !== 'ReifyEffect' &&
+          operation._tag !== 'CatchEffect' &&
           operation._tag !== 'CloseEffectEntry'
         )
           continue

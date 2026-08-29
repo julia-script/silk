@@ -132,8 +132,6 @@ export interface CallInstance {
   readonly span: Hir.Expression['span']
   readonly target: InstanceKey
   readonly resultEffect?: string
-  /** Parameter whose Effect is reified by an exact source forwarding wrapper. */
-  readonly effectResultParameter?: number
 }
 
 /** One exact sealed intrinsic call retained by executable instance closure. */
@@ -417,15 +415,23 @@ const specializeEvidence = (
     const source = Type.substituteFailureRow(evidence.source, substitution)
     return concreteConstraintEvidence(Constraint.nominalMember(selected, source), origin, index)
   }
-  if (evidence._tag === 'FailureSubset')
-    return concreteConstraintEvidence(
-      Constraint.failureSubset(
-        Type.substituteFailureRow(evidence.selected, substitution),
-        Type.substituteFailureRow(evidence.source, substitution),
-      ),
-      origin,
-      index,
+  if (evidence._tag === 'FailureSubset') {
+    const selected = Type.substituteFailureRow(evidence.selected, substitution)
+    const source = Type.substituteFailureRow(evidence.source, substitution)
+    const selectedConcrete = RowAlgebra.concretize(Type.failureRowPolicy(), selected)
+    const sourceConcrete = RowAlgebra.concretize(Type.failureRowPolicy(), source)
+    if (
+      selectedConcrete._tag !== 'Concrete' ||
+      sourceConcrete._tag !== 'Concrete' ||
+      selectedConcrete.row.members.some((member) => !Type.isRuntimeConcrete(member)) ||
+      sourceConcrete.row.members.some((member) => !Type.isRuntimeConcrete(member)) ||
+      !RowAlgebra.isKnownSubset(Type.failureRowPolicy(), selected, source)
     )
+      return undefined
+    return Object.freeze([
+      Object.freeze<ConcreteEvidence>({ _tag: 'FailureSubset', selected, source }),
+    ])
+  }
   if (evidence._tag === 'RequirementSubset')
     return concreteConstraintEvidence(
       Constraint.requirementSubset(

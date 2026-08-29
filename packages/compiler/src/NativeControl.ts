@@ -8,6 +8,7 @@ import type * as LlvmType from '@silklang/llvm/Type'
 import type * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
 import * as CleanupPlan from './CleanupPlan.js'
+import * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import type { LinearTerminator } from './MirLinearization.js'
 import * as NativeAggregate from './NativeAggregate.js'
@@ -15,6 +16,7 @@ import * as NativeDebug from './NativeDebug.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import * as NativeSuspension from './NativeSuspension.js'
 import * as NativeType from './NativeType.js'
+import * as SilkType from './Type.js'
 
 export interface Context {
   readonly builder: Builder.Builder
@@ -115,20 +117,64 @@ export const matchBranch = Effect.fnUntraced(function* (
   terminator: Extract<LinearTerminator, { readonly _tag: 'MatchBranch' }>,
   blockOrdinal: number,
 ): Effect.fn.Return<void, LlvmError.LlvmError> {
-  const tag = read(context, terminator.scrutinee).at(0)
-  if (tag === undefined) throw new RangeError('LLVM union match has no tag lane')
-  const expected = yield* Constant.integerSigned(
-    context.builder,
-    context.i32,
-    BigInt(terminator.memberOrdinal),
-  )
-  const condition = yield* FunctionBody.integerCompare(
-    context.body,
-    'eq',
-    tag,
-    expected,
-    `match${blockOrdinal}_member`,
-  )
+  const values = read(context, terminator.scrutinee)
+  const tag = values.at(0)
+  if (tag === undefined) throw new RangeError('LLVM match has no tag lane')
+  let condition: Value.Value
+  if (terminator.member._tag === 'NominalUnionVariant') {
+    const member = terminator.member
+    const nested = terminator.shape.tree._tag === 'SumShape'
+    const variantTag = values.at(nested ? 1 : 0)
+    if (variantTag === undefined) throw new RangeError('LLVM nominal union match has no tag lane')
+    const variantMatches = yield* FunctionBody.integerCompare(
+      context.body,
+      'eq',
+      variantTag,
+      yield* Constant.integerSigned(context.builder, context.i32, BigInt(member.variantOrdinal)),
+      `match${blockOrdinal}_variant`,
+    )
+    if (!nested) {
+      condition = variantMatches
+    } else {
+      const outer =
+        terminator.shape.tree._tag === 'SumShape'
+          ? terminator.shape.tree.members.find((candidate) =>
+              SilkType.equals(candidate.member, member.root),
+            )
+          : undefined
+      if (outer === undefined)
+        throw new RangeError('LLVM nominal union match lost its structural member')
+      const rootMatches = yield* FunctionBody.integerCompare(
+        context.body,
+        'eq',
+        tag,
+        yield* Constant.integerSigned(context.builder, context.i32, BigInt(outer.ordinal)),
+        `match${blockOrdinal}_root`,
+      )
+      condition = yield* FunctionBody.binary(
+        context.body,
+        'and',
+        rootMatches,
+        variantMatches,
+        `match${blockOrdinal}_member`,
+      )
+    }
+  } else {
+    const outer =
+      terminator.shape.tree._tag === 'SumShape'
+        ? terminator.shape.tree.members.find((candidate) =>
+            SilkType.equals(candidate.member, Match.sourceType(terminator.member)),
+          )
+        : undefined
+    if (outer === undefined) throw new RangeError('LLVM union match lost its structural member')
+    condition = yield* FunctionBody.integerCompare(
+      context.body,
+      'eq',
+      tag,
+      yield* Constant.integerSigned(context.builder, context.i32, BigInt(outer.ordinal)),
+      `match${blockOrdinal}_member`,
+    )
+  }
   yield* FunctionBody.conditionalBranch(
     context.body,
     condition,

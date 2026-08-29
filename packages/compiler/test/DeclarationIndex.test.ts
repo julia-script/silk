@@ -949,6 +949,83 @@ it.effect('indexes mixed struct and function declarations in one canonical names
   }),
 )
 
+it.effect('indexes generic nominal unions with parent-scoped variants and fields', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `pub union Result<A, E> { Success { pub value: A, next: Other }, Failure { error: E }, Pending }
+union Other { Success { value: bool } }`,
+      ],
+    ])
+    const module = index.modules.at(0)
+    const result = module?.unions.at(0)
+    const other = module?.unions.at(1)
+
+    assert.deepEqual(
+      module?.members.map((member) => member._tag),
+      ['UnionDeclaration', 'UnionDeclaration'],
+    )
+    assert.deepEqual(
+      result?.typeParameters.map((parameter) => parameter.type.name),
+      ['A', 'E'],
+    )
+    assert.deepEqual(
+      result?.variants.map((variant) => [
+        variant.name._tag === 'Present' ? variant.name.spelling : '_',
+        variant.kind,
+      ]),
+      [
+        ['Success', 'Fields'],
+        ['Failure', 'Fields'],
+        ['Pending', 'Unit'],
+      ],
+    )
+    assert.strictEqual(result?.validity._tag, 'Valid')
+    assert.strictEqual(result?.variants.at(0)?.fields.at(0)?.visibility, 'Public')
+    assert.strictEqual(result?.variants.at(0)?.fields.at(1)?.declaredType._tag, 'Resolved')
+    assert.notDeepEqual(result?.variants.at(0)?.canonical, other?.variants.at(0)?.canonical)
+    assert.notDeepEqual(
+      result?.variants.at(0)?.fields.at(0)?.id,
+      other?.variants.at(0)?.fields.at(0)?.id,
+    )
+    assert.deepEqual(index.diagnostics, [])
+  }),
+)
+
+it.effect('diagnoses invalid nominal unions while preserving valid siblings', () =>
+  Effect.gen(function* () {
+    const source = `union Empty {}
+union Damaged { Same, Same, EmptyFields {}, Good { value: Missing }, Tail }
+struct Damaged {}`
+    const index = yield* collect('root', [['root', source]])
+    const unions = index.modules.at(0)?.unions ?? []
+    const damaged = unions.at(1)
+
+    assert.deepEqual(
+      damaged?.variants.map((variant) =>
+        variant.name._tag === 'Present' ? variant.name.spelling : '_',
+      ),
+      ['Same', 'Same', 'EmptyFields', 'Good', 'Tail'],
+    )
+    assert.strictEqual(damaged?.variants.at(4)?.canonical._tag, 'Canonical')
+    assert.strictEqual(damaged?.validity._tag, 'Invalid')
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0164', 'SEM0165', 'SEM0166', 'SEM0001', 'SEM0003'],
+    )
+    const duplicate = index.diagnostics.find((diagnostic) => diagnostic.code === 'SEM0165')
+    assert.deepEqual(
+      duplicate?.relatedSpans?.map((related) => source.slice(related.span.start, related.span.end)),
+      ['Same'],
+    )
+    assert.strictEqual(
+      duplicate === undefined ? undefined : source.slice(duplicate.span.start, duplicate.span.end),
+      'Same',
+    )
+  }),
+)
+
 it.effect('retains duplicate and damaged struct fields without losing later fields', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
@@ -986,6 +1063,19 @@ it.effect('diagnoses private exposure and inline recursive struct components can
       ['Hidden', 'Hidden', 'Hidden'],
     )
 
+    const exposedUnion = yield* collect('union-exposure', [
+      [
+        'union-exposure',
+        'struct Hidden {}\npub union Public { Value { pub visible: Hidden, private: Hidden } }',
+      ],
+    ])
+    assert.deepEqual(
+      exposedUnion.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0019'],
+    )
+    assert.strictEqual(exposedUnion.modules.at(0)?.unions.at(0)?.validity._tag, 'Invalid')
+    assert.strictEqual(exposedUnion.modules.at(0)?.unions.at(0)?.dependency._tag, 'Unavailable')
+
     const recursiveSource = 'import b.B\npub struct A { value: B.B }'
     const recursive = yield* collect('a/A', [
       ['a/A', recursiveSource],
@@ -1013,6 +1103,16 @@ it.effect('diagnoses private exposure and inline recursive struct components can
       ['SEM0020'],
     )
     assert.strictEqual(direct.modules.at(0)?.structs.at(0)?.dependency._tag, 'Unavailable')
+
+    const mixed = yield* collect('mixed', [
+      ['mixed', 'union Link { Next { node: Node }, End }\nstruct Node { link: Link }'],
+    ])
+    assert.deepEqual(
+      mixed.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0020'],
+    )
+    assert.strictEqual(mixed.modules.at(0)?.unions.at(0)?.dependency._tag, 'Unavailable')
+    assert.strictEqual(mixed.modules.at(0)?.structs.at(0)?.dependency._tag, 'Unavailable')
   }),
 )
 
@@ -1328,6 +1428,36 @@ impl Clock for FixedClock {}`,
     assert.strictEqual(
       index.diagnostics.filter((diagnostic) => diagnostic.code === 'SEM0083').length,
       3,
+    )
+  }),
+)
+
+it.effect('validates Copy over every specialized nominal union variant field', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('union-copy', [
+      [
+        'union-copy',
+        `union Choice<T> { Empty, Present { value: T } }
+impl<T: Copy> Copy for Choice<T> {}
+union Implicit { Left { value: i32 }, Right }
+union Owned { Empty, Present { allocation: Allocation } }
+impl Copy for Owned {}`,
+      ],
+    ])
+    const choice = (element: Type.Type): Type.Nominal =>
+      Type.nominal('union-copy', 'Choice', [element])
+
+    assert.isTrue(ConformanceProof.copyType(index, choice('i32')))
+    assert.isFalse(ConformanceProof.copyType(index, choice(Type.nominal('union-copy', 'Implicit'))))
+    assert.isFalse(ConformanceProof.copyType(index, Type.nominal('union-copy', 'Implicit')))
+    assert.isFalse(ConformanceProof.copyType(index, Type.nominal('union-copy', 'Owned')))
+    assert.deepEqual(
+      index.modules.at(0)?.conformances.map((conformance) => conformance.validity._tag),
+      ['ValidConformance', 'InvalidConformance'],
+    )
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0083'],
     )
   }),
 )

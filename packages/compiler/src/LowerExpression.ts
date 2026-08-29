@@ -12,6 +12,7 @@ import {
 } from './CleanupEmission.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type { LoweredExpression } from './EffectLowering.js'
 import {
   borrowedWriteRoot,
@@ -22,7 +23,6 @@ import {
   lowerEffectCatch,
   lowerEffectExecution,
   lowerPlace,
-  lowerReifiedEffectRecipe,
   lowerRunEffectComposite,
   ownedWriteRoot,
 } from './EffectLowering.js'
@@ -412,7 +412,9 @@ export function lowerExpressionInner(
           _tag: 'MakeCallable',
           destination,
           target: expression.target,
-          typeArguments: Object.freeze([]),
+          typeArguments: Object.freeze(
+            expression.typeArguments.map((argument) => fn.semanticArgument(argument)),
+          ),
           captures: Object.freeze([]),
           type,
           provenance: authored(expression.span),
@@ -523,7 +525,11 @@ export function lowerExpressionInner(
         if (lowered === undefined || loweredType?._tag !== 'CallableValue') return false
         callable = lowered.result
         callableType = loweredType.type
-        typeArguments = loweredType.environment?.callable.typeArguments ?? Object.freeze([])
+        typeArguments =
+          loweredType.environment?.callable.typeArguments ??
+          loweredType.storage?.realization.targetArguments ??
+          loweredType.typeArguments ??
+          Object.freeze([])
         return true
       }
       const lowered =
@@ -533,7 +539,7 @@ export function lowerExpressionInner(
       const definition =
         callable === undefined ? undefined : fn.callableDefinitions.get(callable.ordinal)
       const realizedTarget = target ?? definition?.target
-      const declaredEffectResult =
+      const declaredEffectValue =
         realizedTarget?._tag === 'DeclarationCallableTarget'
           ? fn.effectResults.get(instanceText(realizedTarget.declaration, typeArguments))
           : undefined
@@ -541,13 +547,12 @@ export function lowerExpressionInner(
         (call?.resultEffect === undefined
           ? undefined
           : effectValueByIdentity(fn.layout, call.resultEffect)) ??
-        declaredEffectResult ??
+        declaredEffectValue ??
         fn.type(expression.type)
       if (!lowered || type === undefined || callableType === undefined) return undefined
       if (
         realizedTarget?._tag === 'BuiltinCallableTarget' &&
-        Scalar.isCheckedOperation(realizedTarget.operation) &&
-        type._tag === 'Union'
+        Scalar.isCheckedOperation(realizedTarget.operation)
       ) {
         const actorScalar = Scalar.find(realizedTarget.actor)
         const scalarOperation = actorScalar?.operations.find(
@@ -562,39 +567,53 @@ export function lowerExpressionInner(
             : (Scalar.conversionTarget(realizedTarget.operation) ?? actorScalar)
         const realizedCaptures = definition?.captures ?? captures
         const ordered: Array<Mir.LocalId | undefined> = Array.from({
-          length: scalarOperation?.arity ?? 0,
+          length: (scalarOperation?.arity ?? 0) + 2,
         })
         for (const capture of realizedCaptures) ordered[capture.parameterOrdinal] = capture.source
         for (const argument of arguments_) {
           const empty = ordered.indexOf(undefined)
           if (empty >= 0) ordered[empty] = argument
         }
-        const operands = ordered.filter((operand): operand is Mir.LocalId => operand !== undefined)
+        const operands = ordered
+          .slice(0, scalarOperation?.arity ?? 0)
+          .filter((operand): operand is Mir.LocalId => operand !== undefined)
+        const present = ordered.at(scalarOperation?.arity ?? -1)
+        const absent = ordered.at((scalarOperation?.arity ?? -1) + 1)
         const first = operands.at(0)
         const sourceType = first === undefined ? undefined : fn.localTypes.at(first.ordinal)
+        const presentType = present === undefined ? undefined : fn.localTypes.at(present.ordinal)
+        const absentType = absent === undefined ? undefined : fn.localTypes.at(absent.ordinal)
         if (
           sourceScalar?.category !== 'Integer' ||
           (valueScalar?.category !== 'Integer' && valueScalar?.category !== 'Character') ||
           scalarOperation === undefined ||
+          present === undefined ||
+          absent === undefined ||
+          presentType?._tag !== 'CallableValue' ||
+          absentType?._tag !== 'CallableValue' ||
           operands.length !== scalarOperation.arity ||
           sourceType?._tag !== sourceScalar.spelling ||
           operands.some((operand) => fn.localTypes.at(operand.ordinal)?._tag !== sourceType._tag)
         )
           return undefined
-        const success = Type.some(valueScalar.spelling)
-        const failure = Type.none
+        const valid = fn.alloc(Object.freeze({ _tag: 'bool' as const }))
+        const value = fn.alloc(Object.freeze({ _tag: valueScalar.spelling }))
         const destination = fn.alloc(type)
         fn.emit(
           Object.freeze({
             _tag: 'CheckedScalar' as const,
             operation: scalarOperation.code,
             destination,
+            valid,
+            value,
             operands: Object.freeze(operands),
+            present,
+            absent,
+            presentCleanup: callableLocalCleanup(fn, presentType),
+            absentCleanup: callableLocalCleanup(fn, absentType),
             sourceType,
             valueType: Object.freeze({ _tag: valueScalar.spelling }),
             type,
-            success,
-            failure,
             provenance: authored(expression.span),
           }),
         )
@@ -741,22 +760,11 @@ export function lowerExpressionInner(
     }
     case 'EffectCatch':
       return lowerCatchEffectValue(fn, expression)
-    case 'EffectResult':
-      return undefined
     case 'Run': {
       return fn.withRecipeReplay(() => {
         const resultRecipe = effectRecipe(fn, expression.subject)
         if (resultRecipe?._tag === 'EffectCatch')
           return lowerEffectCatch(fn, resultRecipe, expression.span)
-        if (resultRecipe?._tag === 'EffectResult') {
-          const reified = lowerReifiedEffectRecipe(
-            fn,
-            resultRecipe.protected,
-            expression.type,
-            expression.span,
-          )
-          return reified === undefined ? undefined : Object.freeze({ result: reified.result })
-        }
         if (
           resultRecipe !== undefined &&
           inlineForwardedRequirement(fn, resultRecipe) !== undefined
@@ -1174,6 +1182,45 @@ export function lowerExpressionInner(
           }
           const type = fn.type(expression.type)
           if (type === undefined) return undefined
+          if (recipe.operation === 'OsFileOpen' || recipe.operation === 'OsDirectoryOpen') {
+            const success = arguments_.at(-2)
+            const failure = arguments_.at(-1)
+            const successType =
+              success === undefined ? undefined : fn.localTypes.at(success.ordinal)
+            const failureType =
+              failure === undefined ? undefined : fn.localTypes.at(failure.ordinal)
+            const handleType = fn.type(Type.osHandle)
+            if (
+              success === undefined ||
+              failure === undefined ||
+              successType?._tag !== 'CallableValue' ||
+              failureType?._tag !== 'CallableValue' ||
+              handleType?._tag !== 'Nominal'
+            )
+              return undefined
+            const valid = fn.alloc(bool)
+            const handle = fn.alloc(handleType)
+            const destination = fn.alloc(type)
+            fn.emit(
+              Object.freeze({
+                _tag: 'OsOpen' as const,
+                operation: recipe.intrinsic,
+                destination,
+                valid,
+                handle,
+                arguments: Object.freeze(arguments_.slice(0, -2)),
+                success,
+                failure,
+                successCleanup: callableLocalCleanup(fn, successType),
+                failureCleanup: callableLocalCleanup(fn, failureType),
+                handleType,
+                type,
+                provenance: authored(expression.span),
+              }),
+            )
+            endLoans(fn, recipe.loanEnds, expression.span)
+            return Object.freeze({ result: destination })
+          }
           const destination = fn.alloc(type)
           fn.emit(
             Object.freeze({
@@ -1371,11 +1418,32 @@ export function lowerExpressionInner(
           candidate.id.span.start === expression.id.span.start &&
           candidate.id.span.end === expression.id.span.end,
       )
-      const specializeMember = (member: Match.CoverageIdentity): Match.CoverageIdentity =>
-        member._tag === 'StructuralTypeMember'
-          ? Match.structuralMember(fn.semantic(member.type))
+      const specializeMember = (member: Match.CoverageIdentity): Match.CoverageIdentity => {
+        if (member._tag === 'StructuralTypeMember')
+          return Match.structuralMember(fn.semantic(member.type))
+        if (member._tag !== 'NominalUnionVariant') return member
+        const type = fn.semantic(member.type)
+        return Type.isNominal(type)
+          ? Match.nominalUnionVariant(
+              fn.semantic(member.root),
+              type,
+              member.variant,
+              member.variantOrdinal,
+            )
           : member
-      const members = Object.freeze(expression.members.map(specializeMember))
+      }
+      const specializedMembers = expression.members.map(specializeMember)
+      const members =
+        scrutineeType._tag === 'Enum'
+          ? Object.freeze(
+              specializedMembers.filter(
+                (member, ordinal) =>
+                  specializedMembers.findIndex((candidate) =>
+                    Match.identityEquals(candidate, member),
+                  ) === ordinal,
+              ),
+            )
+          : Layout.coverageMembers(scrutineeShape)
       const specializedCoverage = Match.cover(
         members,
         expression.arms.map((arm) =>
@@ -1457,6 +1525,35 @@ export function lowerExpressionInner(
         const ownedArm = ownership?.arms.find(
           (candidate) => candidate.id.ordinal === arm.id.ordinal,
         )
+        const finalizedSelectedOperations = [...selectedOperations]
+        const cleanup: Array<Mir.MatchArm['selected']['cleanup'][number]> = []
+        for (const release of ownedArm?.cleanup ?? []) {
+          const plan = specializedCleanup(fn, release.cleanup)
+          if (plan._tag === 'NoCleanup') continue
+          if (
+            release.path.length === 0 &&
+            Type.equals(plan.type, fn.semantic(expression.scrutinee.type))
+          ) {
+            finalizedSelectedOperations.push(
+              Object.freeze({
+                _tag: 'Drop',
+                local: scrutinee.result,
+                cleanup: plan,
+                provenance: authored(arm.span),
+              }),
+            )
+            continue
+          }
+          const type = fn.type(plan.type)
+          if (type === undefined) return undefined
+          cleanup.push(
+            Object.freeze({
+              destination: fn.alloc(type),
+              path: release.path,
+              cleanup: plan,
+            }),
+          )
+        }
         arms.push(
           Object.freeze({
             id: arm.id,
@@ -1468,16 +1565,9 @@ export function lowerExpressionInner(
             ...(guard === undefined ? {} : { guard }),
             selected: Object.freeze({
               access: expression.access,
-              operations: selectedOperations,
+              operations: Object.freeze(finalizedSelectedOperations),
               result: selectedResult.result,
-              cleanup: Object.freeze(
-                (ownedArm?.cleanup ?? []).map((release) =>
-                  Object.freeze({
-                    path: release.path,
-                    cleanup: specializedCleanup(fn, release.cleanup),
-                  }),
-                ),
-              ),
+              cleanup: Object.freeze(cleanup),
               endBorrow: expression.access === 'Shared' || expression.access === 'Exclusive',
             }),
             provenance: authored(arm.span),
@@ -1494,8 +1584,7 @@ export function lowerExpressionInner(
             arms
               .filter(
                 (arm) =>
-                  arm.universal ||
-                  (arm.member !== undefined && Match.identityEquals(arm.member, member)),
+                  arm.universal || (arm.member !== undefined && Match.selects(arm.member, member)),
               )
               .map((arm) => arm.id),
           ),
@@ -1561,11 +1650,8 @@ export function lowerExpressionInner(
         const value = loweredFields.get(field.field.ordinal)
         const declared =
           representation?._tag === 'Aggregate'
-            ? representation.fields.find(
-                (candidate) =>
-                  candidate.id.ordinal === field.field.ordinal &&
-                  candidate.id.struct.sourceId === field.field.struct.sourceId &&
-                  candidate.id.struct.ordinal === field.field.struct.ordinal,
+            ? representation.fields.find((candidate) =>
+                DeclarationFacts.sameFieldId(candidate.id, field.field),
               )
             : undefined
         const stored =
@@ -1592,6 +1678,67 @@ export function lowerExpressionInner(
           type,
           fields: Object.freeze(fields),
           provenance: Object.freeze({ span: expression.span, generated: false }),
+        }),
+      )
+      return { result: destination }
+    }
+    case 'ConstructUnionVariant': {
+      const type = fn.type(expression.type)
+      if (type?._tag !== 'Nominal') return undefined
+      const representation = Layout.entry(fn.layout, type.type)?.representation
+      if (representation?._tag !== 'NominalUnion') return undefined
+      const variant = representation.variants.find(
+        (candidate) =>
+          candidate.ordinal === expression.variantOrdinal &&
+          candidate.variant.union.module === expression.variant.union.module &&
+          candidate.variant.union.name === expression.variant.union.name &&
+          candidate.variant.name === expression.variant.name,
+      )
+      if (variant === undefined) return undefined
+      const canonicalFields = new Map(
+        expression.fields.map(
+          (field) => [DeclarationFacts.fieldIdKey(field.field), field] as const,
+        ),
+      )
+      const loweredFields = new Map<string, Mir.LocalId>()
+      for (const fieldId of expression.evaluationOrder) {
+        const field = canonicalFields.get(DeclarationFacts.fieldIdKey(fieldId))
+        if (field === undefined) return undefined
+        const lowered = lowerExpression(fn, field.value)
+        if (lowered === undefined) return undefined
+        loweredFields.set(DeclarationFacts.fieldIdKey(field.field), lowered.result)
+      }
+      const fields = expression.fields.flatMap((field) => {
+        const value = loweredFields.get(DeclarationFacts.fieldIdKey(field.field))
+        const declared = variant.fields.find((candidate) =>
+          DeclarationFacts.sameFieldId(candidate.id, field.field),
+        )
+        const stored =
+          declared === undefined
+            ? undefined
+            : (storedCallableValueType(fn.layout, declared.type)?.storage ??
+              storedEffectValueType(fn.layout, declared.type)?.storage)
+        return value === undefined
+          ? []
+          : [
+              Object.freeze({
+                field: field.field,
+                value,
+                ...(stored === undefined ? {} : { stored }),
+              }),
+            ]
+      })
+      if (fields.length !== expression.fields.length) return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'ConstructUnionVariant',
+          destination,
+          type,
+          variant: expression.variant,
+          variantOrdinal: expression.variantOrdinal,
+          fields: Object.freeze(fields),
+          provenance: authored(expression.span),
         }),
       )
       return { result: destination }

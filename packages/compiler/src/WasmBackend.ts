@@ -16,7 +16,7 @@ import * as Backend from './Backend.js'
 import { symbolFor } from './Backend.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as FloatingPoint from './FloatingPoint.js'
@@ -56,6 +56,7 @@ import {
   heapBase,
   heapHeaderBytes,
   heapReleaseBody,
+  operationCleanupPlans,
   stackLimit,
 } from './WasmMemory.js'
 import * as WasmSuspension from './WasmSuspension.js'
@@ -891,6 +892,13 @@ const localSharedCleanupDepth = (cleanup: CleanupPlan.CleanupPlan): number => {
       return localSharedCleanupDepth(cleanup.inner)
     case 'StructCleanup':
       return Math.max(0, ...cleanup.fields.map((field) => localSharedCleanupDepth(field.cleanup)))
+    case 'NominalUnionCleanup':
+      return Math.max(
+        0,
+        ...cleanup.variants.flatMap((variant) =>
+          variant.fields.map((field) => localSharedCleanupDepth(field.cleanup)),
+        ),
+      )
     case 'ArrayCleanup':
       return localSharedCleanupDepth(cleanup.element)
     case 'UnionCleanup':
@@ -905,34 +913,6 @@ const localSharedCleanupDepth = (cleanup: CleanupPlan.CleanupPlan): number => {
   }
 }
 
-const operationCleanupPlans = (
-  operation: Mir.Operation,
-): ReadonlyArray<CleanupPlan.CleanupPlan> => {
-  switch (operation._tag) {
-    case 'SlotDrop':
-    case 'Drop':
-      return Object.freeze([operation.cleanup])
-    case 'SharedWithMut':
-      return Object.freeze([operation.useCleanup, operation.conflictCleanup])
-    case 'ExecutionPark':
-      return Object.freeze([operation.guardCleanup, operation.registerCleanup])
-    case 'PropagateEffectFailure':
-    case 'RunEffect':
-    case 'RunEffectValue':
-    case 'RunEffectComposite':
-    case 'RunStaticEffect':
-      return Object.freeze((operation.releases ?? []).map((release) => release.cleanup))
-    case 'CloseEffectEntry':
-      return Object.freeze(operation.failures.map((failure) => failure.cleanup))
-    case 'Match':
-      return Object.freeze(
-        operation.arms.flatMap((arm) => arm.selected.cleanup.map((entry) => entry.cleanup)),
-      )
-    default:
-      return Object.freeze([])
-  }
-}
-
 const containsExecutionCleanup = (cleanup: CleanupPlan.CleanupPlan): boolean => {
   switch (cleanup._tag) {
     case 'ExecutionCleanup':
@@ -944,6 +924,10 @@ const containsExecutionCleanup = (cleanup: CleanupPlan.CleanupPlan): boolean => 
       return containsExecutionCleanup(cleanup.inner)
     case 'StructCleanup':
       return cleanup.fields.some((field) => containsExecutionCleanup(field.cleanup))
+    case 'NominalUnionCleanup':
+      return cleanup.variants.some((variant) =>
+        variant.fields.some((field) => containsExecutionCleanup(field.cleanup)),
+      )
     case 'ArrayCleanup':
       return containsExecutionCleanup(cleanup.element)
     case 'UnionCleanup':
@@ -1355,9 +1339,10 @@ const layoutOf = (
     nextInternal += 2
   }
   const internalCount = nextInternal - physical
-  const frameBase = frame.roots.size === 0 ? undefined : physical + internalCount
-  const frameEnd = frame.roots.size === 0 ? undefined : physical + internalCount + 1
-  const framePages = frame.roots.size === 0 ? undefined : physical + internalCount + 2
+  const needsFrame = frame.roots.size !== 0 || frame.nominalUnionCleanupScratch.length !== 0
+  const frameBase = needsFrame ? physical + internalCount : undefined
+  const frameEnd = needsFrame ? physical + internalCount + 1 : undefined
+  const framePages = needsFrame ? physical + internalCount + 2 : undefined
   if (frameBase !== undefined && frameEnd !== undefined && framePages !== undefined) {
     declared.push(named(i32, 'frame_base'), named(i32, 'frame_end'), named(i32, 'frame_pages'))
   }
@@ -1400,7 +1385,7 @@ const layoutOf = (
 const suspensionOperationInputs = (
   operation: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' | 'ExecutionPark' }
   >,
 ): ReadonlyArray<Mir.LocalId> => {
   switch (operation._tag) {
@@ -1409,7 +1394,7 @@ const suspensionOperationInputs = (
     case 'RunEffect':
       return operation.arguments
     case 'RunEffectValue':
-    case 'ReifyEffect':
+    case 'CatchEffect':
       return Object.freeze([operation.effect, ...operation.arguments])
   }
 }
@@ -1418,13 +1403,13 @@ const matchesSuspensionOperation = (
   candidate: Mir.Operation,
   expected: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' | 'ExecutionPark' }
   >,
 ): boolean =>
   candidate === expected ||
   ((candidate._tag === 'RunEffect' ||
     candidate._tag === 'RunEffectValue' ||
-    candidate._tag === 'ReifyEffect' ||
+    candidate._tag === 'CatchEffect' ||
     candidate._tag === 'ExecutionPark') &&
     candidate._tag === expected._tag &&
     candidate.destination.ordinal === expected.destination.ordinal &&
@@ -1717,121 +1702,270 @@ const makeOperationContext = (
     if (environment !== undefined) return environment
     throw new RangeError('Wasm Effect cleanup lost its exact stored environment')
   }
+  interface AddressCleanupState {
+    readonly addressAt: (byteOffset: number) => ReadonlyArray<Instr.Instr>
+    readonly byteOffset: number
+    readonly nominalDepth: number
+  }
+  const transferNominalUnionStorage = (
+    cleanup: Extract<CleanupPlan.CleanupPlan, { readonly _tag: 'NominalUnionCleanup' }>,
+    carrierAddressAt: (byteOffset: number) => ReadonlyArray<Instr.Instr>,
+    rawAddressAt: (byteOffset: number) => ReadonlyArray<Instr.Instr>,
+    direction: 'CarrierToRaw' | 'RawToCarrier',
+  ): ReadonlyArray<Instr.Instr> => {
+    if (memory === undefined) throw new RangeError('Wasm nominal union transfer has no memory')
+    const representation = LayoutPlan.entry(memory.plan, cleanup.type)?.representation
+    const shape = LayoutPlan.callingShape(memory.plan, cleanup.type)
+    if (representation?._tag !== 'NominalUnion' || shape?.tree._tag !== 'NominalUnionShape') {
+      throw new RangeError('Wasm nominal union transfer lost its layout')
+    }
+    const materialization = LayoutPlan.nominalUnionMaterialization(representation)
+    const sourceAddressAt = direction === 'CarrierToRaw' ? carrierAddressAt : rawAddressAt
+    const targetAddressAt = direction === 'CarrierToRaw' ? rawAddressAt : carrierAddressAt
+    const variants = cleanup.variants.flatMap((variant) => {
+      const layoutVariant = representation.variants.find(
+        (candidate) => candidate.ordinal === variant.ordinal,
+      )
+      if (layoutVariant === undefined) {
+        throw new RangeError('Wasm nominal union transfer lost its active variant layout')
+      }
+      const identity = Match.nominalUnionVariant(
+        cleanup.type,
+        cleanup.type,
+        variant.variant,
+        variant.ordinal,
+      )
+      const transfers = layoutVariant.fields.flatMap((layoutField) => {
+        const physical = LayoutPlan.coverageFieldSlots(shape, identity, [layoutField.id])
+        const fieldLanes = semanticLanesOf(layoutField.type)
+        if (physical === undefined || physical.length !== fieldLanes.length) {
+          throw new RangeError('Wasm nominal union transfer lost its complete field mapping')
+        }
+        return physical.flatMap((physicalOrdinal, fieldOrdinal) => {
+          const carrierLane = shape.lanes.at(physicalOrdinal)
+          const fieldLane = fieldLanes.at(fieldOrdinal)
+          const carrierOffset =
+            carrierLane === undefined
+              ? undefined
+              : LayoutVerify.laneOffset(memory.plan, cleanup.type, carrierLane.path)
+          const nestedOffset =
+            fieldLane === undefined
+              ? undefined
+              : LayoutVerify.laneOffset(memory.plan, layoutField.type, fieldLane.path)
+          if (
+            carrierLane === undefined ||
+            fieldLane === undefined ||
+            carrierOffset === undefined ||
+            nestedOffset === undefined
+          ) {
+            throw new RangeError('Wasm nominal union transfer lost a field lane')
+          }
+          const rawOffset = materialization.payloadOffset + layoutField.offset + nestedOffset
+          const sourceLane = direction === 'CarrierToRaw' ? carrierLane : fieldLane
+          const targetLane = direction === 'CarrierToRaw' ? fieldLane : carrierLane
+          const sourceOffset = direction === 'CarrierToRaw' ? carrierOffset : rawOffset
+          const targetOffset = direction === 'CarrierToRaw' ? rawOffset : carrierOffset
+          return [
+            ...targetAddressAt(targetOffset),
+            ...sourceAddressAt(sourceOffset),
+            Instr.memoryAccess(laneLoadMnemonic(memory.plan, sourceLane), memory.memory),
+            ...laneBridge(
+              laneValueType(memory.plan, sourceLane),
+              laneValueType(memory.plan, targetLane),
+            ),
+            Instr.memoryAccess(laneStoreMnemonic(memory.plan, targetLane), memory.memory),
+          ]
+        })
+      })
+      return [
+        ...sourceAddressAt(0),
+        Instr.memoryAccess('i32.load', memory.memory),
+        Instr.i32Const(variant.ordinal),
+        Instr.op('i32.eq'),
+        Instr.ifElse(Instr.emptyBlockType, transfers, []),
+      ]
+    })
+    return [
+      ...targetAddressAt(0),
+      ...sourceAddressAt(0),
+      Instr.memoryAccess('i32.load', memory.memory),
+      Instr.memoryAccess('i32.store', memory.memory),
+      ...variants,
+    ]
+  }
   const hookReleaseWalk = (
     cleanup: CleanupPlan.CleanupPlan,
     addressAt: (byteOffset: number) => ReadonlyArray<Instr.Instr>,
   ): ReadonlyArray<Instr.Instr> => {
     if (!CleanupPlan.hasHook(cleanup)) return []
     if (memory === undefined) throw new RangeError('Wasm hook cleanup has no private memory')
-    return WasmCleanup.emitCleanupWalk(cleanup, 0, (plan_, byteOffset) => {
-      switch (plan_._tag) {
-        case 'HookCleanup':
-          return Object.freeze({
-            before: Object.freeze([
-              ...addressAt(byteOffset),
-              Instr.call(resolve(plan_.hook, plan_.typeArguments)),
-            ]),
-            children: Object.freeze([Object.freeze({ cleanup: plan_.inner, state: byteOffset })]),
-          })
-        case 'CallableCleanup':
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.slots.map((slot) =>
-                Object.freeze({
-                  cleanup: slot.cleanup,
-                  state: byteOffset + callableCaptureRange(plan_, slot.ordinal).byteOffset,
+    return WasmCleanup.emitCleanupWalk<AddressCleanupState>(
+      cleanup,
+      Object.freeze({ addressAt, byteOffset: 0, nominalDepth: 0 }),
+      (plan_, state) => {
+        const child = (nestedOffset: number): AddressCleanupState =>
+          Object.freeze({ ...state, byteOffset: state.byteOffset + nestedOffset })
+        switch (plan_._tag) {
+          case 'HookCleanup':
+            return Object.freeze({
+              before: Object.freeze([
+                ...state.addressAt(state.byteOffset),
+                Instr.call(resolve(plan_.hook, plan_.typeArguments)),
+              ]),
+              children: Object.freeze([Object.freeze({ cleanup: plan_.inner, state })]),
+            })
+          case 'CallableCleanup':
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.slots.map((slot) =>
+                  Object.freeze({
+                    cleanup: slot.cleanup,
+                    state: child(callableCaptureRange(plan_, slot.ordinal).byteOffset),
+                  }),
+                ),
+              ),
+            })
+          case 'EffectCleanup': {
+            const environment = effectEnvironmentForCleanup(plan_)
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.slots.flatMap((slot) => {
+                  const field = environment.fields.at(slot.ordinal)
+                  return field === undefined
+                    ? []
+                    : [
+                        Object.freeze({
+                          cleanup: slot.cleanup,
+                          state: child(field.offset),
+                        }),
+                      ]
                 }),
               ),
-            ),
-          })
-        case 'EffectCleanup': {
-          const environment = effectEnvironmentForCleanup(plan_)
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.slots.flatMap((slot) => {
-                const field = environment.fields.at(slot.ordinal)
-                return field === undefined
-                  ? []
-                  : [
-                      Object.freeze({
-                        cleanup: slot.cleanup,
-                        state: byteOffset + field.offset,
-                      }),
-                    ]
-              }),
-            ),
-          })
-        }
-        case 'StructCleanup': {
-          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
-          if (representation?._tag !== 'Aggregate') return Object.freeze({})
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.fields.flatMap((field) => {
-                if (!CleanupPlan.hasHook(field.cleanup)) return []
-                const layoutField = representation.fields.find(
-                  (candidate) =>
-                    candidate.id.ordinal === field.field.ordinal &&
-                    candidate.id.struct.ordinal === field.field.struct.ordinal &&
-                    candidate.id.struct.sourceId === field.field.struct.sourceId,
-                )
-                return layoutField === undefined
-                  ? []
-                  : [
-                      Object.freeze({
-                        cleanup: field.cleanup,
-                        state: byteOffset + layoutField.offset,
-                      }),
-                    ]
-              }),
-            ),
-          })
-        }
-        case 'ArrayCleanup': {
-          if (!CleanupPlan.hasHook(plan_.element)) return Object.freeze({})
-          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
-          if (representation?._tag !== 'Repeated') return Object.freeze({})
-          return Object.freeze({
-            children: Object.freeze(
-              Array.from({ length: plan_.length }, (_, index) =>
-                Object.freeze({
-                  cleanup: plan_.element,
-                  state: byteOffset + index * representation.stride,
+            })
+          }
+          case 'StructCleanup': {
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'Aggregate') return Object.freeze({})
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.fields.flatMap((field) => {
+                  if (!CleanupPlan.hasHook(field.cleanup)) return []
+                  const layoutField = representation.fields.find((candidate) =>
+                    DeclarationFacts.sameFieldId(candidate.id, field.field),
+                  )
+                  return layoutField === undefined
+                    ? []
+                    : [
+                        Object.freeze({
+                          cleanup: field.cleanup,
+                          state: child(layoutField.offset),
+                        }),
+                      ]
                 }),
               ),
-            ),
-          })
-        }
-        case 'UnionCleanup': {
-          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
-          if (representation?._tag !== 'Union') return Object.freeze({})
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.cases.flatMap((caseEntry) =>
-                CleanupPlan.hasHook(caseEntry.cleanup)
-                  ? [
-                      Object.freeze({
-                        cleanup: caseEntry.cleanup,
-                        state: byteOffset + representation.payloadOffset,
-                        wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
-                          Object.freeze([
-                            ...addressAt(byteOffset),
-                            Instr.memoryAccess('i32.load', memory.memory),
-                            Instr.i32Const(caseEntry.ordinal),
-                            Instr.op('i32.eq'),
-                            Instr.ifElse(Instr.emptyBlockType, instructions, []),
-                          ]),
-                      }),
-                    ]
-                  : [],
+            })
+          }
+          case 'NominalUnionCleanup': {
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'NominalUnion') return Object.freeze({})
+            const materialization = LayoutPlan.nominalUnionMaterialization(representation)
+            const scratch = memory.frame.nominalUnionCleanupScratch.at(state.nominalDepth)
+            if (scratch === undefined) {
+              throw new RangeError('Wasm nominal union hook cleanup lost its canonical scratch')
+            }
+            const carrierAddressAt = (offset: number): ReadonlyArray<Instr.Instr> =>
+              state.addressAt(state.byteOffset + offset)
+            const rawAddressAt = (offset: number): ReadonlyArray<Instr.Instr> =>
+              frameAddress(scratch.offset + offset)
+            return Object.freeze({
+              before: Object.freeze(
+                transferNominalUnionStorage(plan_, carrierAddressAt, rawAddressAt, 'CarrierToRaw'),
               ),
-            ),
-          })
+              children: Object.freeze(
+                plan_.variants.flatMap((variant) => {
+                  const layoutVariant = representation.variants.find(
+                    (candidate) => candidate.ordinal === variant.ordinal,
+                  )
+                  if (layoutVariant === undefined) return []
+                  return variant.fields.flatMap((field) => {
+                    if (!CleanupPlan.hasHook(field.cleanup)) return []
+                    const layoutField = layoutVariant.fields.find((candidate) =>
+                      DeclarationFacts.sameFieldId(candidate.id, field.field),
+                    )
+                    return layoutField === undefined
+                      ? []
+                      : [
+                          Object.freeze({
+                            cleanup: field.cleanup,
+                            state: Object.freeze({
+                              addressAt: rawAddressAt,
+                              byteOffset: materialization.payloadOffset + layoutField.offset,
+                              nominalDepth: state.nominalDepth + 1,
+                            }),
+                            wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                              Object.freeze([
+                                ...rawAddressAt(0),
+                                Instr.memoryAccess('i32.load', memory.memory),
+                                Instr.i32Const(variant.ordinal),
+                                Instr.op('i32.eq'),
+                                Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                              ]),
+                          }),
+                        ]
+                  })
+                }),
+              ),
+              after: Object.freeze(
+                transferNominalUnionStorage(plan_, carrierAddressAt, rawAddressAt, 'RawToCarrier'),
+              ),
+            })
+          }
+          case 'ArrayCleanup': {
+            if (!CleanupPlan.hasHook(plan_.element)) return Object.freeze({})
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'Repeated') return Object.freeze({})
+            return Object.freeze({
+              children: Object.freeze(
+                Array.from({ length: plan_.length }, (_, index) =>
+                  Object.freeze({
+                    cleanup: plan_.element,
+                    state: child(index * representation.stride),
+                  }),
+                ),
+              ),
+            })
+          }
+          case 'UnionCleanup': {
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'Union') return Object.freeze({})
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.cases.flatMap((caseEntry) =>
+                  CleanupPlan.hasHook(caseEntry.cleanup)
+                    ? [
+                        Object.freeze({
+                          cleanup: caseEntry.cleanup,
+                          state: child(representation.payloadOffset),
+                          wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                            Object.freeze([
+                              ...state.addressAt(state.byteOffset),
+                              Instr.memoryAccess('i32.load', memory.memory),
+                              Instr.i32Const(caseEntry.ordinal),
+                              Instr.op('i32.eq'),
+                              Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                            ]),
+                        }),
+                      ]
+                    : [],
+                ),
+              ),
+            })
+          }
+          default:
+            return Object.freeze({})
         }
-        default:
-          return Object.freeze({})
-      }
-    })
+      },
+    )
   }
   /**
    * Runs every Drop hook one cleanup plan invokes: the owner materializes to its frame root,
@@ -2219,14 +2353,69 @@ const makeOperationContext = (
                     return first !== undefined &&
                       first._tag === 'FieldId' &&
                       value !== undefined &&
-                      first.ordinal === field.field.ordinal &&
-                      first.struct.ordinal === field.field.struct.ordinal &&
-                      first.struct.sourceId === field.field.struct.sourceId
+                      DeclarationFacts.sameFieldId(first, field.field)
                       ? [value]
                       : []
                   }),
                 }),
               ),
+            ),
+          })
+        }
+        case 'NominalUnionCleanup': {
+          const shape = LayoutPlan.callingShape(plan, plan_.type)
+          const tag = currentValues.at(0)
+          if (shape?.tree._tag !== 'NominalUnionShape' || tag === undefined)
+            throw new RangeError('Wasm nominal union cleanup lost its shape')
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.variants.flatMap((variant) => {
+                const identity = Match.nominalUnionVariant(
+                  plan_.type,
+                  plan_.type,
+                  variant.variant,
+                  variant.ordinal,
+                )
+                return variant.fields.flatMap((field) => {
+                  const physical = LayoutPlan.coverageFieldSlots(shape, identity, [field.field])
+                  const fieldLanes = semanticLanesOf(field.cleanup.type)
+                  if (physical === undefined || physical.length !== fieldLanes.length) return []
+                  const selected = physical.flatMap((ordinal, index) => {
+                    const value = currentValues.at(ordinal)
+                    const physicalLane = shape.lanes.at(ordinal)
+                    const fieldLane = fieldLanes.at(index)
+                    return value === undefined ||
+                      physicalLane === undefined ||
+                      fieldLane === undefined
+                      ? []
+                      : [
+                          Object.freeze([
+                            ...value,
+                            ...laneBridge(
+                              laneValueType(plan, physicalLane),
+                              laneValueType(plan, fieldLane),
+                            ),
+                          ]),
+                        ]
+                  })
+                  if (selected.length !== fieldLanes.length) return []
+                  return [
+                    Object.freeze({
+                      cleanup: field.cleanup,
+                      state: selected,
+                      wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                        instructions.length === 0
+                          ? Object.freeze([])
+                          : Object.freeze([
+                              ...tag,
+                              Instr.i32Const(variant.ordinal),
+                              Instr.op('i32.eq'),
+                              Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                            ]),
+                    }),
+                  ]
+                })
+              }),
             ),
           })
         }
@@ -2315,148 +2504,258 @@ const makeOperationContext = (
   ): ReadonlyArray<Instr.Instr> => {
     if (!CleanupPlan.reclaims(cleanup)) return []
     if (memory === undefined) throw new RangeError('Wasm slot reclaim has no private memory')
-    return WasmCleanup.emitCleanupWalk(cleanup, byteOffset, (plan_, currentOffset) => {
-      if (!CleanupPlan.reclaims(plan_)) return Object.freeze({})
-      switch (plan_._tag) {
-        case 'ExecutionCleanup': {
-          const scratch = layout.executionCleanupScratch.at(0)
-          if (scratch === undefined) {
-            throw new RangeError('Wasm Execution cleanup lost its package authority local')
+    const addressAt = (offset: number): ReadonlyArray<Instr.Instr> => [
+      Instr.localGet(address),
+      ...(offset === 0 ? [] : [Instr.i32Const(offset), Instr.op('i32.add')]),
+    ]
+    return WasmCleanup.emitCleanupWalk<AddressCleanupState>(
+      cleanup,
+      Object.freeze({ addressAt, byteOffset, nominalDepth: 0 }),
+      (plan_, state) => {
+        const child = (nestedOffset: number): AddressCleanupState =>
+          Object.freeze({ ...state, byteOffset: state.byteOffset + nestedOffset })
+        const load = (nestedOffset = 0): ReadonlyArray<Instr.Instr> => [
+          ...state.addressAt(state.byteOffset + nestedOffset),
+          Instr.memoryAccess('i32.load', memory.memory),
+        ]
+        if (!CleanupPlan.reclaims(plan_)) return Object.freeze({})
+        switch (plan_._tag) {
+          case 'ExecutionCleanup': {
+            const scratch = layout.executionCleanupScratch.at(0)
+            if (scratch === undefined) {
+              throw new RangeError('Wasm Execution cleanup lost its package authority local')
+            }
+            return Object.freeze({
+              before: Object.freeze([
+                ...load(),
+                Instr.localSet(scratch.package),
+                ...releaseExecutionBase(scratch.package),
+              ]),
+            })
           }
-          return Object.freeze({
-            before: Object.freeze([
-              ...loadAt(address, currentOffset),
-              Instr.localSet(scratch.package),
-              ...releaseExecutionBase(scratch.package),
-            ]),
-          })
-        }
-        case 'WakeCleanup': {
-          const scratch = layout.executionCleanupScratch.at(0)
-          if (scratch === undefined) {
-            throw new RangeError('Wasm Wake cleanup lost its package authority local')
+          case 'WakeCleanup': {
+            const scratch = layout.executionCleanupScratch.at(0)
+            if (scratch === undefined) {
+              throw new RangeError('Wasm Wake cleanup lost its package authority local')
+            }
+            return Object.freeze({
+              before: Object.freeze([
+                ...load(),
+                Instr.localSet(scratch.package),
+                ...releaseWakeBase(scratch.package),
+              ]),
+            })
           }
-          return Object.freeze({
-            before: Object.freeze([
-              ...loadAt(address, currentOffset),
-              Instr.localSet(scratch.package),
-              ...releaseWakeBase(scratch.package),
-            ]),
-          })
-        }
-        case 'AllocationCleanup':
-        case 'RawBufferCleanup': {
-          const contextOffset = SilkType.isRawBuffer(plan_.type)
-            ? aggregateFieldOffset(plan_.type, '$allocation') +
-              aggregateFieldOffset(SilkType.allocation, '$context')
-            : aggregateFieldOffset(SilkType.allocation, '$context')
-          return Object.freeze({
-            before: Object.freeze([
-              ...loadAt(address, currentOffset + contextOffset),
+          case 'LocalSharedCoreCleanup': {
+            const elementLayout = LayoutPlan.entry(plan, plan_.element)
+            const block =
+              elementLayout === undefined
+                ? undefined
+                : LocalSharedControlBlock.plan(plan.target, plan_.element, elementLayout)
+            if (block?._tag !== 'LocalSharedControlBlockPlan') {
+              throw new RangeError('Wasm address cleanup lost its local-shared control block')
+            }
+            const base = load()
+            const context = requireMemory()
+            const decrement = [
+              ...base,
+              ...base,
+              Instr.memoryAccess('i32.load', context.memory, { offset: block.strongOffset }),
+              Instr.i32Const(1),
+              Instr.op('i32.sub'),
+              Instr.memoryAccess('i32.store', context.memory, { offset: block.strongOffset }),
+            ]
+            const last = [
+              ...semanticLanesOf(plan_.element).flatMap((lane) => {
+                const offset = LayoutVerify.laneOffset(plan, plan_.element, lane.path)
+                if (offset === undefined) {
+                  throw new RangeError('Wasm address cleanup lost a local-shared payload lane')
+                }
+                return [
+                  ...base,
+                  Instr.memoryAccess(laneLoadMnemonic(plan, lane), context.memory, {
+                    offset: block.valueOffset + offset,
+                  }),
+                ]
+              }),
+              Instr.call(resolve(LocalSharedPayloadCleanup.declaration, [plan_.element])),
+              Instr.op('drop'),
+              ...base,
+              Instr.memoryAccess('i32.load', context.memory, {
+                offset:
+                  block.allocationOffset + aggregateFieldOffset(SilkType.allocation, '$context'),
+              }),
               Instr.call(requireRelease()),
-            ]),
-          })
-        }
-        case 'HookCleanup':
-          return Object.freeze({
-            children: Object.freeze([
-              Object.freeze({ cleanup: plan_.inner, state: currentOffset }),
-            ]),
-          })
-        case 'CallableCleanup':
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.slots.map((slot) =>
-                Object.freeze({
-                  cleanup: slot.cleanup,
-                  state: currentOffset + callableCaptureRange(plan_, slot.ordinal).byteOffset,
+            ]
+            return Object.freeze({
+              before: Object.freeze([
+                ...base,
+                Instr.memoryAccess('i32.load', context.memory, { offset: block.strongOffset }),
+                Instr.i32Const(1),
+                Instr.op('i32.gt_u'),
+                Instr.ifElse(Instr.emptyBlockType, decrement, last),
+              ]),
+            })
+          }
+          case 'AllocationCleanup':
+          case 'RawBufferCleanup': {
+            const contextOffset = SilkType.isRawBuffer(plan_.type)
+              ? aggregateFieldOffset(plan_.type, '$allocation') +
+                aggregateFieldOffset(SilkType.allocation, '$context')
+              : aggregateFieldOffset(SilkType.allocation, '$context')
+            return Object.freeze({
+              before: Object.freeze([...load(contextOffset), Instr.call(requireRelease())]),
+            })
+          }
+          case 'HookCleanup':
+            return Object.freeze({
+              children: Object.freeze([Object.freeze({ cleanup: plan_.inner, state })]),
+            })
+          case 'CallableCleanup':
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.slots.map((slot) =>
+                  Object.freeze({
+                    cleanup: slot.cleanup,
+                    state: child(callableCaptureRange(plan_, slot.ordinal).byteOffset),
+                  }),
+                ),
+              ),
+            })
+          case 'EffectCleanup': {
+            const environment = effectEnvironmentForCleanup(plan_)
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.slots.flatMap((slot) => {
+                  const field = environment.fields.at(slot.ordinal)
+                  return field === undefined
+                    ? []
+                    : [
+                        Object.freeze({
+                          cleanup: slot.cleanup,
+                          state: child(field.offset),
+                        }),
+                      ]
                 }),
               ),
-            ),
-          })
-        case 'EffectCleanup': {
-          const environment = effectEnvironmentForCleanup(plan_)
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.slots.flatMap((slot) => {
-                const field = environment.fields.at(slot.ordinal)
-                return field === undefined
-                  ? []
-                  : [
-                      Object.freeze({
-                        cleanup: slot.cleanup,
-                        state: currentOffset + field.offset,
-                      }),
-                    ]
-              }),
-            ),
-          })
-        }
-        case 'StructCleanup': {
-          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
-          if (representation?._tag !== 'Aggregate') return Object.freeze({})
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.fields.flatMap((field) => {
-                const layoutField = representation.fields.find(
-                  (candidate) =>
-                    candidate.id.ordinal === field.field.ordinal &&
-                    candidate.id.struct.ordinal === field.field.struct.ordinal &&
-                    candidate.id.struct.sourceId === field.field.struct.sourceId,
-                )
-                return layoutField === undefined
-                  ? []
-                  : [
-                      Object.freeze({
-                        cleanup: field.cleanup,
-                        state: currentOffset + layoutField.offset,
-                      }),
-                    ]
-              }),
-            ),
-          })
-        }
-        case 'ArrayCleanup': {
-          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
-          if (representation?._tag !== 'Repeated') return Object.freeze({})
-          return Object.freeze({
-            children: Object.freeze(
-              Array.from({ length: plan_.length }, (_, index) =>
-                Object.freeze({
-                  cleanup: plan_.element,
-                  state: currentOffset + index * representation.stride,
+            })
+          }
+          case 'StructCleanup': {
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'Aggregate') return Object.freeze({})
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.fields.flatMap((field) => {
+                  const layoutField = representation.fields.find((candidate) =>
+                    DeclarationFacts.sameFieldId(candidate.id, field.field),
+                  )
+                  return layoutField === undefined
+                    ? []
+                    : [
+                        Object.freeze({
+                          cleanup: field.cleanup,
+                          state: child(layoutField.offset),
+                        }),
+                      ]
                 }),
               ),
-            ),
-          })
-        }
-        case 'UnionCleanup': {
-          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
-          if (representation?._tag !== 'Union') return Object.freeze({})
-          return Object.freeze({
-            children: Object.freeze(
-              plan_.cases.map((caseEntry) =>
-                Object.freeze({
-                  cleanup: caseEntry.cleanup,
-                  state: currentOffset + representation.payloadOffset,
-                  wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
-                    instructions.length === 0
-                      ? Object.freeze([])
-                      : Object.freeze([
-                          ...loadAt(address, currentOffset),
-                          Instr.i32Const(caseEntry.ordinal),
-                          Instr.op('i32.eq'),
-                          Instr.ifElse(Instr.emptyBlockType, instructions, []),
-                        ]),
+            })
+          }
+          case 'NominalUnionCleanup': {
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'NominalUnion') return Object.freeze({})
+            const materialization = LayoutPlan.nominalUnionMaterialization(representation)
+            const scratch = memory.frame.nominalUnionCleanupScratch.at(state.nominalDepth)
+            if (scratch === undefined) {
+              throw new RangeError('Wasm nominal union reclaim lost its canonical scratch')
+            }
+            const carrierAddressAt = (offset: number): ReadonlyArray<Instr.Instr> =>
+              state.addressAt(state.byteOffset + offset)
+            const rawAddressAt = (offset: number): ReadonlyArray<Instr.Instr> =>
+              frameAddress(scratch.offset + offset)
+            return Object.freeze({
+              before: Object.freeze(
+                transferNominalUnionStorage(plan_, carrierAddressAt, rawAddressAt, 'CarrierToRaw'),
+              ),
+              children: Object.freeze(
+                plan_.variants.flatMap((variant) => {
+                  const layoutVariant = representation.variants.find(
+                    (candidate) => candidate.ordinal === variant.ordinal,
+                  )
+                  if (layoutVariant === undefined) return []
+                  return variant.fields.flatMap((field) => {
+                    const layoutField = layoutVariant.fields.find((candidate) =>
+                      DeclarationFacts.sameFieldId(candidate.id, field.field),
+                    )
+                    return layoutField === undefined
+                      ? []
+                      : [
+                          Object.freeze({
+                            cleanup: field.cleanup,
+                            state: Object.freeze({
+                              addressAt: rawAddressAt,
+                              byteOffset: materialization.payloadOffset + layoutField.offset,
+                              nominalDepth: state.nominalDepth + 1,
+                            }),
+                            wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                              instructions.length === 0
+                                ? Object.freeze([])
+                                : Object.freeze([
+                                    ...rawAddressAt(0),
+                                    Instr.memoryAccess('i32.load', memory.memory),
+                                    Instr.i32Const(variant.ordinal),
+                                    Instr.op('i32.eq'),
+                                    Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                                  ]),
+                          }),
+                        ]
+                  })
                 }),
               ),
-            ),
-          })
+            })
+          }
+          case 'ArrayCleanup': {
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'Repeated') return Object.freeze({})
+            return Object.freeze({
+              children: Object.freeze(
+                Array.from({ length: plan_.length }, (_, index) =>
+                  Object.freeze({
+                    cleanup: plan_.element,
+                    state: child(index * representation.stride),
+                  }),
+                ),
+              ),
+            })
+          }
+          case 'UnionCleanup': {
+            const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+            if (representation?._tag !== 'Union') return Object.freeze({})
+            return Object.freeze({
+              children: Object.freeze(
+                plan_.cases.map((caseEntry) =>
+                  Object.freeze({
+                    cleanup: caseEntry.cleanup,
+                    state: child(representation.payloadOffset),
+                    wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                      instructions.length === 0
+                        ? Object.freeze([])
+                        : Object.freeze([
+                            ...load(),
+                            Instr.i32Const(caseEntry.ordinal),
+                            Instr.op('i32.eq'),
+                            Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                          ]),
+                  }),
+                ),
+              ),
+            })
+          }
+          default:
+            return Object.freeze({})
         }
-        default:
-          return Object.freeze({})
-      }
-    })
+      },
+    )
   }
   /**
    * One owned value's complete release: its Drop hooks, then the blocks its reclaim tickets still
@@ -3264,7 +3563,7 @@ const emitHostWriteOperation = (
 }
 
 const emitOsCallOperation = (
-  _operation: Extract<Mir.Operation, { readonly _tag: 'OsCall' }>,
+  _operation: Extract<Mir.Operation, { readonly _tag: 'OsOpen' | 'OsCall' }>,
   _state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
   throw new RangeError('Target validation allowed a native-only OS operation into Wasm')
@@ -4572,6 +4871,22 @@ const emitShortCircuitOperation = (
   ]
 }
 
+const emitConditionalOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'Conditional' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const branch = (selected: typeof operation.taken): ReadonlyArray<Instr.Instr> => [
+    ...selected.operations.flatMap((nested) =>
+      emitOperation(nested, state.emitter, state.suspension),
+    ),
+    ...state.copy(state.slots(selected.result), state.slots(operation.destination)),
+  ]
+  return [
+    Instr.localGet(state.scalar(operation.condition)),
+    Instr.ifElse(Instr.emptyBlockType, branch(operation.taken), branch(operation.otherwise)),
+  ]
+}
+
 const emitEnumConstantOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'EnumConstant' }>,
   state: WasmOperationContext,
@@ -4604,7 +4919,7 @@ const emitMatchOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'Match' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
-  const { emitter, layout, suspension, slots, scalar, copy } = state
+  const { emitter, layout, suspension, slots, scalar, copy, releaseInstructions } = state
 
   const emitMany = (operations: ReadonlyArray<Mir.Operation>): ReadonlyArray<Instr.Instr> =>
     operations.flatMap((nested) => emitOperation(nested, emitter, suspension))
@@ -4617,10 +4932,14 @@ const emitMatchOperation = (
     if (candidate === undefined) return [Instr.op('unreachable')]
     const arm = operation.arms.find((entry) => entry.id.ordinal === candidate.ordinal)
     if (arm === undefined) throw new RangeError('Wasm match lost a candidate arm')
+    const bindingMember =
+      arm.member?._tag === 'StructuralTypeMember' && Match.selects(arm.member, member)
+        ? arm.member
+        : member
     const bindings = arm.bindings.flatMap((binding) => {
-      const physical = LayoutPlan.memberFieldSlots(
+      const physical = LayoutPlan.coverageFieldSlots(
         operation.scrutineeShape,
-        Match.sourceType(member),
+        bindingMember,
         binding.path,
       )
       if (physical === undefined) {
@@ -4634,8 +4953,29 @@ const emitMatchOperation = (
         slots(binding.destination),
       )
     })
+    const cleanup = arm.selected.cleanup.flatMap((entry) => {
+      const physical = LayoutPlan.coverageFieldSlots(
+        operation.scrutineeShape,
+        bindingMember,
+        entry.path,
+      )
+      if (physical === undefined) {
+        throw new RangeError('Wasm match lost an omitted payload cleanup path')
+      }
+      return [
+        ...copy(
+          physical.flatMap((lane) => {
+            const source = slots(operation.scrutinee).at(lane)
+            return source === undefined ? [] : [source]
+          }),
+          slots(entry.destination),
+        ),
+        ...releaseInstructions(entry.cleanup, entry.destination),
+      ]
+    })
     const selected = [
       ...emitMany(arm.selected.operations),
+      ...cleanup,
       ...(layout.types.at(arm.selected.result.ordinal)?._tag === 'Bottom'
         ? []
         : copy(slots(arm.selected.result), slots(operation.destination))),
@@ -4673,12 +5013,44 @@ const emitMatchOperation = (
         Instr.ifElse(Instr.emptyBlockType, selected, emitDecisions(ordinal + 1)),
       ]
     }
-    if (operation.scrutineeType._tag !== 'Union') return selected
+    if (decision.member._tag !== 'NominalUnionVariant' && operation.scrutineeType._tag !== 'Union')
+      return selected
     const tag = slots(operation.scrutinee).at(0)
-    if (tag === undefined) throw new RangeError('Wasm union match has no tag lane')
+    if (tag === undefined) throw new RangeError('Wasm match has no tag lane')
+    if (decision.member._tag === 'NominalUnionVariant') {
+      const member = decision.member
+      const nested = operation.scrutineeShape.tree._tag === 'SumShape'
+      const variantTag = slots(operation.scrutinee).at(nested ? 1 : 0)
+      if (variantTag === undefined) throw new RangeError('Wasm nominal union match has no tag lane')
+      const outer =
+        operation.scrutineeShape.tree._tag === 'SumShape'
+          ? operation.scrutineeShape.tree.members.find((candidate) =>
+              SilkType.equals(candidate.member, member.root),
+            )
+          : undefined
+      if (nested && outer === undefined)
+        throw new RangeError('Wasm nominal union match lost its structural member')
+      return [
+        ...(nested
+          ? [Instr.localGet(tag), Instr.i32Const(outer?.ordinal ?? 0), Instr.op('i32.eq')]
+          : []),
+        Instr.localGet(variantTag),
+        Instr.i32Const(member.variantOrdinal),
+        Instr.op('i32.eq'),
+        ...(nested ? [Instr.op('i32.and')] : []),
+        Instr.ifElse(Instr.emptyBlockType, selected, emitDecisions(ordinal + 1)),
+      ]
+    }
+    const outer =
+      operation.scrutineeShape.tree._tag === 'SumShape'
+        ? operation.scrutineeShape.tree.members.find((candidate) =>
+            SilkType.equals(candidate.member, Match.sourceType(decision.member)),
+          )
+        : undefined
+    if (outer === undefined) throw new RangeError('Wasm union match lost its structural member')
     return [
       Instr.localGet(tag),
-      Instr.i32Const(ordinal),
+      Instr.i32Const(outer.ordinal),
       Instr.op('i32.eq'),
       Instr.ifElse(Instr.emptyBlockType, selected, emitDecisions(ordinal + 1)),
     ]
@@ -4817,11 +5189,8 @@ const emitBeginLoanOperation = (
       if (selector._tag === 'FieldSelector') {
         if (selectedLayout?.representation._tag !== 'Aggregate')
           throw new RangeError('Wasm borrow field selector lost its aggregate layout')
-        const field = selectedLayout.representation.fields.find(
-          (candidate) =>
-            candidate.id.ordinal === selector.field.ordinal &&
-            candidate.id.struct.sourceId === selector.field.struct.sourceId &&
-            candidate.id.struct.ordinal === selector.field.struct.ordinal,
+        const field = selectedLayout.representation.fields.find((candidate) =>
+          DeclarationFacts.sameFieldId(candidate.id, selector.field),
         )
         if (field === undefined)
           throw new RangeError('Wasm borrow field selector lost its field layout')
@@ -4983,6 +5352,29 @@ const emitConstructOperation = (
   )
 }
 
+const emitConstructUnionVariantOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ConstructUnionVariant' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, copy, zeroFor } = state
+  const destination = slots(operation.destination)
+  const tag = destination.at(0)
+  if (tag === undefined) throw new RangeError('Wasm nominal union lost its tag lane')
+  const payload = operation.fields.flatMap((field) => [...slots(field.value)])
+  const payloadTargets = destination.slice(1, payload.length + 1)
+  if (payloadTargets.length !== payload.length) {
+    throw new RangeError('Wasm nominal union payload exceeds its calling shape')
+  }
+  return [
+    Instr.i32Const(operation.variantOrdinal),
+    Instr.localSet(tag),
+    ...copy(payload, payloadTargets),
+    ...destination
+      .slice(payload.length + 1)
+      .flatMap((target) => [zeroFor(target), Instr.localSet(target)]),
+  ]
+}
+
 const emitConstructArrayOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'ConstructArray' }>,
   state: WasmOperationContext,
@@ -5008,9 +5400,7 @@ const emitProjectOperation = (
     return field !== undefined &&
       field._tag === 'FieldId' &&
       source !== undefined &&
-      field.ordinal === operation.field.ordinal &&
-      field.struct.sourceId === operation.field.struct.sourceId &&
-      field.struct.ordinal === operation.field.struct.ordinal
+      DeclarationFacts.sameFieldId(field, operation.field)
       ? [source]
       : []
   })
@@ -5125,9 +5515,7 @@ const emitReadPlaceOperation = (
         if (selector._tag === 'FieldSelector') {
           if (
             physical._tag !== 'FieldId' ||
-            physical.ordinal !== selector.field.ordinal ||
-            physical.struct.sourceId !== selector.field.struct.sourceId ||
-            physical.struct.ordinal !== selector.field.struct.ordinal
+            !DeclarationFacts.sameFieldId(physical, selector.field)
           ) {
             return []
           }
@@ -5310,9 +5698,7 @@ const emitWritePlaceOperation = (
       if (selector._tag === 'FieldSelector') {
         if (
           physical._tag !== 'FieldId' ||
-          physical.ordinal !== selector.field.ordinal ||
-          physical.struct.sourceId !== selector.field.struct.sourceId ||
-          physical.struct.ordinal !== selector.field.struct.ordinal
+          !DeclarationFacts.sameFieldId(physical, selector.field)
         ) {
           matches = false
           break
@@ -5924,8 +6310,8 @@ const emitRunEffectCompositeOperation = (
   ]
 }
 
-const emitReifyEffectOperation = (
-  operation: Extract<Mir.Operation, { readonly _tag: 'ReifyEffect' }>,
+const emitCatchEffectOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'CatchEffect' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
   const {
@@ -5945,10 +6331,12 @@ const emitReifyEffectOperation = (
     return suspension?.originate(suspensionRegion) ?? []
   const outcomeSlots = slots(operation.outcome)
   const destinationSlots = slots(operation.destination)
+  const successSlots = slots(operation.successValue)
+  const failureSlots = slots(operation.failureValue)
   const outcomeTag = outcomeSlots.at(0)
-  const resultTag = destinationSlots.at(0)
-  if (outcomeTag === undefined || resultTag === undefined)
-    throw new RangeError('Wasm Effect result lost an outcome or Result tag lane')
+  const valid = destinationSlots.at(0)
+  if (outcomeTag === undefined || valid === undefined)
+    throw new RangeError('Wasm Effect result lost an outcome or validity lane')
   const invoke = [
     ...slots(operation.effect).map((slot) => Instr.localGet(slot)),
     ...operation.arguments.flatMap((argument) =>
@@ -5979,40 +6367,35 @@ const emitReifyEffectOperation = (
       }
       return [Instr.localGet(value), ...bridgeToMember, ...bridgeToTarget, Instr.localSet(target)]
     })
-  const resultPayload = destinationSlots.slice(1)
   const successLaneCount =
     operation.outcomeShape.tree._tag === 'OutcomeShape'
       ? operation.outcomeShape.tree.success.laneCount
       : 0
-  const successShape = LayoutPlan.callingShape(plan, operation.outcomeType.type.success)
-  if (successShape === undefined)
-    throw new RangeError('Wasm Effect Result lost its success member shape')
   const success = [
-    Instr.i32Const(operation.successTag),
-    Instr.localSet(resultTag),
-    ...writePayload(outcomeSlots.slice(1, 1 + successLaneCount), resultPayload, successShape.lanes),
+    Instr.i32Const(1),
+    Instr.localSet(valid),
+    ...writePayload(
+      outcomeSlots.slice(1, 1 + successLaneCount),
+      successSlots,
+      operation.successShape.lanes,
+    ),
   ]
-  let failure: ReadonlyArray<Instr.Instr>
-  if (SilkType.failureMembers(operation.outcomeType.type).length === 0) {
-    failure = [Instr.op('unreachable')]
+  let failurePayload: ReadonlyArray<Instr.Instr>
+  if (SilkType.isUnion(operation.failureValueType)) {
+    const innerTag = failureSlots.at(0)
+    if (innerTag === undefined)
+      throw new RangeError('Wasm Effect result failure lost its union tag lane')
+    failurePayload = [
+      Instr.localGet(outcomeTag),
+      Instr.i32Const(1),
+      Instr.op('i32.sub'),
+      Instr.localSet(innerTag),
+      ...writePayload(outcomeSlots.slice(1), failureSlots.slice(1)),
+    ]
   } else {
-    let payload: ReadonlyArray<Instr.Instr>
-    if (SilkType.isUnion(operation.failureValueType)) {
-      const innerTag = resultPayload.at(0)
-      if (innerTag === undefined)
-        throw new RangeError('Wasm Effect Result failure lost its nested tag lane')
-      payload = [
-        Instr.localGet(outcomeTag),
-        Instr.i32Const(1),
-        Instr.op('i32.sub'),
-        Instr.localSet(innerTag),
-        ...writePayload(outcomeSlots.slice(1), resultPayload.slice(1)),
-      ]
-    } else {
-      payload = writePayload(outcomeSlots.slice(1), resultPayload)
-    }
-    failure = [Instr.i32Const(operation.failureTag), Instr.localSet(resultTag), ...payload]
+    failurePayload = writePayload(outcomeSlots.slice(1), failureSlots)
   }
+  const failure = [Instr.i32Const(0), Instr.localSet(valid), ...failurePayload]
   return [
     ...(skipInvocation ? [] : invoke),
     ...(skipInvocation || suspensionRegion?._tag !== 'RunSuspendableEffectRegion'
@@ -6741,33 +7124,22 @@ const emitCheckedScalarOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'CheckedScalar' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
-  const { layout, plan, slots, scalar } = state
+  const { layout, plan, scalar } = state
 
-  const destination = slots(operation.destination)
-  const tag = destination.at(0)
-  const payload = destination.at(1)
+  const valid = scalar(operation.valid)
+  const value = scalar(operation.value)
   const left = operation.operands.at(0)
   const right = operation.operands.at(1)
   const source = Scalar.find(operation.sourceType._tag)
   const target = Scalar.find(operation.valueType._tag)
   if (
     operation.operation === 'CheckedConvertToChar' &&
-    tag !== undefined &&
-    payload !== undefined &&
     left !== undefined &&
     source?.spelling === 'u32' &&
     target?.category === 'Character'
   ) {
-    const successOrdinal = operation.type.type.members.findIndex((member) =>
-      SilkType.equals(member, operation.success),
-    )
-    const failureOrdinal = operation.type.type.members.findIndex((member) =>
-      SilkType.equals(member, operation.failure),
-    )
-    if (successOrdinal < 0 || failureOrdinal < 0)
-      throw new RangeError('Wasm checked char operation lost its Option members')
     const leftSlot = scalar(left)
-    return [
+    const raw = [
       Instr.localGet(leftSlot),
       Instr.i32Const(0x10ffff),
       Instr.op('i32.gt_u'),
@@ -6779,24 +7151,15 @@ const emitCheckedScalarOperation = (
       Instr.op('i32.le_u'),
       Instr.op('i32.and'),
       Instr.op('i32.or'),
-      Instr.localSet(tag),
-      Instr.i32Const(failureOrdinal),
-      Instr.i32Const(successOrdinal),
-      Instr.localGet(tag),
-      Instr.op('select'),
-      Instr.localSet(tag),
+      Instr.op('i32.eqz'),
+      Instr.localSet(valid),
       Instr.localGet(leftSlot),
-      Instr.localSet(payload),
+      Instr.localSet(value),
     ]
+    return [...raw, ...emitCheckedScalarCarrier(operation, state)]
   }
-  if (
-    tag === undefined ||
-    payload === undefined ||
-    left === undefined ||
-    source?.category !== 'Integer' ||
-    target?.category !== 'Integer'
-  )
-    throw new RangeError('Wasm checked scalar operation lost its Option lanes')
+  if (left === undefined || source?.category !== 'Integer' || target?.category !== 'Integer')
+    throw new RangeError('Wasm checked scalar operation lost its scalar lanes')
   const leftSlot = scalar(left)
   const rightSlot = right === undefined ? undefined : scalar(right)
   const pointerBits = plan.target.pointerSize === 4 ? 32 : 64
@@ -6808,21 +7171,7 @@ const emitCheckedScalarOperation = (
     sourceBits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
   const targetConstant = (value: bigint): Instr.Instr =>
     targetBits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
-  const successOrdinal = operation.type.type.members.findIndex((member) =>
-    SilkType.equals(member, operation.success),
-  )
-  const failureOrdinal = operation.type.type.members.findIndex((member) =>
-    SilkType.equals(member, operation.failure),
-  )
-  if (successOrdinal < 0 || failureOrdinal < 0)
-    throw new RangeError('Wasm checked scalar operation lost its Option members')
-  const setTag = [
-    Instr.i32Const(failureOrdinal),
-    Instr.i32Const(successOrdinal),
-    Instr.localGet(tag),
-    Instr.op('select'),
-    Instr.localSet(tag),
-  ]
+  const setValid = [Instr.localGet(valid), Instr.op('i32.eqz'), Instr.localSet(valid)]
   if (operation.operation.startsWith('CheckedConvertTo')) {
     const sourceRange = Scalar.range(source, pointerBits)
     const targetRange = Scalar.range(target, pointerBits)
@@ -6848,15 +7197,16 @@ const emitCheckedScalarOperation = (
     } else if (sourceBits === 64 && targetBits < 64) {
       conversion = [Instr.op('i32.wrap_i64')]
     }
-    return [
+    const raw = [
       ...(invalid.length === 0 ? [Instr.i32Const(0)] : invalid),
-      Instr.localSet(tag),
-      ...setTag,
+      Instr.localSet(valid),
+      ...setValid,
       Instr.localGet(leftSlot),
       ...conversion,
       ...normalizeSubword(targetBits, target.signedness === 'Signed'),
-      Instr.localSet(payload),
+      Instr.localSet(value),
     ]
+    return [...raw, ...emitCheckedScalarCarrier(operation, state)]
   }
   if (rightSlot === undefined)
     throw new RangeError('Wasm checked arithmetic lost its right operand')
@@ -6880,14 +7230,15 @@ const emitCheckedScalarOperation = (
         throw new RangeError('Wasm checked arithmetic lost its operation')
     }
     const resultScratch = targetBits === 64 ? layout.scratch64 : layout.scratch
-    return [
+    const raw = [
       ...checkedArithmeticOutcome(shape, target, leftSlot, rightSlot, resultScratch, pointerBits),
-      Instr.localSet(tag),
-      ...setTag,
+      Instr.localSet(valid),
+      ...setValid,
       Instr.localGet(resultScratch),
       ...normalizeSubword(targetBits, target.signedness === 'Signed'),
-      Instr.localSet(payload),
+      Instr.localSet(value),
     ]
+    return [...raw, ...emitCheckedScalarCarrier(operation, state)]
   }
   const minimum = Scalar.range(target, pointerBits).minimum
   const signedOverflow =
@@ -6908,21 +7259,80 @@ const emitCheckedScalarOperation = (
     operation.operation === 'CheckedDivide'
       ? `${targetPrefix}.div_${signedness}`
       : `${targetPrefix}.rem_${signedness}`
-  return [
+  const raw = [
     Instr.localGet(rightSlot),
     Instr.op(`${targetPrefix}.eqz`),
     ...signedOverflow,
     Instr.op('i32.or'),
-    Instr.localSet(tag),
-    Instr.localGet(tag),
+    Instr.localSet(valid),
+    Instr.localGet(valid),
     Instr.ifElse(
       Instr.valueBlockType(targetBits === 64 ? i64 : i32),
       [targetConstant(0n)],
       [Instr.localGet(leftSlot), Instr.localGet(rightSlot), Instr.op(division)],
     ),
     ...normalizeSubword(targetBits, target.signedness === 'Signed'),
-    Instr.localSet(payload),
-    ...setTag,
+    Instr.localSet(value),
+    ...setValid,
+  ]
+  return [...raw, ...emitCheckedScalarCarrier(operation, state)]
+}
+
+const emitCheckedScalarCarrier = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'CheckedScalar' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const presentType = state.layout.types.at(operation.present.ordinal)
+  const absentType = state.layout.types.at(operation.absent.ordinal)
+  if (presentType?._tag !== 'CallableValue' || absentType?._tag !== 'CallableValue')
+    throw new RangeError('Wasm checked scalar operation lost its carrier callables')
+  const apply = (
+    callable: Mir.LocalId,
+    callableType: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
+    arguments_: ReadonlyArray<Mir.LocalId>,
+  ): ReadonlyArray<Instr.Instr> =>
+    emitApplyCallableOperation(
+      Object.freeze({
+        _tag: 'ApplyCallable',
+        destination: operation.destination,
+        callable,
+        typeArguments:
+          callableType.environment?.callable.typeArguments ??
+          callableType.storage?.realization.targetArguments ??
+          callableType.typeArguments ??
+          Object.freeze([]),
+        captures: Object.freeze([]),
+        arguments: arguments_,
+        callableType: callableType.type,
+        access: callableType.type.mode,
+        evaluation: 'CalleeThenArguments',
+        realization: 'Environment',
+        type: operation.type,
+        provenance: operation.provenance,
+      }),
+      state,
+    )
+  const drop = (
+    local: Mir.LocalId,
+    cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
+  ): ReadonlyArray<Instr.Instr> =>
+    emitDropOperation(
+      Object.freeze({ _tag: 'Drop', local, cleanup, provenance: operation.provenance }),
+      state,
+    )
+  return [
+    Instr.localGet(state.scalar(operation.valid)),
+    Instr.ifElse(
+      Instr.emptyBlockType,
+      [
+        ...drop(operation.absent, operation.absentCleanup),
+        ...apply(operation.present, presentType, Object.freeze([operation.value])),
+      ],
+      [
+        ...drop(operation.present, operation.presentCleanup),
+        ...apply(operation.absent, absentType, Object.freeze([])),
+      ],
+    ),
   ]
 }
 
@@ -7067,6 +7477,7 @@ const emitOperationWithContext = (
       return emitAllocateOperation(operation, context)
     case 'HostWrite':
       return emitHostWriteOperation(operation, context)
+    case 'OsOpen':
     case 'OsCall':
       return emitOsCallOperation(operation, context)
     case 'RawBufferFrom':
@@ -7109,6 +7520,8 @@ const emitOperationWithContext = (
       return emitSlotDropOperation(operation, context)
     case 'ShortCircuit':
       return emitShortCircuitOperation(operation, context)
+    case 'Conditional':
+      return emitConditionalOperation(operation, context)
     case 'Match':
       return emitMatchOperation(operation, context)
     case 'Literal':
@@ -7127,6 +7540,8 @@ const emitOperationWithContext = (
       return emitConvertUnionOperation(operation, context)
     case 'Construct':
       return emitConstructOperation(operation, context)
+    case 'ConstructUnionVariant':
+      return emitConstructUnionVariantOperation(operation, context)
     case 'ConstructArray':
       return emitConstructArrayOperation(operation, context)
     case 'Project':
@@ -7161,8 +7576,8 @@ const emitOperationWithContext = (
       return emitRunEffectValueOrRunStaticEffectOperation(operation, context)
     case 'RunEffectComposite':
       return emitRunEffectCompositeOperation(operation, context)
-    case 'ReifyEffect':
-      return emitReifyEffectOperation(operation, context)
+    case 'CatchEffect':
+      return emitCatchEffectOperation(operation, context)
     case 'CloseEffectEntry':
       return emitCloseEffectEntryOperation(operation, context)
     case 'Call':
@@ -7275,6 +7690,86 @@ const branchDepth = (
   return depth
 }
 
+const restoreInvocationFrame = (
+  layout: Layout,
+  memory: MemoryContext | undefined,
+): ReadonlyArray<Instr.Instr> =>
+  memory === undefined || layout.frameBase === undefined
+    ? []
+    : [Instr.localGet(layout.frameBase), Instr.globalSet(memory.stackPointer)]
+
+const reserveInvocationFrame = (
+  layout: Layout,
+  memory: MemoryContext | undefined,
+): ReadonlyArray<Instr.Instr> => {
+  if (
+    memory === undefined ||
+    layout.frameBase === undefined ||
+    layout.frameEnd === undefined ||
+    layout.framePages === undefined
+  ) {
+    return []
+  }
+  if (memory.frame.size === 0) {
+    return [Instr.globalGet(memory.stackPointer), Instr.localSet(layout.frameBase)]
+  }
+  const report = (reason: number): ReadonlyArray<Instr.Instr> => [
+    Instr.i32Const(statusAddress),
+    Instr.i32Const(reason),
+    Instr.memoryAccess('i32.store', memory.memory),
+    Instr.i32Const(memory.stackBase),
+    Instr.globalSet(memory.stackPointer),
+    Instr.op('unreachable'),
+  ]
+  const boundCheck =
+    memory.stackLimit === undefined
+      ? []
+      : [
+          Instr.localGet(layout.frameEnd),
+          Instr.i32Const(memory.stackLimit),
+          Instr.op('i32.gt_u'),
+          Instr.ifElse(Instr.emptyBlockType, report(statusStackOverflow), []),
+        ]
+  return [
+    Instr.globalGet(memory.stackPointer),
+    Instr.localSet(layout.frameBase),
+    Instr.localGet(layout.frameBase),
+    Instr.i32Const(memory.frame.size),
+    Instr.op('i32.add'),
+    Instr.localTee(layout.frameEnd),
+    Instr.localGet(layout.frameBase),
+    Instr.op('i32.lt_u'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    ...boundCheck,
+    Instr.localGet(layout.frameEnd),
+    Instr.i32Const(1),
+    Instr.op('i32.sub'),
+    Instr.i32Const(16),
+    Instr.op('i32.shr_u'),
+    Instr.i32Const(1),
+    Instr.op('i32.add'),
+    Instr.localSet(layout.framePages),
+    Instr.localGet(layout.framePages),
+    Instr.memorySize(memory.memory),
+    Instr.op('i32.gt_u'),
+    Instr.ifElse(
+      Instr.emptyBlockType,
+      [
+        Instr.localGet(layout.framePages),
+        Instr.memorySize(memory.memory),
+        Instr.op('i32.sub'),
+        Instr.memoryGrow(memory.memory),
+        Instr.i32Const(-1),
+        Instr.op('i32.eq'),
+        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+      ],
+      [],
+    ),
+    Instr.localGet(layout.frameEnd),
+    Instr.globalSet(memory.stackPointer),
+  ]
+}
+
 /** Direct structured emission from canonical regions; no CFG recovery or dispatch loop exists. */
 const emitBody = (
   context: WasmEmitContext.WasmEmitContext<Layout, WasmSuspensionRuntime>,
@@ -7301,91 +7796,8 @@ const emitBody = (
     }
     return first
   }
-  const restoreFrame = (): ReadonlyArray<Instr.Instr> =>
-    memory === undefined || memory.frame.roots.size === 0 || layout.frameBase === undefined
-      ? []
-      : [Instr.localGet(layout.frameBase), Instr.globalSet(memory.stackPointer)]
-  const reserveFrame = (): ReadonlyArray<Instr.Instr> => {
-    if (
-      memory === undefined ||
-      memory.frame.roots.size === 0 ||
-      layout.frameBase === undefined ||
-      layout.frameEnd === undefined ||
-      layout.framePages === undefined
-    ) {
-      return []
-    }
-    if (memory.frame.size === 0) {
-      return [Instr.globalGet(memory.stackPointer), Instr.localSet(layout.frameBase)]
-    }
-    /**
-     * Report a deliberate trap rather than just taking one: name the reason in the status word, and
-     * rewind the stack pointer to the base so the trap is a single legible event instead of a
-     * module that answers every later call with the same trap. Whatever the abandoned frames owned
-     * is leaked — no cleanup ran — but the allocator's own structures are untouched, so a host that
-     * catches this can still read the heap back and get true answers out of it.
-     */
-    const report = (reason: number): ReadonlyArray<Instr.Instr> => [
-      Instr.i32Const(statusAddress),
-      Instr.i32Const(reason),
-      Instr.memoryAccess('i32.store', memory.memory),
-      Instr.i32Const(memory.stackBase),
-      Instr.globalSet(memory.stackPointer),
-      Instr.op('unreachable'),
-    ]
-    /**
-     * One comparison against an address known at emission, on the path that already computed
-     * `frameEnd`. A reservation that would cross into the heap reports here, before the stack
-     * pointer moves, instead of being noticed downstream as corrupted memory.
-     */
-    const boundCheck =
-      memory.stackLimit === undefined
-        ? []
-        : [
-            Instr.localGet(layout.frameEnd),
-            Instr.i32Const(memory.stackLimit),
-            Instr.op('i32.gt_u'),
-            Instr.ifElse(Instr.emptyBlockType, report(statusStackOverflow), []),
-          ]
-    return [
-      Instr.globalGet(memory.stackPointer),
-      Instr.localSet(layout.frameBase),
-      Instr.localGet(layout.frameBase),
-      Instr.i32Const(memory.frame.size),
-      Instr.op('i32.add'),
-      Instr.localTee(layout.frameEnd),
-      Instr.localGet(layout.frameBase),
-      Instr.op('i32.lt_u'),
-      Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
-      ...boundCheck,
-      Instr.localGet(layout.frameEnd),
-      Instr.i32Const(1),
-      Instr.op('i32.sub'),
-      Instr.i32Const(16),
-      Instr.op('i32.shr_u'),
-      Instr.i32Const(1),
-      Instr.op('i32.add'),
-      Instr.localSet(layout.framePages),
-      Instr.localGet(layout.framePages),
-      Instr.memorySize(memory.memory),
-      Instr.op('i32.gt_u'),
-      Instr.ifElse(
-        Instr.emptyBlockType,
-        [
-          Instr.localGet(layout.framePages),
-          Instr.memorySize(memory.memory),
-          Instr.op('i32.sub'),
-          Instr.memoryGrow(memory.memory),
-          Instr.i32Const(-1),
-          Instr.op('i32.eq'),
-          Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
-        ],
-        [],
-      ),
-      Instr.localGet(layout.frameEnd),
-      Instr.globalSet(memory.stackPointer),
-    ]
-  }
+  const restoreFrame = (): ReadonlyArray<Instr.Instr> => restoreInvocationFrame(layout, memory)
+  const reserveFrame = (): ReadonlyArray<Instr.Instr> => reserveInvocationFrame(layout, memory)
   const loadBorrowedParameters = (): ReadonlyArray<Instr.Instr> => {
     if (layout.borrowPointers.size === 0) return []
     if (memory === undefined) throw new RangeError('Wasm Effect borrow has no private memory')
@@ -8195,8 +8607,19 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     transferResultOffset + transferResultSize,
     program.layout.target.pointerAlignment,
   )
+  const executionDriveCleanups = [...executionPackageCleanups.values()].flatMap(
+    (packageCleanup) => [packageCleanup.body, packageCleanup.endpoint, packageCleanup.callback],
+  )
   const frames = new Map(
-    program.functions.map((fn) => [fn, framePlan(fn, program.layout)] as const),
+    program.functions.map((fn) => {
+      const drivesExecution = MirVerification.operations(fn).some(
+        (operation) => operation._tag === 'ExecutionDrive',
+      )
+      return [
+        fn,
+        framePlan(fn, program.layout, drivesExecution ? executionDriveCleanups : []),
+      ] as const
+    }),
   )
   const staticOffsets = new Map<string, number>()
   let staticEnd = 16
@@ -8657,7 +9080,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         }),
       ]),
     })
-    const helperFrame = framePlan(helperFunction, program.layout)
+    const helperFrame = framePlan(helperFunction, program.layout, executionDriveCleanups)
     const helperLayout = layoutOf(helperFunction, program.layout, helperFrame, debug, false)
     const helperMemory: MemoryContext = Object.freeze({
       memory: privateMemory,
@@ -8689,7 +9112,11 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     )
     yield* FuncActor.define(builder, executionCleanupHelper, {
       locals: helperLayout.declared,
-      body: operation.releaseExecutionBaseInline(0),
+      body: [
+        ...reserveInvocationFrame(helperLayout, helperMemory),
+        ...operation.releaseExecutionBaseInline(0),
+        ...restoreInvocationFrame(helperLayout, helperMemory),
+      ],
     })
   }
 
@@ -8802,7 +9229,11 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     })
     yield* FuncActor.define(builder, handle, {
       locals: cleanupLayout.declared,
-      body,
+      body: [
+        ...reserveInvocationFrame(cleanupLayout, memory),
+        ...body,
+        ...restoreInvocationFrame(cleanupLayout, memory),
+      ],
     })
   }
 

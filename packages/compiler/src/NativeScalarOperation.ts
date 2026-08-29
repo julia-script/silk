@@ -14,7 +14,6 @@ import * as NativeStorage from './NativeStorage.js'
 import * as NativeTranscendental from './NativeTranscendental.js'
 import * as NativeType from './NativeType.js'
 import * as Scalar from './Scalar.js'
-import * as SilkType from './Type.js'
 
 type Operation = Extract<
   LinearOperation,
@@ -25,7 +24,7 @@ type Operation = Extract<
       | 'ReinterpretScalar'
       | 'FloatUnary'
       | 'FloatTranscendental'
-      | 'CheckedScalar'
+      | 'CheckedScalarOutcome'
       | 'Binary'
   }
 >
@@ -388,7 +387,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
       break
     }
-    case 'CheckedScalar': {
+    case 'CheckedScalarOutcome': {
       const leftLocal = operation.operands.at(0)
       const rightLocal = operation.operands.at(1)
       const source = Scalar.find(operation.sourceType._tag)
@@ -411,7 +410,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const targetBits = Scalar.bits(target, pointerBits)
       const sourcePhysical = integerTypes.get(sourceBits) ?? i32
       const targetPhysical = integerTypes.get(targetBits) ?? i32
-      const name = `checked${operation.destination.ordinal}`
+      const name = `checked${operation.value.ordinal}`
       let result: Value.Input
       let invalid: Value.Input
       if (characterConversion) {
@@ -589,29 +588,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       } else {
         throw new RangeError('LLVM checked division lost its integer target')
       }
-      const successOrdinal = operation.type.type.members.findIndex((member) =>
-        SilkType.equals(member, operation.success),
-      )
-      const failureOrdinal = operation.type.type.members.findIndex((member) =>
-        SilkType.equals(member, operation.failure),
-      )
-      if (successOrdinal < 0 || failureOrdinal < 0)
-        throw new RangeError('LLVM checked scalar operation lost its Option members')
-      const successTag = yield* Constant.integerSigned(builder, i32, BigInt(successOrdinal))
-      const failureTag = yield* Constant.integerSigned(builder, i32, BigInt(failureOrdinal))
-      const tag = yield* FunctionBody.select(body, invalid, failureTag, successTag, `${name}_tag`)
-      const valueLane = NativeType.lanesFor(types, operation.valueType).at(0)
-      const payloadLane = NativeType.lanesFor(types, operation.type).at(1)
-      if (valueLane === undefined || payloadLane === undefined)
-        throw new RangeError('LLVM checked scalar operation lost its payload lane')
-      const payload = yield* NativeArith.coerceLane(
-        arith.lane,
-        result,
-        valueLane,
-        payloadLane,
-        `${name}_payload`,
-      )
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([tag, payload]))
+      const zero = yield* Constant.integerUnsigned(builder, i32, 0n)
+      const one = yield* Constant.integerUnsigned(builder, i32, 1n)
+      const valid = yield* FunctionBody.select(body, invalid, zero, one, `${name}_valid`)
+      nativeStorage.locals.set(operation.valid.ordinal, Object.freeze([valid]))
+      nativeStorage.locals.set(operation.value.ordinal, Object.freeze([result]))
       break
     }
     case 'Binary': {

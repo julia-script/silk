@@ -12,6 +12,7 @@ export const keywords: Record<KeywordKind, string> = {
   PubKeyword: 'pub',
   StructKeyword: 'struct',
   EnumKeyword: 'enum',
+  UnionKeyword: 'union',
   ServiceKeyword: 'service',
   InterfaceKeyword: 'interface',
   RoleKeyword: 'role',

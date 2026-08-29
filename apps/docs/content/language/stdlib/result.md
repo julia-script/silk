@@ -12,7 +12,7 @@ success continuation that already returns a result.
 
 ## Details
 
-`Result<A, F>` owns either [`Success`](#declaration-73696c6b2f726573756c743a3a53756363657373) or [`Failure`](#declaration-73696c6b2f726573756c743a3a4661696c757265). Its combinators move the selected payload
+`Result<A, F>` owns either [`Success`](#declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a30) or [`Failure`](#declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a31). Its combinators move the selected payload
 forward and preserve the other arm without inventing a runtime failure-row descriptor.
 
 Unlike an `Effect<A ! F>`, a `Result<A, F>` is already completed ordinary data: it does not run,
@@ -26,7 +26,7 @@ into a `Result` when a caller needs to inspect or store the outcome.
 ```silk
 import silk.result { Result }
 
-fn half(value: i32) -> Result.Result<i32, i32> {
+fn half(value: i32) -> Result<i32, i32> {
   if value == 0 {
     return Result.failResult<i32, i32>(2)
   }
@@ -41,44 +41,20 @@ pub fn main() -> i32 {
   let initial = Result.succeed<i32, i32>(80)
   let halved = Result.flatMap<i32, i32, i32>(move initial, half)
   let answer = Result.map<i32, i32, i32>(move halved, addTwo)
-  let failed = Result.failResult<i32, i32>(7)
-  if Result.isFailure<i32, i32>(&failed) {} else {
-    return 0
-  }
   return Result.unwrapOr<i32, i32>(move answer, 0)
 }
 ```
 
 Import as `Result` with `import silk.result { Result }`.
 
-Public declarations: 11.
-
-<a id="declaration-73696c6b2f726573756c743a3a53756363657373"></a>
-
-## `Success`
-
-```silk
-pub struct Success<A>
-```
-
-The successful member of a completed [`Result`](#declaration-73696c6b2f726573756c743a3a526573756c74).
-
-<a id="declaration-73696c6b2f726573756c743a3a4661696c757265"></a>
-
-## `Failure`
-
-```silk
-pub struct Failure<F>
-```
-
-The failed member of a completed [`Result`](#declaration-73696c6b2f726573756c743a3a526573756c74).
+Public declarations: 7.
 
 <a id="declaration-73696c6b2f726573756c743a3a526573756c74"></a>
 
 ## `Result`
 
 ```silk
-pub struct Result<A, F>
+pub union Result<A, F>
 ```
 
 One completed outcome: either a success carrying `A` or a failure carrying `F`.
@@ -88,8 +64,48 @@ One completed outcome: either a success carrying `A` or a failure carrying `F`.
 `Result` is the reified form of an Effect that has already run. Reifying an Effect turns its
 failure row into ordinary value data, which is what lets the failure combinators in
 `silk.effect` be written as ordinary Silk source instead of compiler built-ins.
-A `Result` is consumed when matched or passed to a transforming combinator; borrow it for
-[`isSuccess`](#declaration-73696c6b2f726573756c743a3a697353756363657373) and [`isFailure`](#declaration-73696c6b2f726573756c743a3a69734661696c757265) when the payload must remain available.
+A `Result` is consumed when matched or passed to a transforming combinator. Use a borrowed
+match when the payload must remain available.
+
+<a id="declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a30"></a>
+
+### `Success`
+
+```silk
+Result<A, F>.Success { value: A }: Result<A, F>
+```
+
+A completed success.
+
+<a id="declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a303a3a6669656c643a30"></a>
+
+#### Field `value`
+
+```silk
+pub value: A
+```
+
+The produced success value.
+
+<a id="declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a31"></a>
+
+### `Failure`
+
+```silk
+Result<A, F>.Failure { error: F }: Result<A, F>
+```
+
+A completed failure.
+
+<a id="declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a313a3a6669656c643a30"></a>
+
+#### Field `error`
+
+```silk
+pub error: F
+```
+
+The produced failure value.
 
 <a id="declaration-73696c6b2f726573756c743a3a73756363656564"></a>
 
@@ -123,7 +139,7 @@ Applies `transform` once to a success value and carries a failure through unchan
 
 ### Details
 
-The callback is never called for [`Failure`](#declaration-73696c6b2f726573756c743a3a4661696c757265). This consumes the result and may change only its
+The callback is never called for [`Failure`](#declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a31). This consumes the result and may change only its
 success type; use [`mapError`](#declaration-73696c6b2f726573756c743a3a6d61704572726f72) to change the failure type instead.
 
 <a id="declaration-73696c6b2f726573756c743a3a6d61704572726f72"></a>
@@ -138,7 +154,7 @@ Applies `transform` once to a failure value and carries a success through unchan
 
 ### Details
 
-The callback is never called for [`Success`](#declaration-73696c6b2f726573756c743a3a53756363657373). This consumes the result and may change only its
+The callback is never called for [`Success`](#declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a30). This consumes the result and may change only its
 failure type.
 
 <a id="declaration-73696c6b2f726573756c743a3a666c61744d6170"></a>
@@ -182,23 +198,3 @@ fallback: A
 ```
 
 The owned alternative consumed only when `self` is a failure.
-
-<a id="declaration-73696c6b2f726573756c743a3a697353756363657373"></a>
-
-## `isSuccess`
-
-```silk
-pub fn isSuccess<A, F>(self: &silk/result.Result<A, F>) -> bool
-```
-
-Returns `true` when the borrowed outcome is [`Success`](#declaration-73696c6b2f726573756c743a3a53756363657373), without consuming either payload.
-
-<a id="declaration-73696c6b2f726573756c743a3a69734661696c757265"></a>
-
-## `isFailure`
-
-```silk
-pub fn isFailure<A, F>(self: &silk/result.Result<A, F>) -> bool
-```
-
-Returns `true` when the borrowed outcome is [`Failure`](#declaration-73696c6b2f726573756c743a3a4661696c757265), without consuming either payload.

@@ -50,6 +50,30 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('uses nominal union parents as ordinary interface and operator providers', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`union Choice { Left { value: i32 }, Right { value: i32 } }
+
+interface Merge { operator + fn add(left: Self, right: Self) -> Self }
+
+fn add(left: Choice, right: Choice) -> Choice { return move left }
+impl Merge for Choice { add: Choice.add }
+
+pub fn main() -> i32 {
+  let combined = Choice.Left { value: 42 } + Choice.Right { value: 0 }
+  return match move combined {
+    Choice.Left { value } => value
+    Choice.Right { value } => value
+  }
+}`)
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
 it.effect('selects a marked operation through an ordinary generic bound', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`${vectorContracts}

@@ -203,16 +203,14 @@ pub fn main() -> i32 {
   return false
 }`,
   `import silk.effect as Effect
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 struct ResultProblem {}
 effect fn succeed() -> i32 ! ResultProblem { return 42 }
 pub effect fn main() -> i32 {
   let completed = run Effect.result(succeed())
   return match move completed {
-    Result<i32, ResultProblem> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<ResultProblem> { error } => 0
-    }
+      Result<i32, ResultProblem>.Success { value } => value
+      Result<i32, ResultProblem>.Failure { error } => 0
   }
 }`,
   `struct CatalogProblem {}
@@ -244,8 +242,10 @@ pub effect fn main() -> () ! StreamWriteError {
   return ()
 }`,
   `import silk.usize as usize
-import silk.option { Option, none }
+import silk.option { Option, none, some }
 fn absurd<T>() -> T { let boom = 1 / 0 return absurd<T>() }
+fn opened(handle: OsHandle) -> Option<OsHandle> { return some<OsHandle>(move handle) }
+fn refused() -> Option<OsHandle> { return none<OsHandle>() }
 effect fn systemClockNow(seconds: &mut i64, nanoseconds: &mut i64) -> bool {
   unsafe { return run Intrinsic.osSystemClockNow(seconds, nanoseconds) }
   return false
@@ -271,24 +271,24 @@ effect fn randomFill(output: &mut [u8]) -> bool {
   return false
 }
 effect fn fileOpen(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> Option<OsHandle> {
-  unsafe { return run Intrinsic.osFileOpen(root, path, 0, reason, code) }
+  unsafe { return run Intrinsic.osFileOpen<Option<OsHandle>>(root, path, 0, reason, code, opened, refused) }
   return none<OsHandle>()
 }
-effect fn fileRead(handle: &mut OsHandle, output: &mut [u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
-  unsafe { return run Intrinsic.osFileRead(handle, output, reason, code) }
-  return none<usize>()
+effect fn fileRead(handle: &mut OsHandle, output: &mut [u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osFileRead(handle, output, count, reason, code) }
+  return false
 }
-effect fn fileWrite(handle: &mut OsHandle, input: &[u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
-  unsafe { return run Intrinsic.osFileWrite(handle, input, 0, reason, code) }
-  return none<usize>()
+effect fn fileWrite(handle: &mut OsHandle, input: &[u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osFileWrite(handle, input, 0, count, reason, code) }
+  return false
 }
 effect fn directoryOpen(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> Option<OsHandle> {
-  unsafe { return run Intrinsic.osDirectoryOpen(root, path, reason, code) }
+  unsafe { return run Intrinsic.osDirectoryOpen<Option<OsHandle>>(root, path, reason, code, opened, refused) }
   return none<OsHandle>()
 }
-effect fn directoryNext(handle: &mut OsHandle, output: &mut [u8], kind: &mut i32, required: &mut usize, reason: &mut i32, code: &mut u32) -> Option<usize> {
-  unsafe { return run Intrinsic.osDirectoryNext(handle, output, kind, required, reason, code) }
-  return none<usize>()
+effect fn directoryNext(handle: &mut OsHandle, output: &mut [u8], count: &mut usize, kind: &mut i32, required: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osDirectoryNext(handle, output, count, kind, required, reason, code) }
+  return false
 }
 effect fn inspect(root: &[u8], path: &[u8], kind: &mut i32, length: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
   unsafe { return run Intrinsic.osPathInspect(root, path, kind, length, reason, code) }
@@ -298,9 +298,9 @@ effect fn create(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> 
   unsafe { return run Intrinsic.osDirectoryCreate(root, path, reason, code) }
   return false
 }
-effect fn createUnique(root: &[u8], parent: &[u8], prefix: &[u8], output: &mut [u8], required: &mut usize, reason: &mut i32, code: &mut u32) -> Option<usize> {
-  unsafe { return run Intrinsic.osDirectoryCreateUnique(root, parent, prefix, move output, required, reason, code) }
-  return none<usize>()
+effect fn createUnique(root: &[u8], parent: &[u8], prefix: &[u8], output: &mut [u8], count: &mut usize, required: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osDirectoryCreateUnique(root, parent, prefix, move output, count, required, reason, code) }
+  return false
 }
 effect fn removeFile(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> bool {
   unsafe { return run Intrinsic.osFileRemove(root, path, reason, code) }
@@ -314,33 +314,33 @@ effect fn close(handle: OsHandle, reason: &mut i32, code: &mut u32) -> bool {
   unsafe { return run Intrinsic.osHandleClose(move handle, reason, code) }
   return false
 }
-effect fn standardInputRead(output: &mut [u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
-  unsafe { return run Intrinsic.osStandardInputRead(move output, reason, code) }
-  return none<usize>()
+effect fn standardInputRead(output: &mut [u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osStandardInputRead(move output, count, reason, code) }
+  return false
 }
 effect fn processExecute(program: &[u8], arguments: &[u8], environment: &[u8], directory: &[u8], status: &mut i32, exit: &mut i32, outputLength: &mut usize, errorLength: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
   unsafe { return run Intrinsic.osProcessExecute(program, arguments, environment, directory, status, exit, outputLength, errorLength, reason, code) }
   return false
 }
-effect fn processCapture(output: &mut [u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
-  unsafe { return run Intrinsic.osProcessCapture(0, usize.ZERO, move output, reason, code) }
-  return none<usize>()
+effect fn processCapture(output: &mut [u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osProcessCapture(0, usize.ZERO, move output, count, reason, code) }
+  return false
 }
 effect fn hostArgumentCount(count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
   unsafe { return run Intrinsic.osHostArgumentCount(count, reason, code) }
   return false
 }
-effect fn hostArgument(index: usize, output: &mut [u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
-  unsafe { return run Intrinsic.osHostArgument(index, move output, reason, code) }
-  return none<usize>()
+effect fn hostArgument(index: usize, output: &mut [u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osHostArgument(index, move output, count, reason, code) }
+  return false
 }
-effect fn hostVariable(name: &[u8], output: &mut [u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
-  unsafe { return run Intrinsic.osHostVariable(name, move output, reason, code) }
-  return none<usize>()
+effect fn hostVariable(name: &[u8], output: &mut [u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osHostVariable(name, move output, count, reason, code) }
+  return false
 }
-effect fn hostWorkingDirectory(output: &mut [u8], reason: &mut i32, code: &mut u32) -> Option<usize> {
-  unsafe { return run Intrinsic.osHostWorkingDirectory(move output, reason, code) }
-  return none<usize>()
+effect fn hostWorkingDirectory(output: &mut [u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osHostWorkingDirectory(move output, count, reason, code) }
+  return false
 }`,
 ])
 

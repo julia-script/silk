@@ -1,8 +1,8 @@
 import type { ControlProvenance } from './Backend.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Layout from './Layout.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
-import type * as SilkType from './Type.js'
 
 export type LinearTerminator =
   | { readonly _tag: 'Return'; readonly value: Mir.LocalId; readonly provenance: Mir.Provenance }
@@ -18,7 +18,8 @@ export type LinearTerminator =
   | {
       readonly _tag: 'MatchBranch'
       readonly scrutinee: Mir.LocalId
-      readonly memberOrdinal: number
+      readonly shape: Layout.CallingShape
+      readonly member: Match.CoverageIdentity
       readonly taken: Mir.RegionId
       readonly otherwise: Mir.RegionId
       readonly provenance: Mir.Provenance
@@ -36,13 +37,45 @@ export type LinearTerminator =
   | { readonly _tag: 'Trap'; readonly reason: string; readonly provenance: Mir.Provenance }
 
 export type LinearOperation =
-  | Exclude<Mir.Operation, { readonly _tag: 'Match' | 'ShortCircuit' | 'PropagateEffectFailure' }>
+  | Exclude<
+      Mir.Operation,
+      {
+        readonly _tag:
+          | 'Match'
+          | 'Conditional'
+          | 'ShortCircuit'
+          | 'CheckedScalar'
+          | 'OsOpen'
+          | 'PropagateEffectFailure'
+      }
+    >
+  | {
+      readonly _tag: 'CheckedScalarOutcome'
+      readonly operation: Extract<Mir.Operation, { readonly _tag: 'CheckedScalar' }>['operation']
+      readonly valid: Mir.LocalId
+      readonly value: Mir.LocalId
+      readonly operands: ReadonlyArray<Mir.LocalId>
+      readonly sourceType: Mir.ScalarType
+      readonly valueType: Mir.ScalarType
+      readonly provenance: Mir.Provenance
+    }
+  | {
+      readonly _tag: 'OsOpenOutcome'
+      readonly operation: Extract<Mir.Operation, { readonly _tag: 'OsOpen' }>['operation']
+      readonly valid: Mir.LocalId
+      readonly handle: Mir.LocalId
+      readonly arguments: ReadonlyArray<Mir.LocalId>
+      readonly handleType: Extract<Mir.Type, { readonly _tag: 'Nominal' }>
+      readonly provenance: Mir.Provenance
+    }
   | {
       readonly _tag: 'BindMatch'
       readonly scrutinee: Mir.LocalId
       readonly shape: Layout.CallingShape
-      readonly member: SilkType.Type
-      readonly binding: Mir.MatchBinding
+      readonly member: Match.CoverageIdentity
+      readonly destination: Mir.LocalId
+      readonly path: ReadonlyArray<DeclarationFacts.FieldId>
+      readonly type: Mir.Type
       readonly provenance: Mir.Provenance
     }
 
@@ -50,7 +83,10 @@ export const isLinearOperation = (
   operation: Mir.Operation | LinearOperation,
 ): operation is LinearOperation =>
   operation._tag !== 'Match' &&
+  operation._tag !== 'Conditional' &&
   operation._tag !== 'ShortCircuit' &&
+  operation._tag !== 'CheckedScalar' &&
+  operation._tag !== 'OsOpen' &&
   operation._tag !== 'PropagateEffectFailure'
 
 export const linearOperations = (
@@ -91,7 +127,6 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'StringEqualsExact':
     case 'Binary':
     case 'ConvertInteger':
-    case 'CheckedScalar':
     case 'Move':
     case 'BeginLoan':
     case 'SliceLength':
@@ -106,9 +141,10 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'RunEffect':
     case 'RunEffectValue':
     case 'RunStaticEffect':
-    case 'ReifyEffect':
+    case 'CatchEffect':
     case 'CloseEffectEntry':
     case 'Construct':
+    case 'ConstructUnionVariant':
     case 'ConstructArray':
     case 'Project':
     case 'ReadPlace':
@@ -137,8 +173,12 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'SlotCopy':
     case 'SlotDrop':
       return operation.destination
+    case 'CheckedScalarOutcome':
+      return operation.value
+    case 'OsOpenOutcome':
+      return operation.valid
     case 'BindMatch':
-      return operation.binding.destination
+      return operation.destination
     case 'CheckPlace':
     case 'WritePlace':
     case 'EndLoan':
@@ -151,6 +191,7 @@ export const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'Allocate' ||
   operation._tag === 'HostWrite' ||
   operation._tag === 'OsCall' ||
+  operation._tag === 'OsOpenOutcome' ||
   operation._tag === 'RawBufferFrom' ||
   operation._tag === 'SharedFromAllocation' ||
   operation._tag === 'ExecutionFromAllocation' ||
@@ -169,7 +210,7 @@ export const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'RunEffectValue' ||
   operation._tag === 'RunEffectComposite' ||
   operation._tag === 'RunStaticEffect' ||
-  operation._tag === 'ReifyEffect' ||
+  operation._tag === 'CatchEffect' ||
   operation._tag === 'CloseEffectEntry' ||
   (operation._tag === 'Binary' &&
     operation.operator !== 'Equals' &&
@@ -207,7 +248,10 @@ export const expandMatches = (
     const specialIndex = operations.findIndex(
       (operation) =>
         operation._tag === 'Match' ||
+        operation._tag === 'Conditional' ||
         operation._tag === 'ShortCircuit' ||
+        operation._tag === 'CheckedScalar' ||
+        operation._tag === 'OsOpen' ||
         operation._tag === 'PropagateEffectFailure',
     )
     if (specialIndex < 0) {
@@ -232,6 +276,223 @@ export const expandMatches = (
           operations: linearOperations(operations.slice(0, specialIndex)),
           terminator: special,
         }),
+      )
+      return
+    }
+    if (special?._tag === 'CheckedScalar') {
+      const presentType = fn.localTypes.at(special.present.ordinal)
+      const absentType = fn.localTypes.at(special.absent.ordinal)
+      if (presentType?._tag !== 'CallableValue' || absentType?._tag !== 'CallableValue')
+        throw new RangeError('LLVM checked scalar expansion lost its carrier callables')
+      const following = reserve()
+      const present = reserve()
+      const absent = reserve()
+      const apply = (
+        callable: Mir.LocalId,
+        callableType: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
+        arguments_: ReadonlyArray<Mir.LocalId>,
+      ): Extract<Mir.Operation, { readonly _tag: 'ApplyCallable' }> =>
+        Object.freeze({
+          _tag: 'ApplyCallable',
+          destination: special.destination,
+          callable,
+          typeArguments:
+            callableType.environment?.callable.typeArguments ??
+            callableType.storage?.realization.targetArguments ??
+            callableType.typeArguments ??
+            Object.freeze([]),
+          captures: Object.freeze([]),
+          arguments: arguments_,
+          callableType: callableType.type,
+          access: callableType.type.mode,
+          evaluation: 'CalleeThenArguments',
+          realization: 'Environment',
+          type: special.type,
+          provenance: special.provenance,
+        })
+      const drop = (
+        local: Mir.LocalId,
+        cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
+      ): Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
+        Object.freeze({ _tag: 'Drop', local, cleanup, provenance: special.provenance })
+      blocks.push(
+        Object.freeze({
+          id,
+          origin,
+          kind,
+          operations: linearOperations([
+            ...operations.slice(0, specialIndex),
+            Object.freeze({
+              _tag: 'CheckedScalarOutcome' as const,
+              operation: special.operation,
+              valid: special.valid,
+              value: special.value,
+              operands: special.operands,
+              sourceType: special.sourceType,
+              valueType: special.valueType,
+              provenance: special.provenance,
+            }),
+          ]),
+          terminator: Object.freeze({
+            _tag: 'Branch',
+            condition: special.valid,
+            taken: present,
+            otherwise: absent,
+            provenance: special.provenance,
+          }),
+        }),
+      )
+      lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
+      lowerSequence(
+        present,
+        origin,
+        'Normal',
+        [
+          drop(special.absent, special.absentCleanup),
+          apply(special.present, presentType, Object.freeze([special.value])),
+        ],
+        jump(following, special.provenance),
+      )
+      lowerSequence(
+        absent,
+        origin,
+        'Normal',
+        [drop(special.present, special.presentCleanup), apply(special.absent, absentType, [])],
+        jump(following, special.provenance),
+      )
+      return
+    }
+    if (special?._tag === 'OsOpen') {
+      const successType = fn.localTypes.at(special.success.ordinal)
+      const failureType = fn.localTypes.at(special.failure.ordinal)
+      if (successType?._tag !== 'CallableValue' || failureType?._tag !== 'CallableValue')
+        throw new RangeError('LLVM OS open expansion lost its carrier callables')
+      const following = reserve()
+      const succeeded = reserve()
+      const failed = reserve()
+      const apply = (
+        callable: Mir.LocalId,
+        callableType: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
+        arguments_: ReadonlyArray<Mir.LocalId>,
+      ): Extract<Mir.Operation, { readonly _tag: 'ApplyCallable' }> =>
+        Object.freeze({
+          _tag: 'ApplyCallable',
+          destination: special.destination,
+          callable,
+          typeArguments:
+            callableType.environment?.callable.typeArguments ??
+            callableType.storage?.realization.targetArguments ??
+            callableType.typeArguments ??
+            Object.freeze([]),
+          captures: Object.freeze([]),
+          arguments: arguments_,
+          callableType: callableType.type,
+          access: callableType.type.mode,
+          evaluation: 'CalleeThenArguments',
+          realization: 'Environment',
+          type: special.type,
+          provenance: special.provenance,
+        })
+      const drop = (
+        local: Mir.LocalId,
+        cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
+      ): Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
+        Object.freeze({ _tag: 'Drop', local, cleanup, provenance: special.provenance })
+      blocks.push(
+        Object.freeze({
+          id,
+          origin,
+          kind,
+          operations: linearOperations([
+            ...operations.slice(0, specialIndex),
+            Object.freeze({
+              _tag: 'OsOpenOutcome' as const,
+              operation: special.operation,
+              valid: special.valid,
+              handle: special.handle,
+              arguments: special.arguments,
+              handleType: special.handleType,
+              provenance: special.provenance,
+            }),
+          ]),
+          terminator: Object.freeze({
+            _tag: 'Branch',
+            condition: special.valid,
+            taken: succeeded,
+            otherwise: failed,
+            provenance: special.provenance,
+          }),
+        }),
+      )
+      lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
+      lowerSequence(
+        succeeded,
+        origin,
+        'Normal',
+        [
+          drop(special.failure, special.failureCleanup),
+          apply(special.success, successType, Object.freeze([special.handle])),
+        ],
+        jump(following, special.provenance),
+      )
+      lowerSequence(
+        failed,
+        origin,
+        'Normal',
+        [drop(special.success, special.successCleanup), apply(special.failure, failureType, [])],
+        jump(following, special.provenance),
+      )
+      return
+    }
+    if (special?._tag === 'Conditional') {
+      const following = reserve()
+      const taken = reserve()
+      const otherwise = reserve()
+      blocks.push(
+        Object.freeze({
+          id,
+          origin,
+          kind,
+          operations: linearOperations(operations.slice(0, specialIndex)),
+          terminator: Object.freeze({
+            _tag: 'Branch',
+            condition: special.condition,
+            taken,
+            otherwise,
+            provenance: special.provenance,
+          }),
+        }),
+      )
+      lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
+      lowerSequence(
+        taken,
+        origin,
+        'Normal',
+        [
+          ...special.taken.operations,
+          Object.freeze({
+            _tag: 'Move' as const,
+            destination: special.destination,
+            source: special.taken.result,
+            provenance: special.provenance,
+          }),
+        ],
+        jump(following, special.provenance),
+      )
+      lowerSequence(
+        otherwise,
+        origin,
+        'Normal',
+        [
+          ...special.otherwise.operations,
+          Object.freeze({
+            _tag: 'Move' as const,
+            destination: special.destination,
+            source: special.otherwise.result,
+            provenance: special.provenance,
+          }),
+        ],
+        jump(following, special.provenance),
       )
       return
     }
@@ -343,25 +604,54 @@ export const expandMatches = (
       }
       const arm = match.arms.find((item) => item.id.ordinal === candidate.ordinal)
       if (arm === undefined) throw new RangeError('LLVM match expansion lost a candidate arm')
+      const bindingMember =
+        arm.member?._tag === 'StructuralTypeMember' && Match.selects(arm.member, member)
+          ? arm.member
+          : member
       const bindings: ReadonlyArray<LinearOperation> = Object.freeze(
         arm.bindings.map((binding) =>
           Object.freeze({
             _tag: 'BindMatch' as const,
             scrutinee: match.scrutinee,
             shape: match.scrutineeShape,
-            member: Match.sourceType(member),
-            binding,
+            member: bindingMember,
+            destination: binding.destination,
+            path: binding.path,
+            type: binding.type,
             provenance: binding.provenance,
           }),
         ),
       )
       const selected = reserve()
+      const cleanup = arm.selected.cleanup.flatMap((entry): ReadonlyArray<LinearOperation> => {
+        const type = fn.localTypes.at(entry.destination.ordinal)
+        if (type === undefined) throw new RangeError('LLVM match cleanup lost its local type')
+        return Object.freeze([
+          Object.freeze({
+            _tag: 'BindMatch' as const,
+            scrutinee: match.scrutinee,
+            shape: match.scrutineeShape,
+            member: bindingMember,
+            destination: entry.destination,
+            path: entry.path,
+            type,
+            provenance: arm.provenance,
+          }),
+          Object.freeze({
+            _tag: 'Drop' as const,
+            local: entry.destination,
+            cleanup: entry.cleanup,
+            provenance: arm.provenance,
+          }),
+        ])
+      })
       lowerSequence(
         selected,
         origin,
         'Normal',
         [
           ...arm.selected.operations,
+          ...cleanup,
           Object.freeze({
             _tag: 'Move' as const,
             destination: match.destination,
@@ -433,7 +723,10 @@ export const expandMatches = (
       })
       return
     }
-    if (match.scrutineeType._tag !== 'Union') {
+    if (
+      match.scrutineeShape.tree._tag !== 'SumShape' &&
+      match.scrutineeShape.tree._tag !== 'NominalUnionShape'
+    ) {
       const selected = decisionEntries.at(0) ?? trap
       blocks.push(
         Object.freeze({
@@ -447,7 +740,7 @@ export const expandMatches = (
       return
     }
     const dispatchIds = match.decisions.map((_, ordinal) => (ordinal === 0 ? dispatch : reserve()))
-    match.decisions.forEach((_, ordinal) => {
+    match.decisions.forEach((decision, ordinal) => {
       blocks.push(
         Object.freeze({
           id: dispatchIds.at(ordinal) ?? dispatch,
@@ -457,7 +750,8 @@ export const expandMatches = (
           terminator: Object.freeze({
             _tag: 'MatchBranch',
             scrutinee: match.scrutinee,
-            memberOrdinal: ordinal,
+            shape: match.scrutineeShape,
+            member: decision.member,
             taken: decisionEntries.at(ordinal) ?? trap,
             otherwise: dispatchIds.at(ordinal + 1) ?? trap,
             provenance: match.provenance,

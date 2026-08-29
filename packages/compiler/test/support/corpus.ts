@@ -728,7 +728,7 @@ export const independentExecutionParkedTypedFailure = `import silk.allocator { A
 import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 struct Failed { code: i32 }
 struct Empty {}
 struct Stored { execution: Intrinsic.Execution<Result<i32, Failed>> }
@@ -743,10 +743,8 @@ effect fn body() -> Result<i32, Failed> {
 fn ready(state: &()) -> () { return () }
 fn observe(result: Result<i32, Failed>) -> i32 {
   return match move result {
-    Result<i32, Failed> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<Failed> { error } => match move error { Failed { code } => code }
-    }
+      Result<i32, Failed>.Success { value } => value
+      Result<i32, Failed>.Failure { error } => match move error { Failed { code } => code }
   }
 }
 fn complete(owner: &mut Owner, result: Result<i32, Failed>) -> () {
@@ -1058,6 +1056,73 @@ export const corpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'scalar-enum-lanes',
     source: scalarEnumLaneAcceptance,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'nominal-result-compound-error',
+    source: `struct Data { value: i32 }
+union HttpErrorCode { DNSTimeout, DNSError { rcode: i32 } }
+struct OutOfMemoryError {}
+union Result<A, E> { Success { value: A }, Failure { error: E } }
+
+fn inspect(result: Result<Data, HttpErrorCode | OutOfMemoryError>) -> i32 {
+  return match move result {
+    Result<Data, HttpErrorCode | OutOfMemoryError>.Success { value } => value.value
+    Result<Data, HttpErrorCode | OutOfMemoryError>.Failure { error } => match move error {
+      HttpErrorCode.DNSTimeout => 1
+      HttpErrorCode.DNSError { rcode } => rcode
+      OutOfMemoryError other => 0
+    }
+  }
+}
+
+pub fn main() -> i32 {
+  let success = Result<Data, HttpErrorCode | OutOfMemoryError>.Success {
+    value: Data { value: 21 },
+  }
+  let failure = Result<Data, HttpErrorCode | OutOfMemoryError>.Failure {
+    error: HttpErrorCode.DNSError { rcode: 21 },
+  }
+  return inspect(move success) + inspect(move failure)
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'nominal-union-represented-copy-drop',
+    source: `union Parser<F: once fn(i32) -> i32> { Empty, Ready { parse: F } }
+union Deferred<F: once Effect<i32>> { Empty, Ready { operation: F } }
+union Flag { Empty, Value { value: i32 } }
+impl Copy for Flag {}
+struct Token {}
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+union Owner { Empty, Present { token: Token, value: i32 } }
+
+fn increment(value: i32) -> i32 { return value + 1 }
+fn parse<F: once fn(i32) -> i32>(parser: Parser<F>) -> i32 {
+  return match move parser {
+    Parser<F>.Empty => 0
+    Parser<F>.Ready { parse } => parse(19)
+  }
+}
+fn force<F: once Effect<i32>>(deferred: Deferred<F>) -> i32 {
+  return match move deferred {
+    Deferred<F>.Empty => 0
+    Deferred<F>.Ready { operation } => run operation
+  }
+}
+fn copyFlag(flag: Flag) -> i32 {
+  let copied = flag
+  return match move copied { Flag.Empty => 0 Flag.Value { value } => value }
+}
+fn consume(owner: Owner) -> i32 {
+  return match move owner { Owner.Empty => 0 Owner.Present { value, .. } => value }
+}
+pub fn main() -> i32 {
+  let parser = Parser.Ready { parse: increment }
+  let deferred = Deferred.Ready { operation: effect { return 18 } }
+  let owner = Owner.Present { token: Token {}, value: 2 }
+  return parse(move parser) + force(move deferred) + copyFlag(Flag.Value { value: 2 }) + consume(move owner)
+}`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -1395,13 +1460,13 @@ pub fn main() -> i32 {
   {
     name: 'arith-convergence-checked-remainder-min-none',
     source: `import silk.i32 as i32
-import silk.option { Option }
+import silk.option { Option, unwrapOr }
 pub fn main() -> i32 {
   let minimum = i32.subtract(-2147483647, 1)
-  if Option.unwrapOr<i32>(i32.checkedRemainder(minimum, -1), 42) != 42 { return 1 }
-  if Option.unwrapOr<i32>(i32.checkedRemainder(7, -1), -1) != 0 { return 2 }
-  if Option.unwrapOr<i32>(i32.checkedRemainder(minimum, 2), -1) != 0 { return 3 }
-  if Option.unwrapOr<i32>(i32.checkedRemainder(7, 0), 42) != 42 { return 4 }
+  if unwrapOr<i32>(i32.checkedRemainder(minimum, -1), 42) != 42 { return 1 }
+  if unwrapOr<i32>(i32.checkedRemainder(7, -1), -1) != 0 { return 2 }
+  if unwrapOr<i32>(i32.checkedRemainder(minimum, 2), -1) != 0 { return 3 }
+  if unwrapOr<i32>(i32.checkedRemainder(7, 0), 42) != 42 { return 4 }
   return 42
 }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -1718,13 +1783,13 @@ import silk.string {
   scalarValue,
   nextCursor
 }
-import silk.option { Some, None }
+import silk.option { Option, unwrapOr }
 import silk.char { toU32 as charToU32 }
 
 fn scalarSum(value: string, cursor: ScalarCursor) -> u32 {
   return match move nextScalar(value, move cursor) {
-    Some<ScalarStep> { value: step } => continueSum(value, move step)
-    None nothing => u32.toU32(0)
+    Option<ScalarStep>.Some { value: step } => continueSum(value, move step)
+    Option<ScalarStep>.None => u32.toU32(0)
   }
 }
 
@@ -1874,7 +1939,7 @@ import silk.i32 as i32
 import silk.hash as Hash
 import silk.hash { HashKey, HashSeed, Word }
 import silk.hash_map { HashMap, bucketCount, contains, get, insert, length, make, remove }
-import silk.option { Option, Some, None }
+import silk.option { Option, unwrapOr }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -1891,7 +1956,7 @@ effect fn build() -> i32 ! OutOfMemoryError {
   let mut probe = 0
   let mut total = 0
   while probe < 40 {
-    let found = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(i32.toU64(probe))), -1)
+    let found = unwrapOr<i32>(get<Word, i32>(&map, Hash.word(i32.toU64(probe))), -1)
     if found != probe * 3 { return 3 }
     total = total + found
     probe = probe + 1

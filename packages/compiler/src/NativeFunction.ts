@@ -67,6 +67,12 @@ export const discoverRoots = (
   const runtimeContinuationDestinations = blocks.flatMap((block) =>
     block.operations.flatMap((operation) => {
       if (!opensRuntimeContinuation(operation) || operation._tag === 'Binary') return []
+      if (operation._tag === 'CatchEffect')
+        return [
+          operation.destination.ordinal,
+          operation.successValue.ordinal,
+          operation.failureValue.ordinal,
+        ]
       const destination = destinationOf(operation)
       return destination === undefined ? [] : [destination.ordinal]
     }),

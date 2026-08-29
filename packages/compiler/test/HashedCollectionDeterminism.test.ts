@@ -96,7 +96,7 @@ const mapImports = `import silk.hash as Hash
 import silk.hash { HashKey, HashSeed, Word }
 import silk.i32 as i32
 import silk.hash_map { HashMap, bucketCount, insert, keyAt, length, make, occupiedAt }
-import silk.option { Option, Some, None }
+import silk.option { Option }
 import silk.u64 as u64
 import silk.usize as usize`
 

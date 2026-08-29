@@ -4,7 +4,9 @@ import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as Layout from '../src/Layout.js'
 import * as LayoutEncode from '../src/LayoutEncode.js'
+import * as Match from '../src/Match.js'
 import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirLinearization from '../src/MirLinearization.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -70,6 +72,536 @@ it.effect(
         }
       }
     }),
+)
+
+it.effect('elaborates nominal union variants as precise parent values', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'union-values/construction',
+      ascii(`union Option<T> { Some { value: T }, None }
+union Result<A, E> { Success { value: A }, Failure { error: E } }
+union State { Ready, Waiting { count: i32 } }
+fn some() -> Option<i32> { return Option.Some { value: 42 } }
+fn none() -> Option<i32> { return Option<i32>.None }
+fn failed() -> Result<i32, bool> { return Result<i32>.Failure { error: true } }
+fn ready() -> State { return State.Ready }`),
+    )
+    const functions = Analysis.rootAnalysis(self).functions
+    const some = functions.at(0)?.returnedExpression
+    const none = functions.at(1)?.returnedExpression
+    const failed = functions.at(2)?.returnedExpression
+    const ready = functions.at(3)?.returnedExpression
+
+    for (const [name, expression] of [
+      ['some', some],
+      ['none', none],
+      ['failed', failed],
+      ['ready', ready],
+    ] as const) {
+      assert.strictEqual(expression?._tag, 'UnionVariant', name)
+      if (expression?._tag === 'UnionVariant') assert.strictEqual(expression.type._tag, 'Available')
+    }
+    assert.strictEqual(
+      some?.type._tag === 'Available' ? Type.encode(some.type.type) : undefined,
+      'union-values/construction.Option<i32>',
+    )
+    assert.strictEqual(
+      none?.type._tag === 'Available' ? Type.encode(none.type.type) : undefined,
+      'union-values/construction.Option<i32>',
+    )
+    assert.strictEqual(
+      failed?.type._tag === 'Available' ? Type.encode(failed.type.type) : undefined,
+      'union-values/construction.Result<i32, bool>',
+    )
+    assert.strictEqual(
+      ready?.type._tag === 'Available' ? Type.encode(ready.type.type) : undefined,
+      'union-values/construction.State',
+    )
+    const hir = Analysis.rootAnalysis(self).hir.functions.map(Hir.returned)
+    assert.deepEqual(
+      hir.map((expression) => expression._tag),
+      [
+        'ConstructUnionVariant',
+        'ConstructUnionVariant',
+        'ConstructUnionVariant',
+        'ConstructUnionVariant',
+      ],
+    )
+    const someHir = hir.at(0)
+    assert.strictEqual(
+      someHir?._tag === 'ConstructUnionVariant' ? someHir.variant.name : undefined,
+      'Some',
+    )
+    assert.deepEqual(
+      someHir?._tag === 'ConstructUnionVariant'
+        ? someHir.fields.map((field) => field.field.ordinal)
+        : undefined,
+      [0],
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+  }),
+)
+
+it.effect('infers union arguments only from the selected variant fields', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'union-values/inference',
+      ascii(`union Option<T> { Some { value: T }, None }
+union Result<A, E> { Success { value: A }, Failure { error: E } }
+fn missingError() -> Result<i32, bool> { return Result.Success { value: 42 } }
+fn missingItem() -> Option<i32> { return Option.None }
+fn unknown() -> Option<i32> { return Option<i32>.Missing }
+fn conflict() -> Result<i32, bool> {
+  return Result<i32>.Success { value: true }
+}`),
+    )
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0099', 'SEM0099', 'SEM0099', 'SEM0167', 'SEM0100'],
+    )
+    const functions = Analysis.rootAnalysis(self).functions
+    assert.strictEqual(functions.at(0)?.returnedExpression._tag, 'UnionVariant')
+    assert.strictEqual(functions.at(1)?.returnedExpression._tag, 'UnionVariant')
+    assert.strictEqual(functions.at(2)?.returnedExpression._tag, 'UnionVariant')
+    assert.ok(
+      functions.every((fn) => fn.returnedExpression.type._tag === 'Unavailable'),
+      'expected-type context must not complete a constructor application',
+    )
+  }),
+)
+
+it.effect('uses union variant field visibility as the external construction boundary', () =>
+  Effect.gen(function* () {
+    const self = yield* multiSnapshot(
+      'app/Main',
+      new Map([
+        [
+          'model/Secret',
+          ascii(`pub union Secret { Open { pub value: i32, key: i32 }, Closed }
+pub fn make(value: i32) -> Secret { return Secret.Open { value: value, key: 7 } }`),
+        ],
+        [
+          'app/Main',
+          ascii(`import model.Secret { Secret }
+pub fn main() -> i32 { let secret = Secret.Open { value: 1, key: 2 } return 0 }`),
+        ],
+      ]),
+    )
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0021'],
+    )
+    assert.notInclude(Analysis.diagnostics(self).at(0)?.message ?? '', 'key')
+  }),
+)
+
+it.effect('uses union variant field visibility as the external pattern boundary', () =>
+  Effect.gen(function* () {
+    const model = ascii(`pub union Secret { Open { pub value: i32, key: i32 }, Closed }
+pub fn make(value: i32) -> Secret { return Secret.Open { value: value, key: 7 } }`)
+    const valid = yield* multiSnapshot(
+      'app/Main',
+      new Map([
+        ['model/Secret', model],
+        [
+          'app/Main',
+          ascii(`import model.Secret { Secret, make }
+fn reveal(secret: Secret) -> i32 {
+  return match move secret {
+    Secret.Open { value, .. } => value
+    Secret.Closed => 0
+  }
+}
+pub fn main() -> i32 { return reveal(make(42)) }`),
+        ],
+      ]),
+    )
+    assert.deepEqual(Analysis.diagnostics(valid), [])
+    const outcome = Analysis.evaluate(valid)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+
+    const explicitPrivate = yield* multiSnapshot(
+      'app/Main',
+      new Map([
+        ['model/Secret', model],
+        [
+          'app/Main',
+          ascii(`import model.Secret { Secret, make }
+pub fn main() -> i32 {
+  return match move make(42) {
+    Secret.Open { value, key } => value
+    Secret.Closed => 0
+  }
+}`),
+        ],
+      ]),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(explicitPrivate).map((diagnostic) => diagnostic.code),
+      ['SEM0028'],
+    )
+
+    const undisclosedPrivate = yield* multiSnapshot(
+      'app/Main',
+      new Map([
+        ['model/Secret', model],
+        [
+          'app/Main',
+          ascii(`import model.Secret { Secret, make }
+pub fn main() -> i32 {
+  return match move make(42) {
+    Secret.Open { value } => value
+    Secret.Closed => 0
+  }
+}`),
+        ],
+      ]),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(undisclosedPrivate).map((diagnostic) => diagnostic.code),
+      ['SEM0046'],
+    )
+    assert.notInclude(Analysis.diagnostics(undisclosedPrivate).at(0)?.message ?? '', 'key')
+  }),
+)
+
+it.effect('does not synthesize fields on the nominal union parent', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'union-values/projection',
+      ascii(`union Result<A, E> { Success { value: A }, Failure { value: E } }
+fn project(result: Result<i32, bool>) -> i32 { return result.value }`),
+    )
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0027'],
+    )
+    assert.strictEqual(
+      Analysis.rootAnalysis(self).functions.at(0)?.returnedExpression.type._tag,
+      'Unavailable',
+    )
+  }),
+)
+
+it.effect('lowers and evaluates nominal union construction as a whole value', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-values/runtime',
+      ascii(`union State { Ready, Waiting { count: i32 } }
+fn make() -> State { return State.Waiting { count: 2 } }
+fn keep(state: State) -> State { return move state }
+pub fn main() -> i32 { let state = keep(make()) return 42 }`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(Analysis.loweredMir(self)._tag, 'MirModule')
+    const make = Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'make')
+    assert.strictEqual(
+      make === undefined
+        ? undefined
+        : MirVerification.operations(make).find(
+            (operation) => operation._tag === 'ConstructUnionVariant',
+          )?._tag,
+      'ConstructUnionVariant',
+    )
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('evaluates exhaustive nominal union variant patterns with payload bindings', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-values/patterns',
+      ascii(`union Option<T> { Some { value: T }, None }
+fn unwrap(option: Option<i32>) -> i32 {
+  return match move option {
+    Option<i32>.Some { value } => value
+    Option<i32>.None => 0
+  }
+}
+pub fn main() -> i32 { return unwrap(Option<i32>.Some { value: 42 }) }`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const returned = Analysis.rootAnalysis(self).functions.at(0)?.returnedExpression
+    assert.strictEqual(returned?._tag, 'Match')
+    if (returned?._tag !== 'Match') return
+    assert.strictEqual(returned.exhaustive, true)
+    assert.deepEqual(returned.members.map(Match.encodeIdentity), [
+      'union-values/patterns.Option<i32>::union-values/patterns.Option<i32>.Some',
+      'union-values/patterns.Option<i32>::union-values/patterns.Option<i32>.None',
+    ])
+    assert.deepEqual(
+      returned.arms.map((arm) => [arm.pattern._tag, arm.bindings.length, arm.reachable]),
+      [
+        ['UnionVariantPattern', 1, true],
+        ['UnionVariantPattern', 0, true],
+      ],
+    )
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('cleans omitted fields of the selected nominal union variant', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-values/omitted-cleanup',
+      ascii(`struct Bomb {}
+impl Drop for Bomb {
+  fn drop(self: &mut Bomb) -> () { let boom = 1 / 0 return () }
+}
+union State { Empty, Ready { value: i32, bomb: Bomb } }
+fn consume(state: State) -> i32 {
+  return match move state {
+    State.Empty => 0
+    State.Ready { value, .. } => value
+  }
+}
+fn ignore(state: State) -> i32 {
+  return match move state { _ => 42 }
+}
+pub fn main() -> i32 {
+  if ignore(State.Empty) != 42 { return 0 }
+  return consume(State.Ready { value: 42, bomb: Bomb {} })
+}`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const consume = Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'consume')
+    const ignore = Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'ignore')
+    assert.isTrue(
+      consume !== undefined &&
+        MirLinearization.linearize(consume).some((block) =>
+          block.operations.some(
+            (operation) => operation._tag === 'Drop' && operation.cleanup._tag === 'HookCleanup',
+          ),
+        ),
+    )
+    assert.isTrue(
+      ignore !== undefined &&
+        MirLinearization.linearize(ignore).some((block) =>
+          block.operations.some(
+            (operation) =>
+              operation._tag === 'Drop' && operation.cleanup._tag === 'NominalUnionCleanup',
+          ),
+        ),
+    )
+    assert.strictEqual(Analysis.evaluate(self)._tag, 'Trap')
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.throws(() => (instance.exports.silk_main as () => number)(), WebAssembly.RuntimeError)
+  }),
+)
+
+it.effect('keeps nominal variants nested beneath structural union roots', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-values/hierarchical-match',
+      ascii(`union HttpError { Timeout, DNS { code: i32 } }
+struct OutOfMemoryError {}
+
+fn inspect(error: HttpError | OutOfMemoryError) -> i32 {
+  return match move error {
+    HttpError.DNS { code } => code
+    HttpError.Timeout => 1
+    OutOfMemoryError other => 0
+  }
+}
+
+fn classify(error: HttpError | OutOfMemoryError) -> i32 {
+  return match move error {
+    HttpError whole => 7
+    OutOfMemoryError other => 0
+  }
+}
+
+pub fn main() -> i32 {
+  return inspect(HttpError.DNS { code: 42 }) + classify(HttpError.Timeout)
+}`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const returned = Analysis.rootAnalysis(self).functions.at(0)?.returnedExpression
+    assert.strictEqual(returned?._tag, 'Match')
+    if (returned?._tag !== 'Match') return
+    assert.deepEqual(returned.members.map(Match.encodeIdentity), [
+      'union-values/hierarchical-match.HttpError::union-values/hierarchical-match.HttpError.Timeout',
+      'union-values/hierarchical-match.HttpError::union-values/hierarchical-match.HttpError.DNS',
+      'union-values/hierarchical-match.OutOfMemoryError',
+    ])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 49n)
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 49)
+  }),
+)
+
+it.effect('keeps generic applications and never-payload variants as distinct coverage leaves', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-values/generic-coverage',
+      ascii(`union Option<T> { Some { value: T }, None }
+union Result<T, E> { Success { value: T }, Failure { error: E } }
+
+fn read(option: Option<i32> | Option<bool>) -> i32 {
+  return match move option {
+    Option<i32>.Some { value } => value
+    Option<i32>.None => 0
+    Option<bool>.Some { value } => 1
+    Option<bool>.None => 0
+  }
+}
+
+fn required(result: Result<i32, never>) -> i32 {
+  return match move result {
+    Result<i32, never>.Success { value } => value
+    Result<i32, never>.Failure { error } => 0
+  }
+}
+
+pub fn main() -> i32 { return read(Option<i32>.Some { value: 42 }) }`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const functions = Analysis.rootAnalysis(self).functions
+    const read = functions.at(0)?.returnedExpression
+    const required = functions.at(1)?.returnedExpression
+    assert.strictEqual(read?._tag, 'Match')
+    assert.strictEqual(required?._tag, 'Match')
+    if (read?._tag !== 'Match' || required?._tag !== 'Match') return
+    assert.strictEqual(read.members.length, 4)
+    assert.deepEqual(
+      read.members.map((member) => Type.encode(Match.sourceType(member))),
+      [
+        'union-values/generic-coverage.Option<bool>',
+        'union-values/generic-coverage.Option<bool>',
+        'union-values/generic-coverage.Option<i32>',
+        'union-values/generic-coverage.Option<i32>',
+      ],
+    )
+    assert.deepEqual(required.members.map(Match.encodeIdentity), [
+      'union-values/generic-coverage.Result<i32, never>::union-values/generic-coverage.Result<i32, never>.Success',
+      'union-values/generic-coverage.Result<i32, never>::union-values/generic-coverage.Result<i32, never>.Failure',
+    ])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('keeps affine variant payloads available after a false guard', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-values/guarded-affine',
+      ascii(`struct Token { value: i32 }
+union Option<T> { Some { value: T }, None }
+
+fn select(option: Option<Token>, guard: bool) -> i32 {
+  return match move option {
+    Option<Token>.Some { value } if guard => value.value
+    Option<Token>.Some { value } => value.value + 1
+    Option<Token>.None => 0
+  }
+}
+
+pub fn main() -> i32 {
+  return select(Option<Token>.Some { value: Token { value: 41 } }, false)
+}`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('realizes callable and Effect fields only in their active nominal variant', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-values/represented-fields',
+      ascii(`union Parser<F: once fn(i32) -> i32> { Empty, Ready { parse: F } }
+union Deferred<F: once Effect<i32>> { Empty, Ready { operation: F } }
+
+fn increment(value: i32) -> i32 { return value + 1 }
+
+fn parse<F: once fn(i32) -> i32>(parser: Parser<F>) -> i32 {
+  return match move parser {
+    Parser<F>.Empty => 0
+    Parser<F>.Ready { parse } => parse(20)
+  }
+}
+
+fn force<F: once Effect<i32>>(deferred: Deferred<F>) -> i32 {
+  return match move deferred {
+    Deferred<F>.Empty => 0
+    Deferred<F>.Ready { operation } => run operation
+  }
+}
+
+pub fn main() -> i32 {
+  let parser = Parser.Ready { parse: increment }
+  let deferred = Deferred.Ready { operation: effect { return 21 } }
+  return parse(move parser) + force(move deferred)
+}`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const constructions = Analysis.loweredMir(self)
+      .functions.flatMap(MirVerification.operations)
+      .filter((operation) => operation._tag === 'ConstructUnionVariant')
+    assert.deepEqual(
+      constructions.flatMap((operation) =>
+        operation._tag === 'ConstructUnionVariant'
+          ? operation.fields.flatMap((field) =>
+              field.stored === undefined ? [] : [field.stored._tag],
+            )
+          : [],
+      ),
+      ['StoredCallableField', 'StoredEffectField'],
+    )
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
 )
 
 it.effect('evaluates initializers in source order before constructing in declaration order', () =>

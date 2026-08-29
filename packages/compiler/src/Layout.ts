@@ -1,6 +1,6 @@
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
@@ -44,6 +44,12 @@ export interface Field extends PlacedField {
   readonly type: DeclarationFacts.SemanticType
 }
 
+/** Static cleanup hook required before structural cleanup; contributes no ABI bytes. */
+export interface CleanupHook {
+  readonly hook: DeclarationFacts.CanonicalId
+  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+}
+
 /** The initial closed representation vocabulary for concrete runtime types. */
 export type Representation =
   | { readonly _tag: 'SignedInteger'; readonly bits: Scalar.FixedBits }
@@ -65,11 +71,7 @@ export type Representation =
       readonly _tag: 'Aggregate'
       readonly fields: ReadonlyArray<Field>
       readonly tailPadding: number
-      /** Static cleanup hook required before structural field cleanup; contributes no ABI bytes. */
-      readonly cleanupHook?: {
-        readonly hook: DeclarationFacts.CanonicalId
-        readonly typeArguments: ReadonlyArray<Type.GenericArgument>
-      }
+      readonly cleanupHook?: CleanupHook
     }
   | {
       readonly _tag: 'CallableEnvironment'
@@ -149,6 +151,56 @@ export type Representation =
       readonly tagPadding: number
       readonly tailPadding: number
     }
+  | {
+      readonly _tag: 'NominalUnion'
+      readonly union: DeclarationFacts.CanonicalId
+      readonly tag: { readonly bits: 32; readonly size: 4 }
+      readonly variants: ReadonlyArray<{
+        readonly variant: DeclarationFacts.CanonicalUnionVariantId
+        readonly ordinal: number
+        readonly fields: ReadonlyArray<Field>
+        readonly size: number
+        readonly alignment: number
+        readonly tailPadding: number
+      }>
+      readonly payloadOffset: number
+      readonly payloadSize: number
+      readonly payloadAlignment: number
+      readonly tagPadding: number
+      readonly tailPadding: number
+      readonly cleanupHook?: CleanupHook
+    }
+
+/** Canonical struct-like storage used transiently for one selected nominal-union variant. */
+export interface NominalUnionMaterialization {
+  readonly payloadOffset: number
+  readonly payloadSize: number
+  readonly payloadAlignment: number
+  readonly size: number
+  readonly alignment: number
+}
+
+export const nominalUnionMaterialization = (
+  representation: Extract<Representation, { readonly _tag: 'NominalUnion' }>,
+): NominalUnionMaterialization => {
+  const payloadSize = representation.variants.reduce(
+    (maximum, variant) => Math.max(maximum, variant.size),
+    0,
+  )
+  const payloadAlignment = representation.variants.reduce(
+    (maximum, variant) => Math.max(maximum, variant.alignment),
+    1,
+  )
+  const payloadOffset = alignUp(4, payloadAlignment)
+  const alignment = Math.max(4, payloadAlignment)
+  return Object.freeze({
+    payloadOffset,
+    payloadSize,
+    payloadAlignment,
+    size: alignUp(payloadOffset + payloadSize, alignment),
+    alignment,
+  })
+}
 
 /** One compiler-owned concrete layout entry. */
 export interface Entry {
@@ -618,7 +670,7 @@ export const neverEntry = (): Entry =>
   })
 
 const nominalOf = (
-  declaration: DeclarationFacts.StructFact | DeclarationFacts.EnumFact,
+  declaration: DeclarationFacts.StructFact | DeclarationFacts.UnionFact | DeclarationFacts.EnumFact,
 ): Type.Nominal | undefined =>
   declaration.canonical._tag === 'Canonical'
     ? Type.nominal(declaration.canonical.id.module, declaration.canonical.id.name)
@@ -665,11 +717,15 @@ export const scalarEnumEntry = (
 }
 
 const dependenciesOf = (
-  struct: DeclarationFacts.StructFact,
+  aggregate: DeclarationFacts.StructFact | DeclarationFacts.UnionFact,
   substitution: Type.Substitution = new Map(),
 ): ReadonlyArray<Type.Nominal> => {
   const dependencies = new Map<string, Type.Nominal>()
-  for (const field of struct.fields) {
+  const fields =
+    aggregate._tag === 'StructDeclaration'
+      ? aggregate.fields
+      : aggregate.variants.flatMap((variant) => variant.fields)
+  for (const field of fields) {
     let types: ReadonlyArray<Type.Nominal> = []
     if (field.declaredType._tag === 'Resolved') {
       types = Type.nominals(Type.substitute(field.declaredType.type, substitution))
@@ -719,8 +775,21 @@ export const catalog = (
       return type === undefined ? [] : [Object.freeze({ enum_, type })]
     })
     .sort((left, right) => Type.compare(left.type, right.type))
+  const unionDeclarations = index.modules
+    .flatMap((module) => module.unions)
+    .flatMap((union) => {
+      const type = nominalOf(union)
+      return type === undefined ? [] : [Object.freeze({ union, type })]
+    })
+    .sort((left, right) => Type.compare(left.type, right.type))
   const byType = new Map(
     declarations.map((declaration) => [
+      `${declaration.type.module}\u0000${declaration.type.name}`,
+      declaration,
+    ]),
+  )
+  const unionByType = new Map(
+    unionDeclarations.map((declaration) => [
       `${declaration.type.module}\u0000${declaration.type.name}`,
       declaration,
     ]),
@@ -1061,7 +1130,10 @@ export const catalog = (
               _tag: 'LayoutField' as const,
               id: Object.freeze({
                 _tag: 'FieldId' as const,
-                struct: structId,
+                owner: Object.freeze({
+                  _tag: 'StructFieldOwnerId' as const,
+                  declaration: structId,
+                }),
                 ordinal: fieldOrdinal,
               }),
               name,
@@ -1086,6 +1158,254 @@ export const catalog = (
           _tag: 'Aggregate',
           fields: Object.freeze(fields),
           tailPadding: packed.tailPadding,
+        }),
+      })
+      completed.set(key, entry)
+      return entry
+    }
+    const layoutAggregateField = (
+      fieldType: DeclarationFacts.SemanticType,
+      fieldId: DeclarationFacts.FieldId,
+    ): CatalogEntry => {
+      const representationPlans = RepresentationField.plansOf(index, type).filter((plan) =>
+        RepresentationField.belongsTo(plan.id, fieldId),
+      )
+      let representationOrdinal = 0
+      const visit = (candidate: DeclarationFacts.SemanticType): CatalogEntry => {
+        if (Type.isRepresented(candidate)) {
+          const plan = representationPlans.at(representationOrdinal)
+          representationOrdinal += 1
+          const realization =
+            plan === undefined || callableRealizations === undefined
+              ? undefined
+              : FieldRealization.realizationOf(callableRealizations, type, plan.id)
+          if (realization === undefined) {
+            return unavailable(candidate, Object.freeze(Type.nominals(candidate)), {
+              _tag: 'InvalidDeclaration',
+              detail: 'represented executable values remain unavailable to layout',
+            })
+          }
+          return FieldRealization.isCallableRealization(realization)
+            ? layoutRepresentedCallable(candidate, realization)
+            : layoutRepresentedEffect(candidate, realization)
+        }
+        if (Type.isFixedArray(candidate)) {
+          const element = visit(candidate.element)
+          if (element._tag === 'UnavailableLayoutEntry') return element
+          return (
+            repeatedEntry(candidate, element) ??
+            unavailable(candidate, Object.freeze(Type.nominals(candidate.element)), {
+              _tag: 'InvalidDeclaration',
+              detail: `array layout overflows for ${Type.encode(candidate)}`,
+            })
+          )
+        }
+        if (Type.isSlice(candidate)) {
+          const element = visit(candidate.element)
+          return element._tag === 'UnavailableLayoutEntry'
+            ? element
+            : sliceEntry(target, candidate, element)
+        }
+        return layoutType(candidate)
+      }
+      return visit(fieldType)
+    }
+    const unionDeclaration = unionByType.get(`${type.module}\u0000${type.name}`)
+    if (unionDeclaration !== undefined) {
+      const union = unionDeclaration.union
+      if (union.canonical._tag !== 'Canonical') {
+        const result = unavailable(type, Object.freeze([]), {
+          _tag: 'InvalidDeclaration',
+          detail: `canonical identity is unavailable for ${Type.encode(type)}`,
+        })
+        completed.set(key, result)
+        return result
+      }
+      const parameters = union.typeParameters.map((parameter) => parameter.type)
+      const substitution = TypeInference.substitution(parameters, type.arguments)
+      const dependencies =
+        substitution === undefined ? Object.freeze([]) : dependenciesOf(union, substitution)
+      if (substitution === undefined) {
+        return unavailable(type, dependencies, {
+          _tag: 'InvalidDeclaration',
+          detail: `${Type.encode(type)} has ${type.arguments.length} type arguments; expected ${parameters.length}`,
+        })
+      }
+      if (visiting.has(key)) {
+        const result = unavailable(type, dependencies, {
+          _tag: 'InvalidDeclaration',
+          detail: `recursive dependency for ${Type.encode(type)} was not rejected during declaration analysis`,
+        })
+        completed.set(key, result)
+        return result
+      }
+      if (union.validity._tag !== 'Valid' || union.dependency._tag === 'Unavailable') {
+        let cause: Diagnostic.Identity | undefined
+        if (union.validity._tag === 'Invalid') cause = union.validity.causes.at(0)
+        else if (union.dependency._tag === 'Unavailable') cause = union.dependency.cause
+        const result = unavailable(
+          type,
+          dependencies,
+          { _tag: 'InvalidDeclaration', detail: `declaration dependencies are unavailable` },
+          cause,
+        )
+        completed.set(key, result)
+        return result
+      }
+
+      visiting.add(key)
+      let fieldsCopy = true
+      let failure: UnavailableEntry | undefined
+      const variants: Array<
+        Extract<Representation, { readonly _tag: 'NominalUnion' }>['variants'][number]
+      > = []
+      for (const variant of union.variants) {
+        if (variant.canonical._tag !== 'Canonical') {
+          failure = unavailable(type, dependencies, {
+            _tag: 'InvalidDeclaration',
+            detail: `variant identity is unavailable for ${Type.encode(type)}`,
+          })
+          break
+        }
+        const inputs: Array<Packing.Input<Omit<Field, keyof Packing.PlacedField>>> = []
+        for (const field of variant.fields) {
+          if (
+            field.state._tag !== 'Unique' ||
+            field.name._tag !== 'Present' ||
+            field.declaredType._tag !== 'Resolved' ||
+            field.declaredType.exposureCause !== undefined
+          ) {
+            let cause: Diagnostic.Identity | undefined
+            if (field.state._tag === 'Duplicate') cause = field.state.cause
+            else if (field.declaredType._tag === 'Unresolved') {
+              cause = field.declaredType.cause
+            } else if (field.declaredType._tag === 'Resolved') {
+              cause = field.declaredType.exposureCause
+            }
+            failure = unavailable(
+              type,
+              dependencies,
+              { _tag: 'UnavailableField', field: field.id, detail: 'field is unavailable' },
+              cause,
+            )
+            break
+          }
+          const fieldType = Type.substitute(field.declaredType.type, substitution)
+          const fieldLayout = layoutAggregateField(fieldType, field.id)
+          if (fieldLayout._tag === 'UnavailableLayoutEntry') {
+            failure = unavailable(
+              type,
+              dependencies,
+              { _tag: 'UnavailableDependency', dependency: fieldType },
+              fieldLayout.cause,
+            )
+            break
+          }
+          fieldsCopy = fieldsCopy && fieldLayout.copy
+          inputs.push(
+            Object.freeze({
+              value: Object.freeze({
+                _tag: 'LayoutField' as const,
+                id: field.id,
+                name: field.name.spelling,
+                type: fieldType,
+              }),
+              size: fieldLayout.size,
+              alignment: fieldLayout.alignment,
+            }),
+          )
+        }
+        if (failure !== undefined) break
+        const packed = Packing.pack(inputs)
+        variants.push(
+          Object.freeze({
+            variant: variant.canonical.id,
+            ordinal: variant.id.ordinal,
+            fields: Object.freeze(
+              packed.fields.map(({ value, ...placement }) =>
+                Object.freeze({ ...value, ...placement }),
+              ),
+            ),
+            size: packed.size,
+            alignment: packed.alignment,
+            tailPadding: packed.tailPadding,
+          }),
+        )
+      }
+      visiting.delete(key)
+      if (failure !== undefined) {
+        completed.set(key, failure)
+        return failure
+      }
+      const callingEntries = new Map(
+        [...completed].flatMap(([entryKey, candidate]) =>
+          candidate._tag === 'LayoutEntry' ? [[entryKey, candidate] as const] : [],
+        ),
+      )
+      const callingContext = Object.freeze({
+        target,
+        entries: callingEntries,
+        effectEnvironments: Object.freeze([]),
+        callableEnvironments: Object.freeze([]),
+        active: new Set<string>(),
+      })
+      const variantShapes = variants.map((variant): CallingShapeNode => {
+        const fields = Object.freeze(
+          variant.fields.map((field) =>
+            Object.freeze({ field: field.id, shape: shapeNode(field.type, callingContext) }),
+          ),
+        )
+        return Object.freeze({
+          _tag: 'ProductShape',
+          type,
+          fields,
+          laneCount: fields.reduce((total, field) => total + field.shape.laneCount, 0),
+        })
+      })
+      const payloadTypes = unifyPayloadTypes(variantShapes, target)
+      const payload = Packing.pack(
+        payloadTypes.map((payloadType) => {
+          const scalar = scalarEntry(target, payloadType)
+          return Object.freeze({
+            value: payloadType,
+            size: scalar.size,
+            alignment: scalar.alignment,
+          })
+        }),
+      )
+      const payloadAlignment = payload.alignment
+      const payloadSize = payload.size
+      const payloadOffset = alignUp(4, payloadAlignment)
+      const alignment = Math.max(4, payloadAlignment)
+      const size = alignUp(payloadOffset + payloadSize, alignment)
+      const cleanup = CleanupPlan.cleanupPlan(index, type)
+      const entry: Entry = Object.freeze({
+        _tag: 'LayoutEntry',
+        type,
+        copy:
+          ConformanceProof.hasCopyDeclaration(index, type) &&
+          fieldsCopy &&
+          cleanup._tag !== 'HookCleanup',
+        size,
+        alignment,
+        representation: Object.freeze({
+          _tag: 'NominalUnion',
+          union: union.canonical.id,
+          tag: Object.freeze({ bits: 32, size: 4 }),
+          variants: Object.freeze(variants),
+          payloadOffset,
+          payloadSize,
+          payloadAlignment,
+          tagPadding: payloadOffset - 4,
+          tailPadding: size - (payloadOffset + payloadSize),
+          ...(cleanup._tag === 'HookCleanup'
+            ? {
+                cleanupHook: Object.freeze({
+                  hook: cleanup.hook,
+                  typeArguments: cleanup.typeArguments,
+                }),
+              }
+            : {}),
         }),
       })
       completed.set(key, entry)
@@ -1164,48 +1484,7 @@ export const catalog = (
         break
       }
       const fieldType = Type.substitute(field.declaredType.type, substitution)
-      const representationPlans = RepresentationField.plansOf(index, type).filter(
-        (plan) => plan.id.ordinal === field.id.ordinal,
-      )
-      let representationOrdinal = 0
-      const layoutFieldType = (candidate: DeclarationFacts.SemanticType): CatalogEntry => {
-        if (Type.isRepresented(candidate)) {
-          const plan = representationPlans.at(representationOrdinal)
-          representationOrdinal += 1
-          const realization =
-            plan === undefined || callableRealizations === undefined
-              ? undefined
-              : FieldRealization.realizationOf(callableRealizations, type, plan.id)
-          if (realization === undefined) {
-            return unavailable(candidate, Object.freeze(Type.nominals(candidate)), {
-              _tag: 'InvalidDeclaration',
-              detail: 'represented executable values remain unavailable to layout',
-            })
-          }
-          return FieldRealization.isCallableRealization(realization)
-            ? layoutRepresentedCallable(candidate, realization)
-            : layoutRepresentedEffect(candidate, realization)
-        }
-        if (Type.isFixedArray(candidate)) {
-          const element = layoutFieldType(candidate.element)
-          if (element._tag === 'UnavailableLayoutEntry') return element
-          return (
-            repeatedEntry(candidate, element) ??
-            unavailable(candidate, Object.freeze(Type.nominals(candidate.element)), {
-              _tag: 'InvalidDeclaration',
-              detail: `array layout overflows for ${Type.encode(candidate)}`,
-            })
-          )
-        }
-        if (Type.isSlice(candidate)) {
-          const element = layoutFieldType(candidate.element)
-          return element._tag === 'UnavailableLayoutEntry'
-            ? element
-            : sliceEntry(target, candidate, element)
-        }
-        return layoutType(candidate)
-      }
-      const fieldLayout = layoutFieldType(fieldType)
+      const fieldLayout = layoutAggregateField(fieldType, field.id)
       if (fieldLayout._tag === 'UnavailableLayoutEntry') {
         failure = unavailable(
           type,
@@ -1615,6 +1894,12 @@ export const catalog = (
         for (const field of member.fields) {
           if (field.declaredType._tag === 'Resolved') addReferenced(field.declaredType.type)
         }
+      } else if (member._tag === 'UnionDeclaration') {
+        for (const variant of member.variants) {
+          for (const field of variant.fields) {
+            if (field.declaredType._tag === 'Resolved') addReferenced(field.declaredType.type)
+          }
+        }
       } else if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
         for (const operation of member.operations) {
           for (const parameter of operation.parameters)
@@ -1629,6 +1914,9 @@ export const catalog = (
   }
   for (const declaration of declarations) {
     if (declaration.struct.typeParameters.length === 0) layoutNominal(declaration.type)
+  }
+  for (const declaration of unionDeclarations) {
+    if (declaration.union.typeParameters.length === 0) layoutNominal(declaration.type)
   }
   for (const instance of discovery?.instances ?? []) {
     const substitution = instance.substitution
@@ -1657,6 +1945,7 @@ export const catalog = (
       }
       for (const child of Hir.expressionTree(expression)) {
         if (child._tag === 'BuiltinCall') {
+          if (Scalar.isCheckedOperation(child.operation)) addReferenced('bool')
           for (const argument of child.typeArguments) {
             const specialized = Type.substituteGenericArgument(argument, substitution)
             if (Type.isTypeArgument(specialized)) addReferenced(specialized)
@@ -1668,10 +1957,11 @@ export const catalog = (
         }
         if (child._tag === 'EffectCatch' && child.protected._tag !== 'Unavailable') {
           const protected_ = Type.substitute(child.protected.type, substitution)
-          if (Type.isEffect(protected_))
-            addReferenced(
-              Type.result(protected_.success, Type.failureValue(Type.failureMembers(protected_))),
-            )
+          if (Type.isEffect(protected_)) {
+            addReferenced('bool')
+            addReferenced(protected_.success)
+            addReferenced(Type.failureValue(Type.failureMembers(protected_)))
+          }
         }
       }
     }
@@ -1745,6 +2035,7 @@ const addExpressionTypes = (
   const specialized = Type.substitute(expression.type, substitution)
   types.set(Type.key(specialized), specialized)
   if (expression._tag === 'BuiltinCall') {
+    if (Scalar.isCheckedOperation(expression.operation)) types.set(Type.key('bool'), 'bool')
     for (const argument of expression.typeArguments) {
       const specialized = Type.substituteGenericArgument(argument, substitution)
       const type = Type.isTypeArgument(specialized)
@@ -1787,7 +2078,7 @@ const addExpressionTypes = (
   ) {
     addExpressionTypes(types, expression.root.value, substitution)
   }
-  if (expression._tag === 'Construct') {
+  if (expression._tag === 'Construct' || expression._tag === 'ConstructUnionVariant') {
     for (const field of expression.fields) addExpressionTypes(types, field.value, substitution)
   }
   if (expression._tag === 'ArrayConstruct') {
@@ -1842,16 +2133,15 @@ const addExpressionTypes = (
   }
   if (expression._tag === 'EffectCatch') {
     types.set(Type.key('never'), 'never')
+    types.set(Type.key('bool'), 'bool')
     addExpressionTypes(types, expression.protected, substitution)
     addExpressionTypes(types, expression.handler, substitution)
     if (expression.protected._tag !== 'Unavailable') {
       const protected_ = Type.substitute(expression.protected.type, substitution)
       if (Type.isEffect(protected_)) {
-        const reified = Type.result(
-          protected_.success,
-          Type.failureValue(Type.failureMembers(protected_)),
-        )
-        types.set(Type.key(reified), reified)
+        types.set(Type.key(protected_.success), protected_.success)
+        const failure = Type.failureValue(Type.failureMembers(protected_))
+        types.set(Type.key(failure), failure)
       }
     }
   }
@@ -2633,6 +2923,7 @@ export const plan = (
     for (const expression of instance.function.statements
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)) {
+      if (expression._tag === 'EffectCatch') reached.set(Type.key('bool'), 'bool')
       if (
         expression._tag !== 'BuiltinCall' ||
         (expression.operation !== 'ExecutionLayout' &&
@@ -2706,6 +2997,9 @@ export const plan = (
     for (const field of candidate.executable?.fields ?? []) add(field.type)
     if (candidate.representation._tag === 'Aggregate') {
       for (const field of candidate.representation.fields) add(field.type)
+    } else if (candidate.representation._tag === 'NominalUnion') {
+      for (const variant of candidate.representation.variants)
+        for (const field of variant.fields) add(field.type)
     } else if (
       candidate.representation._tag === 'CallableEnvironment' ||
       candidate.representation._tag === 'StoredEffectEnvironment'
@@ -3273,6 +3567,46 @@ const shapeNode = (
     })
   }
   const candidate = entries.get(Type.key(type))
+  if (Type.isNominal(type) && candidate?.representation._tag === 'NominalUnion') {
+    const variants = Object.freeze(
+      candidate.representation.variants.map((variant) => {
+        const fields = Object.freeze(
+          variant.fields.map((field) =>
+            Object.freeze({ field: field.id, shape: shapeNode(field.type, context) }),
+          ),
+        )
+        const shape: CallingShapeNode = Object.freeze({
+          _tag: 'ProductShape',
+          type,
+          fields,
+          laneCount: fields.reduce((total, field) => total + field.shape.laneCount, 0),
+        })
+        return Object.freeze({
+          variant: variant.variant,
+          ordinal: variant.ordinal,
+          shape,
+          payloadSlots: Object.freeze(Array.from({ length: shape.laneCount }, (_, slot) => slot)),
+        })
+      }),
+    )
+    const payloadLaneCount = variants.reduce(
+      (maximum, variant) => Math.max(maximum, variant.shape.laneCount),
+      0,
+    )
+    return Object.freeze({
+      _tag: 'NominalUnionShape',
+      type,
+      tag: Object.freeze({ type: 'i32', lane: 0 }),
+      payloadLaneCount,
+      payloadTypes: unifyPayloadTypes(
+        variants.map((variant) => variant.shape),
+        target,
+      ),
+      zeroFill: true,
+      variants,
+      laneCount: 1 + payloadLaneCount,
+    })
+  }
   if (Type.isFixedArray(type)) {
     const element = shapeNode(type.element, context)
     const laneCount = element.laneCount * type.length
@@ -3471,6 +3805,25 @@ const materializeLanes = (
           path: Object.freeze([
             ...path,
             Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
+          ]),
+          type: node.payloadTypes.at(slot) ?? ('i32' as const),
+        }),
+      ),
+    ])
+  }
+  if (node._tag === 'NominalUnionShape') {
+    return Object.freeze([
+      Object.freeze({
+        _tag: 'CallingLane' as const,
+        path: Object.freeze([...path, Object.freeze({ _tag: 'NominalUnionTagSelector' as const })]),
+        type: 'i32' as const,
+      }),
+      ...Array.from({ length: node.payloadLaneCount }, (_, slot) =>
+        Object.freeze({
+          _tag: 'CallingLane' as const,
+          path: Object.freeze([
+            ...path,
+            Object.freeze({ _tag: 'NominalUnionPayloadSelector' as const, slot }),
           ]),
           type: node.payloadTypes.at(slot) ?? ('i32' as const),
         }),
@@ -3882,11 +4235,7 @@ const fieldSlice = (
   if (node._tag !== 'ProductShape') return undefined
   let fieldOffset = offset
   for (const candidate of node.fields) {
-    if (
-      candidate.field.ordinal === field.ordinal &&
-      candidate.field.struct.sourceId === field.struct.sourceId &&
-      candidate.field.struct.ordinal === field.struct.ordinal
-    ) {
+    if (DeclarationFacts.sameFieldId(candidate.field, field)) {
       return fieldSlice(candidate.shape, rest, fieldOffset)
     }
     fieldOffset += candidate.shape.laneCount
@@ -3909,6 +4258,70 @@ export const memberFieldSlots = (
     const candidate = shape.tree.members.find((entry) => Type.equals(entry.member, member))
     if (candidate !== undefined) {
       selected = Object.freeze({ shape: candidate.shape, physicalOffset: 1 })
+    }
+  }
+  if (selected === undefined) return undefined
+  const slice = fieldSlice(selected.shape, path)
+  return slice === undefined
+    ? undefined
+    : Object.freeze(
+        Array.from(
+          { length: slice.length },
+          (_, ordinal) => selected.physicalOffset + slice.offset + ordinal,
+        ),
+      )
+}
+
+/** Canonical match leaves described by a realized calling shape. */
+export const coverageMembers = (shape: CallingShape): ReadonlyArray<Match.CoverageIdentity> => {
+  const variants = (
+    root: Type.Type,
+    node: Extract<CallingShapeNode, { readonly _tag: 'NominalUnionShape' }>,
+  ): ReadonlyArray<Match.CoverageIdentity> =>
+    node.variants.map((variant) =>
+      Match.nominalUnionVariant(root, node.type, variant.variant, variant.ordinal),
+    )
+  if (shape.tree._tag === 'NominalUnionShape')
+    return Object.freeze(variants(shape.type, shape.tree))
+  if (shape.tree._tag !== 'SumShape') return Match.membersOf(shape.type)
+  return Object.freeze(
+    shape.tree.members.flatMap((member) =>
+      member.shape._tag === 'NominalUnionShape'
+        ? variants(member.member, member.shape)
+        : [Match.structuralMember(member.member)],
+    ),
+  )
+}
+
+/** Physical calling-lane slots for a field selected by one exact match coverage identity. */
+export const coverageFieldSlots = (
+  shape: CallingShape,
+  member: Match.CoverageIdentity,
+  path: ReadonlyArray<DeclarationFacts.FieldId>,
+): ReadonlyArray<number> | undefined => {
+  if (member._tag !== 'NominalUnionVariant')
+    return memberFieldSlots(shape, Match.sourceType(member), path)
+  let selected: { readonly shape: CallingShapeNode; readonly physicalOffset: number } | undefined
+  if (shape.tree._tag === 'NominalUnionShape' && Type.equals(shape.tree.type, member.type)) {
+    const variant = shape.tree.variants.find(
+      (candidate) =>
+        candidate.ordinal === member.variantOrdinal &&
+        candidate.variant.union.module === member.variant.union.module &&
+        candidate.variant.union.name === member.variant.union.name &&
+        candidate.variant.name === member.variant.name,
+    )
+    if (variant !== undefined) selected = { shape: variant.shape, physicalOffset: 1 }
+  } else if (shape.tree._tag === 'SumShape') {
+    const outer = shape.tree.members.find((candidate) => Type.equals(candidate.member, member.root))
+    if (outer?.shape._tag === 'NominalUnionShape') {
+      const variant = outer.shape.variants.find(
+        (candidate) =>
+          candidate.ordinal === member.variantOrdinal &&
+          candidate.variant.union.module === member.variant.union.module &&
+          candidate.variant.union.name === member.variant.union.name &&
+          candidate.variant.name === member.variant.name,
+      )
+      if (variant !== undefined) selected = { shape: variant.shape, physicalOffset: 2 }
     }
   }
   if (selected === undefined) return undefined

@@ -527,27 +527,11 @@ export const execution = (result: Type): Nominal => sealedExecution([result])
 export const wake: Nominal = sealedWake()
 /** Sealed host-storage refusal carried only by the primitive allocation boundary. */
 export const storageFailure: Nominal = sealedStorageFailure()
-/** Canonical recoverable success and failure members shipped by silk/option. */
-export const some = (element: Type): Nominal => nominal('silk/option', 'Some', [element])
-export const none: Nominal = nominal('silk/option', 'None')
-
-/** Canonical completed Effect outcome data shipped by silk/result. */
-export const resultSuccess = (value: Type): Nominal => nominal('silk/result', 'Success', [value])
-export const resultFailure = (error: Type): Nominal => nominal('silk/result', 'Failure', [error])
-export const result = (value: Type, error: Type): Nominal =>
-  nominal('silk/result', 'Result', [value, error])
-
 /** Normalizes one or more ordinary failure types to their runtime value union. */
 export const failureValue = (failures: ReadonlyArray<Type>): Type => {
   const only = failures.at(0)
   if (failures.length === 1 && only !== undefined) return only
   const normalized = union(failures)
-  return normalized._tag === 'Normalized' ? normalized.type : 'never'
-}
-
-/** Canonical transparent Option<T> identity, represented as the ordinary structural union. */
-export const option = (element: Type): Type => {
-  const normalized = union([some(element), none])
   return normalized._tag === 'Normalized' ? normalized.type : 'never'
 }
 
@@ -2221,26 +2205,6 @@ export const encode = (self: Type): string => {
     return `${access}Effect<${encode(self.success)}${row}${requirements}>`
   }
   if (isRepresented(self)) return encode(self.contract)
-  const someMember = self.members.find(
-    (member): member is Nominal =>
-      isNominal(member) &&
-      member.module === 'silk/option' &&
-      member.name === 'Some' &&
-      member.arguments.length === 1,
-  )
-  const noneMember = self.members.find(
-    (member): member is Nominal =>
-      isNominal(member) && member.module === 'silk/option' && member.name === 'None',
-  )
-  const someArgument = someMember?.arguments.at(0)
-  if (
-    self.members.length === 2 &&
-    someMember !== undefined &&
-    noneMember !== undefined &&
-    someArgument !== undefined &&
-    isTypeArgument(someArgument)
-  )
-    return `Option<${encode(someArgument)}>`
   return self.members.map(encode).join(' | ')
 }
 

@@ -28,7 +28,6 @@ import {
   callableRecipe,
   delayedEffectState,
   effectRecipe,
-  inlineForwardedEffectResult,
   inlineForwardedRequirement,
   movedEffectRecipe,
   restoreDelayedEffectState,
@@ -66,16 +65,23 @@ export const lowerPatternSelection = (
   const resultType = fn.type(resultSemantic)
   if (subject === undefined || subjectType === undefined || resultType === undefined)
     return undefined
-  if (
-    selection.members.some((member) => member._tag === 'EnumMember') ||
-    selection.member?._tag === 'EnumMember'
-  )
-    return undefined
-  const members = Match.membersOf(semanticSubject)
-  const member =
-    selection.member?._tag === 'StructuralTypeMember'
-      ? Match.structuralMember(fn.semantic(selection.member.type))
-      : undefined
+  if (selection.members.some((member) => member._tag === 'EnumMember')) return undefined
+  const specializeMember = (candidate: Match.CoverageIdentity): Match.CoverageIdentity => {
+    if (candidate._tag === 'StructuralTypeMember')
+      return Match.structuralMember(fn.semantic(candidate.type))
+    if (candidate._tag !== 'NominalUnionVariant') return candidate
+    const type = fn.semantic(candidate.type)
+    return Type.isNominal(type)
+      ? Match.nominalUnionVariant(
+          fn.semantic(candidate.root),
+          type,
+          candidate.variant,
+          candidate.variantOrdinal,
+        )
+      : candidate
+  }
+  const members = Object.freeze(selection.members.map(specializeMember))
+  const member = selection.member === undefined ? undefined : specializeMember(selection.member)
   const literal = (value: boolean): LoweredExpression | undefined =>
     lowerExpression(
       fn,
@@ -120,13 +126,37 @@ export const lowerPatternSelection = (
   const selectedAfter = selection.universal
     ? emptyCoverage
     : Object.freeze(
-        members.filter(
-          (candidate) => member === undefined || !Match.identityEquals(candidate, member),
-        ),
+        members.filter((candidate) => member === undefined || !Match.selects(member, candidate)),
       )
   const ownedArm = ownership?.arms.find(
     (candidate) => candidate.id.ordinal === selection.arm.ordinal,
   )
+  const finalizedSelectedOperations = [...selectedOperations]
+  const cleanup: Array<Mir.MatchArm['selected']['cleanup'][number]> = []
+  for (const release of ownedArm?.cleanup ?? []) {
+    const plan = specializedCleanup(fn, release.cleanup)
+    if (plan._tag === 'NoCleanup') continue
+    if (release.path.length === 0 && Type.equals(plan.type, semanticSubject)) {
+      finalizedSelectedOperations.push(
+        Object.freeze({
+          _tag: 'Drop',
+          local: subject.result,
+          cleanup: plan,
+          provenance: authored(selection.span),
+        }),
+      )
+      continue
+    }
+    const type = fn.type(plan.type)
+    if (type === undefined) return undefined
+    cleanup.push(
+      Object.freeze({
+        destination: fn.alloc(type),
+        path: release.path,
+        cleanup: plan,
+      }),
+    )
+  }
   const selectedArm: Mir.MatchArm = Object.freeze({
     id: selection.arm,
     ...(member === undefined ? {} : { member }),
@@ -136,16 +166,9 @@ export const lowerPatternSelection = (
     bindings: Object.freeze(selectedBindings),
     selected: Object.freeze({
       access: selection.access,
-      operations: selectedOperations,
+      operations: Object.freeze(finalizedSelectedOperations),
       result: selectedResult.result,
-      cleanup: Object.freeze(
-        (ownedArm?.cleanup ?? []).map((release) =>
-          Object.freeze({
-            path: release.path,
-            cleanup: specializedCleanup(fn, release.cleanup),
-          }),
-        ),
-      ),
+      cleanup: Object.freeze(cleanup),
       endBorrow: false,
     }),
     provenance: authored(selection.span),
@@ -193,7 +216,7 @@ export const lowerPatternSelection = (
           let candidates: ReadonlyArray<Match.ArmId>
           if (selection.universal) {
             candidates = [selection.arm]
-          } else if (member === undefined || !Match.identityEquals(candidate, member)) {
+          } else if (member === undefined || !Match.selects(member, candidate)) {
             candidates = [fallbackId]
           } else {
             candidates = needsFallback ? [selection.arm, fallbackId] : [selection.arm]
@@ -336,7 +359,6 @@ export const lowerSequence = (
         : id
     }
     const forwardedRequirement = inlineForwardedRequirement(fn, statement.initializer)
-    const forwardedResult = inlineForwardedEffectResult(fn, statement.initializer)
     const forwardedResultEffect =
       forwardedRequirement === undefined
         ? undefined
@@ -352,7 +374,6 @@ export const lowerSequence = (
         protectedRecipe?._tag === 'ServiceEffectConstruct' ||
         protectedRecipe !== forwardedRequirement.binding.protected)
     if (
-      forwardedResult !== undefined ||
       forwardedRequirementNeedsRecipe ||
       statement.initializer._tag === 'ServiceEffectConstruct' ||
       (statement.initializer._tag === 'EffectConstruct' &&
@@ -363,13 +384,12 @@ export const lowerSequence = (
             statement.initializer.typeArguments.map((argument) => fn.semanticArgument(argument)),
           ),
         ) === undefined) ||
-      statement.initializer._tag === 'EffectResult' ||
       statement.initializer._tag === 'EffectBindRequirement' ||
       (statement.initializer._tag === 'Match' &&
         effectContract(initializerType ?? 'never') !== undefined) ||
       (statement.initializer._tag === 'BuiltinCall' && Type.isEffect(statement.initializer.type))
     ) {
-      fn.effectRecipes.set(statement.binding.ordinal, forwardedResult ?? statement.initializer)
+      fn.effectRecipes.set(statement.binding.ordinal, statement.initializer)
       const following = fn.reserve()
       fn.publish(
         Object.freeze({

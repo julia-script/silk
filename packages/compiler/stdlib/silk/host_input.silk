@@ -93,7 +93,7 @@
 import silk.bytes { Bytes }
 import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
-import silk.option { None, Option, Some }
+import silk.option { Option }
 import silk.result { Result }
 import silk.string { InvalidUtf8, fromUtf8 as stringFromUtf8, utf8Bytes as stringUtf8Bytes }
 import silk.u8 as u8
@@ -235,8 +235,8 @@ pub effect fn arguments(
   while index < total {
     let found = run HostInput.argument(index)
     let owned = match move found {
-      Some<Bytes> { value: bytes } => move bytes
-      None {} => run missingArgument()
+      Option<Bytes>.Some { value: bytes } => move bytes
+      Option<Bytes>.None => run missingArgument()
     }
     let appended = run vectorAppend<Bytes>(&mut collected, move owned)
     index = index + usize.ONE

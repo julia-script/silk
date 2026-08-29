@@ -5,14 +5,12 @@ import * as Analysis from '../src/Analysis.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const copyPayloads = `import silk.result { Result, Success, Failure, succeed, failResult }
+const copyPayloads = `import silk.result { Result, succeed, failResult }
 
 fn observe(result: Result<i32, i32>) -> i32 {
   return match move result {
-    Result<i32, i32> { value: outcome } => match move outcome {
-      Success<i32> { value: successValue } => successValue
-      Failure<i32> { error: failureValue } => failureValue
-    }
+      Result<i32, i32>.Success { value: successValue } => successValue
+      Result<i32, i32>.Failure { error: failureValue } => failureValue
   }
 }
 
@@ -28,7 +26,7 @@ import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
-import silk.result { Result, Success, Failure, succeed }
+import silk.result { Result, succeed }
 
 struct Token { storage: Allocation }
 
@@ -45,10 +43,8 @@ fn consume(token: Token) -> i32 {
 
 fn observe(result: Result<Token, i32>) -> i32 {
   return match move result {
-    Result<Token, i32> { value: outcome } => match move outcome {
-      Success<Token> { value: token } => consume(move token)
-      Failure<i32> { error: failureValue } => failureValue
-    }
+      Result<Token, i32>.Success { value: token } => consume(move token)
+      Result<Token, i32>.Failure { error: failureValue } => failureValue
   }
 }
 
@@ -66,7 +62,7 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 const reifiedEffect = `import silk.effect as Effect
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 
 struct First { code: i32 }
 struct Second { code: i32 }
@@ -79,13 +75,11 @@ effect fn choose(first: bool) -> i32 ! First | Second {
 effect fn inspect(first: bool) -> i32 {
   let completed = run Effect.result(choose(first))
   return match move completed {
-    Result<i32, First | Second> { value: outcome } => match move outcome {
-      Success<i32> { value: successValue } => successValue
-      Failure<First | Second> { error } => match move error {
+      Result<i32, First | Second>.Success { value: successValue } => successValue
+      Result<i32, First | Second>.Failure { error } => match move error {
         First { code: firstCode } => firstCode
         Second { code: secondCode } => secondCode
       }
-    }
   }
 }
 
@@ -101,7 +95,7 @@ import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 
 effect fn allocateOne() -> Allocation ! OutOfMemoryError ? &mut Allocator {
   let layout = Layout.of<i32>()
@@ -116,10 +110,8 @@ effect fn build() -> i32 {
   let mut allocator = Allocator.systemAllocatorProvider()
   let completed = run Intrinsic.bindRequirementMut(attempt(), &mut allocator)
   return match move completed {
-    Result<Allocation, OutOfMemoryError> { value: outcome } => match move outcome {
-      Success<Allocation> { value: storage } => release(move storage)
-      Failure<OutOfMemoryError> { error: ignored } => 0
-    }
+      Result<Allocation, OutOfMemoryError>.Success { value: storage } => release(move storage)
+      Result<Allocation, OutOfMemoryError>.Failure { error: ignored } => 0
   }
 }
 
@@ -129,6 +121,58 @@ fn release(storage: Allocation) -> i32 {
 }
 
 pub fn main() -> i32 { return run build() }`
+
+const alternateResultLikeUnion = `import silk.effect as Effect
+
+union Outcome<A, E> {
+  Good { value: A },
+  Bad { error: E },
+}
+
+struct First { code: i32 }
+struct Second { code: i32 }
+
+fn good<A, E>(value: A) -> Outcome<A, E> {
+  return Outcome<A, E>.Good { value: move value }
+}
+
+effect fn bad<A, E>(error: E) -> Outcome<A, E> {
+  return Outcome<A, E>.Bad { error: move error }
+}
+
+effect fn outcome<A, E, ?R>(
+  protected: once Effect<A ! E ? R>
+) -> Outcome<A, E> ? R {
+  let succeeded = Effect.map<A, Outcome<A, E>, E>(move protected, good)
+  return run Effect.catchAll<Outcome<A, E>, Outcome<A, E>, E, never>(
+    move succeeded,
+    bad
+  )
+}
+
+effect fn choose(kind: i32) -> i32 ! First | Second {
+  if kind == 0 { return 5 }
+  if kind == 1 { fail First { code: 20 } }
+  fail Second { code: 22 }
+}
+
+effect fn inspect(kind: i32) -> i32 {
+  let completed = run outcome(choose(kind))
+  return match move completed {
+    Outcome<i32, First | Second>.Good { value } => value
+    Outcome<i32, First | Second>.Bad { error } => match move error {
+      First { code } => code
+      Second { code } => code
+    }
+  }
+}
+
+pub fn main() -> i32 {
+  let success = run inspect(0)
+  let first = run inspect(1)
+  let second = run inspect(2)
+  return success + first + second - 5
+}`
 
 const reifiedTrap = `import silk.effect as Effect
 import silk.result { Result }
@@ -163,7 +207,7 @@ pub fn main() -> i32 {
 }`
 
 const sourceDefinedMaps = `import silk.effect as Effect
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 
 struct First { code: i32 }
 struct Second { code: i32 }
@@ -175,10 +219,8 @@ fn toSecond(error: First) -> Second { return Second { code: error.code + 40 } }
 
 fn observe(result: Result<i32, Second>) -> i32 {
   return match move result {
-    Result<i32, Second> { value: outcome } => match move outcome {
-      Success<i32> { value: answer } => answer
-      Failure<Second> { error } => error.code
-    }
+      Result<i32, Second>.Success { value: answer } => answer
+      Result<i32, Second>.Failure { error } => error.code
   }
 }
 
@@ -189,7 +231,7 @@ pub fn main() -> i32 {
 }`
 
 const sourceDefinedEffectfulCombinators = `import silk.effect as Effect
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 
 struct First { code: i32 }
 struct Second { code: i32 }
@@ -202,22 +244,18 @@ effect fn recover(error: First) -> i32 ! Second { return error.code + 40 }
 
 fn observeBoth(result: Result<i32, First | Second>) -> i32 {
   return match move result {
-    Result<i32, First | Second> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<First | Second> { error } => match move error {
+      Result<i32, First | Second>.Success { value } => value
+      Result<i32, First | Second>.Failure { error } => match move error {
         First { code } => code
         Second { code } => code
       }
-    }
   }
 }
 
 fn observeSecond(result: Result<i32, Second>) -> i32 {
   return match move result {
-    Result<i32, Second> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<Second> { error } => error.code
-    }
+      Result<i32, Second>.Success { value } => value
+      Result<i32, Second>.Failure { error } => error.code
   }
 }
 
@@ -229,7 +267,7 @@ pub fn main() -> i32 {
 }`
 
 const sourceDefinedRetry = `import silk.effect as Effect
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 
 struct Problem { code: i32 }
 
@@ -238,10 +276,8 @@ effect fn failAlways() -> i32 ! Problem { fail Problem { code: 2 } }
 
 fn observe(result: Result<i32, Problem>) -> i32 {
   return match move result {
-    Result<i32, Problem> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<Problem> { error } => error.code
-    }
+      Result<i32, Problem>.Success { value } => value
+      Result<i32, Problem>.Failure { error } => error.code
   }
 }
 
@@ -319,6 +355,10 @@ it.effect('reifies every typed Effect branch as ordinary Result data', () =>
 
 it.effect('preserves requirements while moving affine channel data into Result', () =>
   evaluateAndRunWasm('reified-requirement', reifiedRequirement),
+)
+
+it.effect('composes an alternate generic result-like union from map and catchAll', () =>
+  evaluateAndRunWasm('alternate-result-like-union', alternateResultLikeUnion),
 )
 
 it.effect('keeps runtime traps outside the typed Result error channel', () =>

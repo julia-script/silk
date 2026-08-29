@@ -70,7 +70,7 @@
 import silk.bool as bool
 import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
-import silk.result { Result, Success, Failure }
+import silk.result { Result }
 import silk.string { String, InvalidUtf8, copyUtf8, make as stringMake, utf8Bytes }
 import silk.u32 as u32
 import silk.u8 as u8
@@ -369,10 +369,8 @@ effect fn encodeOwned(scalars: Vector<u32>) -> String ! OutOfMemoryError ? &mut 
   }
   let owned = run copyUtf8(vectorAsSlice<u8>(&bytes))
   return match move owned {
-    Result<String, InvalidUtf8> { value: outcome } => match move outcome {
-      Success<String> { value } => move value
-      Failure<InvalidUtf8> { error } => stringMake()
-    }
+    Result<String, InvalidUtf8>.Success { value } => move value
+    Result<String, InvalidUtf8>.Failure { error } => stringMake()
   }
 }
 

@@ -14,7 +14,7 @@ the program under test.
 
 The provider owns no persistent state. Each successful lookup copies the host value into
 independent [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573), beginning with a bounded buffer and retrying once at the exact size the
-boundary reports. An absent argument or variable remains [`None`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4e6f6e65); an unavailable working
+boundary reports. An absent argument or variable remains [`None`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a30); an unavailable working
 directory and contradictory host lengths become [`HostInputError`](./host-input.md#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075744572726f72).
 
 Constructing the provider reads no host state. Portable code performs lookups after the

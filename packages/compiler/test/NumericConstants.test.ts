@@ -167,15 +167,15 @@ it.effect('reports no invalid-constant diagnostic for any stdlib declaration', (
 const checkedCases = integerSpellings.flatMap((spelling, ordinal) => [
   {
     name: `pastMax${ordinal}`,
-    body: `match move ${spelling}.checkedAdd(${spelling}.MAX, ${typedOne(spelling)}) { Some<${spelling}> { value: result } => 0 None nothing => 42 }`,
+    body: `match move ${spelling}.checkedAdd(${spelling}.MAX, ${typedOne(spelling)}) { Option<${spelling}>.Some { value: result } => 0 _ => 42 }`,
   },
   {
     name: `belowMin${ordinal}`,
-    body: `match move ${spelling}.checkedSubtract(${spelling}.MIN, ${typedOne(spelling)}) { Some<${spelling}> { value: result } => 0 None nothing => 42 }`,
+    body: `match move ${spelling}.checkedSubtract(${spelling}.MIN, ${typedOne(spelling)}) { Option<${spelling}>.Some { value: result } => 0 _ => 42 }`,
   },
   {
     name: `insideBound${ordinal}`,
-    body: `match move ${spelling}.checkedAdd(${spelling}.MIN, ${typedOne(spelling)}) { Some<${spelling}> { value: result } => 42 None nothing => 0 }`,
+    body: `match move ${spelling}.checkedAdd(${spelling}.MIN, ${typedOne(spelling)}) { Option<${spelling}>.Some { value: result } => 42 _ => 0 }`,
   },
 ])
 
@@ -198,7 +198,7 @@ const probeNames = acceptanceCases.map((declared) => declared.slice(3, declared.
 const acceptance = `${[...integerSpellings, ...floatSpellings]
   .map((spelling) => `import silk.${spelling} as ${spelling}`)
   .join('\n')}
-import silk.option { Some, None }
+import silk.option { Option }
 
 ${acceptanceCases.join('\n')}
 

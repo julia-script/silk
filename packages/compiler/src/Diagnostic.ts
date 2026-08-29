@@ -97,7 +97,7 @@ export const bindingConflictCode = 'SEM0016' as const
 export const duplicateFieldNameCode = 'SEM0017' as const
 export const expectedTypeCode = 'SEM0018' as const
 export const privateTypeExposureCode = 'SEM0019' as const
-export const inlineRecursiveStructCode = 'SEM0020' as const
+export const inlineRecursiveAggregateCode = 'SEM0020' as const
 export const inaccessibleStructConstructionCode = 'SEM0021' as const
 export const unknownStructFieldCode = 'SEM0022' as const
 export const duplicateStructInitializerCode = 'SEM0023' as const
@@ -318,6 +318,18 @@ export const bodylessOpaqueResultCode = 'SEM0118' as const
 
 /** Stable code for effect-block return sites whose success types disagree. */
 export const effectBlockReturnMismatchCode = 'SEM0163' as const
+/** Stable code for a nominal union declaration with no variants. */
+export const emptyNominalUnionCode = 'SEM0164' as const
+/** Stable code for a repeated variant name within one nominal union. */
+export const duplicateUnionVariantCode = 'SEM0165' as const
+/** Stable code for a named-field variant whose braces contain no field. */
+export const emptyUnionVariantCode = 'SEM0166' as const
+/** Stable code for a variant selector absent from its resolved nominal union. */
+export const unknownUnionVariantCode = 'SEM0167' as const
+/** Stable code for a variant qualifier that does not name a nominal union. */
+export const expectedNominalUnionCode = 'SEM0168' as const
+/** Stable code for construction through an incomplete nominal union declaration. */
+export const invalidNominalUnionConstructionCode = 'SEM0169' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -380,7 +392,7 @@ export type Code =
   | typeof duplicateFieldNameCode
   | typeof expectedTypeCode
   | typeof privateTypeExposureCode
-  | typeof inlineRecursiveStructCode
+  | typeof inlineRecursiveAggregateCode
   | typeof inaccessibleStructConstructionCode
   | typeof unknownStructFieldCode
   | typeof duplicateStructInitializerCode
@@ -517,6 +529,12 @@ export type Code =
   | typeof missingOpaqueRealizationCode
   | typeof bodylessOpaqueResultCode
   | typeof effectBlockReturnMismatchCode
+  | typeof emptyNominalUnionCode
+  | typeof duplicateUnionVariantCode
+  | typeof emptyUnionVariantCode
+  | typeof unknownUnionVariantCode
+  | typeof expectedNominalUnionCode
+  | typeof invalidNominalUnionConstructionCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -574,6 +592,16 @@ export type Reason =
     }
   | { readonly _tag: 'ReservedTemplateSyntax' }
   | { readonly _tag: 'ReservedImportBinding'; readonly spelling: string }
+  | { readonly _tag: 'EmptyNominalUnion'; readonly union: string }
+  | {
+      readonly _tag: 'DuplicateUnionVariant'
+      readonly spelling: string
+      readonly originalSpan: SourceSpan.SourceSpan
+    }
+  | { readonly _tag: 'EmptyUnionVariant'; readonly variant: string }
+  | { readonly _tag: 'UnknownUnionVariant'; readonly union: string; readonly variant: string }
+  | { readonly _tag: 'ExpectedNominalUnion'; readonly actual: string }
+  | { readonly _tag: 'InvalidNominalUnionConstruction'; readonly union: string }
   | { readonly _tag: 'UnknownModule'; readonly module: string }
   | { readonly _tag: 'SelfImport'; readonly module: string }
   | { readonly _tag: 'ReservedModuleIdentity'; readonly module: string }
@@ -883,7 +911,7 @@ export type Reason =
   | { readonly _tag: 'IntegerPatternAgainstEnum'; readonly enum: string; readonly value: string }
   | { readonly _tag: 'ExpectedType'; readonly spelling: string }
   | { readonly _tag: 'PrivateTypeExposure'; readonly type: string }
-  | { readonly _tag: 'InlineRecursiveStruct'; readonly members: ReadonlyArray<string> }
+  | { readonly _tag: 'InlineRecursiveAggregate'; readonly members: ReadonlyArray<string> }
   | { readonly _tag: 'InaccessibleStructConstruction'; readonly type: string }
   | { readonly _tag: 'UnknownStructField'; readonly type: string; readonly field: string }
   | {
@@ -1658,6 +1686,96 @@ export const emptyEnum = (enumName: string, span: SourceSpan.SourceSpan): Diagno
     span,
   })
 
+/** Creates the diagnostic for a nominal union with no variants. */
+export const emptyNominalUnion = (unionName: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: emptyNominalUnionCode,
+    severity: 'error',
+    message: `Union ${unionName} must declare at least one variant`,
+    reason: Object.freeze({ _tag: 'EmptyNominalUnion', union: unionName }),
+    span,
+  })
+
+/** Creates the diagnostic for a repeated variant name within one nominal union. */
+export const duplicateUnionVariant = (
+  spelling: string,
+  originalSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: duplicateUnionVariantCode,
+    severity: 'error',
+    message: `Duplicate union variant ${spelling}`,
+    reason: Object.freeze({ _tag: 'DuplicateUnionVariant', spelling, originalSpan }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'first declared here', span: originalSpan }),
+    ]),
+  })
+
+/** Creates the diagnostic for braces used without any named variant field. */
+export const emptyUnionVariant = (variantName: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: emptyUnionVariantCode,
+    severity: 'error',
+    message: `Union variant ${variantName} must omit braces or declare at least one field`,
+    reason: Object.freeze({ _tag: 'EmptyUnionVariant', variant: variantName }),
+    span,
+  })
+
+/** Creates the diagnostic for selecting a missing variant from a resolved nominal union. */
+export const unknownUnionVariant = (
+  unionName: string,
+  variantName: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unknownUnionVariantCode,
+    severity: 'error',
+    message: `Union ${unionName} has no variant ${variantName}`,
+    reason: Object.freeze({
+      _tag: 'UnknownUnionVariant',
+      union: unionName,
+      variant: variantName,
+    }),
+    span,
+  })
+
+/** Creates the diagnostic for a variant qualifier that is not a nominal union. */
+export const expectedNominalUnion = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: expectedNominalUnionCode,
+    severity: 'error',
+    message: `Expected a nominal union, found ${actual}`,
+    reason: Object.freeze({ _tag: 'ExpectedNominalUnion', actual }),
+    span,
+  })
+
+/** Creates the construction fence for a nominal union with invalid declaration facts. */
+export const invalidNominalUnionConstruction = (
+  unionName: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidNominalUnionConstructionCode,
+    severity: 'error',
+    message: `Cannot construct invalid nominal union ${unionName}`,
+    reason: Object.freeze({ _tag: 'InvalidNominalUnionConstruction', union: unionName }),
+    span,
+  })
+
 export const unsupportedEnumRepresentation = (
   spelling: string,
   allowed: ReadonlyArray<string>,
@@ -1883,18 +2001,21 @@ export const privateTypeExposure = (type: string, span: SourceSpan.SourceSpan): 
     span,
   })
 
-/** Creates the one canonical diagnostic for an inline recursive struct component. */
-export const inlineRecursiveStruct = (
+/** Creates the one canonical diagnostic for an inline recursive nominal-aggregate component. */
+export const inlineRecursiveAggregate = (
   members: ReadonlyArray<string>,
   span: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: inlineRecursiveStructCode,
+    code: inlineRecursiveAggregateCode,
     severity: 'error',
-    message: `Inline recursive struct layout: ${members.join(' -> ')}`,
-    reason: Object.freeze({ _tag: 'InlineRecursiveStruct', members: Object.freeze([...members]) }),
+    message: `Inline recursive aggregate layout: ${members.join(' -> ')}`,
+    reason: Object.freeze({
+      _tag: 'InlineRecursiveAggregate',
+      members: Object.freeze([...members]),
+    }),
     span,
   })
 
@@ -3100,6 +3221,17 @@ export const missingPatternField = (
     severity: 'error',
     message: `Pattern for ${type} is missing field ${field}; add it or use ..`,
     reason: Object.freeze({ _tag: 'MissingPatternField', type, field }),
+    span,
+  })
+
+export const inaccessiblePatternFields = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: missingPatternFieldCode,
+    severity: 'error',
+    message: `Pattern for ${type} must use .. to omit inaccessible fields`,
+    reason: Object.freeze({ _tag: 'MissingPatternField', type, field: '<inaccessible>' }),
     span,
   })
 

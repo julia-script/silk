@@ -1858,6 +1858,40 @@ const struct = (value: DeclarationFacts.StructFact): string =>
     structDependency(value.dependency),
   ])
 
+const unionVariantCanonicalState = (value: DeclarationFacts.UnionVariantCanonicalState): string => {
+  switch (value._tag) {
+    case 'Canonical':
+      return record('CanonicalUnionVariant', [value.id.name])
+    case 'Duplicate':
+      return record('DuplicateUnionVariant', [value.original.name])
+    case 'Unidentified':
+      return record('UnidentifiedUnionVariant')
+    default:
+      return exhaustive(value)
+  }
+}
+
+const unionVariant = (value: DeclarationFacts.UnionVariantFact): string =>
+  record('UnionVariant', [
+    number(value.id.ordinal),
+    unionVariantCanonicalState(value.canonical),
+    name(value.name),
+    value.kind,
+    array(value.fields.map(field)),
+  ])
+
+const unionDeclaration = (value: DeclarationFacts.UnionFact): string =>
+  record('UnionDeclaration', [
+    declarationIdOrdinal(value.id),
+    canonicalState(value.canonical),
+    value.visibility,
+    array(value.typeParameters.map(typeParameter)),
+    name(value.name),
+    array(value.variants.map(unionVariant)),
+    structDependency(value.dependency),
+    value.validity._tag,
+  ])
+
 const serviceOperationState = (value: DeclarationFacts.ServiceOperationState): string => {
   switch (value._tag) {
     case 'Unique':
@@ -1945,6 +1979,8 @@ const member = (value: DeclarationFacts.MemberFact): string => {
       return declaration(value)
     case 'StructDeclaration':
       return struct(value)
+    case 'UnionDeclaration':
+      return unionDeclaration(value)
     case 'EnumDeclaration':
       return enumDeclaration(value)
     case 'ServiceDeclaration':

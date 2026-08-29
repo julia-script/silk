@@ -186,7 +186,7 @@ impl Drop for silk/hash_map.HashMap<K, V>
 ## `insert`
 
 ```silk
-pub effect fn insert<K, V>(self: &mut silk/hash_map.HashMap<K, V>, key: K, value: V) -> Option<V> ! OutOfMemoryError ? &mut Allocator
+pub effect fn insert<K, V>(self: &mut silk/hash_map.HashMap<K, V>, key: K, value: V) -> silk/option.Option<V> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Inserts one owned key and value, answering with the value an equivalent key already held.
@@ -218,7 +218,7 @@ This function consumes the probe key. It does not change the map or move a store
 ## `indexOf`
 
 ```silk
-pub fn indexOf<K, V>(self: &silk/hash_map.HashMap<K, V>, key: K) -> Option<usize>
+pub fn indexOf<K, V>(self: &silk/hash_map.HashMap<K, V>, key: K) -> silk/option.Option<usize>
 ```
 
 Returns the bucket holding an entry under a key equivalent to one probe key, or an absent value.
@@ -234,7 +234,7 @@ This function consumes the probe key.
 ## `get`
 
 ```silk
-pub fn get<K, V>(self: &silk/hash_map.HashMap<K, V>, key: K) -> Option<V>
+pub fn get<K, V>(self: &silk/hash_map.HashMap<K, V>, key: K) -> silk/option.Option<V>
 ```
 
 Returns the value held under a key equivalent to one probe key, or an absent value.
@@ -270,7 +270,7 @@ count unchanged.
 ## `remove`
 
 ```silk
-pub fn remove<K, V>(self: &mut silk/hash_map.HashMap<K, V>, key: K) -> Option<V>
+pub fn remove<K, V>(self: &mut silk/hash_map.HashMap<K, V>, key: K) -> silk/option.Option<V>
 ```
 
 Removes the entry under a key equivalent to one probe key and answers with its value.

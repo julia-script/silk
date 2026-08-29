@@ -39,10 +39,9 @@ fn verifyTaskIdRefusal(
   outcome: Result<Scheduler.TaskId, Scheduler.TaskIdExhaustedError>,
   fresh: Scheduler.TaskId,
 ) -> i32 {
-  let Result<Scheduler.TaskId, Scheduler.TaskIdExhaustedError> { value: phase } = move outcome
-  return match move phase {
-    Success<Scheduler.TaskId> { value: reserved } => -3
-    Failure<Scheduler.TaskIdExhaustedError> { error } => verifyFreshTaskId(move error, fresh)
+  return match move outcome {
+    Result<Scheduler.TaskId, Scheduler.TaskIdExhaustedError>.Success { value: reserved } => -3
+    Result<Scheduler.TaskId, Scheduler.TaskIdExhaustedError>.Failure { error } => verifyFreshTaskId(move error, fresh)
   }
 }
 
@@ -83,10 +82,9 @@ fn taskIdBoundaryFailed(error: OutOfMemoryError | Scheduler.TaskIdExhaustedError
 
 pub fn main() -> i32 {
   let outcome = run Effect.result(taskIdBoundary())
-  let Result<i32, OutOfMemoryError | Scheduler.TaskIdExhaustedError> { value: phase } = move outcome
-  return match move phase {
-    Success<i32> { value: answer } => answer
-    Failure<OutOfMemoryError | Scheduler.TaskIdExhaustedError> { error } =>
+  return match move outcome {
+    Result<i32, OutOfMemoryError | Scheduler.TaskIdExhaustedError>.Success { value: answer } => answer
+    Result<i32, OutOfMemoryError | Scheduler.TaskIdExhaustedError>.Failure { error } =>
       taskIdBoundaryFailed(move error)
   }
 }`
@@ -193,12 +191,11 @@ fn finishPublicationInsertion(
     Allocator.OutOfMemoryError
   >,
 ) -> () {
-  let Result.Result<
-    Option.Option<Scheduler.PreparedTask>,
-    Allocator.OutOfMemoryError
-  > { value } = move outcome
-  return match move value {
-    Result.Success<Option.Option<Scheduler.PreparedTask>> { value: previous } =>
+  return match move outcome {
+    Result.Result<
+      Option.Option<Scheduler.PreparedTask>,
+      Allocator.OutOfMemoryError
+    >.Success { value: previous } =>
       finishAcceptedPublicationInsertion(
         move store,
         identity,
@@ -207,7 +204,10 @@ fn finishPublicationInsertion(
         move wake,
         move previous,
       )
-    Result.Failure<Allocator.OutOfMemoryError> { error } =>
+    Result.Result<
+      Option.Option<Scheduler.PreparedTask>,
+      Allocator.OutOfMemoryError
+    >.Failure { error } =>
       finishRefusedPublicationInsertion(
         move store,
         move response,
@@ -917,7 +917,9 @@ it.effect(
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
     }),
-  { timeout: 120_000 },
+  // This is the suite's largest scheduler program and can exceed two minutes while the compiler's
+  // parallel acceptance workers contend for CPU; focused runs remain substantially faster.
+  { timeout: 240_000 },
 )
 
 it.effect(

@@ -29,6 +29,10 @@ export type Identity =
   | { readonly _tag: 'BindingIdentity'; readonly id: Hir.BindingId }
   | { readonly _tag: 'PatternBindingIdentity'; readonly id: Match.BindingId }
   | { readonly _tag: 'FieldIdentity'; readonly id: DeclarationFacts.FieldId }
+  | {
+      readonly _tag: 'UnionVariantIdentity'
+      readonly id: DeclarationFacts.CanonicalUnionVariantId
+    }
   | { readonly _tag: 'EnumMemberIdentity'; readonly id: DeclarationFacts.CanonicalEnumMemberId }
   | {
       readonly _tag: 'EnumAssociatedOperationIdentity'
@@ -147,19 +151,30 @@ const locationOfEnumMember = (
     ? location(member.name.token.span.sourceId, member.syntax.span, member.name.token.span)
     : undefined
 
+const locationOfUnionVariant = (
+  variant: DeclarationFacts.UnionVariantFact,
+): DeclarationLocation | undefined =>
+  variant.name._tag === 'Present'
+    ? location(variant.name.token.span.sourceId, variant.syntax.span, variant.name.token.span)
+    : undefined
+
 const locationOfField = (
   index: DeclarationIndex.Index,
   field: DeclarationFacts.FieldFact,
 ): DeclarationLocation | undefined => {
+  const declarationId = DeclarationFacts.fieldDeclaration(field.id)
+  const module = index.modules.find((candidate) => candidate.module === declarationId.sourceId)
+  const owner = field.id.owner
   const current =
-    index.modules
-      .find((module) => module.module === field.id.struct.sourceId)
-      ?.structs.find(
-        (struct) =>
-          struct.id.sourceId === field.id.struct.sourceId &&
-          struct.id.ordinal === field.id.struct.ordinal,
-      )
-      ?.fields.find((candidate) => candidate.id.ordinal === field.id.ordinal) ?? field
+    (owner._tag === 'StructFieldOwnerId'
+      ? module?.structs
+          .find((struct) => struct.id.ordinal === declarationId.ordinal)
+          ?.fields.find((candidate) => DeclarationFacts.sameFieldId(candidate.id, field.id))
+      : module?.unions
+          .find((union) => union.id.ordinal === declarationId.ordinal)
+          ?.variants.find((variant) => variant.id.ordinal === owner.variant.ordinal)
+          ?.fields.find((candidate) => DeclarationFacts.sameFieldId(candidate.id, field.id))) ??
+    field
   return current.name._tag === 'Present'
     ? location(current.name.token.span.sourceId, current.syntax.span, current.name.token.span)
     : undefined
@@ -199,10 +214,12 @@ const isNominalDeclaration = (
 ): declaration is
   | DeclarationFacts.StructFact
   | DeclarationFacts.EnumFact
+  | DeclarationFacts.UnionFact
   | DeclarationFacts.ServiceFact
   | DeclarationFacts.InterfaceFact =>
   declaration._tag === 'StructDeclaration' ||
   declaration._tag === 'EnumDeclaration' ||
+  declaration._tag === 'UnionDeclaration' ||
   declaration._tag === 'ServiceDeclaration' ||
   declaration._tag === 'InterfaceDeclaration'
 
@@ -212,6 +229,7 @@ const declarationByNominal = (
 ):
   | DeclarationFacts.StructFact
   | DeclarationFacts.EnumFact
+  | DeclarationFacts.UnionFact
   | DeclarationFacts.ServiceFact
   | DeclarationFacts.InterfaceFact
   | undefined =>
@@ -223,6 +241,7 @@ const declarationByNominal = (
       ): declaration is
         | DeclarationFacts.StructFact
         | DeclarationFacts.EnumFact
+        | DeclarationFacts.UnionFact
         | DeclarationFacts.ServiceFact
         | DeclarationFacts.InterfaceFact =>
         isNominalDeclaration(declaration) &&
@@ -809,6 +828,43 @@ const collectPattern = (
         )
       if (field.nested !== undefined) collectPattern(field.nested, index, scope, pending)
     }
+  } else if (pattern._tag === 'UnionVariantPattern') {
+    if (pattern.target._tag === 'Resolved') {
+      const parentToken = SyntaxTree.tokens(pattern.syntax).find(
+        (token) => token.kind === 'Identifier',
+      )
+      push(
+        pending,
+        parentToken?.span,
+        'Type',
+        available(identityOfDeclaration(pattern.target.union)),
+        locationOfDeclaration(index, pattern.target.union),
+      )
+      if (pattern.target.variant.canonical._tag === 'Canonical')
+        push(
+          pending,
+          pattern.target.token.span,
+          'Value',
+          available(
+            Object.freeze({
+              _tag: 'UnionVariantIdentity',
+              id: pattern.target.variant.canonical.id,
+            }),
+          ),
+          locationOfUnionVariant(pattern.target.variant),
+        )
+    }
+    for (const field of pattern.fields) {
+      if (field.state._tag === 'Resolved')
+        push(
+          pending,
+          field.token?.span,
+          'Field',
+          available(Object.freeze({ _tag: 'FieldIdentity', id: field.state.field.id })),
+          locationOfField(index, field.state.field),
+        )
+      if (field.nested !== undefined) collectPattern(field.nested, index, scope, pending)
+    }
   } else if (pattern._tag === 'TypePattern') {
     collectDeclaredType(pattern.declared, index, scope, pending)
   }
@@ -969,6 +1025,37 @@ const collectExpression = (
       }
       return
     }
+    case 'UnionVariant': {
+      const token = expression.target._tag === 'Resolved' ? expression.target.token : undefined
+      if (expression.target._tag === 'Resolved')
+        push(
+          pending,
+          token?.span,
+          'Value',
+          expression.target.variant.canonical._tag === 'Canonical'
+            ? available(
+                Object.freeze({
+                  _tag: 'UnionVariantIdentity',
+                  id: expression.target.variant.canonical.id,
+                }),
+              )
+            : Object.freeze({ _tag: 'Unavailable' }),
+          locationOfUnionVariant(expression.target.variant),
+        )
+      for (const initializer of expression.initializers) {
+        const fieldToken = initializer.token
+        if (initializer.state._tag === 'Resolved' || initializer.state._tag === 'Inaccessible')
+          push(
+            pending,
+            fieldToken?.span,
+            'Field',
+            available(Object.freeze({ _tag: 'FieldIdentity', id: initializer.state.field.id })),
+            locationOfField(index, initializer.state.field),
+          )
+        collectExpression(initializer.expression, index, scope, pending)
+      }
+      return
+    }
     case 'Move':
     case 'Borrow':
     case 'Run':
@@ -1001,10 +1088,6 @@ const collectExpression = (
     case 'EffectBlock':
       for (const statement of expression.statements)
         collectStatement(statement, index, scope, pending)
-      return
-    case 'EffectResult':
-      collectIntrinsicReference(expression.reference, index, pending)
-      collectExpression(expression.protected, index, scope, pending)
       return
     case 'EffectCatch':
       collectIntrinsicReference(expression.reference, index, pending)
@@ -1200,7 +1283,32 @@ const collectMember = (
     return
   }
   if (member._tag === 'RoleDeclaration') return
-  for (const field of member.fields) {
+  if (member._tag === 'UnionDeclaration') {
+    for (const variant of member.variants) {
+      if (variant.name._tag === 'Present' && variant.canonical._tag === 'Canonical')
+        push(
+          pending,
+          variant.name.token.span,
+          'Declaration',
+          available(Object.freeze({ _tag: 'UnionVariantIdentity', id: variant.canonical.id })),
+          locationOfUnionVariant(variant),
+        )
+      for (const field of variant.fields) {
+        if (field.name._tag === 'Present')
+          push(
+            pending,
+            field.name.token.span,
+            'Declaration',
+            available(Object.freeze({ _tag: 'FieldIdentity', id: field.id })),
+            locationOfField(index, field),
+          )
+        collectDeclaredType(field.declaredType, index, scope, pending)
+      }
+    }
+    return
+  }
+  const fields = member.fields
+  for (const field of fields) {
     if (field.name._tag === 'Present')
       push(
         pending,
@@ -1436,7 +1544,9 @@ export const identityKey = (identity: Identity): string => {
     case 'PatternBindingIdentity':
       return `pattern:${JSON.stringify(identity.id)}`
     case 'FieldIdentity':
-      return `field:${identity.id.struct.sourceId}:${identity.id.struct.ordinal}:${identity.id.ordinal}`
+      return `field:${DeclarationFacts.fieldIdKey(identity.id)}`
+    case 'UnionVariantIdentity':
+      return `union-variant:${identity.id.union.module}.${identity.id.union.name}.${identity.id.name}`
     case 'EnumMemberIdentity':
       return `enum-member:${identity.id.enum.module}.${identity.id.enum.name}.${identity.id.name}`
     case 'EnumAssociatedOperationIdentity':

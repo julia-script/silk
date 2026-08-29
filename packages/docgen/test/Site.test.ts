@@ -84,7 +84,7 @@ it.effect(
       assert.include(option.contents, 'unwrapOr')
       assert.include(
         option.contents,
-        'pub fn unwrapOr&lt;T&gt;(self: Option&lt;T&gt;, fallback: T) -&gt; T',
+        'pub fn unwrapOr&lt;T&gt;(self: silk/option.Option&lt;T&gt;, fallback: T) -&gt; T',
         'a signature must be escaped, not emitted as markup',
       )
       assert.notInclude(

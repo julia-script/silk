@@ -151,6 +151,129 @@ it.effect('sums two u8 slots in one word to 14 on every engine', () =>
   }),
 )
 
+it.effect('keeps widened nominal-union payload lanes inside each allocated element', () =>
+  Effect.gen(function* () {
+    const source = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { SystemAllocator }
+import silk.effect as Effect
+import silk.i8 as i8
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+
+union Choice { Small { first: i8, second: i8 }, Wide { value: i64 } }
+
+effect fn store() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let layout = Layout.of<[Choice; 2]>()
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  let allocation = run recipe
+  unsafe {
+    let mut buffer = RawBuffer.from<Choice>(move allocation, 2)
+    let secondValue = Choice.Small { first: 17, second: 20 }
+    let secondWritten = Slot.write(RawBuffer.slot(&mut buffer, 1), move secondValue)
+    let firstValue = Choice.Small { first: 0, second: 0 }
+    let firstWritten = Slot.write(RawBuffer.slot(&mut buffer, 0), move firstValue)
+    let discarded = Slot.take(RawBuffer.slot(&mut buffer, 0))
+    let selected = Slot.take(RawBuffer.slot(&mut buffer, 1))
+    drop discarded
+    drop buffer
+    return match move selected {
+      Choice.Small { first, second } => i8.toI32(first) + i8.toI32(second)
+      Choice.Wide { value } => 0
+    }
+  }
+  return 0
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'slot-lane-width/nominal-union',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 37n)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 37)
+  }),
+)
+
+it.effect('materializes canonical nominal-union fields before address-based Drop cleanup', () =>
+  Effect.gen(function* () {
+    const source = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { SystemAllocator }
+import silk.effect as Effect
+import silk.i8 as i8
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+
+struct Guard {
+  left: i8
+  right: i8
+}
+
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let observed = i8.toI32(self.left) + i8.toI32(self.right)
+    if observed != 42 {
+      let boom = 1 / 0
+    }
+    return ()
+  }
+}
+
+union Choice {
+  Small { marker: i8, guard: Guard },
+  Wide { value: i64 },
+}
+
+effect fn store() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let layout = Layout.of<[Choice; 1]>()
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  let allocation = run recipe
+  unsafe {
+    let mut buffer = RawBuffer.from<Choice>(move allocation, 1)
+    let value = Choice.Small { marker: 7, guard: Guard { left: 19, right: 23 } }
+    let written = Slot.write(RawBuffer.slot(&mut buffer, 0), move value)
+    let cleared = Slot.dropValue(RawBuffer.slot(&mut buffer, 0))
+    drop buffer
+    return 42
+  }
+  return 0
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'slot-lane-width/nominal-union-cleanup',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
 /**
  * Reading a field through a reference lands in the same lane-load helper the slot reads use, so
  * a struct packed with sub-word fields catches a fixed-width load there the same way: every

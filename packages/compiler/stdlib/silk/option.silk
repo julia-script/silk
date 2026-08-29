@@ -6,7 +6,7 @@
 //! when the caller is ready to consume the option.
 //!
 //! # Details
-//! `Option<T>` is the structural union of [`Some`] and [`None`]. Its combinators preserve affine
+//! `Option<T>` is a nominal union with `Some` and `None` variants. Its combinators preserve affine
 //! ownership: a present value moves forward, while an unused fallback or abandoned branch drops.
 //!
 //! # Examples
@@ -37,39 +37,30 @@
 //! }
 //! ```
 
-// Canonical recoverable outcome members. The compiler's Option<T> is represented transparently by the
-// structural union Some<T> | None; the named declaration is its source-navigation anchor.
-
-
-
-/// The present member of [`Option`], carrying the available owned value.
-pub struct Some<T> {
-  /// The value moved through present-only combinator branches.
-  value: T
-}
-
-/// The absent member of [`Option`]; it carries no explanation for the absence.
-pub struct None {}
-
 /// An owned value that is either [`Some`] or [`None`].
 ///
 /// # Details
 ///
 /// Match on an `Option` when both arms need custom behavior. Prefer [`map`], [`flatMap`], or
 /// [`unwrapOr`] for the common transform, continue, and default cases.
-pub struct Option<T> {
-  /// The structural outcome narrowed by `match`.
-  value: Some<T> | None
+pub union Option<T> {
+  /// The absent variant; it carries no explanation for the absence.
+  None,
+  /// The present variant, carrying the available owned value.
+  Some {
+    /// The value moved through present-only combinator branches.
+    pub value: T
+  }
 }
 
 /// Constructs an absent optional value of the requested element type.
 pub fn none<T>() -> Option<T> {
-  return None {}
+  return Option<T>.None
 }
 
 /// Constructs a present option by moving `value` into it.
 pub fn some<T>(value: T) -> Option<T> {
-  return Some<T> { value: move value }
+  return Option.Some { value: move value }
 }
 
 /// Applies `transform` once to a present value and keeps an absent value absent.
@@ -80,8 +71,8 @@ pub fn some<T>(value: T) -> Option<T> {
 /// `match` instead when the original option must remain available.
 pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> Option<U> {
   return match move self {
-    Some<T> { value } => some<U>(transform(move value))
-    None {} => none<U>()
+    Option<T>.Some { value } => some<U>(transform(move value))
+    Option<T>.None => none<U>()
   }
 }
 
@@ -94,8 +85,8 @@ pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> Option<U> {
 /// reject the value without needing to explain why; use a `Result` when rejection needs an error.
 pub fn flatMap<T, U>(self: Option<T>, transform: once fn(T) -> Option<U>) -> Option<U> {
   return match move self {
-    Some<T> { value } => transform(move value)
-    None {} => none<U>()
+    Option<T>.Some { value } => transform(move value)
+    Option<T>.None => none<U>()
   }
 }
 
@@ -129,8 +120,8 @@ pub fn unwrapOr<T>(
   fallback: T,
 ) -> T {
   return match move self {
-    Some<T> { value } => keepPresent<T>(move value, move fallback)
-    None {} => move fallback
+    Option<T>.Some { value } => keepPresent<T>(move value, move fallback)
+    Option<T>.None => move fallback
   }
 }
 

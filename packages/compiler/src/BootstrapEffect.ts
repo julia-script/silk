@@ -1,12 +1,6 @@
 import type { LocalState, MachineRequest, Step } from './BootstrapMachine.js'
 import type { BlockedReason, TraceEvent } from './BootstrapTrace.js'
-import type {
-  AggregateValue,
-  EffectOutcomeValue,
-  EffectValue,
-  UnionValue,
-  Value,
-} from './BootstrapValue.js'
+import type { EffectOutcomeValue, EffectValue, Value } from './BootstrapValue.js'
 import { repackFailurePayload } from './BootstrapValue.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Mir from './Mir.js'
@@ -244,7 +238,7 @@ export interface OperationContext {
     arguments_: ReadonlyArray<Value>,
     operation: Extract<
       Mir.Operation,
-      { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
+      { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' }
     >,
   ) => Generator<MachineRequest, Step, Step>
   readonly callFunction: (
@@ -276,11 +270,11 @@ type EffectOperation = Extract<
       | 'RunEffectComposite'
       | 'RunEffectValue'
       | 'RunStaticEffect'
-      | 'ReifyEffect'
+      | 'CatchEffect'
   }
 >
 
-/** Executes Effect construction, execution, propagation, and reification. */
+/** Executes Effect construction, execution, propagation, and typed-failure catching. */
 export function* execute(
   context: OperationContext,
   operation: EffectOperation,
@@ -615,7 +609,7 @@ export function* execute(
       })
       return Object.freeze({ _tag: 'Value', value: propagated })
     }
-    case 'ReifyEffect': {
+    case 'CatchEffect': {
       const effect = read(operation.effect).value
       if (effect._tag !== 'EffectValue')
         throw new RangeError('MIR attempted to reify a non-Effect value')
@@ -652,51 +646,30 @@ export function* execute(
         throw new RangeError('MIR Effect result runner returned a non-outcome value')
       const outcome = result.value
       write(operation.outcome, { value: outcome, fromCall: true })
-      const branch: AggregateValue =
-        outcome.tag === 0
-          ? Object.freeze({
-              _tag: 'AggregateValue',
-              type: operation.successType,
-              fields: Object.freeze([
-                Object.freeze({ field: operation.successField, value: outcome.payload }),
-              ]),
-            })
-          : (() => {
-              const failure = Type.failureCarrierMember(
-                operation.outcomeType.type,
-                outcome.tag,
-                'OneBased',
-              )
-              if (failure === undefined)
-                throw new RangeError('MIR Effect result has an invalid failure tag')
-              const failureValue: Value = Type.isUnion(operation.failureValueType)
-                ? Object.freeze({
-                    _tag: 'UnionValue',
-                    type: operation.failureValueType,
-                    member: failure,
-                    payload: outcome.payload,
-                  })
-                : outcome.payload
-              return Object.freeze({
-                _tag: 'AggregateValue' as const,
-                type: operation.failureType,
-                fields: Object.freeze([
-                  Object.freeze({ field: operation.failureField, value: failureValue }),
-                ]),
-              })
-            })()
-      const outer: UnionValue = Object.freeze({
-        _tag: 'UnionValue',
-        type: operation.resultUnion,
-        member: outcome.tag === 0 ? operation.successType : operation.failureType,
-        payload: branch,
+      write(operation.destination, {
+        value: Object.freeze({
+          _tag: 'IntegerValue',
+          type: 'i32',
+          value: outcome.tag === 0 ? 1n : 0n,
+        }),
+        fromCall: true,
       })
-      const completed: AggregateValue = Object.freeze({
-        _tag: 'AggregateValue',
-        type: operation.resultType.type,
-        fields: Object.freeze([Object.freeze({ field: operation.resultField, value: outer })]),
-      })
-      write(operation.destination, { value: completed, fromCall: true })
+      if (outcome.tag === 0) {
+        write(operation.successValue, { value: outcome.payload, fromCall: true })
+        break
+      }
+      const failure = Type.failureCarrierMember(operation.outcomeType.type, outcome.tag, 'OneBased')
+      if (failure === undefined)
+        throw new RangeError('MIR Effect result has an invalid failure tag')
+      const failureValue: Value = Type.isUnion(operation.failureValueType)
+        ? Object.freeze({
+            _tag: 'UnionValue',
+            type: operation.failureValueType,
+            member: failure,
+            payload: outcome.payload,
+          })
+        : outcome.payload
+      write(operation.failureValue, { value: failureValue, fromCall: true })
       break
     }
   }

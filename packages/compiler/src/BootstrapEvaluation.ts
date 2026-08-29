@@ -16,6 +16,7 @@ import * as BootstrapPlace from './BootstrapPlace.js'
 import * as BootstrapStorage from './BootstrapStorage.js'
 import type * as ChildProcess from './ChildProcess.js'
 import type * as CleanupPlan from './CleanupPlan.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import type * as Hir from './Hir.js'
@@ -55,6 +56,7 @@ import type {
   ExecutionValue,
   FloatValue,
   IntegerValue,
+  NominalUnionValue,
   SharedCoreValue,
   SliceValue,
   StaticViewValue,
@@ -79,6 +81,7 @@ export type {
   ExecutionValue,
   FloatValue,
   IntegerValue,
+  NominalUnionValue,
   RawBufferValue,
   ReferenceValue,
   SharedCoreValue,
@@ -371,7 +374,7 @@ function* executeFunction(
     arguments_: ReadonlyArray<Value>,
     operation: Extract<
       Mir.Operation,
-      { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
+      { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' }
     >,
   ): FunctionExecution {
     const control = suspensionFor(operation)
@@ -941,6 +944,25 @@ function* executeFunction(
         }
         return undefined
       }
+      case 'NominalUnionCleanup': {
+        if (owner._tag !== 'NominalUnionValue') return undefined
+        const active = cleanup.variants.find((variant) => variant.ordinal === owner.variantOrdinal)
+        if (active === undefined) return undefined
+        for (const field of active.fields) {
+          const entry = owner.fields.find((candidate) =>
+            DeclarationFacts.sameFieldId(candidate.field, field.field),
+          )
+          if (entry === undefined) continue
+          const blocked = yield* releaseThroughPlan(
+            field.cleanup,
+            entry.value,
+            provenance,
+            localOrdinal,
+          )
+          if (blocked !== undefined) return blocked
+        }
+        return undefined
+      }
       case 'ArrayCleanup': {
         if (owner._tag !== 'ArrayValue') return undefined
         for (const element of owner.elements) {
@@ -1100,95 +1122,6 @@ function* executeFunction(
         floatTarget.spelling === 'f32' ? 32 : 64,
       )
       return Object.freeze({ _tag: 'Value', value: floatValue(floatTarget.spelling, encoded.bits) })
-    }
-    if (operation === 'CheckedConvertToChar') {
-      const subject = arguments_.at(0)
-      if (actorScalar?.category !== 'Character' || subject?._tag !== 'IntegerValue')
-        throw new RangeError('MIR verifier allowed an invalid checked char callable')
-      const exact = BigInt(subject.value)
-      const succeeded = Scalar.isUnicodeScalarValue(exact)
-      const semantic = Type.option('char')
-      if (!Type.isUnion(semantic))
-        throw new RangeError('Canonical Option did not normalize to a structural union')
-      const member = succeeded ? Type.some('char') : Type.none
-      const entry = program.layout.entries.find((candidate) => Type.equals(candidate.type, member))
-      if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate')
-        throw new RangeError('Target plan omitted a canonical callable Option member')
-      return Object.freeze({
-        _tag: 'Value',
-        value: Object.freeze({
-          _tag: 'UnionValue',
-          type: semantic,
-          member,
-          payload: Object.freeze({
-            _tag: 'AggregateValue',
-            type: member,
-            fields: Object.freeze(
-              succeeded
-                ? entry.representation.fields.map((field) =>
-                    Object.freeze({ field: field.id, value: characterValue(Number(exact)) }),
-                  )
-                : [],
-            ),
-          }),
-        }),
-      })
-    }
-    if (Scalar.isCheckedOperation(operation)) {
-      const source = Scalar.find(target.actor)
-      const resultScalar = conversionTarget ?? source
-      const leftValue = arguments_.at(0)
-      const rightValue = arguments_.at(1)
-      if (
-        source?.category !== 'Integer' ||
-        resultScalar?.category !== 'Integer' ||
-        leftValue === undefined ||
-        leftValue._tag !== 'IntegerValue'
-      )
-        throw new RangeError('MIR verifier allowed an invalid checked callable')
-      const left = BigInt(leftValue.value)
-      const right =
-        rightValue !== undefined && rightValue._tag === 'IntegerValue'
-          ? BigInt(rightValue.value)
-          : undefined
-      const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
-      const exact = BootstrapArithmetic.checked(
-        operation,
-        left,
-        right,
-        Scalar.range(source, pointerBits).minimum,
-      )
-      const range = Scalar.range(resultScalar, pointerBits)
-      const succeeded = exact !== undefined && exact >= range.minimum && exact <= range.maximum
-      const semantic = Type.option(resultScalar.spelling)
-      if (!Type.isUnion(semantic))
-        throw new RangeError('Canonical Option did not normalize to a structural union')
-      const member = succeeded ? Type.some(resultScalar.spelling) : Type.none
-      const entry = program.layout.entries.find((candidate) => Type.equals(candidate.type, member))
-      if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate')
-        throw new RangeError('Target plan omitted a canonical callable Option member')
-      return Object.freeze({
-        _tag: 'Value',
-        value: Object.freeze({
-          _tag: 'UnionValue',
-          type: semantic,
-          member,
-          payload: Object.freeze({
-            _tag: 'AggregateValue',
-            type: member,
-            fields: Object.freeze(
-              succeeded
-                ? entry.representation.fields.map((field) =>
-                    Object.freeze({
-                      field: field.id,
-                      value: integerValue(resultScalar.spelling, exact),
-                    }),
-                  )
-                : [],
-            ),
-          }),
-        }),
-      })
     }
     if (conversionTarget !== undefined) {
       const subject = arguments_.at(0)
@@ -1457,31 +1390,6 @@ function* executeFunction(
     state.cells.set(key, { value: next, fromCall: backing.fromCall })
   }
 
-  const optionValue = (element: Type.Type, payload?: Value): UnionValue => {
-    const semantic = Type.option(element)
-    if (!Type.isUnion(semantic)) throw new RangeError('OS Option result did not normalize')
-    const member = payload === undefined ? Type.none : Type.some(element)
-    const entry = program.layout.entries.find((candidate) => Type.equals(candidate.type, member))
-    if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate')
-      throw new RangeError('Target plan omitted an OS Option member')
-    return Object.freeze({
-      _tag: 'UnionValue',
-      type: semantic,
-      member,
-      payload: Object.freeze({
-        _tag: 'AggregateValue',
-        type: member,
-        fields: Object.freeze(
-          payload === undefined
-            ? []
-            : entry.representation.fields.map((field) =>
-                Object.freeze({ field: field.id, value: payload }),
-              ),
-        ),
-      }),
-    })
-  }
-
   const handleValue = (handle: OsFileSystemHost.Handle): AggregateValue => {
     const entry = program.layout.entries.find((candidate) =>
       Type.equals(candidate.type, Type.osHandle),
@@ -1648,6 +1556,7 @@ function* executeFunction(
       values.add(value)
       switch (value._tag) {
         case 'AggregateValue':
+        case 'NominalUnionValue':
           for (const field of value.fields) visit(field.value)
           return
         case 'ArrayValue':
@@ -1933,12 +1842,39 @@ function* executeFunction(
             write(operation.destination, read(operation.right.result))
             break
           }
+          case 'Conditional': {
+            const branch =
+              readInteger(operation.condition, 'i32').value === 0n
+                ? operation.otherwise
+                : operation.taken
+            const branchStep = yield* executeOperations(branch.operations)
+            if (branchStep !== undefined) return branchStep
+            write(operation.destination, read(branch.result))
+            break
+          }
           case 'Match': {
             const scrutinee = read(operation.scrutinee).value
-            const activeIdentity =
-              scrutinee._tag === 'EnumValue'
-                ? Match.enumMember(scrutinee.enum, scrutinee.member)
-                : undefined
+            let activeIdentity: Match.CoverageIdentity | undefined
+            if (scrutinee._tag === 'EnumValue') {
+              activeIdentity = Match.enumMember(scrutinee.enum, scrutinee.member)
+            } else if (scrutinee._tag === 'NominalUnionValue') {
+              activeIdentity = Match.nominalUnionVariant(
+                scrutinee.type,
+                scrutinee.type,
+                scrutinee.variant,
+                scrutinee.variantOrdinal,
+              )
+            } else if (
+              scrutinee._tag === 'UnionValue' &&
+              scrutinee.payload._tag === 'NominalUnionValue'
+            ) {
+              activeIdentity = Match.nominalUnionVariant(
+                scrutinee.member,
+                scrutinee.payload.type,
+                scrutinee.payload.variant,
+                scrutinee.payload.variantOrdinal,
+              )
+            }
             let activeMember: Type.Type
             if (activeIdentity !== undefined) {
               activeMember = activeIdentity.type
@@ -1946,13 +1882,18 @@ function* executeFunction(
               activeMember = scrutinee.member
             } else if (scrutinee._tag === 'AggregateValue') {
               activeMember = scrutinee.type
+            } else if (scrutinee._tag === 'NominalUnionValue') {
+              activeMember = scrutinee.type
             } else {
               activeMember = Mir.semanticType(operation.scrutineeType)
             }
             let payload: Value
             if (scrutinee._tag === 'UnionValue') {
               payload = scrutinee.payload
-            } else if (scrutinee._tag === 'AggregateValue') {
+            } else if (
+              scrutinee._tag === 'AggregateValue' ||
+              scrutinee._tag === 'NominalUnionValue'
+            ) {
               payload = scrutinee
             } else {
               payload = scrutinee
@@ -2036,6 +1977,14 @@ function* executeFunction(
               for (const cleanup of arm.selected.cleanup) {
                 const owner = BootstrapStorage.selectFieldPath(payload, cleanup.path)
                 const members = BootstrapStorage.cleanupMembers(cleanup.cleanup, owner)
+                write(cleanup.destination, { value: owner, fromCall: false })
+                const released = yield* releaseThroughPlan(
+                  cleanup.cleanup,
+                  owner,
+                  arm.provenance,
+                  cleanup.destination.ordinal,
+                )
+                if (released !== undefined) return released
                 trace.push(
                   Object.freeze({
                     _tag: 'MatchCleanup',
@@ -2534,6 +2483,7 @@ function* executeFunction(
             break
           }
           case 'HostWrite':
+          case 'OsOpen':
           case 'OsCall': {
             const boundary = BootstrapOsIntrinsics.execute(
               {
@@ -2547,13 +2497,48 @@ function* executeFunction(
                 replaceReferenced,
                 byteView,
                 writeByteView,
-                optionValue,
                 handleValue,
                 hostHandle,
               },
               operation,
             )
             if (boundary !== undefined) return boundary
+            if (operation._tag === 'OsOpen') {
+              const succeeded = readInteger(operation.valid).value !== 0n
+              const callable = succeeded ? operation.success : operation.failure
+              const unused = succeeded ? operation.failure : operation.success
+              const cleanup = succeeded ? operation.failureCleanup : operation.successCleanup
+              const callableType = fn.localTypes.at(callable.ordinal)
+              if (callableType?._tag !== 'CallableValue')
+                throw new RangeError('MIR OS open lost its carrier callable')
+              const carrier = yield* executeOperations([
+                Object.freeze({
+                  _tag: 'Drop' as const,
+                  local: unused,
+                  cleanup,
+                  provenance: operation.provenance,
+                }),
+                Object.freeze({
+                  _tag: 'ApplyCallable' as const,
+                  destination: operation.destination,
+                  callable,
+                  typeArguments:
+                    callableType.environment?.callable.typeArguments ??
+                    callableType.storage?.realization.targetArguments ??
+                    callableType.typeArguments ??
+                    Object.freeze([]),
+                  captures: Object.freeze([]),
+                  arguments: succeeded ? Object.freeze([operation.handle]) : Object.freeze([]),
+                  callableType: callableType.type,
+                  access: callableType.type.mode,
+                  evaluation: 'CalleeThenArguments' as const,
+                  realization: 'Environment' as const,
+                  type: operation.type,
+                  provenance: operation.provenance,
+                }),
+              ])
+              if (carrier !== undefined) return carrier
+            }
             break
           }
           case 'RawBufferFrom': {
@@ -3884,38 +3869,48 @@ function* executeFunction(
                     )
                     return arithmetic >= range.minimum && arithmetic <= range.maximum
                   })())
-            const member = success ? operation.success : operation.failure
-            const entry = program.layout.entries.find((candidate) =>
-              Type.equals(candidate.type, member),
-            )
-            if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate')
-              throw new RangeError('Target plan omitted a canonical Option member')
-            const payload: AggregateValue = Object.freeze({
-              _tag: 'AggregateValue',
-              type: member,
-              fields: Object.freeze(
-                success
-                  ? entry.representation.fields.map((field) =>
-                      Object.freeze({
-                        field: field.id,
-                        value:
-                          target.category === 'Character'
-                            ? characterValue(Number(arithmetic))
-                            : integerValue(target.spelling, arithmetic),
-                      }),
-                    )
-                  : [],
-              ),
-            })
-            write(operation.destination, {
-              value: Object.freeze({
-                _tag: 'UnionValue',
-                type: operation.type.type,
-                member,
-                payload,
+            if (success && arithmetic !== undefined) {
+              write(operation.value, {
+                value:
+                  target.category === 'Character'
+                    ? characterValue(Number(arithmetic))
+                    : integerValue(target.spelling, arithmetic),
+                fromCall: false,
+              })
+            }
+            const callable = success ? operation.present : operation.absent
+            const unused = success ? operation.absent : operation.present
+            const cleanup = success ? operation.absentCleanup : operation.presentCleanup
+            const callableType = fn.localTypes.at(callable.ordinal)
+            if (callableType?._tag !== 'CallableValue')
+              throw new RangeError('MIR checked scalar operation lost its carrier callable')
+            const carrier = yield* executeOperations([
+              Object.freeze({
+                _tag: 'Drop' as const,
+                local: unused,
+                cleanup,
+                provenance: operation.provenance,
               }),
-              fromCall: false,
-            })
+              Object.freeze({
+                _tag: 'ApplyCallable' as const,
+                destination: operation.destination,
+                callable,
+                typeArguments:
+                  callableType.environment?.callable.typeArguments ??
+                  callableType.storage?.realization.targetArguments ??
+                  callableType.typeArguments ??
+                  Object.freeze([]),
+                captures: Object.freeze([]),
+                arguments: success ? Object.freeze([operation.value]) : Object.freeze([]),
+                callableType: callableType.type,
+                access: callableType.type.mode,
+                evaluation: 'CalleeThenArguments' as const,
+                realization: 'Environment' as const,
+                type: operation.type,
+                provenance: operation.provenance,
+              }),
+            ])
+            if (carrier !== undefined) return carrier
             break
           }
           case 'Construct': {
@@ -3935,6 +3930,30 @@ function* executeFunction(
                 function: fn.id,
                 type: aggregate.type,
                 fieldCount: aggregate.fields.length,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'ConstructUnionVariant': {
+            const value: NominalUnionValue = Object.freeze({
+              _tag: 'NominalUnionValue',
+              type: operation.type.type,
+              variant: operation.variant,
+              variantOrdinal: operation.variantOrdinal,
+              fields: Object.freeze(
+                operation.fields.map((field) =>
+                  Object.freeze({ field: field.field, value: read(field.value).value }),
+                ),
+              ),
+            })
+            write(operation.destination, { value, fromCall: false })
+            trace.push(
+              Object.freeze({
+                _tag: 'Construct',
+                function: fn.id,
+                type: value.type,
+                fieldCount: value.fields.length,
                 span: operation.provenance.span,
               }),
             )
@@ -3963,11 +3982,8 @@ function* executeFunction(
             if (aggregate._tag !== 'AggregateValue') {
               throw new RangeError('MIR verifier allowed projection from a scalar value')
             }
-            const selected = aggregate.fields.find(
-              (candidate) =>
-                candidate.field.ordinal === operation.field.ordinal &&
-                candidate.field.struct.sourceId === operation.field.struct.sourceId &&
-                candidate.field.struct.ordinal === operation.field.struct.ordinal,
+            const selected = aggregate.fields.find((candidate) =>
+              DeclarationFacts.sameFieldId(candidate.field, operation.field),
             )
             if (selected === undefined) {
               throw new RangeError('MIR verifier allowed projection of a missing aggregate field')
@@ -4004,11 +4020,8 @@ function* executeFunction(
                     'MIR verifier allowed a field selector on a non-struct value',
                   )
                 }
-                const field = selected.fields.find(
-                  (candidate) =>
-                    candidate.field.ordinal === selector.field.ordinal &&
-                    candidate.field.struct.sourceId === selector.field.struct.sourceId &&
-                    candidate.field.struct.ordinal === selector.field.struct.ordinal,
+                const field = selected.fields.find((candidate) =>
+                  DeclarationFacts.sameFieldId(candidate.field, selector.field),
                 )
                 if (field === undefined) {
                   throw new RangeError('MIR verifier allowed a missing field selector')
@@ -4392,7 +4405,7 @@ function* executeFunction(
           case 'RunEffectComposite':
           case 'RunEffectValue':
           case 'RunStaticEffect':
-          case 'ReifyEffect': {
+          case 'CatchEffect': {
             const effectStep = yield* BootstrapEffect.execute(
               {
                 program,

@@ -25,13 +25,13 @@
 //! pub fn main() -> i32 {
 //!   let valid = String.fromUtf8(b"Silk")
 //!     |> Result.unwrapOr<string, String.InvalidUtf8>("")
-//!   let invalid = String.fromUtf8(b"a\x80")
-//!   if !Result.isFailure<string, String.InvalidUtf8>(&invalid) {
-//!     return 0
-//!   }
+//!   let rejected = String.fromUtf8(b"a\x80")
+//!     |> Result.unwrapOr<string, String.InvalidUtf8>("")
 //!   let length = String.byteLength(valid)
 //!     |> usize.toI32
-//!   return length + 38
+//!   let rejectedLength = String.byteLength(rejected)
+//!     |> usize.toI32
+//!   return length + rejectedLength + 38
 //! }
 //! ```
 //!
@@ -92,9 +92,7 @@ import silk.char as char
 import silk.char { fromU32 as charFromU32 }
 import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
-import silk.option { None }
 import silk.option { Option, none, some }
-import silk.option { Some }
 import silk.result { Result, failResult, succeed }
 import silk.u32 as u32
 import silk.u8 as u8
@@ -208,8 +206,8 @@ pub unsafe fn fromUtf8Unchecked(values: &[u8]) -> string {
 /// first invalid byte offset in [`InvalidUtf8`].
 pub fn fromUtf8(values: &[u8]) -> Result<string, InvalidUtf8> {
   let failure = match move firstInvalidUtf8(values) {
-    Some<usize> { value } => move value
-    None {} => values.length + usize.ONE
+    Option<usize>.Some { value } => move value
+    Option<usize>.None => values.length + usize.ONE
   }
   if failure <= values.length {
     return failResult<string, InvalidUtf8>(InvalidUtf8 { offset: failure })
@@ -244,8 +242,8 @@ pub effect fn copy(value: string) -> String ! OutOfMemoryError ? &mut Allocator 
 /// Effect failure channel. No owned string is returned in either failure case.
 pub effect fn copyUtf8(values: &[u8]) -> Result<String, InvalidUtf8> ! OutOfMemoryError ? &mut Allocator {
   let failure = match move firstInvalidUtf8(values) {
-    Some<usize> { value } => move value
-    None {} => values.length + usize.ONE
+    Option<usize>.Some { value } => move value
+    Option<usize>.None => values.length + usize.ONE
   }
   if failure <= values.length {
     return failResult<String, InvalidUtf8>(InvalidUtf8 { offset: failure })
@@ -382,11 +380,11 @@ pub fn nextScalar(value: string, cursor: ScalarCursor) -> Option<ScalarStep> {
     }
   }
   return match move charFromU32(scalar) {
-    Some<char> { value: decoded } => some<ScalarStep>(ScalarStep {
+    Option<char>.Some { value: decoded } => some<ScalarStep>(ScalarStep {
       scalar: decoded,
       byteOffset: offset,
       next: ScalarCursor { byteOffset: offset + width }
     })
-    None {} => none<ScalarStep>()
+    Option<char>.None => none<ScalarStep>()
   }
 }

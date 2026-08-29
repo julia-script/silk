@@ -69,6 +69,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'Allocate':
     case 'HostWrite':
     case 'OsCall':
+    case 'OsOpenOutcome':
     case 'RawBufferFrom':
     case 'SharedFromAllocation':
     case 'SharedClone':
@@ -99,6 +100,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'SliceLength':
     case 'ConvertUnion':
     case 'Construct':
+    case 'ConstructUnionVariant':
     case 'ConstructArray':
     case 'Project':
     case 'ReadPlace':
@@ -110,7 +112,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'ReinterpretScalar':
     case 'FloatUnary':
     case 'FloatTranscendental':
-    case 'CheckedScalar':
+    case 'CheckedScalarOutcome':
     case 'Binary':
       return yield* NativeScalarOperation.emit(context.scalar, operation)
     case 'Drop':
@@ -124,7 +126,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'RunEffectComposite':
     case 'RunEffectValue':
     case 'RunStaticEffect':
-    case 'ReifyEffect':
+    case 'CatchEffect':
     case 'CloseEffectEntry':
       return yield* NativeEffectOperation.emit(context.effect, operation)
     case 'ApplyCallable':

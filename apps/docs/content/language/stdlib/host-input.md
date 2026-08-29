@@ -13,7 +13,7 @@ lossless pass-through.
 ## Details
 
 Arguments include the program name at index zero and retain host order. A missing argument index
-or unset variable is [`None`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4e6f6e65), while [`HostInputError`](#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075744572726f72) means the provider could not answer.
+or unset variable is [`None`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a30), while [`HostInputError`](#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075744572726f72) means the provider could not answer.
 Returned [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573) values are independently owned, so lookup operations also carry explicit
 [`OutOfMemoryError`](./allocator.md#declaration-73696c6b2f616c6c6f6361746f723a3a4f75744f664d656d6f72794572726f72) and [`Allocator`](./allocator.md#declaration-73696c6b2f616c6c6f6361746f723a3a416c6c6f6361746f72) channels.
 
@@ -152,7 +152,7 @@ A provider that cannot inspect the process arguments fails with `HostInputError`
 ### Operation `argument`
 
 ```silk
-effect fn argument(index: usize) -> Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
+effect fn argument(index: usize) -> silk/option.Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 Copies one argument as raw bytes, or returns `None` when `index` is out of range.
@@ -167,7 +167,7 @@ produces `HostInputError`; ownership allocation produces `OutOfMemoryError`.
 ### Operation `variable`
 
 ```silk
-effect fn variable(name: &[u8]) -> Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
+effect fn variable(name: &[u8]) -> silk/option.Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 Copies one environment value as raw bytes, or returns `None` when `name` is unset.
@@ -212,7 +212,7 @@ The count includes the program name at index zero. Provider failure produces
 ## `argument`
 
 ```silk
-pub effect fn argument(index: usize) -> Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
+pub effect fn argument(index: usize) -> silk/option.Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 Copies one process argument through the active [`HostInput`](#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e707574) provider.
@@ -227,7 +227,7 @@ independently owned and can contain bytes that are not valid UTF-8.
 ## `variable`
 
 ```silk
-pub effect fn variable(name: &[u8]) -> Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
+pub effect fn variable(name: &[u8]) -> silk/option.Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 Copies one environment value selected by a raw byte name.
@@ -242,7 +242,7 @@ process environment. The returned [`Bytes`](./bytes.md#declaration-73696c6b2f627
 ## `variableNamed`
 
 ```silk
-pub effect fn variableNamed(name: string) -> Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
+pub effect fn variableNamed(name: string) -> silk/option.Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 Copies one environment value selected by a valid UTF-8 name.

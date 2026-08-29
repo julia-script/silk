@@ -350,7 +350,7 @@ it.effect('resolves zip and zip3 through the ordinary declaration path without a
     const catalog = Intrinsic.all().flatMap((actor) =>
       actor.operations.map((operation) => operation.spelling),
     )
-    assert.include(catalog, 'effectResult')
+    assert.notInclude(catalog, 'effectResult')
     assert.notInclude(catalog, 'zip')
     assert.notInclude(catalog, 'zip3')
   }),

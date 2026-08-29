@@ -3,6 +3,7 @@ import * as Constant from '@silklang/llvm/Constant'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import * as Mir from './Mir.js'
@@ -26,6 +27,7 @@ type Operation = Extract<
       | 'SliceLength'
       | 'ConvertUnion'
       | 'Construct'
+      | 'ConstructUnionVariant'
       | 'ConstructArray'
       | 'Project'
       | 'ReadPlace'
@@ -184,11 +186,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         if (selector._tag === 'FieldSelector') {
           if (selectedLayout?.representation._tag !== 'Aggregate')
             throw new RangeError('LLVM borrow field lost its aggregate layout')
-          const field = selectedLayout.representation.fields.find(
-            (candidate) =>
-              candidate.id.ordinal === selector.field.ordinal &&
-              candidate.id.struct.sourceId === selector.field.struct.sourceId &&
-              candidate.id.struct.ordinal === selector.field.struct.ordinal,
+          const field = selectedLayout.representation.fields.find((candidate) =>
+            DeclarationFacts.sameFieldId(candidate.id, selector.field),
           )
           if (field === undefined) throw new RangeError('LLVM borrow field lost its field layout')
           staticOffset += field.offset
@@ -423,6 +422,39 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         ),
       )
       break
+    case 'ConstructUnionVariant': {
+      const targetLanes = NativeType.lanesFor(types, operation.type)
+      const tagLane = targetLanes.at(0)
+      if (tagLane === undefined) throw new RangeError('LLVM nominal union lost its tag lane')
+      const tag = yield* Constant.integerSigned(builder, i32, BigInt(operation.variantOrdinal))
+      const sourceValues = operation.fields.flatMap((field) => [
+        ...NativeStorage.readLocal(nativeStorage, field.value),
+      ])
+      const sourceLanes = operation.fields.flatMap((field) => {
+        const fieldType = entry.fn.localTypes.at(field.value.ordinal)
+        return fieldType === undefined ? [] : [...NativeType.lanesFor(types, fieldType)]
+      })
+      const payload: Array<Value.Input> = []
+      for (let ordinal = 1; ordinal < targetLanes.length; ordinal += 1) {
+        const targetLane = targetLanes.at(ordinal)
+        if (targetLane === undefined) throw new RangeError('LLVM nominal union lost a payload lane')
+        const input = sourceValues.at(ordinal - 1)
+        const sourceLane = sourceLanes.at(ordinal - 1)
+        payload.push(
+          input === undefined || sourceLane === undefined
+            ? yield* Constant.nullValue(builder, NativeType.laneType(types, targetLane))
+            : yield* NativeArith.coerceLane(
+                arith.lane,
+                input,
+                sourceLane,
+                targetLane,
+                `nominal_union${operation.destination.ordinal}_${ordinal - 1}`,
+              ),
+        )
+      }
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([tag, ...payload]))
+      break
+    }
     case 'ConstructArray':
       nativeStorage.locals.set(
         operation.destination.ordinal,
@@ -446,9 +478,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         return first !== undefined &&
           first._tag === 'FieldId' &&
           selected !== undefined &&
-          first.ordinal === operation.field.ordinal &&
-          first.struct.sourceId === operation.field.struct.sourceId &&
-          first.struct.ordinal === operation.field.struct.ordinal
+          DeclarationFacts.sameFieldId(first, operation.field)
           ? [selected]
           : []
       })
@@ -657,9 +687,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             if (selector._tag === 'FieldSelector') {
               if (
                 physical._tag !== 'FieldId' ||
-                physical.ordinal !== selector.field.ordinal ||
-                physical.struct.sourceId !== selector.field.struct.sourceId ||
-                physical.struct.ordinal !== selector.field.struct.ordinal
+                !DeclarationFacts.sameFieldId(physical, selector.field)
               ) {
                 return []
               }
@@ -959,9 +987,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           if (selector._tag === 'FieldSelector') {
             if (
               physical._tag !== 'FieldId' ||
-              physical.ordinal !== selector.field.ordinal ||
-              physical.struct.sourceId !== selector.field.struct.sourceId ||
-              physical.struct.ordinal !== selector.field.struct.ordinal
+              !DeclarationFacts.sameFieldId(physical, selector.field)
             ) {
               matches = false
               break

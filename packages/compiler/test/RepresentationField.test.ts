@@ -227,6 +227,36 @@ struct Choice<F: fn(i32) -> i32, G: fn(i32) -> i32> { operation: Left<F> | Right
   }),
 )
 
+it.effect('keeps represented fields scoped to their nominal union variants', () =>
+  Effect.gen(function* () {
+    const module = 'representation-field/nominal-union'
+    const index = yield* declarations(
+      module,
+      `union Choice<F: fn(i32) -> i32> {
+  Left { operation: F },
+  Right { operation: F },
+}`,
+    )
+    const argument = exactCallable(module)
+    const instance = Type.nominal(module, 'Choice', [argument])
+    const plans = RepresentationField.plansOf(index, instance)
+    const resolutions = RepresentationField.resolveFields(index, [instance])
+
+    assert.deepEqual(
+      plans.map((plan) => [plan.id.variantOrdinal, plan.id.ordinal, plan.id.useOrdinal]),
+      [
+        [0, 0, 0],
+        [1, 0, 0],
+      ],
+    )
+    assert.strictEqual(new Set(plans.map((plan) => RepresentationField.idKey(plan.id))).size, 2)
+    assert.deepEqual(
+      plans.map((plan) => RepresentationField.lookup(resolutions, instance, plan.id)?._tag),
+      ['ResolvedRepresentationField', 'ResolvedRepresentationField'],
+    )
+  }),
+)
+
 it.effect('retains explicit open recovery facts after the source specialization gate', () =>
   Effect.gen(function* () {
     const module = 'representation-field/open'

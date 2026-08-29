@@ -336,6 +336,19 @@ const serviceOperationForIdentity = (
         operation.name._tag === 'Present' && operation.name.spelling === identity.id.name,
     )
 
+const unionVariantForIdentity = (
+  self: FrontendSnapshot,
+  identity: Extract<SemanticOccurrence.Identity, { readonly _tag: 'UnionVariantIdentity' }>,
+): readonly [DeclarationFacts.UnionFact, DeclarationFacts.UnionVariantFact] | undefined => {
+  const union = DeclarationFacts.byCanonical(self.index, identity.id.union)
+  if (union?._tag !== 'UnionDeclaration') return undefined
+  const variant = union.variants.find(
+    (candidate) =>
+      candidate.canonical._tag === 'Canonical' && candidate.canonical.id.name === identity.id.name,
+  )
+  return variant === undefined ? undefined : Object.freeze([union, variant] as const)
+}
+
 const syntaxForIdentity = (
   self: FrontendSnapshot,
   identity: SemanticOccurrence.Identity,
@@ -356,6 +369,8 @@ const syntaxForIdentity = (
         (member) =>
           member.canonical._tag === 'Canonical' && member.canonical.id.name === identity.id.name,
       )?.syntax
+  if (identity._tag === 'UnionVariantIdentity')
+    return unionVariantForIdentity(self, identity)?.[1].syntax
   if (identity._tag === 'EnumAssociatedOperationIdentity')
     return DeclarationFacts.byCanonical(self.index, identity.id.enum)?.syntax
   if (identity._tag === 'TypeParameterIdentity') {
@@ -392,16 +407,17 @@ const syntaxForIdentity = (
     return undefined
   }
   if (identity._tag === 'FieldIdentity') {
-    for (const headers of self.index.modules)
-      for (const declaration of headers.structs) {
-        const field = declaration.fields.find(
-          (candidate) =>
-            candidate.id.struct.sourceId === identity.id.struct.sourceId &&
-            candidate.id.struct.ordinal === identity.id.struct.ordinal &&
-            candidate.id.ordinal === identity.id.ordinal,
-        )
-        if (field !== undefined) return field.syntax
+    for (const headers of self.index.modules) {
+      const fields = [
+        ...headers.structs.flatMap((declaration) => declaration.fields),
+        ...headers.unions.flatMap((declaration) =>
+          declaration.variants.flatMap((variant) => variant.fields),
+        ),
+      ]
+      for (const field of fields) {
+        if (DeclarationFacts.sameFieldId(field.id, identity.id)) return field.syntax
       }
+    }
   }
   return undefined
 }
@@ -445,6 +461,7 @@ const hoverPresentation = (
 const nominalDeclarationType = (
   declaration:
     | DeclarationFacts.StructFact
+    | DeclarationFacts.UnionFact
     | DeclarationFacts.EnumFact
     | DeclarationFacts.ContractFact,
 ): Type.Nominal | undefined =>
@@ -480,6 +497,11 @@ const presentationOfIdentity = (
     if (declaration?._tag === 'EnumDeclaration')
       return hoverPresentation(
         Presentation.enumDeclaration(declaration),
+        nominalDeclarationType(declaration),
+      )
+    if (declaration?._tag === 'UnionDeclaration')
+      return hoverPresentation(
+        Presentation.unionDeclaration(declaration),
         nominalDeclarationType(declaration),
       )
     if (declaration?._tag === 'ServiceDeclaration')
@@ -538,17 +560,17 @@ const presentationOfIdentity = (
     return undefined
   }
   if (identity._tag === 'FieldIdentity') {
-    for (const headers of self.index.modules)
-      for (const declaration of headers.structs) {
-        const field = declaration.fields.find(
-          (candidate) =>
-            candidate.id.struct.sourceId === identity.id.struct.sourceId &&
-            candidate.id.struct.ordinal === identity.id.struct.ordinal &&
-            candidate.id.ordinal === identity.id.ordinal,
-        )
-        if (field !== undefined)
+    for (const headers of self.index.modules) {
+      const fields = [
+        ...headers.structs.flatMap((declaration) => declaration.fields),
+        ...headers.unions.flatMap((declaration) =>
+          declaration.variants.flatMap((variant) => variant.fields),
+        ),
+      ]
+      for (const field of fields)
+        if (DeclarationFacts.sameFieldId(field.id, identity.id))
           return hoverPresentation(Presentation.field(field), declaredType(field.declaredType))
-      }
+    }
     return undefined
   }
   if (identity._tag === 'BindingIdentity') {
@@ -646,6 +668,15 @@ const presentationOfIdentity = (
     return member === undefined
       ? undefined
       : hoverPresentation(Presentation.enumMember(enum_, member), nominalDeclarationType(enum_))
+  }
+  if (identity._tag === 'UnionVariantIdentity') {
+    const selected = unionVariantForIdentity(self, identity)
+    return selected === undefined
+      ? undefined
+      : hoverPresentation(
+          Presentation.unionVariant(selected[0], selected[1]),
+          nominalDeclarationType(selected[0]),
+        )
   }
   if (identity._tag === 'EnumAssociatedOperationIdentity') {
     const enum_ = DeclarationFacts.byCanonical(self.index, identity.id.enum)
@@ -985,6 +1016,26 @@ export const structByName = (
   module: string,
   spelling: string,
 ): DeclarationFacts.StructLookup => DeclarationFacts.struct(self.index, module, spelling)
+
+/** Looks up one nominal tagged-union declaration. */
+export const unionByName = (
+  self: FrontendSnapshot,
+  module: string,
+  spelling: string,
+): DeclarationFacts.UnionLookup => DeclarationFacts.unionByName(self.index, module, spelling)
+
+/** Looks up one declaration-ordered variant from a resolved nominal union. */
+export const unionVariantByName = (
+  declaration: DeclarationFacts.UnionFact,
+  spelling: string,
+): DeclarationFacts.UnionVariantLookup =>
+  DeclarationFacts.lookupUnionVariant(declaration.variants, spelling)
+
+/** Looks up one declaration-ordered field within a resolved nominal-union variant. */
+export const unionVariantFieldByName = (
+  variant: DeclarationFacts.UnionVariantFact,
+  spelling: string,
+): DeclarationFacts.FieldLookup => DeclarationFacts.lookupField(variant.fields, spelling)
 
 /** Looks up one declaration-ordered field from a resolved nominal struct. */
 export const fieldByName = (

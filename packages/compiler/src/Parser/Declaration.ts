@@ -43,6 +43,7 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
     kind === 'UnsafeKeyword' ||
     kind === 'StructKeyword' ||
     kind === 'EnumKeyword' ||
+    kind === 'UnionKeyword' ||
     kind === 'ServiceKeyword' ||
     kind === 'InterfaceKeyword' ||
     kind === 'RoleKeyword' ||
@@ -58,6 +59,7 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
       (peek(state, 2) === 'FnKeyword' || peek(state, 2) === 'EffectKeyword')) ||
     following === 'StructKeyword' ||
     following === 'EnumKeyword' ||
+    following === 'UnionKeyword' ||
     following === 'ServiceKeyword' ||
     following === 'InterfaceKeyword' ||
     following === 'RoleKeyword' ||
@@ -260,6 +262,120 @@ export const parseStructDeclaration = (initial: State): NodeResult => {
   return Object.freeze({
     state: right.state,
     node: syntaxNode(right.state, 'StructDeclaration', [...children, ...right.elements]),
+  })
+}
+
+export const parseUnionVariantField = (initial: State): NodeResult => {
+  const field = parseStructField(initial)
+  return Object.freeze({
+    state: field.state,
+    node: syntaxNode(field.state, 'UnionVariantField', field.node.children),
+  })
+}
+
+export const parseUnionVariant = (initial: State): NodeResult => {
+  const name = expect(initial, 'Identifier', [
+    'LeftBrace',
+    'Comma',
+    'RightBrace',
+    ...topLevelFollowing,
+  ])
+  if (nextSignificantKind(name.state) !== 'LeftBrace') {
+    return Object.freeze({
+      state: name.state,
+      node: syntaxNode(name.state, 'UnionVariant', name.elements),
+    })
+  }
+
+  const left = expect(name.state, 'LeftBrace', [
+    'PubKeyword',
+    'Identifier',
+    'RightBrace',
+    ...topLevelFollowing,
+  ])
+  let state = left.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+    ...name.elements,
+    ...left.elements,
+  ])
+
+  if (nextSignificantKind(state) === 'RightBrace') {
+    const field = parseUnionVariantField(state)
+    children = Object.freeze([...children, field.node])
+    state = field.state
+  } else {
+    while (
+      !beginsTopLevelDeclaration(state) &&
+      nextSignificantKind(state) !== 'RightBrace' &&
+      nextSignificantKind(state) !== 'EndOfFile'
+    ) {
+      const field = parseUnionVariantField(state)
+      children = Object.freeze([...children, field.node])
+      state = field.state
+      if (nextSignificantKind(state) === 'RightBrace') break
+      const comma = expect(state, 'Comma', [
+        'PubKeyword',
+        'Identifier',
+        'RightBrace',
+        ...topLevelFollowing,
+      ])
+      children = Object.freeze([...children, ...comma.elements])
+      state = comma.state
+      if (nextSignificantKind(state) === 'RightBrace') break
+    }
+  }
+
+  const right = expect(state, 'RightBrace', ['Comma', 'Identifier', ...topLevelFollowing])
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'UnionVariant', [...children, ...right.elements]),
+  })
+}
+
+export const parseUnionDeclaration = (initial: State): NodeResult => {
+  const hasPublicModifier = nextSignificantKind(initial) === 'PubKeyword'
+  const pubKeyword = hasPublicModifier
+    ? expect(initial, 'PubKeyword', ['UnionKeyword', 'Identifier', 'LeftBrace'])
+    : Object.freeze({ state: initial, elements: Object.freeze([]) })
+  const keyword = expect(pubKeyword.state, 'UnionKeyword', ['Identifier', 'LeftBrace'])
+  const name = expect(keyword.state, 'Identifier', ['Less', 'LeftBrace', ...topLevelFollowing])
+  const typeParameters =
+    nextSignificantKind(name.state) === 'Less'
+      ? parseTypeParameterList(name.state, ['LeftBrace'])
+      : undefined
+  const left = expect(typeParameters?.state ?? name.state, 'LeftBrace', [
+    'Identifier',
+    'RightBrace',
+    ...topLevelFollowing,
+  ])
+  let state = left.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+    ...pubKeyword.elements,
+    ...keyword.elements,
+    ...name.elements,
+    ...(typeParameters === undefined ? [] : [typeParameters.node]),
+    ...left.elements,
+  ])
+
+  while (
+    !beginsTopLevelDeclaration(state) &&
+    nextSignificantKind(state) !== 'RightBrace' &&
+    nextSignificantKind(state) !== 'EndOfFile'
+  ) {
+    const variant = parseUnionVariant(state)
+    children = Object.freeze([...children, variant.node])
+    state = variant.state
+    if (nextSignificantKind(state) === 'RightBrace') break
+    const comma = expect(state, 'Comma', ['Identifier', 'RightBrace', ...topLevelFollowing])
+    children = Object.freeze([...children, ...comma.elements])
+    state = comma.state
+    if (nextSignificantKind(state) === 'RightBrace') break
+  }
+
+  const right = expect(state, 'RightBrace', topLevelFollowing)
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'UnionDeclaration', [...children, ...right.elements]),
   })
 }
 
@@ -478,6 +594,7 @@ const parseServiceLikeDeclaration = (initial: State, kind: 'Service' | 'Interfac
     nextSignificantKind(state) !== 'ConstKeyword' &&
     nextSignificantKind(state) !== 'StructKeyword' &&
     nextSignificantKind(state) !== 'EnumKeyword' &&
+    nextSignificantKind(state) !== 'UnionKeyword' &&
     nextSignificantKind(state) !== 'ServiceKeyword' &&
     nextSignificantKind(state) !== 'InterfaceKeyword' &&
     nextSignificantKind(state) !== 'ImplKeyword'
@@ -590,6 +707,7 @@ export const parseTopLevelDeclaration = (state: State): NodeResult => {
   if (kind === 'StructKeyword' || following === 'StructKeyword')
     return parseStructDeclaration(state)
   if (kind === 'EnumKeyword' || following === 'EnumKeyword') return parseEnumDeclaration(state)
+  if (kind === 'UnionKeyword' || following === 'UnionKeyword') return parseUnionDeclaration(state)
   return parseFunctionDeclaration(state)
 }
 
@@ -604,6 +722,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     lookaheadToken.kind !== 'UnsafeKeyword' &&
     lookaheadToken.kind !== 'StructKeyword' &&
     lookaheadToken.kind !== 'EnumKeyword' &&
+    lookaheadToken.kind !== 'UnionKeyword' &&
     lookaheadToken.kind !== 'ServiceKeyword' &&
     lookaheadToken.kind !== 'InterfaceKeyword' &&
     lookaheadToken.kind !== 'RoleKeyword' &&

@@ -77,6 +77,48 @@ const replaceDrop = (
     ),
   })
 
+it.effect('accepts Drop-wrapped nominal union cleanup with represented Effect fields', () =>
+  Effect.gen(function* () {
+    const source = `union Deferred<F: once Effect<i32>> { Empty, Ready { operation: F } }
+impl<F: once Effect<i32>> Drop for Deferred<F> {
+  fn drop(self: &mut Deferred<F>) -> () { return () }
+}
+fn consume<F: once Effect<i32>>(value: Deferred<F>) -> () { drop value }
+pub fn main() -> i32 {
+  consume(Deferred.Ready { operation: effect { return 42 } })
+  return 42
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'stored-effect-cleanup-verification/nominal-union-hook',
+      ascii(source),
+      Target.wasm32UnknownUnknown.id,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const module = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(module), [])
+    const unionEntry = module.layout.entries.find(
+      (entry) => entry.representation._tag === 'NominalUnion',
+    )
+    assert.isTrue(
+      unionEntry?.representation._tag === 'NominalUnion' &&
+        unionEntry.representation.cleanupHook !== undefined,
+    )
+    assert.isTrue(
+      module.functions
+        .flatMap(MirVerification.operations)
+        .some(
+          (operation) =>
+            operation._tag === 'Drop' &&
+            operation.cleanup._tag === 'HookCleanup' &&
+            operation.cleanup.inner._tag === 'NominalUnionCleanup',
+        ),
+    )
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
 it.effect('rejects incomplete cleanup inside nested Effect and callable captures', () =>
   Effect.gen(function* () {
     const { catalog, module } = yield* lowerStored(

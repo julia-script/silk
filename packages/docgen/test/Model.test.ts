@@ -47,9 +47,42 @@ it('decodes the canonical signature object and required declaration fields', () 
   )
 })
 
-it('decodes enum, enum-member, and role declaration kinds', () => {
-  for (const kind of ['Enum', 'EnumMember', 'Role']) {
+it('decodes enum, union, child, role, and link target kinds', () => {
+  for (const kind of ['Enum', 'EnumMember', 'Union', 'UnionVariant', 'Role']) {
     assert.strictEqual(Model.decode(project(item({ kind })))._tag, 'Decoded', kind)
+  }
+  for (const kind of ['EnumMember', 'UnionVariant']) {
+    const document = {
+      _tag: 'Document',
+      source,
+      markdown: 'Variant.',
+      blocks: [
+        {
+          _tag: 'Paragraph',
+          children: [
+            {
+              _tag: 'SymbolLink',
+              spelling: 'Variant',
+              target: {
+                id: 'project/main::Variant',
+                module: 'project/main',
+                name: 'Variant',
+                kind,
+              },
+              source,
+            },
+          ],
+          source,
+        },
+      ],
+      examples: [],
+      fallback: false,
+    }
+    assert.strictEqual(
+      Model.decode(project(item({ documentation: document })))._tag,
+      'Decoded',
+      kind,
+    )
   }
 })
 

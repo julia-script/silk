@@ -4,6 +4,8 @@ Patterns inspect existing value structure and introduce local bindings. Silk use
 grammar in exhaustive `match`, unconditional `let` destructuring, and conditional `if let`.
 The surrounding construct decides whether a pattern must always match or provides a mismatch path.
 Scalar enums additionally provide a qualified, payload-free member pattern for exhaustive `match`.
+Nominal unions provide parent-qualified unit and named-field variant patterns in `match`, `let`, and
+`if let` wherever the surrounding context admits a refutable selection.
 
 Patterns are not expressions. They perform no conversion, equality call, interface dispatch,
 constructor call, or user-defined extraction.
@@ -531,4 +533,40 @@ member reports `SEM0161`, and an integer literal pattern against an enum reports
 
 **Evidence:** [scalar enum matching specification](../../../../openspec/specs/bootstrap-scalar-enums/spec.md),
 [enum matching tests](../../../../packages/compiler/test/ExhaustiveMatching.test.ts),
+[match coverage rules](functions-callables-and-control-flow.md#match-003--match-coverage-is-exhaustive-and-guards-do-not-prove-coverage).
+
+## PATT-021 — A qualified nominal-union variant selects one hierarchical leaf
+
+**Status:** Confirmed
+
+A nominal-union pattern names the complete applied parent followed by its variant. A unit variant
+introduces no binding. A named-field variant uses the ordinary struct-field pattern rules,
+including renaming, `..`, nesting, and access derived from the matched expression.
+
+```silk
+union Option<T> { Some { value: T }, None }
+
+fn unwrap(option: Option<i32>) -> i32 {
+  return match move option {
+    Option<i32>.Some { value } => value
+    Option<i32>.None => 0
+  }
+}
+```
+
+The selector is one leaf beneath `Option<i32>`, not a standalone type. If `Option<i32>` occurs in a
+structural union, selection retains both the structural member and nominal variant identities.
+Guards remain provisional, and exhausting the parent requires every declared variant even when a
+payload contains `never`.
+
+**Boundary:** Pattern generic arguments are explicit rather than inferred from the scrutinee. A
+variant cannot be used as a type, projected before selection, or flattened into the surrounding
+structural union. A false guarded move leaves the whole active payload available to later arms.
+
+**Diagnostics:** An unknown variant reports `SEM0167`; a non-union qualifier reports `SEM0168`.
+Missing, duplicate, unreachable, field, and ownership errors use the ordinary match, aggregate, and
+ownership diagnostics while naming the complete hierarchical selection path.
+
+**Evidence:** [nominal-union pattern specification](../../../../openspec/changes/add-nominal-unions/specs/bootstrap-nominal-unions/spec.md),
+[hierarchical matching tests](../../../../packages/compiler/test/StructValues.test.ts),
 [match coverage rules](functions-callables-and-control-flow.md#match-003--match-coverage-is-exhaustive-and-guards-do-not-prove-coverage).

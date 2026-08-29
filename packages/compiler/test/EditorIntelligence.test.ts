@@ -109,6 +109,137 @@ pub fn main() -> i32 { return 0 }`
   )
 })
 
+it.effect('presents nominal unions, variants, and variant fields from canonical facts', () => {
+  const source = `/// A computation outcome.
+pub union Result<A, E> {
+  /// A successful payload.
+  Success { pub value: A },
+  Failure { pub error: E },
+}
+pub fn main() -> i32 { return 0 }`
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const declaration = occurrenceAt(snapshot, source, 'Result')
+      const variant = occurrenceAt(snapshot, source, 'Success')
+      const field = occurrenceAt(snapshot, source, 'value')
+      const union = Analysis.unionByName(snapshot, 'main', 'Result')
+
+      assert.strictEqual(declaration?.role, 'Declaration')
+      assert.strictEqual(variant?.role, 'Declaration')
+      assert.strictEqual(field?.role, 'Declaration')
+      assert.strictEqual(variant?.resolution._tag, 'Available')
+      assert.strictEqual(
+        declaration === undefined
+          ? undefined
+          : Analysis.occurrencePresentation(snapshot, 'main', declaration)?.text,
+        'pub union Result<A, E>',
+      )
+      assert.strictEqual(
+        variant === undefined
+          ? undefined
+          : Analysis.occurrencePresentation(snapshot, 'main', variant)?.text,
+        'Result<A, E>.Success { value: A }: Result<A, E>',
+      )
+      assert.strictEqual(
+        documentationText(
+          snapshot,
+          Analysis.documentationAt(snapshot, 'main', source.indexOf('Success')),
+        ),
+        '/// A successful payload.',
+      )
+      assert.strictEqual(union._tag, 'Resolved')
+      if (union._tag !== 'Resolved') return undefined
+      const selected = Analysis.unionVariantByName(union.declaration, 'Success')
+      assert.strictEqual(selected._tag, 'Resolved')
+      if (selected._tag !== 'Resolved') return undefined
+      assert.strictEqual(
+        Analysis.unionVariantFieldByName(selected.variant, 'value')._tag,
+        'Resolved',
+      )
+      return undefined
+    }),
+  )
+})
+
+it.effect('completes variants from a nominal union qualifier', () => {
+  const source = `union State { Ready, Waiting { count: i32 } }
+pub fn main() -> i32 { let state = State. return 0 }`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const offset = source.indexOf('State.') + 'State.'.length
+      const completion = Analysis.completionAt(snapshot, 'main', offset)
+      assert.deepEqual(
+        completion?.candidates.map((candidate) => [candidate.label, candidate.kind]),
+        [
+          ['Ready', 'Constructor'],
+          ['Waiting', 'Constructor'],
+        ],
+      )
+      return undefined
+    }),
+  )
+})
+
+it.effect('completes variants and module operations from a file-named nominal union', () => {
+  const source = `import state { State }
+pub fn main() -> i32 { let state = State. return 0 }`
+  return Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(source)) }).pipe(
+    Effect.provide(
+      SourceResolver.memory(
+        new Map([
+          [
+            'state',
+            encoder.encode(
+              'pub union State { Ready, Waiting { count: i32 } }\npub fn ready() -> State { return State.Ready }',
+            ),
+          ],
+        ]),
+      ),
+    ),
+    Effect.map((snapshot) => {
+      const offset = source.indexOf('State.') + 'State.'.length
+      const completion = Analysis.completionAt(snapshot, 'main', offset)
+      assert.deepEqual(
+        completion?.candidates.map((candidate) => [candidate.label, candidate.kind]),
+        [
+          ['Ready', 'Constructor'],
+          ['Waiting', 'Constructor'],
+          ['ready', 'Function'],
+          ['State', 'Type'],
+        ],
+      )
+      return undefined
+    }),
+  )
+})
+
+it.effect('navigates constructor and pattern variants through one canonical identity', () => {
+  const source = `union Option<T> { Some { value: T }, None }
+fn unwrap(option: Option<i32>) -> i32 {
+  return match move option {
+    Option<i32>.Some { value } => value
+    Option<i32>.None => 0
+  }
+}
+pub fn main() -> i32 { return unwrap(Option<i32>.Some { value: 42 }) }`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const declaration = occurrenceAt(snapshot, source, 'Some')
+      const pattern = occurrenceAt(snapshot, source, 'Some', 1)
+      const construction = occurrenceAt(snapshot, source, 'Some', 2)
+
+      assert.strictEqual(declaration?.role, 'Declaration')
+      assert.strictEqual(pattern?.role, 'Value')
+      assert.strictEqual(construction?.role, 'Value')
+      assert.deepEqual(pattern?.resolution, declaration?.resolution)
+      assert.deepEqual(construction?.resolution, declaration?.resolution)
+      assert.deepEqual(pattern?.declaration, declaration?.declaration)
+      assert.deepEqual(construction?.declaration, declaration?.declaration)
+      return undefined
+    }),
+  )
+})
+
 it.effect('answers raw documentation for modules, declarations, children, and references', () => {
   const source = `//! Recovery module.
 /// A recoverable problem.
@@ -1546,6 +1677,7 @@ pub fn main() -> i32 { return ContractLogger. }`
     )
 
     const typeSource = `struct Local {}
+union LocalChoice { Empty }
 service Logger { fn enabled() -> bool }
 fn identity<T>(value: ) -> i32 { return 0 }`
     const typeSnapshot = yield* Analysis.ofSourceRealized('main', encoder.encode(typeSource))
@@ -1556,11 +1688,33 @@ fn identity<T>(value: ) -> i32 { return 0 }`
     )
     assert.deepEqual(typeResult?.context, { _tag: 'DeclaredTypeContext' })
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'Local')
+    assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'LocalChoice')
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'Logger')
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'f32')
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'f64')
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'string')
     assert.notInclude(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'true')
+
+    const importedUnionSource = `import contracts { ContractChoice }
+fn identity(value: ) -> i32 { return 0 }`
+    const importedUnion = yield* Analysis.makeRealized({
+      root: SourceFile.make('main', encoder.encode(importedUnionSource)),
+    }).pipe(
+      Effect.provide(
+        SourceResolver.memory(
+          new Map([['contracts', encoder.encode('pub union ContractChoice { Empty }')]]),
+        ),
+      ),
+    )
+    const importedUnionResult = Analysis.completionAt(
+      importedUnion,
+      'main',
+      importedUnionSource.indexOf('value: ') + 'value: '.length,
+    )
+    assert.include(
+      importedUnionResult?.candidates.map((candidate) => candidate.label) ?? [],
+      'ContractChoice',
+    )
   }),
 )
 

@@ -1,4 +1,5 @@
 import type { SliceValue, Value } from './BootstrapValue.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Mir from './Mir.js'
 
 export interface Access {
@@ -33,11 +34,8 @@ export const walkPlace = (
     if (selector._tag === 'FieldSelector') {
       if (selected._tag !== 'AggregateValue')
         throw new RangeError('MIR verifier allowed a field selector on a non-struct value')
-      const field = selected.fields.find(
-        (candidate) =>
-          candidate.field.ordinal === selector.field.ordinal &&
-          candidate.field.struct.sourceId === selector.field.struct.sourceId &&
-          candidate.field.struct.ordinal === selector.field.struct.ordinal,
+      const field = selected.fields.find((candidate) =>
+        DeclarationFacts.sameFieldId(candidate.field, selector.field),
       )
       if (field === undefined) throw new RangeError('MIR verifier allowed a missing field selector')
       selected = field.value
@@ -171,7 +169,7 @@ export const selectorKey = (selectors: ReadonlyArray<Mir.PlaceSelector>): string
   selectors
     .map((selector) => {
       if (selector._tag === 'FieldSelector') {
-        return `field:${selector.field.struct.sourceId}:${selector.field.struct.ordinal}:${selector.field.ordinal}`
+        return `field:${DeclarationFacts.fieldIdKey(selector.field)}`
       }
       if (selector._tag === 'SliceElementSelector') {
         return `slice:${selector.index.ordinal}`

@@ -604,6 +604,15 @@ pub fn main() -> i32 {
   let operation = invoke(Effect.provideMut<Logger>(&mut logger), Effect.log("indirect"))
   return 42
 }`,
+        `import silk.effect as Effect
+import silk.logger { InMemoryLogger }
+import silk.logger { Logger }
+union Store<F> { Empty, Stored { value: F } }
+pub fn main() -> i32 {
+  let mut logger = Logger.inMemoryProvider()
+  let escaped = Store.Stored { value: Effect.provideMut<Logger>(&mut logger) }
+  return 42
+}`,
       ]
       for (const [ordinal, body] of cases.entries()) {
         const frontend = yield* snapshot(`import silk.effect as Effect

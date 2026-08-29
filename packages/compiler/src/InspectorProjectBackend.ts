@@ -1,4 +1,4 @@
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 /**
  * Module, name, ownership, lowering and backend phases as rows.
@@ -130,6 +130,8 @@ const memberSignature = (member: DeclarationFacts.MemberFact): string => {
       : `<${member.typeParameters.map((parameter) => typeText(parameter.type)).join(', ')}>`
   if (member._tag === 'StructDeclaration')
     return `struct${parameters} · ${member.fields.length} field${member.fields.length === 1 ? '' : 's'}`
+  if (member._tag === 'UnionDeclaration')
+    return `union${parameters} · ${member.variants.length} variant${member.variants.length === 1 ? '' : 's'}`
   if (member._tag === 'EnumDeclaration') {
     const representation =
       member.representation._tag === 'Available'
@@ -380,6 +382,10 @@ const cleanupText = (cleanup: CleanupPlan.CleanupPlan): string => {
       return `${typeText(cleanup.type)} ${cleanup.fields
         .map(({ field }) => `#${field.ordinal}`)
         .join(' → ')}`
+    case 'NominalUnionCleanup':
+      return `${typeText(cleanup.type)} active variant · ${cleanup.variants
+        .map((variant) => `${variant.ordinal}:${variant.variant.name}`)
+        .join(', ')}`
     case 'ArrayCleanup':
       return `${typeText(cleanup.type)} elements in reverse order · ${cleanupText(cleanup.element)}`
     case 'UnionCleanup':
@@ -663,6 +669,9 @@ export const layoutRows = (
         case 'Union':
           representationText = `sum · tag i${entry.representation.tag.bits} · payload +${entry.representation.payloadOffset}/${entry.representation.payloadSize}`
           break
+        case 'NominalUnion':
+          representationText = `nominal union · ${entry.representation.variants.length} variants · tag i${entry.representation.tag.bits} · payload +${entry.representation.payloadOffset}/${entry.representation.payloadSize}`
+          break
         case 'Reference':
           representationText = `reference · address i${entry.representation.address.bits}`
           break
@@ -848,13 +857,17 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = run effect choice ${localText(operation.effect)}`
     case 'RunStaticEffect':
       return `${localText(operation.destination)} = run static ${operation.runner.name} with ${operation.captures.map((capture) => localText(capture.source)).join(', ') || 'no captures'}`
-    case 'ReifyEffect':
+    case 'CatchEffect':
       return `${localText(operation.destination)} = result ${localText(operation.effect)} with ${operation.runner.name}`
     case 'CloseEffectEntry':
       return `${localText(operation.destination)} = close ${operation.target.name} with ${operation.runner.name}`
     case 'Construct':
       return `${localText(operation.destination)} = construct ${typeText(operation.type.type)} { ${operation.fields
         .map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`)
+        .join(', ')} }`
+    case 'ConstructUnionVariant':
+      return `${localText(operation.destination)} = construct ${typeText(operation.type.type)}.${operation.variant.name}#${operation.variantOrdinal} { ${operation.fields
+        .map(({ field, value }) => `${DeclarationFacts.fieldIdKey(field)}: ${localText(value)}`)
         .join(', ')} }`
     case 'ConstructArray':
       return `${localText(operation.destination)} = array [${operation.elements
@@ -872,10 +885,14 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `drop ${localText(operation.local)}`
     case 'Match':
       return `${localText(operation.destination)} = match ${operation.access.toLowerCase()} ${localText(operation.scrutinee)}`
+    case 'Conditional':
+      return `${localText(operation.destination)} = if ${localText(operation.condition)}`
     case 'ShortCircuit':
       return `${localText(operation.destination)} = ${operation.operator === 'And' ? '&&' : '||'} ${localText(operation.left)}`
     case 'HostWrite':
       return `${localText(operation.destination)} = write all ${localText(operation.bytes)} to stream ${localText(operation.stream)} ! ${operation.failure.name}`
+    case 'OsOpen':
+      return `${localText(operation.destination)} = ${operation.operation}(${operation.arguments.map(localText).join(', ')}) via ${localText(operation.success)}/${localText(operation.failure)}`
     case 'OsCall':
       return `${localText(operation.destination)} = ${operation.operation}(${operation.arguments.map(localText).join(', ')})`
     case 'SharedFromAllocation':
@@ -1177,6 +1194,8 @@ const valueText = (value: BootstrapEvaluation.Value): string => {
       return `${value.enum.module}.${value.enum.name}.${value.member.name} = ${value.discriminant}`
     case 'AggregateValue':
       return `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+    case 'NominalUnionValue':
+      return `${typeText(value.type)}.${value.variant.name} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
   }
 }
 
@@ -1679,6 +1698,10 @@ const selectorPathText = (path: ReadonlyArray<Layout.Selector>): string =>
           return 'tag'
         case 'UnionPayloadSelector':
           return `payload[${selector.slot}]`
+        case 'NominalUnionTagSelector':
+          return 'nominal-tag'
+        case 'NominalUnionPayloadSelector':
+          return `nominal-payload[${selector.slot}]`
         case 'SliceAddressSelector':
           return 'address'
         default:

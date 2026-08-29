@@ -69,6 +69,16 @@ const cleanupText = (cleanup: CleanupPlan.CleanupPlan): string => {
       )
       .join(',')}`
   }
+  if (cleanup._tag === 'NominalUnionCleanup') {
+    return `nominal-union:${Type.encode(cleanup.type)} variants=${cleanup.variants
+      .map(
+        (variant) =>
+          `${variant.ordinal}:${variant.variant.name}(${variant.fields
+            .map((field) => `#${field.field.ordinal}(${cleanupText(field.cleanup)})`)
+            .join(',')})`,
+      )
+      .join(',')}`
+  }
   if (cleanup._tag === 'CallableCleanup') {
     const environment =
       cleanup.environment._tag === 'CallableEnvironmentSite'

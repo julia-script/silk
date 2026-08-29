@@ -142,6 +142,86 @@ it.effect('blocks OS evaluation without an injected adapter and uses one when su
   }),
 )
 
+it.effect('selects an affine OS open carrier without constructing Option in the compiler', () =>
+  Effect.gen(function* () {
+    const source = `import silk.u32 as u32
+
+union OpenAttempt {
+  Opened { handle: OsHandle },
+  Refused
+}
+
+fn opened(handle: OsHandle) -> OpenAttempt {
+  return OpenAttempt.Opened { handle: move handle }
+}
+
+fn refused() -> OpenAttempt { return OpenAttempt.Refused }
+
+effect fn rawOpen(reason: &mut i32, nativeCode: &mut u32) -> OpenAttempt {
+  unsafe {
+    return run Intrinsic.osFileOpen<OpenAttempt>(
+      Intrinsic.stringUtf8Bytes("/root"),
+      Intrinsic.stringUtf8Bytes("/file"),
+      0,
+      reason,
+      nativeCode,
+      opened,
+      refused
+    )
+  }
+  let impossible = 1 / 0
+  return refused()
+}
+
+effect fn rawClose(handle: OsHandle, reason: &mut i32, nativeCode: &mut u32) -> bool {
+  unsafe { return run Intrinsic.osHandleClose(move handle, reason, nativeCode) }
+  return false
+}
+
+effect fn finish(handle: OsHandle, reason: &mut i32, nativeCode: &mut u32) -> i32 {
+  let closed = run rawClose(move handle, move reason, move nativeCode)
+  if closed { return 42 }
+  return 2
+}
+
+effect fn program() -> i32 {
+  let mut reason = 0
+  let mut nativeCode = u32.toU32(0)
+  let attempt = run rawOpen(&mut reason, &mut nativeCode)
+  return match move attempt {
+    OpenAttempt.Opened { handle } => run finish(move handle, &mut reason, &mut nativeCode)
+    OpenAttempt.Refused => 10 + reason
+  }
+}
+
+pub fn main() -> i32 {
+  return run program()
+}`
+    const snapshot = yield* Analysis.ofSourceRealized('os-filesystem/open-carrier', ascii(source))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    let closeCount = 0
+    const successful = Analysis.evaluate(snapshot, {
+      osFileSystem: {
+        ...provider,
+        fileOpen: () => ({ _tag: 'Opened', handle: { identity: 7, kind: 'File' } }),
+        handleClose: () => {
+          closeCount += 1
+          return completed
+        },
+      },
+    })
+    assert.strictEqual(successful._tag, 'Completed')
+    if (successful._tag === 'Completed') assert.strictEqual(successful.result.value, 42n)
+    assert.strictEqual(closeCount, 1)
+
+    const failed = Analysis.evaluate(snapshot, { osFileSystem: provider })
+    assert.strictEqual(failed._tag, 'Completed')
+    if (failed._tag === 'Completed') assert.strictEqual(failed.result.value, 19n)
+    assert.strictEqual(closeCount, 1)
+  }),
+)
+
 it.effect('preserves an arbitrary thrown OS-provider cause in the evaluation trace', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -176,7 +256,7 @@ import silk.usize as usize
 import silk.os_filesystem { make as osMake }
 import silk.bytes { asSlice as bytesSlice }
 import silk.filesystem { FileError, FileSystem, make as pathMake }
-import silk.result { Failure, Result, Success }
+import silk.result { Result }
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -193,15 +273,13 @@ effect fn program() -> i32 ! FileError | OutOfMemoryError {
 }
 
 pub fn main() -> i32 {
-  let attempted = run Intrinsic.effectResult(program())
+  let attempted = run Effect.result(program())
   return match move attempted {
-    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<FileError | OutOfMemoryError> { error } => match move error {
+      Result<i32, FileError | OutOfMemoryError>.Success { value } => value
+      Result<i32, FileError | OutOfMemoryError>.Failure { error } => match move error {
         FileError failure => failure.reason.code
         OutOfMemoryError exhausted => 99
       }
-    }
   }
 }`
       const snapshot = yield* Analysis.ofSourceRealized(
@@ -288,7 +366,7 @@ import silk.effect as Effect
 import silk.usize as usize
 import silk.os_filesystem { make as osMake }
 import silk.filesystem { DirectoryEntry, FileError, FileSystem, root as pathRoot, view as pathView }
-import silk.result { Failure, Result, Success }
+import silk.result { Result }
 import silk.vector { asSlice as vectorSlice }
 
 fn pathMatches(entries: &[DirectoryEntry], index: usize, expected: string) -> bool {
@@ -313,12 +391,10 @@ effect fn program() -> i32 ! FileError | OutOfMemoryError {
 }
 
 pub fn main() -> i32 {
-  let attempted = run Intrinsic.effectResult(program())
+  let attempted = run Effect.result(program())
   return match move attempted {
-    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<FileError | OutOfMemoryError> { error } => 10
-    }
+      Result<i32, FileError | OutOfMemoryError>.Success { value } => value
+      Result<i32, FileError | OutOfMemoryError>.Failure { error } => 10
   }
 }`
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -624,7 +700,7 @@ import silk.usize as usize
 import silk.os_filesystem { make as osMake }
 import silk.bytes { asSlice as bytesSlice }
 import silk.filesystem { FileError, FileSystem, make as pathMake }
-import silk.result { Failure, Result, Success }
+import silk.result { Result }
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -663,12 +739,10 @@ effect fn program() -> i32 ! FileError | OutOfMemoryError {
 }
 
 pub fn main() -> i32 {
-  let completed = run Intrinsic.effectResult(program())
+  let completed = run Effect.result(program())
   return match move completed {
-    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
-      Success<i32> { value } => value
-      Failure<FileError | OutOfMemoryError> { error } => 10
-    }
+      Result<i32, FileError | OutOfMemoryError>.Success { value } => value
+      Result<i32, FileError | OutOfMemoryError>.Failure { error } => 10
   }
 }`
       const compiled = yield* Driver.compile({

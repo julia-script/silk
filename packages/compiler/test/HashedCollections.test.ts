@@ -75,7 +75,7 @@ import silk.hash_map {
   valueAt,
   withMut
 }
-import silk.option { Option, Some, None }
+import silk.option { Option, unwrapOr }
 import silk.u64 as u64
 import silk.usize as usize`
 
@@ -113,13 +113,13 @@ it.effect('inserts, looks up, and removes on both engines', () =>
   if !contains<Word, i32>(&map, Hash.word(7)) { return 2 }
   if contains<Word, i32>(&map, Hash.word(11)) { return 3 }
   let taken = remove<Word, i32>(&mut map, Hash.word(7))
-  let removed = Option.unwrapOr<i32>(move taken, 0)
+  let removed = unwrapOr<i32>(move taken, 0)
   if length<Word, i32>(&map) != 1 { return 4 }
   if contains<Word, i32>(&map, Hash.word(7)) { return 5 }
   let missing = remove<Word, i32>(&mut map, Hash.word(7))
-  let absent = Option.unwrapOr<i32>(move missing, 0)
+  let absent = unwrapOr<i32>(move missing, 0)
   if absent != 0 { return 6 }
-  let held = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(9)), 0)
+  let held = unwrapOr<i32>(get<Word, i32>(&map, Hash.word(9)), 0)
   return removed + held`,
       ),
     )
@@ -158,7 +158,7 @@ fn mustNotRun(value: &mut Counter) -> () {
   if length<Word, Counter>(&map) != 1 { return 6 }
   if bucketCount<Word, Counter>(&map) != 8 { return 7 }
   let fallback = Counter { value: 0, calls: 0 }
-  let held = Option.unwrapOr<Counter>(get<Word, Counter>(&map, Hash.word(7)), move fallback)
+  let held = unwrapOr<Counter>(get<Word, Counter>(&map, Hash.word(7)), move fallback)
   if held.calls != 1 { return 8 }
   return held.value`,
       ),
@@ -181,10 +181,10 @@ it.effect('reaches one entry from two equivalent keys, and replaces rather than 
   // A second key equivalent to the first finds the entry the first placed.
   if !contains<Word, i32>(&map, Hash.word(3)) { return 1 }
   let second = run insert<Word, i32>(&mut map, Hash.word(3), 31) |> Effect.provideMut(&mut allocator)
-  let replaced = Option.unwrapOr<i32>(move second, 0)
+  let replaced = unwrapOr<i32>(move second, 0)
   if length<Word, i32>(&map) != 1 { return 2 }
   if replaced != 11 { return 3 }
-  let held = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(3)), 0)
+  let held = unwrapOr<i32>(get<Word, i32>(&map, Hash.word(3)), 0)
   if held != 31 { return 4 }
   return replaced + held`,
       ),
@@ -215,7 +215,7 @@ it.effect('keeps every entry across the growth that rehomes them', () =>
   let mut probe = 0
   let mut total = 0
   while probe < 40 {
-    let found = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(i32.toU64(probe))), -1)
+    let found = unwrapOr<i32>(get<Word, i32>(&map, Hash.word(i32.toU64(probe))), -1)
     if found != probe * 3 { return 3 }
     total = total + found
     probe = probe + 1
@@ -246,7 +246,7 @@ import silk.hash { Word }
 import silk.hash_map { HashMap }
 import silk.i32 as i32
 import silk.layout { Layout }
-import silk.option { Option }
+import silk.option { Option, unwrapOr }
 import silk.usize as usize
 ${mapImports}
 
@@ -294,7 +294,7 @@ effect fn build() -> i32 ! OutOfMemoryError {
   let mut probe = 0
   let mut total = 0
   while probe < 6 {
-    let found = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(i32.toU64(probe))), -1)
+    let found = unwrapOr<i32>(get<Word, i32>(&map, Hash.word(i32.toU64(probe))), -1)
     if found != probe + 100 { return 7 }
     total = total + found
     probe = probe + 1
@@ -335,7 +335,7 @@ it.effect('keeps probing through the marks a removal leaves behind', () =>
     // Every key of this round must be present while the previous rounds' marks are still there.
     let mut check = 0
     while check < 6 {
-      let found = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(i32.toU64(round * 6 + check))), -1)
+      let found = unwrapOr<i32>(get<Word, i32>(&map, Hash.word(i32.toU64(round * 6 + check))), -1)
       if found != round * 6 + check { return 1 }
       check = check + 1
     }
@@ -344,7 +344,7 @@ it.effect('keeps probing through the marks a removal leaves behind', () =>
     let mut gone = 0
     while gone < 6 {
       let taken = remove<Word, i32>(&mut map, Hash.word(i32.toU64(round * 6 + gone)))
-      let removed = Option.unwrapOr<i32>(move taken, -1)
+      let removed = unwrapOr<i32>(move taken, -1)
       if removed != round * 6 + gone { return 3 }
       gone = gone + 1
     }
@@ -372,7 +372,7 @@ import silk.hash_set {
   occupiedAt,
   remove
 }
-import silk.option { Option, Some, None }`
+import silk.option { Option }`
 
 it.effect(
   'refuses a second equivalent element, and answers membership before and after removal',
@@ -394,8 +394,8 @@ it.effect(
   if !contains<Word>(&seen, Hash.word(9)) { return 5 }
   let taken = remove<Word>(&mut seen, Hash.word(9))
   let gone = match move taken {
-    Some<Word> { value } => u64.toI32(value.value)
-    None {} => 0
+    Option<Word>.Some { value } => u64.toI32(value.value)
+    Option<Word>.None => 0
   }
   if gone != 9 { return 6 }
   if contains<Word>(&seen, Hash.word(9)) { return 7 }

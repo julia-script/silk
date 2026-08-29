@@ -1,6 +1,6 @@
-import type { AggregateValue, Value } from './BootstrapValue.js'
+import type { AggregateValue, NominalUnionValue, Value } from './BootstrapValue.js'
 import type * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as ExecutionPackage from './ExecutionPackage.js'
 import * as Type from './Type.js'
 import * as WakeCell from './WakeCell.js'
@@ -239,6 +239,24 @@ export const cleanupMembers = (
   if (cleanup._tag === 'HookCleanup') return cleanupMembers(cleanup.inner, owner)
   if (cleanup._tag === 'RepresentedCallableCleanup' || cleanup._tag === 'RepresentedEffectCleanup')
     return Object.freeze([])
+  if (cleanup._tag === 'NominalUnionCleanup') {
+    if (owner._tag !== 'NominalUnionValue') return Object.freeze([])
+    const active = cleanup.variants.find(
+      (variant) =>
+        variant.ordinal === owner.variantOrdinal &&
+        variant.variant.union.module === owner.variant.union.module &&
+        variant.variant.union.name === owner.variant.union.name &&
+        variant.variant.name === owner.variant.name,
+    )
+    return Object.freeze(
+      active?.fields.flatMap((field) => {
+        const value = owner.fields.find((candidate) =>
+          DeclarationFacts.sameFieldId(candidate.field, field.field),
+        )
+        return value === undefined ? [] : cleanupMembers(field.cleanup, value.value)
+      }) ?? [],
+    )
+  }
   if (owner._tag !== 'AggregateValue') return Object.freeze([])
   return Object.freeze(
     cleanup.fields.flatMap((field) => {
@@ -257,13 +275,13 @@ export const selectFieldPath = (
 ): Value => {
   let selected: Value = root
   for (const selector of path) {
-    if (selected._tag !== 'AggregateValue')
-      throw new RangeError('MIR verifier allowed a match field below a non-struct value')
-    const field: AggregateValue['fields'][number] | undefined = selected.fields.find(
-      (candidate) =>
-        candidate.field.ordinal === selector.ordinal &&
-        candidate.field.struct.sourceId === selector.struct.sourceId &&
-        candidate.field.struct.ordinal === selector.struct.ordinal,
+    if (selected._tag !== 'AggregateValue' && selected._tag !== 'NominalUnionValue')
+      throw new RangeError('MIR verifier allowed a match field below a non-aggregate value')
+    const field:
+      | AggregateValue['fields'][number]
+      | NominalUnionValue['fields'][number]
+      | undefined = selected.fields.find((candidate) =>
+      DeclarationFacts.sameFieldId(candidate.field, selector),
     )
     if (field === undefined) throw new RangeError('MIR verifier allowed a missing match field')
     selected = field.value

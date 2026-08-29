@@ -41,7 +41,7 @@ import silk.i32 as i32
 import silk.i64 as i64
 import silk.i8 as i8
 import silk.isize as isize
-import silk.option { Option }
+import silk.option { Option, none, some }
 import silk.result { Result }
 import silk.string { String }
 import silk.u32 as u32
@@ -67,7 +67,7 @@ pub fn toU8(value: u16) -> u8 {
 /// Converts `value` to `u8`, or returns `None` if `value` is outside the `u8`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU8(value: u16) -> Option<u8> {
-  return Intrinsic.u16CheckedToU8(value)
+  return Intrinsic.u16CheckedToU8<Option<u8>>(value, some, none)
 }
 
 /// Returns `value` unchanged as `u16`. Use this function when generic conversion code
@@ -79,7 +79,7 @@ pub fn toU16(value: u16) -> u16 {
 /// Returns `Some` with `value` unchanged as `u16`. Use this function when generic
 /// checked-conversion code can select the same source and destination type.
 pub fn checkedToU16(value: u16) -> Option<u16> {
-  return Intrinsic.u16CheckedToU16(value)
+  return Intrinsic.u16CheckedToU16<Option<u16>>(value, some, none)
 }
 
 /// Converts `value` exactly to `u32`. Every `u16` value is representable.
@@ -90,7 +90,7 @@ pub fn toU32(value: u16) -> u32 {
 /// Converts `value` exactly to `u32` and returns `Some`. Every `u16` value is
 /// representable.
 pub fn checkedToU32(value: u16) -> Option<u32> {
-  return Intrinsic.u16CheckedToU32(value)
+  return Intrinsic.u16CheckedToU32<Option<u32>>(value, some, none)
 }
 
 /// Converts `value` exactly to `u64`. Every `u16` value is representable.
@@ -101,7 +101,7 @@ pub fn toU64(value: u16) -> u64 {
 /// Converts `value` exactly to `u64` and returns `Some`. Every `u16` value is
 /// representable.
 pub fn checkedToU64(value: u16) -> Option<u64> {
-  return Intrinsic.u16CheckedToU64(value)
+  return Intrinsic.u16CheckedToU64<Option<u64>>(value, some, none)
 }
 
 /// Converts `value` exactly to `usize`. Every `u16` value is representable.
@@ -112,7 +112,7 @@ pub fn toUsize(value: u16) -> usize {
 /// Converts `value` exactly to `usize` and returns `Some`. Every `u16` value is
 /// representable.
 pub fn checkedToUsize(value: u16) -> Option<usize> {
-  return Intrinsic.u16CheckedToUsize(value)
+  return Intrinsic.u16CheckedToUsize<Option<usize>>(value, some, none)
 }
 
 /// Converts `value` to `i8`. Traps if `value` is outside the `i8` range. Use
@@ -124,7 +124,7 @@ pub fn toI8(value: u16) -> i8 {
 /// Converts `value` to `i8`, or returns `None` if `value` is outside the `i8`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI8(value: u16) -> Option<i8> {
-  return Intrinsic.u16CheckedToI8(value)
+  return Intrinsic.u16CheckedToI8<Option<i8>>(value, some, none)
 }
 
 /// Converts `value` to `i16`. Traps if `value` is outside the `i16` range. Use
@@ -136,7 +136,7 @@ pub fn toI16(value: u16) -> i16 {
 /// Converts `value` to `i16`, or returns `None` if `value` is outside the `i16`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI16(value: u16) -> Option<i16> {
-  return Intrinsic.u16CheckedToI16(value)
+  return Intrinsic.u16CheckedToI16<Option<i16>>(value, some, none)
 }
 
 /// Converts `value` exactly to `i32`. Every `u16` value is representable.
@@ -147,7 +147,7 @@ pub fn toI32(value: u16) -> i32 {
 /// Converts `value` exactly to `i32` and returns `Some`. Every `u16` value is
 /// representable.
 pub fn checkedToI32(value: u16) -> Option<i32> {
-  return Intrinsic.u16CheckedToI32(value)
+  return Intrinsic.u16CheckedToI32<Option<i32>>(value, some, none)
 }
 
 /// Converts `value` exactly to `i64`. Every `u16` value is representable.
@@ -158,7 +158,7 @@ pub fn toI64(value: u16) -> i64 {
 /// Converts `value` exactly to `i64` and returns `Some`. Every `u16` value is
 /// representable.
 pub fn checkedToI64(value: u16) -> Option<i64> {
-  return Intrinsic.u16CheckedToI64(value)
+  return Intrinsic.u16CheckedToI64<Option<i64>>(value, some, none)
 }
 
 /// Converts `value` exactly to `isize`. Every `u16` value is representable.
@@ -169,7 +169,7 @@ pub fn toIsize(value: u16) -> isize {
 /// Converts `value` exactly to `isize` and returns `Some`. Every `u16` value is
 /// representable.
 pub fn checkedToIsize(value: u16) -> Option<isize> {
-  return Intrinsic.u16CheckedToIsize(value)
+  return Intrinsic.u16CheckedToIsize<Option<isize>>(value, some, none)
 }
 
 /// Converts `value` to the nearest `f32` value, with ties to even.
@@ -292,31 +292,31 @@ pub fn saturatingMultiply(left: u16, right: u16) -> u16 {
 /// Returns `Some` with `left + right`, or `None` if the result is outside the `u16` range.
 /// Use this function when overflow is input data.
 pub fn checkedAdd(left: u16, right: u16) -> Option<u16> {
-  return Intrinsic.u16CheckedAdd(left, right)
+  return Intrinsic.u16CheckedAdd<Option<u16>>(left, right, some, none)
 }
 
 /// Returns `Some` with `left - right`, or `None` if the result is outside the `u16` range.
 /// Use this function when overflow is input data.
 pub fn checkedSubtract(left: u16, right: u16) -> Option<u16> {
-  return Intrinsic.u16CheckedSubtract(left, right)
+  return Intrinsic.u16CheckedSubtract<Option<u16>>(left, right, some, none)
 }
 
 /// Returns `Some` with `left * right`, or `None` if the result is outside the `u16` range.
 /// Use this function when overflow is input data.
 pub fn checkedMultiply(left: u16, right: u16) -> Option<u16> {
-  return Intrinsic.u16CheckedMultiply(left, right)
+  return Intrinsic.u16CheckedMultiply<Option<u16>>(left, right, some, none)
 }
 
 /// Returns `Some` with `left / right`, or `None` if `right` is zero. Use this
 /// function when a zero divisor is input data.
 pub fn checkedDivide(left: u16, right: u16) -> Option<u16> {
-  return Intrinsic.u16CheckedDivide(left, right)
+  return Intrinsic.u16CheckedDivide<Option<u16>>(left, right, some, none)
 }
 
 /// Returns `Some` with the remainder, or `None` if `right` is zero. Use this function
 /// when a zero divisor is input data.
 pub fn checkedRemainder(left: u16, right: u16) -> Option<u16> {
-  return Intrinsic.u16CheckedRemainder(left, right)
+  return Intrinsic.u16CheckedRemainder<Option<u16>>(left, right, some, none)
 }
 
 /// Returns `true` when `left` and `right` are equal.

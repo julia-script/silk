@@ -1,6 +1,6 @@
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
@@ -796,12 +796,15 @@ const checkExpression = (
       checkExpression(state, live, expression.left, false, guard, escaping)
       checkExpression(state, live, expression.right, false, guard, escaping)
       return
-    case 'Construct': {
+    case 'Construct':
+    case 'ConstructUnionVariant': {
       const fields = new Map(
-        expression.fields.map((field) => [field.field.ordinal, field.value] as const),
+        expression.fields.map(
+          (field) => [DeclarationFacts.fieldIdKey(field.field), field.value] as const,
+        ),
       )
       for (const field of expression.evaluationOrder) {
-        const value = fields.get(field.ordinal)
+        const value = fields.get(DeclarationFacts.fieldIdKey(field))
         if (value !== undefined) checkExpression(state, live, value, true, guard, escaping)
       }
       return
@@ -1010,19 +1013,6 @@ const checkExpression = (
         )
       return
     }
-    case 'EffectResult':
-      // The intrinsic consumes its protected Effect exactly like its source-callable contract.
-      // Visiting the dedicated HIR operand prevents the runner's exit cleanup from releasing an
-      // affine environment that the reification operation already transferred to its runner.
-      checkExpression(
-        state,
-        live,
-        expression.protected,
-        argumentConsumes(expression.protected),
-        guard,
-        escaping,
-      )
-      return
     case 'EffectCatch':
       // The sealed primitive has the same owned operands as its ordinary callable contract.
       // Visiting both here preserves take-once use checking after elaboration replaces the call
@@ -1389,7 +1379,7 @@ const analyzeLoans = (
         ? Object.freeze([site.binding.ordinal])
         : movedExecutableBindings(expression.subject)
     }
-    if (expression._tag === 'StructLiteral')
+    if (expression._tag === 'StructLiteral' || expression._tag === 'UnionVariant')
       return Object.freeze(
         expression.initializers.flatMap((initializer) =>
           movedExecutableBindings(initializer.expression),
@@ -1399,7 +1389,6 @@ const analyzeLoans = (
       return Object.freeze(
         expression.elements.flatMap((element) => movedExecutableBindings(element.expression)),
       )
-    if (expression._tag === 'EffectResult') return movedExecutableBindings(expression.protected)
     if (expression._tag === 'EffectCatch')
       return Object.freeze([
         ...movedExecutableBindings(expression.protected),
@@ -1473,6 +1462,7 @@ const analyzeLoans = (
         scanRunEnds(expression.index, region)
         return
       case 'StructLiteral':
+      case 'UnionVariant':
         for (const initializer of expression.initializers)
           scanRunEnds(initializer.expression, region)
         return
@@ -1525,9 +1515,6 @@ const analyzeLoans = (
       case 'EffectCatch':
         scanRunEnds(expression.protected, region)
         scanRunEnds(expression.handler, region)
-        return
-      case 'EffectResult':
-        scanRunEnds(expression.protected, region)
         return
       case 'EffectBindRequirement':
         scanRunEnds(expression.protected, region)
@@ -1882,6 +1869,7 @@ const analyzeLoans = (
       // enclosing binding carries reaches the captures stored inside it too. Without this, a
       // borrow captured by a stored callable would be released while the aggregate still holds it.
       case 'StructLiteral':
+      case 'UnionVariant':
         for (const initializer of expression.initializers) {
           inspect(
             initializer.expression,
