@@ -238,6 +238,60 @@ it.effect(
   120_000,
 )
 
+const nominalUnionSharedExecutionCleanup = `import silk.allocator { Allocator }
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.shared as Shared
+
+union Ready {
+  SharedState { value: Shared.Shared<i32> },
+  Unit
+}
+
+fn ready(state: &Ready) -> () { return () }
+
+effect fn packaged() -> () ! Allocator.OutOfMemoryError ? &mut Allocator {
+  let mut index = 0
+  while index < 10000 {
+    let shared = run Shared.make<i32>(42)
+    let state = Ready.SharedState { value: move shared }
+    let execution = run Execution.make(effect { return 42 }, move state, ready)
+    drop execution
+    index = index + 1
+  }
+  return ()
+}
+
+effect fn program() -> () ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run packaged() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn recover(error: Allocator.OutOfMemoryError) -> () { return () }
+
+pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
+
+it.effect(
+  'reclaims local-shared payloads nested in nominal-union execution state',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'wasm-heap-reclaim/nominal-union-shared-execution-cleanup',
+        ascii(nominalUnionSharedExecutionCleanup),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed')
+
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      ;(instance.exports.silk_main as () => void)()
+      assert.isAtMost(pagesOf(instance), 4)
+    }),
+  120_000,
+)
+
 const repeatedSharedAccess = `import silk.allocator { Allocator }
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect

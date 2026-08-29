@@ -2546,6 +2546,57 @@ const makeOperationContext = (
               ]),
             })
           }
+          case 'LocalSharedCoreCleanup': {
+            const elementLayout = LayoutPlan.entry(plan, plan_.element)
+            const block =
+              elementLayout === undefined
+                ? undefined
+                : LocalSharedControlBlock.plan(plan.target, plan_.element, elementLayout)
+            if (block?._tag !== 'LocalSharedControlBlockPlan') {
+              throw new RangeError('Wasm address cleanup lost its local-shared control block')
+            }
+            const base = load()
+            const context = requireMemory()
+            const decrement = [
+              ...base,
+              ...base,
+              Instr.memoryAccess('i32.load', context.memory, { offset: block.strongOffset }),
+              Instr.i32Const(1),
+              Instr.op('i32.sub'),
+              Instr.memoryAccess('i32.store', context.memory, { offset: block.strongOffset }),
+            ]
+            const last = [
+              ...semanticLanesOf(plan_.element).flatMap((lane) => {
+                const offset = LayoutVerify.laneOffset(plan, plan_.element, lane.path)
+                if (offset === undefined) {
+                  throw new RangeError('Wasm address cleanup lost a local-shared payload lane')
+                }
+                return [
+                  ...base,
+                  Instr.memoryAccess(laneLoadMnemonic(plan, lane), context.memory, {
+                    offset: block.valueOffset + offset,
+                  }),
+                ]
+              }),
+              Instr.call(resolve(LocalSharedPayloadCleanup.declaration, [plan_.element])),
+              Instr.op('drop'),
+              ...base,
+              Instr.memoryAccess('i32.load', context.memory, {
+                offset:
+                  block.allocationOffset + aggregateFieldOffset(SilkType.allocation, '$context'),
+              }),
+              Instr.call(requireRelease()),
+            ]
+            return Object.freeze({
+              before: Object.freeze([
+                ...base,
+                Instr.memoryAccess('i32.load', context.memory, { offset: block.strongOffset }),
+                Instr.i32Const(1),
+                Instr.op('i32.gt_u'),
+                Instr.ifElse(Instr.emptyBlockType, decrement, last),
+              ]),
+            })
+          }
           case 'AllocationCleanup':
           case 'RawBufferCleanup': {
             const contextOffset = SilkType.isRawBuffer(plan_.type)
@@ -8556,8 +8607,19 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     transferResultOffset + transferResultSize,
     program.layout.target.pointerAlignment,
   )
+  const executionDriveCleanups = [...executionPackageCleanups.values()].flatMap(
+    (packageCleanup) => [packageCleanup.body, packageCleanup.endpoint, packageCleanup.callback],
+  )
   const frames = new Map(
-    program.functions.map((fn) => [fn, framePlan(fn, program.layout)] as const),
+    program.functions.map((fn) => {
+      const drivesExecution = MirVerification.operations(fn).some(
+        (operation) => operation._tag === 'ExecutionDrive',
+      )
+      return [
+        fn,
+        framePlan(fn, program.layout, drivesExecution ? executionDriveCleanups : []),
+      ] as const
+    }),
   )
   const staticOffsets = new Map<string, number>()
   let staticEnd = 16
@@ -9018,15 +9080,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         }),
       ]),
     })
-    const helperFrame = framePlan(
-      helperFunction,
-      program.layout,
-      [...executionPackageCleanups.values()].flatMap((packageCleanup) => [
-        packageCleanup.body,
-        packageCleanup.endpoint,
-        packageCleanup.callback,
-      ]),
-    )
+    const helperFrame = framePlan(helperFunction, program.layout, executionDriveCleanups)
     const helperLayout = layoutOf(helperFunction, program.layout, helperFrame, debug, false)
     const helperMemory: MemoryContext = Object.freeze({
       memory: privateMemory,

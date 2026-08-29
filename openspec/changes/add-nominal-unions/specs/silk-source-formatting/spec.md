@@ -17,4 +17,3 @@ idempotent without changing variant or field identity.
 
 - **WHEN** construction or a pattern spells `Result<A, E>.Success { value }`
 - **THEN** formatting preserves the applied parent before the dot and formats the field body under the ordinary struct-like policy
-

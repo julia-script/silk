@@ -56,6 +56,11 @@ export const operationCleanupEntries = (
         Object.freeze({ cleanup: operation.presentCleanup, local: operation.present }),
         Object.freeze({ cleanup: operation.absentCleanup, local: operation.absent }),
       ])
+    case 'ExecutionDrive':
+      return Object.freeze([
+        Object.freeze({ cleanup: operation.completionCleanup, local: operation.onComplete }),
+        Object.freeze({ cleanup: operation.suspensionCleanup, local: operation.onSuspend }),
+      ])
     case 'SharedWithMut':
       return Object.freeze([
         Object.freeze({ cleanup: operation.useCleanup, local: operation.use }),

@@ -9,4 +9,3 @@ identifier and SHALL retain exact source provenance under the existing trivia an
 
 - **WHEN** source contains `union` and `unionize`
 - **THEN** the first token is the union keyword and the second remains one identifier token
-

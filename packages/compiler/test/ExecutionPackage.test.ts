@@ -118,6 +118,137 @@ effect fn recover(error: Allocator.OutOfMemoryError) -> () { return () }
 
 pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
 
+const nominalUnionDriveCallbackCleanup = `import silk.allocator { Allocator }
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.i8 as i8
+import silk.layout { Layout }
+
+struct Guard {
+  left: i8
+  right: i8
+  storage: Allocation
+}
+
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let observed = i8.toI32(self.left) + i8.toI32(self.right)
+    if observed != 42 {
+      let boom = 1 / 0
+    }
+    return ()
+  }
+}
+
+union Choice {
+  Small { marker: i8, guard: Guard },
+  Wide { value: i64 }
+}
+
+fn ready(state: &()) -> () { return () }
+fn complete(state: (), value: i32) -> () { return () }
+
+fn suspend(state: (), execution: Intrinsic.Execution<i32>, choice: Choice) -> () {
+  drop execution
+  drop choice
+  return ()
+}
+
+fn suspendWith(choice: Choice) -> some<F: once fn((), Intrinsic.Execution<i32>) -> ()> F {
+  return suspend(move choice)
+}
+
+effect fn packaged() -> () ! Allocator.OutOfMemoryError ? &mut Allocator {
+  let layout = Layout.of<i32>()
+  let storage = run Allocator.allocate(move layout)
+  let choice = Choice.Small {
+    marker: i8.toI8(7),
+    guard: Guard {
+      left: i8.toI8(19),
+      right: i8.toI8(23),
+      storage: move storage
+    }
+  }
+  let execution = run Execution.make(effect { return 42 }, (), ready)
+  return run Execution.drive(move execution, (), complete, suspendWith(move choice))
+}
+
+effect fn program() -> () ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run packaged() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn recover(error: Allocator.OutOfMemoryError) -> () { return () }
+
+pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
+
+const nominalUnionSeparatedDriveCleanup = `import silk.allocator { Allocator }
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.i8 as i8
+import silk.layout { Layout }
+
+struct Guard {
+  left: i8
+  right: i8
+  storage: Allocation
+}
+
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let observed = i8.toI32(self.left) + i8.toI32(self.right)
+    if observed != 42 {
+      let boom = 1 / 0
+    }
+    return ()
+  }
+}
+
+union Ready {
+  Small { marker: i8, guard: Guard },
+  Wide { value: i64 }
+}
+
+fn ready(state: &Ready) -> () { return () }
+fn complete(state: (), value: i32) -> () { return () }
+
+fn suspend(state: (), execution: Intrinsic.Execution<i32>) -> () {
+  drop execution
+  return ()
+}
+
+effect fn makeOne() -> Intrinsic.Execution<i32> ! Allocator.OutOfMemoryError ? &mut Allocator {
+  let layout = Layout.of<i32>()
+  let storage = run Allocator.allocate(move layout)
+  let state = Ready.Small {
+    marker: i8.toI8(7),
+    guard: Guard {
+      left: i8.toI8(19),
+      right: i8.toI8(23),
+      storage: move storage
+    }
+  }
+  return run Execution.make(effect { return 42 }, move state, ready)
+}
+
+effect fn driveOne(execution: Intrinsic.Execution<i32>) -> () {
+  return run Execution.drive(move execution, (), complete, suspend)
+}
+
+effect fn packaged() -> () ! Allocator.OutOfMemoryError ? &mut Allocator {
+  let execution = run makeOne()
+  return run driveOne(move execution)
+}
+
+effect fn program() -> () ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run packaged() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn recover(error: Allocator.OutOfMemoryError) -> () { return () }
+
+pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
+
 it('plans exact direct, nested, and externally parkable combined packages', () => {
   const target = Target.wasm32UnknownUnknown
   const layouts = Object.freeze({
@@ -332,6 +463,38 @@ it.effect('reserves nominal-union scratch for synthetic execution cleanup helper
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
+
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    ;(instance.exports.silk_main as () => void)()
+  }),
+)
+
+it.effect('roots unused nominal-union callbacks released by execution drive', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'execution-package/nominal-union-drive-callback-cleanup',
+      new TextEncoder().encode(nominalUnionDriveCallbackCleanup),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.strictEqual(Analysis.evaluate(snapshot)._tag, 'Completed')
+
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    ;(instance.exports.silk_main as () => void)()
+  }),
+)
+
+it.effect('reserves package cleanup scratch when construction and drive are separated', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'execution-package/nominal-union-separated-drive-cleanup',
+      new TextEncoder().encode(nominalUnionSeparatedDriveCleanup),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.strictEqual(Analysis.evaluate(snapshot)._tag, 'Completed')
 
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})

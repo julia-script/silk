@@ -17,4 +17,3 @@ syntax.
 
 - **WHEN** one variant is damaged beside valid siblings
 - **THEN** facade queries expose its unavailable state while retaining navigable facts for the valid variants and unrelated declarations
-

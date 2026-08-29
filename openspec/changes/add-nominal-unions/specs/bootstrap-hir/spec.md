@@ -16,4 +16,3 @@ access mode, and active-variant cleanup without erasing a union to a structural 
 
 - **WHEN** a match selects `HttpError.Dns` directly from `HttpError | OutOfMemoryError`
 - **THEN** HIR retains both the outer structural member and inner nominal variant selection with exact bindings and cleanup
-
