@@ -18,6 +18,7 @@ import app.log as Log
 pub fn execute() -> i32 { return 1 }
 fn helper() -> i32 { return 2 }
 pub struct User {}
+pub union Choice { Empty }
 pub service Clock { fn now() -> i32 }
 pub interface Show { fn show() -> i32 }
 pub const answer: i32 = 42`,
@@ -34,9 +35,10 @@ pub const answer: i32 = 42`,
     [
       { spelling: 'execute', declarationKind: 'Function', namespace: 'Value', ordinal: 0 },
       { spelling: 'User', declarationKind: 'Struct', namespace: 'ValueAndType', ordinal: 2 },
-      { spelling: 'Clock', declarationKind: 'Service', namespace: 'Type', ordinal: 3 },
-      { spelling: 'Show', declarationKind: 'Interface', namespace: 'Type', ordinal: 4 },
-      { spelling: 'answer', declarationKind: 'Constant', namespace: 'Value', ordinal: 5 },
+      { spelling: 'Choice', declarationKind: 'Union', namespace: 'ValueAndType', ordinal: 3 },
+      { spelling: 'Clock', declarationKind: 'Service', namespace: 'Type', ordinal: 4 },
+      { spelling: 'Show', declarationKind: 'Interface', namespace: 'Type', ordinal: 5 },
+      { spelling: 'answer', declarationKind: 'Constant', namespace: 'Value', ordinal: 6 },
     ],
   )
 })

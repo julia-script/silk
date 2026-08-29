@@ -29,6 +29,21 @@ import * as Scalar from './Scalar.js'
 import * as Target from './Target.js'
 import * as Type from './Type.js'
 
+const cleanupHooksEqual = (
+  leftHook: Extract<Representation, { readonly _tag: 'Aggregate' }>['cleanupHook'],
+  rightHook: Extract<Representation, { readonly _tag: 'Aggregate' }>['cleanupHook'],
+): boolean =>
+  leftHook === undefined
+    ? rightHook === undefined
+    : rightHook !== undefined &&
+      leftHook.hook.module === rightHook.hook.module &&
+      leftHook.hook.name === rightHook.hook.name &&
+      leftHook.typeArguments.length === rightHook.typeArguments.length &&
+      leftHook.typeArguments.every((argument, ordinal) => {
+        const other = rightHook.typeArguments.at(ordinal)
+        return other !== undefined && Type.equalsGenericArgument(argument, other)
+      })
+
 const representationEquals = (left: Representation, right: Representation): boolean => {
   if (left._tag !== right._tag) return false
   if (left._tag === 'SignedInteger')
@@ -195,6 +210,7 @@ const representationEquals = (left: Representation, right: Representation): bool
       left.payloadAlignment === right.payloadAlignment &&
       left.tagPadding === right.tagPadding &&
       left.tailPadding === right.tailPadding &&
+      cleanupHooksEqual(left.cleanupHook, right.cleanupHook) &&
       left.variants.length === right.variants.length &&
       left.variants.every((variant, ordinal) => {
         const other = right.variants.at(ordinal)
@@ -225,20 +241,6 @@ const representationEquals = (left: Representation, right: Representation): bool
       })
     )
   }
-  const cleanupHooksEqual = (
-    leftHook: Extract<Representation, { readonly _tag: 'Aggregate' }>['cleanupHook'],
-    rightHook: Extract<Representation, { readonly _tag: 'Aggregate' }>['cleanupHook'],
-  ): boolean =>
-    leftHook === undefined
-      ? rightHook === undefined
-      : rightHook !== undefined &&
-        leftHook.hook.module === rightHook.hook.module &&
-        leftHook.hook.name === rightHook.hook.name &&
-        leftHook.typeArguments.length === rightHook.typeArguments.length &&
-        leftHook.typeArguments.every((argument, ordinal) => {
-          const other = rightHook.typeArguments.at(ordinal)
-          return other !== undefined && Type.equalsGenericArgument(argument, other)
-        })
   return (
     right._tag === 'Aggregate' &&
     cleanupHooksEqual(left.cleanupHook, right.cleanupHook) &&
@@ -759,6 +761,7 @@ const verifyEntry = (
         ),
       )
     }
+    let variantFieldsValid = true
     for (const [ordinal, variant] of representation.variants.entries()) {
       const expected = variant.fields.map((field) => {
         const fieldLayout = Type.isBuiltin(field.type)
@@ -793,6 +796,7 @@ const verifyEntry = (
         variant.alignment !== packed.alignment ||
         variant.tailPadding !== packed.tailPadding
       ) {
+        variantFieldsValid = false
         unionViolations.push(
           invalid(
             'InvalidAggregate',
@@ -802,14 +806,24 @@ const verifyEntry = (
         )
       }
     }
-    const payloadAlignment = representation.variants.reduce(
-      (maximum, variant) => Math.max(maximum, variant.alignment),
-      1,
-    )
-    const payloadSize = representation.variants.reduce(
-      (maximum, variant) => Math.max(maximum, variant.size),
-      0,
-    )
+    const unionShape = variantFieldsValid
+      ? callingShapes(target, [...available.values()], [candidate.type]).at(0)?.tree
+      : undefined
+    const payload =
+      unionShape?._tag === 'NominalUnionShape'
+        ? Packing.pack(
+            unionShape.payloadTypes.map((payloadType) => {
+              const scalar = scalarEntry(target, payloadType)
+              return Object.freeze({
+                value: payloadType,
+                size: scalar.size,
+                alignment: scalar.alignment,
+              })
+            }),
+          )
+        : undefined
+    const payloadAlignment = payload?.alignment ?? 1
+    const payloadSize = payload?.size ?? 0
     const payloadOffset = alignUp(4, payloadAlignment)
     const alignment = Math.max(4, payloadAlignment)
     const size = alignUp(payloadOffset + payloadSize, alignment)
@@ -827,6 +841,23 @@ const verifyEntry = (
           'InvalidAggregate',
           candidate.type,
           `${Type.encode(candidate.type)} has non-canonical nominal-union size or alignment`,
+        ),
+      )
+    }
+    const cleanupHook = representation.cleanupHook
+    if (
+      cleanupHook !== undefined &&
+      (cleanupHook.hook.module.length === 0 ||
+        cleanupHook.hook.name.length === 0 ||
+        cleanupHook.typeArguments.some(
+          (argument) => !Type.isRuntimeConcreteGenericArgument(argument),
+        ))
+    ) {
+      unionViolations.push(
+        invalid(
+          'InvalidAggregate',
+          candidate.type,
+          `${Type.encode(candidate.type)} has a non-canonical cleanup hook`,
         ),
       )
     }

@@ -51,7 +51,7 @@ it.effect('filters candidates by semantic namespace and omits private declaratio
       project: [
         ['main', summary('main', rootText)],
         ['wrong', summary('wrong', 'pub fn Wanted() -> i32 { return 1 }')],
-        ['right', summary('right', 'pub struct Wanted {}')],
+        ['right', summary('right', 'pub union Wanted { Value }')],
         ['private', summary('private', 'struct Wanted {}')],
       ],
     })

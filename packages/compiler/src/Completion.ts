@@ -464,6 +464,7 @@ const typeCandidates = (
       )
   for (const declaration of [
     ...(index.modules.find((headers) => headers.module === module)?.structs ?? []),
+    ...(index.modules.find((headers) => headers.module === module)?.unions ?? []),
     ...(index.modules.find((headers) => headers.module === module)?.enums ?? []),
     ...(index.modules.find((headers) => headers.module === module)?.services ?? []),
     ...(index.modules.find((headers) => headers.module === module)?.interfaces ?? []),
@@ -494,6 +495,7 @@ const typeCandidates = (
     const declaration = DeclarationFacts.byCanonical(index, binding.declaration)
     if (
       declaration?._tag !== 'StructDeclaration' &&
+      declaration?._tag !== 'UnionDeclaration' &&
       declaration?._tag !== 'EnumDeclaration' &&
       declaration?._tag !== 'ServiceDeclaration' &&
       declaration?._tag !== 'InterfaceDeclaration'

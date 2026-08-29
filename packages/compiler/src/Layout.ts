@@ -44,6 +44,12 @@ export interface Field extends PlacedField {
   readonly type: DeclarationFacts.SemanticType
 }
 
+/** Static cleanup hook required before structural cleanup; contributes no ABI bytes. */
+export interface CleanupHook {
+  readonly hook: DeclarationFacts.CanonicalId
+  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+}
+
 /** The initial closed representation vocabulary for concrete runtime types. */
 export type Representation =
   | { readonly _tag: 'SignedInteger'; readonly bits: Scalar.FixedBits }
@@ -65,11 +71,7 @@ export type Representation =
       readonly _tag: 'Aggregate'
       readonly fields: ReadonlyArray<Field>
       readonly tailPadding: number
-      /** Static cleanup hook required before structural field cleanup; contributes no ABI bytes. */
-      readonly cleanupHook?: {
-        readonly hook: DeclarationFacts.CanonicalId
-        readonly typeArguments: ReadonlyArray<Type.GenericArgument>
-      }
+      readonly cleanupHook?: CleanupHook
     }
   | {
       readonly _tag: 'CallableEnvironment'
@@ -166,6 +168,7 @@ export type Representation =
       readonly payloadAlignment: number
       readonly tagPadding: number
       readonly tailPadding: number
+      readonly cleanupHook?: CleanupHook
     }
 
 /** One compiler-owned concrete layout entry. */
@@ -1303,18 +1306,55 @@ export const catalog = (
         completed.set(key, failure)
         return failure
       }
-      const payloadAlignment = variants.reduce(
-        (maximum, variant) => Math.max(maximum, variant.alignment),
-        1,
+      const callingEntries = new Map(
+        [...completed].flatMap(([entryKey, candidate]) =>
+          candidate._tag === 'LayoutEntry' ? [[entryKey, candidate] as const] : [],
+        ),
       )
-      const payloadSize = variants.reduce((maximum, variant) => Math.max(maximum, variant.size), 0)
+      const callingContext = Object.freeze({
+        target,
+        entries: callingEntries,
+        effectEnvironments: Object.freeze([]),
+        callableEnvironments: Object.freeze([]),
+        active: new Set<string>(),
+      })
+      const variantShapes = variants.map((variant): CallingShapeNode => {
+        const fields = Object.freeze(
+          variant.fields.map((field) =>
+            Object.freeze({ field: field.id, shape: shapeNode(field.type, callingContext) }),
+          ),
+        )
+        return Object.freeze({
+          _tag: 'ProductShape',
+          type,
+          fields,
+          laneCount: fields.reduce((total, field) => total + field.shape.laneCount, 0),
+        })
+      })
+      const payloadTypes = unifyPayloadTypes(variantShapes, target)
+      const payload = Packing.pack(
+        payloadTypes.map((payloadType) => {
+          const scalar = scalarEntry(target, payloadType)
+          return Object.freeze({
+            value: payloadType,
+            size: scalar.size,
+            alignment: scalar.alignment,
+          })
+        }),
+      )
+      const payloadAlignment = payload.alignment
+      const payloadSize = payload.size
       const payloadOffset = alignUp(4, payloadAlignment)
       const alignment = Math.max(4, payloadAlignment)
       const size = alignUp(payloadOffset + payloadSize, alignment)
+      const cleanup = CleanupPlan.cleanupPlan(index, type)
       const entry: Entry = Object.freeze({
         _tag: 'LayoutEntry',
         type,
-        copy: ConformanceProof.hasCopyDeclaration(index, type) && fieldsCopy,
+        copy:
+          ConformanceProof.hasCopyDeclaration(index, type) &&
+          fieldsCopy &&
+          cleanup._tag !== 'HookCleanup',
         size,
         alignment,
         representation: Object.freeze({
@@ -1327,6 +1367,14 @@ export const catalog = (
           payloadAlignment,
           tagPadding: payloadOffset - 4,
           tailPadding: size - (payloadOffset + payloadSize),
+          ...(cleanup._tag === 'HookCleanup'
+            ? {
+                cleanupHook: Object.freeze({
+                  hook: cleanup.hook,
+                  typeArguments: cleanup.typeArguments,
+                }),
+              }
+            : {}),
         }),
       })
       completed.set(key, entry)

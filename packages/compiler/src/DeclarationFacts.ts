@@ -1793,7 +1793,7 @@ export const containsLexicalBorrow = (
     module: type.module,
     name: type.name,
   })
-  if (declaration?._tag !== 'StructDeclaration')
+  if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration')
     return type.arguments
       .filter(Type.isTypeArgument)
       .some((argument) => containsLexicalBorrow(self, argument, seen))
@@ -1803,7 +1803,11 @@ export const containsLexicalBorrow = (
       type.arguments,
     ) ?? new Map()
   const next = new Set(seen).add(key)
-  return declaration.fields.some(
+  const fields =
+    declaration._tag === 'StructDeclaration'
+      ? declaration.fields
+      : declaration.variants.flatMap((variant) => variant.fields)
+  return fields.some(
     (field) =>
       field.declaredType._tag === 'Resolved' &&
       containsLexicalBorrow(self, Type.substitute(field.declaredType.type, substitution), next),

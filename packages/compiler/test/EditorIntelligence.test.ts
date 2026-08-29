@@ -1677,6 +1677,7 @@ pub fn main() -> i32 { return ContractLogger. }`
     )
 
     const typeSource = `struct Local {}
+union LocalChoice { Empty }
 service Logger { fn enabled() -> bool }
 fn identity<T>(value: ) -> i32 { return 0 }`
     const typeSnapshot = yield* Analysis.ofSourceRealized('main', encoder.encode(typeSource))
@@ -1687,11 +1688,33 @@ fn identity<T>(value: ) -> i32 { return 0 }`
     )
     assert.deepEqual(typeResult?.context, { _tag: 'DeclaredTypeContext' })
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'Local')
+    assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'LocalChoice')
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'Logger')
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'f32')
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'f64')
     assert.include(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'string')
     assert.notInclude(typeResult?.candidates.map((candidate) => candidate.label) ?? [], 'true')
+
+    const importedUnionSource = `import contracts { ContractChoice }
+fn identity(value: ) -> i32 { return 0 }`
+    const importedUnion = yield* Analysis.makeRealized({
+      root: SourceFile.make('main', encoder.encode(importedUnionSource)),
+    }).pipe(
+      Effect.provide(
+        SourceResolver.memory(
+          new Map([['contracts', encoder.encode('pub union ContractChoice { Empty }')]]),
+        ),
+      ),
+    )
+    const importedUnionResult = Analysis.completionAt(
+      importedUnion,
+      'main',
+      importedUnionSource.indexOf('value: ') + 'value: '.length,
+    )
+    assert.include(
+      importedUnionResult?.candidates.map((candidate) => candidate.label) ?? [],
+      'ContractChoice',
+    )
   }),
 )
 

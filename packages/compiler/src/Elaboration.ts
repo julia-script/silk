@@ -1727,7 +1727,7 @@ const constrainedCallableEscapeDiagnostics = (
           reject(statement._tag === 'ReturnStatement' ? statement.expression : statement.value)
       },
       expression: (expression) => {
-        if (expression._tag === 'StructLiteral') {
+        if (expression._tag === 'StructLiteral' || expression._tag === 'UnionVariant') {
           for (const initializer of expression.initializers)
             if (constrainedCallableSchema(initializer.expression) !== undefined)
               reject(initializer.expression)

@@ -1413,13 +1413,28 @@ const cleanupMatchesSemanticType = (
   if (seen.has(key)) return cleanup._tag === 'NoCleanup'
   const representation = Layout.entry(layout, type)?.representation
   if (representation?._tag === 'NominalUnion') {
+    const requiredHook = representation.cleanupHook
+    if (requiredHook !== undefined) {
+      if (
+        cleanup._tag !== 'HookCleanup' ||
+        cleanup.hook.module !== requiredHook.hook.module ||
+        cleanup.hook.name !== requiredHook.hook.name ||
+        cleanup.typeArguments.length !== requiredHook.typeArguments.length ||
+        !cleanup.typeArguments.every((argument, ordinal) => {
+          const expected = requiredHook.typeArguments.at(ordinal)
+          return expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
+        })
+      )
+        return false
+    } else if (cleanup._tag === 'HookCleanup') return false
+    const concrete = cleanup._tag === 'HookCleanup' ? cleanup.inner : cleanup
     if (
-      cleanup._tag !== 'NominalUnionCleanup' ||
-      cleanup.variants.length !== representation.variants.length
+      concrete._tag !== 'NominalUnionCleanup' ||
+      concrete.variants.length !== representation.variants.length
     )
       return false
     const next = new Set(seen).add(key)
-    return cleanup.variants.every((variant, ordinal) => {
+    return concrete.variants.every((variant, ordinal) => {
       const expected = representation.variants.at(ordinal)
       return (
         expected !== undefined &&

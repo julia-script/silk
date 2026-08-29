@@ -77,6 +77,7 @@ export const isStaticallyDetachedFailure = (
     case 'Move':
       return isStaticallyDetachedFailure(expression.subject, index)
     case 'StructLiteral':
+    case 'UnionVariant':
       return expression.fields.every((field) =>
         isStaticallyDetachedFailure(field.initializer.expression, index),
       )

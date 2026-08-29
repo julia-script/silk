@@ -47,8 +47,13 @@ const representationText = (representation: Representation): string => {
       return `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
     case 'Union':
       return `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
-    case 'NominalUnion':
-      return `nominal-union ${representation.union.module}.${representation.union.name} tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
+    case 'NominalUnion': {
+      const cleanupHook =
+        representation.cleanupHook === undefined
+          ? 'none'
+          : `${representation.cleanupHook.hook.module}.${representation.cleanupHook.hook.name}<${representation.cleanupHook.typeArguments.map(Type.encodeGenericArgument).join(',')}>`
+      return `nominal-union ${representation.union.module}.${representation.union.name} tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding} cleanup-hook=${cleanupHook}`
+    }
     case 'Aggregate': {
       const cleanupHook =
         representation.cleanupHook === undefined

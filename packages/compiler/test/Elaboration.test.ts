@@ -400,6 +400,32 @@ effect fn risky(error: OwnedError) -> i32 ! OwnedError {
   )
 })
 
+it('checks lexical borrows through nominal union failure payloads', () => {
+  const dynamic = analyzeText(
+    'effect://borrowed-union-failure',
+    `union BorrowedError { Value { message: string } }
+effect fn risky(message: string) -> never ! BorrowedError {
+  fail BorrowedError.Value { message: message }
+}`,
+  )
+  assert.include(
+    dynamic.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0073',
+  )
+
+  const staticText = analyzeText(
+    'effect://static-union-failure',
+    `union BorrowedError { Value { message: string } }
+effect fn risky() -> never ! BorrowedError {
+  fail BorrowedError.Value { message: "program lifetime" }
+}`,
+  )
+  assert.notInclude(
+    staticText.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0073',
+  )
+})
+
 it('subtracts a provided capability role from an Effect contract', () => {
   const result = analyzeText(
     'effect://provide-role',
