@@ -832,7 +832,9 @@ const layoutOf = (
     else if (description._tag === 'NamedStructure') body = description.body
     if (body !== undefined) {
       let offset = 0n
-      let maximumAlignment = 1n
+      let maximumAlignment = body.packed
+        ? 1n
+        : (state.layout.aggregate.abiAlignment.byteUnits ?? 1n)
       for (const field of body.fields) {
         const fieldLayout = layoutOf(field, state, visiting)
         const fieldAlignment = body.packed ? 1n : (fieldLayout.alignment.byteUnits ?? 1n)

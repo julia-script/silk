@@ -2,7 +2,7 @@ import * as Effect from 'effect/Effect'
 import * as AddrSpace from './AddrSpace.js'
 import * as Alignment from './Alignment.js'
 import * as ByteString from './ByteString.js'
-import { type LlvmError, wrappedFailure } from './LlvmError.js'
+import { invalidInput, type LlvmError, wrappedFailure } from './LlvmError.js'
 
 /**
  * Alignment rules for one integer, floating-point, or vector bit width.
@@ -12,6 +12,24 @@ import { type LlvmError, wrappedFailure } from './LlvmError.js'
  */
 export interface PrimitiveSpec {
   readonly bitWidth: number
+  readonly abiAlignment: Alignment.Alignment
+  readonly preferredAlignment: Alignment.Alignment
+}
+
+/**
+ * The effective ABI and preferred alignments for LLVM aggregate types.
+ *
+ * **Details**
+ *
+ * LLVM spells a one-byte aggregate ABI alignment as zero bits. Parsed values expose that spelling
+ * as an explicit one-byte alignment. When no rule is present, the effective default is `a:0:64`;
+ * when preferred alignment is omitted, it inherits the ABI alignment. If rules repeat, the final
+ * rule is authoritative.
+ *
+ * @category data layouts
+ * @since 0.0.0
+ */
+export interface AggregateSpec {
   readonly abiAlignment: Alignment.Alignment
   readonly preferredAlignment: Alignment.Alignment
 }
@@ -44,6 +62,7 @@ export interface DataLayout {
   readonly floats: ReadonlyArray<PrimitiveSpec>
   readonly vectors: ReadonlyArray<PrimitiveSpec>
   readonly pointers: ReadonlyArray<PointerSpec>
+  readonly aggregate: AggregateSpec
   readonly nativeIntegerWidths: ReadonlyArray<number>
   readonly stackAlignment: Alignment.Alignment
   readonly nonIntegralAddressSpaces: ReadonlyArray<AddrSpace.AddrSpace>
@@ -52,6 +71,33 @@ export interface DataLayout {
   readonly globalAddressSpace: AddrSpace.AddrSpace
   readonly allocaAddressSpace: AddrSpace.AddrSpace
   readonly functionPointerAlignment: string | undefined
+}
+
+/** @internal */
+const oneByteAlignment: Alignment.Alignment = Object.freeze({
+  _tag: 'Alignment',
+  byteUnits: 1n,
+})
+
+/** @internal */
+const defaultAggregateSpec: AggregateSpec = Object.freeze({
+  abiAlignment: oneByteAlignment,
+  preferredAlignment: Object.freeze({ _tag: 'Alignment', byteUnits: 8n }),
+})
+
+/** @internal */
+class DataLayoutParseFailure extends Error {
+  readonly input: unknown
+
+  constructor(message: string, input: unknown) {
+    super(message)
+    this.input = input
+  }
+}
+
+/** @internal */
+const reject = (message: string, input: unknown): never => {
+  throw new DataLayoutParseFailure(message, input)
 }
 
 /**
@@ -68,6 +114,7 @@ export const empty: DataLayout = Object.freeze({
   floats: Object.freeze([]),
   vectors: Object.freeze([]),
   pointers: Object.freeze([]),
+  aggregate: defaultAggregateSpec,
   nativeIntegerWidths: Object.freeze([]),
   stackAlignment: Alignment.defaultAlignment,
   nonIntegralAddressSpaces: Object.freeze([]),
@@ -82,7 +129,7 @@ export const empty: DataLayout = Object.freeze({
 const ascii = (value: ByteString.ByteString): string => {
   let output = ''
   for (const byte of value.bytes) {
-    if (byte > 0x7f) throw new Error('data layouts must contain ASCII bytes')
+    if (byte > 0x7f) reject('data layouts must contain ASCII bytes', value)
     output += String.fromCharCode(byte)
   }
   return output
@@ -90,33 +137,49 @@ const ascii = (value: ByteString.ByteString): string => {
 
 /** @internal */
 const natural = (value: string, component: string): number => {
-  if (!/^\d+$/.test(value)) throw new Error(`invalid number in data-layout component ${component}`)
+  if (!/^\d+$/.test(value))
+    reject(`invalid number in data-layout component ${component}`, component)
   const parsed = Number(value)
-  if (!Number.isSafeInteger(parsed)) throw new Error(`number is too large in ${component}`)
+  if (!Number.isSafeInteger(parsed)) reject(`number is too large in ${component}`, component)
   return parsed
 }
 
 /** @internal */
 const addressSpace = (value: string, component: string): AddrSpace.AddrSpace => {
   const parsed = natural(value, component)
-  if (parsed > 0xff_ffff) throw new Error(`address space is too large in ${component}`)
+  if (parsed > 0xff_ffff) reject(`address space is too large in ${component}`, component)
   return Object.freeze({ _tag: 'AddrSpace', value: parsed })
 }
 
 /** @internal */
-const bitAlignment = (value: string, component: string): Alignment.Alignment => {
-  const bits = natural(value, component)
-  if (bits < 8 || bits % 8 !== 0) throw new Error(`invalid bit alignment in ${component}`)
+const alignmentFromBits = (bits: number, component: string): Alignment.Alignment => {
+  if (bits < 8 || bits % 8 !== 0) reject(`invalid bit alignment in ${component}`, component)
   const bytes = BigInt(bits / 8)
   if ((bytes & (bytes - 1n)) !== 0n)
-    throw new Error(`alignment is not a power of two in ${component}`)
+    reject(`alignment is not a power of two in ${component}`, component)
   return Object.freeze({ _tag: 'Alignment', byteUnits: bytes })
+}
+
+/** @internal */
+const bitAlignment = (value: string, component: string): Alignment.Alignment =>
+  alignmentFromBits(natural(value, component), component)
+
+/** @internal */
+const aggregateBitAlignment = (
+  value: string,
+  component: string,
+  field: 'ABI' | 'preferred',
+): Alignment.Alignment => {
+  const bits = natural(value, component)
+  if (bits > 0xffff)
+    reject(`${field} alignment must be a 16-bit integer in ${component}`, component)
+  return field === 'ABI' && bits === 0 ? oneByteAlignment : alignmentFromBits(bits, component)
 }
 
 /** @internal */
 const primitive = (component: string): PrimitiveSpec => {
   const values = component.slice(1).split(':')
-  if (values.length < 2 || values.length > 3) throw new Error(`malformed ${component}`)
+  if (values.length < 2 || values.length > 3) reject(`malformed ${component}`, component)
   const bitWidth = natural(values[0] ?? '', component)
   const abiAlignment = bitAlignment(values[1] ?? '', component)
   const preferredAlignment = bitAlignment(values[2] ?? values[1] ?? '', component)
@@ -124,9 +187,24 @@ const primitive = (component: string): PrimitiveSpec => {
 }
 
 /** @internal */
+const aggregate = (component: string): AggregateSpec => {
+  const values = component.slice(2).split(':')
+  if (values.length < 1 || values.length > 2) reject(`malformed ${component}`, component)
+  const abiAlignment = aggregateBitAlignment(values[0] ?? '', component, 'ABI')
+  const preferredAlignment =
+    values[1] === undefined
+      ? abiAlignment
+      : aggregateBitAlignment(values[1], component, 'preferred')
+  if (Alignment.compare(preferredAlignment, abiAlignment) < 0) {
+    reject(`preferred alignment is below ABI alignment in ${component}`, component)
+  }
+  return Object.freeze({ abiAlignment, preferredAlignment })
+}
+
+/** @internal */
 const pointer = (component: string): PointerSpec => {
   const values = component.slice(1).split(':')
-  if (values.length < 3 || values.length > 5) throw new Error(`malformed ${component}`)
+  if (values.length < 3 || values.length > 5) reject(`malformed ${component}`, component)
   const address =
     values[0] === '' ? AddrSpace.defaultAddrSpace : addressSpace(values[0] ?? '', component)
   const bitWidth = natural(values[1] ?? '', component)
@@ -156,6 +234,7 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
   let globalAddressSpace = AddrSpace.defaultAddrSpace
   let allocaAddressSpace = AddrSpace.defaultAddrSpace
   let functionPointerAlignment: string | undefined
+  let aggregateSpec = empty.aggregate
   const integers: Array<PrimitiveSpec> = []
   const floats: Array<PrimitiveSpec> = []
   const vectors: Array<PrimitiveSpec> = []
@@ -201,10 +280,9 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
     } else if (/^F[ni]\d+$/.test(component)) {
       functionPointerAlignment = component
     } else if (/^a:\d+(?::\d+)?$/.test(component)) {
-      // Aggregate alignment affects layout queries only when no field-specific rule applies.
-      primitive(`a${component.slice(1)}`)
+      aggregateSpec = aggregate(component)
     } else {
-      throw new Error(`unsupported data-layout component ${component}`)
+      reject(`unsupported data-layout component ${component}`, component)
     }
   }
 
@@ -216,6 +294,7 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
     floats: sorted(floats, (value) => value.bitWidth),
     vectors: sorted(vectors, (value) => value.bitWidth),
     pointers: sorted(pointers, (value) => value.addressSpace.value),
+    aggregate: aggregateSpec,
     nativeIntegerWidths: Object.freeze(
       [...nativeIntegerWidths].sort((left, right) => left - right),
     ),
@@ -235,7 +314,8 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
  * **Details**
  *
  * Entries are sorted for deterministic lookup. Input may be byte-exact ASCII or a JavaScript
- * string convenience value.
+ * string convenience value. Aggregate rules default to `a:0:64`, omitted preferred alignment
+ * inherits the ABI alignment, and the final aggregate rule wins when rules repeat.
  *
  * **Gotchas**
  *
@@ -267,11 +347,17 @@ export const parse = Effect.fn('DataLayout.parse')(function* (
   return yield* Effect.try({
     try: () => parseUnsafe(original),
     catch: (cause) =>
-      wrappedFailure({
-        operation: 'DataLayout.parse',
-        message: cause instanceof Error ? cause.message : 'Invalid LLVM data layout',
-        cause: cause,
-      }),
+      cause instanceof DataLayoutParseFailure
+        ? invalidInput({
+            operation: 'DataLayout.parse',
+            message: cause.message,
+            input: cause.input,
+          })
+        : wrappedFailure({
+            operation: 'DataLayout.parse',
+            message: 'LLVM data-layout parsing failed unexpectedly',
+            cause,
+          }),
   })
 })
 

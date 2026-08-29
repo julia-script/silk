@@ -55,6 +55,48 @@ it.effect('computes fixed aggregate layout and rejects cross-owner handles', () 
   }),
 )
 
+it.effect('matches pinned LLVM aggregate alignment for structures and arrays', () =>
+  Effect.gen(function* () {
+    const absentBuilder = yield* Builder.make({ dataLayout: 'e-p:64:64-i8:8' })
+    const absentI8 = yield* Type.integer(absentBuilder, 8)
+    const absent = yield* Type.structure(absentBuilder, [absentI8])
+
+    const zeroBuilder = yield* Builder.make({ dataLayout: 'e-a:0:64-p:64:64-i8:8' })
+    const zeroI8 = yield* Type.integer(zeroBuilder, 8)
+    const zero = yield* Type.structure(zeroBuilder, [zeroI8])
+
+    const builder = yield* Builder.make({
+      dataLayout: 'e-a:64:64-p:64:64-i8:8-i128:128',
+    })
+    const i8 = yield* Type.integer(builder, 8)
+    const i128 = yield* Type.integer(builder, 128)
+    const anonymous = yield* Type.structure(builder, [i8])
+    const empty = yield* Type.structure(builder, [])
+    const packed = yield* Type.structure(builder, [i8], { packed: true })
+    const named = yield* Type.namedStructure(builder, 'AggregateAligned')
+    yield* Type.setNamedBody(builder, named, [i8])
+    const strongerField = yield* Type.structure(builder, [i128])
+    const array = yield* Type.array(builder, i8, 3)
+
+    assert.strictEqual(yield* Type.sizeOf(absentBuilder, absent), 1n)
+    assert.strictEqual((yield* Type.alignmentOf(absentBuilder, absent)).byteUnits, 1n)
+    assert.strictEqual(yield* Type.sizeOf(zeroBuilder, zero), 1n)
+    assert.strictEqual((yield* Type.alignmentOf(zeroBuilder, zero)).byteUnits, 1n)
+    assert.strictEqual(yield* Type.sizeOf(builder, anonymous), 8n)
+    assert.strictEqual((yield* Type.alignmentOf(builder, anonymous)).byteUnits, 8n)
+    assert.strictEqual(yield* Type.sizeOf(builder, empty), 0n)
+    assert.strictEqual((yield* Type.alignmentOf(builder, empty)).byteUnits, 8n)
+    assert.strictEqual(yield* Type.sizeOf(builder, packed), 1n)
+    assert.strictEqual((yield* Type.alignmentOf(builder, packed)).byteUnits, 1n)
+    assert.strictEqual(yield* Type.sizeOf(builder, named), 8n)
+    assert.strictEqual((yield* Type.alignmentOf(builder, named)).byteUnits, 8n)
+    assert.strictEqual(yield* Type.sizeOf(builder, strongerField), 16n)
+    assert.strictEqual((yield* Type.alignmentOf(builder, strongerField)).byteUnits, 16n)
+    assert.strictEqual(yield* Type.sizeOf(builder, array), 3n)
+    assert.strictEqual((yield* Type.alignmentOf(builder, array)).byteUnits, 1n)
+  }),
+)
+
 it.effect('accepts boundary widths and rejects invalid widths before mutation', () =>
   Effect.gen(function* () {
     const builder = yield* Builder.make()
