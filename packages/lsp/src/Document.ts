@@ -358,7 +358,7 @@ export const parseAutoImportData = (value: unknown): AutoImportData | undefined 
     typeof candidate.module !== 'string' ||
     typeof candidate.spelling !== 'string' ||
     typeof candidate.ordinal !== 'number' ||
-    !['Function', 'Constant', 'Struct', 'Service', 'Interface'].includes(
+    !['Function', 'Constant', 'Struct', 'Union', 'Service', 'Interface'].includes(
       typeof candidate.declarationKind === 'string' ? candidate.declarationKind : '',
     )
   )
@@ -1482,6 +1482,8 @@ export const completion = (
         return CompletionItemKind.Constant
       case 'Struct':
         return CompletionItemKind.Struct
+      case 'Union':
+        return CompletionItemKind.Enum
       case 'Service':
       case 'Interface':
         return CompletionItemKind.Interface

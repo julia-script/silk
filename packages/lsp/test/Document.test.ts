@@ -1600,7 +1600,7 @@ it.effect('completes catalog declarations with explicit collision-aware imports'
     const { document, snapshot } = yield* open(source)
     const inventory = inventoryOf([
       { module: 'main', text: source },
-      { module: 'silk/logger', text: 'pub service Logger {}' },
+      { module: 'silk/logger', text: 'pub union Logger { Empty }' },
     ])
     const completion = Document.completion(
       document,
@@ -1611,6 +1611,7 @@ it.effect('completes catalog declarations with explicit collision-aware imports'
     const imported = completion.items.find(
       (item) => item.label === 'Logger' && item.detail === 'Import from silk/logger',
     )
+    assert.strictEqual(imported?.kind, CompletionItemKind.Enum)
     assert.deepEqual(imported?.textEdit, {
       range: {
         start: positionAt(source, source.indexOf('Logg')),
