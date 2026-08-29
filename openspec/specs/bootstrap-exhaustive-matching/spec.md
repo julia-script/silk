@@ -54,12 +54,16 @@ arm-local, non-shadowing declarations with precise narrowed types and exact sour
 
 ### Requirement: Coverage uses canonical union subtraction
 
-Match arms SHALL be considered in source order over the canonical member set of the scrutinee. An
-unguarded nominal arm SHALL remove its member from the remaining set. A guarded arm SHALL NOT remove
-its member. `_` SHALL cover every remaining member and MUST make every following arm unreachable. A
-match SHALL be exhaustive only when no members remain or an explicit universal arm covers them.
-Duplicate, unreachable, guard-after-exhaustive-member, and incomplete matches SHALL be rejected with
-the exact relevant members and arm spans.
+Match arms SHALL be considered in source order over canonical selection paths rooted in the
+scrutinee's normalized member set. An ordinary member contributes one root path. A nominal-union
+member contributes one root-parent-variant leaf for every canonical variant, including variants with
+uninhabited specialized payloads. An unguarded whole-member arm SHALL remove its root and every
+remaining descendant; an unguarded qualified variant arm SHALL remove exactly its leaf. A guarded
+arm SHALL NOT remove any path. `_` SHALL cover every remaining path and MUST make every following arm
+unreachable. A match SHALL be exhaustive only when no paths remain or an explicit universal arm
+covers them. Duplicate, unreachable, guard-after-exhaustive-path, and incomplete matches SHALL be
+rejected with fully qualified remaining paths and exact arm spans. Variant leaves SHALL never become
+members of the structural-union type.
 
 #### Scenario: Exhaust a two-member union
 
@@ -75,6 +79,31 @@ the exact relevant members and arm spans.
 
 - **WHEN** `_` is followed by another arm
 - **THEN** the following arm is diagnosed as unreachable and contributes no binding or result fact
+
+#### Scenario: Match variants directly through a structural union
+
+- **WHEN** a match over `HttpError | OutOfMemoryError` has unguarded arms for every `HttpError` variant and `OutOfMemoryError {}`
+- **THEN** coverage is exhaustive without requiring an intermediate whole-`HttpError` arm or nested match
+
+#### Scenario: Cover the remaining nominal subtree
+
+- **WHEN** one direct `HttpError.Timeout` arm is followed by `HttpError remaining`
+- **THEN** the whole-parent arm binds `remaining` as `HttpError` and covers every other `HttpError` variant
+
+#### Scenario: Reject a leaf after whole-parent coverage
+
+- **WHEN** `HttpError remaining` is followed by `HttpError.Dns { ... }`
+- **THEN** the later variant arm is unreachable because its parent subtree was already removed
+
+#### Scenario: Keep a guarded affine variant available
+
+- **WHEN** a guarded direct variant arm inspects an affine payload and its guard is false before a later arm can select the same path
+- **THEN** coverage retains the complete path and ownership retains the tags and payload for the later arm without early movement or cleanup
+
+#### Scenario: Diagnose a missing generic variant path
+
+- **WHEN** a match over `Option<i32> | Option<bool>` omits only `Option<bool>.Some`
+- **THEN** the incomplete-match diagnostic names that fully applied root-parent-variant path without collapsing either Option application
 
 ### Requirement: Matching narrows without changing the source type
 
@@ -201,3 +230,20 @@ foreign-enum, and integer enum patterns SHALL receive deterministic enum-specifi
 
 - **WHEN** an enum member appears only in a guarded arm and no wildcard follows
 - **THEN** that member remains in the final uncovered-member diagnostic
+
+### Requirement: Variant patterns bind struct-like fields
+
+A named-field variant pattern SHALL bind, rename, nest, borrow, move, omit with `..`, and validate
+fields under the same rules as a nominal struct pattern. A unit variant SHALL bind no fields. Pattern
+selection SHALL retain the applied parent type and canonical variant identity without introducing a
+variant subtype.
+
+#### Scenario: Move fields from one selected variant
+
+- **WHEN** `Result<A, E>.Success { value }` matches a moved `Result<A, E>`
+- **THEN** `value` receives the specialized `A` payload and cleanup remains restricted to that selected variant
+
+#### Scenario: Reject an incomplete field pattern
+
+- **WHEN** a variant pattern omits a declared field without `..`
+- **THEN** analysis reports the same missing-field condition as struct destructuring and creates no executable arm
