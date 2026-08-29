@@ -82,15 +82,11 @@ const nominalUnionScratchRequirements = (
       case 'NominalUnionCleanup': {
         const entry = LayoutPlan.entry(plan, cleanup.type)
         if (entry?.representation._tag !== 'NominalUnion') return
-        const payloadSize = entry.representation.variants.reduce(
-          (maximum, variant) => Math.max(maximum, variant.size),
-          0,
-        )
-        const size = alignUp(entry.representation.payloadOffset + payloadSize, entry.alignment)
+        const materialization = LayoutPlan.nominalUnionMaterialization(entry.representation)
         const current = requirements.at(depth)
         requirements[depth] = {
-          size: Math.max(current?.size ?? 0, size),
-          alignment: Math.max(current?.alignment ?? 1, entry.alignment),
+          size: Math.max(current?.size ?? 0, materialization.size),
+          alignment: Math.max(current?.alignment ?? 1, materialization.alignment),
         }
         for (const variant of cleanup.variants)
           for (const field of variant.fields) visit(field.cleanup, depth + 1)

@@ -222,7 +222,8 @@ algorithm, including concrete callable and Effect realizations. The enclosing pa
 deterministic fixed carrier slots obtained by unifying every variant's logical calling lanes. Its
 size and alignment cover those slots, but its offsets are compiler-owned and need not equal a
 particular variant's struct-like offsets. The plan separately retains the maximum canonical payload
-size and alignment needed for materialization. When a Drop hook or
+size and alignment needed for materialization as deterministic derivations of the complete variant
+layouts. When a Drop hook or
 other address-based operation needs the selected variant's fields, the backend materializes the
 active carrier into canonical aggregate storage, performs the operation there, and writes any hook
 mutation back through the same field-to-slot mapping before structural reclamation. The private tag

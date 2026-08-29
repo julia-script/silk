@@ -171,6 +171,37 @@ export type Representation =
       readonly cleanupHook?: CleanupHook
     }
 
+/** Canonical struct-like storage used transiently for one selected nominal-union variant. */
+export interface NominalUnionMaterialization {
+  readonly payloadOffset: number
+  readonly payloadSize: number
+  readonly payloadAlignment: number
+  readonly size: number
+  readonly alignment: number
+}
+
+export const nominalUnionMaterialization = (
+  representation: Extract<Representation, { readonly _tag: 'NominalUnion' }>,
+): NominalUnionMaterialization => {
+  const payloadSize = representation.variants.reduce(
+    (maximum, variant) => Math.max(maximum, variant.size),
+    0,
+  )
+  const payloadAlignment = representation.variants.reduce(
+    (maximum, variant) => Math.max(maximum, variant.alignment),
+    1,
+  )
+  const payloadOffset = alignUp(4, payloadAlignment)
+  const alignment = Math.max(4, payloadAlignment)
+  return Object.freeze({
+    payloadOffset,
+    payloadSize,
+    payloadAlignment,
+    size: alignUp(payloadOffset + payloadSize, alignment),
+    alignment,
+  })
+}
+
 /** One compiler-owned concrete layout entry. */
 export interface Entry {
   readonly _tag: 'LayoutEntry'

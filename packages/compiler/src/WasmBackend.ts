@@ -1746,6 +1746,7 @@ const makeOperationContext = (
     if (representation?._tag !== 'NominalUnion' || shape?.tree._tag !== 'NominalUnionShape') {
       throw new RangeError('Wasm nominal union transfer lost its layout')
     }
+    const materialization = LayoutPlan.nominalUnionMaterialization(representation)
     const sourceAddressAt = direction === 'CarrierToRaw' ? carrierAddressAt : rawAddressAt
     const targetAddressAt = direction === 'CarrierToRaw' ? rawAddressAt : carrierAddressAt
     const variants = cleanup.variants.flatMap((variant) => {
@@ -1786,7 +1787,7 @@ const makeOperationContext = (
           ) {
             throw new RangeError('Wasm nominal union transfer lost a field lane')
           }
-          const rawOffset = representation.payloadOffset + layoutField.offset + nestedOffset
+          const rawOffset = materialization.payloadOffset + layoutField.offset + nestedOffset
           const sourceLane = direction === 'CarrierToRaw' ? carrierLane : fieldLane
           const targetLane = direction === 'CarrierToRaw' ? fieldLane : carrierLane
           const sourceOffset = direction === 'CarrierToRaw' ? carrierOffset : rawOffset
@@ -1894,6 +1895,7 @@ const makeOperationContext = (
           case 'NominalUnionCleanup': {
             const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
             if (representation?._tag !== 'NominalUnion') return Object.freeze({})
+            const materialization = LayoutPlan.nominalUnionMaterialization(representation)
             const scratch = memory.frame.nominalUnionCleanupScratch.at(state.nominalDepth)
             if (scratch === undefined) {
               throw new RangeError('Wasm nominal union hook cleanup lost its canonical scratch')
@@ -1924,7 +1926,7 @@ const makeOperationContext = (
                             cleanup: field.cleanup,
                             state: Object.freeze({
                               addressAt: rawAddressAt,
-                              byteOffset: representation.payloadOffset + layoutField.offset,
+                              byteOffset: materialization.payloadOffset + layoutField.offset,
                               nominalDepth: state.nominalDepth + 1,
                             }),
                             wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
@@ -2638,6 +2640,7 @@ const makeOperationContext = (
           case 'NominalUnionCleanup': {
             const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
             if (representation?._tag !== 'NominalUnion') return Object.freeze({})
+            const materialization = LayoutPlan.nominalUnionMaterialization(representation)
             const scratch = memory.frame.nominalUnionCleanupScratch.at(state.nominalDepth)
             if (scratch === undefined) {
               throw new RangeError('Wasm nominal union reclaim lost its canonical scratch')
@@ -2667,7 +2670,7 @@ const makeOperationContext = (
                             cleanup: field.cleanup,
                             state: Object.freeze({
                               addressAt: rawAddressAt,
-                              byteOffset: representation.payloadOffset + layoutField.offset,
+                              byteOffset: materialization.payloadOffset + layoutField.offset,
                               nominalDepth: state.nominalDepth + 1,
                             }),
                             wrap: (instructions: ReadonlyArray<Instr.Instr>) =>

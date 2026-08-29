@@ -9,7 +9,8 @@ physical layout. Each available entry SHALL contain an inaccessible variant tag,
 and a deterministic fixed carrier payload whose slots unify every variant's logical calling lanes.
 The carrier SHALL be aligned and sized for all mapped lanes. Unit variants SHALL add no logical
 payload lanes. The plan SHALL separately retain every concrete canonical variant payload layout and
-the maximum materialization size and alignment. The plan SHALL retain canonical parent,
+SHALL deterministically derive the maximum materialization size and alignment from those layouts.
+The plan SHALL retain canonical parent,
 variant, field, ordinal, availability, size, alignment, and padding metadata; source semantics SHALL
 expose no numeric tag, stable external ABI, or serialization representation.
 
@@ -37,7 +38,7 @@ expose no numeric tag, stable external ABI, or serialization representation.
 
 Each named-field variant SHALL lay out its specialized fields in declaration order under the same
 target-aware offset, alignment, padding, represented-callable, represented-Effect, and unavailable-
-dependency rules as a nominal struct. The representation plan SHALL retain the maximum size and
+dependency rules as a nominal struct. The representation plan SHALL derive the maximum size and
 alignment of those complete variant payload layouts for materialization while stored values use the
 compiler-owned fixed carrier mapping rather than one variant's raw field offsets. An address-based
 operation on the active payload SHALL materialize its fields at the canonical aggregate offsets; a
