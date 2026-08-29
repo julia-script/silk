@@ -221,7 +221,7 @@ const pointer = (component: string): PointerSpec => {
 }
 
 /** @internal */
-const sorted = <A>(values: ReadonlyArray<A>, key: (value: A) => number): ReadonlyArray<A> =>
+const sorted = <A>(values: Iterable<A>, key: (value: A) => number): ReadonlyArray<A> =>
   Object.freeze([...values].sort((left, right) => key(left) - key(right)))
 
 /** @internal */
@@ -235,10 +235,10 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
   let allocaAddressSpace = AddrSpace.defaultAddrSpace
   let functionPointerAlignment: string | undefined
   let aggregateSpec = empty.aggregate
-  const integers: Array<PrimitiveSpec> = []
-  const floats: Array<PrimitiveSpec> = []
-  const vectors: Array<PrimitiveSpec> = []
-  const pointers: Array<PointerSpec> = []
+  const integers = new Map<number, PrimitiveSpec>()
+  const floats = new Map<number, PrimitiveSpec>()
+  const vectors = new Map<number, PrimitiveSpec>()
+  const pointers = new Map<number, PointerSpec>()
   const nativeIntegerWidths: Array<number> = []
   const nonIntegralAddressSpaces: Array<AddrSpace.AddrSpace> = []
 
@@ -246,13 +246,17 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
     if (component === 'e' || component === 'E') {
       endian = component === 'e' ? 'little' : 'big'
     } else if (/^i\d+:/.test(component)) {
-      integers.push(primitive(component))
+      const spec = primitive(component)
+      integers.set(spec.bitWidth, spec)
     } else if (/^f\d+:/.test(component)) {
-      floats.push(primitive(component))
+      const spec = primitive(component)
+      floats.set(spec.bitWidth, spec)
     } else if (/^v\d+:/.test(component)) {
-      vectors.push(primitive(component))
+      const spec = primitive(component)
+      vectors.set(spec.bitWidth, spec)
     } else if (/^p\d*:/.test(component)) {
-      pointers.push(pointer(component))
+      const spec = pointer(component)
+      pointers.set(spec.addressSpace.value, spec)
     } else if (/^n\d+(?::\d+)*$/.test(component)) {
       nativeIntegerWidths.push(
         ...component
@@ -290,10 +294,10 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
     _tag: 'DataLayout',
     original,
     endian,
-    integers: sorted(integers, (value) => value.bitWidth),
-    floats: sorted(floats, (value) => value.bitWidth),
-    vectors: sorted(vectors, (value) => value.bitWidth),
-    pointers: sorted(pointers, (value) => value.addressSpace.value),
+    integers: sorted(integers.values(), (value) => value.bitWidth),
+    floats: sorted(floats.values(), (value) => value.bitWidth),
+    vectors: sorted(vectors.values(), (value) => value.bitWidth),
+    pointers: sorted(pointers.values(), (value) => value.addressSpace.value),
     aggregate: aggregateSpec,
     nativeIntegerWidths: Object.freeze(
       [...nativeIntegerWidths].sort((left, right) => left - right),
