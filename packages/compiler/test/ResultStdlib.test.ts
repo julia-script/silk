@@ -150,13 +150,14 @@ effect fn outcome<A, E, ?R>(
   )
 }
 
-effect fn choose(first: bool) -> i32 ! First | Second {
-  if first { fail First { code: 20 } }
+effect fn choose(kind: i32) -> i32 ! First | Second {
+  if kind == 0 { return 5 }
+  if kind == 1 { fail First { code: 20 } }
   fail Second { code: 22 }
 }
 
-effect fn inspect(first: bool) -> i32 {
-  let completed = run outcome(choose(first))
+effect fn inspect(kind: i32) -> i32 {
+  let completed = run outcome(choose(kind))
   return match move completed {
     Outcome<i32, First | Second>.Good { value } => value
     Outcome<i32, First | Second>.Bad { error } => match move error {
@@ -167,9 +168,10 @@ effect fn inspect(first: bool) -> i32 {
 }
 
 pub fn main() -> i32 {
-  let first = run inspect(true)
-  let second = run inspect(false)
-  return first + second
+  let success = run inspect(0)
+  let first = run inspect(1)
+  let second = run inspect(2)
+  return success + first + second - 5
 }`
 
 const reifiedTrap = `import silk.effect as Effect
