@@ -375,7 +375,11 @@ fn consume(state: State) -> i32 {
     State.Ready { value, .. } => value
   }
 }
+fn ignore(state: State) -> i32 {
+  return match move state { _ => 42 }
+}
 pub fn main() -> i32 {
+  if ignore(State.Empty) != 42 { return 0 }
   return consume(State.Ready { value: 42, bomb: Bomb {} })
 }`),
       'wasm32-unknown-unknown',
@@ -383,11 +387,21 @@ pub fn main() -> i32 {
 
     assert.deepEqual(Analysis.diagnostics(self), [])
     const consume = Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'consume')
+    const ignore = Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'ignore')
     assert.isTrue(
       consume !== undefined &&
         MirLinearization.linearize(consume).some((block) =>
           block.operations.some(
             (operation) => operation._tag === 'Drop' && operation.cleanup._tag === 'HookCleanup',
+          ),
+        ),
+    )
+    assert.isTrue(
+      ignore !== undefined &&
+        MirLinearization.linearize(ignore).some((block) =>
+          block.operations.some(
+            (operation) =>
+              operation._tag === 'Drop' && operation.cleanup._tag === 'NominalUnionCleanup',
           ),
         ),
     )

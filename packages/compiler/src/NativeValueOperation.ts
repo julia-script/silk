@@ -74,7 +74,9 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         )
       }
       if (selected.length !== targetLanes.length) {
-        throw new RangeError('LLVM match binding disagrees with its payload lanes')
+        throw new RangeError(
+          `LLVM match binding %${operation.destination.ordinal} disagrees with its payload lanes (${physical.length} selected, ${targetLanes.length} required)`,
+        )
       }
       nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(selected))
       break

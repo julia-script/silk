@@ -131,10 +131,22 @@ export const lowerPatternSelection = (
   const ownedArm = ownership?.arms.find(
     (candidate) => candidate.id.ordinal === selection.arm.ordinal,
   )
+  const finalizedSelectedOperations = [...selectedOperations]
   const cleanup: Array<Mir.MatchArm['selected']['cleanup'][number]> = []
   for (const release of ownedArm?.cleanup ?? []) {
     const plan = specializedCleanup(fn, release.cleanup)
     if (plan._tag === 'NoCleanup') continue
+    if (release.path.length === 0 && Type.equals(plan.type, semanticSubject)) {
+      finalizedSelectedOperations.push(
+        Object.freeze({
+          _tag: 'Drop',
+          local: subject.result,
+          cleanup: plan,
+          provenance: authored(selection.span),
+        }),
+      )
+      continue
+    }
     const type = fn.type(plan.type)
     if (type === undefined) return undefined
     cleanup.push(
@@ -154,7 +166,7 @@ export const lowerPatternSelection = (
     bindings: Object.freeze(selectedBindings),
     selected: Object.freeze({
       access: selection.access,
-      operations: selectedOperations,
+      operations: Object.freeze(finalizedSelectedOperations),
       result: selectedResult.result,
       cleanup: Object.freeze(cleanup),
       endBorrow: false,

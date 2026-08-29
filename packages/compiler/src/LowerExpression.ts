@@ -1525,10 +1525,25 @@ export function lowerExpressionInner(
         const ownedArm = ownership?.arms.find(
           (candidate) => candidate.id.ordinal === arm.id.ordinal,
         )
+        const finalizedSelectedOperations = [...selectedOperations]
         const cleanup: Array<Mir.MatchArm['selected']['cleanup'][number]> = []
         for (const release of ownedArm?.cleanup ?? []) {
           const plan = specializedCleanup(fn, release.cleanup)
           if (plan._tag === 'NoCleanup') continue
+          if (
+            release.path.length === 0 &&
+            Type.equals(plan.type, fn.semantic(expression.scrutinee.type))
+          ) {
+            finalizedSelectedOperations.push(
+              Object.freeze({
+                _tag: 'Drop',
+                local: scrutinee.result,
+                cleanup: plan,
+                provenance: authored(arm.span),
+              }),
+            )
+            continue
+          }
           const type = fn.type(plan.type)
           if (type === undefined) return undefined
           cleanup.push(
@@ -1550,7 +1565,7 @@ export function lowerExpressionInner(
             ...(guard === undefined ? {} : { guard }),
             selected: Object.freeze({
               access: expression.access,
-              operations: selectedOperations,
+              operations: Object.freeze(finalizedSelectedOperations),
               result: selectedResult.result,
               cleanup: Object.freeze(cleanup),
               endBorrow: expression.access === 'Shared' || expression.access === 'Exclusive',
