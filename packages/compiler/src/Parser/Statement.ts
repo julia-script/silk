@@ -19,6 +19,7 @@ import {
   parsePattern,
   parseProjectionChain,
 } from './Expression.js'
+import * as ExpressionNesting from './ExpressionNesting.js'
 import { expressionFollowing, expressionStarts } from './Grammar.js'
 
 export const parseReturnStatement = (initial: State): NodeResult => {
@@ -30,7 +31,7 @@ export const parseReturnStatement = (initial: State): NodeResult => {
       node: syntaxNode(keyword.state, 'ReturnStatement', [...keyword.elements, expression]),
     })
   }
-  const expression = parseExpression(keyword.state, 0, 'Integer')
+  const expression = parseExpression(keyword.state, 0, 'Integer', true, ExpressionNesting.root)
   return Object.freeze({
     state: expression.state,
     node: syntaxNode(expression.state, 'ReturnStatement', [...keyword.elements, expression.node]),
@@ -51,7 +52,7 @@ export const parseFailStatement = (initial: State): NodeResult => {
     nextSignificantKind(keyword.state) === 'MoveKeyword'
       ? expect(keyword.state, 'MoveKeyword', [...expressionStarts, ...expressionFollowing])
       : Object.freeze({ state: keyword.state, elements: Object.freeze([]) })
-  const expression = parseExpression(move.state, 0, 'Identifier')
+  const expression = parseExpression(move.state, 0, 'Identifier', true, ExpressionNesting.root)
   return Object.freeze({
     state: expression.state,
     node: syntaxNode(expression.state, 'FailStatement', [
@@ -64,7 +65,7 @@ export const parseFailStatement = (initial: State): NodeResult => {
 
 export const parseDropStatement = (initial: State): NodeResult => {
   const keyword = expect(initial, 'DropKeyword', expressionStarts)
-  const expression = parseExpression(keyword.state, 0, 'Identifier')
+  const expression = parseExpression(keyword.state, 0, 'Identifier', true, ExpressionNesting.root)
   return Object.freeze({
     state: expression.state,
     node: syntaxNode(expression.state, 'DropStatement', [...keyword.elements, expression.node]),
@@ -72,7 +73,7 @@ export const parseDropStatement = (initial: State): NodeResult => {
 }
 
 export const parseExpressionStatement = (initial: State): NodeResult => {
-  const expression = parseExpression(initial, 0, 'Identifier')
+  const expression = parseExpression(initial, 0, 'Identifier', true, ExpressionNesting.root)
   return Object.freeze({
     state: expression.state,
     node: syntaxNode(expression.state, 'ExpressionStatement', [expression.node]),
@@ -113,7 +114,7 @@ export const parseBindingStatement = (initial: State): NodeResult => {
     'ReturnKeyword',
     'RightBrace',
   ])
-  const expression = parseExpression(equals.state, 0, 'Integer')
+  const expression = parseExpression(equals.state, 0, 'Integer', true, ExpressionNesting.root)
   return Object.freeze({
     state: expression.state,
     node: syntaxNode(expression.state, 'BindingStatement', [
@@ -138,7 +139,7 @@ export const parsePatternBindingStatement = (initial: State): NodeResult => {
   const keyword = expect(initial, 'LetKeyword', ['Identifier', 'LeftBracket', 'Equals'])
   const pattern = parsePattern(keyword.state, ['Equals', 'RightBrace'])
   const equals = expect(pattern.state, 'Equals', [...expressionStarts, 'RightBrace'])
-  const expression = parseExpression(equals.state, 0, 'Identifier')
+  const expression = parseExpression(equals.state, 0, 'Identifier', true, ExpressionNesting.root)
   return Object.freeze({
     state: expression.state,
     node: syntaxNode(expression.state, 'PatternBindingStatement', [
@@ -151,7 +152,7 @@ export const parsePatternBindingStatement = (initial: State): NodeResult => {
 }
 
 export const parseAssignmentStatement = (initial: State): NodeResult => {
-  const place = parseProjectionChain(parseIdentifierExpression(initial))
+  const place = parseProjectionChain(parseIdentifierExpression(initial), ExpressionNesting.root)
   const equals = expect(place.state, 'Equals', [
     ...expressionStarts,
     'LetKeyword',
@@ -163,7 +164,7 @@ export const parseAssignmentStatement = (initial: State): NodeResult => {
     'FailKeyword',
     'RightBrace',
   ])
-  const expression = parseExpression(equals.state, 0, 'Identifier')
+  const expression = parseExpression(equals.state, 0, 'Identifier', true, ExpressionNesting.root)
   return Object.freeze({
     state: expression.state,
     node: syntaxNode(expression.state, 'AssignmentStatement', [
@@ -175,7 +176,7 @@ export const parseAssignmentStatement = (initial: State): NodeResult => {
 }
 
 export const startsAssignmentStatement = (state: State): boolean => {
-  const place = parseProjectionChain(parseIdentifierExpression(state))
+  const place = parseProjectionChain(parseIdentifierExpression(state), ExpressionNesting.root)
   return nextSignificantKind(place.state) === 'Equals'
 }
 
@@ -185,7 +186,7 @@ export function parseConditionalStatement(initial: State): NodeResult {
     const letKeyword = expect(keyword.state, 'LetKeyword', ['Identifier', 'LeftBracket', 'Equals'])
     const pattern = parsePattern(letKeyword.state, ['Equals', 'LeftBrace', 'RightBrace'])
     const equals = expect(pattern.state, 'Equals', [...expressionStarts, 'LeftBrace'])
-    const subject = parseExpression(equals.state, 0, 'Identifier', false)
+    const subject = parseExpression(equals.state, 0, 'Identifier', false, ExpressionNesting.root)
     const taken = parseBlock(subject.state, false)
     let state = taken.state
     let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
@@ -210,7 +211,7 @@ export function parseConditionalStatement(initial: State): NodeResult {
       node: syntaxNode(state, 'PatternConditionalStatement', children),
     })
   }
-  const condition = parseExpression(keyword.state, 0, 'Identifier', false)
+  const condition = parseExpression(keyword.state, 0, 'Identifier', false, ExpressionNesting.root)
   const taken = parseBlock(condition.state, false)
   let state = taken.state
   let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
@@ -237,7 +238,7 @@ export function parseConditionalStatement(initial: State): NodeResult {
 
 export function parseWhileStatement(initial: State): NodeResult {
   const keyword = expect(initial, 'WhileKeyword', [...expressionStarts, 'LeftBrace', 'RightBrace'])
-  const condition = parseExpression(keyword.state, 0, 'Identifier', false)
+  const condition = parseExpression(keyword.state, 0, 'Identifier', false, ExpressionNesting.root)
   const body = parseBlock(condition.state, false)
   return Object.freeze({
     state: body.state,

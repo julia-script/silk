@@ -46,6 +46,8 @@ export const reservedTemplateSyntaxCode = 'PAR0003' as const
 
 /** Stable code for an import whose reserved final path segment cannot form an implicit binding. */
 export const reservedImportBindingCode = 'PAR0004' as const
+/** Stable code for an expression child beyond the parser's supported nesting depth. */
+export const expressionNestingLimitExceededCode = 'PAR0005' as const
 
 /** Stable code for an import naming a module absent from the supplied sources. */
 export const unknownModuleCode = 'MOD0001' as const
@@ -371,6 +373,7 @@ export type Code =
   | typeof unexpectedTokensCode
   | typeof reservedTemplateSyntaxCode
   | typeof reservedImportBindingCode
+  | typeof expressionNestingLimitExceededCode
   | typeof unknownModuleCode
   | typeof selfImportCode
   | typeof reservedModuleIdentityCode
@@ -592,6 +595,11 @@ export type Reason =
     }
   | { readonly _tag: 'ReservedTemplateSyntax' }
   | { readonly _tag: 'ReservedImportBinding'; readonly spelling: string }
+  | {
+      readonly _tag: 'ExpressionNestingLimitExceeded'
+      readonly limit: number
+      readonly attemptedDepth: number
+    }
   | { readonly _tag: 'EmptyNominalUnion'; readonly union: string }
   | {
       readonly _tag: 'DuplicateUnionVariant'
@@ -1564,6 +1572,22 @@ export const reservedTemplateSyntax = (span: SourceSpan.SourceSpan): Diagnostic 
     severity: 'error',
     message: 'Template syntax is reserved but not implemented',
     reason: Object.freeze({ _tag: 'ReservedTemplateSyntax' }),
+    span,
+  })
+
+/** Creates the parser diagnostic for the first token of an over-budget child expression. */
+export const expressionNestingLimitExceeded = (
+  limit: number,
+  attemptedDepth: number,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'parser',
+    code: expressionNestingLimitExceededCode,
+    severity: 'error',
+    message: `Expression nesting exceeds the supported limit of ${limit}`,
+    reason: Object.freeze({ _tag: 'ExpressionNestingLimitExceeded', limit, attemptedDepth }),
     span,
   })
 

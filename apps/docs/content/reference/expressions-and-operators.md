@@ -280,6 +280,37 @@ the programmer to bind, return, compose, or explicitly drop it.
 **Evidence:** [STMT-001](statements-and-discarding.md#stmt-001--a-non-unit-expression-result-must-be-handled-explicitly),
 [expression statement analysis](../../../../packages/compiler/src/Elaboration.ts).
 
+### EXPR-006 — Expression nesting is limited to 256 active child edges
+
+**Status:** Confirmed
+
+The outer expression starts at depth zero. Beginning a direct child expression adds one active
+edge: grouped contents, prefix and infix operands, pipeline targets, indexes, arguments, container
+elements, aggregate initializers, and `match` children all count. Parser-layer transitions that
+still describe the same expression do not add depth. Sequential siblings derive independently
+from their common parent, so finishing one argument or element does not consume another sibling's
+budget.
+
+Depths zero through 256 are valid. An attempted child at depth 257 is rejected before recursive
+descent and reports `PAR0005` on that child's first significant token. The parser retains leading
+trivia and scans the rejected expression region without recursion into one lossless `Error` node;
+it leaves the owning comma, closing delimiter, statement boundary, or declaration boundary for the
+ordinary parser so later syntax remains independently parseable.
+
+**Boundary:** This is an expression-child limit, not a token, syntax-node, type, pattern, statement,
+or declaration nesting limit. Call-delimiter recovery bookkeeping does not change the expression
+depth. Parser implementation failures such as invalid token ordering remain defects: they are not
+caught or converted to `PAR0005`.
+
+**Diagnostics:** `PAR0005` records the fixed limit `256`, the attempted depth `257`, and the exact
+half-open span of the first significant token in the rejected child. One maximal rejected region
+produces one diagnostic; a later independent over-budget expression may produce its own.
+
+**Evidence:** [expression nesting actor](../../../../packages/compiler/src/Parser/ExpressionNesting.ts),
+[bounded expression parser](../../../../packages/compiler/src/Parser/Expression.ts),
+[diagnostic catalog](../language/diagnostics.md#parser-par),
+[bootstrap syntax specification](../../../../openspec/specs/bootstrap-syntax/spec.md).
+
 ## Operator precedence and dispatch
 
 ### OP-001 — Operator precedence and associativity are fixed

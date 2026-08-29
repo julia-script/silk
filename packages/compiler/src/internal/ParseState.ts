@@ -66,6 +66,13 @@ export const advance = (state: State): State =>
     index: state.index + 1,
   })
 
+/** Advances to a previously scanned token index with one immutable state update. */
+export const advanceTo = (state: State, index: number): State =>
+  Object.freeze({
+    ...state,
+    index,
+  })
+
 export const addDiagnostic = (state: State, diagnostic: Diagnostic.Diagnostic): State =>
   state.recovering
     ? state

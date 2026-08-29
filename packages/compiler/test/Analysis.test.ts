@@ -7,6 +7,7 @@ import * as ExecutionAffinity from '../src/ExecutionAffinity.js'
 import * as ExecutionLifecycle from '../src/ExecutionLifecycle.js'
 import * as Hir from '../src/Hir.js'
 import * as LocalSharedOwnership from '../src/LocalSharedOwnership.js'
+import * as ExpressionNesting from '../src/Parser/ExpressionNesting.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
@@ -750,6 +751,29 @@ it.effect('constructs a frontend snapshot without runtime realization', () =>
     assert.strictEqual(Object.hasOwn(frontend, 'layout'), false)
     assert.strictEqual(Object.hasOwn(frontend, 'mir'), false)
     assert.deepEqual(Analysis.diagnostics(frontend), [])
+  }),
+)
+
+it.effect('keeps an over-budget expression queryable through the analysis facade', () =>
+  Effect.gen(function* () {
+    const depth = ExpressionNesting.limit + 1_000
+    const rejected = `${'('.repeat(depth)}1${')'.repeat(depth)}`
+    const source = `fn damaged() -> i32 { return ${rejected} }
+fn after() -> i32 { return 42 }`
+    const frontend = yield* Analysis.ofSource('main', ascii(source))
+    const syntax = Analysis.rootAnalysis(frontend).syntax
+
+    assert.strictEqual(frontend._tag, 'AnalysisSnapshot')
+    assert.strictEqual(
+      syntax.parserDiagnostics.filter((diagnostic) => diagnostic.code === 'PAR0005').length,
+      1,
+    )
+    assert.include(
+      Analysis.diagnostics(frontend).map((diagnostic) => diagnostic.code),
+      'PAR0005',
+    )
+    assert.strictEqual(Analysis.declarationByName(frontend, 'main', 'after')._tag, 'Resolved')
+    assert.strictEqual(SyntaxTree.directNodes(syntax.root, 'FunctionDeclaration').length, 2)
   }),
 )
 

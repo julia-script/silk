@@ -1,7 +1,9 @@
 import { assert, it } from '@effect/vitest'
 import * as Option from 'effect/Option'
 import * as ImportPath from '../src/ImportPath.js'
+import { syntaxNode } from '../src/internal/ParseState.js'
 import * as Lexer from '../src/Lexer.js'
+import * as ExpressionNesting from '../src/Parser/ExpressionNesting.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import type * as SyntaxFile from '../src/SyntaxFile.js'
@@ -43,6 +45,7 @@ import {
   valueCallArgumentSource,
   whollyUnrelatedSource,
 } from './fixtures/BootstrapParserFixture.js'
+import { raise } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -157,6 +160,195 @@ const diagnosticView = (result: SyntaxFile.SyntaxFile) =>
     end: diagnostic.span.end,
     reason: diagnostic.reason,
   }))
+
+it('derives expression child depths without consuming the shared parent depth', () => {
+  const parent = ExpressionNesting.root
+  const firstSibling = ExpressionNesting.child(parent)
+  const secondSibling = ExpressionNesting.child(parent)
+
+  assert.strictEqual(parent, 0)
+  assert.strictEqual(firstSibling, 1)
+  assert.strictEqual(secondSibling, 1)
+  assert.strictEqual(ExpressionNesting.limit, 256)
+  assert.isFalse(ExpressionNesting.exceedsLimit(ExpressionNesting.limit))
+  assert.isTrue(ExpressionNesting.exceedsLimit(ExpressionNesting.child(ExpressionNesting.limit)))
+})
+
+const groupedExpression = (depth: number, leaf = '1'): string =>
+  `${'('.repeat(depth)}${leaf}${')'.repeat(depth)}`
+
+const arrayExpression = (depth: number): string => `${'['.repeat(depth)}1${']'.repeat(depth)}`
+
+const callExpression = (depth: number): string => `${'f('.repeat(depth)}1${')'.repeat(depth)}`
+
+const prefixExpression = (depth: number): string => `${'!'.repeat(depth)}true`
+
+const expressionFunction = (name: string, expression: string, following = ''): string =>
+  `fn ${name.replaceAll('-', '_')}() -> i32 { return ${expression}${following} }`
+
+const nestingDiagnostics = (result: SyntaxFile.SyntaxFile) =>
+  result.parserDiagnostics.filter((diagnostic) => diagnostic.code === 'PAR0005')
+
+const nestingGolden = (result: SyntaxFile.SyntaxFile) => ({
+  diagnostics: diagnosticView(result).filter((diagnostic) => diagnostic.code === 'PAR0005'),
+  errors: errorNodes(result.root).map((node) => ({
+    kind: node.kind,
+    start: node.span.start,
+    end: node.span.end,
+  })),
+})
+
+it('accepts expression depths 255 and 256 and diagnoses the first token at depth 257', () => {
+  for (const depth of [ExpressionNesting.limit - 1, ExpressionNesting.limit]) {
+    const source = expressionFunction('boundary', groupedExpression(depth))
+    const result = parseText(`memory://expression-depth-${depth}.silk`, source)
+    assert.deepEqual(nestingDiagnostics(result), [])
+    assert.strictEqual(
+      descendants(result.root).filter(
+        (element) => SyntaxTree.isNode(element) && element.kind === 'GroupedExpression',
+      ).length,
+      depth,
+    )
+    assertOriginalTokenTraversal(result)
+    assert.deepEqual(reconstructedBytes(result), ascii(source))
+  }
+
+  const overDepth = ExpressionNesting.child(ExpressionNesting.limit)
+  const source = expressionFunction('over', groupedExpression(overDepth, '  1'))
+  const result = parseText('memory://expression-depth-over.silk', source)
+  const diagnostic = nestingDiagnostics(result)
+  const decisiveOffset = source.indexOf('1')
+
+  assert.strictEqual(diagnostic.length, 1)
+  assert.deepEqual(diagnostic.at(0)?.reason, {
+    _tag: 'ExpressionNestingLimitExceeded',
+    limit: ExpressionNesting.limit,
+    attemptedDepth: overDepth,
+  })
+  assert.deepEqual(
+    diagnostic.map((item) => [item.span.start, item.span.end]),
+    [[decisiveOffset, decisiveOffset + 1]],
+  )
+  assert.deepEqual(nestingGolden(result), {
+    diagnostics: [
+      {
+        code: 'PAR0005',
+        start: decisiveOffset,
+        end: decisiveOffset + 1,
+        reason: {
+          _tag: 'ExpressionNestingLimitExceeded',
+          limit: 256,
+          attemptedDepth: 257,
+        },
+      },
+    ],
+    errors: [{ kind: 'Error', start: decisiveOffset - 2, end: decisiveOffset + 1 }],
+  })
+  assert.strictEqual(errorNodes(result.root).length, 1)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('recovers substantially deep grouping, arrays, calls, and direct prefixes deterministically', () => {
+  const deep = 2_000
+  const cases = [
+    ['grouped', groupedExpression(deep)],
+    ['array', arrayExpression(deep)],
+    ['call', callExpression(deep)],
+    ['prefix', prefixExpression(deep)],
+  ] as const
+
+  for (const [name, expression] of cases) {
+    const source = expressionFunction(name, expression, ' let recovered = 2 return recovered')
+    const first = parseText(`memory://deep-${name}.silk`, source)
+    const second = parseText(`memory://deep-${name}.silk`, source)
+
+    assert.strictEqual(nestingDiagnostics(first).length, 1)
+    assert.strictEqual(errorNodes(first.root).length, 1)
+    assert.strictEqual(
+      descendants(first.root).filter(
+        (element) => SyntaxTree.isNode(element) && element.kind === 'BindingStatement',
+      ).length,
+      1,
+    )
+    assert.deepEqual(nestingGolden(first), nestingGolden(second))
+    assertOriginalTokenTraversal(first)
+    assert.deepEqual(reconstructedBytes(first), ascii(source))
+  }
+})
+
+it('counts every structurally distinct child-expression edge', () => {
+  const atBoundary = groupedExpression(ExpressionNesting.limit)
+  const cases = [
+    ['operator', `0 + ${atBoundary}`],
+    ['pipeline', `0 |> ${atBoundary}`],
+    ['index', `items[${atBoundary}]`],
+    ['argument', `f(${atBoundary})`],
+    ['array', `[${atBoundary}]`],
+    ['aggregate', `Point { value: ${atBoundary} }`],
+    ['match-scrutinee', `match ${atBoundary} { _ => 0 }`],
+    ['match-result', `match value { _ => ${atBoundary} }`],
+  ] as const
+
+  for (const [name, expression] of cases) {
+    const source = expressionFunction(name, expression)
+    const result = parseText(`memory://child-depth-${name}.silk`, source)
+    assert.strictEqual(nestingDiagnostics(result).length, 1, name)
+    assert.strictEqual(errorNodes(result.root).length, 1, name)
+    assertOriginalTokenTraversal(result)
+    assert.deepEqual(reconstructedBytes(result), ascii(source))
+  }
+})
+
+it('recovers one maximal region per independent expression and preserves following declarations', () => {
+  const rejected = groupedExpression(2_000)
+  const firstFunction = expressionFunction(
+    'first',
+    rejected,
+    ' let firstRecovered = 1 return firstRecovered',
+  )
+  const secondFunction = expressionFunction(
+    'second',
+    rejected,
+    ' let secondRecovered = 2 return secondRecovered',
+  )
+  const source = `${firstFunction}\n${secondFunction}\nconst after: i32 = 3`
+  const result = parseText('memory://independent-expression-depth.silk', source)
+  const diagnostics = nestingDiagnostics(result)
+
+  assert.strictEqual(diagnostics.length, 2)
+  assert.strictEqual(errorNodes(result.root).length, 2)
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 2)
+  assert.strictEqual(
+    result.root.children.filter(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'ConstantDeclaration',
+    ).length,
+    1,
+  )
+  assert.deepEqual(
+    diagnostics.map((diagnostic) => diagnostic.span.start),
+    [
+      firstFunction.indexOf(rejected) + ExpressionNesting.limit + 1,
+      firstFunction.length + 1 + secondFunction.indexOf(rejected) + ExpressionNesting.limit + 1,
+    ],
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('keeps parser ordering invariant failures outside expression-depth recovery as defects', () => {
+  const lexical = Lexer.lex(SourceFile.make('memory://parser-invariant.silk', ascii('a b')))
+  const first = lexical.tokens.at(0) ?? raise('expected first token')
+  const second = lexical.tokens.at(2) ?? raise('expected second token')
+  const state = Object.freeze({
+    lexical,
+    index: 0,
+    diagnostics: Object.freeze([]),
+    recovering: false,
+  })
+
+  assert.throws(() => syntaxNode(state, 'Error', [second, first]), RangeError)
+})
 
 it('parses effect declarations, failure rows, delayed run, and consuming fail losslessly', () => {
   const result = parseText(
