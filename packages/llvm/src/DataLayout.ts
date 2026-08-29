@@ -58,7 +58,10 @@ export interface DataLayout {
   readonly _tag: 'DataLayout'
   readonly original: ByteString.ByteString
   readonly endian: 'little' | 'big' | undefined
+  /** The integer specifications that occur explicitly in the source layout. */
   readonly integers: ReadonlyArray<PrimitiveSpec>
+  /** The effective LLVM integer specifications after explicit same-width overrides. */
+  readonly effectiveIntegers: ReadonlyArray<PrimitiveSpec>
   readonly floats: ReadonlyArray<PrimitiveSpec>
   readonly vectors: ReadonlyArray<PrimitiveSpec>
   readonly pointers: ReadonlyArray<PointerSpec>
@@ -86,6 +89,32 @@ const defaultAggregateSpec: AggregateSpec = Object.freeze({
 })
 
 /** @internal */
+const fixedPrimitiveSpec = (
+  bitWidth: number,
+  abiByteUnits: bigint,
+  preferredByteUnits: bigint,
+): PrimitiveSpec =>
+  Object.freeze({
+    bitWidth,
+    abiAlignment: Object.freeze({ _tag: 'Alignment', byteUnits: abiByteUnits }),
+    preferredAlignment: Object.freeze({
+      _tag: 'Alignment',
+      byteUnits: preferredByteUnits,
+    }),
+  })
+
+/** @internal */
+const defaultLargestIntegerSpec = fixedPrimitiveSpec(64, 4n, 8n)
+
+/** @internal */
+const defaultIntegerSpecs: ReadonlyArray<PrimitiveSpec> = Object.freeze([
+  fixedPrimitiveSpec(8, 1n, 1n),
+  fixedPrimitiveSpec(16, 2n, 2n),
+  fixedPrimitiveSpec(32, 4n, 4n),
+  defaultLargestIntegerSpec,
+])
+
+/** @internal */
 class DataLayoutParseFailure extends Error {
   readonly input: unknown
 
@@ -111,6 +140,7 @@ export const empty: DataLayout = Object.freeze({
   original: ByteString.empty,
   endian: undefined,
   integers: Object.freeze([]),
+  effectiveIntegers: defaultIntegerSpecs,
   floats: Object.freeze([]),
   vectors: Object.freeze([]),
   pointers: Object.freeze([]),
@@ -225,6 +255,15 @@ const sorted = <A>(values: Iterable<A>, key: (value: A) => number): ReadonlyArra
   Object.freeze([...values].sort((left, right) => key(left) - key(right)))
 
 /** @internal */
+const effectiveIntegerSpecs = (
+  explicit: ReadonlyArray<PrimitiveSpec>,
+): ReadonlyArray<PrimitiveSpec> => {
+  const byWidth = new Map(defaultIntegerSpecs.map((spec) => [spec.bitWidth, spec]))
+  for (const spec of explicit) byWidth.set(spec.bitWidth, spec)
+  return sorted(byWidth.values(), (spec) => spec.bitWidth)
+}
+
+/** @internal */
 const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
   if (ByteString.isEmpty(original)) return empty
   let endian: DataLayout['endian']
@@ -290,11 +329,13 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
     }
   }
 
+  const integerEntries = sorted(integers.values(), (value) => value.bitWidth)
   return Object.freeze({
     _tag: 'DataLayout',
     original,
     endian,
-    integers: sorted(integers.values(), (value) => value.bitWidth),
+    integers: integerEntries,
+    effectiveIntegers: effectiveIntegerSpecs(integerEntries),
     floats: sorted(floats.values(), (value) => value.bitWidth),
     vectors: sorted(vectors.values(), (value) => value.bitWidth),
     pointers: sorted(pointers.values(), (value) => value.addressSpace.value),
@@ -366,13 +407,29 @@ export const parse = Effect.fn('DataLayout.parse')(function* (
 })
 
 /**
- * Finds the exact integer-width rule, without synthesizing a fallback.
+ * Returns the source layout's exact integer-width rule, or `undefined` if the rule is absent.
  *
  * @category data layouts
  * @since 0.0.0
  */
 export const integerSpec = (self: DataLayout, bitWidth: number): PrimitiveSpec | undefined =>
   self.integers.find((spec) => spec.bitWidth === bitWidth)
+
+/**
+ * Returns LLVM's effective integer-width rule after it applies defaults and explicit overrides.
+ *
+ * **Details**
+ *
+ * Exact widths win. Otherwise the smallest larger width is selected, or the largest width when no
+ * larger rule exists.
+ *
+ * @category data layouts
+ * @since 0.0.0
+ */
+export const effectiveIntegerSpec = (self: DataLayout, bitWidth: number): PrimitiveSpec =>
+  self.effectiveIntegers.find((spec) => spec.bitWidth >= bitWidth) ??
+  self.effectiveIntegers.at(-1) ??
+  defaultLargestIntegerSpec
 
 /**
  * Finds the exact floating-point-width rule, without synthesizing a fallback.

@@ -121,6 +121,76 @@ it.effect('matches LLVM 22.1.8 last-wins precedence for repeated keyed specifica
   }),
 )
 
+it.effect('matches pinned LLVM 22.1.8 effective integer specifications', () =>
+  Effect.gen(function* () {
+    const completeEmpty = DataLayout.empty
+    const endianOnly = yield* DataLayout.parse('e')
+    const sparseSource = 'e-i16:16:16-i16:32:32-i32:64:64'
+    const sparseOverride = yield* DataLayout.parse(sparseSource)
+
+    assert.deepEqual(completeEmpty.integers, [])
+    assert.deepEqual(endianOnly.integers, [])
+    assert.deepEqual(sparseOverride.integers.map(primitivePayload), [
+      { bitWidth: 16, abiAlignment: 4n, preferredAlignment: 4n },
+      { bitWidth: 32, abiAlignment: 8n, preferredAlignment: 8n },
+    ])
+    assert.isTrue(ByteString.equals(DataLayout.render(completeEmpty), ByteString.empty))
+    assert.isTrue(ByteString.equals(DataLayout.render(endianOnly), ByteString.fromString('e')))
+    assert.isTrue(
+      ByteString.equals(DataLayout.render(sparseOverride), ByteString.fromString(sparseSource)),
+    )
+
+    for (const layout of [completeEmpty, endianOnly]) {
+      assert.deepEqual(primitivePayload(DataLayout.effectiveIntegerSpec(layout, 8)), {
+        bitWidth: 8,
+        abiAlignment: 1n,
+        preferredAlignment: 1n,
+      })
+      assert.deepEqual(primitivePayload(DataLayout.effectiveIntegerSpec(layout, 9)), {
+        bitWidth: 16,
+        abiAlignment: 2n,
+        preferredAlignment: 2n,
+      })
+      assert.deepEqual(primitivePayload(DataLayout.effectiveIntegerSpec(layout, 65)), {
+        bitWidth: 64,
+        abiAlignment: 4n,
+        preferredAlignment: 8n,
+      })
+    }
+
+    assert.deepEqual(primitivePayload(DataLayout.effectiveIntegerSpec(sparseOverride, 8)), {
+      bitWidth: 8,
+      abiAlignment: 1n,
+      preferredAlignment: 1n,
+    })
+    assert.deepEqual(primitivePayload(DataLayout.effectiveIntegerSpec(sparseOverride, 16)), {
+      bitWidth: 16,
+      abiAlignment: 4n,
+      preferredAlignment: 4n,
+    })
+    assert.deepEqual(primitivePayload(DataLayout.effectiveIntegerSpec(sparseOverride, 9)), {
+      bitWidth: 16,
+      abiAlignment: 4n,
+      preferredAlignment: 4n,
+    })
+    assert.deepEqual(primitivePayload(DataLayout.effectiveIntegerSpec(sparseOverride, 24)), {
+      bitWidth: 32,
+      abiAlignment: 8n,
+      preferredAlignment: 8n,
+    })
+    assert.deepEqual(primitivePayload(DataLayout.effectiveIntegerSpec(sparseOverride, 40)), {
+      bitWidth: 64,
+      abiAlignment: 4n,
+      preferredAlignment: 8n,
+    })
+    assert.deepEqual(primitivePayload(DataLayout.effectiveIntegerSpec(sparseOverride, 128)), {
+      bitWidth: 64,
+      abiAlignment: 4n,
+      preferredAlignment: 8n,
+    })
+  }),
+)
+
 it.effect('keeps semantic collections canonical without rewriting the source layout', () =>
   Effect.gen(function* () {
     const input =

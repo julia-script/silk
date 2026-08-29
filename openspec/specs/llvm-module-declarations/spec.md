@@ -7,11 +7,19 @@ Allow callers to describe LLVM module types, constants, attributes, and global d
 ## Requirements
 
 ### Requirement: Explicit target and data layout
-The system SHALL accept an explicit target triple and LLVM data-layout string, SHALL parse supported layout components exactly, and SHALL expose layout queries for integer, floating-point, vector, pointer, aggregate, size, and alignment properties. Aggregate alignment SHALL follow the pinned LLVM semantics: an absent rule behaves as `a:0:64`; `a:0` has one-byte ABI and preferred alignment; each encoded alignment MUST fit LLVM's unsigned 16-bit field; an explicit preferred alignment MUST be nonzero, power-of-two, and at least the ABI alignment; and the final repeated aggregate rule is authoritative.
+The system SHALL accept an explicit target triple and LLVM data-layout string, SHALL parse supported layout components exactly, and SHALL expose layout queries for integer, floating-point, vector, pointer, aggregate, size, and alignment properties. Integer alignment SHALL follow the pinned LLVM semantics: effective lookup starts from the default `i8:8:8`, `i16:16:16`, `i32:32:32`, and `i64:32:64` rules; an explicit same-width rule overrides its default; repeated rules use the final entry; lookup selects an exact width, the smallest larger width, or the largest width; and the parsed source entries remain distinguishable from the effective rules. Aggregate alignment SHALL follow the pinned LLVM semantics: an absent rule behaves as `a:0:64`; `a:0` has one-byte ABI and preferred alignment; each encoded alignment MUST fit LLVM's unsigned 16-bit field; an explicit preferred alignment MUST be nonzero, power-of-two, and at least the ABI alignment; and the final repeated aggregate rule is authoritative.
 
 #### Scenario: Parse a valid data layout
 - **WHEN** a caller supplies a supported LLVM data-layout string
 - **THEN** layout queries return the widths, address spaces, ABI alignments, and preferred alignments described by that string
+
+#### Scenario: Resolve effective integer alignment
+- **WHEN** a caller queries an integer width under an empty, endian-only, or sparse-override data layout
+- **THEN** the effective query applies default and final explicit rules before selecting the exact, next-larger, or largest specification, while source-entry queries and rendering remain exact
+
+#### Scenario: Compute arbitrary-width integer allocation layout
+- **WHEN** a caller queries the size or alignment of an arbitrary-width integer, or an array, fixed vector, or structure containing one
+- **THEN** its store size is rounded up to the effective ABI alignment; arrays use that allocation stride, fixed vectors pack element bits and apply exact or natural vector alignment, and structures use the resulting field layout
 
 #### Scenario: Preserve an aggregate rule
 - **WHEN** a caller supplies `a:<abi>[:<preferred>]`

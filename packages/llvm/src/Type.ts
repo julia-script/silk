@@ -789,22 +789,37 @@ const simpleBitWidth = (tag: TypeDescription.SimpleTag): number | undefined => {
 }
 
 /** @internal */
+const powerOfTwoCeiling = (value: bigint): bigint => {
+  let power = 1n
+  while (power < value) power *= 2n
+  return power
+}
+
+/** @internal */
 const layoutOf = (
   index: number,
   state: BuilderState.MutableState,
   visiting: Set<number>,
-): { readonly size: bigint; readonly alignment: Alignment.Alignment } => {
+): {
+  readonly bitSize: bigint
+  readonly size: bigint
+  readonly alignment: Alignment.Alignment
+} => {
   if (visiting.has(index)) throw new Error('recursive type has no finite inline size')
   visiting.add(index)
   const description = state.types.descriptions[index]
   if (description === undefined) throw new Error('missing type table entry')
   try {
     if (description._tag === 'Integer') {
-      const spec = DataLayout.integerSpec(state.layout, description.bitWidth)
-      const size = BigInt(Math.ceil(description.bitWidth / 8))
+      const spec = DataLayout.effectiveIntegerSpec(state.layout, description.bitWidth)
+      const storeSize = BigInt(Math.ceil(description.bitWidth / 8))
+      const alignment = spec.abiAlignment.byteUnits
+      if (alignment === undefined) throw new Error('effective integer alignment is unspecified')
+      const remainder = storeSize % alignment
       return {
-        size,
-        alignment: spec?.abiAlignment ?? { _tag: 'Alignment', byteUnits: size === 0n ? 1n : size },
+        bitSize: BigInt(description.bitWidth),
+        size: remainder === 0n ? storeSize : storeSize + alignment - remainder,
+        alignment: spec.abiAlignment,
       }
     }
     if (description._tag === 'Simple') {
@@ -812,20 +827,44 @@ const layoutOf = (
       if (bits === undefined) throw new Error(`${description.tag} has no allocatable size`)
       const size = BigInt(Math.ceil(bits / 8))
       const spec = DataLayout.floatSpec(state.layout, bits)
-      return { size, alignment: spec?.abiAlignment ?? { _tag: 'Alignment', byteUnits: size } }
+      return {
+        bitSize: BigInt(bits),
+        size,
+        alignment: spec?.abiAlignment ?? { _tag: 'Alignment', byteUnits: size },
+      }
     }
     if (description._tag === 'Pointer') {
       const spec = DataLayout.pointerSpec(state.layout, description.addressSpace)
       if (spec === undefined) throw new Error('data layout has no pointer specification')
-      return { size: BigInt(Math.ceil(spec.bitWidth / 8)), alignment: spec.abiAlignment }
-    }
-    if (description._tag === 'Array' || description._tag === 'Vector') {
-      if (description._tag === 'Vector' && description.scalable) {
-        throw new Error('scalable vector has no fixed allocation size')
+      return {
+        bitSize: BigInt(spec.bitWidth),
+        size: BigInt(Math.ceil(spec.bitWidth / 8)),
+        alignment: spec.abiAlignment,
       }
+    }
+    if (description._tag === 'Array') {
       const child = layoutOf(description.child, state, visiting)
-      const length = description._tag === 'Array' ? description.length : BigInt(description.length)
-      return { size: child.size * length, alignment: child.alignment }
+      const size = child.size * description.length
+      return { bitSize: size * 8n, size, alignment: child.alignment }
+    }
+    if (description._tag === 'Vector') {
+      if (description.scalable) throw new Error('scalable vector has no fixed allocation size')
+      const child = layoutOf(description.child, state, visiting)
+      const bitSize = child.bitSize * BigInt(description.length)
+      const storeSize = (bitSize + 7n) / 8n
+      const bitWidth = bitSize <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(bitSize) : undefined
+      const vectorSpec =
+        bitWidth === undefined ? undefined : DataLayout.vectorSpec(state.layout, bitWidth)
+      const vectorAlignment: Alignment.Alignment =
+        vectorSpec?.abiAlignment ??
+        Object.freeze({ _tag: 'Alignment', byteUnits: powerOfTwoCeiling(storeSize) })
+      const alignment = vectorAlignment.byteUnits ?? 1n
+      const remainder = storeSize % alignment
+      return {
+        bitSize,
+        size: remainder === 0n ? storeSize : storeSize + alignment - remainder,
+        alignment: vectorAlignment,
+      }
     }
     let body: { readonly fields: ReadonlyArray<number>; readonly packed: boolean } | undefined
     if (description._tag === 'Structure') body = description
@@ -846,6 +885,7 @@ const layoutOf = (
       const remainder = offset % maximumAlignment
       if (remainder !== 0n) offset += maximumAlignment - remainder
       return {
+        bitSize: offset * 8n,
         size: offset,
         alignment: { _tag: 'Alignment', byteUnits: maximumAlignment },
       }
