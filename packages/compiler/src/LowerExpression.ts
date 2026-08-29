@@ -1525,6 +1525,20 @@ export function lowerExpressionInner(
         const ownedArm = ownership?.arms.find(
           (candidate) => candidate.id.ordinal === arm.id.ordinal,
         )
+        const cleanup: Array<Mir.MatchArm['selected']['cleanup'][number]> = []
+        for (const release of ownedArm?.cleanup ?? []) {
+          const plan = specializedCleanup(fn, release.cleanup)
+          if (plan._tag === 'NoCleanup') continue
+          const type = fn.type(plan.type)
+          if (type === undefined) return undefined
+          cleanup.push(
+            Object.freeze({
+              destination: fn.alloc(type),
+              path: release.path,
+              cleanup: plan,
+            }),
+          )
+        }
         arms.push(
           Object.freeze({
             id: arm.id,
@@ -1538,14 +1552,7 @@ export function lowerExpressionInner(
               access: expression.access,
               operations: selectedOperations,
               result: selectedResult.result,
-              cleanup: Object.freeze(
-                (ownedArm?.cleanup ?? []).map((release) =>
-                  Object.freeze({
-                    path: release.path,
-                    cleanup: specializedCleanup(fn, release.cleanup),
-                  }),
-                ),
-              ),
+              cleanup: Object.freeze(cleanup),
               endBorrow: expression.access === 'Shared' || expression.access === 'Exclusive',
             }),
             provenance: authored(arm.span),

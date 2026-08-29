@@ -862,6 +862,7 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
           ...arm.bindings.map((binding) => binding.destination),
           ...(arm.guard === undefined ? [] : [arm.guard.result]),
           arm.selected.result,
+          ...arm.selected.cleanup.map((entry) => entry.destination),
         ]),
       ]
     case 'Conditional':
@@ -4559,8 +4560,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                             entry.path,
                           )
                         : coverageFieldPathType(self.layout, arm.member, entry.path)
+                    const destinationType = fn.localTypes.at(entry.destination.ordinal)
                     return (
                       selected !== undefined &&
+                      destinationType !== undefined &&
+                      SilkType.equals(semanticType(destinationType), entry.cleanup.type) &&
                       (arm.member?._tag === 'NominalUnionVariant'
                         ? cleanupMatchesSemanticType(self.layout, entry.cleanup, selected)
                         : SilkType.equals(selected, entry.cleanup.type))

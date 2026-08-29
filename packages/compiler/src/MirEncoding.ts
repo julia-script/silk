@@ -253,7 +253,8 @@ const operationLines = (operation: Operation, indent: string): ReadonlyArray<str
         `${indent}    selected access=${arm.selected.access} result=${localText(arm.selected.result)} end-borrow=${arm.selected.endBorrow}`,
         ...arm.selected.operations.flatMap((child) => operationLines(child, `${indent}      `)),
         ...arm.selected.cleanup.map(
-          (entry) => `${indent}      cleanup ${fieldPathText(entry.path)} ${entry.cleanup._tag}`,
+          (entry) =>
+            `${indent}      cleanup ${localText(entry.destination)} <- ${fieldPathText(entry.path)} ${entry.cleanup._tag}`,
         ),
       ]
     }),

@@ -48,17 +48,13 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
   const checkOrdinal = context.state.checkOrdinal
   switch (operation._tag) {
     case 'BindMatch': {
-      const physical = Layout.coverageFieldSlots(
-        operation.shape,
-        operation.member,
-        operation.binding.path,
-      )
+      const physical = Layout.coverageFieldSlots(operation.shape, operation.member, operation.path)
       if (physical === undefined) {
         throw new RangeError('LLVM match lost a pattern payload path')
       }
       const source = NativeStorage.readLocal(nativeStorage, operation.scrutinee)
       const sourceLanes = operation.shape.lanes
-      const targetLanes = NativeType.lanesFor(types, operation.binding.type)
+      const targetLanes = NativeType.lanesFor(types, operation.type)
       const selected: Array<Value.Input> = []
       for (const [targetOrdinal, ordinal] of physical.entries()) {
         const value = source.at(ordinal)
@@ -73,14 +69,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             value,
             sourceLane,
             targetLane,
-            `match${operation.binding.destination.ordinal}_${targetOrdinal}_lane`,
+            `match${operation.destination.ordinal}_${targetOrdinal}_lane`,
           ),
         )
       }
       if (selected.length !== targetLanes.length) {
         throw new RangeError('LLVM match binding disagrees with its payload lanes')
       }
-      nativeStorage.locals.set(operation.binding.destination.ordinal, Object.freeze(selected))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(selected))
       break
     }
     case 'EnumConstant': {

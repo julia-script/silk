@@ -384,6 +384,42 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('follows represented executables nested inside nominal union variants', () =>
+  Effect.gen(function* () {
+    const source = `struct Box { value: i32 }
+union Deferred<F: once Effect<i32>> { Empty, Ready { operation: F } }
+fn requireDetached<F: once Effect<i32> + Intrinsic.Detached>(body: F) -> i32 {
+  drop body
+  return 1
+}
+pub fn main() -> i32 {
+  let box = Box { value: 42 }
+  let view = &box
+  let deferred = Deferred.Ready { operation: effect { return view.value } }
+  return requireDetached(effect { drop move deferred return 1 })
+}`
+    const self = yield* snapshot(source)
+
+    const diagnostics = Analysis.diagnostics(self)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0139'],
+    )
+    const diagnostic = diagnostics.at(0)
+    assert.strictEqual(diagnostic?.reason._tag, 'UnsatisfiedExecutableProperty')
+    assert.strictEqual(
+      diagnostic?.reason._tag === 'UnsatisfiedExecutableProperty'
+        ? diagnostic.reason.property
+        : undefined,
+      'Intrinsic.Detached',
+    )
+    assert.isTrue(
+      diagnostic?.reason._tag === 'UnsatisfiedExecutableProperty' &&
+        diagnostic.reason.causes.some((cause) => cause.startsWith('LexicalLoan:')),
+    )
+  }),
+)
+
 it.effect('closes direct self and mutual cycles over exact execution nodes', () =>
   Effect.gen(function* () {
     const direct = yield* snapshot(`import silk.effect as Effect

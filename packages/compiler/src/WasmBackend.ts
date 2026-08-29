@@ -4752,7 +4752,7 @@ const emitMatchOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'Match' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
-  const { emitter, layout, suspension, slots, scalar, copy } = state
+  const { emitter, layout, suspension, slots, scalar, copy, releaseInstructions } = state
 
   const emitMany = (operations: ReadonlyArray<Mir.Operation>): ReadonlyArray<Instr.Instr> =>
     operations.flatMap((nested) => emitOperation(nested, emitter, suspension))
@@ -4786,8 +4786,29 @@ const emitMatchOperation = (
         slots(binding.destination),
       )
     })
+    const cleanup = arm.selected.cleanup.flatMap((entry) => {
+      const physical = LayoutPlan.coverageFieldSlots(
+        operation.scrutineeShape,
+        bindingMember,
+        entry.path,
+      )
+      if (physical === undefined) {
+        throw new RangeError('Wasm match lost an omitted payload cleanup path')
+      }
+      return [
+        ...copy(
+          physical.flatMap((lane) => {
+            const source = slots(operation.scrutinee).at(lane)
+            return source === undefined ? [] : [source]
+          }),
+          slots(entry.destination),
+        ),
+        ...releaseInstructions(entry.cleanup, entry.destination),
+      ]
+    })
     const selected = [
       ...emitMany(arm.selected.operations),
+      ...cleanup,
       ...(layout.types.at(arm.selected.result.ordinal)?._tag === 'Bottom'
         ? []
         : copy(slots(arm.selected.result), slots(operation.destination))),

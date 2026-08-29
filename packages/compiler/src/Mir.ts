@@ -1191,6 +1191,7 @@ export interface MatchArm {
     readonly operations: ReadonlyArray<Operation>
     readonly result: LocalId
     readonly cleanup: ReadonlyArray<{
+      readonly destination: LocalId
       readonly path: ReadonlyArray<DeclarationFacts.FieldId>
       readonly cleanup: CleanupPlan.CleanupPlan
     }>

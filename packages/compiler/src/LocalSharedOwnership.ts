@@ -57,6 +57,14 @@ export type ObligationPlan =
         readonly obligations: ObligationPlan
       }>
     }
+  | {
+      readonly _tag: 'ActiveNominalUnion'
+      readonly type: Type.Nominal
+      readonly cases: ReadonlyArray<{
+        readonly variant: DeclarationFacts.UnionVariantId
+        readonly obligations: ObligationPlan
+      }>
+    }
   | { readonly _tag: 'Unavailable'; readonly causes: ReadonlyArray<Diagnostic.Identity> }
 
 export const none: ObligationPlan = Object.freeze({ _tag: 'NoLocalSharedObligation' })
@@ -131,13 +139,36 @@ const ofTypeInner = (
     module: type.module,
     name: type.name,
   })
-  if (declaration?._tag !== 'StructDeclaration') return none
+  if (
+    declaration === undefined ||
+    (declaration._tag !== 'StructDeclaration' && declaration._tag !== 'UnionDeclaration')
+  )
+    return none
   const substitution =
     TypeInference.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),
       type.arguments,
     ) ?? new Map()
   const next = new Set(active).add(key)
+  if (declaration._tag === 'UnionDeclaration')
+    return Object.freeze({
+      _tag: 'ActiveNominalUnion',
+      type,
+      cases: Object.freeze(
+        declaration.variants.map((variant) =>
+          Object.freeze({
+            variant: variant.id,
+            obligations: product(
+              variant.fields.map((field) =>
+                field.declaredType._tag === 'Resolved'
+                  ? ofTypeInner(index, Type.substitute(field.declaredType.type, substitution), next)
+                  : unavailable(causeOf(field.declaredType)),
+              ),
+            ),
+          }),
+        ),
+      ),
+    })
   return product(
     declaration.fields.map((field) =>
       field.declaredType._tag === 'Resolved'
@@ -191,6 +222,7 @@ export const count = (self: ObligationPlan, activeUnionCase = 0): number => {
     case 'Repeat':
       return self.length * count(self.element)
     case 'ActiveUnion':
+    case 'ActiveNominalUnion':
       return count(self.cases.at(activeUnionCase)?.obligations ?? none)
   }
 }
@@ -210,6 +242,8 @@ export const encode = (self: ObligationPlan): string => {
       return `repeat(${self.length},${encode(self.element)})`
     case 'ActiveUnion':
       return `active-union(${self.cases.map((entry) => `${Type.key(entry.member)}:${encode(entry.obligations)}`).join(',')})`
+    case 'ActiveNominalUnion':
+      return `active-nominal-union(${Type.key(self.type)};${self.cases.map((entry) => `variant#${entry.variant.ordinal}:${encode(entry.obligations)}`).join(',')})`
     case 'Unavailable':
       return `unavailable(${self.causes.map((cause) => `${cause.code}@${cause.span.sourceId}:${cause.span.start}:${cause.ordinal}`).join(',')})`
   }

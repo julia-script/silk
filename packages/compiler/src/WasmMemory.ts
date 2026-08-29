@@ -104,6 +104,16 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
                 : []),
             ]
           : []),
+        ...(operation._tag === 'Match'
+          ? operation.arms.flatMap((arm) =>
+              arm.selected.cleanup.flatMap((entry) =>
+                CleanupPlan.hasHook(entry.cleanup) &&
+                fn.localTypes.at(entry.destination.ordinal)?._tag !== 'EffectBorrow'
+                  ? [entry.destination.ordinal]
+                  : [],
+              ),
+            )
+          : []),
       ]
     }),
   ])

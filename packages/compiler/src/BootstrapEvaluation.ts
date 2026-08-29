@@ -1977,6 +1977,14 @@ function* executeFunction(
               for (const cleanup of arm.selected.cleanup) {
                 const owner = BootstrapStorage.selectFieldPath(payload, cleanup.path)
                 const members = BootstrapStorage.cleanupMembers(cleanup.cleanup, owner)
+                write(cleanup.destination, { value: owner, fromCall: false })
+                const released = yield* releaseThroughPlan(
+                  cleanup.cleanup,
+                  owner,
+                  arm.provenance,
+                  cleanup.destination.ordinal,
+                )
+                if (released !== undefined) return released
                 trace.push(
                   Object.freeze({
                     _tag: 'MatchCleanup',

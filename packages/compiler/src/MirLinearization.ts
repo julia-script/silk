@@ -1,4 +1,5 @@
 import type { ControlProvenance } from './Backend.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Layout from './Layout.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
@@ -72,7 +73,9 @@ export type LinearOperation =
       readonly scrutinee: Mir.LocalId
       readonly shape: Layout.CallingShape
       readonly member: Match.CoverageIdentity
-      readonly binding: Mir.MatchBinding
+      readonly destination: Mir.LocalId
+      readonly path: ReadonlyArray<DeclarationFacts.FieldId>
+      readonly type: Mir.Type
       readonly provenance: Mir.Provenance
     }
 
@@ -175,7 +178,7 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'OsOpenOutcome':
       return operation.valid
     case 'BindMatch':
-      return operation.binding.destination
+      return operation.destination
     case 'CheckPlace':
     case 'WritePlace':
     case 'EndLoan':
@@ -612,18 +615,43 @@ export const expandMatches = (
             scrutinee: match.scrutinee,
             shape: match.scrutineeShape,
             member: bindingMember,
-            binding,
+            destination: binding.destination,
+            path: binding.path,
+            type: binding.type,
             provenance: binding.provenance,
           }),
         ),
       )
       const selected = reserve()
+      const cleanup = arm.selected.cleanup.flatMap((entry): ReadonlyArray<LinearOperation> => {
+        const type = fn.localTypes.at(entry.destination.ordinal)
+        if (type === undefined) throw new RangeError('LLVM match cleanup lost its local type')
+        return Object.freeze([
+          Object.freeze({
+            _tag: 'BindMatch' as const,
+            scrutinee: match.scrutinee,
+            shape: match.scrutineeShape,
+            member: bindingMember,
+            destination: entry.destination,
+            path: entry.path,
+            type,
+            provenance: arm.provenance,
+          }),
+          Object.freeze({
+            _tag: 'Drop' as const,
+            local: entry.destination,
+            cleanup: entry.cleanup,
+            provenance: arm.provenance,
+          }),
+        ])
+      })
       lowerSequence(
         selected,
         origin,
         'Normal',
         [
           ...arm.selected.operations,
+          ...cleanup,
           Object.freeze({
             _tag: 'Move' as const,
             destination: match.destination,

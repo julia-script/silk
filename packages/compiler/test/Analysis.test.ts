@@ -758,6 +758,7 @@ it.effect('publishes sealed local-shared identity, affinity, and structural obli
     const source = `struct Token { value: i32 }
 struct Generic<T> { value: T }
 struct Pair<T> { first: Intrinsic.SharedCore<T> second: Intrinsic.SharedCore<T> }
+union LocalHolder<T> { Empty, Full { core: Intrinsic.SharedCore<T> } }
 struct LocalWrap<T> { core: Intrinsic.SharedCore<T> }
 struct Damaged { first: Missing second: AlsoMissing }
 struct Shared { value: i32 }
@@ -835,6 +836,17 @@ pub fn main() -> i32 { return 0 }`
     )
     assert.strictEqual(ExecutionAffinity.ofType(self.index, pair)._tag, 'LocalExecution')
     assert.strictEqual(LocalSharedOwnership.count(LocalSharedOwnership.ofType(self.index, pair)), 2)
+    const localHolder = Type.nominal('main', 'LocalHolder', ['i32'])
+    assert.strictEqual(ExecutionAffinity.ofType(self.index, localHolder)._tag, 'LocalExecution')
+    const localHolderObligations = LocalSharedOwnership.ofType(self.index, localHolder)
+    assert.strictEqual(localHolderObligations._tag, 'ActiveNominalUnion')
+    if (localHolderObligations._tag !== 'ActiveNominalUnion') return
+    assert.deepEqual(
+      localHolderObligations.cases.map((_, ordinal) =>
+        LocalSharedOwnership.count(localHolderObligations, ordinal),
+      ),
+      [0, 1],
+    )
     assert.strictEqual(
       LocalSharedOwnership.count(
         LocalSharedOwnership.ofType(self.index, Type.fixedArray(Type.sharedCore('i32'), 2)),
@@ -1022,6 +1034,7 @@ it.effect('publishes sealed affine Execution identity, affinity, and logical lif
       ascii(
         `struct Execution<T> { value: T }
 struct NestedLoan { value: &i32 }
+union NestedUnionLoan { Empty, Ready { value: &i32 } }
 fn retain(value: Intrinsic.Execution<i32>) -> () { drop value }
 fn ordinary(value: Execution<i32>) -> () { drop value }
 pub fn main() -> i32 { return 42 }`,
@@ -1129,6 +1142,22 @@ pub fn main() -> i32 { return 42 }`,
     assert.include(
       nested._tag === 'Unsatisfied' ? nested.causes.at(0)?.path.join(' -> ') : '',
       'NestedLoan.value',
+    )
+    const nestedUnion = ExecutableProperty.detachedOfEnvironment(self.index, [
+      {
+        ordinal: 0,
+        access: 'Take',
+        type: Type.nominal('execution-semantics', 'NestedUnionLoan'),
+      },
+    ])
+    assert.strictEqual(nestedUnion._tag, 'Unsatisfied')
+    assert.strictEqual(
+      nestedUnion._tag === 'Unsatisfied' ? nestedUnion.causes.at(0)?.reason : undefined,
+      'NestedLoan',
+    )
+    assert.include(
+      nestedUnion._tag === 'Unsatisfied' ? nestedUnion.causes.at(0)?.path.join(' -> ') : '',
+      'NestedUnionLoan.Ready.value',
     )
 
     const duplicate = yield* Analysis.ofSource(

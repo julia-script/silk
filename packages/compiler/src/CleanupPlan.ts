@@ -384,15 +384,27 @@ export const cleanupTypeAtPath = (
       module: current.module,
       name: current.name,
     })
-    if (declaration?._tag !== 'StructDeclaration') return undefined
+    if (
+      declaration === undefined ||
+      (declaration._tag !== 'StructDeclaration' && declaration._tag !== 'UnionDeclaration')
+    )
+      return undefined
     const substitution = TypeInference.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),
       current.arguments,
     )
     if (substitution === undefined) return undefined
-    const field = declaration.fields.find((candidate) =>
-      DeclarationFacts.sameFieldId(candidate.id, fieldId),
-    )
+    const fields =
+      declaration._tag === 'StructDeclaration'
+        ? declaration.fields
+        : declaration.variants.find(
+            (variant) =>
+              fieldId.owner._tag === 'UnionVariantFieldOwnerId' &&
+              variant.id.union.sourceId === fieldId.owner.variant.union.sourceId &&
+              variant.id.union.ordinal === fieldId.owner.variant.union.ordinal &&
+              variant.id.ordinal === fieldId.owner.variant.ordinal,
+          )?.fields
+    const field = fields?.find((candidate) => DeclarationFacts.sameFieldId(candidate.id, fieldId))
     current =
       field?.declaredType._tag === 'Resolved'
         ? Type.substitute(field.declaredType.type, substitution)

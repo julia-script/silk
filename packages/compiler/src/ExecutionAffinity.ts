@@ -138,14 +138,22 @@ const ofTypeInner = (
     module: type.module,
     name: type.name,
   })
-  if (declaration?._tag !== 'StructDeclaration') return unrestricted
+  if (
+    declaration === undefined ||
+    (declaration._tag !== 'StructDeclaration' && declaration._tag !== 'UnionDeclaration')
+  )
+    return unrestricted
   const substitution =
     TypeInference.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),
       type.arguments,
     ) ?? new Map()
   const next = new Set(active).add(key)
-  const fields = declaration.fields.map((field): ExecutionAffinity => {
+  const declarationFields =
+    declaration._tag === 'StructDeclaration'
+      ? declaration.fields
+      : declaration.variants.flatMap((variant) => variant.fields)
+  const fields = declarationFields.map((field): ExecutionAffinity => {
     if (field.declaredType._tag !== 'Resolved')
       return unavailable(declaredCauses(field.declaredType))
     return ofTypeInner(index, Type.substitute(field.declaredType.type, substitution), next)

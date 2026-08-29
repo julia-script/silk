@@ -6,6 +6,7 @@ import * as Layout from '../src/Layout.js'
 import * as LayoutEncode from '../src/LayoutEncode.js'
 import * as Match from '../src/Match.js'
 import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirLinearization from '../src/MirLinearization.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -356,6 +357,44 @@ pub fn main() -> i32 { return unwrap(Option<i32>.Some { value: 42 }) }`),
     const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('cleans omitted fields of the selected nominal union variant', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-values/omitted-cleanup',
+      ascii(`struct Bomb {}
+impl Drop for Bomb {
+  fn drop(self: &mut Bomb) -> () { let boom = 1 / 0 return () }
+}
+union State { Empty, Ready { value: i32, bomb: Bomb } }
+fn consume(state: State) -> i32 {
+  return match move state {
+    State.Empty => 0
+    State.Ready { value, .. } => value
+  }
+}
+pub fn main() -> i32 {
+  return consume(State.Ready { value: 42, bomb: Bomb {} })
+}`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const consume = Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'consume')
+    assert.isTrue(
+      consume !== undefined &&
+        MirLinearization.linearize(consume).some((block) =>
+          block.operations.some(
+            (operation) => operation._tag === 'Drop' && operation.cleanup._tag === 'HookCleanup',
+          ),
+        ),
+    )
+    assert.strictEqual(Analysis.evaluate(self)._tag, 'Trap')
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.throws(() => (instance.exports.silk_main as () => number)(), WebAssembly.RuntimeError)
   }),
 )
 
