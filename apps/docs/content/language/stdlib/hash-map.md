@@ -71,7 +71,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `HashMap` with `import silk.hash_map`.
+Import as `HashMap` with `import silk.hash_map { HashMap }`.
 
 Public declarations: 16.
 

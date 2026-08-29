@@ -89,7 +89,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `HostInput` with `import silk.host_input`.
+Import as `HostInput` with `import silk.host_input { HostInput }`.
 
 Public declarations: 10.
 

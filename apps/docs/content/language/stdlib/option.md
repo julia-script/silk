@@ -45,7 +45,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Option` with `import silk.option`.
+Import as `Option` with `import silk.option { Option }`.
 
 Public declarations: 6.
 
@@ -83,6 +83,16 @@ Option<T>.Some { value: T }: Option<T>
 ```
 
 The present variant, carrying the available owned value.
+
+<a id="declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a313a3a6669656c643a30"></a>
+
+#### Field `value`
+
+```silk
+pub value: T
+```
+
+The value moved through present-only combinator branches.
 
 <a id="declaration-73696c6b2f6f7074696f6e3a3a6e6f6e65"></a>
 

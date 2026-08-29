@@ -1860,6 +1860,7 @@ export const analyzePattern = (
     )
   }
   const label = nominal === undefined ? 'unknown aggregate' : Type.encode(nominal)
+  const outsideDefiningModule = nominal !== undefined && nominal.module !== source.id
   const seen = new Map<string, PatternFieldFact>()
   const bindings: Array<PatternBindingFact> = []
   const fields = SyntaxTree.directNodes(node, 'PatternField').map((fieldNode): PatternFieldFact => {
@@ -1875,7 +1876,20 @@ export const analyzePattern = (
         : DeclarationFacts.lookupField(aggregateFields, name)
     let state: PatternFieldState = Object.freeze({ _tag: 'Unavailable' })
     let resolvedField: DeclarationFacts.FieldFact | undefined
-    if (lookup?._tag === 'Resolved') {
+    if (
+      lookup?._tag === 'Resolved' &&
+      lookup.field.visibility === 'Private' &&
+      outsideDefiningModule
+    ) {
+      const diagnostic = Diagnostic.inaccessibleProjectedField(
+        label,
+        name ?? '',
+        nameToken?.span ?? fieldNode.span,
+      )
+      diagnostics.push(diagnostic)
+      counters.invalid = true
+      state = Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) })
+    } else if (lookup?._tag === 'Resolved') {
       const original = seen.get(name ?? '')
       if (original === undefined) {
         resolvedField = lookup.field
@@ -2006,10 +2020,17 @@ export const analyzePattern = (
     (field) => field.nested?.omitted ?? [],
   )
   if (aggregate !== undefined && !rest) {
+    let omittedInaccessible = false
     for (const field of aggregateFields) {
       if (field.name._tag !== 'Present' || seen.has(field.name.spelling)) continue
+      if (field.visibility === 'Private' && outsideDefiningModule) {
+        omittedInaccessible = true
+        continue
+      }
       diagnostics.push(Diagnostic.missingPatternField(label, field.name.spelling, node.span))
     }
+    if (omittedInaccessible)
+      diagnostics.push(Diagnostic.inaccessiblePatternFields(label, node.span))
   } else if (aggregate !== undefined && rest) {
     for (const field of aggregateFields) {
       if (field.name._tag === 'Present' && seen.has(field.name.spelling)) continue
@@ -5975,6 +5996,7 @@ export function analyzeExpression(
     if (
       qualifierLookup._tag === 'Resolved' &&
       (qualifierLookup.declaration._tag === 'StructDeclaration' ||
+        qualifierLookup.declaration._tag === 'UnionDeclaration' ||
         qualifierLookup.declaration._tag === 'ServiceDeclaration' ||
         qualifierLookup.declaration._tag === 'InterfaceDeclaration') &&
       qualifierLookup.declaration.canonical._tag === 'Canonical'

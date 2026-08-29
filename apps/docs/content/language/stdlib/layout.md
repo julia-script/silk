@@ -33,7 +33,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Layout` with `import silk.layout`.
+Import as `Layout` with `import silk.layout { Layout }`.
 
 Public declarations: 6.
 

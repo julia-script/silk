@@ -54,7 +54,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Box` with `import silk.box`.
+Import as `Box` with `import silk.box { Box }`.
 
 Public declarations: 7.
 

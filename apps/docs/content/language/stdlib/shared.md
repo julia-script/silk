@@ -65,7 +65,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Shared` with `import silk.shared`.
+Import as `Shared` with `import silk.shared { Shared }`.
 
 Public declarations: 5.
 

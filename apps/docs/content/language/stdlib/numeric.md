@@ -33,7 +33,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Integer` with `import silk.numeric`.
+Import as `Integer` with `import silk.numeric { Integer }`.
 
 Public declarations: 3.
 

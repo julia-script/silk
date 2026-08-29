@@ -48,7 +48,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Allocator` with `import silk.allocator`.
+Import as `Allocator` with `import silk.allocator { Allocator }`.
 
 Public declarations: 5.
 

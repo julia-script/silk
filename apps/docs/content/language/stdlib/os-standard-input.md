@@ -39,7 +39,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `OsStandardInput` with `import silk.os_standard_input`.
+Import as `OsStandardInput` with `import silk.os_standard_input { OsStandardInput }`.
 
 Public declarations: 2.
 

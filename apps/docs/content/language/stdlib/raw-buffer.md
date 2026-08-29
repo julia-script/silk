@@ -61,7 +61,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `RawBuffer` with `import silk.raw_buffer`.
+Import as `RawBuffer` with `import silk.raw_buffer { RawBuffer }`.
 
 Public declarations: 9.
 

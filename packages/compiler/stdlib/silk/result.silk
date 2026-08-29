@@ -18,7 +18,7 @@
 //! ```silk
 //! import silk.result { Result }
 //!
-//! fn half(value: i32) -> Result.Result<i32, i32> {
+//! fn half(value: i32) -> Result<i32, i32> {
 //!   if value == 0 {
 //!     return Result.failResult<i32, i32>(2)
 //!   }
@@ -55,12 +55,12 @@ pub union Result<A, F> {
   /// A completed success.
   Success {
     /// The produced success value.
-    value: A
+    pub value: A
   },
   /// A completed failure.
   Failure {
     /// The produced failure value.
-    error: F
+    pub error: F
   }
 }
 

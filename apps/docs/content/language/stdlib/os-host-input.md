@@ -40,7 +40,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `OsHostInput` with `import silk.os_host_input`.
+Import as `OsHostInput` with `import silk.os_host_input { OsHostInput }`.
 
 Public declarations: 2.
 

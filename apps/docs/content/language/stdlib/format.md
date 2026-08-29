@@ -59,7 +59,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Format` with `import silk.format`.
+Import as `Format` with `import silk.format { Format }`.
 
 Public declarations: 18.
 

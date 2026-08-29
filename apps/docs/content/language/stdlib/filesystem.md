@@ -58,7 +58,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `FileSystem` with `import silk.filesystem`.
+Import as `FileSystem` with `import silk.filesystem { FileSystem }`.
 
 Public declarations: 58.
 

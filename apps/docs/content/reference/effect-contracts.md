@@ -349,8 +349,8 @@ remain for their own reference areas.
 value into `Result<A, E>.Failure`.
 
 ```silk
-import silk.effect as Effect
-import silk.result as Result
+import silk.effect { Effect }
+import silk.result { Result }
 
 struct HttpError {}
 struct OutOfMemoryError {}
@@ -359,7 +359,7 @@ effect fn fetch() -> i32 ! HttpError | OutOfMemoryError {
   fail HttpError {}
 }
 
-effect fn inspect() -> Result.Result<i32, HttpError | OutOfMemoryError> {
+effect fn inspect() -> Result<i32, HttpError | OutOfMemoryError> {
   return run Effect.result(fetch())
 }
 ```

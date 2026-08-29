@@ -68,7 +68,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `HashSet` with `import silk.hash_set`.
+Import as `HashSet` with `import silk.hash_set { HashSet }`.
 
 Public declarations: 13.
 

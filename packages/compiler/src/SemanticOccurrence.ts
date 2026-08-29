@@ -214,10 +214,12 @@ const isNominalDeclaration = (
 ): declaration is
   | DeclarationFacts.StructFact
   | DeclarationFacts.EnumFact
+  | DeclarationFacts.UnionFact
   | DeclarationFacts.ServiceFact
   | DeclarationFacts.InterfaceFact =>
   declaration._tag === 'StructDeclaration' ||
   declaration._tag === 'EnumDeclaration' ||
+  declaration._tag === 'UnionDeclaration' ||
   declaration._tag === 'ServiceDeclaration' ||
   declaration._tag === 'InterfaceDeclaration'
 
@@ -227,6 +229,7 @@ const declarationByNominal = (
 ):
   | DeclarationFacts.StructFact
   | DeclarationFacts.EnumFact
+  | DeclarationFacts.UnionFact
   | DeclarationFacts.ServiceFact
   | DeclarationFacts.InterfaceFact
   | undefined =>
@@ -238,6 +241,7 @@ const declarationByNominal = (
       ): declaration is
         | DeclarationFacts.StructFact
         | DeclarationFacts.EnumFact
+        | DeclarationFacts.UnionFact
         | DeclarationFacts.ServiceFact
         | DeclarationFacts.InterfaceFact =>
         isNominalDeclaration(declaration) &&

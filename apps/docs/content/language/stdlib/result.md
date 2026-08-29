@@ -26,7 +26,7 @@ into a `Result` when a caller needs to inspect or store the outcome.
 ```silk
 import silk.result { Result }
 
-fn half(value: i32) -> Result.Result<i32, i32> {
+fn half(value: i32) -> Result<i32, i32> {
   if value == 0 {
     return Result.failResult<i32, i32>(2)
   }
@@ -45,7 +45,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Result` with `import silk.result`.
+Import as `Result` with `import silk.result { Result }`.
 
 Public declarations: 7.
 
@@ -77,6 +77,16 @@ Result<A, F>.Success { value: A }: Result<A, F>
 
 A completed success.
 
+<a id="declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a303a3a6669656c643a30"></a>
+
+#### Field `value`
+
+```silk
+pub value: A
+```
+
+The produced success value.
+
 <a id="declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a31"></a>
 
 ### `Failure`
@@ -86,6 +96,16 @@ Result<A, F>.Failure { error: F }: Result<A, F>
 ```
 
 A completed failure.
+
+<a id="declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a313a3a6669656c643a30"></a>
+
+#### Field `error`
+
+```silk
+pub error: F
+```
+
+The produced failure value.
 
 <a id="declaration-73696c6b2f726573756c743a3a73756363656564"></a>
 

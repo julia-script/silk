@@ -37,7 +37,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `UnicodeTables` with `import silk.unicode_tables`.
+Import as `UnicodeTables` with `import silk.unicode_tables { UnicodeTables }`.
 
 Public declarations: 8.
 

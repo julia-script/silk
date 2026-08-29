@@ -196,6 +196,77 @@ pub fn main() -> i32 { let secret = Secret.Open { value: 1, key: 2 } return 0 }`
   }),
 )
 
+it.effect('uses union variant field visibility as the external pattern boundary', () =>
+  Effect.gen(function* () {
+    const model = ascii(`pub union Secret { Open { pub value: i32, key: i32 }, Closed }
+pub fn make(value: i32) -> Secret { return Secret.Open { value: value, key: 7 } }`)
+    const valid = yield* multiSnapshot(
+      'app/Main',
+      new Map([
+        ['model/Secret', model],
+        [
+          'app/Main',
+          ascii(`import model.Secret { Secret, make }
+fn reveal(secret: Secret) -> i32 {
+  return match move secret {
+    Secret.Open { value, .. } => value
+    Secret.Closed => 0
+  }
+}
+pub fn main() -> i32 { return reveal(make(42)) }`),
+        ],
+      ]),
+    )
+    assert.deepEqual(Analysis.diagnostics(valid), [])
+    const outcome = Analysis.evaluate(valid)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+
+    const explicitPrivate = yield* multiSnapshot(
+      'app/Main',
+      new Map([
+        ['model/Secret', model],
+        [
+          'app/Main',
+          ascii(`import model.Secret { Secret, make }
+pub fn main() -> i32 {
+  return match move make(42) {
+    Secret.Open { value, key } => value
+    Secret.Closed => 0
+  }
+}`),
+        ],
+      ]),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(explicitPrivate).map((diagnostic) => diagnostic.code),
+      ['SEM0028'],
+    )
+
+    const undisclosedPrivate = yield* multiSnapshot(
+      'app/Main',
+      new Map([
+        ['model/Secret', model],
+        [
+          'app/Main',
+          ascii(`import model.Secret { Secret, make }
+pub fn main() -> i32 {
+  return match move make(42) {
+    Secret.Open { value } => value
+    Secret.Closed => 0
+  }
+}`),
+        ],
+      ]),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(undisclosedPrivate).map((diagnostic) => diagnostic.code),
+      ['SEM0046'],
+    )
+    assert.notInclude(Analysis.diagnostics(undisclosedPrivate).at(0)?.message ?? '', 'key')
+  }),
+)
+
 it.effect('does not synthesize fields on the nominal union parent', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.ofSource(

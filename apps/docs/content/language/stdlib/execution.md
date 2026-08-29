@@ -25,7 +25,7 @@ Dropping a dormant Execution cancels it. A retained Wake keeps the complete iner
 until the Wake is consumed or dropped. [`drive`](#declaration-73696c6b2f657865637574696f6e3a3a6472697665) returns continued ownership only to
 `onSuspend`.
 
-Import as `Execution` with `import silk.execution`.
+Import as `Execution` with `import silk.execution { Execution }`.
 
 Public declarations: 5.
 

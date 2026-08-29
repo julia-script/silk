@@ -3224,6 +3224,17 @@ export const missingPatternField = (
     span,
   })
 
+export const inaccessiblePatternFields = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: missingPatternFieldCode,
+    severity: 'error',
+    message: `Pattern for ${type} must use .. to omit inaccessible fields`,
+    reason: Object.freeze({ _tag: 'MissingPatternField', type, field: '<inaccessible>' }),
+    span,
+  })
+
 export const duplicatePatternField = (
   field: string,
   originalSpan: SourceSpan.SourceSpan,

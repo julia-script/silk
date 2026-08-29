@@ -40,7 +40,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `OsChildProcess` with `import silk.os_child_process`.
+Import as `OsChildProcess` with `import silk.os_child_process { OsChildProcess }`.
 
 Public declarations: 2.
 

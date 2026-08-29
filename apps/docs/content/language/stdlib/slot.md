@@ -62,7 +62,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Slot` with `import silk.slot`.
+Import as `Slot` with `import silk.slot { Slot }`.
 
 Public declarations: 5.
 

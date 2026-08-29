@@ -199,10 +199,11 @@ export function analyzeArguments(
       }
     } else if (
       qualifier._tag === 'Resolved' &&
-      qualifier.declaration._tag === 'StructDeclaration' &&
+      (qualifier.declaration._tag === 'StructDeclaration' ||
+        qualifier.declaration._tag === 'UnionDeclaration') &&
       NameResolution.scopedModule(qualifier.declaration) !== undefined
     ) {
-      // A nominal type doubles as the scope of the module it names: `Vector.length(...)` names a
+      // A nominal aggregate doubles as the scope of the module it names: `Vector.length(...)` names a
       // public function of `silk/vector` because `Vector` matches that module's basename. The call
       // itself already resolves that way, but arguments are analyzed first, and without the same
       // lookup they get no expected types — which reads to a borrow argument as "no borrow is

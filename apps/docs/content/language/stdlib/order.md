@@ -44,7 +44,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Order` with `import silk.order`.
+Import as `Order` with `import silk.order { Order }`.
 
 Public declarations: 11.
 

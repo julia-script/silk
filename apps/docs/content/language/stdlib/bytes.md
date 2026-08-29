@@ -54,7 +54,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Bytes` with `import silk.bytes`.
+Import as `Bytes` with `import silk.bytes { Bytes }`.
 
 Public declarations: 8.
 

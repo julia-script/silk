@@ -34,7 +34,7 @@ effect fn tokenWord() -> u64
 }
 ```
 
-Import as `Random` with `import silk.random`.
+Import as `Random` with `import silk.random { Random }`.
 
 Public declarations: 5.
 

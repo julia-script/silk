@@ -594,11 +594,11 @@ A nominal union is distinct from both other sum forms:
 independent generic parameters, explicit discriminants, or standalone type identity. Raw C unions
 and external linkage are outside this declaration form.
 
-**Diagnostics:** An empty union reports `SEM0165`; duplicate variants report `SEM0166`; an empty
-named-field variant reports `PAR0026`. Invalid variant fields preserve declaration facts for
+**Diagnostics:** An empty union reports `SEM0164`; duplicate variants report `SEM0165`; an empty
+named-field variant reports `SEM0166`. Invalid variant fields preserve declaration facts for
 tooling but make the complete parent unavailable for execution.
 
-**Evidence:** [nominal union specification](../../../../openspec/changes/add-nominal-unions/specs/nominal-unions/spec.md),
+**Evidence:** [nominal union specification](../../../../openspec/changes/add-nominal-unions/specs/bootstrap-nominal-unions/spec.md),
 [declaration tests](../../../../packages/compiler/test/DeclarationIndex.test.ts).
 
 ### NUNION-002 — Construction selects a qualified variant of one complete parent
@@ -637,7 +637,7 @@ same-spelled field. Bind a selected variant before using its payload. Constructi
 variant subtype and never flattens the parent into `A | B`.
 
 **Evidence:** [constructor and visibility tests](../../../../packages/compiler/test/StructValues.test.ts),
-[generic inference rules](../../../../openspec/changes/add-nominal-unions/specs/generic-inference/spec.md).
+[generic inference rules](../../../../openspec/changes/add-nominal-unions/specs/bootstrap-type-generics/spec.md).
 
 ### NUNION-003 — Patterns select variants hierarchically and exhaustively
 

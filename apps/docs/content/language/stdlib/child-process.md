@@ -81,7 +81,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `ChildProcess` with `import silk.child_process`.
+Import as `ChildProcess` with `import silk.child_process { ChildProcess }`.
 
 Public declarations: 41.
 

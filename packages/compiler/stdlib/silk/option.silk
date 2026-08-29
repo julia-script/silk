@@ -49,7 +49,7 @@ pub union Option<T> {
   /// The present variant, carrying the available owned value.
   Some {
     /// The value moved through present-only combinator branches.
-    value: T
+    pub value: T
   }
 }
 

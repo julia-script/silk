@@ -41,7 +41,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `StandardStreams` with `import silk.standard_streams`.
+Import as `StandardStreams` with `import silk.standard_streams { StandardStreams }`.
 
 Public declarations: 7.
 

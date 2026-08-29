@@ -60,7 +60,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `OsFileSystem` with `import silk.os_filesystem`.
+Import as `OsFileSystem` with `import silk.os_filesystem { OsFileSystem }`.
 
 Public declarations: 2.
 

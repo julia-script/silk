@@ -127,7 +127,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Effect` with `import silk.effect`.
+Import as `Effect` with `import silk.effect { Effect }`.
 
 Public declarations: 32.
 

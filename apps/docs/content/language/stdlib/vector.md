@@ -105,7 +105,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Vector` with `import silk.vector`.
+Import as `Vector` with `import silk.vector { Vector }`.
 
 Public declarations: 20.
 

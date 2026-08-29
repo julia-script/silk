@@ -36,7 +36,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `InsecureSeed` with `import silk.insecure_seed`.
+Import as `InsecureSeed` with `import silk.insecure_seed { InsecureSeed }`.
 
 Public declarations: 8.
 

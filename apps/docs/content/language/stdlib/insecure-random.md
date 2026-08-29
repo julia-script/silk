@@ -36,7 +36,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `InsecureRandom` with `import silk.insecure_random`.
+Import as `InsecureRandom` with `import silk.insecure_random { InsecureRandom }`.
 
 Public declarations: 7.
 

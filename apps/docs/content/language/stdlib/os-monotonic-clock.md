@@ -23,7 +23,7 @@ deadline overflow is a fatal trap. Linux requires `glibc` 2.17 or later and excl
 suspend time from this clock. macOS includes system suspend time. Direct WebAssembly has no
 ambient implementation.
 
-Import as `OsMonotonicClock` with `import silk.os_monotonic_clock`.
+Import as `OsMonotonicClock` with `import silk.os_monotonic_clock { OsMonotonicClock }`.
 
 Public declarations: 2.
 

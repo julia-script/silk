@@ -20,7 +20,7 @@ Completion, cancellation, and cooperative yielding notify an Execution without a
 
 Dropping a Fiber stops observation. It does not cancel the task that produces the result.
 
-Import as `Fiber` with `import silk.fiber`.
+Import as `Fiber` with `import silk.fiber { Fiber }`.
 
 Public declarations: 16.
 

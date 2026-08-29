@@ -721,7 +721,8 @@ export const complete = (options: {
         replacement: replacement.span,
         candidates: stable(enumCandidates(lookup.declaration)),
       })
-    if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'UnionDeclaration')
+    if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'UnionDeclaration') {
+      const scoped = NameResolution.scopedModule(lookup.declaration)
       return Object.freeze({
         _tag: 'CompletionResult',
         context: Object.freeze({
@@ -732,8 +733,12 @@ export const complete = (options: {
               : (qualifier ?? 'union'),
         }),
         replacement: replacement.span,
-        candidates: stable(unionCandidates(lookup.declaration)),
+        candidates: stable([
+          ...unionCandidates(lookup.declaration),
+          ...(scoped === undefined ? [] : namespaceCandidates(options.index, scoped)),
+        ]),
       })
+    }
     if (
       lookup?._tag === 'Resolved' &&
       (lookup.declaration._tag === 'StructDeclaration' ||

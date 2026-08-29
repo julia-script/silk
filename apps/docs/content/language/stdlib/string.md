@@ -33,9 +33,9 @@ import silk.usize
 
 pub fn main() -> i32 {
   let valid = String.fromUtf8(b"Silk")
-    |> unwrapOr<string, InvalidUtf8>("")
+    |> Result.unwrapOr<string, String.InvalidUtf8>("")
   let rejected = String.fromUtf8(b"a\x80")
-    |> unwrapOr<string, InvalidUtf8>("")
+    |> Result.unwrapOr<string, String.InvalidUtf8>("")
   let length = String.byteLength(valid)
     |> usize.toI32
   let rejectedLength = String.byteLength(rejected)
@@ -89,7 +89,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `String` with `import silk.string`.
+Import as `String` with `import silk.string { String }`.
 
 Public declarations: 22.
 

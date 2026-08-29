@@ -180,6 +180,39 @@ pub fn main() -> i32 { let state = State. return 0 }`
   )
 })
 
+it.effect('completes variants and module operations from a file-named nominal union', () => {
+  const source = `import state { State }
+pub fn main() -> i32 { let state = State. return 0 }`
+  return Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(source)) }).pipe(
+    Effect.provide(
+      SourceResolver.memory(
+        new Map([
+          [
+            'state',
+            encoder.encode(
+              'pub union State { Ready, Waiting { count: i32 } }\npub fn ready() -> State { return State.Ready }',
+            ),
+          ],
+        ]),
+      ),
+    ),
+    Effect.map((snapshot) => {
+      const offset = source.indexOf('State.') + 'State.'.length
+      const completion = Analysis.completionAt(snapshot, 'main', offset)
+      assert.deepEqual(
+        completion?.candidates.map((candidate) => [candidate.label, candidate.kind]),
+        [
+          ['Ready', 'Constructor'],
+          ['Waiting', 'Constructor'],
+          ['ready', 'Function'],
+          ['State', 'Type'],
+        ],
+      )
+      return undefined
+    }),
+  )
+})
+
 it.effect('navigates constructor and pattern variants through one canonical identity', () => {
   const source = `union Option<T> { Some { value: T }, None }
 fn unwrap(option: Option<i32>) -> i32 {

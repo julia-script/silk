@@ -81,7 +81,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `StandardInput` with `import silk.standard_input`.
+Import as `StandardInput` with `import silk.standard_input { StandardInput }`.
 
 Public declarations: 11.
 

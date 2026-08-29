@@ -62,7 +62,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Unicode` with `import silk.unicode`.
+Import as `Unicode` with `import silk.unicode { Unicode }`.
 
 Public declarations: 6.
 

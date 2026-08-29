@@ -642,12 +642,18 @@ such as `Status.Ready` covers that exact canonical member; a guarded occurrence 
 Enum patterns bind no payload, and `_` covers every remaining member just as it does for a
 structural union.
 
+A nominal union begins with one coverage leaf for each variant of its complete applied parent.
+`Option<i32>.Some { value }` covers only `Option<i32>.Some`; a guarded occurrence removes nothing.
+When the parent is itself a structural-union member, coverage retains the outer member and inner
+variant path rather than flattening either identity.
+
 **Boundary:** A match missing any member is invalid. A duplicate unguarded member, an arm after `_`,
 or another arm made impossible by earlier coverage is unreachable. A guarded arm alone never makes
 a member exhaustive.
 
 **Diagnostics:** An incomplete structural-union match reports `SEM0044` and lists the uncovered
-members. An unreachable arm reports `SEM0043`. Scalar enums use the more specific coverage codes:
+members or nominal variant paths. An unreachable arm reports `SEM0043`. Scalar enums use the more
+specific coverage codes:
 `SEM0158` for missing members, `SEM0159` for a duplicate unguarded member, and `SEM0160` for an arm
 after `_`. A non-boolean guard reports `SEM0045`. Consuming a provisional guard binding reports
 `OWN0008` because later arms may still need the unchanged payload.
@@ -683,12 +689,17 @@ A scalar enum member pattern selects one value but introduces no member subtype 
 narrowing. The scrutinee and every use of it remain the enum's nominal type inside and outside the
 arm.
 
+A nominal-union variant pattern narrows only the selected arm to its active payload fields. It does
+not create a variant subtype: the complete applied parent remains the value type transported into
+and out of the match.
+
 **Boundary:** Match narrowing does not introduce general subtyping, mutate a binding's declared
 type, expose a union's numeric runtime tag, or carry a borrowed member binding outside its arm.
 
 **Diagnostics:** A structural pattern member absent from the scrutinee reports `SEM0042`. A scalar
 enum pattern from another enum reports `SEM0161`; an integer literal pattern against an enum reports
-`SEM0162`. Using a member-only field without branch proof receives the ordinary field/type
+`SEM0162`. An unknown nominal variant reports `SEM0167`, and a qualifier that is not a nominal union
+reports `SEM0168`. Using a member-only field without branch proof receives the ordinary field/type
 diagnostic. Escaping a borrowed narrowed binding reports `OWN0006`.
 
 **Evidence:** [exhaustive matching specification](../../../../openspec/specs/bootstrap-exhaustive-matching/spec.md),

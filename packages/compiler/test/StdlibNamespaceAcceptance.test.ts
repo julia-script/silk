@@ -32,9 +32,9 @@ pub fn main() -> i32 {
 }`
 
 /** The selective import form keeps resolving the same members alongside the injected namespaces. */
-const selective = `import silk.vector { Vector, make }
-import silk.option { Option, some }
-import silk.result { Result, succeed }
+const selective = `import silk.vector { Vector }
+import silk.option { Option }
+import silk.result { Result }
 
 fn settled(value: Result<i32, i32>) -> i32 {
   return match move value {
@@ -51,9 +51,9 @@ fn present(value: Option<i32>) -> i32 {
 }
 
 pub fn main() -> i32 {
-  let values = make<i32>()
+  let values = Vector.make<i32>()
   drop values
-  return present(some<i32>(40)) + settled(succeed<i32, i32>(2))
+  return present(Option.some<i32>(40)) + settled(Result.succeed<i32, i32>(2))
 }`
 
 const agrees = (name: string, source: string) =>
@@ -132,7 +132,7 @@ it.effect(
 )
 
 it.effect(
-  'keeps the selective import form compiling alongside the injected namespaces',
+  'lets selectively imported nominal unions expose their module operations',
   () => agrees('stdlib-namespace/selective', selective),
   60_000,
 )

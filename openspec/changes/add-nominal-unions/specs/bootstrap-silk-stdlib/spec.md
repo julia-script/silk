@@ -46,7 +46,7 @@ dual representations MUST NOT remain.
 
 #### Scenario: Migrate standard-library operations
 
-- **WHEN** `map`, `mapError`, `flatMap`, predicates, `Effect.result`, and other Result producers or consumers are compiled
+- **WHEN** `map`, `mapError`, `flatMap`, `unwrapOr`, `Effect.result`, and other Result producers or consumers are compiled
 - **THEN** they construct and match direct Result variants without a wrapper field or detached member types
 
 #### Scenario: Remove the Result wrapper representation

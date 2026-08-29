@@ -53,7 +53,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `AllocationMetrics` with `import silk.metrics`.
+Import as `AllocationMetrics` with `import silk.metrics { AllocationMetrics }`.
 
 Public declarations: 7.
 

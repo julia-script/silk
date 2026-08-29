@@ -44,7 +44,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `HashKey` with `import silk.hash`.
+Import as `HashKey` with `import silk.hash { HashKey }`.
 
 Public declarations: 8.
 

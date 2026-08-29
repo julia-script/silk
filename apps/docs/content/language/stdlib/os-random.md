@@ -21,7 +21,7 @@ Host failure is a fatal trap because continuing with weak or partial bytes would
 service contract. GNU/Linux requires glibc 2.25 and Linux 3.17 or later. Direct WebAssembly and
 Windows do not provide this implementation.
 
-Import as `OsRandom` with `import silk.os_random`.
+Import as `OsRandom` with `import silk.os_random { OsRandom }`.
 
 Public declarations: 2.
 
