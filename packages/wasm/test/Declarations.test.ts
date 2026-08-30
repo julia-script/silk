@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Binary from '../src/Binary.js'
 import * as Builder from '../src/Builder.js'
 import * as DataActor from '../src/Data.js'
 import * as Elem from '../src/Elem.js'
@@ -184,5 +185,39 @@ it.effect('rejects duplicate names within an index space', () =>
       Import.memory(builder, 'env', 'm', { min: 1 }, { name: 'helper' }),
     )
     assert.strictEqual(memoryDuplicate?.reason._tag, 'InvalidInput')
+  }),
+)
+
+it.effect('rejects canonically equal UTF-8 names without partial commits', () =>
+  Effect.gen(function* () {
+    const builder = yield* Builder.make()
+    const type = yield* Type.func(builder, [], [])
+    const malformed = yield* Func.declare(builder, type, { name: '\uD800' })
+    const entityCollision = yield* failure(Func.declare(builder, type, { name: '\uFFFD' }))
+    assert.strictEqual(entityCollision?.reason._tag, 'InvalidInput')
+
+    const afterCollision = yield* Func.declare(builder, type, { name: 'after-collision' })
+    yield* Func.define(builder, malformed, { body: [] })
+    const localCollision = yield* failure(
+      Func.define(builder, afterCollision, {
+        locals: [
+          { type: ValType.i32, name: '\uD800' },
+          { type: ValType.i32, name: '\uFFFD' },
+        ],
+        body: [],
+      }),
+    )
+    assert.strictEqual(localCollision?.reason._tag, 'InvalidInput')
+    yield* Func.define(builder, afterCollision, {
+      locals: [{ type: ValType.i32, name: 'local' }],
+      body: [],
+    })
+
+    yield* ExportActor.func(builder, '\uD800', malformed)
+    const exportCollision = yield* failure(ExportActor.func(builder, '\uFFFD', afterCollision))
+    assert.strictEqual(exportCollision?.reason._tag, 'InvalidInput')
+    yield* ExportActor.func(builder, 'after-collision', afterCollision)
+
+    assert.isTrue(WebAssembly.validate(yield* Binary.encode(builder)))
   }),
 )

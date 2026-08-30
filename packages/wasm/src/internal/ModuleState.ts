@@ -176,7 +176,7 @@ export interface MutableState {
   datas: Array<DataEntry>
   dataHandles: Array<DataActor.Data>
   exports: Array<ExportEntry>
-  exportNames: Set<string>
+  exportNameKeys: Set<string>
   start: number | undefined
 }
 

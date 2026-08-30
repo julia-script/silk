@@ -9,12 +9,34 @@ import * as Func from '../src/Func.js'
 import * as Global from '../src/Global.js'
 import * as Import from '../src/Import.js'
 import * as Instr from '../src/Instr.js'
+import * as Utf8 from '../src/internal/Utf8.js'
 import * as Memory from '../src/Memory.js'
 import * as Table from '../src/Table.js'
 import * as Type from '../src/Type.js'
 import * as ValType from '../src/ValType.js'
 import type { WasmError } from '../src/WasmError.js'
 import * as WatText from '../src/WatText.js'
+
+const utf8Vectors = [
+  { label: 'lone high surrogate', value: '\uD800', bytes: [0xef, 0xbf, 0xbd] },
+  { label: 'lone low surrogate', value: '\uDC00', bytes: [0xef, 0xbf, 0xbd] },
+  {
+    label: 'adjacent malformed units',
+    value: '\uDC00\uD800',
+    bytes: [0xef, 0xbf, 0xbd, 0xef, 0xbf, 0xbd],
+  },
+  {
+    label: 'mixed valid and malformed text',
+    value: 'A\uD800λ\uDC00Z',
+    bytes: [0x41, 0xef, 0xbf, 0xbd, 0xce, 0xbb, 0xef, 0xbf, 0xbd, 0x5a],
+  },
+  { label: 'BMP text', value: 'AλЖZ', bytes: [0x41, 0xce, 0xbb, 0xd0, 0x96, 0x5a] },
+  {
+    label: 'supplementary pair',
+    value: 'A😀Z',
+    bytes: [0x41, 0xf0, 0x9f, 0x98, 0x80, 0x5a],
+  },
+] as const
 
 const failure = <A>(effect: Effect.Effect<A, WasmError>) =>
   effect.pipe(
@@ -75,6 +97,33 @@ const representative = Effect.gen(function* () {
   yield* ExportActor.global(builder, 'counter', counter)
   return builder
 })
+
+it('matches the TextEncoder scalar-value policy at the canonical Wasm name boundary', () => {
+  for (const vector of utf8Vectors) {
+    const actual = Utf8.encode(vector.value)
+    const expected = Uint8Array.from(vector.bytes)
+    assert.deepEqual(actual, expected, vector.label)
+  }
+})
+
+it.effect('emits valid binary and text for malformed JavaScript names', () =>
+  Effect.gen(function* () {
+    const builder = yield* Builder.make({ moduleName: 'module-\uD800' })
+    const type = yield* Type.func(builder, [], [])
+    yield* Import.func(builder, 'env-\uD800', 'import-\uDC00', type, { name: 'foreign-\uD800' })
+    const func = yield* Func.declare(builder, type, { name: 'func-\uDC00' })
+    yield* Func.define(builder, func, {
+      locals: [{ type: ValType.i32, name: 'local-\uD800' }],
+      body: [],
+    })
+    yield* ExportActor.func(builder, 'export-\uD800', func)
+
+    const bytes = yield* Binary.encode(builder)
+    assert.isTrue(WebAssembly.validate(bytes))
+    const text = yield* WatText.render(builder)
+    assert.include(text, '\\ef\\bf\\bd')
+  }),
+)
 
 it.effect('encodes a module Node’s own WebAssembly runtime accepts', () =>
   Effect.gen(function* () {
