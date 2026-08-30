@@ -705,3 +705,18 @@ pub effect fn suspend<A, E, ?R>(
 pub effect fn of<A>(value: A) -> A {
   return move value
 }
+
+import silk.monotonic_clock { MonotonicClock }
+
+/// Waits for `howLong` nanoseconds on the active [`MonotonicClock`] provider's logical timeline.
+///
+/// # Details
+///
+/// The provider decides whether the wait blocks a host thread or advances virtual time.
+///
+/// # Gotchas
+///
+/// A zero duration needs no positive timeline advance. An unrepresentable absolute deadline traps.
+pub effect fn sleep(howLong: u64) -> () ? &mut MonotonicClock {
+  return run MonotonicClock.waitFor(howLong)
+}
