@@ -129,7 +129,7 @@ pub fn main() -> i32 {
 
 Import as `Effect` with `import silk.effect { Effect }`.
 
-Public declarations: 32.
+Public declarations: 33.
 
 <a id="declaration-73696c6b2f6566666563743a3a456666656374"></a>
 
@@ -743,3 +743,21 @@ Calling `of` evaluates and transfers `value` immediately as an ordinary function
 the returned Effect does not produce that value until execution. The Effect has no typed failure
 or requirement channels. For an affine value, constructing the Effect transfers ownership into
 it, so that Effect can be consumed only once.
+
+<a id="declaration-73696c6b2f6566666563743a3a736c656570"></a>
+
+## `sleep`
+
+```silk
+pub effect fn sleep(howLong: u64) -> () ? &mut MonotonicClock
+```
+
+Waits for `howLong` nanoseconds on the active [`MonotonicClock`](./monotonic-clock.md#declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a4d6f6e6f746f6e6963436c6f636b) provider's logical timeline.
+
+### Details
+
+The provider decides whether the wait blocks a host thread or advances virtual time.
+
+### Gotchas
+
+A zero duration needs no positive timeline advance. An unrepresentable absolute deadline traps.
