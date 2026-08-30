@@ -1,0 +1,6 @@
+interface:
+  display_name: "Silk Discover"
+  short_description: "Scout and file Silk maintenance issues"
+  default_prompt: "Use $silk-discover to scout the repository and file the strongest maintenance issues in Linear."
+policy:
+  allow_implicit_invocation: false
