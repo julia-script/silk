@@ -30,6 +30,8 @@ export const fromUint8Array = (bytes: Uint8Array): ByteString => fromNumbers(byt
  *
  * Use when the input is genuinely Unicode text. LLVM identifiers and assembly fragments are
  * byte-oriented; use {@link fromUint8Array} to preserve arbitrary bytes.
+ * Unpaired UTF-16 surrogate code units are replaced with U+FFFD, matching `TextEncoder`; valid
+ * scalar values are encoded without normalization or case folding.
  *
  * **Example** (Encoding UTF-8 text)
  *
@@ -48,22 +50,23 @@ export const fromString = (value: string): ByteString => {
 
   for (const character of value) {
     const codePoint = character.codePointAt(0) ?? 0
-    if (codePoint <= 0x7f) {
-      bytes.push(codePoint)
-    } else if (codePoint <= 0x7ff) {
-      bytes.push(0xc0 | (codePoint >> 6), 0x80 | (codePoint & 0x3f))
-    } else if (codePoint <= 0xffff) {
+    const scalarValue = codePoint >= 0xd800 && codePoint <= 0xdfff ? 0xfffd : codePoint
+    if (scalarValue <= 0x7f) {
+      bytes.push(scalarValue)
+    } else if (scalarValue <= 0x7ff) {
+      bytes.push(0xc0 | (scalarValue >> 6), 0x80 | (scalarValue & 0x3f))
+    } else if (scalarValue <= 0xffff) {
       bytes.push(
-        0xe0 | (codePoint >> 12),
-        0x80 | ((codePoint >> 6) & 0x3f),
-        0x80 | (codePoint & 0x3f),
+        0xe0 | (scalarValue >> 12),
+        0x80 | ((scalarValue >> 6) & 0x3f),
+        0x80 | (scalarValue & 0x3f),
       )
     } else {
       bytes.push(
-        0xf0 | (codePoint >> 18),
-        0x80 | ((codePoint >> 12) & 0x3f),
-        0x80 | ((codePoint >> 6) & 0x3f),
-        0x80 | (codePoint & 0x3f),
+        0xf0 | (scalarValue >> 18),
+        0x80 | ((scalarValue >> 12) & 0x3f),
+        0x80 | ((scalarValue >> 6) & 0x3f),
+        0x80 | (scalarValue & 0x3f),
       )
     }
   }

@@ -97,7 +97,7 @@ export const make = Effect.fn('Builder.make')(function* (options: Options = {}) 
       datas: [],
       dataHandles: [],
       exports: [],
-      exportNames: new Set(),
+      exportNameKeys: new Set(),
       start: undefined,
     },
   })

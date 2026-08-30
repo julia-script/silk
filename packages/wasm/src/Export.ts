@@ -1,8 +1,9 @@
 /**
  * Module exports.
  *
- * Export names are UTF-8 strings that must be unique across all exports of a module; a duplicate
- * name is rejected when it is declared.
+ * Export names are UTF-8 strings that must be unique across all exports of a module. Uniqueness is
+ * based on canonical encoded identity, so source spellings that encode to the same name are
+ * rejected when declared.
  *
  * @since 0.0.0
  */
@@ -13,6 +14,7 @@ import type * as FuncActor from './Func.js'
 import type * as GlobalActor from './Global.js'
 import * as Handle from './internal/Handle.js'
 import * as ModuleState from './internal/ModuleState.js'
+import * as Utf8 from './internal/Utf8.js'
 import type * as MemoryActor from './Memory.js'
 import type * as TableActor from './Table.js'
 import type * as TagActor from './Tag.js'
@@ -32,7 +34,8 @@ const declare = (
     yield* ModuleState.mutate(builder, operation, (state, owner) =>
       Result.gen(function* () {
         const entryIndex = yield* Handle.resolve(owner, handle, tag, operation)
-        if (state.exportNames.has(name)) {
+        const nameKey = Utf8.canonicalKey(name)
+        if (state.exportNameKeys.has(nameKey)) {
           return yield* Result.fail(
             invalidInput({
               operation,
@@ -41,7 +44,7 @@ const declare = (
             }),
           )
         }
-        state.exportNames.add(name)
+        state.exportNameKeys.add(nameKey)
         state.exports.push({ name, kind, entryIndex })
       }),
     )

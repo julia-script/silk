@@ -242,6 +242,24 @@ export const fixtures = [
   ),
 
   build(
+    'malformed-names',
+    Effect.gen(function* () {
+      const builder = yield* Builder.make({ moduleName: 'module-\uD800' })
+      const type = yield* Type.func(builder, [], [])
+      yield* Import.func(builder, 'env-\uD800', 'import-\uDC00', type, {
+        name: 'foreign-\uD800',
+      })
+      const func = yield* Func.declare(builder, type, { name: 'func-\uDC00' })
+      yield* Func.define(builder, func, {
+        locals: [{ type: ValType.i32, name: 'local-\uD800' }],
+        body: [],
+      })
+      yield* Export.func(builder, 'export-\uD800', func)
+      return builder
+    }),
+  ),
+
+  build(
     'segments',
     Effect.gen(function* () {
       const builder = yield* Builder.make({ moduleName: 'segments' })
