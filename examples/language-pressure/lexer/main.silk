@@ -24,6 +24,8 @@ const tokenCharLiteral: u8 = 75
 const tokenRole: u8 = 76
 const tokenEnum: u8 = 77
 const tokenUnion: u8 = 78
+const tokenDurationLiteral: u8 = 79
+const tokenInvalidDurationLiteral: u8 = 80
 
 struct Token {
   kind: u8
@@ -398,6 +400,99 @@ fn scanIdentifier(source: &[u8], start: usize) -> usize {
   return index
 }
 
+fn scanDurationCandidate(source: &[u8], start: usize) -> usize {
+  let mut index = start
+  while index < source.length {
+    if !isIdentifierContinue(source[index]) { return index }
+    index = index + 1
+  }
+  return index
+}
+
+fn durationUnitRank(source: &[u8], start: usize, end: usize) -> i32 {
+  let width = end - start
+  if width == 1 {
+    let byte = source[start]
+    if byte == 119 { return 0 }
+    if byte == 100 { return 1 }
+    if byte == 104 { return 2 }
+    if byte == 109 { return 3 }
+    if byte == 115 { return 4 }
+    return -1
+  }
+  if width == 2 {
+    if source[start + 1] != 115 { return -1 }
+    let first = source[start]
+    if first == 109 { return 5 }
+    if first == 117 { return 6 }
+    if first == 110 { return 7 }
+  }
+  return -1
+}
+
+fn subordinateAmountIsValid(
+  source: &[u8],
+  start: usize,
+  end: usize,
+  rank: i32
+) -> bool {
+  let mut significant = start
+  while significant + 1 < end {
+    if source[significant] != 48 { break }
+    significant = significant + 1
+  }
+  let width = end - significant
+  if rank == 1 {
+    return width == 1 && source[significant] <= 54
+  }
+  if rank == 2 {
+    if width < 2 { return true }
+    if width > 2 { return false }
+    if source[significant] < 50 { return true }
+    return source[significant] == 50 && source[significant + 1] <= 51
+  }
+  if rank == 3 || rank == 4 {
+    if width < 2 { return true }
+    if width > 2 { return false }
+    return source[significant] <= 53
+  }
+  if rank == 5 || rank == 6 || rank == 7 { return width <= 3 }
+  return true
+}
+
+// Returns `end` for a valid literal, or the start of the first invalid component. Tokenization
+// needs only the first lexical failure; the compiler owns the more specific diagnostic code.
+fn invalidDurationStart(source: &[u8], start: usize, end: usize) -> usize {
+  let mut index = start
+  let mut previousRank = -1
+  let mut component = 0
+  while index < end {
+    let componentStart = index
+    while index < end {
+      if !isDecimalDigit(source[index]) { break }
+      index = index + 1
+    }
+    let amountEnd = index
+    if amountEnd == componentStart { return componentStart }
+    let unitStart = index
+    while index < end {
+      if !isAsciiLetter(source[index]) { break }
+      index = index + 1
+    }
+    let rank = durationUnitRank(source, unitStart, index)
+    if rank < 0 { return componentStart }
+    if previousRank >= rank { return componentStart }
+    if component > 0 {
+      if !subordinateAmountIsValid(source, componentStart, amountEnd, rank) {
+        return componentStart
+      }
+    }
+    previousRank = rank
+    component = component + 1
+  }
+  return end
+}
+
 fn scanNumber(source: &[u8], start: usize) -> Decision {
   let mut index = start + 1
   while index < source.length {
@@ -443,6 +538,14 @@ fn scanNumber(source: &[u8], start: usize) -> Decision {
         index = index + 1
       }
     }
+  }
+  if isAsciiLetter(byteAtOrZero(source, index)) {
+    let end = scanDurationCandidate(source, index)
+    let invalidStart = invalidDurationStart(source, start, end)
+    if invalidStart == end {
+      return Decision { kind: tokenDurationLiteral, end: end, invalid: false }
+    }
+    return Decision { kind: tokenInvalidDurationLiteral, end: end, invalid: true }
   }
   if !exponentDigits { return Decision { kind: 65, end: index, invalid: true } }
   if floating { return Decision { kind: 6, end: index, invalid: false } }
@@ -534,7 +637,11 @@ effect fn lex(source: &[u8]) -> Lexed ! OutOfMemoryError ? &mut Allocator {
     let decision = nextToken(source, index)
     let tokenAdded = run pushToken(&mut tokens, decision.kind, index, decision.end)
     if decision.invalid {
-      let diagnosticAdded = run pushDiagnostic(&mut diagnostics, index, decision.end)
+      let mut diagnosticStart = index
+      if decision.kind == tokenInvalidDurationLiteral {
+        diagnosticStart = invalidDurationStart(source, index, decision.end)
+      }
+      let diagnosticAdded = run pushDiagnostic(&mut diagnostics, diagnosticStart, decision.end)
     }
     index = decision.end
   }

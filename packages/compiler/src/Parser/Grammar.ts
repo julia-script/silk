@@ -33,6 +33,8 @@ export const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze
 export const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'DecimalInteger',
   'DecimalFloat',
+  'DurationLiteral',
+  'InvalidDurationLiteral',
   'TextLiteral',
   'ByteStringLiteral',
   'CharLiteral',

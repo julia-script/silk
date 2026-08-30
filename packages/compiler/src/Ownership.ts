@@ -1523,6 +1523,7 @@ const analyzeLoans = (
       case 'FunctionItem':
         return
       case 'Integer':
+      case 'Duration':
       case 'Floating':
       case 'Boolean':
       case 'Character':

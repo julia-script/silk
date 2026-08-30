@@ -286,6 +286,18 @@ export const parseFloatingLiteralExpression = (initial: State): NodeResult => {
   })
 }
 
+export const parseDurationLiteralExpression = (initial: State): NodeResult => {
+  const kind =
+    nextSignificantKind(initial) === 'InvalidDurationLiteral'
+      ? 'InvalidDurationLiteral'
+      : 'DurationLiteral'
+  const literal = expect(initial, kind, expressionFollowing)
+  return Object.freeze({
+    state: literal.state,
+    node: syntaxNode(literal.state, 'DurationLiteralExpression', literal.elements),
+  })
+}
+
 export const parseIdentifierExpression = (initial: State): NodeResult => {
   const identifier = expect(initial, 'Identifier', [
     'Dot',
@@ -342,6 +354,7 @@ export const primaryKind = (
   allowStructLiteral: boolean,
 ):
   | 'Integer'
+  | 'Duration'
   | 'Floating'
   | 'StaticText'
   | 'Character'
@@ -367,6 +380,8 @@ export const primaryKind = (
   while (token !== undefined) {
     if (token.kind === 'DecimalInteger') return 'Integer'
     if (token.kind === 'DecimalFloat') return 'Floating'
+    if (token.kind === 'DurationLiteral' || token.kind === 'InvalidDurationLiteral')
+      return 'Duration'
     if (
       token.kind === 'TextLiteral' ||
       token.kind === 'ByteStringLiteral' ||
@@ -1415,6 +1430,7 @@ export function parsePrimaryExpression(
   if (kind === 'Boolean') return parseBooleanLiteralExpression(initial)
   if (kind === 'StaticText') return parseStaticTextLiteralExpression(initial)
   if (kind === 'Character') return parseCharacterLiteralExpression(initial)
+  if (kind === 'Duration') return parseDurationLiteralExpression(initial)
   if (kind === 'Floating') return parseFloatingLiteralExpression(initial)
   if (kind === 'Identifier') return parseIdentifierExpression(initial)
   if (kind === 'Grouped') return parseGroupedExpression(initial, reservedForEnclosingCalls, depth)

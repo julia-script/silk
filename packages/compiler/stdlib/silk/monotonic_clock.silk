@@ -15,6 +15,16 @@
 //! virtual providers may satisfy a wait by advancing their own timeline without sleeping. An
 //! invalid or unrepresentable provider result traps because this service has no typed failure
 //! channel.
+//!
+//! # Examples
+//! ## Wait for one fixed duration on the active provider
+//! ```silk
+//! import silk.monotonic_clock as MonotonicClock
+//!
+//! effect fn pause() -> () ? &mut MonotonicClock.MonotonicClock {
+//!   return run MonotonicClock.waitFor(300ms)
+//! }
+//! ```
 
 import silk.system_clock { Instant }
 

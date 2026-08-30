@@ -123,7 +123,58 @@ and an exponent with no digits are invalid numeric spellings.
 [integer lexer tests](../../../../packages/compiler/test/Lexer.test.ts),
 [floating-point tests](../../../../packages/compiler/test/FloatingPointScalars.test.ts).
 
-## LEXICAL-005 — Static text and byte literals have a closed form vocabulary
+## LEXICAL-005 — Duration literals use canonical fixed-unit components
+
+**Status:** Confirmed
+
+A duration literal is one or more adjacent decimal components. Each component is a whole decimal
+amount followed immediately by one exact lowercase unit suffix:
+
+```text
+duration  = component+
+component = decimal-digits ("w" | "d" | "h" | "m" | "s" | "ms" | "us" | "ns")
+```
+
+Digit separators may group an amount under the ordinary between-digits rule. Units in a compound
+must appear at most once and in strictly descending order: `w`, `d`, `h`, `m`, `s`, `ms`, `us`,
+then `ns`. Omitted units are valid. Zero components and leading-zero padding remain part of the
+source token.
+
+```silk
+const pollInterval: u64 = 300ms
+const alignedTimeout: u64 = 01h05m00s
+const preciseWindow: u64 = 1s999ms999us999ns
+```
+
+The first component is limited only by the final `u64` nanosecond range. Every later component is
+a canonical subordinate field:
+
+| Unit | Later-component range |
+| --- | --- |
+| `d` | `0...6` |
+| `h` | `0...23` |
+| `m`, `s` | `0...59` |
+| `ms`, `us`, `ns` | `0...999` |
+
+Whitespace and punctuation end a duration token. `1h30m30s` is one literal, `1h + 30m + 30s` is
+three literals joined by operators, and `1h 30m` is two adjacent expressions rather than one
+compound.
+
+**Boundary:** A numeric token immediately followed by ASCII letters commits to duration
+recognition. Malformed candidates such as `1.5s`, `0x10s`, `3sec`, `1H`, `1h60m`, `1m1h`, and
+`1h1h` remain one `InvalidDurationLiteral`; they do not split into a number and identifier. A
+standalone exponent spelling such as `1e5` remains a floating literal because no unit follows it.
+
+**Diagnostics:** A malformed candidate produces exactly one focused lexical diagnostic. Invalid
+amounts report `LEX0008`, unknown units `LEX0009`, repeated units `LEX0010`, out-of-order units
+`LEX0011`, and subordinate fields outside their range `LEX0012`. Invalid digit separators retain
+`LEX0005`.
+
+**Evidence:** [duration literal specification](../../../../openspec/changes/add-duration-literals/specs/duration-literals/spec.md),
+[duration actor](../../../../packages/compiler/src/internal/DurationLiteral.ts),
+[lexer tests](../../../../packages/compiler/test/Lexer.test.ts).
+
+## LEXICAL-006 — Static text and byte literals have a closed form vocabulary
 
 **Status:** Confirmed
 
@@ -175,7 +226,7 @@ diagnostic without publishing a partial value.
 [raw-string acceptance tests](../../../../packages/compiler/test/RawStringAcceptance.test.ts),
 [static text specification](../../../../openspec/specs/bootstrap-static-text/spec.md).
 
-## LEXICAL-006 — A character literal denotes exactly one Unicode scalar
+## LEXICAL-007 — A character literal denotes exactly one Unicode scalar
 
 **Status:** Confirmed
 
@@ -203,7 +254,7 @@ reports `LEX0003`; malformed escapes receive their literal diagnostic.
 [character scalar tests](../../../../packages/compiler/test/CharacterScalar.test.ts),
 [literal-form tests](../../../../packages/compiler/test/LiteralForm.test.ts).
 
-## LEXICAL-007 — Tokenization is longest and lossless
+## LEXICAL-008 — Tokenization is longest and lossless
 
 **Status:** Confirmed
 

@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Option from 'effect/Option'
 import * as FloatingPoint from '../src/FloatingPoint.js'
 import * as DigitSeparator from '../src/internal/DigitSeparator.js'
+import * as DurationLiteral from '../src/internal/DurationLiteral.js'
 import * as IntegerLiteral from '../src/internal/IntegerLiteral.js'
 import * as Lexer from '../src/Lexer.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -33,6 +34,150 @@ const tokenView = (
     slice: String.fromCharCode(...bytes),
   }
 }
+
+it('parses canonical duration components into exact nanoseconds', () => {
+  const parsed = DurationLiteral.parse(ascii('01h05m00s'))
+  assert.strictEqual(parsed._tag, 'Valid')
+  if (parsed._tag === 'Invalid') return
+
+  assert.strictEqual(parsed.nanoseconds, 3_900_000_000_000n)
+  assert.deepEqual(
+    parsed.components.map(({ amount, unit }) => ({ amount, unit })),
+    [
+      { amount: 1n, unit: 'h' },
+      { amount: 5n, unit: 'm' },
+      { amount: 0n, unit: 's' },
+    ],
+  )
+})
+
+it('keeps duration scaling exact across separators, skipped units, and u64 edges', () => {
+  const cases: ReadonlyArray<readonly [string, bigint]> = [
+    ['1_000ms', 1_000_000_000n],
+    ['1h00s', 3_600_000_000_000n],
+    ['7d', 604_800_000_000_000n],
+    ['24h', 86_400_000_000_000n],
+    ['60s', 60_000_000_000n],
+    ['1000ns', 1_000n],
+    ['1s999ms999us999ns', 1_999_999_999n],
+    ['18446744073709551615ns', 18_446_744_073_709_551_615n],
+    ['18446744073709551616ns', 18_446_744_073_709_551_616n],
+  ]
+
+  for (const [spelling, expected] of cases) {
+    const parsed = DurationLiteral.parse(ascii(spelling))
+    assert.strictEqual(parsed._tag, 'Valid', spelling)
+    if (parsed._tag === 'Valid') assert.strictEqual(parsed.nanoseconds, expected, spelling)
+  }
+})
+
+it('recognizes canonical duration literals as one token', () => {
+  const text = '3s 1h30m30s 300ms 1d 1w2d3h4m5s6ms7us8ns 01h05m00s 60m 1000ms'
+  const source = SourceFile.make('memory://durations.silk', ascii(text))
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace' && token.kind !== 'EndOfFile')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'DurationLiteral', start: 0, end: 2, slice: '3s' },
+      { kind: 'DurationLiteral', start: 3, end: 11, slice: '1h30m30s' },
+      { kind: 'DurationLiteral', start: 12, end: 17, slice: '300ms' },
+      { kind: 'DurationLiteral', start: 18, end: 20, slice: '1d' },
+      { kind: 'DurationLiteral', start: 21, end: 40, slice: '1w2d3h4m5s6ms7us8ns' },
+      { kind: 'DurationLiteral', start: 41, end: 50, slice: '01h05m00s' },
+      { kind: 'DurationLiteral', start: 51, end: 54, slice: '60m' },
+      { kind: 'DurationLiteral', start: 55, end: 61, slice: '1000ms' },
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
+
+it('commits malformed numeric-plus-letter candidates to one invalid duration token', () => {
+  const text = '3sec 1H 1.5s 0x10s 1e5s 1h60m 1m1h 1h1h 1h_'
+  const source = SourceFile.make('memory://invalid-durations.silk', ascii(text))
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace' && token.kind !== 'EndOfFile')
+      .map((token) => tokenView(source, token)),
+    [
+      { kind: 'InvalidDurationLiteral', start: 0, end: 4, slice: '3sec' },
+      { kind: 'InvalidDurationLiteral', start: 5, end: 7, slice: '1H' },
+      { kind: 'InvalidDurationLiteral', start: 8, end: 12, slice: '1.5s' },
+      { kind: 'InvalidDurationLiteral', start: 13, end: 18, slice: '0x10s' },
+      { kind: 'InvalidDurationLiteral', start: 19, end: 23, slice: '1e5s' },
+      { kind: 'InvalidDurationLiteral', start: 24, end: 29, slice: '1h60m' },
+      { kind: 'InvalidDurationLiteral', start: 30, end: 34, slice: '1m1h' },
+      { kind: 'InvalidDurationLiteral', start: 35, end: 39, slice: '1h1h' },
+      { kind: 'InvalidDurationLiteral', start: 40, end: 43, slice: '1h_' },
+    ],
+  )
+  assert.deepEqual(
+    result.diagnostics.map(({ code, reason, span }) => ({
+      code,
+      reason,
+      span: [span.start, span.end],
+    })),
+    [
+      { code: 'LEX0009', reason: { _tag: 'UnknownDurationUnit', spelling: 'sec' }, span: [1, 4] },
+      { code: 'LEX0009', reason: { _tag: 'UnknownDurationUnit', spelling: 'H' }, span: [6, 7] },
+      { code: 'LEX0008', reason: { _tag: 'InvalidDurationAmount' }, span: [8, 11] },
+      { code: 'LEX0008', reason: { _tag: 'InvalidDurationAmount' }, span: [13, 17] },
+      { code: 'LEX0008', reason: { _tag: 'InvalidDurationAmount' }, span: [19, 22] },
+      {
+        code: 'LEX0012',
+        reason: {
+          _tag: 'SubordinateDurationOutOfRange',
+          unit: 'm',
+          amount: '60',
+          maximum: '59',
+        },
+        span: [26, 29],
+      },
+      {
+        code: 'LEX0011',
+        reason: { _tag: 'OutOfOrderDurationUnit', unit: 'h', previous: 'm' },
+        span: [33, 34],
+      },
+      {
+        code: 'LEX0010',
+        reason: { _tag: 'RepeatedDurationUnit', unit: 'h' },
+        span: [38, 39],
+      },
+      { code: 'LEX0008', reason: { _tag: 'InvalidDurationAmount' }, span: [42, 43] },
+    ],
+  )
+})
+
+it('stops duration candidates at expression and member boundaries', () => {
+  const source = SourceFile.make(
+    'memory://duration-boundaries.silk',
+    ascii('1e5 1h + 30m + 30s 1h 30m 1h.member'),
+  )
+  const result = Lexer.lex(source)
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    [
+      'DecimalFloat',
+      'DurationLiteral',
+      'Plus',
+      'DurationLiteral',
+      'Plus',
+      'DurationLiteral',
+      'DurationLiteral',
+      'DurationLiteral',
+      'DurationLiteral',
+      'Dot',
+      'Identifier',
+      'EndOfFile',
+    ],
+  )
+  assert.deepEqual(result.diagnostics, [])
+})
 
 it('matches the bootstrap fixture with exact kinds, spans, and slices', () => {
   const source = SourceFile.make('fixture://bootstrap.silk', ascii(fixtureSource))
@@ -363,7 +508,7 @@ it('keeps unprefixed zero and decimal fractions at their existing kinds', () => 
   assert.deepEqual(result.diagnostics, [])
 })
 
-it('stops a prefixed literal before any fraction, exponent, or foreign digit', () => {
+it('stops a prefixed literal at punctuation and commits a following letter candidate', () => {
   const source = SourceFile.make('memory://prefixed-boundaries.silk', ascii('0xff.5 0b1e5 0o18'))
   const result = Lexer.lex(source)
   assert.deepEqual(
@@ -374,13 +519,15 @@ it('stops a prefixed literal before any fraction, exponent, or foreign digit', (
       { kind: 'DecimalInteger', start: 0, end: 4, slice: '0xff' },
       { kind: 'Dot', start: 4, end: 5, slice: '.' },
       { kind: 'DecimalInteger', start: 5, end: 6, slice: '5' },
-      { kind: 'DecimalInteger', start: 7, end: 10, slice: '0b1' },
-      { kind: 'Identifier', start: 10, end: 12, slice: 'e5' },
+      { kind: 'InvalidDurationLiteral', start: 7, end: 12, slice: '0b1e5' },
       { kind: 'DecimalInteger', start: 13, end: 16, slice: '0o1' },
       { kind: 'DecimalInteger', start: 16, end: 17, slice: '8' },
     ],
   )
-  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(
+    result.diagnostics.map(({ code, reason }) => ({ code, reason })),
+    [{ code: 'LEX0008', reason: { _tag: 'InvalidDurationAmount' } }],
+  )
 })
 
 it('diagnoses a base prefix without digits exactly once and resumes lexing', () => {

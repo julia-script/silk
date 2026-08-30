@@ -96,6 +96,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'ContinueStatement',
   'ConstantDeclaration',
   'DropStatement',
+  'DurationLiteralExpression',
   'EffectExpression',
   'EnumDeclaration',
   'EnumMember',
@@ -179,6 +180,24 @@ it.effect('formats a generic effect catch pipeline canonically and idempotently'
     )
     const second = yield* SyntaxFormatter.format(parse('memory://effect-catch-pipeline.silk', text))
     assert.strictEqual(formattedText(second), text)
+  }),
+)
+
+it.effect('preserves duration component spelling while formatting surrounding expressions', () =>
+  Effect.gen(function* () {
+    const source = 'fn main()->u64{return 01h05m00s+1h0m30s+1_000ms}'
+    const first = yield* SyntaxFormatter.format(parse('memory://duration-format.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `fn main() -> u64 {
+  return 01h05m00s + 1h0m30s + 1_000ms
+}
+`,
+    )
+    const second = yield* SyntaxFormatter.format(parse('memory://duration-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
+    assert.strictEqual(second.changed, false)
   }),
 )
 
@@ -985,6 +1004,7 @@ it.effect('prints and reparses the complete current grammar surface', () =>
   Effect.gen(function* () {
     const source = `import Core.Math as Math { add as plus, subtract }
 pub const limit:i32=2
+pub const timeout:u64=01h05m00s
 pub struct Pair {
   pub left: [i32; 2]
   right: bool

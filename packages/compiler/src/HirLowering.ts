@@ -371,6 +371,16 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
         })
       : Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
   }
+  if (fact._tag === 'Duration') {
+    return fact.value !== undefined && fact.type._tag === 'Available'
+      ? Object.freeze({
+          _tag: 'IntegerLiteral',
+          value: fact.value,
+          type: 'u64',
+          span: fact.syntax.span,
+        })
+      : Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+  }
   if (fact._tag === 'Floating') {
     return fact.floating._tag === 'Available'
       ? Object.freeze({
@@ -1648,6 +1658,7 @@ export const directExpressionChildren = (
     case 'EffectBlock':
     case 'Match':
     case 'Integer':
+    case 'Duration':
     case 'Floating':
     case 'StaticText':
     case 'Character':

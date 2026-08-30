@@ -1777,6 +1777,7 @@ const lexicalTokenType = (kind: Token.TokenKind): string | undefined => {
       return SemanticTokenTypes.string
     case 'DecimalInteger':
     case 'DecimalFloat':
+    case 'DurationLiteral':
       return SemanticTokenTypes.number
     case 'Equals':
     case 'EqualEqual':

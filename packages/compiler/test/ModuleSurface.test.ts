@@ -134,6 +134,19 @@ pub const enabled: bool = true`
   }),
 )
 
+it.effect('normalizes duration constant spellings to their exact fixed-u64 surface value', () =>
+  Effect.gen(function* () {
+    const compact = yield* surface('pub const timeout: u64 = 1h5m')
+    const padded = yield* surface('pub const timeout: u64 = 01h05m00s')
+    const changed = yield* surface('pub const timeout: u64 = 1h6m')
+
+    assert.strictEqual(ModuleSurface.equals(compact, padded), true)
+    assert.strictEqual(ModuleSurface.equals(compact, changed), false)
+    assert.include(compact.canonical, 'DurationLiteral')
+    assert.include(compact.canonical, '3900000000000')
+  }),
+)
+
 it.effect('ignores bodies and source positions while retaining header meaning', () =>
   Effect.gen(function* () {
     const left = yield* surface(`fn helper() -> i32 { return 1 }

@@ -23,6 +23,62 @@ const build = () => {
   return { lexical, parser, semantic }
 }
 
+it('publishes structured duration diagnostics with focused spans', () => {
+  const diagnostics = [
+    Diagnostic.invalidDurationAmount(spanAt(0, 3)),
+    Diagnostic.unknownDurationUnit('sec', spanAt(4, 7)),
+    Diagnostic.repeatedDurationUnit('h', spanAt(9, 10)),
+    Diagnostic.outOfOrderDurationUnit('h', 'm', spanAt(12, 13)),
+    Diagnostic.subordinateDurationOutOfRange('m', 60n, 59n, spanAt(14, 17)),
+    Diagnostic.durationOutOfRange('18446744073709551616ns', spanAt(18, 40)),
+  ]
+
+  assert.deepEqual(
+    diagnostics.map(({ code, reason, span }) => ({
+      code,
+      reason,
+      span: [span.start, span.end],
+    })),
+    [
+      { code: 'LEX0008', reason: { _tag: 'InvalidDurationAmount' }, span: [0, 3] },
+      {
+        code: 'LEX0009',
+        reason: { _tag: 'UnknownDurationUnit', spelling: 'sec' },
+        span: [4, 7],
+      },
+      {
+        code: 'LEX0010',
+        reason: { _tag: 'RepeatedDurationUnit', unit: 'h' },
+        span: [9, 10],
+      },
+      {
+        code: 'LEX0011',
+        reason: { _tag: 'OutOfOrderDurationUnit', unit: 'h', previous: 'm' },
+        span: [12, 13],
+      },
+      {
+        code: 'LEX0012',
+        reason: {
+          _tag: 'SubordinateDurationOutOfRange',
+          unit: 'm',
+          amount: '60',
+          maximum: '59',
+        },
+        span: [14, 17],
+      },
+      {
+        code: 'SEM0170',
+        reason: {
+          _tag: 'DurationOutOfRange',
+          spelling: '18446744073709551616ns',
+          maximum: '18446744073709551615',
+        },
+        span: [18, 40],
+      },
+    ],
+  )
+})
+
 it('publishes structured scalar enum diagnostics with exact related spans', () => {
   const declaration = spanAt(0, 12)
   const first = spanAt(16, 21)

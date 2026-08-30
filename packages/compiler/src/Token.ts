@@ -9,6 +9,8 @@ export type TokenKind =
   | 'Identifier'
   | 'DecimalInteger'
   | 'DecimalFloat'
+  | 'DurationLiteral'
+  | 'InvalidDurationLiteral'
   | 'TextLiteral'
   | 'ByteStringLiteral'
   | 'CharLiteral'
@@ -90,6 +92,8 @@ const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
   Identifier: 'identifier',
   DecimalInteger: 'decimal integer',
   DecimalFloat: 'decimal floating-point literal',
+  DurationLiteral: 'duration literal',
+  InvalidDurationLiteral: 'invalid duration literal',
   TextLiteral: 'text literal',
   ByteStringLiteral: 'byte-string literal',
   CharLiteral: 'character literal',

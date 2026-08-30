@@ -35,6 +35,21 @@ export const missingExponentDigitsCode = 'LEX0006' as const
 /** Stable code for a character literal that denotes a number of scalars other than one. */
 export const characterLiteralScalarCountCode = 'LEX0007' as const
 
+/** Stable code for a duration component amount that is not a whole decimal integer. */
+export const invalidDurationAmountCode = 'LEX0008' as const
+
+/** Stable code for an identifier-like suffix outside the duration unit vocabulary. */
+export const unknownDurationUnitCode = 'LEX0009' as const
+
+/** Stable code for a duration unit repeated within one compact literal. */
+export const repeatedDurationUnitCode = 'LEX0010' as const
+
+/** Stable code for duration components that do not descend from larger to smaller units. */
+export const outOfOrderDurationUnitCode = 'LEX0011' as const
+
+/** Stable code for a subordinate duration component outside its canonical field bound. */
+export const subordinateDurationOutOfRangeCode = 'LEX0012' as const
+
 /** Stable code for one required token that is absent at its insertion position. */
 export const missingTokenCode = 'PAR0001' as const
 
@@ -333,6 +348,9 @@ export const expectedNominalUnionCode = 'SEM0168' as const
 /** Stable code for construction through an incomplete nominal union declaration. */
 export const invalidNominalUnionConstructionCode = 'SEM0169' as const
 
+/** Stable code for a duration literal whose exact nanosecond total exceeds `u64`. */
+export const durationOutOfRangeCode = 'SEM0170' as const
+
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
 export const partialMoveCode = 'OWN0002' as const
@@ -369,6 +387,11 @@ export type Code =
   | typeof invalidDigitSeparatorCode
   | typeof missingExponentDigitsCode
   | typeof characterLiteralScalarCountCode
+  | typeof invalidDurationAmountCode
+  | typeof unknownDurationUnitCode
+  | typeof repeatedDurationUnitCode
+  | typeof outOfOrderDurationUnitCode
+  | typeof subordinateDurationOutOfRangeCode
   | typeof missingTokenCode
   | typeof unexpectedTokensCode
   | typeof reservedTemplateSyntaxCode
@@ -538,6 +561,7 @@ export type Code =
   | typeof unknownUnionVariantCode
   | typeof expectedNominalUnionCode
   | typeof invalidNominalUnionConstructionCode
+  | typeof durationOutOfRangeCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -586,6 +610,20 @@ export type Reason =
   | { readonly _tag: 'InvalidDigitSeparator' }
   | { readonly _tag: 'MissingExponentDigits' }
   | { readonly _tag: 'CharacterLiteralScalarCount'; readonly scalars: number }
+  | { readonly _tag: 'InvalidDurationAmount' }
+  | { readonly _tag: 'UnknownDurationUnit'; readonly spelling: string }
+  | { readonly _tag: 'RepeatedDurationUnit'; readonly unit: string }
+  | {
+      readonly _tag: 'OutOfOrderDurationUnit'
+      readonly unit: string
+      readonly previous: string
+    }
+  | {
+      readonly _tag: 'SubordinateDurationOutOfRange'
+      readonly unit: string
+      readonly amount: string
+      readonly maximum: string
+    }
   | { readonly _tag: 'MissingToken'; readonly expected: Token.TokenKind }
   | {
       readonly _tag: 'UnexpectedTokens'
@@ -610,6 +648,11 @@ export type Reason =
   | { readonly _tag: 'UnknownUnionVariant'; readonly union: string; readonly variant: string }
   | { readonly _tag: 'ExpectedNominalUnion'; readonly actual: string }
   | { readonly _tag: 'InvalidNominalUnionConstruction'; readonly union: string }
+  | {
+      readonly _tag: 'DurationOutOfRange'
+      readonly spelling: string
+      readonly maximum: '18446744073709551615'
+    }
   | { readonly _tag: 'UnknownModule'; readonly module: string }
   | { readonly _tag: 'SelfImport'; readonly module: string }
   | { readonly _tag: 'ReservedModuleIdentity'; readonly module: string }
@@ -1368,6 +1411,80 @@ export const characterLiteralScalarCount = (
     severity: 'error',
     message: `Character literal must hold exactly one Unicode scalar, but holds ${scalars}`,
     reason: Object.freeze({ _tag: 'CharacterLiteralScalarCount', scalars }),
+    span,
+  })
+
+/** Creates the lexical diagnostic for a duration amount that is not a whole decimal integer. */
+export const invalidDurationAmount = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'lexical',
+    code: invalidDurationAmountCode,
+    severity: 'error',
+    message: 'Duration components require whole decimal amounts',
+    reason: Object.freeze({ _tag: 'InvalidDurationAmount' }),
+    span,
+  })
+
+/** Creates the lexical diagnostic for one unknown duration unit suffix. */
+export const unknownDurationUnit = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'lexical',
+    code: unknownDurationUnitCode,
+    severity: 'error',
+    message: `Unknown duration unit ${spelling}`,
+    reason: Object.freeze({ _tag: 'UnknownDurationUnit', spelling }),
+    span,
+  })
+
+/** Creates the lexical diagnostic for one duration unit repeated in a compact literal. */
+export const repeatedDurationUnit = (unit: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'lexical',
+    code: repeatedDurationUnitCode,
+    severity: 'error',
+    message: `Duration unit ${unit} may appear only once`,
+    reason: Object.freeze({ _tag: 'RepeatedDurationUnit', unit }),
+    span,
+  })
+
+/** Creates the lexical diagnostic for a duration unit written after a smaller unit. */
+export const outOfOrderDurationUnit = (
+  unit: string,
+  previous: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'lexical',
+    code: outOfOrderDurationUnitCode,
+    severity: 'error',
+    message: `Duration unit ${unit} must not follow ${previous}`,
+    reason: Object.freeze({ _tag: 'OutOfOrderDurationUnit', unit, previous }),
+    span,
+  })
+
+/** Creates the lexical diagnostic for a non-leading duration component outside its field bound. */
+export const subordinateDurationOutOfRange = (
+  unit: string,
+  amount: bigint,
+  maximum: bigint,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'lexical',
+    code: subordinateDurationOutOfRangeCode,
+    severity: 'error',
+    message: `Subordinate ${unit} component ${amount} exceeds ${maximum}`,
+    reason: Object.freeze({
+      _tag: 'SubordinateDurationOutOfRange',
+      unit,
+      amount: amount.toString(),
+      maximum: maximum.toString(),
+    }),
     span,
   })
 
@@ -2292,6 +2409,22 @@ export const integerOutOfRange = (spelling: string, span: SourceSpan.SourceSpan)
       spelling,
       maximum: 2147483647,
       minimum: -2147483648,
+    }),
+    span,
+  })
+
+/** Creates the semantic diagnostic for a duration total outside the fixed `u64` domain. */
+export const durationOutOfRange = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: durationOutOfRangeCode,
+    severity: 'error',
+    message: 'Duration literal exceeds the u64 nanosecond range',
+    reason: Object.freeze({
+      _tag: 'DurationOutOfRange',
+      spelling,
+      maximum: '18446744073709551615',
     }),
     span,
   })

@@ -122,6 +122,16 @@ export type IntegerExpressionFact =
       readonly syntax: SyntaxTree.Element
     }
 
+/** One fixed-`u64` duration expression after exact nanosecond scaling. */
+export interface DurationExpressionFact {
+  readonly _tag: 'Duration'
+  readonly value?: bigint
+  readonly spelling?: string
+  readonly token?: Token.Token
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
 export type FloatingExpressionFact =
   | {
       readonly _tag: 'Available'
@@ -891,6 +901,7 @@ export type ExpressionFact =
       readonly type: ExpressionTypeFact
       readonly syntax: SyntaxTree.Node
     }
+  | DurationExpressionFact
   | {
       readonly _tag: 'Floating'
       readonly floating: FloatingExpressionFact
@@ -1403,6 +1414,7 @@ export const unionConversionDiagnostic = (
 
 export const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'IntegerLiteralExpression',
+  'DurationLiteralExpression',
   'FloatingLiteralExpression',
   'StaticTextLiteralExpression',
   'CharacterLiteralExpression',
