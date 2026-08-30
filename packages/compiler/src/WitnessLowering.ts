@@ -14,7 +14,7 @@ import { lowerExpression } from './LowerExpression.js'
 import * as Mir from './Mir.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
-import { baseRunnerKey, witnessEffectValueType } from './ValueType.js'
+import { baseRunnerKey, effectValueAtSite } from './ValueType.js'
 
 export const emitWitnessDispatch = (
   fn: FunctionLowering,
@@ -332,7 +332,7 @@ export const lowerWitnessEffect = (
       : (expression.interfaceOperation?.operation ?? ''),
   )
   if (target === undefined && intrinsic?.rule._tag !== 'BuiltinRule') return undefined
-  const type = witnessEffectValueType(fn.layout, fn.owner.key, site)
+  const type = effectValueAtSite(fn.layout, fn.owner.key, site)
   if (type === undefined) return undefined
   const operands = lowerInterfaceOperands(
     fn,

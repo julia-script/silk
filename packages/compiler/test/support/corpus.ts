@@ -16,6 +16,7 @@ import {
   ownedProviderSuspendedFailure,
   ownedProviderSuspendedSuccess,
 } from './ownedAllocatorSuspension.js'
+import { recoveredProvidedWrite, recoveredWriterModule } from './recoveredProvidedWrite.js'
 import { storedCatchSuspension } from './storedCatchSuspension.js'
 
 // folded from Transcendental.test.ts: the canonical-bits program is generated from the pinned
@@ -68,7 +69,9 @@ export interface CorpusProgram {
   readonly name: string
   readonly source: string
   readonly nativeSource?: string
+  readonly nativeImports?: Readonly<Record<string, string>>
   readonly nativeEnvironment?: Readonly<Record<string, string>>
+  readonly nativeStdout?: string
   readonly expected:
     | { readonly _tag: 'Completes'; readonly result: number }
     | { readonly _tag: 'Trap' }
@@ -2740,6 +2743,14 @@ pub fn main() -> i32 {
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   ...corpus,
+  {
+    name: 'recovered-provided-write',
+    source: 'pub fn main() -> i32 { return 0 }',
+    nativeSource: recoveredProvidedWrite,
+    nativeImports: { recovered_writer: recoveredWriterModule },
+    nativeStdout: 'Hello',
+    expected: { _tag: 'Completes', result: 0 },
+  },
   {
     name: 'secure-random-provider',
     source: deterministicSecureRandom,

@@ -10,29 +10,39 @@ import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirNormalization from '../src/MirNormalization.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
-import type * as Ownership from '../src/Ownership.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import * as SuspensionMir from '../src/SuspensionMir.js'
 import * as SuspensionOwnership from '../src/SuspensionOwnership.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
 import { unreachable } from './support/raise.js'
+import { recoveredProvidedWrite, recoveredWriterModule } from './support/recoveredProvidedWrite.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
-  const snapshot = yield* Analysis.ofSourceRealized(
-    name,
-    ascii(source),
-    Target.wasm32UnknownUnknown.id,
-  )
+const lowerStored = Effect.fnUntraced(function* (
+  name: string,
+  source: string,
+  imports: ReadonlyMap<string, Uint8Array> = new Map(),
+) {
+  const snapshot = yield* Analysis.makeRealized({
+    root: SourceFile.make(name, ascii(source)),
+    target: Target.wasm32UnknownUnknown.id,
+  }).pipe(Effect.provide(SourceResolver.memory(imports)))
   const catalog = Layout.catalog(Target.wasm32UnknownUnknown, snapshot.index, snapshot.instances)
   const layout = Layout.plan(catalog, snapshot.instances, snapshot.index)
-  const ownership = Analysis.ownershipOf(snapshot, name) ?? unreachable('expected module ownership')
+  const ownership = new Map(
+    [name, ...imports.keys()].map((module) => [
+      module,
+      Analysis.ownershipOf(snapshot, module) ?? unreachable(`expected ownership for ${module}`),
+    ]),
+  )
   const module = Lower.lowerProgram(
     snapshot.instances,
-    new Map<string, Ownership.ModuleOwnership>([[name, ownership]]),
+    ownership,
     layout,
     snapshot.index,
     OpaqueRealization.catalogOf(snapshot),
@@ -266,6 +276,64 @@ pub fn main() -> i32 {
       'InvalidEffectOperation',
     )
   }),
+)
+
+it.effect('retains provided runner contracts through typed-failure recovery', () =>
+  Effect.gen(function* () {
+    const { snapshot, module } = yield* lowerStored(
+      'stored-effect-mir/recovered-provided-write',
+      recoveredProvidedWrite,
+      new Map([['recovered_writer', ascii(recoveredWriterModule)]]),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(MirVerification.verify(module), [])
+
+    const providedRun = module.functions
+      .flatMap(MirVerification.operations)
+      .find(
+        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'RunEffectValue' }> =>
+          operation._tag === 'RunEffectValue' &&
+          operation.runnerBase !== undefined &&
+          operation.runnerBase.declaration.name.includes('impl@0.writeAll'),
+      )
+    assert.isDefined(providedRun)
+    if (providedRun === undefined || providedRun.runnerBase === undefined) return
+    assert.strictEqual(providedRun.providers.length, 1)
+    assert.strictEqual(providedRun.providers.at(0)?.capability.name, 'Writer')
+    assert.strictEqual(providedRun.providers.at(0)?.providerType.name, 'StdoutWriter')
+    assert.strictEqual(providedRun.providers.at(0)?.role, 'DefaultRole')
+    assert.strictEqual(providedRun.providers.at(0)?.requirementAccess, 'Exclusive')
+    assert.strictEqual(providedRun.providers.at(0)?.access, 'Exclusive')
+
+    const retainedRunner = module.functions.find(
+      (fn) => fn.id.module === providedRun.runner.module && fn.id.name === providedRun.runner.name,
+    )
+    assert.isDefined(retainedRunner)
+    assert.deepEqual(retainedRunner?.effectRunner?.base, providedRun.runnerBase)
+    assert.deepEqual(
+      retainedRunner?.effectRunner?.providers,
+      providedRun.providers.map(({ argument: _argument, ...provider }) => provider),
+    )
+  }),
+)
+
+it.effect(
+  'materializes nested intrinsic Effect captures with their executable representation',
+  () =>
+    Effect.gen(function* () {
+      const { snapshot, module } = yield* lowerStored(
+        'stored-effect-mir/nested-intrinsic-effect',
+        `import silk.effect { Effect }
+effect fn pass<A, E, ?R>(self: once Effect<A ! E ? R>) -> A ! E ? R {
+  return run move self
+}
+pub fn main() -> i32 {
+  return run Intrinsic.suspendEffect(effect { return 42 }) |> pass
+}`,
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      assert.deepEqual(MirVerification.verify(module), [])
+    }),
 )
 
 it.effect('resolves unrun stored Effect cleanup before MIR', () =>

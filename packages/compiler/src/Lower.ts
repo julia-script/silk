@@ -214,6 +214,7 @@ const withLocalSharedDropPlans = (
 
 import { generated } from './CleanupEmission.js'
 import {
+  lowerBuiltinEffectRunner,
   lowerCatchEffectRunner,
   lowerEffectRunner,
   lowerInstance,
@@ -383,6 +384,18 @@ export const lowerProgram = (
       )
     } else if (generated._tag === 'CatchEffectRunner') {
       runner = lowerCatchEffectRunner(
+        generated,
+        ownership.get(generated.owner.key.declaration.module),
+        layout,
+        index,
+        discovery.instances,
+        discovery.calls,
+        effectResults,
+        generatedRunners,
+        opaqueRealizations,
+      )
+    } else if (generated._tag === 'BuiltinEffectRunner') {
+      runner = lowerBuiltinEffectRunner(
         generated,
         ownership.get(generated.owner.key.declaration.module),
         layout,

@@ -2346,11 +2346,53 @@ const effectEnvironments = (
                 }),
               ],
         )
+      const builtinSites = instance.function.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .flatMap((expression) => {
+          if (expression._tag !== 'BuiltinCall' || expression.witnessEffectSite !== undefined)
+            return []
+          const type = Type.substitute(expression.type, instance.substitution)
+          if (!Type.isEffect(type)) return []
+          return [
+            Object.freeze({
+              site: Hir.builtinEffectSite(
+                instance.function.declaration.id,
+                instance.key.declaration,
+                expression.span,
+              ),
+              type: expression.type,
+              captures: Object.freeze(
+                expression.arguments.map((argument) => {
+                  const specialized =
+                    argument._tag === 'Unavailable'
+                      ? undefined
+                      : Type.substitute(argument.type, instance.substitution)
+                  let access: 'Copy' | 'Shared' | 'Exclusive' | 'Take' = 'Take'
+                  if (
+                    specialized !== undefined &&
+                    (Type.isReference(specialized) || Type.isSlice(specialized))
+                  ) {
+                    access = specialized.access
+                  } else if (specialized !== undefined && Type.isCallable(specialized)) {
+                    access = specialized.mode
+                  }
+                  return Object.freeze({
+                    access,
+                    binding: undefined,
+                    parameter: undefined,
+                  })
+                }),
+              ),
+            }),
+          ]
+        })
       const effectSites = Object.freeze([
         ...blocks.map((block) =>
           Object.freeze({ site: block.site, type: block.type, captures: block.captures }),
         ),
         ...catchSites,
+        ...builtinSites,
       ])
       for (const block of effectSites) {
         const structuralEffect = Type.substitute(block.type, instance.substitution)

@@ -11,7 +11,7 @@ import type {} from './EntryAssembly.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
 import type {} from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
-import type * as Hir from './Hir.js'
+import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
@@ -21,6 +21,7 @@ import { borrowKey, isOsOperation, usize } from './Lower.js'
 import * as Mir from './Mir.js'
 import * as Scalar from './Scalar.js'
 import * as Type from './Type.js'
+import { baseRunnerKey, effectValueAtSite } from './ValueType.js'
 import {
   lowerBuiltinArguments,
   lowerInterfaceWitnessCall,
@@ -42,6 +43,53 @@ export const lowerBuiltinExpression = (
   if (expression.witnessEffectSite !== undefined) return lowerWitnessEffect(fn, expression)
   const intrinsic = Intrinsic.findOperationById(expression.intrinsic)
   if (intrinsic === undefined || !Intrinsic.isBuiltinOperation(intrinsic)) return undefined
+  const semanticType = fn.semantic(expression.type)
+  if (Type.isEffect(semanticType)) {
+    const site = Hir.builtinEffectSite(
+      fn.owner.function.declaration.id,
+      fn.owner.key.declaration,
+      expression.span,
+    )
+    const type = effectValueAtSite(fn.layout, fn.owner.key, site)
+    if (type === undefined) return undefined
+    const captures = lowerBuiltinArguments(fn, expression, intrinsic)
+    if (captures === undefined || captures.length !== type.environment.fields.length)
+      return undefined
+    const destination = fn.alloc(type)
+    const runner = Hir.effectRunnerId(fn.owner.key.declaration, site)
+    fn.emit(
+      Object.freeze({
+        _tag: 'MakeEffect',
+        destination,
+        runner,
+        runnerTypeArguments: fn.owner.key.typeArguments,
+        captures: Object.freeze(
+          captures.map((source, ordinal) =>
+            Object.freeze({
+              source,
+              access: type.environment.fields.at(ordinal)?.access ?? ('Take' as const),
+            }),
+          ),
+        ),
+        type,
+        provenance: generated(expression.span),
+      }),
+    )
+    const key = baseRunnerKey(fn.owner.key, site)
+    if (!fn.generatedRunners.some((candidate) => candidate.specializationKey === key))
+      fn.generatedRunners.push(
+        Object.freeze({
+          _tag: 'BuiltinEffectRunner',
+          id: runner,
+          owner: fn.owner,
+          expression,
+          type,
+          specializationKey: key,
+          providedRequirements: Object.freeze([]),
+        }),
+      )
+    return Object.freeze({ result: destination })
+  }
   const argumentLocals = lowerBuiltinArguments(fn, expression, intrinsic)
   if (argumentLocals === undefined) return undefined
   const finishBuiltin = (result: Mir.LocalId): { readonly result: Mir.LocalId } => {
