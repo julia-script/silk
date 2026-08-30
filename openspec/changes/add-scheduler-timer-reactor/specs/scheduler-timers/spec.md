@@ -11,17 +11,15 @@ For every future scheduler-owned monotonic wait, `LocalScheduler` SHALL park the
 and associate that parked Execution generation with exactly one active registration and exactly one
 affine Wake. A registration identity SHALL distinguish the task and its parked generation, SHALL
 not be reused while a stale source notification could still exist, and SHALL make a notification
-for a cancelled, completed, or older generation inert. One registration MAY admit multiple source
-interests in a future capability, but this change SHALL arm exactly one timer interest per wait and
-SHALL publish no public multi-interest API. Before root publication or child adoption, the
-scheduler SHALL reserve enough timer-index capacity for every live task plus the candidate task.
-Once a Wake is installed, request installation, arming, claiming, and disarming SHALL allocate
-nothing and SHALL add no typed failure path.
+for a cancelled, completed, or older generation inert. This change SHALL arm exactly one timer
+interest per wait and SHALL publish no public multi-interest API. Before root publication or child
+adoption, the scheduler SHALL reserve enough timer-index capacity for every live task plus the
+candidate task. Once a Wake is installed, request installation, arming, claiming, and disarming
+SHALL allocate nothing and SHALL add no typed failure path.
 
 Registration identities and source indexes SHALL be per-run for the timer-only backend, and typed
 teardown SHALL make every notification from that run unreachable before a later run may restart its
-counters. A future host backend MUST close and drain its source during teardown or extend the
-identity with a run epoch.
+counters.
 
 #### Scenario: Arm one timer for one parked generation
 
@@ -81,13 +79,12 @@ scheduler SHALL trap before that counter can wrap or reuse an order value.
 ### Requirement: The run loop observes timers without starving tasks or deadlines
 
 Each scheduler turn SHALL refresh the scheduler-owned cached mark from the parent monotonic clock,
-claim every timer due at that mark, and drive at most one selected ready task before observing event
-sources again. When no task is ready and at least one timer remains active, the timer-only backend
-SHALL wait against the parent provider until the earliest absolute deadline, refresh the mark, and
-resume event collection. An incomplete root SHALL be stalled only when its ready queue and active-
-registration set are both empty. A registered source is structurally active whether its external
-peer will eventually produce readiness; backend failures belong to that source's separate error
-contract.
+claim every timer due at that mark, and drive at most one selected ready task before observing timer
+registrations again. When no task is ready and at least one timer remains active, the timer-only
+backend SHALL wait against the parent provider until the earliest absolute deadline, refresh the
+mark, and resume timer collection. An incomplete root SHALL be stalled only when its ready queue is
+empty and no active timer registration remains. An active timer registration prevents stalled
+detection until it completes or is cancelled.
 
 #### Scenario: Let ready work advance during another task's wait
 
@@ -125,15 +122,15 @@ contract.
 - **THEN** its `execute` call does not promise outward fairness, and inner `yieldNow` operations
   schedule only among inner tasks until the inner scheduler becomes idle or terminates
 
-### Requirement: Timer cancellation releases every retained authority
+### Requirement: In-driver timer removal releases every retained authority
 
 When a timed task completes through another permitted path, is cancelled by structured lifetime,
-or is removed during scheduler shutdown, `LocalScheduler` SHALL disarm its active registration,
-remove its timer interest, and take its retained Wake without signaling readiness before destroying
-the dormant Execution, then drop the detached Wake as the final package authority. Normal timer
-completion SHALL remove the same registration before invoking its Wake exactly once.
-Typed scheduler shutdown SHALL leave no registration, timer entry, Wake, or cached per-run clock
-state observable by a later `execute` call.
+or is removed during typed scheduler shutdown while the driver is active, `LocalScheduler` SHALL
+disarm its active registration, remove its timer interest, and take its retained Wake without
+signaling readiness before destroying the dormant Execution, then drop the detached Wake as the
+final package authority. Normal timer completion SHALL remove the same registration before invoking
+its Wake exactly once. Typed scheduler shutdown SHALL leave no registration, timer entry, Wake, or
+cached per-run clock state observable by a later `execute` call.
 
 #### Scenario: Cancel a sleeping descendant
 
@@ -153,6 +150,23 @@ state observable by a later `execute` call.
 - **THEN** the second run starts with fresh per-run registration state, an empty timer set, and no
   reachable notification or readiness from the first run
 
+### Requirement: Whole-driver destruction cancels unfinished Fibers without readiness
+
+When a containing Execution destroys a parked `LocalScheduler.execute` instead of letting its drive
+loop perform in-driver removal, destruction of the scheduler's complete per-run owner SHALL release
+every inner Execution, completion authority, registration, timer entry, and retained Wake. It SHALL
+publish cancellation to observers of unfinished inner Fibers and SHALL NOT invoke a retained Wake or
+otherwise publish readiness while releasing the run.
+
+#### Scenario: Destroy an outer task parked in a nested scheduler
+
+- **WHEN** an outer scheduler destroys a task whose nested `LocalScheduler.execute` remains parked
+  with an incomplete root and active timer descendants
+- **THEN** the nested scheduler releases every inner registration, Wake, and Execution
+- **AND** an escaped Fiber observing an unfinished inner task receives `Fiber.Cancelled` exactly once
+- **AND** no cancelled inner timer resumes
+- **AND** every allocation owned by the nested run is released
+
 ### Requirement: Timer policy remains ordinary source
 
 Scheduler-owned clock clients, registrations, timer ordering, cached time, and run-loop policy SHALL
@@ -161,8 +175,9 @@ collection, and clock contracts. No source declaration SHALL receive semantic or
 from its name or module identity. This capability SHALL add no compiler-selected scheduler, timer,
 ambient clock, cross-thread wake delivery, or new clock intrinsic.
 
-#### Scenario: Copy the timer policy under other names
+#### Scenario: Dispatch an ordinary scheduler provider under other names
 
-- **WHEN** equivalent clock-client and timer-queue declarations are written under other legal names
-- **THEN** they receive the same ownership, suspension, service, lowering, and execution behavior
-  without compiler registration
+- **WHEN** an ordinary-source `Scheduler` provider is written under other legal declaration and
+  module names
+- **THEN** the compiler dispatches `Scheduler.prepare` through the public contract without
+  recognizing canonical `LocalScheduler` or timer declarations

@@ -251,7 +251,11 @@ effect fn scenario() -> i32
   let fresh = run LocalScheduler.execute(&mut scheduler, freshRoot())
   freshReturned()
 
-  if success == 11 && failure == 1 && cancelled && stalled == 1 && fresh == 42 { return 42 }
+  if success == 11
+    && failure == 1
+    && cancelled
+    && stalled == 1
+    && fresh == 42 { return 42 }
   return -42
 }
 

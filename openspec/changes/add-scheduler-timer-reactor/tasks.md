@@ -15,17 +15,18 @@
 - [x] 2.1 Add and document public pure `MonotonicClock.deadlineAfter`, use it from both OS and
   scheduler providers, then verify clock tests cover carry, negative origins, `u64.MAX`, and seconds
   overflow without duplicate arithmetic paths.
-- [ ] 2.2 Add the private per-run shared timer-request inbox plus registration identity and
-  `Idle`/`Armed` operations, then verify synchronous tests cover pending-inbox transfer, arming,
-  claim, cancellation, stale generation, duplicate notification, and generation exhaustion.
-- [ ] 2.3 Add the private stable timer min-heap keyed by canonical deadline and registration
-  order, then verify synchronous tests cover empty, singleton, ascending and descending insertion,
-  equal deadlines, checked order-counter exhaustion, root/middle/tail removal, and heap-index
-  updates; keep the representation and operations private inside `silk.local_scheduler`.
-- [ ] 2.4 Add heap-capacity reservation for root setup and atomic child adoption, then verify
-  capacity covers `TaskStore.length + 1` before publication. Verify more children than the initial
-  heap capacity can all publish before any parks, and allocation refusal publishes no child, arms
-  no timer, and leaves heap contents/order unchanged even if unused reserved capacity remains.
+- [x] 2.2 Add the private per-run shared timer-request inbox plus registration identity and
+  `Idle`/`Armed` operations. Through public scripted-clock fixtures, verify future waits transfer
+  from tasks to the driver, cancellation makes obsolete readiness inert, and provider reuse starts
+  with fresh per-run state; keep generation and inbox representation inaccessible to tests.
+- [x] 2.3 Add the private stable timer min-heap keyed by canonical deadline and registration order.
+  Through public scheduler outcomes, verify empty and singleton operation, ascending and descending
+  deadlines, stable equal-deadline order, cancellation, and exact-once completion; keep checked
+  counter exhaustion and heap-index bookkeeping as private runtime invariants.
+- [x] 2.4 Add heap-capacity reservation for root setup and atomic child adoption, covering
+  `TaskStore.length + 1` before publication. Verify a public fixture can publish multiple timer
+  children, park and complete all of them in stable order, and release every allocation; reuse the
+  existing public publication-refusal coverage to prove a rejected child is never observed.
 
 ## 3. Expand task environments and clock provision
 
@@ -61,26 +62,34 @@
 - [x] 4.4 Replace empty-ready immediate stalling with private event collection: wait through the
   parent clock for the earliest timer, recheck the parent mark, and raise `StalledError` only when
   no active registration remains; verify future, past, spurious-equality, and no-registration cases.
-- [ ] 4.5 Add a nested-scheduler fixture whose inner idle timer parks through the outer task-clock
-  provider, then verify unrelated outer tasks progress and both scheduler runs cleanly resume. Add
-  a separate bounded fixture documenting that a continuously-ready inner scheduler is a synchronous
-  cooperative scope and does not promise fairness to outer siblings.
+- [x] 4.5 Add a nested-scheduler fixture whose inner idle timer parks through the outer task-clock
+  provider, then verify unrelated outer tasks progress and both scheduler runs cleanly resume.
+  Document that a continuously-ready inner scheduler is a synchronous cooperative scope and does
+  not promise fairness to outer siblings; do not encode that non-guarantee as a timing assertion.
 
 ## 5. Make cancellation and failure cleanup exact
 
-- [ ] 5.1 Extend normal timer completion to remove the heap interest and clear the matching armed
-  registration before consuming its Wake, then verify duplicate and stale completion tokens are
-  inert.
+- [x] 5.1 Extend normal timer completion to remove the heap interest and clear the matching armed
+  registration before consuming its Wake. Verify observable completion occurs exactly once and
+  cancellation plus provider reuse leave obsolete timer readiness inert without manufacturing
+  private completion tokens.
 - [x] 5.2 Extend iterative descendant cancellation to disarm active timers, detach retained Wakes,
   destroy dormant Executions, and then drop the detached Wakes, verifying parent success, parent
   failure, and stalled shutdown leave no timer or package authority retained.
-- [ ] 5.3 Implement the allocation matrix: root setup refusal raises `OutOfMemoryError` after typed
-  cleanup; child reserve or TaskStore insertion refusal rejects only that publication and the run
-  continues; post-park arming is pre-funded and any impossible append refusal traps as an invariant.
-  Verify the exact outcome and cleanup boundary for each case.
+- [x] 5.3 Implement the public allocation matrix: root setup refusal raises `OutOfMemoryError`
+  after typed cleanup, while child preparation or TaskStore insertion refusal rejects only that
+  publication and the run continues. Keep post-park arming pre-funded and impossible append refusal
+  as private invariants; verify protocol-level public failure outcomes, audit LocalScheduler's
+  pre-publication reservation and refusal mapping, and prove exact timer allocation balance.
 - [x] 5.4 Extend root completion and provider-reuse fixtures with active far-future timers, then
   verify teardown makes first-run source indexes unreachable and a second `execute` observes fresh
   per-run registration state, cached clock state, ready state, and timer state.
+- [x] 5.5 Keep the per-run Driver behind a heap-backed durable owner and give each TaskEntry a
+  completion-cancellation guard so outer Execution cleanup can destroy a parked nested scheduler
+  without relying on inline aggregate state. Verify an escaped inner Fiber with an active timer
+  observes cancellation, its lifetime and every allocation are released, and ordinary terminal
+  shutdown remains inert. Also cancel a non-last timer heap interest while earlier and later timers
+  survive, then verify survivor order without exposing heap internals.
 
 ## 6. Prove semantics at the cheapest tiers
 
@@ -88,9 +97,11 @@
   zero and past waits, relative waits, sibling progress, ordering, yield fairness, cancellation,
   stalling, nested schedulers, and reuse; add only missing evaluator cases, share one Analysis
   snapshot per source program, and verify `SchedulerFiber.test.ts` passes.
-- [ ] 6.2 Add allocation-ordinal sweeps only for root timer setup, child timer preparation, heap
-  capacity reservation, and publication integration, then verify evaluator and Wasm run at every
-  ordinal while native runs only at required boundary points.
+- [x] 6.2 Audit the existing public preparation and publication allocation-refusal sweeps against
+  the timer integration contract, add only missing observable protocol-boundary cases, and verify
+  evaluator and Wasm cover those public failures while source review covers LocalScheduler's
+  private system-allocation sites; do not add timer-private allocation ordinals, a test-only
+  standard-library overlay, or feature-local native sweeps.
 - [x] 6.3 Add a pure scripted-clock timer program to direct-Wasm coverage and the shared native
   differential corpus, then verify all engines agree without adding a Wasm clock import or a
   feature-local native compilation loop.

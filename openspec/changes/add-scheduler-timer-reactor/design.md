@@ -11,9 +11,9 @@ absolute deadline in source. A service provider cannot inherit three operations 
 one, so scheduler ownership requires a complete task-local clock provider. The compiler's Execution
 and Wake substrate already supplies the only privileged lifecycle operation this design needs.
 
-The first event source is time. Future HTTP, WebSocket, process, and other asynchronous operations
-will require the same scheduler transition from one dormant Execution generation to one readiness
-notification, but their public readiness and error contracts are not yet known.
+The first event source is time. HTTP, WebSocket, process, and other asynchronous operations can use
+the same scheduler transition from one dormant Execution generation to one readiness notification,
+but this change does not define their public readiness or error contracts.
 
 ## Goals / Non-Goals
 
@@ -96,8 +96,10 @@ slot is sufficient and no timer protocol is added to the public `Scheduler.Prepa
 The task clock's non-parking `Execution.park` registration callback installs the timer request and
 the generation's sole Wake in that inbox without allocating.
 
-Every TaskEntry gains a monotonically advanced wait generation and an `Idle` or `Armed` phase. A
-pending inbox request is the pre-arm state; after drive returns, the driver takes it, advances the
+Every TaskEntry gains a monotonically advanced registration generation and a source-neutral `Idle`
+or `Armed` registration phase. `Armed` owns the generation's sole Wake plus an interest set; the
+timer-only set stores a timer heap index separately from that registration authority. A pending
+inbox request is the pre-arm state; after drive returns, the driver takes it, advances the
 generation, creates the private registration identity from TaskId and generation, and transfers the
 Wake into `Armed` state. There is no `Registering` TaskEntry phase because the park callback cannot
 borrow the TaskStore.
@@ -107,13 +109,14 @@ TaskEntry and atomically claims the registration only when its generation still 
 stale notification therefore cannot wake a completed task or a later parked generation. Generation
 exhaustion traps instead of reusing an identity that a future host backend might still report.
 Identities and source indexes are per-run in this timer-only backend. Teardown makes all first-run
-notifications unreachable before counters may restart. A future host backend MUST either close and
-drain its source during teardown or add a run epoch to registration identities.
+notifications unreachable before counters may restart. A host-backed event-source proposal can
+choose between closing and draining that source during teardown or adding a run epoch to
+registration identities; this timer change does not decide that contract.
 
-One parked generation has only one Wake, so a future timeout race will attach several interests to
-one registration rather than fabricate independent waits. The first claimed interest will remove
-its siblings and consume the Wake. This change implements only one timer interest and publishes no
-multi-interest surface.
+One parked generation has only one Wake. Keeping the timer index separate from registration
+authority leaves room for a later timeout-race proposal to define sibling interests and their
+removal semantics without changing Wake ownership. This change implements only one timer interest
+and publishes no multi-interest surface.
 
 **Alternatives considered:** A second registration HashMap duplicates the TaskStore and adds
 allocation to every park. Storing Wakes in heap nodes complicates cancellation and lets source
@@ -192,10 +195,22 @@ shutdown drops the empty timer heap and clock cache with the rest of the per-run
 readiness from another existing facility remains inert under the current TaskId rules, but this
 change deliberately leaves no timer Wake retained outside the scheduler.
 
-**Alternatives considered:** Lazy cancellation by generation alone is safe against false wakeups
-but retains heap storage and Wake-owned Execution packages. Dropping a still-linked Wake before
-destroying the Execution can release the package while its dormant frame is still needed for
-cleanup; detaching first and dropping it last avoids both hazards.
+The per-run Driver lives behind one heap-backed durable owner for the whole drive loop. Each
+TaskEntry also owns a completion-cancellation guard after its Execution field and before its source
+registration. If an outer Execution destroys a nested scheduler while its driver is parked, boxed
+Driver cleanup reaches every TaskEntry without depending on partially dismantled coroutine-frame
+storage: the dormant Execution is destroyed, the completion guard publishes cancellation, and the
+registration releases its Wake. Escaped Fiber observers therefore receive cancellation instead of
+remaining pending. Ordinary terminal paths remove entries explicitly, so the same guards become
+inert after a completion was already published.
+
+**Alternatives considered:** Keeping Driver inline in the scheduler Effect frame makes forced outer
+cleanup depend on the frame's partially consumed aggregate state. A heap-backed owner gives Driver
+one stable cleanup boundary across parent event waits. Lazy cancellation by generation alone is
+safe against false wakeups but retains heap storage and Wake-owned Execution packages. Dropping a
+still-linked Wake before destroying the Execution can release the package while its dormant frame
+is still needed for cleanup; detaching first and dropping it last avoids both hazards on explicit
+cancellation paths.
 
 ### 7. Only timer-local ordering is specified
 
@@ -214,18 +229,33 @@ all future sources would prematurely decide timeout-race semantics.
 Evaluator fixtures use a source-level scripted parent clock and one Analysis snapshot per program.
 They prove cached reads, zero and past waits, relative deadline arithmetic, sibling progress,
 distinct and equal timer order, yield traffic, cancellation, stalling, root outcomes, nested
-schedulers, the nested synchronous-scope liveness boundary, registration-order exhaustion, and
-provider reuse. The yield-fairness fixture advances the scripted parent on each driver refresh and
-requires a due timer to fire before a known later yield while ready work remains. Allocation-ordinal
-tests cover root timer preparation, child timer preparation, heap-capacity reservation, and
-publication rollback, including more live children than the heap's initial capacity before any
-child parks.
+scheduler idle progress, and provider reuse through public scheduler outcomes. The
+yield-fairness fixture advances the scripted parent on each driver refresh and requires a due timer
+to fire before a known later yield while ready work remains. Existing public preparation and
+publication failure sweeps prove protocol-level atomic rejection and cleanup. A source audit checks
+that `LocalScheduler` performs timer reservation before root publication and child adoption and maps
+each refusal at the documented boundary; no alternate allocator path is added solely to force its
+private system-allocation sites. Timer integration fixtures additionally prove that multiple timer
+children can publish, park, complete, and release their exact allocations cleanly.
+
+The timer inbox, generation state, stable heap, and reservation accounting remain private
+implementation details. Checked generation and registration-order exhaustion remain runtime
+invariants, but tests do not manufacture unreachable private states or add a test-only standard
+library overlay. Private bookkeeping is instead exercised through stable observable ordering,
+exact-once completion, cancellation, reuse, allocation balance, and evaluator/Wasm/native parity.
+The continuously-ready nested-scheduler boundary is documented as a synchronous cooperative scope;
+it is not turned into a timing or fairness assertion for outer siblings.
 
 Direct Wasm uses only pure source clock providers and proves the same scheduling results without a
 clock import. Representative timer programs enter the shared native differential corpus. A small
 native acceptance case provides `OsMonotonicClock` outside `execute` and proves that another ready
 task progresses before a short future timer, without elapsed-time assertions. Existing clock tests
 continue to prove the OS provider's direct blocking ABI separately.
+
+Forced destruction of a parked nested scheduler remains an evaluator policy case. The shared
+`independent-execution-separation-dormant-cancel` native corpus case already proves the distinct
+target-specific mechanism—destruction of a dormant suspension frame through ordered `Drop` hooks—
+so compiling the larger scheduler scenario again would not establish another backend property.
 
 **Alternatives considered:** Per-feature native compiler loops and timing thresholds are expensive
 and flaky. Evaluator semantics plus shared differential coverage isolate scheduler policy from the
@@ -242,8 +272,9 @@ already-tested native clock boundary.
   immediately after drive and never perform another fallible operation while the Wake remains in
   Shared storage.
 - **[Heap index bookkeeping can corrupt cancellation]** → Centralize swap/remove operations in the
-  private local-scheduler heap functions and test every root, middle, tail, completion, and
-  cancellation removal shape.
+  private local-scheduler heap functions and exercise removal through observable completion,
+  cancellation of a non-last indexed timer, stable survivor ordering, allocation balance, and
+  provider-reuse scenarios without exposing the heap representation to tests.
 - **[Polling the parent clock once per turn adds overhead]** → Keep reads source-level and measure
   only in opt-in benches; correctness requires bounded timer observation under ready traffic.
 - **[A future I/O backend may require several interests per task]** → Keep one registration per
@@ -256,7 +287,8 @@ already-tested native clock boundary.
 ## Migration Plan
 
 1. Add public canonical deadline derivation plus private clock state, per-run registration inbox,
-   and local timer-heap functions with synchronous invariant tests before task integration.
+   and local timer-heap functions, then exercise their reachable behavior through scripted public
+   scheduler fixtures before broader task integration.
 2. Expand Scheduler child contracts and task wrappers to bind owned Scheduler and MonotonicClock
    clients; migrate every fixture and call site in the same change.
 3. Integrate timer registration, driver time refresh, timer completion, cancellation, and

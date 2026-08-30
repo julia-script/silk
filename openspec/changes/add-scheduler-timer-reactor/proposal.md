@@ -24,8 +24,10 @@ HTTP, WebSocket, and other event sources without replacing the Fiber or ready-qu
 - Change the run loop so an empty ready queue waits for the earliest timer and raises
   `LocalScheduler.StalledError` only when the incomplete root has no runnable task or active event
   registration.
-- Make cancellation and typed shutdown disarm timer interests, detach retained Wakes, destroy
-  dormant Executions, and then release the detached Wakes as the final package authority.
+- Make in-driver cancellation and typed shutdown disarm timer interests, detach retained Wakes,
+  destroy dormant Executions, and then release the detached Wakes as the final package authority.
+  Give forced destruction of a whole parked scheduler its own structural cleanup path that cancels
+  unfinished Fiber observers, releases every authority, and never signals readiness.
 - Keep the registration machinery private in this slice. It is shaped for later multi-interest and
   non-timer event sources, but this change does not publish a speculative Reactor or raw I/O SPI and
   does not define timer-versus-I/O tie ordering.

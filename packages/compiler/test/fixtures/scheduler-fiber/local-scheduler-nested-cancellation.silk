@@ -1,0 +1,170 @@
+import silk.allocator as Allocator
+import silk.effect as Effect
+import silk.fiber as Fiber
+import silk.local_scheduler as LocalScheduler
+import silk.monotonic_clock as MonotonicClock
+import silk.scheduler as Scheduler
+import silk.shared as Shared
+import silk.system_clock as SystemClock
+import silk.system_clock { Instant }
+
+struct ParentClock { mark: Instant }
+effect fn parentNow(self: &mut ParentClock) -> Instant {
+  return SystemClock.make(SystemClock.seconds(&self.mark), SystemClock.nanoseconds(&self.mark))
+}
+effect fn parentResolution(self: &mut ParentClock) -> u64 { return 1 }
+effect fn parentWaitUntil(self: &mut ParentClock, deadline: Instant) -> () {
+  self.mark = move deadline
+  return ()
+}
+effect fn parentWaitFor(self: &mut ParentClock, duration: u64) -> () {
+  let deadline = MonotonicClock.deadlineAfter(&self.mark, duration)
+  return run parentWaitUntil(move self, move deadline)
+}
+impl MonotonicClock.MonotonicClock for ParentClock {
+  now: ParentClock.parentNow
+  getResolution: ParentClock.parentResolution
+  waitUntil: ParentClock.parentWaitUntil
+  waitFor: ParentClock.parentWaitFor
+}
+
+struct NoNestedFiber {}
+struct StoredNestedFiber { fiber: Fiber.Fiber<i32, never> }
+struct NestedFiberSlot { phase: NoNestedFiber | StoredNestedFiber }
+struct NestedTimerLifetime { kind: i32 }
+
+fn nestedTimerActivated() -> () { return () }
+fn nestedTimerReleased() -> () { return () }
+fn nestedFiberPublished() -> () { return () }
+fn nestedOuterTerminating() -> () { return () }
+fn nestedOuterReturned() -> () { return () }
+fn nestedCancellationObserved() -> () { return () }
+fn resumedUnexpectedly() -> () { return () }
+
+impl Drop for NestedTimerLifetime {
+  fn drop(self: &mut NestedTimerLifetime) -> () {
+    if self.kind == 1 { nestedTimerReleased() }
+    return ()
+  }
+}
+
+fn installNestedFiber(
+  self: &mut NestedFiberSlot,
+  fiber: Fiber.Fiber<i32, never>,
+) -> () {
+  let previous = Intrinsic.replace(self.phase, StoredNestedFiber { fiber: move fiber })
+  drop previous
+  nestedFiberPublished()
+  return ()
+}
+
+fn takeNestedFiber(self: &mut NestedFiberSlot) -> NoNestedFiber | StoredNestedFiber {
+  return Intrinsic.replace(self.phase, NoNestedFiber {})
+}
+
+fn requireNestedFiber(selected: NoNestedFiber | StoredNestedFiber) -> Fiber.Fiber<i32, never> {
+  return match move selected {
+    NoNestedFiber {} => missingNestedFiber()
+    StoredNestedFiber { fiber } => move fiber
+  }
+}
+
+fn missingNestedFiber() -> Fiber.Fiber<i32, never> {
+  let invalid = 1 / 0
+  return missingNestedFiber()
+}
+
+effect fn nestedTimer() -> i32
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  let lifetime = NestedTimerLifetime { kind: 1 }
+  nestedTimerActivated()
+  run MonotonicClock.waitFor(1000000000000)
+  drop lifetime
+  resumedUnexpectedly()
+  return -1
+}
+
+effect fn innerRoot(slot: Shared.Shared<NestedFiberSlot>) -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  let timer = run Fiber.forkChild<i32, never>(nestedTimer())
+  let published = Shared.withMut(&slot, installNestedFiber(move timer))
+  drop slot
+  run MonotonicClock.waitFor(1000000000000)
+  resumedUnexpectedly()
+  return -2
+}
+
+effect fn nestedSchedulerTask(slot: Shared.Shared<NestedFiberSlot>) -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | LocalScheduler.StalledError
+? &mut MonotonicClock.MonotonicClock {
+  let mut inner = LocalScheduler.make()
+  return run LocalScheduler.execute(&mut inner, innerRoot(move slot))
+}
+
+effect fn outerRoot(slot: Shared.Shared<NestedFiberSlot>) -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | LocalScheduler.StalledError
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  let inner = run Fiber.forkChild<
+    i32,
+    Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | LocalScheduler.StalledError,
+  >(nestedSchedulerTask(move slot))
+  drop inner
+  run Fiber.yieldNow()
+  nestedOuterTerminating()
+  return 13
+}
+
+fn observeCancellation(outcome: Fiber.Outcome<i32, never>) -> bool {
+  let Fiber.Outcome<i32, never> { value } = move outcome
+  return match move value {
+    Fiber.Success<i32> { value: success } => false
+    Fiber.Failure<never> { error } => move error
+    Fiber.Cancelled {} => recordCancellation()
+  }
+}
+
+fn recordCancellation() -> bool {
+  nestedCancellationObserved()
+  return true
+}
+
+effect fn observeRoot(fiber: Fiber.Fiber<i32, never>) -> bool
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  return observeCancellation(run Fiber.await<i32, never>(move fiber))
+}
+
+effect fn scenario() -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | LocalScheduler.StalledError
+? &mut MonotonicClock.MonotonicClock {
+  let mut scheduler = LocalScheduler.make()
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let slot = run Shared.make<NestedFiberSlot>(NestedFiberSlot {
+    phase: NoNestedFiber {},
+  }) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+  let nested = run LocalScheduler.execute(
+    &mut scheduler,
+    outerRoot(Shared.clone<NestedFiberSlot>(&slot)),
+  )
+  nestedOuterReturned()
+  let nestedFiber = requireNestedFiber(Shared.withMut(&slot, takeNestedFiber))
+  drop slot
+  let cancelled = run LocalScheduler.execute(&mut scheduler, observeRoot(move nestedFiber))
+  if nested == 13 && cancelled { return 42 }
+  return -42
+}
+
+effect fn recover(
+  error: Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | LocalScheduler.StalledError,
+) -> i32 {
+  drop error
+  return -99
+}
+
+pub fn main() -> i32 {
+  let mut clock = ParentClock { mark: SystemClock.make(0, 0) }
+  return run Effect.catchAll(
+    scenario() |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock),
+    recover,
+  )
+}

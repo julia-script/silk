@@ -13,6 +13,11 @@ struct Audit {
   siblingEvent: i32
   firstTimerEvent: i32
   secondTimerEvent: i32
+  earlyTimerEvent: i32
+  middleTimerEvent: i32
+  lateTimerEvent: i32
+  cancellationEarlyTimerEvent: i32
+  cancellationLateTimerEvent: i32
   outerSiblingEvent: i32
   innerTimerEvent: i32
   resolutionReads: i32
@@ -60,6 +65,36 @@ fn recordSecondTimer(self: &mut Audit) -> () {
   return ()
 }
 
+fn recordEarlyTimer(self: &mut Audit) -> () {
+  self.nextEvent = self.nextEvent + 1
+  self.earlyTimerEvent = self.nextEvent
+  return ()
+}
+
+fn recordMiddleTimer(self: &mut Audit) -> () {
+  self.nextEvent = self.nextEvent + 1
+  self.middleTimerEvent = self.nextEvent
+  return ()
+}
+
+fn recordLateTimer(self: &mut Audit) -> () {
+  self.nextEvent = self.nextEvent + 1
+  self.lateTimerEvent = self.nextEvent
+  return ()
+}
+
+fn recordCancellationEarlyTimer(self: &mut Audit) -> () {
+  self.nextEvent = self.nextEvent + 1
+  self.cancellationEarlyTimerEvent = self.nextEvent
+  return ()
+}
+
+fn recordCancellationLateTimer(self: &mut Audit) -> () {
+  self.nextEvent = self.nextEvent + 1
+  self.cancellationLateTimerEvent = self.nextEvent
+  return ()
+}
+
 fn recordOuterSibling(self: &mut Audit) -> () {
   self.nextEvent = self.nextEvent + 1
   self.outerSiblingEvent = self.nextEvent
@@ -75,6 +110,25 @@ fn recordInnerTimer(self: &mut Audit) -> () {
 fn recordCachedReads(self: &mut Audit, equal: bool) -> () {
   self.cachedReadsEqual = equal
   return ()
+}
+
+fn beforeCachedReads() -> () { return () }
+fn afterCachedReads() -> () { return () }
+fn beforeRelativeWait() -> () { return () }
+fn afterRelativeWait() -> () { return () }
+fn beforeImmediateWaits() -> () { return () }
+fn afterImmediateWaits() -> () { return () }
+fn cancelledMiddleTimerActivated() -> () { return () }
+fn cancelledMiddleTimerReleased() -> () { return () }
+fn cancelledMiddleTimerResumed() -> () { return () }
+
+struct CancelledMiddleTimerLifetime { kind: i32 }
+
+impl Drop for CancelledMiddleTimerLifetime {
+  fn drop(self: &mut CancelledMiddleTimerLifetime) -> () {
+    if self.kind == 1 { cancelledMiddleTimerReleased() }
+    return ()
+  }
 }
 
 struct ScriptedParentClock {
@@ -124,7 +178,9 @@ impl MonotonicClock.MonotonicClock for ScriptedParentClock {
 
 effect fn firstTimer(audit: Shared.Shared<Audit>) -> i32
 ? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  beforeRelativeWait()
   run MonotonicClock.waitFor(1000000000)
+  afterRelativeWait()
   let recorded = Shared.withMut(&audit, recordFirstTimer)
   drop audit
   return 20
@@ -144,19 +200,133 @@ effect fn readySibling(audit: Shared.Shared<Audit>) -> i32 {
   return 1
 }
 
+effect fn schedulerOnlyChild() -> i32 ? &mut Scheduler.Scheduler {
+  run Fiber.yieldNow()
+  return 0
+}
+
+effect fn earlyTimer(audit: Shared.Shared<Audit>) -> i32
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  run MonotonicClock.waitUntil(SystemClock.make(2, 0))
+  let recorded = Shared.withMut(&audit, recordEarlyTimer)
+  drop audit
+  return 10
+}
+
+effect fn middleTimer(audit: Shared.Shared<Audit>) -> i32
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  run MonotonicClock.waitUntil(SystemClock.make(3, 0))
+  let recorded = Shared.withMut(&audit, recordMiddleTimer)
+  drop audit
+  return 11
+}
+
+effect fn lateTimer(audit: Shared.Shared<Audit>) -> i32
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  run MonotonicClock.waitUntil(SystemClock.make(4, 0))
+  let recorded = Shared.withMut(&audit, recordLateTimer)
+  drop audit
+  return 12
+}
+
+effect fn outOfOrderTimersRoot(audit: Shared.Shared<Audit>) -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  let late = run Fiber.forkChild<i32, never>(
+    lateTimer(Shared.clone<Audit>(&audit)),
+  )
+  let early = run Fiber.forkChild<i32, never>(
+    earlyTimer(Shared.clone<Audit>(&audit)),
+  )
+  let middle = run Fiber.forkChild<i32, never>(
+    middleTimer(Shared.clone<Audit>(&audit)),
+  )
+  let lateValue = run Fiber.join<i32, never>(move late)
+  let earlyValue = run Fiber.join<i32, never>(move early)
+  let middleValue = run Fiber.join<i32, never>(move middle)
+  drop audit
+  return lateValue + earlyValue + middleValue
+}
+
+effect fn cancellationEarlyTimer(audit: Shared.Shared<Audit>) -> i32
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  run MonotonicClock.waitUntil(SystemClock.make(6, 0))
+  let recorded = Shared.withMut(&audit, recordCancellationEarlyTimer)
+  drop audit
+  return 10
+}
+
+effect fn cancelledMiddleTimer() -> i32
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  let lifetime = CancelledMiddleTimerLifetime { kind: 1 }
+  cancelledMiddleTimerActivated()
+  run MonotonicClock.waitUntil(SystemClock.make(7, 0))
+  drop lifetime
+  cancelledMiddleTimerResumed()
+  return -100
+}
+
+effect fn cancellingTimerParent() -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  let timer = run Fiber.forkChild<i32, never>(cancelledMiddleTimer())
+  drop timer
+  run Fiber.yieldNow()
+  run Fiber.yieldNow()
+  return 0
+}
+
+effect fn cancellationLateTimer(audit: Shared.Shared<Audit>) -> i32
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  run Fiber.yieldNow()
+  run MonotonicClock.waitUntil(SystemClock.make(8, 0))
+  let recorded = Shared.withMut(&audit, recordCancellationLateTimer)
+  drop audit
+  return 32
+}
+
+effect fn indexedTimerCancellationRoot(audit: Shared.Shared<Audit>) -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  let early = run Fiber.forkChild<i32, never>(
+    cancellationEarlyTimer(Shared.clone<Audit>(&audit)),
+  )
+  let parent = run Fiber.forkChild<
+    i32,
+    Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError,
+  >(cancellingTimerParent())
+  let late = run Fiber.forkChild<i32, never>(
+    cancellationLateTimer(Shared.clone<Audit>(&audit)),
+  )
+  let earlyValue = run Fiber.join<i32, never>(move early)
+  let parentValue = run Fiber.join<
+    i32,
+    Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError,
+  >(move parent)
+  let lateValue = run Fiber.join<i32, never>(move late)
+  drop audit
+  return earlyValue + parentValue + lateValue
+}
+
 effect fn root(audit: Shared.Shared<Audit>) -> i32
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
 ? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  beforeCachedReads()
   let firstRead = run MonotonicClock.now()
   let secondRead = run MonotonicClock.now()
+  let cachedResolution = run MonotonicClock.getResolution()
   let equal = SystemClock.seconds(&firstRead) == SystemClock.seconds(&secondRead)
     && SystemClock.nanoseconds(&firstRead) == SystemClock.nanoseconds(&secondRead)
+    && cachedResolution == 1
   let cached = Shared.withMut(&audit, recordCachedReads(equal))
   drop firstRead
   drop secondRead
+  afterCachedReads()
 
+  beforeImmediateWaits()
   run MonotonicClock.waitFor(0)
   run MonotonicClock.waitUntil(SystemClock.make(-1, 999999999))
+  afterImmediateWaits()
 
   let first = run Fiber.forkChild<i32, never>(
     firstTimer(Shared.clone<Audit>(&audit)),
@@ -167,11 +337,13 @@ effect fn root(audit: Shared.Shared<Audit>) -> i32
   let sibling = run Fiber.forkChild<i32, never>(
     readySibling(Shared.clone<Audit>(&audit)),
   )
+  let schedulerOnly = run Fiber.forkChild<i32, never>(schedulerOnlyChild())
   let siblingValue = run Fiber.join<i32, never>(move sibling)
+  let schedulerOnlyValue = run Fiber.join<i32, never>(move schedulerOnly)
   let firstValue = run Fiber.join<i32, never>(move first)
   let secondValue = run Fiber.join<i32, never>(move second)
   drop audit
-  return siblingValue + firstValue + secondValue
+  return siblingValue + schedulerOnlyValue + firstValue + secondValue
 }
 
 effect fn innerRoot(audit: Shared.Shared<Audit>) -> i32
@@ -264,18 +436,23 @@ effect fn fairnessRoot(audit: Shared.Shared<Audit>) -> i32
 fn auditResult(self: &Audit, value: i32) -> i32 {
   if value != 42 { return -1 }
   if !self.cachedReadsEqual { return -2 }
-  if self.resolutionReads != 3 { return -3 }
-  if self.absoluteWaits != 2 { return -4 }
-  if self.waitedSeconds != 2 || self.waitedNanoseconds != 0 { return -5 }
+  if self.resolutionReads != 5 { return -3 }
+  if self.absoluteWaits != 7 { return -4 }
+  if self.waitedSeconds != 9 || self.waitedNanoseconds != 0 { return -5 }
   if self.siblingEvent != 1 { return -6 }
   if self.firstTimerEvent != 2 { return -7 }
   if self.secondTimerEvent != 3 { return -8 }
   if self.markReads < 2 { return -9 }
-  if self.outerSiblingEvent != 4 { return -10 }
-  if self.innerTimerEvent != 5 { return -11 }
-  if self.fairnessTimerStep <= 0 { return -12 }
-  if self.fairnessTimerStep >= 10 { return -13 }
-  if self.spinnerSteps != 10 { return -14 }
+  if self.earlyTimerEvent != 4 { return -10 }
+  if self.middleTimerEvent != 5 { return -11 }
+  if self.lateTimerEvent != 6 { return -12 }
+  if self.cancellationEarlyTimerEvent != 7 { return -13 }
+  if self.cancellationLateTimerEvent != 8 { return -14 }
+  if self.outerSiblingEvent != 9 { return -15 }
+  if self.innerTimerEvent != 10 { return -16 }
+  if self.fairnessTimerStep <= 0 { return -17 }
+  if self.fairnessTimerStep >= 10 { return -18 }
+  if self.spinnerSteps != 10 { return -19 }
   return 42
 }
 
@@ -287,6 +464,11 @@ effect fn scenario() -> i32
     siblingEvent: 0,
     firstTimerEvent: 0,
     secondTimerEvent: 0,
+    earlyTimerEvent: 0,
+    middleTimerEvent: 0,
+    lateTimerEvent: 0,
+    cancellationEarlyTimerEvent: 0,
+    cancellationLateTimerEvent: 0,
     outerSiblingEvent: 0,
     innerTimerEvent: 0,
     resolutionReads: 0,
@@ -309,6 +491,16 @@ effect fn scenario() -> i32
     root(Shared.clone<Audit>(&audit)),
   ) |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
   let value = run move program
+  let orderedProgram = LocalScheduler.execute(
+    &mut scheduler,
+    outOfOrderTimersRoot(Shared.clone<Audit>(&audit)),
+  ) |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+  let orderedValue = run move orderedProgram
+  let cancellationProgram = LocalScheduler.execute(
+    &mut scheduler,
+    indexedTimerCancellationRoot(Shared.clone<Audit>(&audit)),
+  ) |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+  let cancellationValue = run move cancellationProgram
   let nestedProgram = LocalScheduler.execute(
     &mut scheduler,
     nestedOuterRoot(Shared.clone<Audit>(&audit)),
@@ -323,7 +515,7 @@ effect fn scenario() -> i32
   drop clock
   let result = Shared.with<Audit, i32>(
     &audit,
-    auditResult(value + nestedValue + fairnessValue - 84),
+    auditResult(value + orderedValue + cancellationValue + nestedValue + fairnessValue - 159),
   )
   drop audit
   return result

@@ -20,8 +20,9 @@ task storage, Fiber observation, and structured cancellation remain standard-lib
 
 ## Enter a local scheduler explicitly
 
-`LocalScheduler.execute` receives the program before it starts, creates task zero, provides an owned
-`Scheduler` client, and privately drives the ready queue until the root terminates.
+`LocalScheduler.execute` receives the program before it starts, creates task zero, provides owned
+`Scheduler` and `MonotonicClock` clients, and privately drives the ready queue until the root
+terminates.
 
 ```silk
 import silk.allocator { OutOfMemoryError }
@@ -215,9 +216,10 @@ name a task from a later `execute` call.
 **Status:** Confirmed
 
 `LocalScheduler.execute` returns the root's exact success value or raises its exact typed failure.
-If no task is ready while the root remains incomplete, it cancels the remaining task tree and raises
-`LocalScheduler.StalledError`. Setup or task-store allocation refusal raises
-`Allocator.OutOfMemoryError`. Fatal traps remain outside typed recovery.
+If no task is ready and no event registration remains while the root is incomplete, it cancels the
+remaining task tree and raises `LocalScheduler.StalledError`. An active timer keeps the scheduler
+waiting for progress. Setup or task-store allocation refusal raises `Allocator.OutOfMemoryError`.
+Fatal traps remain outside typed recovery.
 
 Before any typed return or failure, shutdown removes every task, drains prepared submissions,
 releases scheduler-owned handles, and drops the per-run ready queue. The same `LocalScheduler`
@@ -230,7 +232,7 @@ allocation. It is inert and cannot enqueue into a later run.
 Fatal lifecycle or intrinsic-state errors remain fatal traps.
 
 **Evidence:** [generic root and reuse tests](../../../../packages/compiler/test/SchedulerFiber.test.ts),
-[fiber capability specification](../../../../openspec/changes/add-single-threaded-fibers/specs/bootstrap-single-threaded-fibers/spec.md).
+[timer-aware scheduler specification](../../../../openspec/changes/add-scheduler-timer-reactor/specs/scheduler-timers/spec.md).
 
 ### FIBER-008 — Scheduler timers suspend tasks without blocking siblings
 

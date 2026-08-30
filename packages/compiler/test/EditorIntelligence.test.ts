@@ -468,7 +468,7 @@ pub fn main() -> i32 {
             'LocalScheduler.'.length,
             'silk/local_scheduler',
             'pub struct StalledError',
-            '/// Reports that no task is ready while the root is incomplete.',
+            '/// Reports that no task is ready and no event registration remains while the root is incomplete.',
           ],
         ] as const) {
           const position = source.indexOf(needle) + offset

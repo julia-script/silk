@@ -96,7 +96,8 @@ The complete error row is deliberate:
 - `OutOfMemoryError` reports task-storage allocation refusal;
 - `Scheduler.TaskIdExhaustedError` reports exhausted task identities;
 - `Fiber.Cancelled` is the join result of structured cancellation; and
-- `LocalScheduler.StalledError` means the root is incomplete but no task can make progress.
+- `LocalScheduler.StalledError` means the root is incomplete with no ready task or active event
+  registration remaining.
 
 Fatal traps remain outside this typed recovery path.
 
@@ -117,8 +118,9 @@ providers. Provide any other services before forking.
 
 Inside `LocalScheduler.execute`, `Effect.sleep`, `MonotonicClock.waitFor`, and
 `MonotonicClock.waitUntil` use the scheduler-owned clock replacement. A future deadline stores the
-task's Wake in a private timer queue and returns control to the driver, so ready siblings continue
-before the timer fires. Zero-duration and reached deadlines return immediately.
+task's Wake in its private registration state while the timer queue indexes only the registration
+identity, then returns control to the driver so ready siblings continue before the timer fires.
+Zero-duration and reached deadlines return immediately.
 
 Clock reads are cached for one driver turn, so repeated `MonotonicClock.now()` calls in one task
 activation may be equal. The driver refreshes its mark before each selected task and derives a

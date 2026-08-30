@@ -42,7 +42,7 @@ Each call to [`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a
 pub struct StalledError
 ```
 
-Reports that no task is ready while the root is incomplete.
+Reports that no task is ready and no event registration remains while the root is incomplete.
 
 ### Details
 
@@ -139,6 +139,14 @@ prepare = SchedulerClient.prepareChild
 ```
 
 <a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a35"></a>
+
+## Implementation `Drop for CompletionCancellation`
+
+```silk
+impl Drop for CompletionCancellation
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a36"></a>
 
 ## Implementation `Copy for TimerEntry`
 
