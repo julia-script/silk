@@ -94,6 +94,74 @@ pub fn main() -> i32 { let whenEnabled = select(true) return whenEnabled(42) }`)
   }),
 )
 
+it.effect('resolves a provided service effect captured by a callable section', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.effect { Effect }
+
+service Sink {
+  effect fn value() -> i32 ? &mut Sink
+}
+
+struct FixedSink {}
+
+impl Sink for FixedSink {
+  effect fn value(self: &Self) -> i32 ? &mut Sink { return 42 }
+}
+
+effect fn forward<A, E, ?R>(marker: i32, protected: once Effect<A ! E ? R>) -> A ! E ? R {
+  return run move protected
+}
+
+pub fn main() -> i32 {
+  let mut sink = FixedSink {}
+  let finish = forward(Sink.value())
+  return run finish(0) |> Effect.provideMut(&mut sink)
+}`)
+
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    assert.deepEqual(
+      Analysis.instancesOf(result).instances.map((instance) => instance.key.declaration.name),
+      ['main', 'provideMut', 'forward', 'forward', 'impl@0.value'],
+    )
+  }),
+)
+
+it.effect('keeps inferred hidden calls scoped to the function that contains their expression', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`fn make() -> once Effect<i32> { return effect { return 42 } }
+fn relay() -> once Effect<i32> { return make() }
+fn forward<A, E, ?R>(protected: once Effect<A ! E ? R>) -> once Effect<A ! E ? R> {
+  return move protected
+}
+pub fn main() -> i32 { return run forward(relay()) }`)
+    const discovery = Analysis.instancesOf(result)
+
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    assert.deepEqual(
+      discovery.calls.map((call) => ({
+        owner: call.owner.declaration.name,
+        target: call.target.declaration.name,
+      })),
+      [
+        { owner: 'main', target: 'forward' },
+        { owner: 'main', target: 'relay' },
+        { owner: 'relay', target: 'make' },
+      ],
+    )
+    for (const call of discovery.calls) {
+      const owner = discovery.instances.find(
+        (instance) => Instances.keyText(instance.key) === Instances.keyText(call.owner),
+      )
+      assert.notStrictEqual(owner, undefined)
+      if (owner === undefined) continue
+      const ownerSpan = owner.function.declaration.syntax.span
+      assert.strictEqual(call.span.sourceId, ownerSpan.sourceId)
+      assert.isAtLeast(call.span.start, ownerSpan.start)
+      assert.isAtMost(call.span.end, ownerSpan.end)
+    }
+  }),
+)
+
 it.effect('keeps executable sites distinct across generic owner specializations', () =>
   Effect.gen(function* () {
     const result = Analysis.instancesOf(

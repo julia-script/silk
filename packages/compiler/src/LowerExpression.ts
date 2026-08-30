@@ -153,7 +153,7 @@ export function lowerExpressionInner(
       return Object.freeze({ result: destination })
     }
     case 'EnumValue': {
-      const value = lowerExpression(fn, expression.value)
+      const value = lowerExpression(fn, expression.value, availableRequirements)
       const sourceType = value === undefined ? undefined : fn.localTypes.at(value.result.ordinal)
       const type = fn.type(expression.type)
       if (
@@ -180,8 +180,8 @@ export function lowerExpressionInner(
       return Object.freeze({ result: destination })
     }
     case 'EnumEquality': {
-      const left = lowerExpression(fn, expression.left)
-      const right = lowerExpression(fn, expression.right)
+      const left = lowerExpression(fn, expression.left, availableRequirements)
+      const right = lowerExpression(fn, expression.right, availableRequirements)
       const leftType = left === undefined ? undefined : fn.localTypes.at(left.result.ordinal)
       const rightType = right === undefined ? undefined : fn.localTypes.at(right.result.ordinal)
       if (
@@ -228,7 +228,7 @@ export function lowerExpressionInner(
       return Object.freeze({ result: destination })
     }
     case 'RuntimeStringView': {
-      const source = lowerExpression(fn, expression.source)
+      const source = lowerExpression(fn, expression.source, availableRequirements)
       const sourceType = source === undefined ? undefined : fn.localTypes.at(source.result.ordinal)
       const type = fn.type(expression.type)
       if (
@@ -253,8 +253,8 @@ export function lowerExpressionInner(
       return Object.freeze({ result: destination })
     }
     case 'StringEquality': {
-      const left = lowerExpression(fn, expression.left)
-      const right = lowerExpression(fn, expression.right)
+      const left = lowerExpression(fn, expression.left, availableRequirements)
+      const right = lowerExpression(fn, expression.right, availableRequirements)
       const leftType = left === undefined ? undefined : fn.localTypes.at(left.result.ordinal)
       const rightType = right === undefined ? undefined : fn.localTypes.at(right.result.ordinal)
       if (
@@ -764,33 +764,57 @@ export function lowerExpressionInner(
       return Object.freeze({ result: destination })
     }
     case 'EffectCatch':
-      return lowerCatchEffectValue(fn, expression)
+      return lowerCatchEffectValue(fn, expression, availableRequirements)
     case 'Run': {
       return fn.withRecipeReplay(() => {
         const resultRecipe = effectRecipe(fn, expression.subject)
         if (resultRecipe?._tag === 'EffectCatch')
-          return lowerEffectCatch(fn, resultRecipe, expression.span)
+          return lowerEffectCatch(
+            fn,
+            resultRecipe,
+            expression.span,
+            undefined,
+            availableRequirements,
+          )
         if (
           resultRecipe !== undefined &&
           inlineForwardedRequirement(fn, resultRecipe) !== undefined
         ) {
-          return lowerEffectExecution(fn, resultRecipe, expression.type, expression.span)
+          return lowerEffectExecution(
+            fn,
+            resultRecipe,
+            expression.type,
+            expression.span,
+            availableRequirements,
+          )
         }
         if (
           resultRecipe?._tag === 'CallableApply' &&
           !Type.isEffect(fn.semantic(expression.type)) &&
           callableRecipe(fn, resultRecipe.callee) !== undefined
         )
-          return lowerEffectExecution(fn, resultRecipe, expression.type, expression.span)
+          return lowerEffectExecution(
+            fn,
+            resultRecipe,
+            expression.type,
+            expression.span,
+            availableRequirements,
+          )
         if (resultRecipe?._tag === 'ServiceEffectConstruct')
-          return lowerEffectExecution(fn, resultRecipe, expression.type, expression.span)
+          return lowerEffectExecution(
+            fn,
+            resultRecipe,
+            expression.type,
+            expression.span,
+            availableRequirements,
+          )
         const recipe = resultRecipe
         // Compiler-backed effects lower directly from their recipe. Lowering the effect expression
         // first would form every borrowed argument twice before the dedicated operation is emitted.
         const loweredSubject =
           recipe?._tag === 'BuiltinCall' && recipe.witnessEffectSite === undefined
             ? undefined
-            : lowerExpression(fn, expression.subject)
+            : lowerExpression(fn, expression.subject, availableRequirements)
         const effectValueType =
           loweredSubject === undefined ? undefined : fn.localTypes.at(loweredSubject.result.ordinal)
         if (loweredSubject !== undefined && effectValueType?._tag === 'EffectValue') {
@@ -911,18 +935,31 @@ export function lowerExpressionInner(
             effectValueType,
             expression.type,
             expression.span,
+            availableRequirements,
           )
           if (result !== undefined) endRunLoans(fn, expression.span)
           return result
         }
         if (recipe?._tag === 'EffectBindRequirement') {
-          return lowerEffectExecution(fn, recipe, expression.type, expression.span)
+          return lowerEffectExecution(
+            fn,
+            recipe,
+            expression.type,
+            expression.span,
+            availableRequirements,
+          )
         }
         if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'EffectSuspend') {
           const deferred = recipe.arguments.at(0)
           return deferred === undefined
             ? undefined
-            : lowerEffectExecution(fn, deferred, expression.type, expression.span)
+            : lowerEffectExecution(
+                fn,
+                deferred,
+                expression.type,
+                expression.span,
+                availableRequirements,
+              )
         }
         if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'ExecutionDrive') {
           const [executionExpression, branchExpression, completeExpression, suspendExpression] =
@@ -934,10 +971,10 @@ export function lowerExpressionInner(
             suspendExpression === undefined
           )
             return undefined
-          const execution = lowerExpression(fn, executionExpression)
-          const branch = lowerExpression(fn, branchExpression)
-          const onComplete = lowerExpression(fn, completeExpression)
-          const onSuspend = lowerExpression(fn, suspendExpression)
+          const execution = lowerExpression(fn, executionExpression, availableRequirements)
+          const branch = lowerExpression(fn, branchExpression, availableRequirements)
+          const onComplete = lowerExpression(fn, completeExpression, availableRequirements)
+          const onSuspend = lowerExpression(fn, suspendExpression, availableRequirements)
           const type = fn.type(expression.type)
           const executionType =
             execution === undefined ? undefined : fn.localTypes.at(execution.result.ordinal)
@@ -1003,7 +1040,7 @@ export function lowerExpressionInner(
         if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'ExecutionPark') {
           const [registerExpression] = recipe.arguments
           if (registerExpression === undefined) return undefined
-          const register = lowerExpression(fn, registerExpression)
+          const register = lowerExpression(fn, registerExpression, availableRequirements)
           const type = fn.type(expression.type)
           const guardArgument = recipe.typeArguments.at(0)
           const semanticGuard =
@@ -1109,7 +1146,7 @@ export function lowerExpressionInner(
         if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'StorageAcquire') {
           const [layoutExpression] = recipe.arguments
           if (layoutExpression === undefined || fn.effectOutcome === undefined) return undefined
-          const loweredLayout = lowerExpression(fn, layoutExpression)
+          const loweredLayout = lowerExpression(fn, layoutExpression, availableRequirements)
           const type = fn.type(expression.type)
           const propagationType = fn.type(fn.effectOutcome)
           const failureTag = Type.failureMembers(fn.effectOutcome).findIndex((failure) =>
@@ -1146,8 +1183,8 @@ export function lowerExpressionInner(
             fn.effectOutcome === undefined
           )
             return undefined
-          const stream = lowerExpression(fn, streamExpression)
-          const bytes = lowerExpression(fn, bytesExpression)
+          const stream = lowerExpression(fn, streamExpression, availableRequirements)
+          const bytes = lowerExpression(fn, bytesExpression, availableRequirements)
           const type = fn.type(expression.type)
           const propagationType = fn.type(fn.effectOutcome)
           const failureTag = Type.failureMembers(fn.effectOutcome).findIndex((failure) =>
@@ -1181,7 +1218,7 @@ export function lowerExpressionInner(
         if (recipe?._tag === 'BuiltinCall' && isOsOperation(recipe.operation)) {
           const arguments_: Array<Mir.LocalId> = []
           for (const argument of recipe.arguments) {
-            const lowered = lowerExpression(fn, argument)
+            const lowered = lowerExpression(fn, argument, availableRequirements)
             if (lowered === undefined) return undefined
             arguments_.push(lowered.result)
           }
@@ -1243,7 +1280,7 @@ export function lowerExpressionInner(
         if (recipe?._tag !== 'EffectConstruct') return undefined
         const arguments_: Array<Mir.LocalId> = []
         for (const argument of recipe.arguments) {
-          const lowered = lowerExpression(fn, argument)
+          const lowered = lowerExpression(fn, argument, availableRequirements)
           if (lowered === undefined) return undefined
           arguments_.push(lowered.result)
         }
@@ -1326,7 +1363,7 @@ export function lowerExpressionInner(
       })
     }
     case 'UnionConvert': {
-      const source = lowerExpression(fn, expression.source)
+      const source = lowerExpression(fn, expression.source, availableRequirements)
       // Effect access is a semantic ownership coercion. Hidden construction identity has already
       // selected one concrete EffectValue layout, so the runtime representation is unchanged.
       if (expression.conversion === 'EffectAccess') return source
@@ -1378,12 +1415,14 @@ export function lowerExpressionInner(
     case 'ShortCircuit': {
       const type = fn.type(expression.type)
       if (type?._tag !== 'bool') return undefined
-      const left = lowerExpression(fn, expression.left)
+      const left = lowerExpression(fn, expression.left, availableRequirements)
       if (left === undefined) return undefined
       // The right operand's operations stay nested so that the engines can emit them under the
       // branch instead of before it. It is pure by elaboration, so nothing there needs releasing
       // on the path that skips it.
-      const [right, rightOperations] = fn.capture(() => lowerExpression(fn, expression.right))
+      const [right, rightOperations] = fn.capture(() =>
+        lowerExpression(fn, expression.right, availableRequirements),
+      )
       if (right === undefined) return undefined
       const destination = fn.alloc(type)
       fn.emit(
@@ -1401,7 +1440,7 @@ export function lowerExpressionInner(
     }
     case 'Match': {
       if (expression.scrutinee._tag === 'Unavailable') return undefined
-      const scrutinee = lowerExpression(fn, expression.scrutinee)
+      const scrutinee = lowerExpression(fn, expression.scrutinee, availableRequirements)
       const scrutineeType = fn.type(expression.scrutinee.type)
       const resultType = fn.type(expression.type)
       const scrutineeShape = Layout.callingShape(fn.layout, fn.semantic(expression.scrutinee.type))
@@ -1491,14 +1530,16 @@ export function lowerExpressionInner(
           guardExpression === undefined
             ? undefined
             : (() => {
-                const [lowered, operations] = fn.capture(() => lowerExpression(fn, guardExpression))
+                const [lowered, operations] = fn.capture(() =>
+                  lowerExpression(fn, guardExpression, availableRequirements),
+                )
                 return lowered === undefined
                   ? undefined
                   : Object.freeze({ operations, result: lowered.result })
               })()
         if (guardExpression !== undefined && guard === undefined) return undefined
         const [selectedResult, selectedOperations] = fn.capture(() => {
-          const lowered = lowerExpression(fn, arm.result)
+          const lowered = lowerExpression(fn, arm.result, availableRequirements)
           if (lowered === undefined || resultType._tag !== 'EffectComposite') return lowered
           const selectedType = fn.localTypes.at(lowered.result.ordinal)
           if (selectedType?._tag !== 'EffectValue') return undefined
@@ -1647,7 +1688,7 @@ export function lowerExpressionInner(
       for (const fieldId of expression.evaluationOrder) {
         const field = canonicalFields.get(fieldId.ordinal)
         if (field === undefined) return undefined
-        const lowered = lowerExpression(fn, field.value)
+        const lowered = lowerExpression(fn, field.value, availableRequirements)
         if (lowered === undefined) return undefined
         loweredFields.set(field.field.ordinal, lowered.result)
       }
@@ -1709,7 +1750,7 @@ export function lowerExpressionInner(
       for (const fieldId of expression.evaluationOrder) {
         const field = canonicalFields.get(DeclarationFacts.fieldIdKey(fieldId))
         if (field === undefined) return undefined
-        const lowered = lowerExpression(fn, field.value)
+        const lowered = lowerExpression(fn, field.value, availableRequirements)
         if (lowered === undefined) return undefined
         loweredFields.set(DeclarationFacts.fieldIdKey(field.field), lowered.result)
       }
@@ -1753,7 +1794,7 @@ export function lowerExpressionInner(
       if (type?._tag !== 'FixedArray') return undefined
       const elements: Array<Mir.LocalId> = []
       for (const element of expression.elements) {
-        const lowered = lowerExpression(fn, element)
+        const lowered = lowerExpression(fn, element, availableRequirements)
         if (lowered === undefined) return undefined
         elements.push(lowered.result)
       }
@@ -1770,15 +1811,15 @@ export function lowerExpressionInner(
       return { result: destination }
     }
     case 'Project': {
-      return lowerPlace(fn, expression)
+      return lowerPlace(fn, expression, availableRequirements)
     }
     case 'IndexPlace': {
-      return lowerPlace(fn, expression)
+      return lowerPlace(fn, expression, availableRequirements)
     }
     case 'SliceBorrow': {
       const temporary =
         expression.root._tag === 'TemporarySliceRoot'
-          ? lowerExpression(fn, expression.root.value)
+          ? lowerExpression(fn, expression.root.value, availableRequirements)
           : undefined
       let root: Mir.LocalId | undefined
       switch (expression.root._tag) {
@@ -1839,7 +1880,7 @@ export function lowerExpressionInner(
     case 'ValueBorrow': {
       const temporary =
         expression.root._tag === 'TemporarySliceRoot'
-          ? lowerExpression(fn, expression.root.value)
+          ? lowerExpression(fn, expression.root.value, availableRequirements)
           : undefined
       let root: Mir.LocalId | undefined
       switch (expression.root._tag) {
@@ -1894,7 +1935,7 @@ export function lowerExpressionInner(
       return Object.freeze({ result: destination })
     }
     case 'SliceLength': {
-      const slice = lowerExpression(fn, expression.slice)
+      const slice = lowerExpression(fn, expression.slice, availableRequirements)
       const sliceType = slice === undefined ? undefined : fn.localTypes.at(slice.result.ordinal)
       if (
         slice === undefined ||
@@ -1916,12 +1957,12 @@ export function lowerExpressionInner(
       return Object.freeze({ result: destination })
     }
     case 'SliceIndexPlace': {
-      return lowerPlace(fn, expression)
+      return lowerPlace(fn, expression, availableRequirements)
     }
     case 'Call': {
       const argumentLocals: Array<Mir.LocalId> = []
       for (const argument of expression.arguments) {
-        const lowered = lowerExpression(fn, argument)
+        const lowered = lowerExpression(fn, argument, availableRequirements)
         if (lowered === undefined) return undefined
         argumentLocals.push(lowered.result)
       }
@@ -1986,7 +2027,7 @@ export function lowerExpressionInner(
       if (selected?.rule._tag !== 'BuiltinRule') {
         const argumentLocals: Array<Mir.LocalId> = []
         for (const argument of expression.arguments) {
-          const lowered = lowerExpression(fn, argument)
+          const lowered = lowerExpression(fn, argument, availableRequirements)
           if (lowered === undefined) return undefined
           argumentLocals.push(lowered.result)
         }

@@ -824,8 +824,10 @@ export const make = (operations: Operations) => {
   const callableApplicationArgument = (
     expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
     ordinal: number,
+    context: EffectOriginContext,
   ): Hir.Expression | undefined => {
-    const section = expression.callee._tag === 'CallableSection' ? expression.callee : undefined
+    const callable = callableValue(expression.callee, callableBindings(context.fn))
+    const section = callable?._tag === 'CallableSection' ? callable : undefined
     if (section === undefined) return expression.arguments.at(ordinal)
     const captured = section.captures.find((capture) => capture.parameterOrdinal === ordinal)
     if (captured !== undefined) return captured.value
@@ -855,7 +857,7 @@ export const make = (operations: Operations) => {
       | Type.CompositeEffectRepresentationArgument
     > = []
     for (const ordinal of effectParameterOrdinals(target, targetSubstitution)) {
-      const argument = callableApplicationArgument(expression, ordinal)
+      const argument = callableApplicationArgument(expression, ordinal, context)
       const compositeRepresentation =
         argument === undefined ? undefined : compositeEffectRepresentationOf(argument, context)
       if (compositeRepresentation !== undefined) {
@@ -880,7 +882,13 @@ export const make = (operations: Operations) => {
         const serviceIdentity =
           serviceTarget === undefined || serviceFunction === undefined
             ? undefined
-            : resultEffectIdentity(serviceFunction, serviceTarget, context.results, context.index)
+            : resultEffectIdentity(
+                serviceFunction,
+                serviceTarget,
+                context.results,
+                context.index,
+                context.resolving,
+              )
         if (argument !== undefined && service !== undefined && serviceIdentity !== undefined) {
           const inheritedResolver = context.resolveServiceEffectIdentity
           identity = effectOriginOf(argument, {
@@ -894,7 +902,7 @@ export const make = (operations: Operations) => {
       hiddenArguments.push(Type.effectIdentityArgument(identity))
     }
     for (const ordinal of callableParameterOrdinals(target, targetSubstitution)) {
-      const argument = callableApplicationArgument(expression, ordinal)
+      const argument = callableApplicationArgument(expression, ordinal, context)
       const identity = argument === undefined ? undefined : callableOriginOf(argument, context)
       if (identity === undefined) return undefined
       hiddenArguments.push(identity)
@@ -1005,12 +1013,21 @@ export const make = (operations: Operations) => {
           serviceEffectRecipes(argument, context, resolving),
         ),
       )
-    if (expression._tag === 'CallableApply')
+    if (expression._tag === 'CallableSection')
       return Object.freeze(
-        expression.arguments.flatMap((argument) =>
-          serviceEffectRecipes(argument, context, resolving),
+        expression.captures.flatMap((capture) =>
+          serviceEffectRecipes(capture.value, context, resolving),
         ),
       )
+    if (expression._tag === 'CallableApply') {
+      const children =
+        expression.evaluation === 'LeftThenCallable'
+          ? [...expression.arguments, expression.callee]
+          : [expression.callee, ...expression.arguments]
+      return Object.freeze(
+        children.flatMap((child) => serviceEffectRecipes(child, context, resolving)),
+      )
+    }
     if (expression._tag === 'BuiltinCall' || expression._tag === 'BoundOperationCall')
       return Object.freeze(
         expression.arguments.flatMap((argument) =>
@@ -1107,7 +1124,7 @@ export const make = (operations: Operations) => {
     serviceOverride?: ServiceEffectRecipe,
   ): InstanceKey | undefined {
     const binding = forwardedRequirementBinding(target)
-    const argument = callableApplicationArgument(expression, effectParameter)
+    const argument = callableApplicationArgument(expression, effectParameter, context)
     const service =
       serviceOverride ??
       (argument === undefined ? undefined : serviceEffectRecipe(argument, context))
@@ -1297,7 +1314,13 @@ export const make = (operations: Operations) => {
         const serviceIdentity =
           serviceTarget === undefined || serviceFunction === undefined
             ? undefined
-            : resultEffectIdentity(serviceFunction, serviceTarget, context.results, context.index)
+            : resultEffectIdentity(
+                serviceFunction,
+                serviceTarget,
+                context.results,
+                context.index,
+                context.resolving,
+              )
         if (argument !== undefined && service !== undefined && serviceIdentity !== undefined) {
           const inheritedResolver = context.resolveServiceEffectIdentity
           identity = effectOriginOf(argument, {
@@ -1578,6 +1601,10 @@ export const make = (operations: Operations) => {
       >,
       target: InstanceKey,
     ): void => {
+      const ordinal = expressionOrder.get(expression)
+      // Origin inference may inspect a callee's returned expression. Those calls belong to that
+      // callee's discovery pass, not to the owner whose argument identity is currently inferred.
+      if (ordinal === undefined) return
       const targetFn = targetFunction(results, target.declaration)
       if (targetFn === undefined) return
       const resultEffect = resultEffectIdentity(targetFn, target, results, index)
@@ -1592,7 +1619,7 @@ export const make = (operations: Operations) => {
             target,
             ...(resultEffect === undefined ? {} : { resultEffect }),
           }),
-          ordinal: expressionOrder.get(expression) ?? expressions.length,
+          ordinal,
         }),
       )
     }
@@ -2598,7 +2625,7 @@ export const make = (operations: Operations) => {
             : instanceSubstitution(wrapper, wrapperKey)
         if (wrapper === undefined || wrapperSubstitution === undefined) return
         for (const ordinal of effectParameterOrdinals(wrapper, wrapperSubstitution)) {
-          const argument = callableApplicationArgument(expression, ordinal)
+          const argument = callableApplicationArgument(expression, ordinal, context)
           for (const service of argument === undefined
             ? []
             : serviceEffectRecipes(argument, context)) {

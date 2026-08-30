@@ -135,7 +135,7 @@ service Sink {
   effect fn act() -> () ! Problem ? &mut Sink
 }
 
-struct SinkImpl {}
+struct SinkImpl { calls: i32 }
 
 effect fn ignoreError<A, E, ?R>(protected: once Effect<A ! E ? R>) -> A | () ? R {
   let completed = run Effect.result(move protected)
@@ -146,7 +146,8 @@ effect fn ignoreError<A, E, ?R>(protected: once Effect<A ! E ? R>) -> A | () ? R
 }
 
 impl Sink for SinkImpl {
-  effect fn act(self: &Self) -> () ! Problem ? &mut Sink {
+  effect fn act(self: &mut Self) -> () ! Problem ? &mut Sink {
+    self.calls = self.calls + 1
     fail Problem { code: 42 }
   }
 }
@@ -155,11 +156,12 @@ struct StdoutWriter {}
 
 impl Writer for StdoutWriter {
   effect fn write(self: &Self) -> i32 ? &mut Writer {
-    let mut sink = SinkImpl {}
+    let mut sink = SinkImpl { calls: 0 }
     run Sink.act()
       |> ignoreError
       |> Effect.provideMut(&mut sink)
-    return 42
+    if sink.calls == 1 { return 42 }
+    return 0
   }
 }
 

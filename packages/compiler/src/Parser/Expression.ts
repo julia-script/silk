@@ -532,10 +532,10 @@ export function parseArgumentList(
     kind !== 'EnumKeyword' &&
     kind !== 'UnionKeyword' &&
     kind !== 'FnKeyword' &&
-    !(kind === 'EffectKeyword' && peek(state, 1) === 'FnKeyword') &&
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
   ) {
+    const argumentStart = consumeTrivia(state).state.index
     const argument = parseChildExpression(state, depth, true, (childDepth) =>
       parseExpression(state, reservedForEnclosingCalls + 1, 'Identifier', true, childDepth),
     )
@@ -551,7 +551,6 @@ export function parseArgumentList(
       kind === 'EnumKeyword' ||
       kind === 'UnionKeyword' ||
       kind === 'FnKeyword' ||
-      (kind === 'EffectKeyword' && peek(state, 1) === 'FnKeyword') ||
       kind === 'ImportKeyword'
     )
       break
@@ -569,6 +568,28 @@ export function parseArgumentList(
     ])
     children = Object.freeze([...children, ...comma.elements])
     state = comma.state
+
+    // Malformed expression starts may be synchronization tokens for both the expression and the
+    // comma expectation. Consume one concrete token when neither parser advanced so this recovery
+    // loop has a structural progress guarantee.
+    const stalled = consumeTrivia(state)
+    if (stalled.state.index === argumentStart) {
+      const token = currentToken(stalled.state)
+      if (token !== undefined && token.kind !== 'EndOfFile') {
+        const advanced = advance(stalled.state)
+        const error = syntaxNode(advanced, 'Error', [...stalled.elements, token])
+        children = Object.freeze([...children, error])
+        state = addDiagnostic(
+          advanced,
+          Diagnostic.unexpectedTokens(
+            [token.kind],
+            'syntax',
+            ['an expression', '`,`', '`)`'],
+            error.span,
+          ),
+        )
+      }
+    }
     kind = nextSignificantKind(state)
   }
 
