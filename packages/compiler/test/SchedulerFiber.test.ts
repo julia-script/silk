@@ -948,7 +948,9 @@ it.effect(
         describe({ acquiredTickets, releasedTickets }),
       )
     }),
-  { timeout: 300_000 },
+  // The Linux compiler shard has less per-worker CPU than focused/local runs and has measured just
+  // over five minutes for this evaluator-heavy fixture. Keep the timeout above that CI envelope.
+  { timeout: 600_000 },
 )
 
 it.effect(
@@ -1323,7 +1325,8 @@ it.effect(
         'joining an already completed child must not park',
       )
     }),
-  { timeout: 120_000 },
+  // This fixture exceeded two minutes under Linux shard contention while completing normally.
+  { timeout: 300_000 },
 )
 
 it.effect(
