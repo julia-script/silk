@@ -12,7 +12,8 @@
 //! # Gotchas
 //! The shared [`Instant`] representation cannot statically prevent mixing system time or marks from
 //! different providers. Native OS waits block the calling host thread and do not park one Fiber;
-//! virtual providers may satisfy a wait by advancing their own timeline without sleeping. An
+//! scheduler-owned tasks receive a lexical replacement whose waits park only that task. Virtual
+//! providers may satisfy a wait by advancing their own timeline without sleeping. An
 //! invalid or unrepresentable provider result traps because this service has no typed failure
 //! channel.
 //!
@@ -26,7 +27,11 @@
 //! }
 //! ```
 
+import silk.i64 as i64
+import silk.option { Option }
+import silk.system_clock as SystemClock
 import silk.system_clock { Instant }
+import silk.u64 as u64
 
 /// An explicit provider of monotonic marks, nominal resolution, and deadline waits.
 ///
@@ -84,4 +89,46 @@ pub effect fn waitUntil(when: Instant) -> () ? &mut MonotonicClock {
 /// instead of wrapping.
 pub effect fn waitFor(howLong: u64) -> () ? &mut MonotonicClock {
   return run MonotonicClock.waitFor(howLong)
+}
+
+fn invalidI64() -> i64 {
+  let invalid = 1 / 0
+  return invalidI64()
+}
+
+fn requireI64(value: Option<i64>) -> i64 {
+  return match move value {
+    Option<i64>.None => invalidI64()
+    Option<i64>.Some { value: present } => present
+  }
+}
+
+/// Derives the canonical absolute deadline `howLong` nanoseconds after `start`.
+///
+/// # Details
+///
+/// The addition is performed in split seconds and nanoseconds so every `u64` duration is accepted
+/// whenever the resulting signed-seconds [`Instant`] remains representable. Fractional overflow
+/// carries exactly once into seconds.
+///
+/// # Gotchas
+///
+/// This operation traps rather than wrapping when the resulting whole seconds exceed the
+/// representable `i64` range. `start` must belong to the provider timeline on which the deadline
+/// will be used.
+pub fn deadlineAfter(start: &Instant, howLong: u64) -> Instant {
+  let startSeconds = SystemClock.seconds(start)
+  let startNanoseconds = SystemClock.nanoseconds(start)
+  let billion = u64.toU64(1000000000)
+  let wholeSeconds = requireI64(u64.checkedToI64(howLong / billion))
+  let fraction = u64.toI64(howLong % billion)
+  let mut deadlineNanoseconds = startNanoseconds + fraction
+  let mut carry = i64.toI64(0)
+  if deadlineNanoseconds >= 1000000000 {
+    deadlineNanoseconds = deadlineNanoseconds - 1000000000
+    carry = i64.toI64(1)
+  }
+  let extended = requireI64(i64.checkedAdd(startSeconds, wholeSeconds))
+  let deadlineSeconds = requireI64(i64.checkedAdd(extended, carry))
+  return SystemClock.make(deadlineSeconds, deadlineNanoseconds)
 }

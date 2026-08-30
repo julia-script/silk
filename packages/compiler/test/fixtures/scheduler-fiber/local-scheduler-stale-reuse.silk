@@ -3,8 +3,31 @@ import silk.effect as Effect
 import silk.execution as Execution
 import silk.fiber as Fiber
 import silk.local_scheduler as LocalScheduler
+import silk.monotonic_clock as MonotonicClock
 import silk.scheduler as Scheduler
 import silk.shared as Shared
+import silk.system_clock as SystemClock
+import silk.system_clock { Instant }
+
+struct ParentClock { mark: Instant }
+effect fn parentNow(self: &mut ParentClock) -> Instant {
+  return SystemClock.make(SystemClock.seconds(&self.mark), SystemClock.nanoseconds(&self.mark))
+}
+effect fn parentResolution(self: &mut ParentClock) -> u64 { return 1 }
+effect fn parentWaitUntil(self: &mut ParentClock, deadline: Instant) -> () {
+  self.mark = move deadline
+  return ()
+}
+effect fn parentWaitFor(self: &mut ParentClock, duration: u64) -> () {
+  let deadline = MonotonicClock.deadlineAfter(&self.mark, duration)
+  return run parentWaitUntil(move self, move deadline)
+}
+impl MonotonicClock.MonotonicClock for ParentClock {
+  now: ParentClock.parentNow
+  getResolution: ParentClock.parentResolution
+  waitUntil: ParentClock.parentWaitUntil
+  waitFor: ParentClock.parentWaitFor
+}
 
 struct WakeEmpty {}
 struct WakeArmed { wake: Intrinsic.Wake }
@@ -58,7 +81,7 @@ fn consumeRetainedWake(state: &Shared.Shared<RetainedWake>) -> () {
 
 effect fn retainedWakeRoot(state: Shared.Shared<RetainedWake>) -> i32
 ! RetainedRootFailure
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   let registration = retainWake(move state)
   run Execution.park(move registration)
   resumedUnexpectedly()
@@ -72,7 +95,7 @@ effect fn staleChild() -> i32 {
 
 effect fn staleReadyRoot() -> i32
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   let child = run Fiber.forkChild<i32, never>(staleChild())
   drop child
   staleRootTerminating()
@@ -86,7 +109,7 @@ effect fn currentChild() -> i32 {
 
 effect fn freshRoot(state: Shared.Shared<RetainedWake>) -> i32
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   freshStarted()
   consumeRetainedWake(&state)
   cancelledWakeConsumed()
@@ -114,7 +137,8 @@ effect fn scenario() -> i32
 ! Allocator.OutOfMemoryError
   | Scheduler.TaskIdExhaustedError
   | Fiber.Cancelled
-  | LocalScheduler.StalledError {
+  | LocalScheduler.StalledError
+? &mut MonotonicClock.MonotonicClock {
   let mut allocator = Allocator.systemAllocatorProvider()
   let state = run Shared.make<RetainedWake>(RetainedWake { slot: WakeEmpty {} })
     |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
@@ -149,5 +173,8 @@ effect fn recoverScenario(
 }
 
 pub fn main() -> i32 {
-  return run Effect.catchAll(scenario(), recoverScenario)
+  let mut clock = ParentClock { mark: SystemClock.make(0, 0) }
+  let program = Effect.catchAll(scenario(), recoverScenario)
+    |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+  return run move program
 }

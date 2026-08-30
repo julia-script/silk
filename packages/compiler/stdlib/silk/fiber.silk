@@ -15,6 +15,7 @@
 
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.execution as Execution
+import silk.monotonic_clock as MonotonicClock
 import silk.scheduler as Scheduler
 import silk.shared as Shared
 
@@ -508,7 +509,8 @@ effect fn publishPending<A, E>(
 ///
 /// # When to use
 ///
-/// Use this operation to run closed work or work that uses the child Scheduler provider.
+/// Use this operation to run closed work or work that uses the child Scheduler and MonotonicClock
+/// providers.
 ///
 /// # Details
 ///
@@ -522,7 +524,11 @@ effect fn publishPending<A, E>(
 /// Allocation refusal or task-identity exhaustion raises the exact preparation failure. Publication
 /// refusal raises `OutOfMemoryError`, returns no Fiber, and does not activate the child.
 pub effect fn forkChild<A, E>(
-  child: once Effect<A ! E ? &mut Scheduler.Scheduler>
+  child: once Effect<
+    A
+    ! E
+    ? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock
+  >
 ) -> Fiber<A, E>
 ! OutOfMemoryError | Scheduler.TaskIdExhaustedError
 ? &mut Scheduler.Scheduler {

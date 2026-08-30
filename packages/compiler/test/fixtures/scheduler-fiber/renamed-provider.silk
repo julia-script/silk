@@ -1,5 +1,6 @@
 import silk.allocator as Allocator
 import silk.effect as Effect
+import silk.monotonic_clock as MonotonicClock
 import silk.scheduler as RuntimePolicy
 
 struct RenamedDispatcher { calls: i32 }
@@ -8,7 +9,11 @@ fn renamedPrepareCalled() -> () { return () }
 
 effect fn prepare<A, E>(
   self: &mut RenamedDispatcher,
-  child: once Effect<A ! E ? &mut RuntimePolicy.Scheduler>,
+  child: once Effect<
+    A
+    ! E
+    ? &mut RuntimePolicy.Scheduler | &mut MonotonicClock.MonotonicClock
+  >,
 ) -> RuntimePolicy.PendingPublication<A, E>
 ! Allocator.OutOfMemoryError | RuntimePolicy.TaskIdExhaustedError {
   drop child
@@ -21,7 +26,10 @@ impl RuntimePolicy.Scheduler for RenamedDispatcher {
   prepare: RenamedDispatcher.prepare
 }
 
-effect fn child() -> i32 ? &mut RuntimePolicy.Scheduler { return 1 }
+effect fn child() -> i32
+? &mut RuntimePolicy.Scheduler | &mut MonotonicClock.MonotonicClock {
+  return 1
+}
 
 effect fn request() -> i32
 ! Allocator.OutOfMemoryError | RuntimePolicy.TaskIdExhaustedError

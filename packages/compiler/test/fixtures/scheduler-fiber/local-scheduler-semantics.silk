@@ -2,7 +2,30 @@ import silk.allocator as Allocator
 import silk.effect as Effect
 import silk.fiber as Fiber
 import silk.local_scheduler as LocalScheduler
+import silk.monotonic_clock as MonotonicClock
 import silk.scheduler as Scheduler
+import silk.system_clock as SystemClock
+import silk.system_clock { Instant }
+
+struct ParentClock { mark: Instant }
+effect fn parentNow(self: &mut ParentClock) -> Instant {
+  return SystemClock.make(SystemClock.seconds(&self.mark), SystemClock.nanoseconds(&self.mark))
+}
+effect fn parentResolution(self: &mut ParentClock) -> u64 { return 1 }
+effect fn parentWaitUntil(self: &mut ParentClock, deadline: Instant) -> () {
+  self.mark = move deadline
+  return ()
+}
+effect fn parentWaitFor(self: &mut ParentClock, duration: u64) -> () {
+  let deadline = MonotonicClock.deadlineAfter(&self.mark, duration)
+  return run parentWaitUntil(move self, move deadline)
+}
+impl MonotonicClock.MonotonicClock for ParentClock {
+  now: ParentClock.parentNow
+  getResolution: ParentClock.parentResolution
+  waitUntil: ParentClock.parentWaitUntil
+  waitFor: ParentClock.parentWaitFor
+}
 
 struct ChildProblem { code: i32 }
 
@@ -51,7 +74,7 @@ effect fn thirdSibling() -> i32 {
 
 effect fn fifoRoot() -> i32
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   let first = run Fiber.forkChild<i32, never>(firstSibling())
   drop first
   firstForkReturned()
@@ -77,7 +100,7 @@ effect fn yieldingChild() -> i32 {
 
 effect fn yieldingRoot() -> i32
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   let child = run Fiber.forkChild<i32, never>(yieldingChild())
   rootBeforeYield()
   run Fiber.yieldNow()
@@ -96,7 +119,7 @@ effect fn completedChild() -> i32 {
 
 effect fn completionBeforeJoinRoot() -> i32
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   let child = run Fiber.forkChild<i32, never>(completedChild())
   run Fiber.yieldNow()
   beforeCompletedJoin()
@@ -112,7 +135,7 @@ effect fn nestedLeaf() -> i32 {
 
 effect fn nestedFailure() -> i32
 ! ChildProblem | Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   nestedStarted()
   let child = run Fiber.forkChild<i32, never>(nestedLeaf())
   nestedForkReturned()
@@ -142,7 +165,7 @@ fn observeNestedFailure(code: i32) -> i32 {
 
 effect fn nestedRoot() -> i32
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   let child = run Fiber.forkChild<
     i32,
     ChildProblem
@@ -169,7 +192,7 @@ effect fn cancelledChild() -> i32 {
 
 effect fn escapeCancelledChild() -> Fiber.Fiber<i32, never>
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   return run Fiber.forkChild<i32, never>(cancelledChild())
 }
 
@@ -188,12 +211,13 @@ fn recordCancellation() -> bool {
 }
 
 effect fn observeCancelled(fiber: Fiber.Fiber<i32, never>) -> bool
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   return isCancelled(run Fiber.await<i32, never>(move fiber))
 }
 
 effect fn scenario() -> i32
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled | LocalScheduler.StalledError {
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled | LocalScheduler.StalledError
+? &mut MonotonicClock.MonotonicClock {
   let mut scheduler = LocalScheduler.make()
   let fifo = run LocalScheduler.execute(&mut scheduler, fifoRoot())
   let yielded = run LocalScheduler.execute(&mut scheduler, yieldingRoot())
@@ -216,5 +240,8 @@ effect fn recoverScenario(
 }
 
 pub fn main() -> i32 {
-  return run Effect.catchAll(scenario(), recoverScenario)
+  let mut clock = ParentClock { mark: SystemClock.make(0, 0) }
+  let program = Effect.catchAll(scenario(), recoverScenario)
+    |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+  return run move program
 }

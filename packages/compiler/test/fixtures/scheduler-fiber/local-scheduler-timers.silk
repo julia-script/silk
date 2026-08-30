@@ -1,0 +1,342 @@
+import silk.allocator as Allocator
+import silk.effect as Effect
+import silk.fiber as Fiber
+import silk.local_scheduler as LocalScheduler
+import silk.monotonic_clock as MonotonicClock
+import silk.scheduler as Scheduler
+import silk.shared as Shared
+import silk.system_clock as SystemClock
+import silk.system_clock { Instant }
+
+struct Audit {
+  nextEvent: i32
+  siblingEvent: i32
+  firstTimerEvent: i32
+  secondTimerEvent: i32
+  outerSiblingEvent: i32
+  innerTimerEvent: i32
+  resolutionReads: i32
+  markReads: i32
+  absoluteWaits: i32
+  waitedSeconds: i64
+  waitedNanoseconds: i64
+  cachedReadsEqual: bool
+  spinnerSteps: i32
+  fairnessTimerStep: i32
+}
+
+fn recordResolution(self: &mut Audit) -> () {
+  self.resolutionReads = self.resolutionReads + 1
+  return ()
+}
+
+fn recordMark(self: &mut Audit) -> () {
+  self.markReads = self.markReads + 1
+  return ()
+}
+
+fn recordWait(self: &mut Audit, deadline: &Instant) -> () {
+  self.absoluteWaits = self.absoluteWaits + 1
+  self.waitedSeconds = SystemClock.seconds(deadline)
+  self.waitedNanoseconds = SystemClock.nanoseconds(deadline)
+  return ()
+}
+
+fn recordSibling(self: &mut Audit) -> () {
+  self.nextEvent = self.nextEvent + 1
+  self.siblingEvent = self.nextEvent
+  return ()
+}
+
+fn recordFirstTimer(self: &mut Audit) -> () {
+  self.nextEvent = self.nextEvent + 1
+  self.firstTimerEvent = self.nextEvent
+  return ()
+}
+
+fn recordSecondTimer(self: &mut Audit) -> () {
+  self.nextEvent = self.nextEvent + 1
+  self.secondTimerEvent = self.nextEvent
+  return ()
+}
+
+fn recordOuterSibling(self: &mut Audit) -> () {
+  self.nextEvent = self.nextEvent + 1
+  self.outerSiblingEvent = self.nextEvent
+  return ()
+}
+
+fn recordInnerTimer(self: &mut Audit) -> () {
+  self.nextEvent = self.nextEvent + 1
+  self.innerTimerEvent = self.nextEvent
+  return ()
+}
+
+fn recordCachedReads(self: &mut Audit, equal: bool) -> () {
+  self.cachedReadsEqual = equal
+  return ()
+}
+
+struct ScriptedParentClock {
+  mark: Instant
+  audit: Shared.Shared<Audit>
+  advanceOnRead: bool
+}
+
+fn advanceMark(mark: &Instant) -> Instant {
+  let seconds = SystemClock.seconds(mark)
+  let nanoseconds = SystemClock.nanoseconds(mark)
+  if nanoseconds == 999999999 { return SystemClock.make(seconds + 1, 0) }
+  return SystemClock.make(seconds, nanoseconds + 1)
+}
+
+effect fn parentNow(self: &mut ScriptedParentClock) -> Instant {
+  let recorded = Shared.withMut(&self.audit, recordMark)
+  if self.advanceOnRead { self.mark = advanceMark(&self.mark) }
+  return SystemClock.make(
+    SystemClock.seconds(&self.mark),
+    SystemClock.nanoseconds(&self.mark),
+  )
+}
+
+effect fn parentResolution(self: &mut ScriptedParentClock) -> u64 {
+  let recorded = Shared.withMut(&self.audit, recordResolution)
+  return 1
+}
+
+effect fn parentWaitUntil(self: &mut ScriptedParentClock, deadline: Instant) -> () {
+  let recorded = Shared.withMut(&self.audit, recordWait(&deadline))
+  self.mark = move deadline
+  return ()
+}
+
+effect fn parentWaitFor(self: &mut ScriptedParentClock, duration: u64) -> () {
+  let deadline = MonotonicClock.deadlineAfter(&self.mark, duration)
+  return run parentWaitUntil(move self, move deadline)
+}
+
+impl MonotonicClock.MonotonicClock for ScriptedParentClock {
+  now: ScriptedParentClock.parentNow
+  getResolution: ScriptedParentClock.parentResolution
+  waitUntil: ScriptedParentClock.parentWaitUntil
+  waitFor: ScriptedParentClock.parentWaitFor
+}
+
+effect fn firstTimer(audit: Shared.Shared<Audit>) -> i32
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  run MonotonicClock.waitFor(1000000000)
+  let recorded = Shared.withMut(&audit, recordFirstTimer)
+  drop audit
+  return 20
+}
+
+effect fn secondTimer(audit: Shared.Shared<Audit>) -> i32
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  run MonotonicClock.waitUntil(SystemClock.make(1, 0))
+  let recorded = Shared.withMut(&audit, recordSecondTimer)
+  drop audit
+  return 21
+}
+
+effect fn readySibling(audit: Shared.Shared<Audit>) -> i32 {
+  let recorded = Shared.withMut(&audit, recordSibling)
+  drop audit
+  return 1
+}
+
+effect fn root(audit: Shared.Shared<Audit>) -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  let firstRead = run MonotonicClock.now()
+  let secondRead = run MonotonicClock.now()
+  let equal = SystemClock.seconds(&firstRead) == SystemClock.seconds(&secondRead)
+    && SystemClock.nanoseconds(&firstRead) == SystemClock.nanoseconds(&secondRead)
+  let cached = Shared.withMut(&audit, recordCachedReads(equal))
+  drop firstRead
+  drop secondRead
+
+  run MonotonicClock.waitFor(0)
+  run MonotonicClock.waitUntil(SystemClock.make(-1, 999999999))
+
+  let first = run Fiber.forkChild<i32, never>(
+    firstTimer(Shared.clone<Audit>(&audit)),
+  )
+  let second = run Fiber.forkChild<i32, never>(
+    secondTimer(Shared.clone<Audit>(&audit)),
+  )
+  let sibling = run Fiber.forkChild<i32, never>(
+    readySibling(Shared.clone<Audit>(&audit)),
+  )
+  let siblingValue = run Fiber.join<i32, never>(move sibling)
+  let firstValue = run Fiber.join<i32, never>(move first)
+  let secondValue = run Fiber.join<i32, never>(move second)
+  drop audit
+  return siblingValue + firstValue + secondValue
+}
+
+effect fn innerRoot(audit: Shared.Shared<Audit>) -> i32
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  run MonotonicClock.waitFor(1000000000)
+  let recorded = Shared.withMut(&audit, recordInnerTimer)
+  drop audit
+  return 41
+}
+
+effect fn nestedScheduler(audit: Shared.Shared<Audit>) -> i32
+! Allocator.OutOfMemoryError | LocalScheduler.StalledError
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  let mut inner = LocalScheduler.make()
+  return run LocalScheduler.execute(&mut inner, innerRoot(move audit))
+}
+
+effect fn outerSibling(audit: Shared.Shared<Audit>) -> i32 {
+  let recorded = Shared.withMut(&audit, recordOuterSibling)
+  drop audit
+  return 1
+}
+
+effect fn nestedOuterRoot(audit: Shared.Shared<Audit>) -> i32
+! Allocator.OutOfMemoryError
+  | Scheduler.TaskIdExhaustedError
+  | Fiber.Cancelled
+  | LocalScheduler.StalledError
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  let inner = run Fiber.forkChild<
+    i32,
+    Allocator.OutOfMemoryError | LocalScheduler.StalledError,
+  >(nestedScheduler(Shared.clone<Audit>(&audit)))
+  let sibling = run Fiber.forkChild<i32, never>(
+    outerSibling(Shared.clone<Audit>(&audit)),
+  )
+  let siblingValue = run Fiber.join<i32, never>(move sibling)
+  let innerValue = run Fiber.join<
+    i32,
+    Allocator.OutOfMemoryError | LocalScheduler.StalledError,
+  >(move inner)
+  drop audit
+  return siblingValue + innerValue
+}
+
+fn recordSpinnerStep(self: &mut Audit) -> () {
+  self.spinnerSteps = self.spinnerSteps + 1
+  return ()
+}
+
+fn recordFairnessTimer(self: &mut Audit) -> () {
+  self.fairnessTimerStep = self.spinnerSteps
+  return ()
+}
+
+effect fn fairnessTimer(audit: Shared.Shared<Audit>) -> i32
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  run MonotonicClock.waitFor(5)
+  let recorded = Shared.withMut(&audit, recordFairnessTimer)
+  drop audit
+  return 40
+}
+
+effect fn readySpinner(audit: Shared.Shared<Audit>) -> i32 {
+  let mut remaining = 10
+  while remaining > 0 {
+    let recorded = Shared.withMut(&audit, recordSpinnerStep)
+    run Fiber.yieldNow()
+    remaining = remaining - 1
+  }
+  drop audit
+  return 2
+}
+
+effect fn fairnessRoot(audit: Shared.Shared<Audit>) -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  let timer = run Fiber.forkChild<i32, never>(
+    fairnessTimer(Shared.clone<Audit>(&audit)),
+  )
+  let spinner = run Fiber.forkChild<i32, never>(
+    readySpinner(Shared.clone<Audit>(&audit)),
+  )
+  let timerValue = run Fiber.join<i32, never>(move timer)
+  let spinnerValue = run Fiber.join<i32, never>(move spinner)
+  drop audit
+  return timerValue + spinnerValue
+}
+
+fn auditResult(self: &Audit, value: i32) -> i32 {
+  if value != 42 { return -1 }
+  if !self.cachedReadsEqual { return -2 }
+  if self.resolutionReads != 3 { return -3 }
+  if self.absoluteWaits != 2 { return -4 }
+  if self.waitedSeconds != 2 || self.waitedNanoseconds != 0 { return -5 }
+  if self.siblingEvent != 1 { return -6 }
+  if self.firstTimerEvent != 2 { return -7 }
+  if self.secondTimerEvent != 3 { return -8 }
+  if self.markReads < 2 { return -9 }
+  if self.outerSiblingEvent != 4 { return -10 }
+  if self.innerTimerEvent != 5 { return -11 }
+  if self.fairnessTimerStep <= 0 { return -12 }
+  if self.fairnessTimerStep >= 10 { return -13 }
+  if self.spinnerSteps != 10 { return -14 }
+  return 42
+}
+
+effect fn scenario() -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled | LocalScheduler.StalledError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let audit = run Shared.make<Audit>(Audit {
+    nextEvent: 0,
+    siblingEvent: 0,
+    firstTimerEvent: 0,
+    secondTimerEvent: 0,
+    outerSiblingEvent: 0,
+    innerTimerEvent: 0,
+    resolutionReads: 0,
+    markReads: 0,
+    absoluteWaits: 0,
+    waitedSeconds: -1,
+    waitedNanoseconds: -1,
+    cachedReadsEqual: false,
+    spinnerSteps: 0,
+    fairnessTimerStep: 0,
+  }) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+  let mut clock = ScriptedParentClock {
+    mark: SystemClock.make(0, 0),
+    audit: Shared.clone<Audit>(&audit),
+    advanceOnRead: false,
+  }
+  let mut scheduler = LocalScheduler.make()
+  let program = LocalScheduler.execute(
+    &mut scheduler,
+    root(Shared.clone<Audit>(&audit)),
+  ) |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+  let value = run move program
+  let nestedProgram = LocalScheduler.execute(
+    &mut scheduler,
+    nestedOuterRoot(Shared.clone<Audit>(&audit)),
+  ) |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+  let nestedValue = run move nestedProgram
+  clock.advanceOnRead = true
+  let fairnessProgram = LocalScheduler.execute(
+    &mut scheduler,
+    fairnessRoot(Shared.clone<Audit>(&audit)),
+  ) |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+  let fairnessValue = run move fairnessProgram
+  drop clock
+  let result = Shared.with<Audit, i32>(
+    &audit,
+    auditResult(value + nestedValue + fairnessValue - 84),
+  )
+  drop audit
+  return result
+}
+
+effect fn recover(
+  error: Allocator.OutOfMemoryError
+    | Scheduler.TaskIdExhaustedError
+    | Fiber.Cancelled
+    | LocalScheduler.StalledError,
+) -> i32 {
+  drop error
+  return -99
+}
+
+pub fn main() -> i32 { return run Effect.catchAll(scenario(), recover) }

@@ -2,9 +2,32 @@ import silk.allocator as Allocator
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.fiber as Fiber
+import silk.monotonic_clock as MonotonicClock
 import silk.result as Result
 import silk.scheduler as Scheduler
 import silk.shared as Shared
+import silk.system_clock as SystemClock
+import silk.system_clock { Instant }
+
+struct TaskClock {}
+effect fn taskNow(self: &mut TaskClock) -> Instant {
+  return SystemClock.make(0, 0)
+}
+effect fn taskResolution(self: &mut TaskClock) -> u64 { return 1 }
+effect fn taskWaitUntil(self: &mut TaskClock, deadline: Instant) -> () {
+  drop deadline
+  return ()
+}
+effect fn taskWaitFor(self: &mut TaskClock, duration: u64) -> () {
+  drop duration
+  return ()
+}
+impl MonotonicClock.MonotonicClock for TaskClock {
+  now: TaskClock.taskNow
+  getResolution: TaskClock.taskResolution
+  waitUntil: TaskClock.taskWaitUntil
+  waitFor: TaskClock.taskWaitFor
+}
 
 struct Audit {
   rootPreparations: i32
@@ -181,13 +204,19 @@ fn completeChild<A, E>(
 }
 
 effect fn runChild<A, E>(
-  child: once Effect<A ! E ? &mut Scheduler.Scheduler>,
+  child: once Effect<
+    A
+    ! E
+    ? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock
+  >,
   provider: RenamedDispatcher,
+  clock: TaskClock,
   producer: Fiber.CompletionProducer<A, E>,
   lifetime: RejectedLifetime,
 ) -> () {
   let bound = Effect.bindRequirementOwned<Scheduler.Scheduler>(move child, move provider)
-  let completed = run Effect.result(move bound)
+  let timed = Effect.bindRequirementOwned<MonotonicClock.MonotonicClock>(move bound, move clock)
+  let completed = run Effect.result(move timed)
   drop lifetime
   completeChild<A, E>(move completed, move producer)
   return ()
@@ -195,7 +224,11 @@ effect fn runChild<A, E>(
 
 effect fn prepare<A, E>(
   self: &mut RenamedDispatcher,
-  child: once Effect<A ! E ? &mut Scheduler.Scheduler>,
+  child: once Effect<
+    A
+    ! E
+    ? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock
+  >,
 ) -> Scheduler.PendingPublication<A, E>
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError {
   let owner = self.identity
@@ -223,7 +256,13 @@ effect fn prepare<A, E>(
     audit: Shared.clone<Audit>(&self.audit),
   }
   let execution = run Execution.make(
-    runChild<A, E>(move child, move childProvider, move producer, move lifetime),
+    runChild<A, E>(
+      move child,
+      move childProvider,
+      TaskClock {},
+      move producer,
+      move lifetime,
+    ),
     (),
     ready,
   ) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
@@ -424,7 +463,7 @@ effect fn closedWork() -> i32 {
 
 effect fn nestedWork() -> i32
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   nestedBodyActivated()
   let child = run Fiber.forkChild<i32, never>(closedWork())
   nestedForkReturned()
@@ -439,7 +478,7 @@ effect fn rejectedWork() -> i32 {
 
 effect fn forkRejected() -> i32
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   let child = run Fiber.forkChild<i32, never>(rejectedWork())
   drop child
   return -100
@@ -466,7 +505,7 @@ fn observeWrongRejectionFailure() -> i32 {
 
 effect fn rootWork(audit: Shared.Shared<Audit>) -> ()
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   let child = run Fiber.forkChild<
     i32,
     Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError,
@@ -545,7 +584,11 @@ effect fn scenario() -> i32 ! Allocator.OutOfMemoryError {
     move rootProgram,
     move rootProvider,
   )
-  let mut rootExecution = run Execution.make(move root, (), ready)
+  let timedRoot = Effect.bindRequirementOwned<MonotonicClock.MonotonicClock>(
+    move root,
+    TaskClock {},
+  )
+  let mut rootExecution = run Execution.make(move timedRoot, (), ready)
     |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
   Execution.notifyInitial(&mut rootExecution)
 

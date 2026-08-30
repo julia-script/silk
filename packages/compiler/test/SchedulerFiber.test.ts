@@ -28,6 +28,12 @@ const localSchedulerStaleReuse = readFileSync(
 const localSchedulerSemantics = readFileSync(
   new URL('./fixtures/scheduler-fiber/local-scheduler-semantics.silk', import.meta.url),
 )
+const localSchedulerTimers = readFileSync(
+  new URL('./fixtures/scheduler-fiber/local-scheduler-timers.silk', import.meta.url),
+)
+const localSchedulerTimerBasic = readFileSync(
+  new URL('./fixtures/scheduler-fiber/local-scheduler-timer-basic.silk', import.meta.url),
+)
 const localSchedulerImplementation = readFileSync(
   new URL('../stdlib/silk/local_scheduler.silk', import.meta.url),
   'utf8',
@@ -57,14 +63,14 @@ effect fn taskIdBoundary() -> i32 ! OutOfMemoryError | Scheduler.TaskIdExhausted
     next: 18446744073709551614,
     exhausted: false,
   }) |> Effect.provideMut<Allocator>(&mut allocator)
-  let first = run reserve(&nearLimit)
-  let second = run reserve(&nearLimit)
-  let refused = run Effect.result(reserve(&nearLimit))
+  let first = run reserveIdentity(&nearLimit)
+  let second = run reserveIdentity(&nearLimit)
+  let refused = run Effect.result(reserveIdentity(&nearLimit))
   let freshSource = run Shared.make<TaskIdSource>(TaskIdSource {
     next: 0,
     exhausted: false,
   }) |> Effect.provideMut<Allocator>(&mut allocator)
-  let fresh = run reserve(&freshSource)
+  let fresh = run reserveIdentity(&freshSource)
   drop nearLimit
   drop freshSource
   drop allocator
@@ -311,7 +317,13 @@ const allocationOrdinalSource = (quota: number): string => {
     )
     .replace(
       `  let execution = run Execution.make(
-    runChild<A, E>(move child, move childProvider, move producer, move lifetime),
+    runChild<A, E>(
+      move child,
+      move childProvider,
+      TaskClock {},
+      move producer,
+      move lifetime,
+    ),
     (),
     ready,
   ) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)`,
@@ -320,7 +332,13 @@ const allocationOrdinalSource = (quota: number): string => {
   }) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
   let endpoint = OrdinalReadyEndpoint { node: move node }
   let execution = run Execution.make(
-    runChild<A, E>(move child, move childProvider, move producer, move lifetime),
+    runChild<A, E>(
+      move child,
+      move childProvider,
+      TaskClock {},
+      move producer,
+      move lifetime,
+    ),
     move endpoint,
     ordinalReady,
   ) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)`,
@@ -333,7 +351,7 @@ const allocationOrdinalSource = (quota: number): string => {
     .replace(
       `effect fn rootWork(audit: Shared.Shared<Audit>) -> ()
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   let child = run Fiber.forkChild<
     i32,
     Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError,
@@ -360,7 +378,7 @@ const allocationOrdinalSource = (quota: number): string => {
 }`,
       `effect fn rootWork(audit: Shared.Shared<Audit>) -> ()
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   let rejected = run Effect.catchAll(forkRejected(), recoverRejected)
   let stored = Shared.withMut(&audit, recordResult(41 + rejected))
   drop audit
@@ -742,6 +760,65 @@ it.effect('executes a scheduler-owned root with generic success and failure outc
   }),
 )
 
+it.effect(
+  'suspends timer Fibers through a scripted parent clock without blocking siblings',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'scheduler-fiber/local-scheduler-timers',
+        new Uint8Array(localSchedulerTimers),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        [],
+        describe(Analysis.diagnostics(snapshot)),
+      )
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, 42n)
+
+      const allocations = evaluated.trace.filter(
+        (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
+      )
+      assert.strictEqual(
+        allocations.filter((event) => event._tag === 'AllocationAcquire').length,
+        allocations.filter((event) => event._tag === 'AllocationRelease').length,
+        describe(allocations),
+      )
+    }),
+  { timeout: 180_000 },
+)
+
+it.effect(
+  'agrees across evaluator and direct Wasm for one ready sibling and one timer',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'scheduler-fiber/local-scheduler-timer-basic',
+        new Uint8Array(localSchedulerTimerBasic),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        [],
+        describe(Analysis.diagnostics(snapshot)),
+      )
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, 42n)
+
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+    }),
+  { timeout: 120_000 },
+)
+
 it.effect('extracts generic root outcomes without externally parking execute', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -799,7 +876,6 @@ it.effect(
         describe(Analysis.diagnostics(snapshot)),
       )
       assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
       if (evaluated._tag !== 'Completed') return

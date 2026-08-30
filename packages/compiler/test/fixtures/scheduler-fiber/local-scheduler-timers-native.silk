@@ -1,0 +1,89 @@
+import silk.allocator as Allocator
+import silk.effect as Effect
+import silk.fiber as Fiber
+import silk.local_scheduler as LocalScheduler
+import silk.monotonic_clock as MonotonicClock
+import silk.os_monotonic_clock as OsMonotonicClock
+import silk.scheduler as Scheduler
+import silk.shared as Shared
+
+struct Audit {
+  nextEvent: i32
+  siblingEvent: i32
+  timerEvent: i32
+}
+
+fn recordSibling(self: &mut Audit) -> () {
+  self.nextEvent = self.nextEvent + 1
+  self.siblingEvent = self.nextEvent
+  return ()
+}
+
+fn recordTimer(self: &mut Audit) -> () {
+  self.nextEvent = self.nextEvent + 1
+  self.timerEvent = self.nextEvent
+  return ()
+}
+
+fn isOrdered(self: &Audit) -> bool {
+  return self.siblingEvent == 1 && self.timerEvent == 2
+}
+
+effect fn timer(audit: Shared.Shared<Audit>) -> i32
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  run MonotonicClock.waitFor(1)
+  let recorded = Shared.withMut(&audit, recordTimer)
+  drop recorded
+  drop audit
+  return 41
+}
+
+effect fn sibling(audit: Shared.Shared<Audit>) -> i32 {
+  let recorded = Shared.withMut(&audit, recordSibling)
+  drop recorded
+  drop audit
+  return 1
+}
+
+effect fn root(audit: Shared.Shared<Audit>) -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  let sleeping = run Fiber.forkChild<i32, never>(timer(Shared.clone<Audit>(&audit)))
+  let ready = run Fiber.forkChild<i32, never>(sibling(Shared.clone<Audit>(&audit)))
+  let readyValue = run Fiber.join<i32, never>(move ready)
+  let timerValue = run Fiber.join<i32, never>(move sleeping)
+  let ordered = Shared.with<Audit, bool>(&audit, isOrdered)
+  drop audit
+  if !ordered { return -1 }
+  return readyValue + timerValue
+}
+
+effect fn scenario() -> i32
+! Allocator.OutOfMemoryError
+  | Scheduler.TaskIdExhaustedError
+  | Fiber.Cancelled
+  | LocalScheduler.StalledError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let audit = run Shared.make<Audit>(Audit {
+    nextEvent: 0,
+    siblingEvent: 0,
+    timerEvent: 0,
+  }) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+  let mut scheduler = LocalScheduler.make()
+  let mut clock = OsMonotonicClock.make()
+  let program = LocalScheduler.execute(&mut scheduler, root(move audit))
+    |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+  return run move program
+}
+
+effect fn recover(
+  error: Allocator.OutOfMemoryError
+    | Scheduler.TaskIdExhaustedError
+    | Fiber.Cancelled
+    | LocalScheduler.StalledError,
+) -> i32 {
+  drop error
+  return -99
+}
+
+pub fn main() -> i32 { return run Effect.catchAll(scenario(), recover) }
