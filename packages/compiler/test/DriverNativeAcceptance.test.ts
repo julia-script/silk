@@ -128,7 +128,9 @@ it.effect(
         }
       }
     }),
-  1_200_000,
+  // The expanded scheduler corpus crosses twenty minutes on the shared Linux runner while each
+  // selected case completes normally. Keep this bounded below the validate job's 45-minute limit.
+  1_500_000,
 )
 
 it.effect(
