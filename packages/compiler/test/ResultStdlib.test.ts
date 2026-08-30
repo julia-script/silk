@@ -122,6 +122,58 @@ fn release(storage: Allocation) -> i32 {
 
 pub fn main() -> i32 { return run build() }`
 
+const reifiedFailureInsideNestedProvider = `import silk.effect { Effect }
+import silk.result { Result }
+
+struct Problem { code: i32 }
+
+service Writer {
+  effect fn write() -> i32 ? &mut Writer
+}
+
+service Sink {
+  effect fn act() -> () ! Problem ? &mut Sink
+}
+
+struct SinkImpl { calls: i32 }
+
+effect fn ignoreError<A, E, ?R>(protected: once Effect<A ! E ? R>) -> A | () ? R {
+  let completed = run Effect.result(move protected)
+  return match move completed {
+    Result<A, E>.Success { value } => move value
+    Result<A, E>.Failure { error } => ()
+  }
+}
+
+impl Sink for SinkImpl {
+  effect fn act(self: &mut Self) -> () ! Problem ? &mut Sink {
+    self.calls = self.calls + 1
+    fail Problem { code: 42 }
+  }
+}
+
+struct StdoutWriter {}
+
+impl Writer for StdoutWriter {
+  effect fn write(self: &Self) -> i32 ? &mut Writer {
+    let mut sink = SinkImpl { calls: 0 }
+    run Sink.act()
+      |> ignoreError
+      |> Effect.provideMut(&mut sink)
+    if sink.calls == 1 { return 42 }
+    return 0
+  }
+}
+
+effect fn program() -> i32 ? &mut Writer {
+  return run Writer.write()
+}
+
+pub fn main() -> i32 {
+  let mut writer = StdoutWriter {}
+  return run Effect.provideMut(program(), &mut writer)
+}`
+
 const alternateResultLikeUnion = `import silk.effect as Effect
 
 union Outcome<A, E> {
@@ -355,6 +407,10 @@ it.effect('reifies every typed Effect branch as ordinary Result data', () =>
 
 it.effect('preserves requirements while moving affine channel data into Result', () =>
   evaluateAndRunWasm('reified-requirement', reifiedRequirement),
+)
+
+it.effect('reifies failure inside a nested mutable service provider', () =>
+  evaluateAndRunWasm('reified-failure-inside-nested-provider', reifiedFailureInsideNestedProvider),
 )
 
 it.effect('composes an alternate generic result-like union from map and catchAll', () =>

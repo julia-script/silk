@@ -36,11 +36,12 @@ import {
 export const lowerCatchEffectValue = (
   fn: FunctionLowering,
   expression: Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }>,
+  availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.providedRequirements,
 ): LoweredExpression | undefined => {
-  const protected_ = lowerExpression(fn, expression.protected)
+  const protected_ = lowerExpression(fn, expression.protected, availableRequirements)
   const protectedType =
     protected_ === undefined ? undefined : fn.localTypes.at(protected_.result.ordinal)
-  const handler = lowerExpression(fn, expression.handler)
+  const handler = lowerExpression(fn, expression.handler, availableRequirements)
   const handlerType = handler === undefined ? undefined : fn.localTypes.at(handler.result.ordinal)
   if (
     protected_ === undefined ||
@@ -414,14 +415,15 @@ export const lowerEffectCatch = (
     readonly handler: Mir.LocalId
     readonly handlerType: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>
   },
+  availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.providedRequirements,
 ): LoweredExpression | undefined => {
   if (expression.protected._tag === 'Unavailable') return undefined
   let protected_: LoweredExpression | undefined
   if (captured === undefined) {
     if (expression.protected._tag === 'ServiceEffectConstruct') {
-      protected_ = lowerServiceEffectValue(fn, expression.protected, fn.providedRequirements)
+      protected_ = lowerServiceEffectValue(fn, expression.protected, availableRequirements)
     } else {
-      protected_ = lowerExpression(fn, expression.protected)
+      protected_ = lowerExpression(fn, expression.protected, availableRequirements)
     }
   } else {
     protected_ = Object.freeze({ result: captured.protected })
@@ -435,7 +437,7 @@ export const lowerEffectCatch = (
   // evaluation even though the handler is invoked only on the selected failure path.
   const handler =
     captured === undefined
-      ? lowerExpression(fn, expression.handler)
+      ? lowerExpression(fn, expression.handler, availableRequirements)
       : Object.freeze({ result: captured.handler })
   const handlerType =
     captured?.handlerType ??
@@ -477,6 +479,7 @@ export const lowerEffectCatch = (
       protectedType,
       protectedEffect.success,
       runSpan,
+      availableRequirements,
     )
     if (succeeded === undefined) return undefined
     for (const drop of unusedHandlerDrop()) fn.emit(drop)
@@ -528,7 +531,13 @@ export const lowerEffectCatch = (
   )
     return undefined
 
-  const caught = runCaughtEffectValue(fn, protected_.result, protectedType, expression.span)
+  const caught = runCaughtEffectValue(
+    fn,
+    protected_.result,
+    protectedType,
+    expression.span,
+    availableRequirements,
+  )
   if (caught === undefined) return undefined
 
   const successType = fn.type(resultEffect.success)
@@ -580,7 +589,14 @@ export const lowerEffectCatch = (
           provenance: generated(expression.span),
         }),
       )
-      return lowerRunEffectValue(fn, applied, handlerEffectType, resultEffect.success, runSpan)
+      return lowerRunEffectValue(
+        fn,
+        applied,
+        handlerEffectType,
+        resultEffect.success,
+        runSpan,
+        availableRequirements,
+      )
     })
     if (handled === undefined) return undefined
     const destination = fn.alloc(successType)
@@ -686,7 +702,14 @@ export const lowerEffectCatch = (
             provenance: generated(expression.span),
           }),
         )
-        return lowerRunEffectValue(fn, applied, handlerEffectType, resultEffect.success, runSpan)
+        return lowerRunEffectValue(
+          fn,
+          applied,
+          handlerEffectType,
+          resultEffect.success,
+          runSpan,
+          availableRequirements,
+        )
       }
       const target = Type.failureMembers(propagationEffect).findIndex((candidate) =>
         Type.equals(candidate, member),
@@ -787,9 +810,10 @@ export const lowerEffectCatch = (
 export const lowerPlacePath = (
   fn: FunctionLowering,
   expression: Hir.Expression,
+  availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.providedRequirements,
 ): LoweredPlace | undefined => {
   if (expression._tag === 'Project') {
-    const subject = lowerPlacePath(fn, expression.subject)
+    const subject = lowerPlacePath(fn, expression.subject, availableRequirements)
     if (subject === undefined) return undefined
     return Object.freeze({
       root: subject.root,
@@ -804,7 +828,7 @@ export const lowerPlacePath = (
     })
   }
   if (expression._tag === 'IndexPlace') {
-    const subject = lowerPlacePath(fn, expression.subject)
+    const subject = lowerPlacePath(fn, expression.subject, availableRequirements)
     if (subject === undefined) return undefined
     const index:
       | Extract<Mir.PlaceSelector, { readonly _tag: 'ElementSelector' }>['index']
@@ -812,7 +836,7 @@ export const lowerPlacePath = (
       expression.bounds._tag === 'Proven'
         ? Object.freeze({ _tag: 'Proven', value: expression.bounds.index })
         : (() => {
-            const lowered = lowerExpression(fn, expression.index)
+            const lowered = lowerExpression(fn, expression.index, availableRequirements)
             return lowered === undefined
               ? undefined
               : Object.freeze({ _tag: 'Runtime' as const, local: lowered.result })
@@ -832,8 +856,8 @@ export const lowerPlacePath = (
     })
   }
   if (expression._tag === 'SliceIndexPlace') {
-    const subject = lowerPlacePath(fn, expression.slice)
-    const index = lowerExpression(fn, expression.index)
+    const subject = lowerPlacePath(fn, expression.slice, availableRequirements)
+    const index = lowerExpression(fn, expression.index, availableRequirements)
     if (subject === undefined || index === undefined) return undefined
     return Object.freeze({
       root: subject.root,
@@ -848,7 +872,7 @@ export const lowerPlacePath = (
       ]),
     })
   }
-  const root = lowerExpression(fn, expression)
+  const root = lowerExpression(fn, expression, availableRequirements)
   return root === undefined
     ? undefined
     : Object.freeze({ root: root.result, selectors: Object.freeze([]) })
@@ -860,8 +884,9 @@ export const lowerPlace = (
     Hir.Expression,
     { readonly _tag: 'Project' | 'IndexPlace' | 'SliceIndexPlace' }
   >,
+  availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.providedRequirements,
 ): LoweredExpression | undefined => {
-  const place = lowerPlacePath(fn, expression)
+  const place = lowerPlacePath(fn, expression, availableRequirements)
   const type = fn.type(expression.type)
   if (place === undefined || type === undefined) return undefined
   const destination = fn.alloc(type)
@@ -1036,7 +1061,9 @@ export const lowerServiceEffectValue = (
     return undefined
   const target = ConformanceProof.witnessOperation(provided.witness, subject.operation)
   if (target === undefined) return undefined
-  const loweredArguments = subject.arguments.map((argument) => lowerExpression(fn, argument))
+  const loweredArguments = subject.arguments.map((argument) =>
+    lowerExpression(fn, argument, availableRequirements),
+  )
   if (loweredArguments.some((argument) => argument === undefined)) return undefined
   const call = fn.call(subject.span, target)
   if (
@@ -1194,9 +1221,10 @@ const lowerForwardedProvider = <A>(
   fn: FunctionLowering,
   forwarded: ForwardedRequirement,
   loanEndSpan: SourceSpan.SourceSpan,
+  availableRequirements: ReadonlyArray<ProvidedRequirement>,
   use: (requirement: ProvidedRequirement) => A | undefined,
 ): A | undefined => {
-  const provider = lowerExpression(fn, forwarded.provider)
+  const provider = lowerExpression(fn, forwarded.provider, availableRequirements)
   if (provider === undefined) return undefined
   const providerBorrow =
     forwarded.provider._tag === 'ValueBorrow'
@@ -1273,6 +1301,7 @@ export const lowerEffectExecution = (
         ),
         type: success,
       }),
+      availableRequirements,
     )
   }
   if (subject._tag === 'BindingReference') {
@@ -1288,7 +1317,7 @@ export const lowerEffectExecution = (
 
   const forwarded = inlineForwardedRequirement(fn, subject)
   if (forwarded !== undefined) {
-    return lowerForwardedProvider(fn, forwarded, span, (requirement) => {
+    return lowerForwardedProvider(fn, forwarded, span, availableRequirements, (requirement) => {
       const result = lowerEffectExecution(
         fn,
         forwarded.binding.protected,
@@ -1347,10 +1376,10 @@ export const lowerEffectExecution = (
 
   if (subject._tag === 'BuiltinCall' && Type.isEffect(subject.type)) {
     const run = Object.freeze({ _tag: 'Run' as const, subject, type: success, span })
-    return lowerExpression(fn, run)
+    return lowerExpression(fn, run, availableRequirements)
   }
 
-  const lowered = lowerExpression(fn, subject)
+  const lowered = lowerExpression(fn, subject, availableRequirements)
   const loweredType = lowered === undefined ? undefined : fn.localTypes.at(lowered.result.ordinal)
   if (lowered === undefined || loweredType === undefined) return undefined
   if (loweredType._tag === 'EffectComposite')

@@ -1451,6 +1451,50 @@ it('keeps malformed arguments explicit and resumes at the next comma', () => {
   assert.deepEqual(reconstructedBytes(result), ascii(malformedArgumentSource))
 })
 
+it('bounds unsupported anonymous effect function recovery inside call arguments', () => {
+  const source = `fn outer() -> () {
+  f(once effect fn (error: E) -> () {
+    return ()
+  })
+}`
+  const result = parseText('fixture://unsupported-anonymous-effect-function.silk', source)
+
+  assert.isAbove(result.parserDiagnostics.length, 0)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('advances past a malformed effect expression inside call arguments', () => {
+  const source = 'fn outer() -> () { f(effect nope) }'
+  const result = parseText('fixture://malformed-effect-call-argument.silk', source)
+
+  assert.isAbove(result.parserDiagnostics.length, 0)
+  assert.include(
+    errorNodes(result.root)
+      .flatMap((node) => SyntaxTree.tokens(node))
+      .map((token) => token.kind),
+    'EffectKeyword',
+  )
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('keeps a valid effect block as a call argument', () => {
+  const source = 'fn outer() -> () { f(effect { return () }) }'
+  const result = parseText('fixture://effect-block-call-argument.silk', source)
+
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.include(
+    descendants(result.root)
+      .filter(SyntaxTree.isNode)
+      .map((node) => node.kind),
+    'EffectExpression',
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('bounds damaged call recovery before the following function', () => {
   const result = parseText(
     'fixture://damaged-call-before-next-function.silk',

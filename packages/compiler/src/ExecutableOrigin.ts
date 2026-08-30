@@ -824,8 +824,10 @@ export const make = (operations: Operations) => {
   const callableApplicationArgument = (
     expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
     ordinal: number,
+    context: EffectOriginContext,
   ): Hir.Expression | undefined => {
-    const section = expression.callee._tag === 'CallableSection' ? expression.callee : undefined
+    const callable = callableValue(expression.callee, callableBindings(context.fn))
+    const section = callable?._tag === 'CallableSection' ? callable : undefined
     if (section === undefined) return expression.arguments.at(ordinal)
     const captured = section.captures.find((capture) => capture.parameterOrdinal === ordinal)
     if (captured !== undefined) return captured.value
@@ -855,7 +857,7 @@ export const make = (operations: Operations) => {
       | Type.CompositeEffectRepresentationArgument
     > = []
     for (const ordinal of effectParameterOrdinals(target, targetSubstitution)) {
-      const argument = callableApplicationArgument(expression, ordinal)
+      const argument = callableApplicationArgument(expression, ordinal, context)
       const compositeRepresentation =
         argument === undefined ? undefined : compositeEffectRepresentationOf(argument, context)
       if (compositeRepresentation !== undefined) {
@@ -864,35 +866,53 @@ export const make = (operations: Operations) => {
       }
       let identity = argument === undefined ? undefined : effectOriginOf(argument, context)
       if (identity === undefined) {
+        const service = argument === undefined ? undefined : serviceEffectRecipe(argument, context)
         const serviceTarget = forwardedServiceTargetOfCallableApply(
           expression,
           target,
           targetSubstitution,
           ordinal,
           context,
+          service,
         )
         const serviceFunction =
           serviceTarget === undefined
             ? undefined
             : targetFunction(context.results, serviceTarget.declaration)
-        identity =
+        const serviceIdentity =
           serviceTarget === undefined || serviceFunction === undefined
             ? undefined
-            : resultEffectIdentity(serviceFunction, serviceTarget, context.results, context.index)
+            : resultEffectIdentity(
+                serviceFunction,
+                serviceTarget,
+                context.results,
+                context.index,
+                context.resolving,
+              )
+        if (argument !== undefined && service !== undefined && serviceIdentity !== undefined) {
+          const inheritedResolver = context.resolveServiceEffectIdentity
+          identity = effectOriginOf(argument, {
+            ...context,
+            resolveServiceEffectIdentity: (candidate) =>
+              candidate === service.expression ? serviceIdentity : inheritedResolver?.(candidate),
+          })
+        }
       }
       if (identity === undefined) return undefined
       hiddenArguments.push(Type.effectIdentityArgument(identity))
     }
     for (const ordinal of callableParameterOrdinals(target, targetSubstitution)) {
-      const argument = callableApplicationArgument(expression, ordinal)
+      const argument = callableApplicationArgument(expression, ordinal, context)
       const identity = argument === undefined ? undefined : callableOriginOf(argument, context)
       if (identity === undefined) return undefined
       hiddenArguments.push(identity)
     }
-    return keyOf(declaration, target.contract, parameters, [
+    const key = keyOf(declaration, target.contract, parameters, [
       ...callable.typeArguments,
       ...hiddenArguments,
     ])
+    context.recordResolvedCall?.(expression, key)
+    return key
   }
 
   interface EffectOriginContext {
@@ -907,6 +927,16 @@ export const make = (operations: Operations) => {
       identity: string,
       resolving: ReadonlySet<string>,
     ) => ReadonlyArray<ServiceEffectRecipe>
+    readonly resolveServiceEffectIdentity?: (
+      expression: Extract<Hir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,
+    ) => string | undefined
+    readonly recordResolvedCall?: (
+      expression: Extract<
+        Hir.Expression,
+        { readonly _tag: 'Call' | 'EffectConstruct' | 'CallableApply' }
+      >,
+      target: InstanceKey,
+    ) => void
   }
 
   interface ServiceEffectRecipe {
@@ -970,6 +1000,38 @@ export const make = (operations: Operations) => {
       return Object.freeze(
         expression.arms.flatMap((arm) =>
           arm.reachable ? serviceEffectRecipes(arm.result, context, resolving) : [],
+        ),
+      )
+    if (expression._tag === 'EffectCatch')
+      return Object.freeze([
+        ...serviceEffectRecipes(expression.protected, context, resolving),
+        ...serviceEffectRecipes(expression.handler, context, resolving),
+      ])
+    if (expression._tag === 'Call' || expression._tag === 'EffectConstruct')
+      return Object.freeze(
+        expression.arguments.flatMap((argument) =>
+          serviceEffectRecipes(argument, context, resolving),
+        ),
+      )
+    if (expression._tag === 'CallableSection')
+      return Object.freeze(
+        expression.captures.flatMap((capture) =>
+          serviceEffectRecipes(capture.value, context, resolving),
+        ),
+      )
+    if (expression._tag === 'CallableApply') {
+      const children =
+        expression.evaluation === 'LeftThenCallable'
+          ? [...expression.arguments, expression.callee]
+          : [expression.callee, ...expression.arguments]
+      return Object.freeze(
+        children.flatMap((child) => serviceEffectRecipes(child, context, resolving)),
+      )
+    }
+    if (expression._tag === 'BuiltinCall' || expression._tag === 'BoundOperationCall')
+      return Object.freeze(
+        expression.arguments.flatMap((argument) =>
+          serviceEffectRecipes(argument, context, resolving),
         ),
       )
     if (expression._tag === 'ParameterReference') {
@@ -1062,7 +1124,7 @@ export const make = (operations: Operations) => {
     serviceOverride?: ServiceEffectRecipe,
   ): InstanceKey | undefined {
     const binding = forwardedRequirementBinding(target)
-    const argument = callableApplicationArgument(expression, effectParameter)
+    const argument = callableApplicationArgument(expression, effectParameter, context)
     const service =
       serviceOverride ??
       (argument === undefined ? undefined : serviceEffectRecipe(argument, context))
@@ -1236,21 +1298,37 @@ export const make = (operations: Operations) => {
       }
       let identity = argument === undefined ? undefined : effectOriginOf(argument, context)
       if (identity === undefined) {
+        const service = argument === undefined ? undefined : serviceEffectRecipe(argument, context)
         const serviceTarget = forwardedServiceTargetOfCall(
           expression,
           target,
           targetSubstitution,
           ordinal,
           context,
+          service,
         )
         const serviceFunction =
           serviceTarget === undefined
             ? undefined
             : targetFunction(context.results, serviceTarget.declaration)
-        identity =
+        const serviceIdentity =
           serviceTarget === undefined || serviceFunction === undefined
             ? undefined
-            : resultEffectIdentity(serviceFunction, serviceTarget, context.results, context.index)
+            : resultEffectIdentity(
+                serviceFunction,
+                serviceTarget,
+                context.results,
+                context.index,
+                context.resolving,
+              )
+        if (argument !== undefined && service !== undefined && serviceIdentity !== undefined) {
+          const inheritedResolver = context.resolveServiceEffectIdentity
+          identity = effectOriginOf(argument, {
+            ...context,
+            resolveServiceEffectIdentity: (candidate) =>
+              candidate === service.expression ? serviceIdentity : inheritedResolver?.(candidate),
+          })
+        }
       }
       if (identity === undefined) return undefined
       hiddenArguments.push(Type.effectIdentityArgument(identity))
@@ -1261,12 +1339,14 @@ export const make = (operations: Operations) => {
       if (identity === undefined) return undefined
       hiddenArguments.push(identity)
     }
-    return keyOf(
+    const key = keyOf(
       expression.target,
       target.contract,
       target.declaration.typeParameters.map((parameter) => parameter.type),
       [...typeArguments, ...hiddenArguments],
     )
+    context.recordResolvedCall?.(expression, key)
+    return key
   }
 
   function targetKeyOfServiceCall(
@@ -1444,7 +1524,8 @@ export const make = (operations: Operations) => {
         ? identities.at(0)
         : undefined
     }
-    if (expression._tag === 'ServiceEffectConstruct') return undefined
+    if (expression._tag === 'ServiceEffectConstruct')
+      return context.resolveServiceEffectIdentity?.(expression)
     if (expression._tag === 'CallableApply') {
       const targetKey = targetKeyOfCallableApply(expression, context)
       if (targetKey === undefined) return undefined
@@ -1510,6 +1591,38 @@ export const make = (operations: Operations) => {
     results: ReadonlyMap<string, Elaboration.Result>,
     index: DeclarationIndex.Index,
   ): ReadonlyArray<CallInstance> => {
+    const expressions = fn.statements.flatMap(Hir.statementExpressions).flatMap(Hir.expressionTree)
+    const expressionOrder = new Map(expressions.map((expression, ordinal) => [expression, ordinal]))
+    const calls = new Map<string, { readonly call: CallInstance; readonly ordinal: number }>()
+    const record = (
+      expression: Extract<
+        Hir.Expression,
+        { readonly _tag: 'Call' | 'EffectConstruct' | 'CallableApply' }
+      >,
+      target: InstanceKey,
+    ): void => {
+      const ordinal = expressionOrder.get(expression)
+      // Origin inference may inspect a callee's returned expression. Those calls belong to that
+      // callee's discovery pass, not to the owner whose argument identity is currently inferred.
+      if (ordinal === undefined) return
+      const targetFn = targetFunction(results, target.declaration)
+      if (targetFn === undefined) return
+      const resultEffect = resultEffectIdentity(targetFn, target, results, index)
+      const span = expression.span
+      calls.set(
+        `${span.sourceId}:${span.start}:${span.end}\u0000${keyText(target)}`,
+        Object.freeze({
+          call: Object.freeze({
+            _tag: 'CallInstance',
+            owner,
+            span,
+            target,
+            ...(resultEffect === undefined ? {} : { resultEffect }),
+          }),
+          ordinal,
+        }),
+      )
+    }
     const context: EffectOriginContext = {
       fn,
       owner,
@@ -1517,47 +1630,28 @@ export const make = (operations: Operations) => {
       results,
       index,
       resolving: new Set<string>(),
+      recordResolvedCall: record,
     }
-    return fn.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
-      .flatMap((expression): ReadonlyArray<CallInstance> => {
-        if (expression._tag === 'CallableApply' && Type.isEffect(expression.type)) {
-          const target = targetKeyOfCallableApply(expression, context)
-          if (target === undefined) return []
-          const targetFn = targetFunction(results, target.declaration)
-          if (targetFn === undefined) return []
-          const resultEffect = resultEffectIdentity(targetFn, target, results, index)
-          return [
-            Object.freeze({
-              _tag: 'CallInstance',
-              owner,
-              span: expression.span,
-              target,
-              ...(resultEffect === undefined ? {} : { resultEffect }),
-            }),
-          ]
-        }
-        if (expression._tag !== 'Call' && expression._tag !== 'EffectConstruct') return []
-        // Calls carrying neither an Effect nor a callable value remain on the original
-        // finite-specialization path. Resolving them here as well would bypass its
-        // polymorphic-recursion guard.
-        if (!carriesHiddenIdentity(expression, substitution)) return []
-        const target = targetKeyOfCall(expression, context)
-        const targetFn =
-          target === undefined ? undefined : targetFunction(results, expression.target)
-        if (target === undefined || targetFn === undefined) return []
-        const resultEffect = resultEffectIdentity(targetFn, target, results, index)
-        return [
-          Object.freeze({
-            _tag: 'CallInstance',
-            owner,
-            span: expression.span,
-            target,
-            ...(resultEffect === undefined ? {} : { resultEffect }),
-          }),
-        ]
-      })
+    expressions.forEach((expression) => {
+      if (expression._tag === 'CallableApply' && Type.isEffect(expression.type)) {
+        const target = targetKeyOfCallableApply(expression, context)
+        if (target === undefined) return
+        record(expression, target)
+        return
+      }
+      if (expression._tag !== 'Call' && expression._tag !== 'EffectConstruct') return
+      // Calls carrying neither an Effect nor a callable value remain on the original
+      // finite-specialization path. Resolving them here as well would bypass its
+      // polymorphic-recursion guard.
+      if (!carriesHiddenIdentity(expression, substitution)) return
+      const target = targetKeyOfCall(expression, context)
+      if (target !== undefined) record(expression, target)
+    })
+    return Object.freeze(
+      [...calls.values()]
+        .sort((left, right) => left.ordinal - right.ordinal)
+        .map(({ call }) => call),
+    )
   }
 
   const callableValue = (
@@ -2531,7 +2625,7 @@ export const make = (operations: Operations) => {
             : instanceSubstitution(wrapper, wrapperKey)
         if (wrapper === undefined || wrapperSubstitution === undefined) return
         for (const ordinal of effectParameterOrdinals(wrapper, wrapperSubstitution)) {
-          const argument = callableApplicationArgument(expression, ordinal)
+          const argument = callableApplicationArgument(expression, ordinal, context)
           for (const service of argument === undefined
             ? []
             : serviceEffectRecipes(argument, context)) {
