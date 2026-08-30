@@ -1,0 +1,80 @@
+import silk.allocator as Allocator
+import silk.effect as Effect
+import silk.fiber as Fiber
+import silk.local_scheduler as LocalScheduler
+import silk.monotonic_clock as MonotonicClock
+import silk.scheduler as Scheduler
+import silk.system_clock as SystemClock
+import silk.system_clock { Instant }
+
+struct ParentClock {
+  mark: Instant
+}
+
+effect fn parentNow(self: &mut ParentClock) -> Instant {
+  return SystemClock.make(
+    SystemClock.seconds(&self.mark),
+    SystemClock.nanoseconds(&self.mark),
+  )
+}
+
+effect fn parentResolution(self: &mut ParentClock) -> u64 { return 1 }
+
+effect fn parentWaitUntil(self: &mut ParentClock, deadline: Instant) -> () {
+  self.mark = move deadline
+  return ()
+}
+
+effect fn parentWaitFor(self: &mut ParentClock, duration: u64) -> () {
+  let deadline = MonotonicClock.deadlineAfter(&self.mark, duration)
+  return run parentWaitUntil(move self, move deadline)
+}
+
+impl MonotonicClock.MonotonicClock for ParentClock {
+  now: ParentClock.parentNow
+  getResolution: ParentClock.parentResolution
+  waitUntil: ParentClock.parentWaitUntil
+  waitFor: ParentClock.parentWaitFor
+}
+
+effect fn timer() -> i32
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  run MonotonicClock.waitFor(1)
+  return 41
+}
+
+effect fn sibling() -> i32 { return 1 }
+
+effect fn root() -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  let sleeping = run Fiber.forkChild<i32, never>(timer())
+  let ready = run Fiber.forkChild<i32, never>(sibling())
+  let readyValue = run Fiber.join<i32, never>(move ready)
+  let timerValue = run Fiber.join<i32, never>(move sleeping)
+  return readyValue + timerValue
+}
+
+effect fn scenario() -> i32
+! Allocator.OutOfMemoryError
+  | Scheduler.TaskIdExhaustedError
+  | Fiber.Cancelled
+  | LocalScheduler.StalledError {
+  let mut scheduler = LocalScheduler.make()
+  let mut clock = ParentClock { mark: SystemClock.make(0, 0) }
+  let program = LocalScheduler.execute(&mut scheduler, root())
+    |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+  return run move program
+}
+
+effect fn recover(
+  error: Allocator.OutOfMemoryError
+    | Scheduler.TaskIdExhaustedError
+    | Fiber.Cancelled
+    | LocalScheduler.StalledError,
+) -> i32 {
+  drop error
+  return -99
+}
+
+pub fn main() -> i32 { return run Effect.catchAll(scenario(), recover) }

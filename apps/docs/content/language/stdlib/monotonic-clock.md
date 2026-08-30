@@ -19,7 +19,8 @@ are meaningful only on the logical provider timeline that produced them.
 
 The shared [`Instant`](./system-clock.md#declaration-73696c6b2f73797374656d5f636c6f636b3a3a496e7374616e74) representation cannot statically prevent mixing system time or marks from
 different providers. Native OS waits block the calling host thread and do not park one Fiber;
-virtual providers may satisfy a wait by advancing their own timeline without sleeping. An
+scheduler-owned tasks receive a lexical replacement whose waits park only that task. Virtual
+providers may satisfy a wait by advancing their own timeline without sleeping. An
 invalid or unrepresentable provider result traps because this service has no typed failure
 channel.
 
@@ -37,7 +38,7 @@ effect fn pause() -> () ? &mut MonotonicClock.MonotonicClock {
 
 Import as `MonotonicClock` with `import silk.monotonic_clock { MonotonicClock }`.
 
-Public declarations: 5.
+Public declarations: 6.
 
 <a id="declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a4d6f6e6f746f6e6963436c6f636b"></a>
 
@@ -151,3 +152,25 @@ pub effect fn waitFor(howLong: u64) -> () ? &mut MonotonicClock
 Waits for `howLong` nanoseconds on the active provider's logical timeline.
 A zero duration needs no positive timeline advance. An unrepresentable absolute deadline traps
 instead of wrapping.
+
+<a id="declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a646561646c696e654166746572"></a>
+
+## `deadlineAfter`
+
+```silk
+pub fn deadlineAfter(start: &silk/system_clock.Instant, howLong: u64) -> Instant
+```
+
+Derives the canonical absolute deadline `howLong` nanoseconds after `start`.
+
+### Details
+
+The addition is performed in split seconds and nanoseconds so every `u64` duration is accepted
+whenever the resulting signed-seconds [`Instant`](./system-clock.md#declaration-73696c6b2f73797374656d5f636c6f636b3a3a496e7374616e74) remains representable. Fractional overflow
+carries exactly once into seconds.
+
+### Gotchas
+
+This operation traps rather than wrapping when the resulting whole seconds exceed the
+representable `i64` range. `start` must belong to the provider timeline on which the deadline
+will be used.

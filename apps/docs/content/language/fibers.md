@@ -17,7 +17,40 @@ import silk.allocator { OutOfMemoryError }
 import silk.effect { Effect }
 import silk.fiber { Fiber }
 import silk.local_scheduler { LocalScheduler }
+import silk.monotonic_clock as MonotonicClock
 import silk.scheduler { Scheduler }
+import silk.system_clock as SystemClock
+import silk.system_clock { Instant }
+
+struct ParentClock {
+  mark: Instant
+}
+
+effect fn parentNow(self: &mut ParentClock) -> Instant {
+  return SystemClock.make(
+    SystemClock.seconds(&self.mark),
+    SystemClock.nanoseconds(&self.mark),
+  )
+}
+
+effect fn parentResolution(self: &mut ParentClock) -> u64 { return 1 }
+
+effect fn parentWaitUntil(self: &mut ParentClock, deadline: Instant) -> () {
+  self.mark = move deadline
+  return ()
+}
+
+effect fn parentWaitFor(self: &mut ParentClock, duration: u64) -> () {
+  let deadline = MonotonicClock.deadlineAfter(&self.mark, duration)
+  return run parentWaitUntil(move self, move deadline)
+}
+
+impl MonotonicClock.MonotonicClock for ParentClock {
+  now: ParentClock.parentNow
+  getResolution: ParentClock.parentResolution
+  waitUntil: ParentClock.parentWaitUntil
+  waitFor: ParentClock.parentWaitFor
+}
 
 effect fn work() -> i32 {
   return 42
@@ -25,7 +58,7 @@ effect fn work() -> i32 {
 
 effect fn program() -> i32
 ! OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   let child = run Fiber.forkChild<i32, never>(work())
   return run Fiber.join<i32, never>(move child)
 }
@@ -42,23 +75,29 @@ effect fn recover(
 
 pub fn main() -> i32 {
   let mut scheduler = LocalScheduler.make()
-  return run Effect.catchAll(
+  let mut clock = ParentClock { mark: SystemClock.make(0, 0) }
+  let scheduled = Effect.catchAll(
     LocalScheduler.execute(&mut scheduler, program()),
     recover,
-  )
+  ) |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+  return run move scheduled
 }
 ```
 
-`LocalScheduler.execute` stores the lazy root as task zero, provides an owned Scheduler client,
-and drives the ready queue until that root terminates. Application code uses Fiber operations; it
-does not drive the scheduler loop itself.
+`LocalScheduler.execute` stores the lazy root as task zero, provides owned Scheduler and
+MonotonicClock clients, and drives the ready queue and private event sources until that root
+terminates. The explicit outer clock is the driver's event-wait boundary: a deterministic provider
+can advance logical time, while `OsMonotonicClock` blocks the host thread only when the scheduler
+has no ready task. Application code uses Fiber and clock operations; it does not drive the scheduler
+loop itself.
 
 The complete error row is deliberate:
 
 - `OutOfMemoryError` reports task-storage allocation refusal;
 - `Scheduler.TaskIdExhaustedError` reports exhausted task identities;
 - `Fiber.Cancelled` is the join result of structured cancellation; and
-- `LocalScheduler.StalledError` means the root is incomplete but no task can make progress.
+- `LocalScheduler.StalledError` means the root is incomplete with no ready task or active event
+  registration remaining.
 
 Fatal traps remain outside this typed recovery path.
 
@@ -72,8 +111,22 @@ Publishing a child only makes it ready. It does not run the child body inline. W
 `LocalScheduler`, deterministic FIFO readiness lets `forkChild` return its handle before the
 child's first activation.
 
-The child's unresolved requirement row may contain only its owned Scheduler provider. Provide any
-other services before forking.
+The child's unresolved requirement row may contain only its owned Scheduler and MonotonicClock
+providers. Provide any other services before forking.
+
+## Sleeping parks one Fiber
+
+Inside `LocalScheduler.execute`, `Effect.sleep`, `MonotonicClock.waitFor`, and
+`MonotonicClock.waitUntil` use the scheduler-owned clock replacement. A future deadline stores the
+task's Wake in its private registration state while the timer queue indexes only the registration
+identity, then returns control to the driver so ready siblings continue before the timer fires.
+Zero-duration and reached deadlines return immediately.
+
+Clock reads are cached for one driver turn, so repeated `MonotonicClock.now()` calls in one task
+activation may be equal. The driver refreshes its mark before each selected task and derives a
+positive relative wait from one fresh parent-provider read. When no task is ready, it calls the
+outer provider's blocking `waitUntil` for the earliest timer. Calling `OsMonotonicClock` directly,
+outside a scheduler-owned task clock, still blocks the calling host thread.
 
 ## Observe exactly once
 

@@ -22,11 +22,34 @@ const localSchedulerRoot = readFileSync(
 const localSchedulerShutdown = readFileSync(
   new URL('./fixtures/scheduler-fiber/local-scheduler-shutdown.silk', import.meta.url),
 )
+const localSchedulerNestedCancellation = readFileSync(
+  new URL('./fixtures/scheduler-fiber/local-scheduler-nested-cancellation.silk', import.meta.url),
+)
 const localSchedulerStaleReuse = readFileSync(
   new URL('./fixtures/scheduler-fiber/local-scheduler-stale-reuse.silk', import.meta.url),
 )
 const localSchedulerSemantics = readFileSync(
   new URL('./fixtures/scheduler-fiber/local-scheduler-semantics.silk', import.meta.url),
+)
+const localSchedulerTimers = readFileSync(
+  new URL('./fixtures/scheduler-fiber/local-scheduler-timers.silk', import.meta.url),
+)
+const localSchedulerTimerBasic = readFileSync(
+  new URL('./fixtures/scheduler-fiber/local-scheduler-timer-basic.silk', import.meta.url),
+)
+const localSchedulerTimerBasicText = localSchedulerTimerBasic.toString('utf8')
+const invalidTimerChildRequirementSource = localSchedulerTimerBasicText
+  .replace('struct ParentClock {', 'service Extra {}\n\nstruct ParentClock {')
+  .replace(
+    '? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {\n  run MonotonicClock.waitFor(1)',
+    '? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock | &mut Extra {\n  run MonotonicClock.waitFor(1)',
+  )
+const missingParentClockSource = localSchedulerTimerBasicText.replace(
+  `  let mut clock = ParentClock { mark: SystemClock.make(0, 0) }
+  let program = LocalScheduler.execute(&mut scheduler, root())
+    |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+  return run move program`,
+  '  return run LocalScheduler.execute(&mut scheduler, root())',
 )
 const localSchedulerImplementation = readFileSync(
   new URL('../stdlib/silk/local_scheduler.silk', import.meta.url),
@@ -35,59 +58,44 @@ const localSchedulerImplementation = readFileSync(
 
 const taskIdBoundarySource = `${localSchedulerImplementation}
 
-fn verifyTaskIdRefusal(
-  outcome: Result<Scheduler.TaskId, Scheduler.TaskIdExhaustedError>,
-  fresh: Scheduler.TaskId,
-) -> i32 {
-  return match move outcome {
-    Result<Scheduler.TaskId, Scheduler.TaskIdExhaustedError>.Success { value: reserved } => -3
-    Result<Scheduler.TaskId, Scheduler.TaskIdExhaustedError>.Failure { error } => verifyFreshTaskId(move error, fresh)
+fn requireReserved(selected: ReservedIdentity | Refused) -> u64 {
+  return match move selected {
+    ReservedIdentity { identity } => identity.value
+    Refused {} => u64.MIN
   }
 }
 
-fn verifyFreshTaskId(error: Scheduler.TaskIdExhaustedError, fresh: Scheduler.TaskId) -> i32 {
-  drop error
-  if fresh.value != 0 { return -4 }
+fn verifyTaskIdRefusal(selected: ReservedIdentity | Refused, fresh: u64) -> i32 {
+  return match move selected {
+    ReservedIdentity { identity } => -3
+    Refused {} => verifyFreshTaskId(fresh)
+  }
+}
+
+fn verifyFreshTaskId(fresh: u64) -> i32 {
+  if fresh != 0 { return -4 }
   return 42
 }
 
-effect fn taskIdBoundary() -> i32 ! OutOfMemoryError | Scheduler.TaskIdExhaustedError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let nearLimit = run Shared.make<TaskIdSource>(TaskIdSource {
+fn taskIdBoundary() -> i32 {
+  let mut nearLimit = TaskIdSource {
     next: 18446744073709551614,
     exhausted: false,
-  }) |> Effect.provideMut<Allocator>(&mut allocator)
-  let first = run reserve(&nearLimit)
-  let second = run reserve(&nearLimit)
-  let refused = run Effect.result(reserve(&nearLimit))
-  let freshSource = run Shared.make<TaskIdSource>(TaskIdSource {
+  }
+  let first = requireReserved(reserveIdentityStep(&mut nearLimit))
+  let second = requireReserved(reserveIdentityStep(&mut nearLimit))
+  let refused = reserveIdentityStep(&mut nearLimit)
+  let mut freshSource = TaskIdSource {
     next: 0,
     exhausted: false,
-  }) |> Effect.provideMut<Allocator>(&mut allocator)
-  let fresh = run reserve(&freshSource)
-  drop nearLimit
-  drop freshSource
-  drop allocator
-  if first.value != 18446744073709551614 { return -1 }
-  if second.value != u64.MAX { return -2 }
+  }
+  let fresh = requireReserved(reserveIdentityStep(&mut freshSource))
+  if first != 18446744073709551614 { return -1 }
+  if second != u64.MAX { return -2 }
   return verifyTaskIdRefusal(move refused, fresh)
 }
 
-fn taskIdBoundaryFailed(error: OutOfMemoryError | Scheduler.TaskIdExhaustedError) -> i32 {
-  return match move error {
-    OutOfMemoryError {} => -5
-    Scheduler.TaskIdExhaustedError {} => -6
-  }
-}
-
-pub fn main() -> i32 {
-  let outcome = run Effect.result(taskIdBoundary())
-  return match move outcome {
-    Result<i32, OutOfMemoryError | Scheduler.TaskIdExhaustedError>.Success { value: answer } => answer
-    Result<i32, OutOfMemoryError | Scheduler.TaskIdExhaustedError>.Failure { error } =>
-      taskIdBoundaryFailed(move error)
-  }
-}`
+pub fn main() -> i32 { return taskIdBoundary() }`
 
 const describe = (value: unknown): string =>
   JSON.stringify(value, (_, current) =>
@@ -311,7 +319,13 @@ const allocationOrdinalSource = (quota: number): string => {
     )
     .replace(
       `  let execution = run Execution.make(
-    runChild<A, E>(move child, move childProvider, move producer, move lifetime),
+    runChild<A, E>(
+      move child,
+      move childProvider,
+      TaskClock {},
+      move producer,
+      move lifetime,
+    ),
     (),
     ready,
   ) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)`,
@@ -320,7 +334,13 @@ const allocationOrdinalSource = (quota: number): string => {
   }) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
   let endpoint = OrdinalReadyEndpoint { node: move node }
   let execution = run Execution.make(
-    runChild<A, E>(move child, move childProvider, move producer, move lifetime),
+    runChild<A, E>(
+      move child,
+      move childProvider,
+      TaskClock {},
+      move producer,
+      move lifetime,
+    ),
     move endpoint,
     ordinalReady,
   ) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)`,
@@ -333,7 +353,7 @@ const allocationOrdinalSource = (quota: number): string => {
     .replace(
       `effect fn rootWork(audit: Shared.Shared<Audit>) -> ()
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   let child = run Fiber.forkChild<
     i32,
     Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError,
@@ -360,7 +380,7 @@ const allocationOrdinalSource = (quota: number): string => {
 }`,
       `effect fn rootWork(audit: Shared.Shared<Audit>) -> ()
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   let rejected = run Effect.catchAll(forkRejected(), recoverRejected)
   let stored = Shared.withMut(&audit, recordResult(41 + rejected))
   drop audit
@@ -621,167 +641,413 @@ it.effect('observes immediate and pending Fibers with monotonic terminal signals
   }),
 )
 
-it.effect('publishes child Fibers atomically through a renamed Scheduler provider', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'scheduler-fiber/fork-child',
-      new Uint8Array(forkChild),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      [],
-      describe(Analysis.diagnostics(snapshot)),
-    )
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
-
-    const calls = evaluated.trace.filter((event) => event._tag === 'Call')
-    const callIndex = (name: string): number =>
-      calls.findIndex((event) => event.target.name === name)
-    const callCount = (name: string): number =>
-      calls.filter((event) => event.target.name === name).length
-    for (const name of [
-      'rootForkReturned',
-      'nestedBodyActivated',
-      'nestedForkReturned',
-      'closedBodyActivated',
-      'rejectedTaskReleased',
-      'rejectionObserved',
-    ])
-      assert.strictEqual(callCount(name), 1, name)
-    assert.isBelow(callIndex('rootForkReturned'), callIndex('nestedBodyActivated'))
-    assert.isBelow(callIndex('nestedForkReturned'), callIndex('closedBodyActivated'))
-    assert.strictEqual(callIndex('rejectedBodyActivated'), -1)
-    assert.strictEqual(callIndex('wrongRejectionFailure'), -1)
-    assert.isBelow(callIndex('rejectedTaskReleased'), callIndex('rejectionObserved'))
-
-    const preparationFinished = evaluated.trace.flatMap((event, index) =>
-      event._tag === 'Call' && event.target.name === 'providerPreparationFinished' ? [index] : [],
-    )
-    assert.lengthOf(preparationFinished, 3)
-    for (const finished of preparationFinished) {
-      const nextRegister = evaluated.trace.findIndex(
-        (event, index) =>
-          index > finished && event._tag === 'ExecutionTransition' && event.event === 'Register',
+it.effect(
+  'publishes child Fibers atomically through a renamed Scheduler provider',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'scheduler-fiber/fork-child',
+        new Uint8Array(forkChild),
+        'wasm32-unknown-unknown',
       )
-      assert.isAbove(nextRegister, finished)
-    }
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        [],
+        describe(Analysis.diagnostics(snapshot)),
+      )
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, 42n)
 
-    const transitions = evaluated.trace.filter((event) => event._tag === 'ExecutionTransition')
-    assert.strictEqual(
-      transitions.filter((transition) => transition.event === 'Register').length,
-      5,
-      describe(transitions),
-    )
-    assert.strictEqual(
-      transitions.filter((transition) => transition.event === 'Notify').length,
-      5,
-      describe(transitions),
-    )
+      const calls = evaluated.trace.filter((event) => event._tag === 'Call')
+      const callIndex = (name: string): number =>
+        calls.findIndex((event) => event.target.name === name)
+      const callCount = (name: string): number =>
+        calls.filter((event) => event.target.name === name).length
+      for (const name of [
+        'rootForkReturned',
+        'nestedBodyActivated',
+        'nestedForkReturned',
+        'closedBodyActivated',
+        'rejectedTaskReleased',
+        'rejectionObserved',
+      ])
+        assert.strictEqual(callCount(name), 1, name)
+      assert.isBelow(callIndex('rootForkReturned'), callIndex('nestedBodyActivated'))
+      assert.isBelow(callIndex('nestedForkReturned'), callIndex('closedBodyActivated'))
+      assert.strictEqual(callIndex('rejectedBodyActivated'), -1)
+      assert.strictEqual(callIndex('wrongRejectionFailure'), -1)
+      assert.isBelow(callIndex('rejectedTaskReleased'), callIndex('rejectionObserved'))
 
-    const acquiredTickets = evaluated.trace.flatMap((event) =>
-      event._tag === 'AllocationAcquire' ? [event.ticket] : [],
-    )
-    const releasedTickets = evaluated.trace.flatMap((event) =>
-      event._tag === 'AllocationRelease' ? [event.ticket] : [],
-    )
-    assert.deepEqual(
-      releasedTickets.toSorted((left, right) => left - right),
-      acquiredTickets.toSorted((left, right) => left - right),
-      describe({ acquiredTickets, releasedTickets }),
-    )
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-  }),
+      const preparationFinished = evaluated.trace.flatMap((event, index) =>
+        event._tag === 'Call' && event.target.name === 'providerPreparationFinished' ? [index] : [],
+      )
+      assert.lengthOf(preparationFinished, 3)
+      for (const finished of preparationFinished) {
+        const nextRegister = evaluated.trace.findIndex(
+          (event, index) =>
+            index > finished && event._tag === 'ExecutionTransition' && event.event === 'Register',
+        )
+        assert.isAbove(nextRegister, finished)
+      }
+
+      const transitions = evaluated.trace.filter((event) => event._tag === 'ExecutionTransition')
+      assert.strictEqual(
+        transitions.filter((transition) => transition.event === 'Register').length,
+        5,
+        describe(transitions),
+      )
+      assert.strictEqual(
+        transitions.filter((transition) => transition.event === 'Notify').length,
+        5,
+        describe(transitions),
+      )
+
+      const acquiredTickets = evaluated.trace.flatMap((event) =>
+        event._tag === 'AllocationAcquire' ? [event.ticket] : [],
+      )
+      const releasedTickets = evaluated.trace.flatMap((event) =>
+        event._tag === 'AllocationRelease' ? [event.ticket] : [],
+      )
+      assert.deepEqual(
+        releasedTickets.toSorted((left, right) => left - right),
+        acquiredTickets.toSorted((left, right) => left - right),
+        describe({ acquiredTickets, releasedTickets }),
+      )
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    }),
+  { timeout: 120_000 },
 )
 
-it.effect('executes a scheduler-owned root with generic success and failure outcomes', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'scheduler-fiber/local-scheduler',
-      new Uint8Array(localScheduler),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      [],
-      describe(Analysis.diagnostics(snapshot)),
-    )
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+it.effect(
+  'executes a scheduler-owned root with generic success and failure outcomes',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'scheduler-fiber/local-scheduler',
+        new Uint8Array(localScheduler),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        [],
+        describe(Analysis.diagnostics(snapshot)),
+      )
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
 
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, 42n)
 
-    const calls = evaluated.trace.filter((event) => event._tag === 'Call')
-    const callIndex = (name: string): number =>
-      calls.findIndex((event) => event.target.name === name)
-    assert.isAtLeast(callIndex('rootStarted'), 0)
-    assert.isBelow(callIndex('rootStarted'), callIndex('forkReturned'))
-    assert.isBelow(callIndex('forkReturned'), callIndex('childStarted'))
-    assert.isBelow(callIndex('childStarted'), callIndex('rootResumed'))
+      const calls = evaluated.trace.filter((event) => event._tag === 'Call')
+      const callIndex = (name: string): number =>
+        calls.findIndex((event) => event.target.name === name)
+      assert.isAtLeast(callIndex('rootStarted'), 0)
+      assert.isBelow(callIndex('rootStarted'), callIndex('forkReturned'))
+      assert.isBelow(callIndex('forkReturned'), callIndex('childStarted'))
+      assert.isBelow(callIndex('childStarted'), callIndex('rootResumed'))
 
-    const allocations = evaluated.trace.filter(
-      (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
-    )
-    assert.strictEqual(
-      allocations.filter((event) => event._tag === 'AllocationAcquire').length,
-      allocations.filter((event) => event._tag === 'AllocationRelease').length,
-      describe(allocations),
-    )
+      const allocations = evaluated.trace.filter(
+        (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
+      )
+      assert.strictEqual(
+        allocations.filter((event) => event._tag === 'AllocationAcquire').length,
+        allocations.filter((event) => event._tag === 'AllocationRelease').length,
+        describe(allocations),
+      )
 
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-  }),
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+    }),
+  { timeout: 120_000 },
 )
 
-it.effect('extracts generic root outcomes without externally parking execute', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'scheduler-fiber/local-scheduler-root',
-      new Uint8Array(localSchedulerRoot),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      [],
-      describe(Analysis.diagnostics(snapshot)),
-    )
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+it.effect(
+  'suspends timer Fibers through a scripted parent clock without blocking siblings',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'scheduler-fiber/local-scheduler-timers',
+        new Uint8Array(localSchedulerTimers),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        [],
+        describe(Analysis.diagnostics(snapshot)),
+      )
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, 42n)
 
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
-    assert.strictEqual(
-      evaluated.trace.filter(
-        (event) =>
+      const calls = evaluated.trace.filter((event) => event._tag === 'Call')
+      for (const name of [
+        'recordFirstTimer',
+        'recordSecondTimer',
+        'recordEarlyTimer',
+        'recordMiddleTimer',
+        'recordLateTimer',
+        'recordCancellationEarlyTimer',
+        'recordCancellationLateTimer',
+        'recordInnerTimer',
+        'recordFairnessTimer',
+      ]) {
+        assert.strictEqual(
+          calls.filter((event) => event.target.name === name).length,
+          1,
+          `${name} must run exactly once`,
+        )
+      }
+
+      const onlyTraceCall = (name: string): number => {
+        const indices = evaluated.trace.flatMap((event, index) =>
+          event._tag === 'Call' && event.target.name === name ? [index] : [],
+        )
+        assert.lengthOf(indices, 1, name)
+        return indices[0] ?? -1
+      }
+      const beforeCachedReads = onlyTraceCall('beforeCachedReads')
+      const afterCachedReads = onlyTraceCall('afterCachedReads')
+      const cachedReadTrace = evaluated.trace.slice(beforeCachedReads + 1, afterCachedReads)
+      assert.isFalse(
+        cachedReadTrace.some(
+          (event) => event._tag === 'ExecutionTransition' && event.event === 'Register',
+        ),
+        'task-local clock reads must not park',
+      )
+      assert.isFalse(
+        cachedReadTrace.some(
+          (event) => event._tag === 'Call' && /^parentNow(?:\$|$)/.test(event.target.name),
+        ),
+        'task-local clock reads must not dispatch to the parent provider',
+      )
+      assert.isFalse(
+        cachedReadTrace.some(
+          (event) => event._tag === 'Call' && /^parentResolution(?:\$|$)/.test(event.target.name),
+        ),
+        'task-local resolution reads must use the cached parent resolution',
+      )
+
+      const beforeImmediateWaits = onlyTraceCall('beforeImmediateWaits')
+      const afterImmediateWaits = onlyTraceCall('afterImmediateWaits')
+      const immediateWaitTrace = evaluated.trace.slice(
+        beforeImmediateWaits + 1,
+        afterImmediateWaits,
+      )
+      assert.isFalse(
+        immediateWaitTrace.some(
+          (event) => event._tag === 'ExecutionTransition' && event.event === 'Register',
+        ),
+        'zero and past-deadline waits must not park',
+      )
+      assert.isFalse(
+        immediateWaitTrace.some(
+          (event) => event._tag === 'Call' && /^parentNow(?:\$|$)/.test(event.target.name),
+        ),
+        'zero and past-deadline waits must not dispatch to the parent provider',
+      )
+      assert.isFalse(
+        immediateWaitTrace.some(
+          (event) =>
+            event._tag === 'Call' && /^parentWait(?:Until|For)(?:\$|$)/.test(event.target.name),
+        ),
+        'zero and past-deadline waits must not block through the parent provider',
+      )
+
+      const beforeRelativeWait = onlyTraceCall('beforeRelativeWait')
+      const afterRelativeWait = onlyTraceCall('afterRelativeWait')
+      const registration = evaluated.trace.findIndex(
+        (event, index) =>
+          index > beforeRelativeWait &&
+          event._tag === 'ExecutionTransition' &&
+          event.event === 'Register',
+      )
+      const nextDrive = evaluated.trace.findIndex(
+        (event, index) =>
+          index > registration &&
           event._tag === 'Call' &&
-          (event.target.name === 'successStarted' || event.target.name === 'failureStarted'),
-      ).length,
-      2,
-    )
+          /^driveIdentity(?:\$|$)/.test(event.target.name),
+      )
+      assert.isAbove(registration, beforeRelativeWait)
+      assert.isAbove(nextDrive, registration)
+      assert.isAbove(afterRelativeWait, nextDrive)
+      const armedTimer = evaluated.trace.findIndex(
+        (event, index) =>
+          index > registration &&
+          event._tag === 'Call' &&
+          /^armTimer(?:\$|$)/.test(event.target.name),
+      )
+      assert.isAbove(armedTimer, registration)
+      assert.strictEqual(
+        evaluated.trace
+          .slice(beforeRelativeWait + 1, nextDrive)
+          .filter((event) => event._tag === 'ExecutionTransition' && event.event === 'Register')
+          .length,
+        1,
+        'one positive relative wait must park exactly once before control returns to the driver',
+      )
+      assert.strictEqual(
+        evaluated.trace
+          .slice(registration + 1, armedTimer)
+          .filter((event) => event._tag === 'Call' && /^parentNow(?:\$|$)/.test(event.target.name))
+          .length,
+        1,
+        'the relative wait must sample the parent clock exactly once before arming its timer',
+      )
+      assert.isFalse(
+        evaluated.trace
+          .slice(registration + 1, armedTimer + 1)
+          .some((event) => event._tag === 'AllocationAcquire'),
+        'timer installation and arming must use prefunded storage',
+      )
 
-    const allocations = evaluated.trace.filter(
-      (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
-    )
-    assert.strictEqual(
-      allocations.filter((event) => event._tag === 'AllocationAcquire').length,
-      allocations.filter((event) => event._tag === 'AllocationRelease').length,
-      describe(allocations),
-    )
+      const cancelledTimerActivated = onlyTraceCall('cancelledMiddleTimerActivated')
+      const cancelledTimerReleased = onlyTraceCall('cancelledMiddleTimerReleased')
+      const cancellationEarlyTimer = onlyTraceCall('recordCancellationEarlyTimer')
+      const cancellationLateTimer = onlyTraceCall('recordCancellationLateTimer')
+      const cancellationDisarm = evaluated.trace.findLastIndex(
+        (event, index) =>
+          index < cancelledTimerReleased &&
+          event._tag === 'Call' &&
+          event.target.name === 'disarmRegistration',
+      )
+      assert.isAbove(cancellationDisarm, cancelledTimerActivated)
+      assert.isBelow(cancelledTimerActivated, cancelledTimerReleased)
+      assert.isBelow(cancelledTimerReleased, cancellationEarlyTimer)
+      assert.isBelow(cancellationEarlyTimer, cancellationLateTimer)
+      assert.isFalse(
+        evaluated.trace
+          .slice(cancellationDisarm, cancelledTimerReleased)
+          .some((event) => event._tag === 'AllocationAcquire'),
+        'timer cancellation and arbitrary-index removal must not allocate',
+      )
+      assert.isFalse(
+        evaluated.trace.some(
+          (event) => event._tag === 'Call' && event.target.name === 'cancelledMiddleTimerResumed',
+        ),
+        'the cancelled middle timer must never resume',
+      )
 
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-  }),
+      const acquiredTickets = evaluated.trace.flatMap((event) =>
+        event._tag === 'AllocationAcquire' ? [event.ticket] : [],
+      )
+      const releasedTickets = evaluated.trace.flatMap((event) =>
+        event._tag === 'AllocationRelease' ? [event.ticket] : [],
+      )
+      assert.deepEqual(
+        releasedTickets.toSorted((left, right) => left - right),
+        acquiredTickets.toSorted((left, right) => left - right),
+        describe({ acquiredTickets, releasedTickets }),
+      )
+    }),
+  // The Linux compiler shard has less per-worker CPU than focused/local runs and has measured just
+  // over five minutes for this evaluator-heavy fixture. Keep the timeout above that CI envelope.
+  { timeout: 600_000 },
+)
+
+it.effect(
+  'agrees across evaluator and direct Wasm for one ready sibling and one timer',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'scheduler-fiber/local-scheduler-timer-basic',
+        new Uint8Array(localSchedulerTimerBasic),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        [],
+        describe(Analysis.diagnostics(snapshot)),
+      )
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, 42n)
+
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+    }),
+  { timeout: 120_000 },
+)
+
+it.effect(
+  'enforces child and parent clock requirement-row boundaries',
+  () =>
+    Effect.gen(function* () {
+      const invalidChild = yield* Analysis.ofSource(
+        'scheduler-fiber/invalid-timer-child-requirement',
+        ascii(invalidTimerChildRequirementSource),
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(invalidChild).map((diagnostic) => diagnostic.code),
+        ['SEM0012'],
+      )
+
+      const missingParentClock = yield* Analysis.ofSource(
+        'scheduler-fiber/missing-parent-clock',
+        ascii(missingParentClockSource),
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(missingParentClock).map((diagnostic) => diagnostic.code),
+        ['SEM0071'],
+      )
+    }),
+  { timeout: 120_000 },
+)
+
+it.effect(
+  'extracts generic root outcomes without externally parking execute',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'scheduler-fiber/local-scheduler-root',
+        new Uint8Array(localSchedulerRoot),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        [],
+        describe(Analysis.diagnostics(snapshot)),
+      )
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, 42n)
+      assert.strictEqual(
+        evaluated.trace.filter(
+          (event) =>
+            event._tag === 'Call' &&
+            (event.target.name === 'successStarted' || event.target.name === 'failureStarted'),
+        ).length,
+        2,
+      )
+
+      const allocations = evaluated.trace.filter(
+        (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
+      )
+      assert.strictEqual(
+        allocations.filter((event) => event._tag === 'AllocationAcquire').length,
+        allocations.filter((event) => event._tag === 'AllocationRelease').length,
+        describe(allocations),
+      )
+
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+    }),
+  { timeout: 120_000 },
 )
 
 it.effect(
@@ -799,7 +1065,6 @@ it.effect(
         describe(Analysis.diagnostics(snapshot)),
       )
       assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
       if (evaluated._tag !== 'Completed') return
@@ -919,7 +1184,64 @@ it.effect(
     }),
   // This is the suite's largest scheduler program and can exceed two minutes while the compiler's
   // parallel acceptance workers contend for CPU; focused runs remain substantially faster.
-  { timeout: 240_000 },
+  { timeout: 300_000 },
+)
+
+it.effect(
+  'cancels a parked nested LocalScheduler and every inner timer Fiber',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'scheduler-fiber/local-scheduler-nested-cancellation',
+        new Uint8Array(localSchedulerNestedCancellation),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        [],
+        describe(Analysis.diagnostics(snapshot)),
+      )
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, 42n)
+
+      const callIndices = (name: string): ReadonlyArray<number> =>
+        evaluated.trace.flatMap((event, index) =>
+          event._tag === 'Call' && event.target.name === name ? [index] : [],
+        )
+      const onlyCall = (name: string): number => {
+        const indices = callIndices(name)
+        assert.lengthOf(indices, 1, name)
+        return indices[0] ?? -1
+      }
+      const published = onlyCall('nestedFiberPublished')
+      const activated = onlyCall('nestedTimerActivated')
+      const terminal = onlyCall('nestedOuterTerminating')
+      const released = onlyCall('nestedTimerReleased')
+      const returned = onlyCall('nestedOuterReturned')
+      const cancelled = onlyCall('nestedCancellationObserved')
+      assert.isBelow(published, activated)
+      assert.isBelow(activated, terminal)
+      assert.isBelow(terminal, released)
+      assert.isBelow(released, returned)
+      assert.isBelow(returned, cancelled)
+      assert.lengthOf(callIndices('resumedUnexpectedly'), 0)
+
+      const acquiredTickets = evaluated.trace.flatMap((event) =>
+        event._tag === 'AllocationAcquire' ? [event.ticket] : [],
+      )
+      const releasedTickets = evaluated.trace.flatMap((event) =>
+        event._tag === 'AllocationRelease' ? [event.ticket] : [],
+      )
+      assert.deepEqual(
+        releasedTickets.toSorted((left, right) => left - right),
+        acquiredTickets.toSorted((left, right) => left - right),
+        describe({ acquiredTickets, releasedTickets }),
+      )
+    }),
+  { timeout: 180_000 },
 )
 
 it.effect(
@@ -1003,85 +1325,89 @@ it.effect(
         'joining an already completed child must not park',
       )
     }),
-  { timeout: 120_000 },
+  // This fixture exceeded two minutes under Linux shard contention while completing normally.
+  { timeout: 300_000 },
 )
 
-it.effect('keeps cancelled Wakes and stale ready nodes inert across scheduler reuse', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'scheduler-fiber/local-scheduler-stale-reuse',
-      new Uint8Array(localSchedulerStaleReuse),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      [],
-      describe(Analysis.diagnostics(snapshot)),
-    )
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
-
-    const callIndices = (name: string): ReadonlyArray<number> =>
-      evaluated.trace.flatMap((event, index) =>
-        event._tag === 'Call' && event.target.name === name ? [index] : [],
+it.effect(
+  'keeps cancelled Wakes and stale ready nodes inert across scheduler reuse',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'scheduler-fiber/local-scheduler-stale-reuse',
+        new Uint8Array(localSchedulerStaleReuse),
+        'wasm32-unknown-unknown',
       )
-    const onlyCall = (name: string): number => {
-      const indices = callIndices(name)
-      assert.lengthOf(indices, 1, name)
-      return indices[0] ?? -1
-    }
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        [],
+        describe(Analysis.diagnostics(snapshot)),
+      )
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
 
-    const retainedInstalled = onlyCall('retainedWakeInstalled')
-    const retainedReleased = onlyCall('retainedGuardReleased')
-    const retainedRecovered = onlyCall('retainedRunRecovered')
-    const staleTerminal = onlyCall('staleRootTerminating')
-    const staleReturned = onlyCall('staleRunReturned')
-    const freshStarted = onlyCall('freshStarted')
-    const wakeConsumed = onlyCall('cancelledWakeConsumed')
-    const currentChildActivated = onlyCall('currentChildActivated')
-    const freshReturned = onlyCall('freshReturned')
-    assert.isBelow(retainedInstalled, retainedReleased)
-    assert.isBelow(retainedReleased, retainedRecovered)
-    assert.isBelow(retainedRecovered, staleTerminal)
-    assert.isBelow(staleTerminal, staleReturned)
-    assert.isBelow(staleReturned, freshStarted)
-    assert.isBelow(freshStarted, wakeConsumed)
-    assert.isBelow(wakeConsumed, currentChildActivated)
-    assert.isBelow(currentChildActivated, freshReturned)
-    assert.lengthOf(callIndices('staleChildActivated'), 0)
-    assert.lengthOf(callIndices('resumedUnexpectedly'), 0)
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, 42n)
 
-    const freshEntry = evaluated.trace.slice(staleReturned + 1, freshStarted)
-    assert.strictEqual(
-      freshEntry.filter(
-        (event) => event._tag === 'Call' && /^driveIdentity(?:\$|$)/.test(event.target.name),
-      ).length,
-      1,
-      'the later execute must dispatch only its fresh root before that root starts',
-    )
+      const callIndices = (name: string): ReadonlyArray<number> =>
+        evaluated.trace.flatMap((event, index) =>
+          event._tag === 'Call' && event.target.name === name ? [index] : [],
+        )
+      const onlyCall = (name: string): number => {
+        const indices = callIndices(name)
+        assert.lengthOf(indices, 1, name)
+        return indices[0] ?? -1
+      }
 
-    const lateWake = evaluated.trace.slice(freshStarted + 1, wakeConsumed)
-    assert.isFalse(
-      lateWake.some(
-        (event) =>
-          event._tag === 'ExecutionTransition' &&
-          (event.event === 'Notify' || event.event === 'Eligible'),
-      ),
-      'consuming a Wake retained from a cancelled run must not publish readiness',
-    )
-    assert.isTrue(
-      lateWake.some((event) => event._tag === 'ExecutionTransition' && event.event === 'Release'),
-      'the retained cancelled Wake must discharge its old package authority',
-    )
-    assert.isFalse(
-      lateWake.some((event) => event._tag === 'Call' && event.target.name === 'notifyReady'),
-      'the retained cancelled Wake must not call its old ready endpoint',
-    )
-  }),
+      const retainedInstalled = onlyCall('retainedWakeInstalled')
+      const retainedReleased = onlyCall('retainedGuardReleased')
+      const retainedRecovered = onlyCall('retainedRunRecovered')
+      const staleTerminal = onlyCall('staleRootTerminating')
+      const staleReturned = onlyCall('staleRunReturned')
+      const freshStarted = onlyCall('freshStarted')
+      const wakeConsumed = onlyCall('cancelledWakeConsumed')
+      const currentChildActivated = onlyCall('currentChildActivated')
+      const freshReturned = onlyCall('freshReturned')
+      assert.isBelow(retainedInstalled, retainedReleased)
+      assert.isBelow(retainedReleased, retainedRecovered)
+      assert.isBelow(retainedRecovered, staleTerminal)
+      assert.isBelow(staleTerminal, staleReturned)
+      assert.isBelow(staleReturned, freshStarted)
+      assert.isBelow(freshStarted, wakeConsumed)
+      assert.isBelow(wakeConsumed, currentChildActivated)
+      assert.isBelow(currentChildActivated, freshReturned)
+      assert.lengthOf(callIndices('staleChildActivated'), 0)
+      assert.lengthOf(callIndices('resumedUnexpectedly'), 0)
+
+      const freshEntry = evaluated.trace.slice(staleReturned + 1, freshStarted)
+      assert.strictEqual(
+        freshEntry.filter(
+          (event) => event._tag === 'Call' && /^driveIdentity(?:\$|$)/.test(event.target.name),
+        ).length,
+        1,
+        'the later execute must dispatch only its fresh root before that root starts',
+      )
+
+      const lateWake = evaluated.trace.slice(freshStarted + 1, wakeConsumed)
+      assert.isFalse(
+        lateWake.some(
+          (event) =>
+            event._tag === 'ExecutionTransition' &&
+            (event.event === 'Notify' || event.event === 'Eligible'),
+        ),
+        'consuming a Wake retained from a cancelled run must not publish readiness',
+      )
+      assert.isTrue(
+        lateWake.some((event) => event._tag === 'ExecutionTransition' && event.event === 'Release'),
+        'the retained cancelled Wake must discharge its old package authority',
+      )
+      assert.isFalse(
+        lateWake.some((event) => event._tag === 'Call' && event.target.name === 'notifyReady'),
+        'the retained cancelled Wake must not call its old ready endpoint',
+      )
+    }),
+  { timeout: 120_000 },
 )
 
 it.effect(

@@ -7,12 +7,14 @@ Deterministic single-threaded execution for structured Fibers.
 ## When to use
 
 Use [`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a65786563757465) at an application entry point to run one lazy program that uses the
-`silk.scheduler.Scheduler` service.
+`silk.scheduler.Scheduler` and `silk.monotonic_clock.MonotonicClock` services.
 
 ## Details
 
-Each call creates fresh task storage and a FIFO ready queue. The root is task zero and uses the
-same `Execution<()>` storage as every child. [`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a65786563757465) returns only after the root terminates.
+Each call creates fresh task storage, a FIFO ready queue, and a private timer source. The root is
+task zero and uses the same `Execution<()>` storage as every child. Task clock waits park only
+their task; the driver uses the parent clock when its event sources need to wait. [`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a65786563757465)
+returns only after the root terminates.
 
 Import as `LocalScheduler` with `import silk.local_scheduler { LocalScheduler }`.
 
@@ -40,7 +42,7 @@ Each call to [`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a
 pub struct StalledError
 ```
 
-Reports that no task is ready while the root is incomplete.
+Reports that no task is ready and no event registration remains while the root is incomplete.
 
 ### Details
 
@@ -74,13 +76,61 @@ impl Copy for TaskLink
 
 <a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a32"></a>
 
+## Implementation `Copy for ClockSnapshot`
+
+```silk
+impl Copy for ClockSnapshot
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a33"></a>
+
+## Implementation `MonotonicClock.MonotonicClock for TaskClockClient`
+
+```silk
+impl MonotonicClock.MonotonicClock for TaskClockClient
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a30"></a>
+
+### Operation `now`
+
+```silk
+now = TaskClockClient.taskNow
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a31"></a>
+
+### Operation `getResolution`
+
+```silk
+getResolution = TaskClockClient.taskResolution
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a32"></a>
+
+### Operation `waitUntil`
+
+```silk
+waitUntil = TaskClockClient.taskWaitUntil
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a33"></a>
+
+### Operation `waitFor`
+
+```silk
+waitFor = TaskClockClient.taskWaitFor
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a34"></a>
+
 ## Implementation `Scheduler.Scheduler for SchedulerClient`
 
 ```silk
 impl Scheduler.Scheduler for SchedulerClient
 ```
 
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `prepare`
 
@@ -88,20 +138,38 @@ impl Scheduler.Scheduler for SchedulerClient
 prepare = SchedulerClient.prepareChild
 ```
 
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a35"></a>
+
+## Implementation `Drop for CompletionCancellation`
+
+```silk
+impl Drop for CompletionCancellation
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a36"></a>
+
+## Implementation `Copy for TimerEntry`
+
+```silk
+impl Copy for TimerEntry
+```
+
 <a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a65786563757465"></a>
 
 ## `execute`
 
 ```silk
-pub effect fn execute<A, E>(self: &mut silk/local_scheduler.LocalScheduler, program: once Effect<A ! E ? &mut silk/scheduler.Scheduler>) -> A ! E | OutOfMemoryError | StalledError
+pub effect fn execute<A, E>(self: &mut silk/local_scheduler.LocalScheduler, program: once Effect<A ! E ? &mut silk/monotonic_clock.MonotonicClock | &mut silk/scheduler.Scheduler>) -> A ! E | OutOfMemoryError | StalledError ? &mut MonotonicClock.MonotonicClock
 ```
 
 Runs one lazy root program under this Scheduler and returns its typed outcome.
 
 ### Details
 
-The root becomes task zero. This operation owns all per-run task storage, provides one distinct
-Scheduler client to each task, and dispatches ready tasks in FIFO order. Before it returns a
-root value or raises a typed error, it cancels every unfinished descendant and releases the
-run state. If the root is incomplete when no task is ready, it performs the same cleanup and
-raises [`StalledError`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a5374616c6c65644572726f72).
+The root becomes task zero. This operation owns all per-run task and timer storage, provides
+distinct Scheduler and MonotonicClock clients to each task, and dispatches ready tasks in FIFO
+order. Task clock reads use one cached mark per driver turn. Future waits suspend their task and
+are resumed in deadline and registration order. When the ready queue is empty, the driver waits
+through its required parent MonotonicClock for the earliest timer; it raises [`StalledError`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a5374616c6c65644572726f72)
+only when no task is ready and no timer registration remains. Before any typed return or failure,
+it cancels every unfinished descendant and releases the complete run state.

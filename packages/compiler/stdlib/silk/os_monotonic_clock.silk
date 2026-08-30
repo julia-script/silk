@@ -18,7 +18,6 @@
 
 import silk.i64 as i64
 import silk.monotonic_clock as MonotonicClock
-import silk.option { Option }
 import silk.system_clock as SystemClock
 import silk.system_clock { Instant }
 import silk.u64 as u64
@@ -34,18 +33,6 @@ pub struct OsMonotonicClock {}
 /// Creates a native monotonic-clock provider without reading the clock or installing a default.
 pub fn make() -> OsMonotonicClock {
   return OsMonotonicClock {}
-}
-
-fn invalidI64() -> i64 {
-  let invalid = 1 / 0
-  return invalidI64()
-}
-
-fn requireI64(value: Option<i64>) -> i64 {
-  return match move value {
-    Option<i64>.None => invalidI64()
-    Option<i64>.Some { value: present } => present
-  }
 }
 
 effect fn read(seconds: &mut i64, nanoseconds: &mut i64) -> bool {
@@ -101,21 +88,8 @@ effect fn waitUntil(self: &mut OsMonotonicClock, when: Instant) -> () {
 }
 
 effect fn waitFor(self: &mut OsMonotonicClock, howLong: u64) -> () {
-  let mut start = run readInstant()
-  let startSeconds = SystemClock.seconds(&start)
-  let startNanoseconds = SystemClock.nanoseconds(&start)
-  let billion = u64.toU64(1000000000)
-  let wholeSeconds = requireI64(u64.checkedToI64(howLong / billion))
-  let fraction = u64.toI64(howLong % billion)
-  let mut deadlineNanoseconds = startNanoseconds + fraction
-  let mut carry = i64.toI64(0)
-  if deadlineNanoseconds >= 1000000000 {
-    deadlineNanoseconds = deadlineNanoseconds - 1000000000
-    carry = i64.toI64(1)
-  }
-  let extended = requireI64(i64.checkedAdd(startSeconds, wholeSeconds))
-  let deadlineSeconds = requireI64(i64.checkedAdd(extended, carry))
-  let deadline = SystemClock.make(deadlineSeconds, deadlineNanoseconds)
+  let start = run readInstant()
+  let deadline = MonotonicClock.deadlineAfter(&start, howLong)
   return run waitDeadline(move deadline)
 }
 

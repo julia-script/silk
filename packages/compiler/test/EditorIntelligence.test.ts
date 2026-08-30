@@ -334,19 +334,23 @@ it.effect(
     const source = `import silk.allocator as Allocator
 import silk.fiber as Fiber
 import silk.local_scheduler as LocalScheduler
+import silk.monotonic_clock as MonotonicClock
 import silk.scheduler as Scheduler
 
-effect fn child() -> i32 ? &mut Scheduler.Scheduler { return 42 }
+effect fn child() -> i32
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+  return 42
+}
 
 effect fn prepareOnly() -> Scheduler.PendingPublication<i32, never>
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   return run Scheduler.prepare<i32, never>(child())
 }
 
 effect fn program() -> i32
 ! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   let childFiber = run Fiber.forkChild<i32, never>(child())
   return run Fiber.join<i32, never>(move childFiber)
 }
@@ -365,7 +369,8 @@ effect fn runProgram(scheduler: &mut LocalScheduler.LocalScheduler) -> i32
 ! Allocator.OutOfMemoryError
   | Scheduler.TaskIdExhaustedError
   | Fiber.Cancelled
-  | LocalScheduler.StalledError {
+  | LocalScheduler.StalledError
+? &mut MonotonicClock.MonotonicClock {
   return run LocalScheduler.execute(move scheduler, program())
 }
 
@@ -463,7 +468,7 @@ pub fn main() -> i32 {
             'LocalScheduler.'.length,
             'silk/local_scheduler',
             'pub struct StalledError',
-            '/// Reports that no task is ready while the root is incomplete.',
+            '/// Reports that no task is ready and no event registration remains while the root is incomplete.',
           ],
         ] as const) {
           const position = source.indexOf(needle) + offset

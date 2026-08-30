@@ -34,7 +34,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/local_scheduler`](./local-scheduler.md) | `LocalScheduler` | 4 | Deterministic single-threaded execution for structured Fibers. |
 | [`silk/logger`](./logger.md) | `Logger` | 14 | Typed semantic logging with replaceable stdout and bounded in-memory providers. |
 | [`silk/metrics`](./metrics.md) | `AllocationMetrics` | 7 | Provider-owned allocation counters that can be published as ordinary copyable data. |
-| [`silk/monotonic_clock`](./monotonic-clock.md) | `MonotonicClock` | 5 | Provider-replaceable monotonic marks, resolution, and deadline waits. |
+| [`silk/monotonic_clock`](./monotonic-clock.md) | `MonotonicClock` | 6 | Provider-replaceable monotonic marks, resolution, and deadline waits. |
 | [`silk/numeric`](./numeric.md) | `Integer` | 3 | Shared compile-time addition witness for generic algorithms over primitive integers. |
 | [`silk/option`](./option.md) | `Option` | 6 | Optional owned values that distinguish presence from absence without a failure channel. |
 | [`silk/order`](./order.md) | `Order` | 11 | Compile-time ordering witnesses and a three-way result derived from strict comparison. |

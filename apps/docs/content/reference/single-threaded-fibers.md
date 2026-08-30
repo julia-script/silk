@@ -20,15 +20,49 @@ task storage, Fiber observation, and structured cancellation remain standard-lib
 
 ## Enter a local scheduler explicitly
 
-`LocalScheduler.execute` receives the program before it starts, creates task zero, provides an owned
-`Scheduler` client, and privately drives the ready queue until the root terminates.
+`LocalScheduler.execute` receives the program before it starts, creates task zero, provides owned
+`Scheduler` and `MonotonicClock` clients, and privately drives the ready queue until the root
+terminates.
 
 ```silk
 import silk.allocator { OutOfMemoryError }
 import silk.effect { Effect }
 import silk.fiber { Fiber }
 import silk.local_scheduler { LocalScheduler }
+import silk.monotonic_clock as MonotonicClock
 import silk.scheduler { Scheduler }
+import silk.system_clock as SystemClock
+import silk.system_clock { Instant }
+
+struct ParentClock {
+  mark: Instant
+}
+
+effect fn parentNow(self: &mut ParentClock) -> Instant {
+  return SystemClock.make(
+    SystemClock.seconds(&self.mark),
+    SystemClock.nanoseconds(&self.mark),
+  )
+}
+
+effect fn parentResolution(self: &mut ParentClock) -> u64 { return 1 }
+
+effect fn parentWaitUntil(self: &mut ParentClock, deadline: Instant) -> () {
+  self.mark = move deadline
+  return ()
+}
+
+effect fn parentWaitFor(self: &mut ParentClock, duration: u64) -> () {
+  let deadline = MonotonicClock.deadlineAfter(&self.mark, duration)
+  return run parentWaitUntil(move self, move deadline)
+}
+
+impl MonotonicClock.MonotonicClock for ParentClock {
+  now: ParentClock.parentNow
+  getResolution: ParentClock.parentResolution
+  waitUntil: ParentClock.parentWaitUntil
+  waitFor: ParentClock.parentWaitFor
+}
 
 effect fn work() -> i32 {
   return 42
@@ -36,7 +70,7 @@ effect fn work() -> i32 {
 
 effect fn program() -> i32
 ! OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
-? &mut Scheduler.Scheduler {
+? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
   let child = run Fiber.forkChild<i32, never>(work())
   return run Fiber.join<i32, never>(move child)
 }
@@ -53,16 +87,21 @@ effect fn recover(
 
 pub fn main() -> i32 {
   let mut scheduler = LocalScheduler.make()
-  return run Effect.catchAll(
+  let mut clock = ParentClock { mark: SystemClock.make(0, 0) }
+  let scheduled = Effect.catchAll(
     LocalScheduler.execute(&mut scheduler, program()),
     recover,
-  )
+  ) |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+  return run move scheduled
 }
 ```
 
 Application code inside `program` uses Fiber operations. It does not call a public scheduler loop.
 A different provider may expose its own explicit entry operation while implementing the same
 ordinary `Scheduler` preparation service.
+
+This reference example uses a deterministic parent clock so it also runs in the evaluator. A
+native application can instead provide `OsMonotonicClock` at this outer boundary.
 
 ### FIBER-001 — Applications select scheduler entry explicitly
 
@@ -90,8 +129,8 @@ and construction have no compiler diagnostic because they are ordinary source ca
 
 **Status:** Confirmed
 
-`Fiber.forkChild` accepts a consuming lazy Effect whose remaining runtime requirement is at most
-the child's owned Scheduler provider. Closed work is therefore valid. The selected provider funds
+`Fiber.forkChild` accepts a consuming lazy Effect whose remaining runtime requirements are at most
+the child's owned Scheduler and MonotonicClock providers. Closed work is therefore valid. The selected provider funds
 the completion cells, child client, mailbox, ready endpoint, identity, and Execution before the
 child can become observable.
 
@@ -177,9 +216,10 @@ name a task from a later `execute` call.
 **Status:** Confirmed
 
 `LocalScheduler.execute` returns the root's exact success value or raises its exact typed failure.
-If no task is ready while the root remains incomplete, it cancels the remaining task tree and raises
-`LocalScheduler.StalledError`. Setup or task-store allocation refusal raises
-`Allocator.OutOfMemoryError`. Fatal traps remain outside typed recovery.
+If no task is ready and no event registration remains while the root is incomplete, it cancels the
+remaining task tree and raises `LocalScheduler.StalledError`. An active timer keeps the scheduler
+waiting for progress. Setup or task-store allocation refusal raises `Allocator.OutOfMemoryError`.
+Fatal traps remain outside typed recovery.
 
 Before any typed return or failure, shutdown removes every task, drains prepared submissions,
 releases scheduler-owned handles, and drops the per-run ready queue. The same `LocalScheduler`
@@ -192,7 +232,31 @@ allocation. It is inert and cannot enqueue into a later run.
 Fatal lifecycle or intrinsic-state errors remain fatal traps.
 
 **Evidence:** [generic root and reuse tests](../../../../packages/compiler/test/SchedulerFiber.test.ts),
-[fiber capability specification](../../../../openspec/changes/add-single-threaded-fibers/specs/bootstrap-single-threaded-fibers/spec.md).
+[timer-aware scheduler specification](../../../../openspec/changes/add-scheduler-timer-reactor/specs/scheduler-timers/spec.md).
+
+### FIBER-008 — Scheduler timers suspend tasks without blocking siblings
+
+**Status:** Confirmed
+
+Every `LocalScheduler.execute` requires an outer `MonotonicClock` for driver reads and idle waits.
+The root and each child instead receive a complete owned clock replacement. `now` and
+`getResolution` read per-run cached state; a future `waitFor` or `waitUntil` parks only the calling
+task and transfers its Wake to the scheduler's private timer source. Zero-duration and reached
+deadlines return without parking.
+
+The driver refreshes time, collects all due timers, and then selects at most one ready task per
+turn. Timers are ordered by deadline and registration order, and their Wakes join the same FIFO
+ready queue as every other event. If no task is ready, the driver calls the outer clock's
+`waitUntil` for the earliest timer. It reports `StalledError` only when neither ready work nor an
+active timer remains.
+
+**Boundary:** The outer provider may block the host thread while the scheduler has no ready work.
+Calling `OsMonotonicClock.waitFor` directly still blocks. A nested local scheduler can park through
+its outer task-clock provider, but a continuously ready inner scheduler remains a synchronous
+cooperative scope and does not promise fairness to outer siblings.
+
+**Evidence:** [scripted timer fixture](../../../../packages/compiler/test/fixtures/scheduler-fiber/local-scheduler-timers.silk),
+[scheduler and Fiber tests](../../../../packages/compiler/test/SchedulerFiber.test.ts).
 
 ### FIBER-007 — Scheduler policy remains ordinary source
 

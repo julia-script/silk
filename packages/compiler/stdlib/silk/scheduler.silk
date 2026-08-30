@@ -17,6 +17,7 @@ import silk.allocator { OutOfMemoryError }
 import silk.fiber as Fiber
 import silk.hash as Hash
 import silk.hash { HashKey, HashSeed }
+import silk.monotonic_clock as MonotonicClock
 import silk.shared as Shared
 import silk.u64 as u64
 
@@ -175,10 +176,15 @@ pub service Scheduler {
   ///
   /// # Details
   ///
-  /// The child can require only its owned Scheduler provider. Preparation reserves all child
-  /// endpoints and one task identity before it returns. It does not activate the child.
+  /// The child can require only its owned Scheduler and MonotonicClock providers. Preparation
+  /// reserves all child endpoints and one task identity before it returns. It does not activate
+  /// the child.
   effect fn prepare<A, E>(
-    child: once Effect<A ! E ? &mut Scheduler>
+    child: once Effect<
+      A
+      ! E
+      ? &mut Scheduler | &mut MonotonicClock.MonotonicClock
+    >
   ) -> PendingPublication<A, E>
   ! OutOfMemoryError | TaskIdExhaustedError
   ? &mut Scheduler
@@ -191,7 +197,11 @@ pub service Scheduler {
 /// This operation only prepares the task. `Fiber.forkChild` registers the returned data after the
 /// service call ends, then obtains the affine Fiber only after the Scheduler accepts the child.
 pub effect fn prepare<A, E>(
-  child: once Effect<A ! E ? &mut Scheduler>
+  child: once Effect<
+    A
+    ! E
+    ? &mut Scheduler | &mut MonotonicClock.MonotonicClock
+  >
 ) -> PendingPublication<A, E>
 ! OutOfMemoryError | TaskIdExhaustedError
 ? &mut Scheduler {

@@ -491,6 +491,30 @@ it.effect('derives zero, carry, and maximum monotonic waits from one read each',
   }),
 )
 
+it.effect('derives canonical monotonic deadlines through the public pure helper', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`import silk.monotonic_clock as MonotonicClock
+import silk.system_clock as SystemClock
+import silk.u64 as u64
+pub fn main() -> i32 {
+  let negative = SystemClock.make(-1, 900000000)
+  let carried = MonotonicClock.deadlineAfter(&negative, u64.toU64(200000000))
+  if SystemClock.seconds(&carried) != 0 { return 1 }
+  if SystemClock.nanoseconds(&carried) != 100000000 { return 2 }
+
+  let origin = SystemClock.make(-2, 0)
+  let maximum = MonotonicClock.deadlineAfter(&origin, u64.MAX)
+  if SystemClock.seconds(&maximum) != 18446744071 { return 3 }
+  if SystemClock.nanoseconds(&maximum) != 709551615 { return 4 }
+  return 42
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
 it.effect('preserves negative scripted marks through source-derived absolute waits', () =>
   Effect.gen(function* () {
     const built = MonotonicClockHost.scripted([{ seconds: -1n, nanoseconds: 0n }], 1n)

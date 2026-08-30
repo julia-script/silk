@@ -2,23 +2,32 @@
 //!
 //! # When to use
 //! Use [`execute`] at an application entry point to run one lazy program that uses the
-//! `silk.scheduler.Scheduler` service.
+//! `silk.scheduler.Scheduler` and `silk.monotonic_clock.MonotonicClock` services.
 //!
 //! # Details
-//! Each call creates fresh task storage and a FIFO ready queue. The root is task zero and uses the
-//! same `Execution<()>` storage as every child. [`execute`] returns only after the root terminates.
+//! Each call creates fresh task storage, a FIFO ready queue, and a private timer source. The root is
+//! task zero and uses the same `Execution<()>` storage as every child. Task clock waits park only
+//! their task; the driver uses the parent clock when its event sources need to wait. [`execute`]
+//! returns only after the root terminates.
 
 import silk.allocator { Allocator, OutOfMemoryError }
+import silk.box as Box
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.fiber as Fiber
 import silk.hash as Hash
 import silk.hash_map as HashMap
+import silk.i64 as i64
+import silk.monotonic_clock as MonotonicClock
 import silk.option { Option }
 import silk.result { Result }
 import silk.scheduler as Scheduler
 import silk.shared as Shared
+import silk.system_clock as SystemClock
+import silk.system_clock { Instant }
 import silk.u64 as u64
+import silk.usize as usize
+import silk.vector as Vector
 
 /// A reusable deterministic single-threaded Scheduler provider.
 ///
@@ -27,7 +36,7 @@ import silk.u64 as u64
 /// Each call to [`execute`] creates fresh task storage and readiness state.
 pub struct LocalScheduler {}
 
-/// Reports that no task is ready while the root is incomplete.
+/// Reports that no task is ready and no event registration remains while the root is incomplete.
 ///
 /// # Details
 ///
@@ -160,27 +169,217 @@ fn takeReady(queue: &Shared.Shared<ReadyQueue>) -> QueueEmpty | ReadyIdentity {
 }
 
 struct TaskIdSource { next: u64 exhausted: bool }
-struct Reserved { identity: Scheduler.TaskId }
+struct TaskContext {
+  identities: TaskIdSource
+  clock: Shared.Shared<ClockState>
+  timerInbox: Shared.Shared<TimerRequestInbox>
+}
+struct ReservedIdentity { identity: Scheduler.TaskId }
+struct Reserved {
+  identity: Scheduler.TaskId
+  clock: Shared.Shared<ClockState>
+  timerInbox: Shared.Shared<TimerRequestInbox>
+}
 struct Refused {}
 
-fn reserveStep(source: &mut TaskIdSource) -> Reserved | Refused {
+fn reserveIdentityStep(source: &mut TaskIdSource) -> ReservedIdentity | Refused {
   if source.exhausted { return Refused {} }
   let selected = source.next
   if selected == u64.MAX { source.exhausted = true } else { source.next = selected + 1 }
-  return Reserved { identity: Scheduler.TaskId { value: selected } }
+  return ReservedIdentity { identity: Scheduler.TaskId { value: selected } }
 }
 
-effect fn exhausted() -> Scheduler.TaskId ! Scheduler.TaskIdExhaustedError {
+fn reserveStep(source: &mut TaskContext) -> Reserved | Refused {
+  let selected = reserveIdentityStep(&mut source.identities)
+  return match move selected {
+    Refused {} => Refused {}
+    ReservedIdentity { identity } => Reserved {
+      identity: identity,
+      clock: Shared.clone<ClockState>(&source.clock),
+      timerInbox: Shared.clone<TimerRequestInbox>(&source.timerInbox),
+    }
+  }
+}
+
+effect fn exhaustedReservation() -> Reserved ! Scheduler.TaskIdExhaustedError {
   fail Scheduler.TaskIdExhaustedError {}
 }
 
-effect fn reserve(source: &Shared.Shared<TaskIdSource>) -> Scheduler.TaskId
+effect fn reserve(source: &Shared.Shared<TaskContext>) -> Reserved
 ! Scheduler.TaskIdExhaustedError {
-  let selected = Shared.withMut<TaskIdSource, Reserved | Refused>(source, reserveStep)
+  let selected = Shared.withMut<TaskContext, Reserved | Refused>(source, reserveStep)
   return match move selected {
-    Reserved { identity } => move identity
-    Refused {} => run exhausted()
+    Reserved { identity, clock, timerInbox } => Reserved {
+      identity: identity,
+      clock: move clock,
+      timerInbox: move timerInbox,
+    }
+    Refused {} => run exhaustedReservation()
   }
+}
+
+struct ClockState {
+  seconds: i64
+  nanoseconds: i64
+  resolution: u64
+}
+
+struct ClockSnapshot {
+  seconds: i64
+  nanoseconds: i64
+  resolution: u64
+}
+
+impl Copy for ClockSnapshot {}
+
+fn snapshotClock(state: &ClockState) -> ClockSnapshot {
+  return ClockSnapshot {
+    seconds: state.seconds,
+    nanoseconds: state.nanoseconds,
+    resolution: state.resolution,
+  }
+}
+
+fn replaceClock(state: &mut ClockState, mark: &Instant) -> () {
+  state.seconds = SystemClock.seconds(mark)
+  state.nanoseconds = SystemClock.nanoseconds(mark)
+  return ()
+}
+
+struct NoTimerRequest {}
+struct AbsoluteTimerRequest { deadline: Instant wake: Intrinsic.Wake }
+struct RelativeTimerRequest { duration: u64 wake: Intrinsic.Wake }
+
+struct TimerRequestInbox {
+  request: NoTimerRequest | AbsoluteTimerRequest | RelativeTimerRequest
+}
+
+struct TimerWaitGuard {}
+struct AbsoluteWaitRegistration {
+  inbox: Shared.Shared<TimerRequestInbox>
+  deadline: Instant
+}
+struct RelativeWaitRegistration {
+  inbox: Shared.Shared<TimerRequestInbox>
+  duration: u64
+}
+
+fn installAbsoluteRequest(
+  inbox: &mut TimerRequestInbox,
+  deadline: Instant,
+  wake: Intrinsic.Wake,
+) -> () {
+  let previous = Intrinsic.replace(
+    inbox.request,
+    AbsoluteTimerRequest { deadline: move deadline, wake: move wake },
+  )
+  return match move previous {
+    NoTimerRequest {} => ()
+    AbsoluteTimerRequest { deadline: retainedDeadline, wake: retainedWake } =>
+      duplicateTimerRequest(move retainedDeadline, move retainedWake)
+    RelativeTimerRequest { duration: retainedDuration, wake: retainedWake } =>
+      duplicateRelativeTimerRequest(retainedDuration, move retainedWake)
+  }
+}
+
+fn installRelativeRequest(
+  inbox: &mut TimerRequestInbox,
+  duration: u64,
+  wake: Intrinsic.Wake,
+) -> () {
+  let previous = Intrinsic.replace(
+    inbox.request,
+    RelativeTimerRequest { duration: duration, wake: move wake },
+  )
+  return match move previous {
+    NoTimerRequest {} => ()
+    AbsoluteTimerRequest { deadline: retainedDeadline, wake: retainedWake } =>
+      duplicateTimerRequest(move retainedDeadline, move retainedWake)
+    RelativeTimerRequest { duration: retainedDuration, wake: retainedWake } =>
+      duplicateRelativeTimerRequest(retainedDuration, move retainedWake)
+  }
+}
+
+fn duplicateTimerRequest(deadline: Instant, wake: Intrinsic.Wake) -> () {
+  drop deadline
+  drop wake
+  let invalid = 1 / 0
+  return ()
+}
+
+fn duplicateRelativeTimerRequest(duration: u64, wake: Intrinsic.Wake) -> () {
+  drop duration
+  drop wake
+  let invalid = 1 / 0
+  return ()
+}
+
+fn registerAbsoluteWait(
+  wake: Intrinsic.Wake,
+  registration: AbsoluteWaitRegistration,
+) -> TimerWaitGuard {
+  let AbsoluteWaitRegistration { inbox, deadline } = move registration
+  let installed = Shared.withMut(&inbox, installAbsoluteRequest(move deadline, move wake))
+  drop inbox
+  return TimerWaitGuard {}
+}
+
+fn registerRelativeWait(
+  wake: Intrinsic.Wake,
+  registration: RelativeWaitRegistration,
+) -> TimerWaitGuard {
+  let RelativeWaitRegistration { inbox, duration } = move registration
+  let installed = Shared.withMut(&inbox, installRelativeRequest(duration, move wake))
+  drop inbox
+  return TimerWaitGuard {}
+}
+
+fn reached(state: &ClockState, deadline: &Instant) -> bool {
+  let seconds = SystemClock.seconds(deadline)
+  if seconds < state.seconds { return true }
+  if seconds > state.seconds { return false }
+  return SystemClock.nanoseconds(deadline) <= state.nanoseconds
+}
+
+struct TaskClockClient {
+  clock: Shared.Shared<ClockState>
+  inbox: Shared.Shared<TimerRequestInbox>
+}
+
+effect fn taskNow(self: &mut TaskClockClient) -> Instant {
+  let seen = Shared.with<ClockState, ClockSnapshot>(&self.clock, snapshotClock)
+  return SystemClock.make(seen.seconds, seen.nanoseconds)
+}
+
+effect fn taskResolution(self: &mut TaskClockClient) -> u64 {
+  let seen = Shared.with<ClockState, ClockSnapshot>(&self.clock, snapshotClock)
+  return seen.resolution
+}
+
+effect fn taskWaitUntil(self: &mut TaskClockClient, deadline: Instant) -> () {
+  let alreadyReached = Shared.with<ClockState, bool>(&self.clock, reached(&deadline))
+  if alreadyReached { drop deadline return () }
+  let registration = AbsoluteWaitRegistration {
+    inbox: Shared.clone<TimerRequestInbox>(&self.inbox),
+    deadline: move deadline,
+  }
+  return run Execution.park(registerAbsoluteWait(move registration))
+}
+
+effect fn taskWaitFor(self: &mut TaskClockClient, duration: u64) -> () {
+  if duration == u64.MIN { return () }
+  let registration = RelativeWaitRegistration {
+    inbox: Shared.clone<TimerRequestInbox>(&self.inbox),
+    duration: duration,
+  }
+  return run Execution.park(registerRelativeWait(move registration))
+}
+
+impl MonotonicClock.MonotonicClock for TaskClockClient {
+  now: TaskClockClient.taskNow
+  getResolution: TaskClockClient.taskResolution
+  waitUntil: TaskClockClient.taskWaitUntil
+  waitFor: TaskClockClient.taskWaitFor
 }
 
 struct SchedulerClient {
@@ -188,7 +387,7 @@ struct SchedulerClient {
   mailbox: Shared.Shared<Scheduler.TaskMailbox>
   submission: Shared.Shared<Scheduler.SubmissionSlot>
   response: Shared.Shared<Scheduler.PublicationResponse>
-  identities: Shared.Shared<TaskIdSource>
+  context: Shared.Shared<TaskContext>
   queue: Shared.Shared<ReadyQueue>
 }
 
@@ -203,14 +402,28 @@ fn publishTaskResult<A, E>(
 }
 
 effect fn runTask<A, E>(
-  body: once Effect<A ! E ? &mut Scheduler.Scheduler>,
+  body: once Effect<
+    A
+    ! E
+    ? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock
+  >,
   client: SchedulerClient,
+  clock: TaskClockClient,
   producer: Fiber.CompletionProducer<A, E>,
 ) -> () {
-  let result = run Effect.bindRequirementOwned<Scheduler.Scheduler>(
-    Effect.result(move body),
-    move client,
+  let mut scheduler = move client
+  let mut taskClock = move clock
+  let timed = Effect.provideMut<MonotonicClock.MonotonicClock>(
+    move body,
+    &mut taskClock,
   )
+  let scheduled = Effect.provideMut<Scheduler.Scheduler>(
+    Effect.result(move timed),
+    &mut scheduler,
+  )
+  let result = run move scheduled
+  drop scheduler
+  drop taskClock
   publishTaskResult<A, E>(move result, move producer)
   return ()
 }
@@ -239,15 +452,29 @@ fn extractRoot<A, E>(state: &mut RootState<A, E>, output: &mut RootExtraction<A,
 }
 
 effect fn runRoot<A, E>(
-  body: once Effect<A ! E ? &mut Scheduler.Scheduler>,
+  body: once Effect<
+    A
+    ! E
+    ? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock
+  >,
   client: SchedulerClient,
+  clock: TaskClockClient,
   state: Shared.Shared<RootState<A, E>>,
   producer: Fiber.CompletionProducer<RootTaskCompleted, RootTaskNeverFailed>,
 ) -> () {
-  let result = run Effect.bindRequirementOwned<Scheduler.Scheduler>(
-    Effect.result(move body),
-    move client,
+  let mut scheduler = move client
+  let mut taskClock = move clock
+  let timed = Effect.provideMut<MonotonicClock.MonotonicClock>(
+    move body,
+    &mut taskClock,
   )
+  let scheduled = Effect.provideMut<Scheduler.Scheduler>(
+    Effect.result(move timed),
+    &mut scheduler,
+  )
+  let result = run move scheduled
+  drop scheduler
+  drop taskClock
   let stored = Shared.withMut(&state, storeRoot<A, E>(move result))
   drop state
   Fiber.completeSuccess<RootTaskCompleted, RootTaskNeverFailed>(
@@ -259,10 +486,19 @@ effect fn runRoot<A, E>(
 
 effect fn prepareChild<A, E>(
   self: &mut SchedulerClient,
-  child: once Effect<A ! E ? &mut Scheduler.Scheduler>,
+  child: once Effect<
+    A
+    ! E
+    ? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock
+  >,
 ) -> Scheduler.PendingPublication<A, E>
 ! OutOfMemoryError | Scheduler.TaskIdExhaustedError {
-  let identity = run reserve(&self.identities)
+  let reserved = run reserve(&self.context)
+  let Reserved {
+    identity,
+    clock: childClock,
+    timerInbox: childTimerInbox,
+  } = move reserved
   let mut allocator = Allocator.systemAllocatorProvider()
   let prepared = run Fiber.prepare<A, E>() |> Effect.provideMut<Allocator>(&mut allocator)
   let response = run Shared.make<Scheduler.PublicationResponse>(Scheduler.PublicationResponse {
@@ -287,15 +523,19 @@ effect fn prepareChild<A, E>(
     mailbox: Shared.clone<Scheduler.TaskMailbox>(&childMailbox),
     submission: Shared.clone<Scheduler.SubmissionSlot>(&childSubmission),
     response: move response,
-    identities: Shared.clone<TaskIdSource>(&self.identities),
+    context: Shared.clone<TaskContext>(&self.context),
     queue: Shared.clone<ReadyQueue>(&self.queue),
+  }
+  let clock = TaskClockClient {
+    clock: move childClock,
+    inbox: move childTimerInbox,
   }
   let endpoint = ReadyEndpoint {
     queue: Shared.clone<ReadyQueue>(&self.queue),
     node: move node,
   }
   let execution = run Execution.make(
-    runTask<A, E>(move child, move client, move producer),
+    runTask<A, E>(move child, move client, move clock, move producer),
     move endpoint,
     notifyReady,
   ) |> Effect.provideMut<Allocator>(&mut allocator)
@@ -326,6 +566,49 @@ struct Completed {}
 struct NoExecution {}
 struct StoredExecution { execution: Intrinsic.Execution<()> }
 
+struct NoTimerInterest {}
+struct TimerInterest { index: usize }
+struct EventInterests { timer: NoTimerInterest | TimerInterest }
+
+struct RegistrationIdle {}
+struct RegistrationArmed {
+  generation: u64
+  interests: EventInterests
+  wake: Intrinsic.Wake
+}
+
+struct CancellationConsumed {}
+struct CancellationAvailable { canceller: Fiber.CompletionCanceller }
+struct CompletionCancellation {
+  phase: CancellationConsumed | CancellationAvailable
+}
+
+impl Drop for CompletionCancellation {
+  fn drop(self: &mut CompletionCancellation) -> () {
+    let selected = Intrinsic.replace(self.phase, CancellationConsumed {})
+    return finishCompletionCancellation(move selected)
+  }
+}
+
+fn finishCompletionCancellation(
+  selected: CancellationConsumed | CancellationAvailable,
+) -> () {
+  return match move selected {
+    CancellationConsumed {} => ()
+    CancellationAvailable { canceller } => Fiber.cancel(move canceller)
+  }
+}
+
+struct TimerEntry {
+  seconds: i64
+  nanoseconds: i64
+  order: u64
+  identity: Scheduler.TaskId
+  generation: u64
+}
+
+impl Copy for TimerEntry {}
+
 struct TaskEntry {
   parent: NoLink | TaskLink
   firstChild: NoLink | TaskLink
@@ -333,17 +616,559 @@ struct TaskEntry {
   cancellationNext: NoLink | TaskLink
   phase: Initial | Running | Dormant | Eligible | Completed
   execution: NoExecution | StoredExecution
-  canceller: Fiber.CompletionCanceller
+  cancellation: CompletionCancellation
   mailbox: Shared.Shared<Scheduler.TaskMailbox>
   submission: Shared.Shared<Scheduler.SubmissionSlot>
+  nextRegistrationGeneration: u64
+  registrationGenerationExhausted: bool
+  registration: RegistrationIdle | RegistrationArmed
+}
+
+struct TaskStore {
+  timers: Vector.Vector<TimerEntry>
+  tasks: HashMap.HashMap<Scheduler.TaskId, TaskEntry>
+  nextTimerOrder: u64
+  timerOrderExhausted: bool
 }
 
 struct Driver {
-  tasks: HashMap.HashMap<Scheduler.TaskId, TaskEntry>
+  store: TaskStore
   queue: Shared.Shared<ReadyQueue>
   current: Scheduler.TaskId
   cancellationHead: NoLink | TaskLink
   rootComplete: bool
+  clock: Shared.Shared<ClockState>
+  timerInbox: Shared.Shared<TimerRequestInbox>
+}
+
+struct DurableDriver { boxed: Box.Box<Driver> }
+
+struct NoGeneration {}
+struct ReservedGeneration { value: u64 }
+struct GenerationOutput { phase: NoGeneration | ReservedGeneration }
+
+fn reserveRegistrationGeneration(entry: &mut TaskEntry, output: &mut GenerationOutput) -> () {
+  if entry.registrationGenerationExhausted {
+    let invalid = 1 / 0
+    return ()
+  }
+  let selected = entry.nextRegistrationGeneration
+  if selected == u64.MAX {
+    entry.registrationGenerationExhausted = true
+  } else {
+    entry.nextRegistrationGeneration = selected + 1
+  }
+  output.phase = ReservedGeneration { value: selected }
+  return ()
+}
+
+fn timerBefore(left: &TimerEntry, right: &TimerEntry) -> bool {
+  if left.seconds < right.seconds { return true }
+  if left.seconds > right.seconds { return false }
+  if left.nanoseconds < right.nanoseconds { return true }
+  if left.nanoseconds > right.nanoseconds { return false }
+  return left.order < right.order
+}
+
+fn updateTimerIndex(entry: &mut TaskEntry, generation: u64, index: usize) -> () {
+  let previous = Intrinsic.replace(entry.registration, RegistrationIdle {})
+  return match move previous {
+    RegistrationIdle {} => ()
+    RegistrationArmed { generation: armed, interests, wake } => retainTimerIndex(
+      move entry,
+      generation,
+      index,
+      armed,
+      move interests,
+      move wake,
+    )
+  }
+}
+
+fn retainTimerIndex(
+  entry: &mut TaskEntry,
+  generation: u64,
+  index: usize,
+  armed: u64,
+  interests: EventInterests,
+  wake: Intrinsic.Wake,
+) -> () {
+  let EventInterests { timer } = move interests
+  let selected = match move timer {
+    NoTimerInterest {} => missingTimerInterest()
+    TimerInterest { index: oldIndex } => selectTimerIndex(
+      generation,
+      index,
+      armed,
+      oldIndex,
+    )
+  }
+  entry.registration = RegistrationArmed {
+    generation: armed,
+    interests: EventInterests { timer: TimerInterest { index: selected } },
+    wake: move wake,
+  }
+  return ()
+}
+
+fn selectTimerIndex(generation: u64, index: usize, armed: u64, oldIndex: usize) -> usize {
+  if armed == generation { return index }
+  return oldIndex
+}
+
+fn missingTimerInterest() -> usize {
+  let invalid = 1 / 0
+  return usize.ZERO
+}
+
+fn bubbleTimerUp(store: &mut TaskStore, start: usize) -> () {
+  let mut index = start
+  while index > usize.ZERO {
+    let parent = (index - usize.ONE) / 2
+    let selected = Vector.get<TimerEntry>(&store.timers, index)
+    let previous = Vector.get<TimerEntry>(&store.timers, parent)
+    if !timerBefore(&selected, &previous) { return () }
+    Vector.set<TimerEntry>(&mut store.timers, index, previous)
+    Vector.set<TimerEntry>(&mut store.timers, parent, selected)
+    let previousUpdated = HashMap.withMut(
+      &mut store.tasks,
+      previous.identity,
+      updateTimerIndex(previous.generation, index),
+    )
+    let selectedUpdated = HashMap.withMut(
+      &mut store.tasks,
+      selected.identity,
+      updateTimerIndex(selected.generation, parent),
+    )
+    index = parent
+  }
+  return ()
+}
+
+fn sinkTimerDown(store: &mut TaskStore, start: usize) -> () {
+  let mut index = start
+  let length = Vector.length<TimerEntry>(&store.timers)
+  let parents = length / 2
+  while index < parents {
+    let left = index + index + usize.ONE
+    let right = left + usize.ONE
+    let mut selected = left
+    if right < length {
+      let leftTimer = Vector.get<TimerEntry>(&store.timers, left)
+      let rightTimer = Vector.get<TimerEntry>(&store.timers, right)
+      if timerBefore(&rightTimer, &leftTimer) { selected = right }
+    }
+    let current = Vector.get<TimerEntry>(&store.timers, index)
+    let child = Vector.get<TimerEntry>(&store.timers, selected)
+    if !timerBefore(&child, &current) { return () }
+    Vector.set<TimerEntry>(&mut store.timers, index, child)
+    Vector.set<TimerEntry>(&mut store.timers, selected, current)
+    let childUpdated = HashMap.withMut(
+      &mut store.tasks,
+      child.identity,
+      updateTimerIndex(child.generation, index),
+    )
+    let currentUpdated = HashMap.withMut(
+      &mut store.tasks,
+      current.identity,
+      updateTimerIndex(current.generation, selected),
+    )
+    index = selected
+  }
+  return ()
+}
+
+fn rebalanceTimer(store: &mut TaskStore, index: usize) -> () {
+  if index > usize.ZERO {
+    let parent = (index - usize.ONE) / 2
+    let selected = Vector.get<TimerEntry>(&store.timers, index)
+    let previous = Vector.get<TimerEntry>(&store.timers, parent)
+    if timerBefore(&selected, &previous) {
+      return bubbleTimerUp(move store, index)
+    }
+  }
+  return sinkTimerDown(move store, index)
+}
+
+fn removeTimerAt(store: &mut TaskStore, index: usize) -> TimerEntry {
+  let length = Vector.length<TimerEntry>(&store.timers)
+  if length == usize.ZERO {
+    let invalid = 1 / 0
+  }
+  if length <= index {
+    let invalid = 1 / 0
+  }
+  let selected = Vector.get<TimerEntry>(&store.timers, index)
+  let lastIndex = length - usize.ONE
+  if index != lastIndex {
+    let replacement = Vector.get<TimerEntry>(&store.timers, lastIndex)
+    Vector.set<TimerEntry>(&mut store.timers, index, replacement)
+    let updated = HashMap.withMut(
+      &mut store.tasks,
+      replacement.identity,
+      updateTimerIndex(replacement.generation, index),
+    )
+  }
+  let removed = Vector.pop<TimerEntry>(&mut store.timers)
+  drop removed
+  if index < Vector.length<TimerEntry>(&store.timers) {
+    return finishRemovedTimer(move store, index, selected)
+  }
+  return selected
+}
+
+fn finishRemovedTimer(
+  store: &mut TaskStore,
+  index: usize,
+  selected: TimerEntry,
+) -> TimerEntry {
+  rebalanceTimer(move store, index)
+  return selected
+}
+
+effect fn reserveTimerSlot(store: &mut TaskStore) -> () ! OutOfMemoryError {
+  let target = HashMap.length<Scheduler.TaskId, TaskEntry>(&store.tasks) + usize.ONE
+  let initialized = Vector.length<TimerEntry>(&store.timers)
+  let additional = target - initialized
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run Vector.reserve<TimerEntry>(&mut store.timers, additional)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+fn impossibleTimerAllocation(error: OutOfMemoryError) -> () {
+  drop error
+  let invalid = 1 / 0
+  return ()
+}
+
+effect fn appendTimerWithoutGrowth(
+  timers: &mut Vector.Vector<TimerEntry>,
+  entry: TimerEntry,
+) -> () {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let appended = Vector.append<TimerEntry>(move timers, entry)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let outcome = run Effect.result(move appended)
+  return match move outcome {
+    Result<(), OutOfMemoryError>.Success { value } => finishTimerAppend(move value)
+    Result<(), OutOfMemoryError>.Failure { error } => impossibleTimerAllocation(move error)
+  }
+}
+
+fn finishTimerAppend(value: ()) -> () { drop value return () }
+
+fn installArmedTimer(
+  entry: &mut TaskEntry,
+  generation: u64,
+  index: usize,
+  wake: Intrinsic.Wake,
+) -> () {
+  let previous = Intrinsic.replace(entry.registration, RegistrationArmed {
+    generation: generation,
+    interests: EventInterests { timer: TimerInterest { index: index } },
+    wake: move wake,
+  })
+  return match move previous {
+    RegistrationIdle {} => ()
+    RegistrationArmed {
+      generation: retainedGeneration,
+      interests: retainedInterests,
+      wake: retainedWake,
+    } => rejectDuplicateArmed(
+      retainedGeneration,
+      move retainedInterests,
+      move retainedWake,
+    )
+  }
+}
+
+fn rejectDuplicateArmed(
+  generation: u64,
+  interests: EventInterests,
+  wake: Intrinsic.Wake,
+) -> () {
+  drop generation
+  drop interests
+  drop wake
+  let invalid = 1 / 0
+  return ()
+}
+
+effect fn armTimer(
+  store: &mut TaskStore,
+  identity: Scheduler.TaskId,
+  deadline: Instant,
+  wake: Intrinsic.Wake,
+) -> () {
+  let mut generation = GenerationOutput { phase: NoGeneration {} }
+  let found = HashMap.withMut(
+    &mut store.tasks,
+    identity,
+    reserveRegistrationGeneration(&mut generation),
+  )
+  if !found {
+    drop deadline
+    drop wake
+    return ()
+  }
+  let GenerationOutput { phase: generationPhase } = move generation
+  let selectedGeneration = match move generationPhase {
+    NoGeneration {} => missingTimerGeneration()
+    ReservedGeneration { value } => value
+  }
+  if store.timerOrderExhausted {
+    let invalid = 1 / 0
+  }
+  let order = store.nextTimerOrder
+  if order == u64.MAX {
+    store.timerOrderExhausted = true
+  } else {
+    store.nextTimerOrder = order + 1
+  }
+  let timer = TimerEntry {
+    seconds: SystemClock.seconds(&deadline),
+    nanoseconds: SystemClock.nanoseconds(&deadline),
+    order: order,
+    identity: identity,
+    generation: selectedGeneration,
+  }
+  drop deadline
+  let index = Vector.length<TimerEntry>(&store.timers)
+  run appendTimerWithoutGrowth(&mut store.timers, timer)
+  let installed = HashMap.withMut(
+    &mut store.tasks,
+    identity,
+    installArmedTimer(selectedGeneration, index, move wake),
+  )
+  if !installed {
+    let invalid = 1 / 0
+    return ()
+  }
+  return bubbleTimerUp(move store, index)
+}
+
+fn missingTimerGeneration() -> u64 {
+  let invalid = 1 / 0
+  return u64.MIN
+}
+
+struct RegistrationStateOutput { phase: RegistrationIdle | RegistrationArmed }
+struct NoDisarmedWake {}
+struct DisarmedWake { wake: Intrinsic.Wake }
+
+fn takeRegistrationState(entry: &mut TaskEntry, output: &mut RegistrationStateOutput) -> () {
+  output.phase = Intrinsic.replace(entry.registration, RegistrationIdle {})
+  return ()
+}
+
+fn disarmRegistration(
+  store: &mut TaskStore,
+  identity: Scheduler.TaskId,
+) -> NoDisarmedWake | DisarmedWake {
+  let mut selected = RegistrationStateOutput { phase: RegistrationIdle {} }
+  let found = HashMap.withMut(
+    &mut store.tasks,
+    identity,
+    takeRegistrationState(&mut selected),
+  )
+  if !found { drop selected return NoDisarmedWake {} }
+  let RegistrationStateOutput { phase } = move selected
+  return match move phase {
+    RegistrationIdle {} => NoDisarmedWake {}
+    RegistrationArmed { generation, interests, wake } => finishDisarm(
+      move store,
+      identity,
+      generation,
+      move interests,
+      move wake,
+    )
+  }
+}
+
+fn finishDisarm(
+  store: &mut TaskStore,
+  identity: Scheduler.TaskId,
+  generation: u64,
+  interests: EventInterests,
+  wake: Intrinsic.Wake,
+) -> NoDisarmedWake | DisarmedWake {
+  let EventInterests { timer } = move interests
+  return match move timer {
+    NoTimerInterest {} => DisarmedWake { wake: move wake }
+    TimerInterest { index } => finishDisarmTimer(
+      move store,
+      identity,
+      generation,
+      index,
+      move wake,
+    )
+  }
+}
+
+fn finishDisarmTimer(
+  store: &mut TaskStore,
+  identity: Scheduler.TaskId,
+  generation: u64,
+  index: usize,
+  wake: Intrinsic.Wake,
+) -> NoDisarmedWake | DisarmedWake {
+  let removed = removeTimerAt(move store, index)
+  if removed.identity.value != identity.value {
+    drop wake
+    let invalid = 1 / 0
+    return NoDisarmedWake {}
+  }
+  if removed.generation != generation {
+    drop wake
+    let invalid = 1 / 0
+    return NoDisarmedWake {}
+  }
+  return DisarmedWake { wake: move wake }
+}
+
+struct NoClaimedWake {}
+struct ClaimedWake { interests: EventInterests wake: Intrinsic.Wake }
+struct WakeClaim { phase: NoClaimedWake | ClaimedWake }
+
+fn claimTimerWake(entry: &mut TaskEntry, generation: u64, output: &mut WakeClaim) -> () {
+  let previous = Intrinsic.replace(entry.registration, RegistrationIdle {})
+  return match move previous {
+    RegistrationIdle {} => ()
+    RegistrationArmed { generation: armed, interests, wake } => finishTimerClaim(
+      move entry,
+      generation,
+      armed,
+      move interests,
+      move wake,
+      move output,
+    )
+  }
+}
+
+fn finishTimerClaim(
+  entry: &mut TaskEntry,
+  generation: u64,
+  armed: u64,
+  interests: EventInterests,
+  wake: Intrinsic.Wake,
+  output: &mut WakeClaim,
+) -> () {
+  if armed == generation {
+    output.phase = ClaimedWake { interests: move interests, wake: move wake }
+    return ()
+  }
+  entry.registration = RegistrationArmed {
+    generation: armed,
+    interests: move interests,
+    wake: move wake,
+  }
+  return ()
+}
+
+fn completeTimer(store: &mut TaskStore, timer: TimerEntry) -> () {
+  let mut claim = WakeClaim { phase: NoClaimedWake {} }
+  let found = HashMap.withMut(
+    &mut store.tasks,
+    timer.identity,
+    claimTimerWake(timer.generation, &mut claim),
+  )
+  let WakeClaim { phase } = move claim
+  return match move phase {
+    NoClaimedWake {} => ()
+    ClaimedWake { interests, wake } => completeClaimedTimer(move interests, move wake)
+  }
+}
+
+fn completeClaimedTimer(interests: EventInterests, wake: Intrinsic.Wake) -> () {
+  let EventInterests { timer } = move interests
+  drop timer
+  return Intrinsic.wake(move wake)
+}
+
+fn dueAt(timer: &TimerEntry, mark: &ClockSnapshot) -> bool {
+  if timer.seconds < mark.seconds { return true }
+  if timer.seconds > mark.seconds { return false }
+  return timer.nanoseconds <= mark.nanoseconds
+}
+
+fn drainDueTimers(driver: &mut Driver) -> () {
+  let mark = Shared.with<ClockState, ClockSnapshot>(&driver.clock, snapshotClock)
+  let mut collecting = true
+  while collecting && Vector.length<TimerEntry>(&driver.store.timers) > usize.ZERO {
+    let earliest = Vector.get<TimerEntry>(&driver.store.timers, usize.ZERO)
+    if dueAt(&earliest, &mark) {
+      let selected = removeTimerAt(&mut driver.store, usize.ZERO)
+      completeTimer(&mut driver.store, selected)
+    } else {
+      collecting = false
+    }
+  }
+  return ()
+}
+
+fn takeTimerRequest(
+  inbox: &mut TimerRequestInbox,
+) -> NoTimerRequest | AbsoluteTimerRequest | RelativeTimerRequest {
+  return Intrinsic.replace(inbox.request, NoTimerRequest {})
+}
+
+effect fn processTimerRequest(
+  store: &mut TaskStore,
+  identity: Scheduler.TaskId,
+  request: NoTimerRequest | AbsoluteTimerRequest | RelativeTimerRequest,
+) -> ()
+? &mut MonotonicClock.MonotonicClock {
+  return match move request {
+    NoTimerRequest {} => ()
+    AbsoluteTimerRequest { deadline, wake } => run armTimer(
+      move store,
+      identity,
+      move deadline,
+      move wake,
+    )
+    RelativeTimerRequest { duration, wake } => run armRelativeTimer(
+      move store,
+      identity,
+      duration,
+      move wake,
+    )
+  }
+}
+
+effect fn armRelativeTimer(
+  store: &mut TaskStore,
+  identity: Scheduler.TaskId,
+  duration: u64,
+  wake: Intrinsic.Wake,
+) -> () ? &mut MonotonicClock.MonotonicClock {
+  let start = run MonotonicClock.now()
+  let deadline = MonotonicClock.deadlineAfter(&start, duration)
+  return run armTimer(move store, identity, move deadline, move wake)
+}
+
+effect fn refreshClock(driver: &mut Driver) -> ()
+? &mut MonotonicClock.MonotonicClock {
+  let mark = run MonotonicClock.now()
+  let refreshed = Shared.withMut(&driver.clock, replaceClock(&mark))
+  drop mark
+  return ()
+}
+
+struct NoTimerDeadline {}
+struct TimerDeadline { value: Instant }
+
+fn earliestTimer(driver: &Driver) -> NoTimerDeadline | TimerDeadline {
+  if Vector.length<TimerEntry>(&driver.store.timers) == usize.ZERO {
+    return NoTimerDeadline {}
+  }
+  let timer = Vector.get<TimerEntry>(&driver.store.timers, usize.ZERO)
+  return TimerDeadline { value: SystemClock.make(timer.seconds, timer.nanoseconds) }
+}
+
+effect fn waitUntilTimer(value: Instant) -> ()
+? &mut MonotonicClock.MonotonicClock {
+  run MonotonicClock.waitUntil(move value)
+  return ()
 }
 
 struct Extraction { slot: NoExecution | StoredExecution }
@@ -488,9 +1313,14 @@ fn makeEntry(task: Scheduler.PreparedTask, sibling: NoLink | TaskLink) -> TaskEn
     cancellationNext: NoLink {},
     phase: Initial {},
     execution: StoredExecution { execution: move execution },
-    canceller: move canceller,
+    cancellation: CompletionCancellation {
+      phase: CancellationAvailable { canceller: move canceller },
+    },
     mailbox: move mailbox,
     submission: move submission,
+    nextRegistrationGeneration: u64.MIN,
+    registrationGenerationExhausted: false,
+    registration: RegistrationIdle {},
   }
 }
 
@@ -507,13 +1337,67 @@ effect fn adopt(
   response: Shared.Shared<Scheduler.PublicationResponse>,
   task: Scheduler.PreparedTask,
 ) -> () {
+  let reservation = run Effect.result(reserveTimerSlot(&mut driver.store))
+  return match move reservation {
+    Result<(), OutOfMemoryError>.Success { value } => run finishReservedAdoption(
+      move driver,
+      parent,
+      move wake,
+      move response,
+      move task,
+      move value,
+    )
+    Result<(), OutOfMemoryError>.Failure { error } => finishUnreservedAdoption(
+      move wake,
+      move response,
+      move task,
+      move error,
+    )
+  }
+}
+
+effect fn finishReservedAdoption(
+  driver: &mut Driver,
+  parent: Scheduler.TaskId,
+  wake: Intrinsic.Wake,
+  response: Shared.Shared<Scheduler.PublicationResponse>,
+  task: Scheduler.PreparedTask,
+  reserved: (),
+) -> () {
+  drop reserved
+  return run insertAdoptedTask(
+    move driver,
+    parent,
+    move wake,
+    move response,
+    move task,
+  )
+}
+
+fn finishUnreservedAdoption(
+  wake: Intrinsic.Wake,
+  response: Shared.Shared<Scheduler.PublicationResponse>,
+  task: Scheduler.PreparedTask,
+  error: OutOfMemoryError,
+) -> () {
+  drop task
+  return finishRejectedAdoption(move response, move wake, move error)
+}
+
+effect fn insertAdoptedTask(
+  driver: &mut Driver,
+  parent: Scheduler.TaskId,
+  wake: Intrinsic.Wake,
+  response: Shared.Shared<Scheduler.PublicationResponse>,
+  task: Scheduler.PreparedTask,
+) -> () {
   let child = task.identity
   let mut links = LinkOutput { link: NoLink {} }
-  let found = HashMap.withMut(&mut driver.tasks, parent, copyFirstChild(&mut links))
+  let found = HashMap.withMut(&mut driver.store.tasks, parent, copyFirstChild(&mut links))
   let LinkOutput { link } = move links
   let entry = makeEntry(move task, move link)
   let mut allocator = Allocator.systemAllocatorProvider()
-  let inserted = HashMap.insert<Scheduler.TaskId, TaskEntry>(&mut driver.tasks, child, move entry)
+  let inserted = HashMap.insert<Scheduler.TaskId, TaskEntry>(&mut driver.store.tasks, child, move entry)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let outcome = run Effect.result(move inserted)
   return finishAdoption(
@@ -560,10 +1444,10 @@ fn finishAcceptedAdoption(
   previous: Option<TaskEntry>,
 ) -> () {
   drop previous
-  let linked = HashMap.withMut(&mut driver.tasks, parent, setFirstChild(child))
+  let linked = HashMap.withMut(&mut driver.store.tasks, parent, setFirstChild(child))
   let published = Shared.withMut(&response, markPublished)
   Intrinsic.wake(move wake)
-  let notified = HashMap.withMut(&mut driver.tasks, child, notifyInitialEntry)
+  let notified = HashMap.withMut(&mut driver.store.tasks, child, notifyInitialEntry)
   drop response
   return ()
 }
@@ -585,7 +1469,7 @@ effect fn processPublication(driver: &mut Driver, identity: Scheduler.TaskId) ->
     mailbox: NoMailbox {},
     submission: NoSubmissionHandle {},
   }
-  let found = HashMap.withMut(&mut driver.tasks, identity, copyHandles(&mut handles))
+  let found = HashMap.withMut(&mut driver.store.tasks, identity, copyHandles(&mut handles))
   if !found { drop handles return () }
   let EntryHandles { mailbox: selectedMailbox, submission: selectedSubmission } = move handles
   let mailbox = match move selectedMailbox {
@@ -735,19 +1619,25 @@ fn cancelEntry(entry: TaskEntry) -> () {
     cancellationNext,
     phase,
     execution,
-    canceller,
+    cancellation,
     mailbox,
     submission,
+    nextRegistrationGeneration,
+    registrationGenerationExhausted,
+    registration,
   } = move entry
-  Fiber.cancel(move canceller)
   drop parent
   drop firstChild
   drop nextSibling
   drop cancellationNext
   drop phase
   drop execution
+  drop cancellation
   drop mailbox
   drop submission
+  drop nextRegistrationGeneration
+  drop registrationGenerationExhausted
+  drop registration
   return ()
 }
 
@@ -764,7 +1654,7 @@ fn finishCompletedTask(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
     firstChild: NoLink {},
     nextSibling: NoLink {},
   }
-  let found = readTaskLinks(&mut driver.tasks, identity, &mut links)
+  let found = readTaskLinks(&mut driver.store.tasks, identity, &mut links)
   if !found { return () }
 
   let mut child = links.firstChild
@@ -776,7 +1666,7 @@ fn finishCompletedTask(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
       nextSibling: NoLink {},
     }
     let childFound = readTaskLinks(
-      &mut driver.tasks,
+      &mut driver.store.tasks,
       childIdentity,
       &mut childLinks,
     )
@@ -784,7 +1674,7 @@ fn finishCompletedTask(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
       child = childLinks.nextSibling
       let nextWork = driver.cancellationHead
       let linked = HashMap.withMut(
-        &mut driver.tasks,
+        &mut driver.store.tasks,
         childIdentity,
         installCancellationLink(nextWork),
       )
@@ -803,7 +1693,7 @@ fn finishCompletedTask(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
       nextSibling: NoLink {},
     }
     let parentFound = readTaskLinks(
-      &mut driver.tasks,
+      &mut driver.store.tasks,
       parentIdentity,
       &mut parentLinks,
     )
@@ -819,7 +1709,7 @@ fn finishCompletedTask(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
           nextSibling: NoLink {},
         }
         let currentFound = readTaskLinks(
-          &mut driver.tasks,
+          &mut driver.store.tasks,
           currentIdentity,
           &mut currentLinks,
         )
@@ -829,12 +1719,12 @@ fn finishCompletedTask(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
           let nextSibling = currentLinks.nextSibling
           let replaced = match previous.link {
             NoLink {} => HashMap.withMut(
-              &mut driver.tasks,
+              &mut driver.store.tasks,
               parentIdentity,
               setFirstChildLink(nextSibling),
             )
             TaskLink { identity: previousIdentity } => HashMap.withMut(
-              &mut driver.tasks,
+              &mut driver.store.tasks,
               previousIdentity,
               setNextSiblingLink(nextSibling),
             )
@@ -848,8 +1738,10 @@ fn finishCompletedTask(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
     }
   }
 
-  let removed = HashMap.remove<Scheduler.TaskId, TaskEntry>(&mut driver.tasks, identity)
+  let timerWake = disarmRegistration(&mut driver.store, identity)
+  let removed = HashMap.remove<Scheduler.TaskId, TaskEntry>(&mut driver.store.tasks, identity)
   releaseRemoved(move removed)
+  drop timerWake
   if identity.value == 0 { driver.rootComplete = true }
 
   while hasLink(driver.cancellationHead) {
@@ -860,7 +1752,7 @@ fn finishCompletedTask(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
       nextSibling: NoLink {},
     }
     let selectedFound = readTaskLinks(
-      &mut driver.tasks,
+      &mut driver.store.tasks,
       selected,
       &mut selectedLinks,
     )
@@ -869,7 +1761,7 @@ fn finishCompletedTask(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
     } else {
       let mut nextWork = LinkOutput { link: NoLink {} }
       let popped = HashMap.withMut(
-        &mut driver.tasks,
+        &mut driver.store.tasks,
         selected,
         takeCancellationLink(&mut nextWork),
       )
@@ -883,7 +1775,7 @@ fn finishCompletedTask(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
           nextSibling: NoLink {},
         }
         let descendantFound = readTaskLinks(
-          &mut driver.tasks,
+          &mut driver.store.tasks,
           descendantIdentity,
           &mut descendantLinks,
         )
@@ -891,7 +1783,7 @@ fn finishCompletedTask(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
           descendant = descendantLinks.nextSibling
           let nextDescendant = driver.cancellationHead
           let linked = HashMap.withMut(
-            &mut driver.tasks,
+            &mut driver.store.tasks,
             descendantIdentity,
             installCancellationLink(nextDescendant),
           )
@@ -902,85 +1794,64 @@ fn finishCompletedTask(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
           descendant = NoLink {}
         }
       }
-      let cancelled = HashMap.remove<Scheduler.TaskId, TaskEntry>(&mut driver.tasks, selected)
+      let selectedTimerWake = disarmRegistration(&mut driver.store, selected)
+      let cancelled = HashMap.remove<Scheduler.TaskId, TaskEntry>(&mut driver.store.tasks, selected)
       cancelRemoved(move cancelled)
+      drop selectedTimerWake
     }
   }
   return ()
 }
 
-fn cancelTree(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
-  let nextWork = driver.cancellationHead
-  let linked = HashMap.withMut(
-    &mut driver.tasks,
-    identity,
-    installCancellationLink(nextWork),
-  )
-  if linked { driver.cancellationHead = TaskLink { identity: identity } }
+fn durableRootComplete(owner: &DurableDriver) -> bool {
+  let driver = Box.get<Driver>(&owner.boxed)
+  return driver[0].rootComplete
+}
 
-  while hasLink(driver.cancellationHead) {
-    let selected = requireIdentity(driver.cancellationHead)
-    let mut selectedLinks = TaskLinks {
-      parent: NoLink {},
-      firstChild: NoLink {},
-      nextSibling: NoLink {},
-    }
-    let selectedFound = readTaskLinks(
-      &mut driver.tasks,
-      selected,
-      &mut selectedLinks,
-    )
-    if !selectedFound {
-      driver.cancellationHead = NoLink {}
-    } else {
-      let mut selectedWork = LinkOutput { link: NoLink {} }
-      let popped = HashMap.withMut(
-        &mut driver.tasks,
-        selected,
-        takeCancellationLink(&mut selectedWork),
-      )
-      driver.cancellationHead = selectedWork.link
-      let mut descendant = selectedLinks.firstChild
-      while hasLink(descendant) {
-        let descendantIdentity = requireIdentity(descendant)
-        let mut descendantLinks = TaskLinks {
-          parent: NoLink {},
-          firstChild: NoLink {},
-          nextSibling: NoLink {},
-        }
-        let descendantFound = readTaskLinks(
-          &mut driver.tasks,
-          descendantIdentity,
-          &mut descendantLinks,
-        )
-        if descendantFound {
-          descendant = descendantLinks.nextSibling
-          let nextDescendant = driver.cancellationHead
-          let linkedDescendant = HashMap.withMut(
-            &mut driver.tasks,
-            descendantIdentity,
-            installCancellationLink(nextDescendant),
-          )
-          if linkedDescendant {
-            driver.cancellationHead = TaskLink { identity: descendantIdentity }
-          }
-        } else {
-          descendant = NoLink {}
-        }
-      }
-      let cancelled = HashMap.remove<Scheduler.TaskId, TaskEntry>(&mut driver.tasks, selected)
-      cancelRemoved(move cancelled)
-    }
-  }
+fn durableEarliestTimer(owner: &DurableDriver) -> NoTimerDeadline | TimerDeadline {
+  let driver = Box.get<Driver>(&owner.boxed)
+  return earliestTimer(&driver[0])
+}
+
+effect fn refreshDurable(owner: &mut DurableDriver) -> ()
+? &mut MonotonicClock.MonotonicClock {
+  let mut drivers = Box.getMut<Driver>(&mut owner.boxed)
+  run refreshClock(&mut drivers[0])
   return ()
+}
+
+fn drainDurableTimers(owner: &mut DurableDriver) -> () {
+  let mut drivers = Box.getMut<Driver>(&mut owner.boxed)
+  drainDueTimers(&mut drivers[0])
+  return ()
+}
+
+fn takeDurableReady(owner: &mut DurableDriver) -> QueueEmpty | ReadyIdentity {
+  let mut drivers = Box.getMut<Driver>(&mut owner.boxed)
+  return takeDriverReady(&mut drivers[0])
+}
+
+fn takeDriverReady(driver: &mut Driver) -> QueueEmpty | ReadyIdentity {
+  return takeReady(&driver.queue)
+}
+
+effect fn driveDurableSelected(
+  owner: &mut DurableDriver,
+  selected: QueueEmpty | ReadyIdentity,
+) -> bool
+! OutOfMemoryError
+? &mut MonotonicClock.MonotonicClock {
+  let mut drivers = Box.getMut<Driver>(&mut owner.boxed)
+  return run driveReady(&mut drivers[0], move selected)
 }
 
 effect fn driveIdentity(driver: &mut Driver, identity: Scheduler.TaskId) -> ()
-! OutOfMemoryError {
-  let eligible = HashMap.withMut(&mut driver.tasks, identity, markEligible)
+! OutOfMemoryError
+? &mut MonotonicClock.MonotonicClock {
+  let eligible = HashMap.withMut(&mut driver.store.tasks, identity, markEligible)
   if !eligible { return () }
   let mut extraction = Extraction { slot: NoExecution {} }
-  let found = HashMap.withMut(&mut driver.tasks, identity, extract(&mut extraction))
+  let found = HashMap.withMut(&mut driver.store.tasks, identity, extract(&mut extraction))
   if !found { drop extraction return () }
   driver.current = identity
   let Extraction { slot } = move extraction
@@ -990,16 +1861,18 @@ effect fn driveIdentity(driver: &mut Driver, identity: Scheduler.TaskId) -> ()
   let restored = match move parked {
     NoExecution {} => false
     StoredExecution { execution } => HashMap.withMut(
-      &mut driver.tasks,
+      &mut driver.store.tasks,
       identity,
       restore(move execution),
     )
   }
   if parkedComplete {
-    let marked = HashMap.withMut(&mut driver.tasks, identity, markCompleted(()))
+    let marked = HashMap.withMut(&mut driver.store.tasks, identity, markCompleted(()))
   }
+  let timerRequest = Shared.withMut(&driver.timerInbox, takeTimerRequest)
+  run processTimerRequest(&mut driver.store, identity, move timerRequest)
   let mut terminal = CompletionAudit { completed: false }
-  let inspected = HashMap.withMut(&mut driver.tasks, identity, phaseCompleted(&mut terminal))
+  let inspected = HashMap.withMut(&mut driver.store.tasks, identity, phaseCompleted(&mut terminal))
   return run finishDrive(move driver, identity, terminal.completed)
 }
 
@@ -1014,40 +1887,68 @@ effect fn finishDrive(
   return ()
 }
 
-effect fn stalledDriver(driver: Driver) -> Driver ! StalledError {
-  drop driver
-  fail StalledError {}
-}
-
 fn noReady() -> bool { return false }
 
 effect fn drivePresent(driver: &mut Driver, identity: Scheduler.TaskId) -> bool
-! OutOfMemoryError {
+! OutOfMemoryError
+? &mut MonotonicClock.MonotonicClock {
   run driveIdentity(move driver, identity)
   return true
 }
 
 effect fn driveReady(driver: &mut Driver, selected: QueueEmpty | ReadyIdentity) -> bool
-! OutOfMemoryError {
+! OutOfMemoryError
+? &mut MonotonicClock.MonotonicClock {
   return match move selected {
     QueueEmpty {} => noReady()
     ReadyIdentity { identity } => run drivePresent(move driver, identity)
   }
 }
 
-effect fn driveUntilRoot(driver: Driver) -> Driver
-! OutOfMemoryError | StalledError {
-  let mut owned = move driver
-  while !owned.rootComplete {
-    let selected = takeReady(&owned.queue)
-    let progressed = run driveReady(&mut owned, move selected)
+effect fn driveUntilRoot(driver: Box.Box<Driver>) -> ()
+! OutOfMemoryError | StalledError
+? &mut MonotonicClock.MonotonicClock {
+  let mut owner = DurableDriver { boxed: move driver }
+  while !durableRootComplete(&owner) {
+    run refreshDurable(&mut owner)
+    drainDurableTimers(&mut owner)
+    let selected = takeDurableReady(&mut owner)
+    let progressed = run driveDurableSelected(&mut owner, move selected)
     if !progressed {
-      let cancelled = cancelTree(&mut owned, Scheduler.TaskId { value: 0 })
-      drop cancelled
-      return run stalledDriver(move owned)
+      let deadline = durableEarliestTimer(&owner)
+      run waitForDeadline(move deadline)
     }
   }
-  return move owned
+  return ()
+}
+
+effect fn waitForDeadline(deadline: NoTimerDeadline | TimerDeadline) -> ()
+! StalledError
+? &mut MonotonicClock.MonotonicClock {
+  return match move deadline {
+    NoTimerDeadline {} => run stalledWait()
+    TimerDeadline { value } => run waitUntilTimer(move value)
+  }
+}
+
+effect fn stalledWait() -> () ! StalledError { fail StalledError {} }
+
+effect fn initializeDriver(
+  driver: &mut Driver,
+  root: Scheduler.TaskId,
+  entry: TaskEntry,
+) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  run reserveTimerSlot(&mut driver.store)
+  let inserted = run HashMap.insert<Scheduler.TaskId, TaskEntry>(
+    &mut driver.store.tasks,
+    root,
+    move entry,
+  )
+  drop inserted
+  let notified = HashMap.withMut(&mut driver.store.tasks, root, notifyInitialEntry)
+  return ()
 }
 
 effect fn finishRoot<A, E>(selected: RootPending | RootReady<A, E>) -> A ! E {
@@ -1067,29 +1968,61 @@ effect fn finishRootResult<A, E>(result: Result<A, E>) -> A ! E {
 effect fn raiseRoot<A, E>(error: E) -> A ! E { fail move error }
 fn missingRoot<A>() -> A { let invalid = 1 / 0 return missingRoot<A>() }
 
+fn requirePositiveResolution(value: u64) -> u64 {
+  if value == u64.MIN {
+    let invalid = 1 / 0
+  }
+  return value
+}
+
 /// Runs one lazy root program under this Scheduler and returns its typed outcome.
 ///
 /// # Details
 ///
-/// The root becomes task zero. This operation owns all per-run task storage, provides one distinct
-/// Scheduler client to each task, and dispatches ready tasks in FIFO order. Before it returns a
-/// root value or raises a typed error, it cancels every unfinished descendant and releases the
-/// run state. If the root is incomplete when no task is ready, it performs the same cleanup and
-/// raises [`StalledError`].
+/// The root becomes task zero. This operation owns all per-run task and timer storage, provides
+/// distinct Scheduler and MonotonicClock clients to each task, and dispatches ready tasks in FIFO
+/// order. Task clock reads use one cached mark per driver turn. Future waits suspend their task and
+/// are resumed in deadline and registration order. When the ready queue is empty, the driver waits
+/// through its required parent MonotonicClock for the earliest timer; it raises [`StalledError`]
+/// only when no task is ready and no timer registration remains. Before any typed return or failure,
+/// it cancels every unfinished descendant and releases the complete run state.
 pub effect fn execute<A, E>(
   self: &mut LocalScheduler,
-  program: once Effect<A ! E ? &mut Scheduler.Scheduler>,
+  program: once Effect<
+    A
+    ! E
+    ? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock
+  >,
 ) -> A
-! E | OutOfMemoryError | StalledError {
+! E | OutOfMemoryError | StalledError
+? &mut MonotonicClock.MonotonicClock {
+  let parentResolution = run MonotonicClock.getResolution()
+  let resolution = requirePositiveResolution(parentResolution)
+  let initialMark = run MonotonicClock.now()
+  let initialSeconds = SystemClock.seconds(&initialMark)
+  let initialNanoseconds = SystemClock.nanoseconds(&initialMark)
+  drop initialMark
   let mut allocator = Allocator.systemAllocatorProvider()
   let queue = run Shared.make<ReadyQueue>(ReadyQueue {
     head: NoLink {},
     tail: NoLink {},
   }) |> Effect.provideMut<Allocator>(&mut allocator)
-  let identities = run Shared.make<TaskIdSource>(TaskIdSource {
-    next: 1,
-    exhausted: false,
+  let clock = run Shared.make<ClockState>(ClockState {
+    seconds: initialSeconds,
+    nanoseconds: initialNanoseconds,
+    resolution: resolution,
   }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let timerInbox = run Shared.make<TimerRequestInbox>(TimerRequestInbox {
+    request: NoTimerRequest {},
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let identities = TaskIdSource { next: 1, exhausted: false }
+  let contextValue = TaskContext {
+    identities: move identities,
+    clock: Shared.clone<ClockState>(&clock),
+    timerInbox: Shared.clone<TimerRequestInbox>(&timerInbox),
+  }
+  let context = run Shared.make<TaskContext>(move contextValue)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let prepared = run Fiber.prepare<RootTaskCompleted, RootTaskNeverFailed>()
     |> Effect.provideMut<Allocator>(&mut allocator)
   let rootState = run Shared.make<RootState<A, E>>(RootState<A, E> {
@@ -1123,8 +2056,12 @@ pub effect fn execute<A, E>(
     mailbox: Shared.clone<Scheduler.TaskMailbox>(&mailbox),
     submission: Shared.clone<Scheduler.SubmissionSlot>(&submission),
     response: move response,
-    identities: move identities,
+    context: move context,
     queue: Shared.clone<ReadyQueue>(&queue),
+  }
+  let rootClock = TaskClockClient {
+    clock: Shared.clone<ClockState>(&clock),
+    inbox: Shared.clone<TimerRequestInbox>(&timerInbox),
   }
   let endpoint = ReadyEndpoint {
     queue: Shared.clone<ReadyQueue>(&queue),
@@ -1134,6 +2071,7 @@ pub effect fn execute<A, E>(
     runRoot<A, E>(
       move program,
       move client,
+      move rootClock,
       Shared.clone<RootState<A, E>>(&rootState),
       move producer,
     ),
@@ -1147,26 +2085,35 @@ pub effect fn execute<A, E>(
     cancellationNext: NoLink {},
     phase: Initial {},
     execution: StoredExecution { execution: move execution },
-    canceller: move canceller,
+    cancellation: CompletionCancellation {
+      phase: CancellationAvailable { canceller: move canceller },
+    },
     mailbox: move mailbox,
     submission: move submission,
+    nextRegistrationGeneration: u64.MIN,
+    registrationGenerationExhausted: false,
+    registration: RegistrationIdle {},
   }
-  let mut driver = Driver {
-    tasks: HashMap.make<Scheduler.TaskId, TaskEntry>(Hash.seed(0)),
+  let driverValue = Driver {
+    store: TaskStore {
+      timers: Vector.make<TimerEntry>(),
+      tasks: HashMap.make<Scheduler.TaskId, TaskEntry>(Hash.seed(0)),
+      nextTimerOrder: u64.MIN,
+      timerOrderExhausted: false,
+    },
     queue: move queue,
     current: root,
     cancellationHead: NoLink {},
     rootComplete: false,
+    clock: move clock,
+    timerInbox: move timerInbox,
   }
-  let inserted = run HashMap.insert<Scheduler.TaskId, TaskEntry>(
-    &mut driver.tasks,
-    root,
-    move entry,
-  ) |> Effect.provideMut<Allocator>(&mut allocator)
-  drop inserted
-  let notified = HashMap.withMut(&mut driver.tasks, root, notifyInitialEntry)
-  let completed = run driveUntilRoot(move driver)
-  drop completed
+  let mut boxedDriver = run Box.make<Driver>(move driverValue)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut drivers = Box.getMut<Driver>(&mut boxedDriver)
+  run initializeDriver(&mut drivers[0], root, move entry)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run driveUntilRoot(move boxedDriver)
   let mut extraction = RootExtraction<A, E> { phase: RootPending {} }
   let extracted = Shared.withMut(&rootState, extractRoot<A, E>(&mut extraction))
   let RootExtraction<A, E> { phase: selected } = move extraction

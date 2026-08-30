@@ -435,22 +435,23 @@ before the caller registers the returned publication data and parks for the resp
 ### Operation `prepare`
 
 ```silk
-effect fn prepare<A, E>(child: once Effect<A ! E ? &mut silk/scheduler.Scheduler>) -> silk/scheduler.PendingPublication<A, E> ! OutOfMemoryError | TaskIdExhaustedError ? &mut Scheduler
+effect fn prepare<A, E>(child: once Effect<A ! E ? &mut silk/monotonic_clock.MonotonicClock | &mut silk/scheduler.Scheduler>) -> silk/scheduler.PendingPublication<A, E> ! OutOfMemoryError | TaskIdExhaustedError ? &mut Scheduler
 ```
 
 Prepares one lazy child task and returns its affine publication value.
 
 #### Details
 
-The child can require only its owned Scheduler provider. Preparation reserves all child
-endpoints and one task identity before it returns. It does not activate the child.
+The child can require only its owned Scheduler and MonotonicClock providers. Preparation
+reserves all child endpoints and one task identity before it returns. It does not activate
+the child.
 
 <a id="declaration-73696c6b2f7363686564756c65723a3a70726570617265"></a>
 
 ## `prepare`
 
 ```silk
-pub effect fn prepare<A, E>(child: once Effect<A ! E ? &mut silk/scheduler.Scheduler>) -> silk/scheduler.PendingPublication<A, E> ! OutOfMemoryError | TaskIdExhaustedError ? &mut Scheduler
+pub effect fn prepare<A, E>(child: once Effect<A ! E ? &mut silk/monotonic_clock.MonotonicClock | &mut silk/scheduler.Scheduler>) -> silk/scheduler.PendingPublication<A, E> ! OutOfMemoryError | TaskIdExhaustedError ? &mut Scheduler
 ```
 
 Prepares one lazy child task through the active Scheduler provider.
