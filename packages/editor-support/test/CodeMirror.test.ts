@@ -18,6 +18,12 @@ it('classifies keywords, identifiers, numbers, and operators', () => {
   assert.include(spellings(doc, 'punctuation'), '{')
 })
 
+it('classifies valid durations as numbers and malformed candidates as invalid', () => {
+  const doc = 'let delay = 01h05m00s let broken = 1h60m'
+  assert.deepStrictEqual(spellings(doc, 'number'), ['01h05m00s'])
+  assert.deepStrictEqual(spellings(doc, 'invalid'), ['1h60m'])
+})
+
 it('distinguishes doc comments from line comments', () => {
   const doc = '// plain\n/// documented\n//! module docs'
   assert.deepStrictEqual(spellings(doc, 'line-comment'), ['// plain'])

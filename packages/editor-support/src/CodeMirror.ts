@@ -34,6 +34,8 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
   Identifier: { name: 'identifier', tags: [tags.variableName] },
   DecimalInteger: { name: 'number', tags: [tags.integer] },
   DecimalFloat: { name: 'number', tags: [tags.float] },
+  DurationLiteral: { name: 'number', tags: [tags.integer] },
+  InvalidDurationLiteral: { name: 'invalid', tags: [tags.invalid] },
   TextLiteral: { name: 'string', tags: [tags.string] },
   ByteStringLiteral: { name: 'string', tags: [tags.string] },
   CharLiteral: { name: 'character', tags: [tags.character] },

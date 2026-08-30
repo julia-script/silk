@@ -81,3 +81,14 @@ it('encodes byte-identically across repeated fresh constructions', () => {
 
   assert.strictEqual(first, second)
 })
+
+it('inspects duration tokens and syntax nodes at their source-owned spans', () => {
+  const source = 'fn main() -> u64 { return 01h05m00s }'
+  const syntax = parseBytes('memory://duration-inspection.silk', ascii(source))
+  const encoded = SyntaxFile.encode(syntax)
+
+  assert.include(encoded, 'DurationLiteral [26, 35) "01h05m00s"')
+  assert.include(encoded, 'DurationLiteralExpression [25, 35)')
+  assert.deepEqual(syntax.lexicalDiagnostics, [])
+  assert.deepEqual(syntax.parserDiagnostics, [])
+})

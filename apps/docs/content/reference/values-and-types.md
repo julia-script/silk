@@ -213,6 +213,54 @@ The diagnostic must retain its exact magnitude rather than a rounded host-number
 **Evidence:** [integer literal specification](../../../../openspec/specs/bootstrap-integer-scalars/spec.md),
 [literal elaboration tests](../../../../packages/compiler/test/IntegerScalars.test.ts).
 
+### DURATION-001 — Duration literals are fixed `u64` nanosecond values
+
+**Status:** Confirmed
+
+Every valid duration literal has type `u64`, independent of its surrounding context. The compiler
+scales every component exactly and sums the result before HIR lowering.
+
+| Suffix | Exact nanoseconds |
+| --- | ---: |
+| `ns` | `1` |
+| `us` | `1_000` |
+| `ms` | `1_000_000` |
+| `s` | `1_000_000_000` |
+| `m` | `60_000_000_000` |
+| `h` | `3_600_000_000_000` |
+| `d` | `86_400_000_000_000` |
+| `w` | `604_800_000_000_000` |
+
+Days and weeks are fixed spans: one day is exactly 24 hours and one week is exactly seven days.
+They do not represent calendar days, time zones, daylight-saving transitions, or leap seconds.
+
+```silk
+import silk.monotonic_clock as MonotonicClock
+
+effect fn pause() -> () ? &mut MonotonicClock.MonotonicClock {
+  return run MonotonicClock.waitFor(1h30m)
+}
+```
+
+A duration literal carries no nominal dimensional identity after analysis. It is an ordinary `u64`
+value, so it may be passed to any `u64` parameter, compared with another `u64`, or combined with
+ordinary integer operators. `1h + 30m + 30s` therefore uses ordinary checked `u64` addition; an
+arithmetic result outside the `u64` range traps under the general integer rule.
+
+**Boundary:** Context never retypes a duration literal to `i32`, `usize`, or another integer type.
+Supplying it where another type is required reports that boundary's ordinary mismatch. Duration
+literals are values, not duration patterns, enum discriminants, array lengths, a nominal `Duration`
+type, or a new clock API.
+
+The largest valid total is `18_446_744_073_709_551_615` nanoseconds. A larger exact total reports
+`SEM0170` before HIR is produced. Public `u64` constants may use duration literals; their exported
+module surface retains the exact scaled value, not the source padding or component grouping.
+
+**Evidence:** [duration literal specification](../../../../openspec/changes/add-duration-literals/specs/duration-literals/spec.md),
+[duration analysis and lowering](../../../../packages/compiler/src/ExpressionAnalysis.ts),
+[integer-scalar duration tests](../../../../packages/compiler/test/IntegerScalars.test.ts),
+[clock integration tests](../../../../packages/compiler/test/Clock.test.ts).
+
 ### FLOAT-001 — Floating literals select `f32` contextually and otherwise default to `f64`
 
 **Status:** Confirmed

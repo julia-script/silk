@@ -73,6 +73,7 @@ export type NodeKind =
   | 'UnsafeStatement'
   | 'UnsafeExpression'
   | 'IntegerLiteralExpression'
+  | 'DurationLiteralExpression'
   | 'FloatingLiteralExpression'
   | 'StaticTextLiteralExpression'
   | 'CharacterLiteralExpression'

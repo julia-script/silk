@@ -1017,6 +1017,43 @@ it('parses decimal and identifier call arguments as ordered concrete expressions
   assertOriginalTokenTraversal(identifier)
 })
 
+it('parses valid and invalid duration tokens as lossless duration expressions', () => {
+  const validSource =
+    'fn sleep(value: u64) -> u64 { return value }\nfn main() -> u64 { return sleep(01h05m00s) }'
+  const valid = parseText('fixture://duration-expression.silk', validSource)
+  const durations = descendants(valid.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'DurationLiteralExpression',
+  )
+
+  assert.deepEqual(nodeShape(durations.at(0) ?? valid.root), {
+    kind: 'DurationLiteralExpression',
+    children: ['DurationLiteral'],
+  })
+  assert.deepEqual(valid.lexicalDiagnostics, [])
+  assert.deepEqual(valid.parserDiagnostics, [])
+  assertOriginalTokenTraversal(valid)
+  assert.deepEqual(reconstructedBytes(valid), ascii(validSource))
+
+  const invalidSource = 'fn main() -> u64 { return 1h60m }'
+  const invalid = parseText('fixture://invalid-duration-expression.silk', invalidSource)
+  const invalidDuration = descendants(invalid.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'DurationLiteralExpression',
+  )
+  assert.deepEqual(nodeShape(invalidDuration ?? invalid.root), {
+    kind: 'DurationLiteralExpression',
+    children: ['Whitespace', 'InvalidDurationLiteral'],
+  })
+  assert.deepEqual(
+    invalid.lexicalDiagnostics.map((diagnostic) => diagnostic.code),
+    ['LEX0012'],
+  )
+  assert.deepEqual(invalid.parserDiagnostics, [])
+  assertOriginalTokenTraversal(invalid)
+  assert.deepEqual(reconstructedBytes(invalid), ascii(invalidSource))
+})
+
 it('parses nested calls as lossless argument expressions', () => {
   const result = parseText('fixture://nested-call.silk', nestedCallSource)
   const calls = descendants(result.root).filter(

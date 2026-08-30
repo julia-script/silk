@@ -1945,6 +1945,8 @@ const constantLiteral = (value: DeclarationFacts.ConstantLiteralFact): string =>
       return record('CharacterLiteral', [value.value.toString()])
     case 'IntegerLiteral':
       return record('IntegerLiteral', [value.value.toString()])
+    case 'DurationLiteral':
+      return record('DurationLiteral', [value.value.toString()])
     case 'FloatingLiteral':
       return record('FloatingLiteral', [value.spelling])
     case 'StringLiteral':

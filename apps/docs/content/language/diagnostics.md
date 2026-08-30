@@ -13,14 +13,14 @@ $ pnpm --filter @silklang/compiler documentation:generate
 
 | Prefix | Phase | Codes |
 | --- | --- | --- |
-| `LEX` | Lexical | 7 |
+| `LEX` | Lexical | 12 |
 | `PAR` | Parser | 5 |
 | `MOD` | Module | 3 |
-| `SEM` | Semantic | 161 |
+| `SEM` | Semantic | 162 |
 | `OWN` | Ownership | 16 |
 | `LAY` | Layout | 1 |
 
-There are 193 codes in total.
+There are 199 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -33,6 +33,11 @@ There are 193 codes in total.
 | `LEX0005` | Stable code for a number-literal digit separator outside a position between two digits. | `Digit separator must sit between two digits` |
 | `LEX0006` | Stable code for a float-literal exponent marker that no exponent digit follows. | `Float literal exponent must have at least one digit` |
 | `LEX0007` | Stable code for a character literal that denotes a number of scalars other than one. | `Character literal must hold exactly one Unicode scalar, but holds <scalars>` |
+| `LEX0008` | Stable code for a duration component amount that is not a whole decimal integer. | `Duration components require whole decimal amounts` |
+| `LEX0009` | Stable code for an identifier-like suffix outside the duration unit vocabulary. | `Unknown duration unit <spelling>` |
+| `LEX0010` | Stable code for a duration unit repeated within one compact literal. | `Duration unit <unit> may appear only once` |
+| `LEX0011` | Stable code for duration components that do not descend from larger to smaller units. | `Duration unit <unit> must not follow <previous>` |
+| `LEX0012` | Stable code for a subordinate duration component outside its canonical field bound. | `Subordinate <unit> component <amount> exceeds <maximum>` |
 
 ## Parser (`PAR`)
 
@@ -217,6 +222,7 @@ There are 193 codes in total.
 | `SEM0167` | Stable code for a variant selector absent from its resolved nominal union. | `Union <unionName> has no variant <variantName>` |
 | `SEM0168` | Stable code for a variant qualifier that does not name a nominal union. | `Expected a nominal union, found <actual>` |
 | `SEM0169` | Stable code for construction through an incomplete nominal union declaration. | `Cannot construct invalid nominal union <unionName>` |
+| `SEM0170` | Stable code for a duration literal whose exact nanosecond total exceeds `u64`. | `Duration literal exceeds the u64 nanosecond range` |
 
 ## Ownership (`OWN`)
 

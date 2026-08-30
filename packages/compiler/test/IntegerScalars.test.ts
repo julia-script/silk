@@ -523,6 +523,143 @@ pub fn main() -> i32 {
   }),
 )
 
+const durationSource = `pub const timeout: u64 = 01h05m00s
+
+fn accept(value: u64) -> u64 { return value }
+
+pub fn main() -> i32 {
+  let nano = 1ns
+  let micro = 1us
+  let milli = 1ms
+  let second = 1s
+  let minute = 1m
+  let hour = 1h
+  let day = 1d
+  let week = 1w
+  let compound = 1w2d3h4m5s6ms7us8ns
+  let aligned = 01h05m00s
+  let additive = 1h + 30m + 30s
+  let accepted = accept(300ms)
+  if nano != 1 { return 1 }
+  if micro != 1000 { return 2 }
+  if milli != 1000000 { return 3 }
+  if second != 1000000000 { return 4 }
+  if minute != 60000000000 { return 5 }
+  if hour != 3600000000000 { return 6 }
+  if day != 86400000000000 { return 7 }
+  if week != 604800000000000 { return 8 }
+  if compound != 788645006007008 { return 9 }
+  if aligned != 3900000000000 { return 10 }
+  if additive != 5430000000000 { return 11 }
+  if accepted != 300000000 { return 12 }
+  if timeout != 3900000000000 { return 13 }
+  return 42
+}`
+
+it.effect(
+  'treats every duration form as one exact fixed-u64 value and reuses scalar lowering',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'integer/durations',
+        new TextEncoder().encode(durationSource),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+      const durations = Analysis.expressionsOf(snapshot, 'integer/durations').filter(
+        (expression) => expression._tag === 'Duration',
+      )
+      assert.isAtLeast(durations.length, 12)
+      assert.isTrue(
+        durations.every(
+          (duration) => duration.type._tag === 'Available' && duration.type.type === 'u64',
+        ),
+      )
+
+      const hir = Hir.encode(Analysis.rootAnalysis(snapshot).hir)
+      const mir = MirEncoding.encode(Analysis.loweredMir(snapshot))
+      assert.include(hir, 'literal 1000000000 : u64')
+      assert.include(mir, 'literal 1000000000 : u64')
+      assert.notInclude(hir, 'Duration')
+      assert.notInclude(mir, 'Duration')
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'debug' })
+      assert.isAbove(wasm.bytes.length, 0)
+
+      const outcome = Analysis.evaluate(snapshot)
+      assert.strictEqual(outcome._tag, 'Completed')
+      if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+    }),
+)
+
+it.effect(
+  'rejects duration range and type mismatches before HIR without duplicate recovery errors',
+  () =>
+    Effect.gen(function* () {
+      const overflow = yield* Analysis.ofSourceRealized(
+        'integer/duration-overflow',
+        new TextEncoder().encode('pub fn main() -> u64 { return 18446744073709551616ns }'),
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(overflow).map((diagnostic) => diagnostic.code),
+        ['SEM0170'],
+      )
+      assert.notInclude(Hir.encode(Analysis.rootAnalysis(overflow).hir), '18446744073709551616')
+
+      const constantOverflow = yield* Analysis.ofSourceRealized(
+        'integer/duration-constant-overflow',
+        new TextEncoder().encode(
+          'pub const timeout: u64 = 18446744073709551616ns pub fn main() -> i32 { return 42 }',
+        ),
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(constantOverflow).map((diagnostic) => diagnostic.code),
+        ['SEM0170'],
+      )
+
+      const mismatch = yield* Analysis.ofSourceRealized(
+        'integer/duration-mismatch',
+        new TextEncoder().encode(
+          'fn accept(value: i32) -> i32 { return value } pub fn main() -> i32 { return accept(1s) }',
+        ),
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(mismatch).map((diagnostic) => diagnostic.code),
+        ['SEM0012'],
+      )
+      assert.isTrue(
+        Analysis.expressionsOf(mismatch, 'integer/duration-mismatch').some(
+          (expression) =>
+            expression._tag === 'Duration' &&
+            expression.type._tag === 'Available' &&
+            expression.type.type === 'u64',
+        ),
+      )
+
+      const malformed = yield* Analysis.ofSourceRealized(
+        'integer/duration-malformed',
+        new TextEncoder().encode('pub fn main() -> u64 { return 1h60m }'),
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(malformed).map((diagnostic) => diagnostic.code),
+        ['LEX0012'],
+      )
+    }),
+)
+
+it.effect('uses ordinary checked u64 arithmetic for duration expressions', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'integer/duration-arithmetic-overflow',
+      new TextEncoder().encode(
+        'pub fn main() -> i32 { let overflow = 18446744073709551615ns + 1ns return 42 }',
+      ),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.strictEqual(Analysis.evaluate(snapshot)._tag, 'Trap')
+  }),
+)
+
 const contextualCallSource = `import silk.u8 as u8
 fn selectByte(
   source: &[u8],

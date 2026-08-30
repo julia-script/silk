@@ -732,11 +732,11 @@ pub fn main() -> i32 {
 
   let future = SystemClock.make(11, 25)
   run Effect.provideMut(MonotonicClock.waitUntil(move future), &mut provider)
-  run Effect.provideMut(MonotonicClock.waitFor(u64.toU64(0)), &mut provider)
+  run Effect.provideMut(MonotonicClock.waitFor(0s), &mut provider)
   if provider.seconds != 11 { return 6 }
   if provider.nanoseconds != 25 { return 7 }
 
-  run Effect.provideMut(Effect.sleep(u64.toU64(999999975)), &mut provider)
+  run Effect.provideMut(Effect.sleep(999ms999us975ns), &mut provider)
   if provider.seconds != 12 { return 8 }
   if provider.nanoseconds != 0 { return 9 }
   if provider.waits == u64.toU64(4) {} else { return 10 }

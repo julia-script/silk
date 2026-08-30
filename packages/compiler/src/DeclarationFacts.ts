@@ -517,6 +517,12 @@ export type ConstantLiteralFact =
       readonly token: Token.Token
     }
   | {
+      readonly _tag: 'DurationLiteral'
+      readonly value: bigint
+      readonly spelling: string
+      readonly token: Token.Token
+    }
+  | {
       readonly _tag: 'FloatingLiteral'
       readonly spelling: string
       readonly token: Token.Token

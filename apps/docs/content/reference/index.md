@@ -60,7 +60,7 @@ not belong in a language rule unless a program can observe them.
 ## Contents
 
 - [Lexical form](lexical-form.md) — identifiers, the closed keyword vocabulary, comments, numeric
-  spellings, text and byte forms, character literals, and longest tokenization.
+  and duration spellings, text and byte forms, character literals, and longest tokenization.
 - [Program entry](program-entry.md) — ordinary and effectful `main`, automatic Effect execution,
   unhandled typed failures, and requirement closure.
 - [Statements and discarded values](statements-and-discarding.md) — which expression results may be
@@ -98,7 +98,7 @@ not belong in a language rule unless a program can observe them.
 - [Patterns and destructuring](patterns-and-destructuring.md) — one pattern language across exact
   union-member matches, scalar enum member matches, irrefutable local destructuring, and
   conditional `if let`.
-- [Values and types](values-and-types.md) — foundational scalars, literals, nominal structs, fixed
+- [Values and types](values-and-types.md) — foundational scalars, duration literals, nominal structs, fixed
   arrays, lexical views, nominal and structural unions, scalar enums, precise inference, and
   compatibility.
 - [Expressions and operators](expressions-and-operators.md) — deterministic evaluation, expression

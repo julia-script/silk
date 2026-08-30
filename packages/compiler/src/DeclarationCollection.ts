@@ -55,6 +55,7 @@ import {
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
+import * as DurationLiteral from './internal/DurationLiteral.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as LiteralForm from './LiteralForm.js'
 import type * as ModuleClosure from './ModuleClosure.js'
@@ -180,6 +181,21 @@ export const constantLiteral = (
       _tag: 'IntegerLiteral',
       value: negative ? -magnitude : magnitude,
       spelling: `${negative ? '-' : ''}${digits}`,
+      token,
+    })
+  }
+  if (initializer.kind === 'DurationLiteralExpression') {
+    const token = SyntaxTree.directToken(initializer, 'DurationLiteral')
+    if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    const bytes = Option.getOrUndefined(SourceFile.slice(source, token.span))
+    if (bytes === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    const parsed = DurationLiteral.parse(bytes)
+    if (parsed._tag === 'Invalid')
+      return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    return Object.freeze({
+      _tag: 'DurationLiteral',
+      value: parsed.nanoseconds,
+      spelling: spelling(source, token),
       token,
     })
   }

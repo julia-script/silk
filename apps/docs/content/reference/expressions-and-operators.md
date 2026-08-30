@@ -432,6 +432,10 @@ fn increment(value: u8) -> u8 {
 The literal `1` is selected as `u8`. This is contextual literal selection, not conversion of an
 `i32` value.
 
+A duration literal is already `u64` and does not participate in contextual integer selection.
+Consequently, `1h + 30m` is ordinary `u64` addition, while combining a duration literal with an
+already typed non-`u64` operand is a type mismatch.
+
 **Boundary:** Two already-typed numeric values never widen, narrow, change signedness, or cross
 between integer and floating point to satisfy an operator.
 
@@ -448,6 +452,7 @@ type; it cannot be selected as an unsigned type or `usize`.
 contextual integer literal reports `SEM0002`; a negative `usize` literal reports `SEM0060`.
 
 **Evidence:** [integer literal selection](values-and-types.md#int-002--integer-literals-are-exact-until-an-immediate-context-selects-their-type),
+[duration literal values](values-and-types.md#duration-001--duration-literals-are-fixed-u64-nanosecond-values),
 [integer scalar specification](../../../../openspec/specs/bootstrap-integer-scalars/spec.md),
 [floating scalar specification](../../../../openspec/specs/bootstrap-floating-point-scalars/spec.md).
 

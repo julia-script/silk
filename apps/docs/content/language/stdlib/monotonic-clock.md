@@ -23,6 +23,18 @@ virtual providers may satisfy a wait by advancing their own timeline without sle
 invalid or unrepresentable provider result traps because this service has no typed failure
 channel.
 
+## Examples
+
+### Wait for one fixed duration on the active provider
+
+```silk
+import silk.monotonic_clock as MonotonicClock
+
+effect fn pause() -> () ? &mut MonotonicClock.MonotonicClock {
+  return run MonotonicClock.waitFor(300ms)
+}
+```
+
 Import as `MonotonicClock` with `import silk.monotonic_clock { MonotonicClock }`.
 
 Public declarations: 5.

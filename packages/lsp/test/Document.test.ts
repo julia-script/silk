@@ -2244,6 +2244,22 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('colors one duration literal as a single numeric semantic token', () =>
+  Effect.gen(function* () {
+    const source = 'pub fn main() -> u64 { return 01h05m00s }'
+    const { document, snapshot } = yield* open(source)
+    assert.deepEqual(
+      Document.diagnostics(document, snapshot, () => undefined),
+      [],
+    )
+
+    const decoded = decodeSemanticTokens(Document.semanticTokens(document, snapshot))
+    const duration = semanticTokenAt(decoded, source, '01h05m00s')
+    assert.strictEqual(duration?.type, 'number')
+    assert.strictEqual(duration?.length, 9)
+  }),
+)
+
 it.effect('colors contextual import path segments as namespaces', () =>
   Effect.gen(function* () {
     const source = `import silk.vector { Vector }

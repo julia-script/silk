@@ -23,6 +23,7 @@ import type {
   DeclarationFact,
   DeclarationId,
   DeclaredName,
+  DurationExpressionFact,
   EffectCaptureFact,
   EffectRequirementBindingFact,
   ExpressionFact,
@@ -84,6 +85,7 @@ import * as FloatingPoint from './FloatingPoint.js'
 import * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
+import * as DurationLiteral from './internal/DurationLiteral.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as LiteralForm from './LiteralForm.js'
@@ -223,6 +225,66 @@ export const analyzeFloating = (
   })
 }
 
+export const analyzeDuration = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+): {
+  readonly fact: DurationExpressionFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  const token = directToken(node, 'DurationLiteral')
+  if (token === undefined) {
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Duration',
+        type: unavailableExpressionType,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  }
+  const bytes = Option.getOrThrowWith(
+    SourceFile.slice(source, token.span),
+    () => new RangeError(`Semantic duration span does not belong to source ${source.id}`),
+  )
+  const parsed = DurationLiteral.parse(bytes)
+  if (parsed._tag === 'Invalid') {
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Duration',
+        token,
+        type: unavailableExpressionType,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([]),
+    })
+  }
+  const spelling = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
+  if (parsed.nanoseconds > 18_446_744_073_709_551_615n) {
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Duration',
+        spelling,
+        token,
+        type: unavailableExpressionType,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([Diagnostic.durationOutOfRange(spelling, token.span)]),
+    })
+  }
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'Duration',
+      value: parsed.nanoseconds,
+      spelling,
+      token,
+      type: availableExpressionType('u64'),
+      syntax: node,
+    }),
+    diagnostics: Object.freeze([]),
+  })
+}
+
 export const analyzeConstant = (
   declaration: DeclarationFacts.ConstantFact,
   token: Token.Token,
@@ -266,6 +328,13 @@ export const analyzeConstant = (
         value = Object.freeze({ _tag: 'Integer', value: literal.value, type })
       }
     }
+  } else if (declared.type === 'u64' && literal._tag === 'DurationLiteral') {
+    if (literal.value > 18_446_744_073_709_551_615n) {
+      detail = `${literal.spelling} does not fit u64`
+    } else {
+      type = 'u64'
+      value = Object.freeze({ _tag: 'Integer', value: literal.value, type })
+    }
   } else if (literal._tag === 'TargetConstant') {
     // The pointer width is not known here — elaboration precedes target selection — so the fact is
     // recorded with its widest value and its selector. `Lower` narrows it once the target is fixed.
@@ -298,10 +367,13 @@ export const analyzeConstant = (
     detail = `the literal kind does not match ${declared._tag === 'Resolved' ? Type.encode(declared.type) : 'the declared type'}`
   }
 
-  const diagnostic =
-    detail === undefined
-      ? undefined
-      : Diagnostic.invalidConstant(detail, declaration.initializer.span)
+  let diagnostic: Diagnostic.Diagnostic | undefined
+  if (detail !== undefined) {
+    diagnostic =
+      literal._tag === 'DurationLiteral' && literal.value > 18_446_744_073_709_551_615n
+        ? Diagnostic.durationOutOfRange(literal.spelling, literal.token.span)
+        : Diagnostic.invalidConstant(detail, declaration.initializer.span)
+  }
   const expressionType =
     type === undefined ? unavailableExpressionType : availableExpressionType(type)
   return Object.freeze({
@@ -5212,6 +5284,7 @@ export const effectCaptureFacts = (
         expression(fact.argument)
         return
       case 'Integer':
+      case 'Duration':
       case 'Floating':
       case 'Boolean':
       case 'Character':
@@ -5517,6 +5590,15 @@ export function analyzeExpression(
       ]),
       type:
         integer.fact._tag === 'Available' && mismatch === undefined ? integer.fact.type : undefined,
+    })
+  }
+
+  if (node.kind === 'DurationLiteralExpression') {
+    const duration = analyzeDuration(source, node)
+    return Object.freeze({
+      fact: duration.fact,
+      diagnostics: duration.diagnostics,
+      type: duration.fact.type._tag === 'Available' ? duration.fact.type.type : undefined,
     })
   }
 

@@ -1393,6 +1393,7 @@ const printNode = (
       )
     case 'UnitExpression':
     case 'IntegerLiteralExpression':
+    case 'DurationLiteralExpression':
     case 'FloatingLiteralExpression':
     case 'StaticTextLiteralExpression':
     case 'CharacterLiteralExpression':

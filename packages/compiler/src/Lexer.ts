@@ -2,6 +2,7 @@ import * as Option from 'effect/Option'
 import * as Diagnostic from './Diagnostic.js'
 import * as ByteClass from './internal/ByteClass.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
+import * as DurationLiteral from './internal/DurationLiteral.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as LiteralForm from './LiteralForm.js'
 import type * as SourceFile from './SourceFile.js'
@@ -256,6 +257,47 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
     return span
   }
 
+  const pushDurationCandidate = (start: number, numericEnd: number): boolean => {
+    if (!ByteClass.isAsciiLetter(bytes[numericEnd])) return false
+    index = DurationLiteral.candidateEnd(bytes, numericEnd)
+    const parsed = DurationLiteral.parse(bytes, start, index)
+    pushToken(parsed._tag === 'Valid' ? 'DurationLiteral' : 'InvalidDurationLiteral', start, index)
+    if (parsed._tag === 'Valid') return true
+
+    const reason = parsed.reason
+    const reasonSpan = spanAt(source, reason.start, reason.end)
+    switch (reason._tag) {
+      case 'InvalidAmount':
+        diagnostics.push(Diagnostic.invalidDurationAmount(reasonSpan))
+        break
+      case 'InvalidDigitSeparator':
+        diagnostics.push(Diagnostic.invalidDigitSeparator(reasonSpan))
+        break
+      case 'UnknownUnit':
+        diagnostics.push(Diagnostic.unknownDurationUnit(reason.spelling, reasonSpan))
+        break
+      case 'RepeatedUnit':
+        diagnostics.push(Diagnostic.repeatedDurationUnit(reason.unit, reasonSpan))
+        break
+      case 'OutOfOrderUnit':
+        diagnostics.push(
+          Diagnostic.outOfOrderDurationUnit(reason.unit, reason.previous, reasonSpan),
+        )
+        break
+      case 'SubordinateOutOfRange':
+        diagnostics.push(
+          Diagnostic.subordinateDurationOutOfRange(
+            reason.unit,
+            reason.amount,
+            reason.maximum,
+            reasonSpan,
+          ),
+        )
+        break
+    }
+    return true
+  }
+
   while (index < bytes.length) {
     const start = index
     const byte = bytes[index]
@@ -336,6 +378,7 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
         index += base.width
         const run = scanDigitRun(bytes, base, index)
         index = run.end
+        if (pushDurationCandidate(start, index)) continue
         const span = pushToken(
           run.digits && run.separated ? 'DecimalInteger' : 'Invalid',
           start,
@@ -367,6 +410,7 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
         exponentDigits = exponent.digits
         separated = separated && exponent.separated
       }
+      if (pushDurationCandidate(start, index)) continue
       let kind: Token.TokenKind = 'DecimalInteger'
       if (!separated || !exponentDigits) kind = 'Invalid'
       else if (floating) kind = 'DecimalFloat'
