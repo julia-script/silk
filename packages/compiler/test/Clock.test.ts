@@ -707,7 +707,7 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('advances a scripted monotonic timeline without moving backwards', () =>
+it.effect('advances a scripted monotonic timeline and delegates Effect.sleep', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`${scriptedMonotonicClock}
 import silk.effect as Effect
@@ -736,7 +736,7 @@ pub fn main() -> i32 {
   if provider.seconds != 11 { return 6 }
   if provider.nanoseconds != 25 { return 7 }
 
-  run Effect.provideMut(MonotonicClock.waitFor(999ms999us975ns), &mut provider)
+  run Effect.provideMut(Effect.sleep(999ms999us975ns), &mut provider)
   if provider.seconds != 12 { return 8 }
   if provider.nanoseconds != 0 { return 9 }
   if provider.waits == u64.toU64(4) {} else { return 10 }
