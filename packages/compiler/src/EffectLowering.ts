@@ -1350,7 +1350,7 @@ export const lowerEffectExecution = (
     return lowerExpression(fn, run)
   }
 
-  const lowered = lowerExpression(fn, subject)
+  const lowered = lowerExpression(fn, subject, availableRequirements)
   const loweredType = lowered === undefined ? undefined : fn.localTypes.at(lowered.result.ordinal)
   if (lowered === undefined || loweredType === undefined) return undefined
   if (loweredType._tag === 'EffectComposite')

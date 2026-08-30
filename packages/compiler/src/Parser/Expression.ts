@@ -532,6 +532,7 @@ export function parseArgumentList(
     kind !== 'EnumKeyword' &&
     kind !== 'UnionKeyword' &&
     kind !== 'FnKeyword' &&
+    !(kind === 'EffectKeyword' && peek(state, 1) === 'FnKeyword') &&
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
   ) {
@@ -550,6 +551,7 @@ export function parseArgumentList(
       kind === 'EnumKeyword' ||
       kind === 'UnionKeyword' ||
       kind === 'FnKeyword' ||
+      (kind === 'EffectKeyword' && peek(state, 1) === 'FnKeyword') ||
       kind === 'ImportKeyword'
     )
       break

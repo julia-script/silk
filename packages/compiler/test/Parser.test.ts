@@ -1451,6 +1451,19 @@ it('keeps malformed arguments explicit and resumes at the next comma', () => {
   assert.deepEqual(reconstructedBytes(result), ascii(malformedArgumentSource))
 })
 
+it('bounds unsupported anonymous effect function recovery inside call arguments', () => {
+  const source = `fn outer() -> () {
+  f(once effect fn (error: E) -> () {
+    return ()
+  })
+}`
+  const result = parseText('fixture://unsupported-anonymous-effect-function.silk', source)
+
+  assert.isAbove(result.parserDiagnostics.length, 0)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('bounds damaged call recovery before the following function', () => {
   const result = parseText(
     'fixture://damaged-call-before-next-function.silk',
