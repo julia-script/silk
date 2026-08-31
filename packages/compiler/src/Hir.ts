@@ -127,6 +127,22 @@ export const effectCatchSite = (
     span,
   })
 
+/** Stable hidden Effect site for one compiler-backed Effect-valued builtin call. */
+export const builtinEffectSite = (
+  function_: DeclarationFacts.DeclarationId,
+  owner: DeclarationFacts.CanonicalId,
+  span: SourceSpan.SourceSpan,
+): EffectSiteId =>
+  Object.freeze({
+    _tag: 'EffectSiteId',
+    function: function_,
+    owner,
+    // Effect blocks and selective catches already occupy the authored and 0x40000000 ranges.
+    // Builtin recipes use a third disjoint range while retaining target-independent source order.
+    ordinal: 0x60000000 + span.start,
+    span,
+  })
+
 /** Orders executable sites by their stable structural identities. */
 export const compareExecutableSites = (
   left: EffectSiteId | CallableSiteId,

@@ -10,6 +10,7 @@ import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as StandardStreams from '../src/StandardStreams.js'
+import { recoveredDirectWrite } from './support/recoveredProvidedWrite.js'
 import * as Driver from './support/TestDriver.js'
 
 const encoder = new TextEncoder()
@@ -190,6 +191,42 @@ it.effect('lowers target-neutral writes through native and hosted Wasm boundarie
     assert.strictEqual(run.status, 0, run.stderr)
     assert.strictEqual(run.stdout, 'heading\nrow\n')
     assert.strictEqual(run.stderr, 'warning\n')
+  }),
+)
+
+it.effect('lowers direct typed-failure recovery through LLVM and Wasm', () =>
+  Effect.gen(function* () {
+    const wasm = yield* Analysis.ofSourceRealized(
+      'standard-streams/recovered-direct-write',
+      encoder.encode(recoveredDirectWrite),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(wasm), [])
+    const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
+    const memory = StandardStreams.memory()
+    let instance: WebAssembly.Instance | undefined
+    instance = new WebAssembly.Instance(
+      new WebAssembly.Module(artifact.bytes.slice()),
+      StandardStreams.wasmImports(memory.provider, () => {
+        const exported = instance?.exports[StandardStreams.wasmMemoryExport]
+        return exported instanceof WebAssembly.Memory ? exported : undefined
+      }),
+    )
+    const wasmMain = instance.exports.silk_main
+    if (typeof wasmMain !== 'function') throw new Error('recovered write Wasm lost silk_main')
+    assert.strictEqual(wasmMain(), 0)
+    assert.deepEqual(
+      memory.events().map((event) => event.bytes),
+      [Array.from(encoder.encode('Hello'))],
+    )
+
+    const native = yield* Analysis.ofSourceRealized(
+      'standard-streams/recovered-direct-write-native',
+      encoder.encode(recoveredDirectWrite),
+    )
+    assert.deepEqual(Analysis.diagnostics(native), [])
+    const llvm = yield* Analysis.codegen(native, { mode: 'release' })
+    assert.include(llvm.ir, '@silk_standard_stream_write_v1')
   }),
 )
 

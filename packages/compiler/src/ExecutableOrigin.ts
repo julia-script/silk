@@ -1501,6 +1501,20 @@ export const make = (operations: Operations) => {
         context.owner,
         Hir.effectCatchSite(context.fn.declaration.id, context.owner.declaration, expression.span),
       )
+    if (expression._tag === 'BuiltinCall' && expression.witnessEffectSite === undefined) {
+      const specialized = Specialization.specializeType(context.owner, expression.type, [
+        context.substitution,
+      ])
+      if (Type.isEffect(specialized))
+        return effectIdentity(
+          context.owner,
+          Hir.builtinEffectSite(
+            context.fn.declaration.id,
+            context.owner.declaration,
+            expression.span,
+          ),
+        )
+    }
     if (
       (expression._tag === 'BoundOperationCall' || expression._tag === 'BuiltinCall') &&
       expression.witnessEffectSite !== undefined
@@ -2220,6 +2234,67 @@ export const make = (operations: Operations) => {
           }),
         )
       }
+      const builtins = callableExpressions(instance.function).flatMap((expression) =>
+        expression._tag === 'BuiltinCall' && expression.witnessEffectSite === undefined
+          ? [expression]
+          : [],
+      )
+      for (const builtin of builtins) {
+        const type = specializeInstanceType(builtin.type, instance.key, [instance.substitution])
+        if (!Type.isEffect(type) || !Type.isRuntimeConcrete(type)) continue
+        const captures = builtin.arguments.flatMap((argument, ordinal) => {
+          if (argument._tag === 'Unavailable') return []
+          const specialized = specializeInstanceType(argument.type, instance.key, [
+            instance.substitution,
+          ])
+          if (!Type.isRuntimeConcrete(specialized)) return []
+          const effectIdentity = Type.isEffect(specialized)
+            ? effectOriginOf(argument, context)
+            : undefined
+          const callableIdentity = Type.isCallable(specialized)
+            ? callableOriginOf(argument, context)
+            : undefined
+          let access: 'Copy' | 'Shared' | 'Exclusive' | 'Take' = 'Take'
+          if (Type.isReference(specialized) || Type.isSlice(specialized)) {
+            access = specialized.access
+          } else if (Type.isCallable(specialized)) {
+            access = specialized.mode
+          }
+          return [
+            Object.freeze({
+              ordinal,
+              source: 'Binding' as const,
+              sourceOrdinal: ordinal,
+              access,
+              type: specialized,
+              ...(effectIdentity === undefined ? {} : { effectIdentity }),
+              ...(callableIdentity === undefined ? {} : { callableIdentity }),
+            }),
+          ]
+        })
+        if (captures.length !== builtin.arguments.length) continue
+        const site = Hir.builtinEffectSite(
+          instance.function.declaration.id,
+          instance.key.declaration,
+          builtin.span,
+        )
+        const identity = effectIdentity(instance.key, site)
+        effects.set(
+          identity,
+          Object.freeze({
+            _tag: 'EffectInstance',
+            representationIdentity: Hir.effectRepresentationIdentity(site),
+            identity,
+            owner: instance.key,
+            site,
+            runner: Hir.effectRunnerId(instance.key.declaration, site),
+            typeArguments: Object.freeze([...instance.key.typeArguments]),
+            captures: Object.freeze(captures),
+            type,
+            suspension: suspension.get(effectNode(identity)) ?? SuspensionMode.direct,
+          }),
+        )
+      }
     }
     const callableFor = (identity: Type.CallableIdentityArgument): CallableInstance | undefined =>
       callables.find(
@@ -2515,6 +2590,23 @@ export const make = (operations: Operations) => {
           if (targetKey !== undefined) addDependency(execution, executionNodeForKey(targetKey))
           return Object.freeze([execution])
         }
+        if (expression._tag === 'BuiltinCall') {
+          const type = Type.substitute(expression.type, instance.substitution)
+          if (Type.isEffect(type)) {
+            const site = Hir.builtinEffectSite(
+              instance.function.declaration.id,
+              instance.key.declaration,
+              expression.span,
+            )
+            const identity = effectIdentity(instance.key, site)
+            const execution = effectNode(identity)
+            effectIdentities.add(identity)
+            for (const argument of expression.arguments)
+              for (const target of executionTargets(argument))
+                if (target !== execution) addDependency(execution, target)
+            return Object.freeze([execution])
+          }
+        }
         if (expression._tag === 'EffectConstruct') {
           const target = targetKeyOfCall(expression, context)
           const targetFn =
@@ -2734,6 +2826,8 @@ export const make = (operations: Operations) => {
           (expression._tag === 'BoundOperationCall' || expression._tag === 'BuiltinCall') &&
           expression.witnessEffectSite !== undefined
         ) {
+          for (const target of executionTargets(expression)) addDependency(execution, target)
+        } else if (expression._tag === 'BuiltinCall') {
           for (const target of executionTargets(expression)) addDependency(execution, target)
         } else if (expression._tag === 'ServiceEffectConstruct') {
           for (const target of executionTargets(expression)) addDependency(execution, target)

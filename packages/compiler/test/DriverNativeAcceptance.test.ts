@@ -49,6 +49,7 @@ afterAll(() => {
 const compileSource = (
   name: string,
   text: string,
+  imports?: Readonly<Record<string, string>>,
 ): Effect.Effect<Driver.Outcome, Driver.SourceResolutionFailed | NativeToolchain.ToolchainError> =>
   Driver.compile({
     compilation: {
@@ -57,7 +58,17 @@ const compileSource = (
     toolchain,
     profile: 'release',
     destination: join(destinationRoot, name),
-  }).pipe(Effect.provide(SourceResolver.empty))
+  }).pipe(
+    Effect.provide(
+      imports === undefined
+        ? SourceResolver.empty
+        : SourceResolver.memory(
+            new Map(
+              Object.entries(imports).map(([module, source]) => [module, ascii(source)] as const),
+            ),
+          ),
+    ),
+  )
 
 it.effect(
   'keeps the interpreter and native execution in agreement across the corpus',
@@ -79,6 +90,7 @@ it.effect(
         const outcome = yield* compileSource(
           `corpus-${program.name}`,
           program.nativeSource ?? program.source,
+          program.nativeImports,
         )
 
         if (program.expected._tag === 'UnavailableEntry') {
@@ -104,6 +116,8 @@ it.effect(
         if (program.expected._tag === 'Completes') {
           assert.strictEqual(interpreted._tag, 'Completed', program.name)
           const run = yield* runCompiled(outcome.path, program.nativeEnvironment)
+          if (program.nativeStdout !== undefined)
+            assert.strictEqual(run.stdout, program.nativeStdout, program.name)
           const nativeStatus = run.status === null ? null : BigInt(run.status)
           // POSIX exposes only the low unsigned byte of a process exit value.
           const interpretedStatus =

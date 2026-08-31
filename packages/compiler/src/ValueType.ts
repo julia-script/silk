@@ -40,6 +40,16 @@ export interface GeneratedWitnessEffectRunner {
   readonly providedRequirements: ReadonlyArray<Omit<ProvidedRequirement, 'local'>>
 }
 
+export interface GeneratedBuiltinEffectRunner {
+  readonly _tag: 'BuiltinEffectRunner'
+  readonly id: DeclarationFacts.CanonicalId
+  readonly owner: Instances.Instance
+  readonly expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>
+  readonly type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>
+  readonly specializationKey: string
+  readonly providedRequirements: ReadonlyArray<Omit<ProvidedRequirement, 'local'>>
+}
+
 export interface GeneratedCatchEffectRunner {
   readonly _tag: 'CatchEffectRunner'
   readonly id: DeclarationFacts.CanonicalId
@@ -55,6 +65,7 @@ export interface GeneratedCatchEffectRunner {
 export type GeneratedEffectRunner =
   | GeneratedBlockEffectRunner
   | GeneratedWitnessEffectRunner
+  | GeneratedBuiltinEffectRunner
   | GeneratedCatchEffectRunner
 
 export const instanceText = (
@@ -124,7 +135,7 @@ export const effectValueType = (
   })
 }
 
-export const witnessEffectValueType = (
+export const effectValueAtSite = (
   layout: Layout.Plan,
   instance: Instances.InstanceKey,
   site: Hir.EffectSiteId,

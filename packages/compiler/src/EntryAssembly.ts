@@ -22,6 +22,7 @@ import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 import type {
   GeneratedBlockEffectRunner,
+  GeneratedBuiltinEffectRunner,
   GeneratedCatchEffectRunner,
   GeneratedEffectRunner,
   GeneratedWitnessEffectRunner,
@@ -275,6 +276,37 @@ export const lowerInstance = (
   })
 }
 
+const effectCaptureParameterTypes = (
+  fields: ReadonlyArray<Layout.EffectEnvironmentField>,
+  layout: Layout.Plan,
+  opaqueRealizations: OpaqueRealization.Catalog,
+): ReadonlyArray<Mir.Type> =>
+  Object.freeze(
+    fields.flatMap((field) => {
+      if (field.effectIdentity !== undefined) {
+        const effectValue = effectValueByIdentity(layout, field.effectIdentity)
+        return effectValue === undefined ? [] : [effectValue]
+      }
+      if (field.callableIdentity !== undefined && Type.isCallable(field.type)) {
+        const callable = callableValueByIdentity(layout, field.callableIdentity, field.type)
+        return callable === undefined ? [] : [callable]
+      }
+      if (Type.isRepresented(field.type)) {
+        const represented = representedValueType(layout, opaqueRealizations, field.type, new Map())
+        return represented === undefined ? [] : [represented]
+      }
+      // The layout resolves scalar-enum nominals to their Enum representation; without it a
+      // captured enum lowers as a bare Nominal and every enum operation in the runner body fails.
+      const lowered = mirType(field.type, new Map(), layout)
+      if (lowered === undefined) return []
+      if (field.representation === 'Value') return [lowered]
+      if (field.access !== 'Shared' && field.access !== 'Exclusive') return []
+      return [
+        Object.freeze({ _tag: 'EffectBorrow' as const, type: field.type, access: field.access }),
+      ]
+    }),
+  )
+
 export const lowerEffectRunner = (
   spec: GeneratedBlockEffectRunner,
   ownership: Ownership.ModuleOwnership | undefined,
@@ -298,29 +330,11 @@ export const lowerEffectRunner = (
       ...spec.providedRequirements.map(providedContractEntry),
     ]),
   })
-  const captureParameterTypes = type.environment.fields.flatMap((field) => {
-    if (field.effectIdentity !== undefined) {
-      const effectValue = effectValueByIdentity(layout, field.effectIdentity)
-      return effectValue === undefined ? [] : [effectValue]
-    }
-    if (field.callableIdentity !== undefined && Type.isCallable(field.type)) {
-      const callable = callableValueByIdentity(layout, field.callableIdentity, field.type)
-      return callable === undefined ? [] : [callable]
-    }
-    if (Type.isRepresented(field.type)) {
-      const represented = representedValueType(layout, opaqueRealizations, field.type, new Map())
-      return represented === undefined ? [] : [represented]
-    }
-    // The layout resolves scalar-enum nominals to their Enum representation; without it a
-    // captured enum lowers as a bare Nominal and every enum operation in the runner body fails.
-    const lowered = mirType(field.type, new Map(), layout)
-    if (lowered === undefined) return []
-    if (field.representation === 'Value') return [lowered]
-    if (field.access !== 'Shared' && field.access !== 'Exclusive') return []
-    return [
-      Object.freeze({ _tag: 'EffectBorrow' as const, type: field.type, access: field.access }),
-    ]
-  })
+  const captureParameterTypes = effectCaptureParameterTypes(
+    type.environment.fields,
+    layout,
+    opaqueRealizations,
+  )
   if (captureParameterTypes.length !== block.captures.length) return undefined
   const parameterizedRequirements = spec.providedRequirements.filter(
     (requirement) => requirement.witness._tag === 'SourceConformanceWitness',
@@ -539,6 +553,157 @@ export const lowerCatchEffectRunner = (
   })
 }
 
+export const lowerBuiltinEffectRunner = (
+  spec: GeneratedBuiltinEffectRunner,
+  ownership: Ownership.ModuleOwnership | undefined,
+  layout: Layout.Plan,
+  index: DeclarationIndex.Index,
+  instances: ReadonlyArray<Instances.Instance>,
+  calls: ReadonlyArray<Instances.CallInstance>,
+  effectResults: ReadonlyMap<string, ExecutableEffectType>,
+  generatedRunners: Array<GeneratedEffectRunner>,
+  opaqueRealizations: OpaqueRealization.Catalog,
+): Mir.MirFunction | undefined => {
+  const parameterTypes = effectCaptureParameterTypes(
+    spec.type.environment.fields,
+    layout,
+    opaqueRealizations,
+  )
+  if (parameterTypes.length !== spec.expression.arguments.length) return undefined
+  const parameterizedRequirements = spec.providedRequirements.filter(
+    (requirement) => requirement.witness._tag === 'SourceConformanceWitness',
+  )
+  const requirementParameterTypes = parameterizedRequirements.flatMap((requirement) => {
+    const type = mirType(
+      Type.reference(
+        requirement.access === 'Take' ? ('Exclusive' as const) : requirement.access,
+        requirement.providerType,
+      ),
+    )
+    return type === undefined ? [] : [type]
+  })
+  if (requirementParameterTypes.length !== parameterizedRequirements.length) return undefined
+  const allParameters = Object.freeze([...parameterTypes, ...requirementParameterTypes])
+  const instance: Instances.InstanceKey = Object.freeze({
+    _tag: 'InstanceKey',
+    declaration: spec.id,
+    typeArguments: spec.owner.key.typeArguments,
+    contractRow: Object.freeze([
+      ...spec.owner.key.contractRow,
+      `builtin-effect-site:${Hir.executableSiteKey(spec.type.site)}`,
+    ]),
+  })
+  const lowering = new FunctionLowering(
+    layout,
+    index,
+    allParameters,
+    planFor(ownership, spec.owner.function),
+    spec.owner.substitution,
+    spec.type.type,
+    spec.owner,
+    instances,
+    calls,
+    effectResults,
+    generatedRunners,
+    opaqueRealizations,
+    Object.freeze(
+      spec.providedRequirements.map((requirement) => {
+        const ordinal = parameterizedRequirements.indexOf(requirement)
+        return Object.freeze({
+          ...requirement,
+          ...(ordinal < 0 ? {} : { local: local(parameterTypes.length + ordinal) }),
+        })
+      }),
+    ),
+  )
+  const region = lowering.reserve()
+  const [success, operations] = lowering.capture(() =>
+    lowerExpressionInner(
+      lowering,
+      Object.freeze({
+        _tag: 'Run',
+        subject: Object.freeze({
+          ...spec.expression,
+          arguments: Object.freeze(
+            spec.expression.arguments.map((argument, ordinal) =>
+              Object.freeze({
+                _tag: 'ParameterReference' as const,
+                parameter: Object.freeze({
+                  _tag: 'ParameterId' as const,
+                  function: spec.owner.function.declaration.id,
+                  ordinal,
+                }),
+                type: argument._tag === 'Unavailable' ? ('never' as const) : argument.type,
+                span: spec.expression.span,
+              }),
+            ),
+          ),
+        }),
+        type: spec.type.type.success,
+        span: spec.expression.span,
+      }),
+    ),
+  )
+  if (success === undefined) return undefined
+  const result: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
+    _tag: 'EffectOutcome',
+    type: spec.type.type,
+  })
+  const returned = lowering.alloc(result)
+  lowering.publish(
+    Object.freeze({
+      _tag: 'OperationRegion',
+      id: region,
+      operations: Object.freeze([
+        ...operations,
+        Object.freeze({
+          _tag: 'PackEffectOutcome' as const,
+          destination: returned,
+          source: success.result,
+          tag: 0,
+          type: result,
+          provenance: generated(spec.expression.span),
+        }),
+      ]),
+      outcome: Object.freeze({
+        _tag: 'Return',
+        value: returned,
+        provenance: generated(spec.expression.span),
+      }),
+    }),
+  )
+  return Object.freeze({
+    _tag: 'MirFunction',
+    id: spec.id,
+    instance,
+    parameterCount: allParameters.length,
+    localTypes: Object.freeze([...lowering.localTypes]),
+    result,
+    entry: region,
+    regions: Object.freeze(
+      lowering.regions.flatMap((candidate) => (candidate === undefined ? [] : [candidate])),
+    ),
+    effectRunner: Object.freeze({
+      base: Object.freeze({
+        declaration: Hir.effectRunnerId(spec.type.environment.instance.declaration, spec.type.site),
+        typeArguments: spec.type.environment.instance.typeArguments,
+      }),
+      providers: Object.freeze(
+        spec.providedRequirements.map((requirement) =>
+          Object.freeze({
+            capability: requirement.capability,
+            providerType: requirement.providerType,
+            witness: requirement.witness,
+            role: requirement.role,
+            requirementAccess: requirement.requirementAccess,
+            access: requirement.access,
+          }),
+        ),
+      ),
+    }),
+  })
+}
+
 export const lowerWitnessEffectRunner = (
   spec: GeneratedWitnessEffectRunner,
   ownership: Ownership.ModuleOwnership | undefined,
@@ -550,12 +715,11 @@ export const lowerWitnessEffectRunner = (
   generatedRunners: Array<GeneratedEffectRunner>,
   opaqueRealizations: OpaqueRealization.Catalog,
 ): Mir.MirFunction | undefined => {
-  const parameterTypes = spec.type.environment.fields.flatMap((field) => {
-    // The layout resolves scalar-enum nominals to their Enum representation, exactly as in
-    // lowerEffectRunner — without it a captured enum silently fails every enum operation.
-    const type = mirType(field.type, new Map(), layout)
-    return type === undefined ? [] : [type]
-  })
+  const parameterTypes = effectCaptureParameterTypes(
+    spec.type.environment.fields,
+    layout,
+    opaqueRealizations,
+  )
   if (parameterTypes.length !== spec.type.environment.fields.length) return undefined
   const parameterizedRequirements = spec.providedRequirements.filter(
     (requirement) => requirement.witness._tag === 'SourceConformanceWitness',
