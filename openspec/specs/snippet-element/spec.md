@@ -66,8 +66,12 @@ failures.
 ### Requirement: Hover presents language-server content safely
 
 When hover is enabled, pointing at source SHALL show the language server's hover content for that
-position, rendered from its CommonMark payload. Links in hover content SHALL only be emitted for
-http, https, and mailto destinations; other schemes SHALL render as plain text.
+position, rendered from its CommonMark payload into a detached DOM node. Links in hover content
+SHALL only be emitted for explicit `http:`, `https:`, and `mailto:` destinations after CommonMark
+entity decoding and ASCII control-character removal. Relative, fragment, protocol-relative, and
+all other destinations SHALL render as plain text. Raw HTML SHALL render literally rather than
+creating authored elements. The renderer SHALL highlight fenced Silk code with the editor's
+classes and SHALL NOT inject standalone CSS.
 
 #### Scenario: Hovering a declaration
 
@@ -77,8 +81,14 @@ http, https, and mailto destinations; other schemes SHALL render as plain text.
 
 #### Scenario: Unsafe link scheme
 
-- **WHEN** hover content contains a link with a non-http(s), non-mailto scheme
+- **WHEN** hover content contains a relative, fragment, protocol-relative, unknown-scheme, or
+  encoded-control destination that does not normalize to an explicit allowed scheme
 - **THEN** the tooltip shows the link text without a hyperlink
+
+#### Scenario: Raw HTML
+
+- **WHEN** hover content contains authored raw HTML
+- **THEN** the tooltip shows that HTML literally and creates no authored element
 
 ### Requirement: Inlay hints render inline
 

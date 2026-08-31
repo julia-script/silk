@@ -8,6 +8,10 @@ support that can be reused independently of any one application:
   configuration.
 - `@silklang/editor-support/Editor` provides the framework-free CodeMirror editor with diagnostics,
   hover, inlay hints, and UTF-8/UTF-16 position mapping.
+- `@silklang/editor-support` exposes `HoverContent` as a namespace, while
+  `@silklang/editor-support/HoverContent` provides the same actor as a deep import. Its `render`
+  operation converts CommonMark hover payloads into detached DOM, requires a browser-compatible
+  `document`, and leaves tooltip and highlight CSS to the host.
 - `@silklang/editor-support/Element` and `/register` provide the `<silk-snippet>` custom element.
 - `@silklang/editor-support/bundle` resolves to the self-registering browser bundle built for
   generated documentation sites.
