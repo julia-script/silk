@@ -4994,6 +4994,15 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             rootSemantic !== undefined && SilkType.isReference(rootSemantic)
               ? rootSemantic.access
               : undefined
+          const sliceSelector = operation.selectors.find(
+            (selector) => selector._tag === 'SliceElementSelector',
+          )
+          const borrowedAccesses = [
+            ...(referenceAccess === undefined ? [] : [referenceAccess]),
+            ...operation.selectors.flatMap((selector) =>
+              selector._tag === 'SliceElementSelector' ? [selector.access] : [],
+            ),
+          ]
           const pairedReplacement =
             operation._tag === 'ReadPlace' && operation.consume === true
               ? operations.at(index + 1)
@@ -5001,14 +5010,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const consumingReadValid =
             operation._tag !== 'ReadPlace' ||
             operation.consume !== true ||
-            referenceAccess === undefined ||
-            (referenceAccess === 'Exclusive' &&
+            borrowedAccesses.length === 0 ||
+            (borrowedAccesses.every((access) => access === 'Exclusive') &&
               pairedReplacement?._tag === 'WritePlace' &&
               pairedReplacement.root.ordinal === operation.root.ordinal &&
               samePlaceSelectors(pairedReplacement.selectors, operation.selectors))
-          const sliceSelector = operation.selectors.find(
-            (selector) => selector._tag === 'SliceElementSelector',
-          )
           const sharedMatchProjection =
             operation._tag === 'ReadPlace' &&
             operation.consume !== true &&
@@ -5097,7 +5103,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 function: fn.id,
                 region: region.id,
                 detail: !consumingReadValid
-                  ? 'consuming reference ReadPlace is not followed by a same-place replacement through an exclusive root'
+                  ? 'consuming borrowed ReadPlace is not followed by a same-place replacement through exclusive access'
                   : `${operation._tag} does not match its root, selectors, or type`,
               }),
             )

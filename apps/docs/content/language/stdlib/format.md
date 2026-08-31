@@ -369,7 +369,8 @@ Reports whether a minimum width was supplied.
 pub fn width(self: &silk/format.Formatter) -> usize
 ```
 
-Returns the requested minimum width, or zero when no width was supplied.
+Returns the requested minimum width in Unicode scalars, not UTF-8 bytes or terminal cells, or
+zero when no width was supplied.
 
 <a id="declaration-73696c6b2f666f726d61743a3a616c69676e6d656e74"></a>
 
@@ -419,7 +420,8 @@ Reports whether alternate presentation is requested.
 pub fn zeroPad(self: &silk/format.Formatter) -> bool
 ```
 
-Reports whether width-driven integer zero padding is requested.
+Reports whether width-driven integer zero padding is requested. A supplied precision disables
+that padding when presenting an integer.
 
 <a id="declaration-73696c6b2f666f726d61743a3a686173507265636973696f6e"></a>
 
@@ -439,7 +441,8 @@ Reports whether a numeric precision was supplied.
 pub fn precision(self: &silk/format.Formatter) -> usize
 ```
 
-Returns the requested numeric precision, or zero when none was supplied.
+Returns the requested minimum digit count, or zero when no numeric precision was supplied. For
+integers, a supplied precision disables width-driven zero padding.
 
 <a id="declaration-73696c6b2f666f726d61743a3a636f6c6f72"></a>
 
@@ -540,7 +543,8 @@ extra scalar up. No padding is returned when the requested width does not exceed
 pub effect fn writeLeadingPadding(self: &mut silk/format.Formatter, contentWidth: usize) -> () ! WriterError ? &mut Writer
 ```
 
-Emits all fill required before content with this visible width.
+Emits all fill required before content whose width is the supplied Unicode-scalar count, not a
+byte or terminal-cell count.
 
 ### Gotchas
 
@@ -555,7 +559,8 @@ failure remains written.
 pub effect fn writeTrailingPadding(self: &mut silk/format.Formatter, contentWidth: usize) -> () ! WriterError ? &mut Writer
 ```
 
-Emits all fill required after content with this visible width.
+Emits all fill required after content whose width is the supplied Unicode-scalar count, not a
+byte or terminal-cell count.
 
 ### Gotchas
 
