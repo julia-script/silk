@@ -47,20 +47,50 @@ const installedDependencyNames = (parent: string): ReadonlyArray<string> =>
   ).sort()
 
 const installedDependencyVersion = (parent: string, name: string): string =>
-  JSON.parse(readFileSync(resolve(installedPackageRoot(parent), `../${name}/package.json`), 'utf8'))
-    .version
+  JSON.parse(
+    readFileSync(
+      resolve(
+        installedPackageRoot(parent),
+        ...parent.split('/').map(() => '..'),
+        name,
+        'package.json',
+      ),
+      'utf8',
+    ),
+  ).version
 
-const effectDependencyOverrides = installedDependencyNames('effect').map(
-  (name) => `  '${name}': ${installedDependencyVersion('effect', name)}`,
-)
+const consumerDependencyParents: ReadonlyArray<string> = Object.freeze([
+  'effect',
+  '@effect/platform-node',
+])
+
+const consumerDependencyVersions = new Map<string, string>()
+for (const parent of consumerDependencyParents) {
+  for (const name of installedDependencyNames(parent)) {
+    const version = installedDependencyVersion(parent, name)
+    const existing = consumerDependencyVersions.get(name)
+    if (existing !== undefined && existing !== version)
+      throw new Error(
+        `packed consumer dependency ${name} has incompatible installed versions ${existing} and ${version}`,
+      )
+    consumerDependencyVersions.set(name, version)
+  }
+}
+
+const consumerDependencyOverrides = Array.from(consumerDependencyVersions)
+  .sort(([left], [right]) => left.localeCompare(right))
+  .map(([name, version]) => `  '${name}': ${version}`)
 
 const consumerWorkspace = (configuration = ''): string =>
-  `overrides:\n${effectDependencyOverrides.join('\n')}\n${configuration}`
+  `overrides:\n${consumerDependencyOverrides.join('\n')}\n${configuration}`
 
-test('consumer workspaces pin Effect transitive ranges to installed versions', () => {
+test('consumer workspaces pin runtime transitive ranges to installed versions', () => {
   const workspace = consumerWorkspace()
-  for (const override of effectDependencyOverrides) expect(workspace).toContain(override)
-  expect(effectDependencyOverrides).toHaveLength(installedDependencyNames('effect').length)
+  for (const parent of consumerDependencyParents) {
+    for (const name of installedDependencyNames(parent))
+      expect(workspace).toContain(`  '${name}': ${installedDependencyVersion(parent, name)}`)
+  }
+  expect(consumerDependencyOverrides).toHaveLength(consumerDependencyVersions.size)
 })
 
 const installConsumer = (cwd: string): void => {
@@ -1539,7 +1569,7 @@ test('the CLI release candidate installs with its project-first command surface'
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
       ),
     )
     installConsumer(consumerRoot)
@@ -1835,7 +1865,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  vscode-languageserver: ${lspInstalledVersion('vscode-languageserver')}\n  vscode-languageserver-textdocument: ${lspInstalledVersion('vscode-languageserver-textdocument')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  vscode-languageserver: ${lspInstalledVersion('vscode-languageserver')}\n  vscode-languageserver-textdocument: ${lspInstalledVersion('vscode-languageserver-textdocument')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
       ),
     )
     installConsumer(consumerRoot)
