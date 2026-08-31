@@ -330,8 +330,7 @@ pub effect fn main() -> () ! Streams.WriterError {
     const hover = Document.hover(document, snapshot, positionOf(source, 'streams', 1))
     assert.deepEqual(hover?.contents, {
       kind: 'markdown',
-      value:
-        '```silk\nlet mut streams: Streams.StdoutWriter\n```\n\n**Implements**\n\n- `Writer`',
+      value: '```silk\nlet mut streams: Streams.StdoutWriter\n```\n\n**Implements**\n\n- `Writer`',
     })
 
     const selectorOffset = source.indexOf('provideMut(') + 'provideMut'.length
