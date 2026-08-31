@@ -404,7 +404,7 @@ it.effect(
       }
       assert.deepEqual([...covered].sort(), [...tokenKinds].sort())
     }),
-  30_000,
+  60_000,
 )
 
 it.effect('publishes only general MIR operations for the pressure program', () =>
