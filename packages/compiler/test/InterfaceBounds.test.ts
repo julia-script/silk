@@ -439,6 +439,45 @@ pub fn main() -> i32 { return 0 }`),
   }),
 )
 
+it.effect('keeps a scalar conformance in the source contract module', () =>
+  Effect.gen(function* () {
+    const contracts = encoder.encode(`pub interface Present {
+  fn present(value: &Self) -> i32
+}`)
+    const root = SourceFile.make(
+      'consumer',
+      encoder.encode(`import contracts { Present }
+impl Present for i32 {
+  fn present(value: &Self) -> i32 { return 42 }
+}
+pub fn main() -> i32 { return 0 }`),
+    )
+    const self = yield* Analysis.make({ root }).pipe(
+      Effect.provide(SourceResolver.memory(new Map([['contracts', contracts]]))),
+    )
+    assert.include(
+      messages(self),
+      "Invalid conformance: implementation for i32 must be declared in contracts, the contract's module for scalar providers",
+    )
+  }),
+)
+
+it.effect('rejects structural source-interface providers', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`interface Present {
+  fn present(value: &Self) -> i32
+}
+impl Present for [i32; 1] {
+  fn present(value: &Self) -> i32 { return 42 }
+}
+pub fn main() -> i32 { return 0 }`)
+    assert.include(
+      messages(self),
+      'Invalid conformance: interface and service providers must be nominal types or scalar types',
+    )
+  }),
+)
+
 it.effect('reports a bound operation reachable through two bounded parameters', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`pub interface Mixer {

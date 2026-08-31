@@ -41,7 +41,7 @@ import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type { DelayedEffectState } from './Lower.js'
-import { bool, borrowKey, character, isOsOperation, local, patternKey, usize } from './Lower.js'
+import { bool, borrowKey, character, isOsOperation, patternKey, usize } from './Lower.js'
 import { lowerBuiltinExpression } from './LowerBuiltin.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
@@ -1813,6 +1813,9 @@ export function lowerExpressionInner(
     case 'Project': {
       return lowerPlace(fn, expression, availableRequirements)
     }
+    case 'ReferentPlace': {
+      return lowerPlace(fn, expression, availableRequirements)
+    }
     case 'IndexPlace': {
       return lowerPlace(fn, expression, availableRequirements)
     }
@@ -1827,7 +1830,7 @@ export function lowerExpressionInner(
           root = fn.bindingLocals.get(expression.root.binding.ordinal)
           break
         case 'ParameterSliceRoot':
-          root = local(expression.root.parameter.ordinal)
+          root = fn.parameterLocals.get(expression.root.parameter.ordinal)
           break
         case 'PatternSliceRoot':
           root = fn.patternLocals.get(patternKey(expression.root.binding))
@@ -1888,7 +1891,7 @@ export function lowerExpressionInner(
           root = fn.bindingLocals.get(expression.root.binding.ordinal)
           break
         case 'ParameterSliceRoot':
-          root = local(expression.root.parameter.ordinal)
+          root = fn.parameterLocals.get(expression.root.parameter.ordinal)
           break
         case 'PatternSliceRoot':
           root = fn.patternLocals.get(patternKey(expression.root.binding))
@@ -1916,8 +1919,8 @@ export function lowerExpressionInner(
           sourceType,
           type,
           access: expression.access,
-          reborrow: false,
-          suspendsParent: false,
+          reborrow: expression.reborrow,
+          suspendsParent: expression.suspendsParent,
           provenance: authored(expression.span),
         }),
       )

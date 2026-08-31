@@ -52,7 +52,8 @@ it.effect('pins one operator pipeline through canonical HIR, MIR, LLVM, and WebA
     const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
 
     assert.strictEqual(Hir.encode(Analysis.rootAnalysis(native).hir), golden('hir.txt'))
-    assert.strictEqual(MirEncoding.encode(Analysis.loweredMir(native)), golden('mir.txt'))
+    const encodedMir = MirEncoding.encode(Analysis.loweredMir(native))
+    assert.strictEqual(encodedMir, golden('mir.txt'))
     assert.strictEqual(llvmArtifact.ir, golden('ll.txt'))
     assert.strictEqual(wasmArtifact.wat, golden('wat.txt'))
     assert.strictEqual(

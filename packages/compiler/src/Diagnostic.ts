@@ -350,6 +350,8 @@ export const invalidNominalUnionConstructionCode = 'SEM0169' as const
 
 /** Stable code for a duration literal whose exact nanosecond total exceeds `u64`. */
 export const durationOutOfRangeCode = 'SEM0170' as const
+/** Stable code for postfix referent projection whose subject is not a reference. */
+export const invalidReferentProjectionCode = 'SEM0171' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -562,6 +564,7 @@ export type Code =
   | typeof expectedNominalUnionCode
   | typeof invalidNominalUnionConstructionCode
   | typeof durationOutOfRangeCode
+  | typeof invalidReferentProjectionCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -978,6 +981,7 @@ export type Reason =
       readonly actual: string
     }
   | { readonly _tag: 'ProjectionOnNonStruct'; readonly actual: string }
+  | { readonly _tag: 'InvalidReferentProjection'; readonly actual: string }
   | { readonly _tag: 'UnknownProjectedField'; readonly type: string; readonly field: string }
   | { readonly _tag: 'InaccessibleProjectedField'; readonly type: string; readonly field: string }
   | { readonly _tag: 'EmptyArrayNeedsContext' }
@@ -2272,6 +2276,20 @@ export const projectionOnNonStruct = (actual: string, span: SourceSpan.SourceSpa
     severity: 'error',
     message: `Cannot project a field from ${actual}`,
     reason: Object.freeze({ _tag: 'ProjectionOnNonStruct', actual }),
+    span,
+  })
+
+export const invalidReferentProjection = (
+  actual: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidReferentProjectionCode,
+    severity: 'error',
+    message: `Cannot project a referent from ${actual}; the subject must be a reference`,
+    reason: Object.freeze({ _tag: 'InvalidReferentProjection', actual }),
     span,
   })
 

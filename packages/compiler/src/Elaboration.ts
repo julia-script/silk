@@ -349,6 +349,12 @@ export type BorrowFormationFact =
       readonly root: BorrowRootFact
       readonly source: Type.Type
     }
+  | {
+      readonly _tag: 'ValueReborrow'
+      readonly root: BorrowRootFact
+      readonly parent: Type.Reference
+      readonly suspendsParent: boolean
+    }
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
 
 /** One explicit whole-root borrowed view. */
@@ -609,6 +615,21 @@ export interface FieldProjectionExpressionFact {
   readonly fieldName: string | undefined
   readonly fieldToken?: Token.Token
   readonly state: ProjectionState
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
+export type ReferentProjectionState =
+  | { readonly _tag: 'Resolved'; readonly reference: Type.Reference }
+  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
+
+/** One explicit postfix projection from a reference value to its borrowed target place. */
+export interface ReferentProjectionExpressionFact {
+  readonly _tag: 'ReferentProjection'
+  readonly subject: ExpressionFact
+  readonly reference?: Type.Reference
+  readonly borrowAccess?: Type.BorrowAccess
+  readonly state: ReferentProjectionState
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
 }
@@ -927,6 +948,7 @@ export type ExpressionFact =
   | UnionVariantExpressionFact
   | ArrayLiteralExpressionFact
   | FieldProjectionExpressionFact
+  | ReferentProjectionExpressionFact
   | IndexProjectionExpressionFact
   | GroupedExpressionFact
   | OperatorExpressionFact
@@ -1141,7 +1163,11 @@ export const assignmentRoot = (fact: ExpressionFact): AssignmentRootFact | undef
     if (fact.reference._tag === 'Resolved') return fact.reference.parameter
     return undefined
   }
-  if (fact._tag === 'FieldProjection' || fact._tag === 'IndexProjection') {
+  if (
+    fact._tag === 'FieldProjection' ||
+    fact._tag === 'ReferentProjection' ||
+    fact._tag === 'IndexProjection'
+  ) {
     return assignmentRoot(fact.subject)
   }
   if (fact._tag === 'Grouped') return assignmentRoot(fact.expression)
@@ -1429,6 +1455,7 @@ export const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.fr
   'UnionVariantExpression',
   'ArrayLiteralExpression',
   'FieldProjectionExpression',
+  'ReferentProjectionExpression',
   'IndexProjectionExpression',
   'CallExpression',
   'GroupedExpression',
@@ -1453,6 +1480,7 @@ export const isRecursiveArgumentNode = (element: SyntaxTree.Element): element is
     element.kind === 'UnionVariantExpression' ||
     element.kind === 'ArrayLiteralExpression' ||
     element.kind === 'FieldProjectionExpression' ||
+    element.kind === 'ReferentProjectionExpression' ||
     element.kind === 'IndexProjectionExpression' ||
     element.kind === 'GroupedExpression' ||
     element.kind === 'PrefixExpression' ||

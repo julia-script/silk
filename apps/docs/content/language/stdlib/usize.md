@@ -17,7 +17,9 @@ division by zero, and invalid shift counts trap. `checked*` returns [`Option`](.
 computes modulo the target width, and `saturating*` clamps at [`MIN`](#declaration-73696c6b2f7573697a653a3a4d494e) or [`MAX`](#declaration-73696c6b2f7573697a653a3a4d4158).
 
 [`ZERO`](#declaration-73696c6b2f7573697a653a3a5a45524f) and [`ONE`](#declaration-73696c6b2f7573697a653a3a4f4e45) provide typed values where an uncontextualized literal would be `i32`.
-Decimal [`parse`](#declaration-73696c6b2f7573697a653a3a7061727365) uses the target's range, while [`toText`](#declaration-73696c6b2f7573697a653a3a746f54657874) allocates owned text.
+Decimal [`parse`](#declaration-73696c6b2f7573697a653a3a7061727365) uses the target's range. Use [`Format`](./format.md#declaration-73696c6b2f666f726d61743a3a466f726d6174) with `Format.display` for defaults or
+`Format.displayWith` for explicit options. Both operations stream through a mutable `Writer`
+without `Allocator`.
 
 ## Gotchas
 
@@ -28,7 +30,7 @@ A value valid as usize on a 64-bit target can be out of range on a 32-bit target
 ### Keep a count within the target range
 
 ```silk
-import silk.option { Option }
+import silk.option {Option}
 
 import silk.usize
 
@@ -42,7 +44,7 @@ pub fn main() -> i32 {
 
 Import as `usize` with `import silk.usize`.
 
-Public declarations: 59.
+Public declarations: 58.
 
 <a id="declaration-73696c6b2f7573697a653a3a4d4158"></a>
 
@@ -654,17 +656,6 @@ pub fn greaterOrEqual(left: usize, right: usize) -> bool
 ```
 
 Returns `true` when `left` is greater than or equal to `right`.
-
-<a id="declaration-73696c6b2f7573697a653a3a746f54657874"></a>
-
-## `toText`
-
-```silk
-pub effect fn toText(value: usize) -> String ! OutOfMemoryError ? &mut Allocator
-```
-
-Renders the value as base-10 text in new owned storage. Allocation uses the required
-`Allocator` and can fail with `OutOfMemoryError`.
 
 <a id="declaration-73696c6b2f7573697a653a3a7061727365"></a>
 

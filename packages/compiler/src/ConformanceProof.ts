@@ -556,11 +556,11 @@ export const interfaceOperationIntrinsic = (
 }
 
 /**
- * Selects the provider's own function that its interface conformance maps one operation to.
+ * Selects the canonical source function that an interface conformance maps one operation to.
  *
- * Nothing is returned when the mapping names a sealed intrinsic instead, which is the whole answer
- * for every scalar witness: specialization keeps lowering those operators to the compiler-known
- * operation and only a source-declared target redirects the call to ordinary Silk.
+ * Nothing is returned when the mapping names a sealed intrinsic instead. Inline implementations
+ * are selected by their conformance identity rather than by their synthesized source spelling, so
+ * scalar and nominal providers share the same stable lookup.
  */
 export const interfaceWitnessImplementation = (
   self: Index,
@@ -580,10 +580,20 @@ const witnessImplementation = (
   conformance: ConformanceFact,
   operation: string,
 ): CanonicalId | undefined => {
-  if (!Type.isNominal(provider)) return undefined
   const mapping = conformance.operations.find(
     (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === operation,
   )
+  if (mapping?.form === 'Inline') {
+    const declaration = self.modules
+      .find((module) => module.module === conformance.module)
+      ?.declarations.find(
+        (candidate) =>
+          candidate.conformanceImplementation?.ordinal === conformance.ordinal &&
+          candidate.conformanceImplementation.operation === operation,
+      )
+    return declaration?.canonical._tag === 'Canonical' ? declaration.canonical.id : undefined
+  }
+  if (!Type.isNominal(provider)) return undefined
   const target = mapping?.target
   if (
     target?._tag !== 'TypePath' ||

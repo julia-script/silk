@@ -812,6 +812,12 @@ export const lowerPlacePath = (
   expression: Hir.Expression,
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.providedRequirements,
 ): LoweredPlace | undefined => {
+  if (expression._tag === 'ReferentPlace') {
+    const root = lowerExpression(fn, expression.subject, availableRequirements)
+    return root === undefined
+      ? undefined
+      : Object.freeze({ root: root.result, selectors: Object.freeze([]) })
+  }
   if (expression._tag === 'Project') {
     const subject = lowerPlacePath(fn, expression.subject, availableRequirements)
     if (subject === undefined) return undefined
@@ -882,7 +888,7 @@ export const lowerPlace = (
   fn: FunctionLowering,
   expression: Extract<
     Hir.Expression,
-    { readonly _tag: 'Project' | 'IndexPlace' | 'SliceIndexPlace' }
+    { readonly _tag: 'ReferentPlace' | 'Project' | 'IndexPlace' | 'SliceIndexPlace' }
   >,
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.providedRequirements,
 ): LoweredExpression | undefined => {
@@ -900,7 +906,8 @@ export const lowerPlace = (
       ...((type._tag === 'CallableValue' &&
         type.storage !== undefined &&
         type.type.mode === 'Take') ||
-      (type._tag === 'EffectValue' && type.storage !== undefined && type.type.access === 'Take')
+      (type._tag === 'EffectValue' && type.storage !== undefined && type.type.access === 'Take') ||
+      ('access' in expression && expression.access === 'ConsumeRequested')
         ? { consume: true as const }
         : {}),
       provenance: Object.freeze({ span: expression.span, generated: false }),

@@ -1476,7 +1476,19 @@ export function parseProjectionChain(initial: NodeResult, depth: number): NodeRe
       continue
     }
     if (nextSignificantKind(result.state) === 'Dot') {
-      const dot = expect(result.state, 'Dot', ['Identifier', ...expressionFollowing])
+      const dot = expect(result.state, 'Dot', ['Identifier', 'Star', ...expressionFollowing])
+      if (nextSignificantKind(dot.state) === 'Star') {
+        const star = expect(dot.state, 'Star', expressionFollowing)
+        result = Object.freeze({
+          state: star.state,
+          node: syntaxNode(star.state, 'ReferentProjectionExpression', [
+            result.node,
+            ...dot.elements,
+            ...star.elements,
+          ]),
+        })
+        continue
+      }
       const field = expect(
         dot.state,
         nextSignificantKind(dot.state) === 'DropKeyword' ? 'DropKeyword' : 'Identifier',

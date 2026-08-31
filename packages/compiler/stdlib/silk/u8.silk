@@ -10,12 +10,14 @@
 //! `saturating*` clamps at [`MIN`] or [`MAX`]. Right shift inserts zero bits.
 //!
 //! Decimal [`parse`] accepts only a complete unsigned representation; a leading minus sign is
-//! malformed rather than an out-of-range unsigned value. [`toText`] allocates owned text.
+//! malformed rather than an out-of-range unsigned value. Use [`Format`] with `Format.display` for
+//! defaults or `Format.displayWith` for explicit options. Both operations stream through a mutable
+//! `Writer` without `Allocator`.
 //!
 //! # Examples
 //! ## Choose an overflow policy instead of relying on a trap
 //! ```silk
-//! import silk.option { Option }
+//! import silk.option {Option}
 //!
 //! import silk.u8
 //!
@@ -40,12 +42,9 @@
 //! Use the `silk.char` module when a value is a Unicode scalar rather than an arbitrary byte.
 
 import silk.bool as bool
-import silk.allocator { Allocator }
-import silk.allocator { OutOfMemoryError }
 import silk.f32 as f32
 import silk.f64 as f64
-import silk.format as Format
-import silk.format { ParseError }
+import silk.format { Format, ParseError }
 import silk.i16 as i16
 import silk.i32 as i32
 import silk.i64 as i64
@@ -53,7 +52,6 @@ import silk.i8 as i8
 import silk.isize as isize
 import silk.option { Option, none, some }
 import silk.result { Result }
-import silk.string { String }
 import silk.u16 as u16
 import silk.u32 as u32
 import silk.u64 as u64
@@ -355,12 +353,6 @@ pub fn greaterThan(left: u8, right: u8) -> bool {
 /// Returns `true` when `left` is greater than or equal to `right`.
 pub fn greaterOrEqual(left: u8, right: u8) -> bool {
   return Intrinsic.u8GreaterOrEqual(left, right)
-}
-
-/// Renders the value as base-10 text in new owned storage. Allocation uses the required
-/// `Allocator` and can fail with `OutOfMemoryError`.
-pub effect fn toText(value: u8) -> String ! OutOfMemoryError ? &mut Allocator {
-  return run Format.unsignedText(toU64(value))
 }
 
 /// Reads the complete text as an unsigned decimal `u8`.

@@ -86,7 +86,7 @@ it.effect(
     }),
 )
 
-it.effect('rejects missing endings and mismatched slice access as verifier data', () =>
+it.effect('rejects missing endings, consuming shared reads, and mismatched slice access', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(source)
     const mir = Analysis.loweredMir(self)
@@ -124,6 +124,43 @@ it.effect('rejects missing endings and mismatched slice access as verifier data'
     const inspectIndex = mir.functions.findIndex((fn) => fn.id.name === 'inspect')
     const inspect = mir.functions.at(inspectIndex)
     if (inspect === undefined) throw new RangeError('expected inspect MIR function')
+    const sharedRead: Mir.MirFunction = Object.freeze({
+      ...inspect,
+      regions: Object.freeze(
+        inspect.regions.map((region) =>
+          region._tag === 'OperationRegion'
+            ? Object.freeze({
+                ...region,
+                operations: Object.freeze(
+                  region.operations.map(
+                    (operation): Mir.Operation =>
+                      operation._tag === 'ReadPlace' &&
+                      operation.selectors.some(
+                        (selector) =>
+                          selector._tag === 'SliceElementSelector' && selector.access === 'Shared',
+                      )
+                        ? Object.freeze({ ...operation, consume: true })
+                        : operation,
+                  ),
+                ),
+              })
+            : region,
+        ),
+      ),
+    })
+    const consumingShared: Mir.Module = Object.freeze({
+      ...mir,
+      functions: Object.freeze([
+        ...mir.functions.slice(0, inspectIndex),
+        sharedRead,
+        ...mir.functions.slice(inspectIndex + 1),
+      ]),
+    })
+    assert.include(
+      MirVerification.verify(consumingShared).map((violation) => violation.rule),
+      'InvalidSliceOperation',
+    )
+
     const wrongAccess: Mir.MirFunction = Object.freeze({
       ...inspect,
       regions: Object.freeze(

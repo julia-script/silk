@@ -99,6 +99,7 @@ export type NodeKind =
   | 'ArrayLiteralExpression'
   | 'StructFieldInitializer'
   | 'FieldProjectionExpression'
+  | 'ReferentProjectionExpression'
   | 'IndexProjectionExpression'
   | 'CallExpression'
   | 'CallTypeArgumentList'

@@ -93,9 +93,8 @@ pub fn main() -> i32 {
 
 it.effect('refuses a source witness for a scalar provider', () =>
   Effect.gen(function* () {
-    // A scalar's conformance admits a sealed intrinsic and nothing else, so a scalar key's hash
-    // cannot be ordinary Silk. Since no intrinsic computes a hash, and requirement 9 forbids one
-    // being added, a scalar key has no honest `hash` witness to name.
+    // A scalar has no provider-owned module from which an ordinary mapped function can be selected.
+    // Source witnesses for scalars therefore have one unambiguous declaration form: inline.
     const snapshot = yield* analyzed(
       'hash-key-bound/scalar-source-witness',
       `import silk.u64 as u64
@@ -107,7 +106,7 @@ impl HashKey for u64 { digest: u64.u64Digest }
 pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(messages(snapshot), [
-      'Invalid conformance: u64.u64Digest is incompatible with HashKey.digest',
+      'Invalid conformance: u64.u64Digest is incompatible with HashKey.digest: scalar source witnesses must be declared inline',
     ])
   }),
 )

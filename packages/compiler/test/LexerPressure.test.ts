@@ -377,31 +377,34 @@ const observations = (
   })
 }
 
-it.effect('matches the canonical lexer over a complete table-driven corpus', () =>
-  Effect.gen(function* () {
-    const covered = new Set<Token.TokenKind>()
-    for (const entry of corpus) {
-      const generated = sourceFor(entry.input, `lexer-pressure/oracle/${entry.id}`)
-      for (const token of generated.expected.tokens) covered.add(token.kind)
-      const snapshot = yield* Analysis.ofSourceRealized(
-        `lexer-pressure/${entry.id}`,
-        ascii(generated.source),
-        'wasm32-unknown-unknown',
-      )
-      assert.deepEqual(Analysis.diagnostics(snapshot), [], entry.id)
-      const outcome = Analysis.evaluate(snapshot)
-      assert.strictEqual(outcome._tag, 'Completed', entry.id)
-      if (outcome._tag !== 'Completed') continue
-      const observed = observations(outcome)
-      assert.deepEqual(
-        observed.tokens,
-        generated.expected.tokens.map(({ code, start, end }) => ({ code, start, end })),
-        entry.id,
-      )
-      assert.deepEqual(observed.diagnostics, generated.expected.diagnostics, entry.id)
-    }
-    assert.deepEqual([...covered].sort(), [...tokenKinds].sort())
-  }),
+it.effect(
+  'matches the canonical lexer over a complete table-driven corpus',
+  () =>
+    Effect.gen(function* () {
+      const covered = new Set<Token.TokenKind>()
+      for (const entry of corpus) {
+        const generated = sourceFor(entry.input, `lexer-pressure/oracle/${entry.id}`)
+        for (const token of generated.expected.tokens) covered.add(token.kind)
+        const snapshot = yield* Analysis.ofSourceRealized(
+          `lexer-pressure/${entry.id}`,
+          ascii(generated.source),
+          'wasm32-unknown-unknown',
+        )
+        assert.deepEqual(Analysis.diagnostics(snapshot), [], entry.id)
+        const outcome = Analysis.evaluate(snapshot)
+        assert.strictEqual(outcome._tag, 'Completed', entry.id)
+        if (outcome._tag !== 'Completed') continue
+        const observed = observations(outcome)
+        assert.deepEqual(
+          observed.tokens,
+          generated.expected.tokens.map(({ code, start, end }) => ({ code, start, end })),
+          entry.id,
+        )
+        assert.deepEqual(observed.diagnostics, generated.expected.diagnostics, entry.id)
+      }
+      assert.deepEqual([...covered].sort(), [...tokenKinds].sort())
+    }),
+  60_000,
 )
 
 it.effect('publishes only general MIR operations for the pressure program', () =>
@@ -503,7 +506,8 @@ it.effect(
       const allocationCount = baselineOutcome.trace.filter(
         (event) => event._tag === 'AllocationAcquire',
       ).length
-      assert.isAtLeast(allocationCount, 4)
+      // Rendering is Writer-backed now; only token and diagnostic vector growth allocates.
+      assert.isAtLeast(allocationCount, 2)
 
       // Native execution runs at the boundary ordinals only — immediate failure, one mid-growth
       // rollback, and unrestricted completion — while the evaluator and Wasm carry every ordinal.

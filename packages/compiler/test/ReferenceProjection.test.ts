@@ -2,10 +2,336 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
+import type * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+it.effect('reads a Copy scalar through an explicit referent projection', () =>
+  Effect.gen(function* () {
+    const source = `fn read(value: &i32) -> i32 { return value.* }
+pub fn main() -> i32 {
+  let value = 42
+  return read(&value)
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'reference-projection/scalar-referent',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const [projection] = Analysis.referentProjectionsOf(
+      snapshot,
+      'reference-projection/scalar-referent',
+    )
+    assert.strictEqual(projection?.state._tag, 'Resolved')
+    assert.strictEqual(projection?.borrowAccess, 'Shared')
+    assert.strictEqual(projection?.type._tag, 'Available')
+    if (projection?.type._tag === 'Available') assert.strictEqual(projection.type.type, 'i32')
+    assert.deepEqual(Hir.verify(Analysis.rootAnalysis(snapshot).hir), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('reads a zero-lane Copy referent without inventing runtime state', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'reference-projection/zero-lane-referent',
+      ascii(`struct Empty {}
+impl Copy for Empty {}
+fn read(value: &Empty) -> Empty { return value.* }
+pub fn main() -> i32 {
+  let value = Empty {}
+  let copied = read(&value)
+  drop copied
+  return 42
+}`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(Hir.verify(Analysis.rootAnalysis(snapshot).hir), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('reads and writes a runtime-indexed element through an explicit referent', () =>
+  Effect.gen(function* () {
+    const source = `import silk.usize as usize
+struct Buffer { values: [i32; 3] }
+fn update(buffer: &mut Buffer, index: usize) -> i32 {
+  buffer.*.values[index] = 42
+  return buffer.*.values[index]
+}
+pub fn main() -> i32 {
+  let mut buffer = Buffer { values: [1, 2, 3] }
+  return update(&mut buffer, usize.ONE)
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'reference-projection/runtime-indexed-referent',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(Hir.verify(Analysis.rootAnalysis(snapshot).hir), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('retains failed referent facts and rejects affine borrowed reads', () =>
+  Effect.gen(function* () {
+    const invalid = yield* Analysis.ofSourceRealized(
+      'reference-projection/non-reference-referent',
+      ascii('fn invalid(value: i32) -> i32 { return value.* }'),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
+      ['SEM0171'],
+    )
+    assert.strictEqual(
+      Analysis.referentProjectionsOf(invalid, 'reference-projection/non-reference-referent').at(0)
+        ?.state._tag,
+      'Unavailable',
+    )
+
+    const affine = yield* Analysis.ofSourceRealized(
+      'reference-projection/affine-referent',
+      ascii(`struct Token { value: i32 }
+fn invalid(value: &Token) -> Token { return value.* }`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(affine).map((diagnostic) => diagnostic.code),
+      ['OWN0012'],
+    )
+  }),
+)
+
+it.effect('reborrows value-reference parameters for nested calls and restores the parent', () =>
+  Effect.gen(function* () {
+    const source = `struct Box { value: i32 }
+fn increment(box: &mut Box) -> () { box.value = box.value + 1 }
+fn observe(box: &Box) -> i32 { return box.value }
+fn read(value: &i32) -> i32 { return value.* }
+fn forwarded(value: &i32) -> i32 { return read(&value.*) }
+fn twice(box: &mut Box) -> i32 {
+  increment(&mut box)
+  increment(&mut box)
+  return observe(&box) + forwarded(&box.value)
+}
+pub fn main() -> i32 {
+  let mut box = Box { value: 20 }
+  return twice(&mut box)
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'reference-projection/value-reborrow',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.include(Hir.encode(Analysis.rootAnalysis(snapshot).hir), 'reborrow-value')
+    assert.deepEqual(Hir.verify(Analysis.rootAnalysis(snapshot).hir), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 44n)
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 44)
+  }),
+)
+
+it.effect('rejects strengthening a shared value-reference reborrow', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'reference-projection/value-reborrow-strengthening',
+      ascii(`struct Box { value: i32 }
+fn mutate(box: &mut Box) -> () { box.value = 1 }
+fn invalid(box: &Box) -> () { mutate(&mut box) }`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0056'],
+    )
+  }),
+)
+
+it.effect('replaces an exclusive referent with exact-once cleanup', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'reference-projection/referent-replacement',
+      ascii(`struct Token { value: i32 }
+fn replace(token: &mut Token) -> i32 {
+  token.* = Token { value: 42 }
+  return token.*.value
+}
+pub fn main() -> i32 {
+  let mut token = Token { value: 1 }
+  return replace(&mut token)
+}`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(Hir.verify(Analysis.rootAnalysis(snapshot).hir), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+    assert.strictEqual(
+      evaluated.trace.filter((event) => event._tag === 'ReplacementCleanup').length,
+      1,
+    )
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+
+    const shared = yield* Analysis.ofSourceRealized(
+      'reference-projection/shared-referent-replacement',
+      ascii(`struct Token { value: i32 }
+fn invalid(token: &Token) -> () { token.* = Token { value: 1 } }`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(shared).map((diagnostic) => diagnostic.code),
+      ['SEM0036'],
+    )
+  }),
+)
+
+it.effect('rejects forged consuming reads and writes through shared references', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'reference-projection/forged-shared-mir',
+      ascii(`fn read(value: &i32) -> i32 { return value.* }
+pub fn main() -> i32 {
+  let value = 42
+  return read(&value)
+}`),
+      'wasm32-unknown-unknown',
+    )
+    const mir = Analysis.loweredMir(snapshot)
+    const functionIndex = mir.functions.findIndex((fn) => fn.id.name === 'read')
+    const fn = mir.functions.at(functionIndex)
+    if (fn === undefined) throw new RangeError('expected read MIR function')
+    const read = MirVerification.operations(fn).find((operation) => operation._tag === 'ReadPlace')
+    if (read === undefined) throw new RangeError('expected shared referent read')
+    const rootType = fn.localTypes.at(read.root.ordinal)
+    if (rootType === undefined) throw new RangeError('expected shared reference root type')
+
+    const consuming: Mir.MirFunction = Object.freeze({
+      ...fn,
+      regions: Object.freeze(
+        fn.regions.map((region) =>
+          region._tag === 'OperationRegion'
+            ? Object.freeze({
+                ...region,
+                operations: Object.freeze(
+                  region.operations.map(
+                    (operation): Mir.Operation =>
+                      operation === read ? Object.freeze({ ...read, consume: true }) : operation,
+                  ),
+                ),
+              })
+            : region,
+        ),
+      ),
+    })
+    const consumingModule: Mir.Module = Object.freeze({
+      ...mir,
+      functions: Object.freeze([
+        ...mir.functions.slice(0, functionIndex),
+        consuming,
+        ...mir.functions.slice(functionIndex + 1),
+      ]),
+    })
+    assert.include(
+      MirVerification.verify(consumingModule).map((violation) => violation.rule),
+      'InvalidAggregateOperation',
+    )
+
+    const sharedWrite: Mir.MirFunction = Object.freeze({
+      ...fn,
+      regions: Object.freeze(
+        fn.regions.map((region) =>
+          region._tag === 'OperationRegion'
+            ? Object.freeze({
+                ...region,
+                operations: Object.freeze(
+                  region.operations.flatMap(
+                    (operation): ReadonlyArray<Mir.Operation> =>
+                      operation === read
+                        ? [
+                            read,
+                            Object.freeze({
+                              _tag: 'CheckPlace',
+                              root: read.root,
+                              selectors: read.selectors,
+                              type: read.type,
+                              provenance: read.provenance,
+                            }),
+                            Object.freeze({
+                              _tag: 'WritePlace',
+                              root: read.root,
+                              selectors: read.selectors,
+                              source: read.destination,
+                              rootType,
+                              type: read.type,
+                              mutable: true,
+                              replacement: 'Copy',
+                              commit: 'AfterCleanup',
+                              provenance: read.provenance,
+                            }),
+                          ]
+                        : [operation],
+                  ),
+                ),
+              })
+            : region,
+        ),
+      ),
+    })
+    const sharedWriteModule: Mir.Module = Object.freeze({
+      ...mir,
+      functions: Object.freeze([
+        ...mir.functions.slice(0, functionIndex),
+        sharedWrite,
+        ...mir.functions.slice(functionIndex + 1),
+      ]),
+    })
+    assert.include(
+      MirVerification.verify(sharedWriteModule).map((violation) => violation.rule),
+      'InvalidWrite',
+    )
+  }),
+)
 
 it.effect('reads and writes fields through nominal references on both targets', () =>
   Effect.gen(function* () {

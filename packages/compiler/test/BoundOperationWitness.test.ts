@@ -7,6 +7,7 @@ import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 import * as Projections from './support/projections.js'
+import * as WasmMain from './support/WasmMain.js'
 
 /**
  * The bound-operation call at a source witness.
@@ -55,8 +56,7 @@ const twoEngineValue = (name: string, source: string) =>
     const bootstrap = evaluated._tag === 'Completed' ? Number(evaluated.result.value) : undefined
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-    const direct = (instance.exports.silk_main as () => number)()
+    const direct = yield* WasmMain.invoke(wasm.bytes, 'BoundOperationWitness.invokeWasm')
 
     return Object.freeze({ bootstrap, direct })
   })
@@ -286,6 +286,86 @@ pub fn main() -> i32 {
       assert.strictEqual(outcome.bootstrap, 42)
       assert.strictEqual(outcome.direct, 42)
     }),
+)
+
+it.effect('runs an effectful inline scalar witness with its failure and requirement rows', () =>
+  Effect.gen(function* () {
+    const module = 'bound-operation-witness/inline-scalar-effect'
+    const source = `import silk.effect as Effect
+import silk.result { Result }
+
+pub struct Problem { code: i32 }
+
+service Output {
+  effect fn emit(number: i32) -> i32 ? &Output
+}
+
+struct FixedOutput {}
+
+effect fn emit(self: &FixedOutput, number: i32) -> i32 { return number }
+
+impl Output for FixedOutput { emit: FixedOutput.emit }
+
+interface Present {
+  effect fn present(value: &Self) -> i32 ! Problem ? &Output
+}
+
+impl Present for i32 {
+  effect fn present(value: &Self) -> i32 ! Problem ? &Output {
+    return run Output.emit(42)
+  }
+}
+
+fn pending<T: Present>(value: &T) -> Effect<i32 ! Problem ? &Output> {
+  return Present.present(value)
+}
+
+fn observe(result: Result<i32, Problem>) -> i32 {
+  return match move result {
+      Result<i32, Problem>.Success { value } => value
+      Result<i32, Problem>.Failure { error } => error.code
+  }
+}
+
+pub fn main() -> i32 {
+  let output = FixedOutput {}
+  let value = 7
+  let provided = pending<i32>(&value) |> Effect.provide(&output)
+  return observe(run Effect.result(provided))
+}`
+    const snapshot = yield* analyzed(module, source, 'wasm32-unknown-unknown')
+    assert.deepEqual(messages(snapshot), [])
+
+    const pending = Projections.hirOf(snapshot, module)?.functions.find(
+      (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'pending',
+    )
+    const bound = pending?.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+      .find((expression) => expression._tag === 'BoundOperationCall')
+    assert.strictEqual(bound?._tag, 'BoundOperationCall')
+    if (bound?._tag !== 'BoundOperationCall') return
+    assert.deepEqual(bound.contract.failureRow.failures.map(Type.encode), [`${module}.Problem`])
+    assert.deepEqual(
+      bound.contract.requirementRow.requirements.map((requirement) => ({
+        capability: Type.encode(requirement.capability),
+        access: requirement.access,
+      })),
+      [{ capability: `${module}.Output`, access: 'Shared' }],
+    )
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const direct = yield* WasmMain.invoke(
+      wasm.bytes,
+      'BoundOperationWitness.invokeInlineScalarEffectWasm',
+    )
+    assert.strictEqual(direct, 42)
+  }),
 )
 
 it.effect('weakens implicit operator borrows to a source witness demand', () =>

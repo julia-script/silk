@@ -345,10 +345,9 @@ it.effect('resolves standard-library imports without vendoring source', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized('stdlib/importer', ascii(importing))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    // `usize` renders and reads decimal text, so naming it reaches the formatting stack and the
-    // owned text it produces. The closure is an analysis fact, not an artifact cost: this program's
-    // emitted module is byte-identical to the one it produced before those functions existed,
-    // because codegen emits only what `main` reaches.
+    // `usize` renders and reads decimal text, so naming it reaches the formatting, writer, Effect,
+    // and standard-service stack. The closure is an analysis fact, not an artifact cost: codegen
+    // still emits only what `main` reaches.
     assert.deepEqual(
       Analysis.modules(snapshot).map((module) => module.name),
       [
@@ -356,6 +355,7 @@ it.effect('resolves standard-library imports without vendoring source', () =>
         'silk/bool',
         'silk/bytes',
         'silk/char',
+        'silk/effect',
         'silk/f32',
         'silk/f64',
         'silk/format',
@@ -365,18 +365,22 @@ it.effect('resolves standard-library imports without vendoring source', () =>
         'silk/i8',
         'silk/isize',
         'silk/layout',
+        'silk/logger',
+        'silk/monotonic_clock',
         'silk/option',
         'silk/order',
         'silk/raw_buffer',
         'silk/result',
         'silk/slot',
         'silk/string',
+        'silk/system_clock',
         'silk/u16',
         'silk/u32',
         'silk/u64',
         'silk/u8',
         'silk/usize',
         'silk/vector',
+        'silk/writer',
         'stdlib/importer',
       ],
     )

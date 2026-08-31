@@ -753,6 +753,7 @@ export const analyzeStatements = (
         assignmentRootAccess(root) === 'SharedBorrowed' ||
         (assignmentRootAccess(root) === 'ExclusiveBorrowed' &&
           destination.fact._tag !== 'IndexProjection' &&
+          destination.fact._tag !== 'ReferentProjection' &&
           destination.fact._tag !== 'FieldProjection')
       ) {
         context.diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
