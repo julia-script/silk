@@ -324,13 +324,6 @@
     "aliases": ["EndOfInput", "Filled", "ReadOutcome", "StreamReadError"]
   },
   {
-    "module": "silk/standard_streams",
-    "path": "silk/standard_streams.silk",
-    "layer": "portable",
-    "namespace": "StandardStreams",
-    "aliases": ["NativeStandardStreams", "StandardStream", "StreamWriteError"]
-  },
-  {
     "module": "silk/string",
     "path": "silk/string.silk",
     "layer": "portable",
@@ -392,5 +385,12 @@
     "path": "silk/vector.silk",
     "layer": "portable",
     "namespace": "Vector"
+  },
+  {
+    "module": "silk/writer",
+    "path": "silk/writer.silk",
+    "layer": "portable",
+    "namespace": "Writer",
+    "aliases": ["StdoutWriter", "StderrWriter", "WriterError"]
   }
 ]

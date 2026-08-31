@@ -44,6 +44,11 @@ overlaps:
 recommended_shape:
   title
   pitch
+  why_it_matters:
+    current_cost_or_risk
+    affected_workflow_or_property
+    causal_chain
+    consequence_if_ignored
   evidence
   acceptance
   gate
@@ -64,6 +69,8 @@ grouping_review:
   - merge, split, keep separate, or no concern
 acceptance_gaps:
   - condition that is vague, solution-prescriptive, or cannot falsify completion
+justification_gaps:
+  - missing evidence, broken causal link, generic rationale, or consequence not established
 recommended_verdict: todo | duplicate | canceled | needs-more-investigation
 ```
 
@@ -75,6 +82,14 @@ Resolve disagreements against primary evidence. Uncertainty is not success: leav
 Backlog with a focused investigation comment when the available evidence cannot support Todo,
 Duplicate, or Canceled. Triage may organize multiple leads into one survivor, split a broad lead,
 or discard weak leads. Preserve useful evidence and native Linear relations.
+
+The coordinator must preserve the lead's `Why this matters` rationale when it survives review or
+replace it with the more precise rationale supported by investigation. Do not promote a
+solution-only issue. A Todo description must make the causal chain from current condition to cost
+or risk understandable without reading discovery comments, subagent reports, or conversation
+history. If the condition is real but no concrete consequence can be established, it is not yet
+worthwhile: leave it in Backlog for named evidence or cancel it when further investigation is not
+justified.
 
 Unless Julia states a different current priority, rank validated stabilization issues above
 features. Within stabilization, correctness and safety come first, then broken documentation or

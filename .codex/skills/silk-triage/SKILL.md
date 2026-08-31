@@ -36,8 +36,11 @@ says otherwise, choose stabilization leads before feature leads for the default 
 6. If a claim fails, move the issue to Canceled and comment with the failed claim, evidence, and a
    concrete reopen condition. If another issue owns the work, use Duplicate instead.
 7. If all claims hold, rewrite the description into the queue-ready issue shape from `WORKFLOW.md`.
-   Make every acceptance item observable. Assign priority, estimate, and a broad existing label.
-   Move it to Todo.
+   Preserve the discovery rationale when verified or replace it with the stronger rationale from
+   investigation. Include a concrete `## Why this matters` section that names the present cost or
+   risk, affected workflow or system property, causal chain, and consequence of doing nothing.
+   Never leave Todo with only an outcome, scope, and acceptance list. Make every acceptance item
+   observable. Assign priority, estimate, and a broad existing label. Move it to Todo.
 8. When completion is genuinely blocked, keep it Todo, add the smallest accurate `## Gate`, and
    apply the `Blocked` label. Use native issue relations for issue-to-issue blockers. Split an
    independently useful unblocked slice only when it can ship on its own.

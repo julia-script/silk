@@ -24,7 +24,9 @@ provides them. Do not invent missing detail or require a person's name when a ro
 4. When several issues plausibly match, make no write and ask Julia to choose among their links.
 5. When no issue matches, create one Backlog issue with no priority or estimate. Use the issue shape
    in `WORKFLOW.md`, `Origin: direct demand`, the faithful request as evidence, draft acceptance,
-   and a lightweight repository baseline. Use `Feature`, `Bug`, or `Improvement` only when the
+   and a lightweight repository baseline. Preserve Julia's stated reason in `## Why this matters`.
+   If no reason was supplied, say that the request is direct demand and list the missing impact as
+   a triage question instead of inventing one. Use `Feature`, `Bug`, or `Improvement` only when the
    request clearly fits; otherwise omit the label.
 6. Read the issue back and report its identifier, title, link, requester, and captured outcome.
 

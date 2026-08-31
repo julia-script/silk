@@ -74,7 +74,11 @@ candidates:
     scope
     confidence: high | medium | low
     observation
-    suspected_cost_or_risk
+    why_it_might_matter:
+      affected_workflow_or_property
+      causal_chain
+      consequence_if_ignored
+      uncertainty
     evidence
     draft_acceptance_if_obvious
     triage_questions
@@ -87,7 +91,10 @@ not_checked:
 
 High-, medium-, and low-confidence leads can all be valid Backlog material when they identify a
 specific investigable subject and state the open question honestly. Confidence guides triage; it
-is not a discovery gate. Reject only vague suspicions with no reproducible starting point.
+is not a discovery gate. The justification may be a hypothesis, but it must connect the observed
+condition to a concrete possible consequence rather than restating that the code is large,
+duplicated, old, or unusual. Reject vague suspicions with no reproducible starting point or no
+articulable reason to investigate them.
 
 ## Fan-in and second pass
 
@@ -95,10 +102,11 @@ Wait for every scout. Normalize lead wording and merge only obvious duplicates t
 subject and suspected problem. Leave debatable grouping and splitting to triage. Search all Linear
 states, open PRs, and active OpenSpec changes before creating anything.
 
-Spot-check lead identity and provenance during fan-in. This is not a skeptical or adversarial
-review. Confirm only that the cited subject exists, the evidence was not fabricated, and the lead
-is not an exact duplicate or clearly owned by active work. Leave correctness, impact, design, and
-worth to triage.
+Spot-check lead identity, provenance, and rationale during fan-in. This is not a skeptical or
+adversarial review. Confirm that the cited subject exists, the evidence was not fabricated, the
+lead is not an exact duplicate or clearly owned by active work, and `Why this matters` states a
+specific causal hypothesis rather than merely repeating the observation. Leave verification of
+that impact, final design, and worth to triage.
 
 Build a coverage ledger for these areas:
 
@@ -136,7 +144,8 @@ sweep as part of discovery.
 
 After the final remote-main freshness check succeeds, the coordinator writes sequentially after
 fan-in. New issues enter Backlog with no priority or estimate. For an existing issue, add only new
-evidence as a dated comment. Read every write back.
+evidence as a dated comment. Every new description includes a visible `## Why this matters`
+section. Read every write back and confirm that the section survived rendering.
 
 The final report includes:
 

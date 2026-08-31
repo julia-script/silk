@@ -834,14 +834,15 @@ it.effect('presents canonical string in hover, inlay hints, and semantic occurre
 })
 
 it.effect('publishes proved hover contracts and inferred provider-selector hints', () => {
-  const source = `import silk.standard_streams as Streams
+  const source = `import silk.writer as Streams
+import silk.writer { Writer }
 import silk.effect as Effect
 
-fn inspect(value: Streams.NativeStandardStreams) -> () { return () }
+fn inspect(value: Streams.StdoutWriter) -> () { return () }
 
-pub effect fn main() -> () ! Streams.StreamWriteError {
-  let mut streams = Streams.nativeStandardStreamProvider()
-  return run Streams.send(Streams.stdout(), b"Hello, world!")
+pub effect fn main() -> () ! Streams.WriterError {
+  let mut streams = Streams.stdoutWriterProvider()
+  return run Writer.writeAll(b"Hello, world!")
     |> Effect.provideMut(&mut streams)
 }`
   return Analysis.ofSource('main', encoder.encode(source)).pipe(
@@ -857,22 +858,22 @@ pub effect fn main() -> () ! Streams.StreamWriteError {
         )
       }
 
-      assert.deepEqual(contractsAt('NativeStandardStreams'), ['Streams.StandardStreams'])
-      assert.deepEqual(contractsAt('nativeStandardStreamProvider'), ['Streams.StandardStreams'])
-      assert.deepEqual(contractsAt('streams', 1), ['Streams.StandardStreams'])
+      assert.deepEqual(contractsAt('StdoutWriter'), ['Writer'])
+      assert.deepEqual(contractsAt('stdoutWriterProvider'), ['Writer'])
+      assert.deepEqual(contractsAt('streams', 1), ['Writer'])
       assert.deepEqual(
         Analysis.hoverSubjectAt(
           snapshot,
           'main',
-          source.indexOf('nativeStandardStreamProvider()') + 'nativeStandardStreamProvider'.length,
+          source.indexOf('stdoutWriterProvider()') + 'stdoutWriterProvider'.length,
         )?.implementedContracts.map((contract) => contract.text) ?? [],
-        ['Streams.StandardStreams'],
+        ['Writer'],
       )
 
       const hints = Analysis.typeHints(snapshot, 'main', 0, encoder.encode(source).length)
       const selectors = hints.filter((hint) => hint._tag === 'ProviderSelectorTypeHint')
       assert.strictEqual(selectors.length, 1)
-      assert.strictEqual(selectors.at(0)?.presentation.text, 'Streams.StandardStreams')
+      assert.strictEqual(selectors.at(0)?.presentation.text, 'Writer')
       assert.strictEqual(
         selectors.at(0)?.span.start,
         source.indexOf('provideMut(') + 'provideMut'.length,
@@ -888,7 +889,7 @@ pub effect fn main() -> () ! Streams.StreamWriteError {
         Analysis.typeHints(snapshot, 'main', selectorOffset, selectorOffset + 1)
           .filter((hint) => hint._tag === 'ProviderSelectorTypeHint')
           .map((hint) => hint.presentation.text),
-        ['Streams.StandardStreams'],
+        ['Writer'],
       )
       assert.deepEqual(
         Analysis.typeHints(snapshot, 'main', 0, encoder.encode(source).length),
@@ -900,12 +901,12 @@ pub effect fn main() -> () ! Streams.StreamWriteError {
 })
 
 it.effect('presents selected imports and shared and owned provider selectors', () => {
-  const selectedImportSource = `import silk.standard_streams { StandardStreams }
+  const selectedImportSource = `import silk.writer { Writer }
 import silk.effect as Effect
 
-pub effect fn main() -> () ! StandardStreams.StreamWriteError {
-  let mut streams = StandardStreams.nativeStandardStreamProvider()
-  return run StandardStreams.send(StandardStreams.stdout(), b"selected\\n")
+pub effect fn main() -> () ! Writer.WriterError {
+  let mut streams = Writer.stdoutWriterProvider()
+  return run Writer.writeAll(b"selected\\n")
     |> Effect.provideMut(&mut streams)
 }`
   const accessFormsSource = `import silk.effect as Effect
@@ -933,7 +934,7 @@ pub fn main() -> i32 {
         Analysis.typeHints(selectedImport, 'main', 0, encoder.encode(selectedImportSource).length)
           .filter((hint) => hint._tag === 'ProviderSelectorTypeHint')
           .map((hint) => hint.presentation.text),
-        ['StandardStreams'],
+        ['Writer'],
       )
 
       assert.deepEqual(Analysis.diagnostics(accessForms), [])
@@ -1009,13 +1010,13 @@ pub fn main() -> i32 {
 })
 
 it.effect('omits explicit provider selectors while retaining binding hints', () => {
-  const source = `import silk.standard_streams as Streams
+  const source = `import silk.writer as Streams
 import silk.effect as Effect
 
-pub effect fn main() -> () ! Streams.StreamWriteError {
-  let mut streams = Streams.nativeStandardStreamProvider()
-  return run Streams.send(Streams.stdout(), b"ok\\n")
-    |> Effect.provideMut<Streams.StandardStreams>(&mut streams)
+pub effect fn main() -> () ! Streams.WriterError {
+  let mut streams = Streams.stdoutWriterProvider()
+  return run Streams.writeAll(b"ok\\n")
+    |> Effect.provideMut<Streams.Writer>(&mut streams)
 }`
   return Analysis.ofSource('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
@@ -1024,7 +1025,7 @@ pub effect fn main() -> () ! Streams.StreamWriteError {
         hints.map((hint) => hint._tag),
         ['BindingTypeHint'],
       )
-      assert.strictEqual(hints.at(0)?.presentation.text, 'Streams.NativeStandardStreams')
+      assert.strictEqual(hints.at(0)?.presentation.text, 'Streams.StdoutWriter')
       return undefined
     }),
   )

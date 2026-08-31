@@ -229,16 +229,13 @@ effect fn suspendDirect(
   return run Intrinsic.suspendEffect(move deferred)
 }
 pub fn main() -> i32 { return 42 }`,
-  `import silk.standard_streams as StandardStream
-import silk.standard_streams { NativeStandardStreams }
-import silk.standard_streams { StreamWriteError }
+  `import silk.writer as Streams
+import silk.writer { Writer, WriterError }
 import silk.effect as Effect
-pub effect fn main() -> () ! StreamWriteError {
-  let mut native = StandardStream.nativeStandardStreamProvider()
-  let stdout = StandardStream.stdout()
-  let stderr = StandardStream.stderr()
-  let first = run Effect.provideMut(StandardStream.send(stdout, b"out"), &mut native)
-  let second = run Effect.provideMut(StandardStream.send(stderr, b"error"), &mut native)
+pub effect fn main() -> () ! WriterError {
+  let mut native = Streams.stdoutWriterProvider()
+  let first = run Effect.provideMut(Writer.writeAll(b"out"), &mut native)
+  let second = run Effect.provideMut(Writer.writeAll(b"error"), &mut native)
   return ()
 }`,
   `import silk.usize as usize

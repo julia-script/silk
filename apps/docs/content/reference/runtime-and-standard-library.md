@@ -248,7 +248,7 @@ portable closure depend transitively on target-provider source.
 **Current standard library:** Partially aligned. The manifest now classifies every module as
 `portable` or `target-provider`, and filesystem, standard input, host input, and child-process
 contracts are separate from their OS providers. Allocation (`silk.allocator`) and standard streams
-(`silk.standard_streams`) are still classified as portable while also containing their
+(`silk.writer`) are still classified as portable while also containing their
 process-backed providers, so those two module boundaries remain to be reconciled with this rule.
 
 **Evidence:** [portable/provider separation](../../../../openspec/specs/bootstrap-silk-stdlib/spec.md),

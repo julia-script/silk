@@ -70,7 +70,9 @@ theme. Features are new capabilities whose primary value is additive behavior ra
 the current system more correct, truthful, simple, or maintainable.
 
 Prefer deletion and one clean design over compatibility layers. Do not file speculative taste as
-work. Every issue must name a concrete cost or risk and a bounded way to prove completion.
+work. Every issue must name a concrete cost or risk, explain how the observed condition causes it,
+and give a bounded way to prove completion. A proposed refactor, outcome, or acceptance list is not
+a justification by itself.
 
 ## Backlog intake bar
 
@@ -79,6 +81,8 @@ Discovery is broad intake, not final triage. Favor recall over certainty. A Back
 - a specific lead anchored to paths, symbols, output, a documentation passage, or a structural
   query result;
 - a plausible connection to one maintenance theme;
+- a concrete `Why this matters` hypothesis connecting the observation to an affected workflow or
+  system property and the consequence of leaving it alone;
 - enough breadcrumbs for triage to investigate it;
 - explicit uncertainty and the question triage must answer.
 
@@ -88,7 +92,9 @@ solution, consolidate debatable overlaps, write final acceptance, size, prioriti
 a lead is worth implementing. Those are triage decisions.
 
 A graph score, TODO marker, large file, suppression, or odd design can be a valid lead when its
-exact location and the suspected concern are recorded. It does not become a queue-ready claim until
+exact location and the suspected concern are recorded. The description must still say why that
+signal might matter: for example, which recurring change is made riskier, which user contract may
+be false, or which obsolete path creates ambiguity. It does not become a queue-ready claim until
 triage verifies the concern.
 
 ## Queue-ready issue quality bar
@@ -104,6 +110,12 @@ description uses this shape, omitting empty sections:
 - Theme: <maintenance theme>
 - Origin: discovery | direct demand
 - Scope: <package, app, docs area, or repository-wide>
+
+## Why this matters
+
+<The concrete current cost or risk, who or what pays it, and the causal chain from the observed
+condition to that consequence. For Backlog leads, distinguish observed facts from the hypothesis
+and state material uncertainty.>
 
 ## Evidence
 
@@ -129,6 +141,12 @@ description uses this shape, omitting empty sections:
 <Only when the issue cannot currently be completed.>
 ```
 
+The `Why this matters` section must answer: **what remains costly, risky, misleading, or broken if
+we do nothing?** Do not satisfy it with generic adjectives such as “complex,” “unclean,” or
+“difficult to maintain.” Name the affected change path, user behavior, correctness property,
+operational task, or repeated effort. Evidence proves that the condition exists; this section
+explains why the condition deserves attention.
+
 Use Linear comments for dated discovery additions, implementation reports, and reconciliation
 history. Keep the description as the current specification rather than an activity log.
 
@@ -139,12 +157,17 @@ Validate five claims:
 1. **Real** — the problem exists and the evidence is reproducible.
 2. **Current** — it is not already fixed, implemented, or superseded.
 3. **In scope** — it belongs to this repository and respects its design direction.
-4. **Worthwhile** — its stability, clarity, or maintenance value justifies its complexity.
+4. **Worthwhile** — its stability, clarity, or maintenance value justifies its complexity, with a
+   verified causal explanation of the current cost or risk.
 5. **Bounded** — acceptance can describe a coherent change or a sensible first slice.
 
 Direct demand is strong evidence of value, but not proof that a proposed solution is correct.
 Maintenance findings do not need an external requester when the repository evidence shows a real
 cost or risk.
+
+Triage must preserve the discovery rationale when evidence supports it, or replace it with the
+stronger rationale established during investigation. A queue-ready rewrite may not discard the
+reason for the issue and retain only the proposed implementation, scope, or acceptance criteria.
 
 ## Priority and size
 

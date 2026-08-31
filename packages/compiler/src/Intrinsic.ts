@@ -181,7 +181,7 @@ const consumer = (family: string, operation: string): string => {
       : `silk/execution.${operation}`
   if (family === 'Wake' || family === 'Parking') return 'language:external-wake-parking'
   if (family === 'Storage') return 'silk/allocator.allocate'
-  if (family === 'Host') return 'silk/standard_streams.writeAll'
+  if (family === 'Host') return 'silk/writer.writeAll'
   if (family === 'Os') return osConsumer(operation)
   if (family === 'Place') return 'language:place-replacement'
   return `silk/${family.replaceAll(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()}.${operation}`
@@ -1411,7 +1411,7 @@ const intrinsicOperations = Object.freeze([
         valueParameter('bytes', '&[u8]'),
       ]),
       semanticParameters: Object.freeze(['bool', Type.slice('Shared', 'u8')]),
-      result: 'Effect<() ! StreamWriteError>',
+      result: 'Effect<() ! WriterError>',
       semanticResult: Type.effect(
         Type.unit,
         Object.freeze([Type.streamWriteFailure]),

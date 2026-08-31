@@ -1,0 +1,116 @@
+//! Complete stdout and stderr byte writes through a replaceable service.
+//!
+//! # When to use
+//! Use [`Writer`] when code must write complete byte sequences without selecting a destination.
+//! Use [`StdoutWriter`] or [`StderrWriter`] at a process boundary. Use `silk.logger.Logger` for
+//! structured log events.
+//!
+//! # Details
+//! A Writer requirement remains in an Effect until a caller supplies a provider. Applications and
+//! tests can replace the provider for one lexical operation. Provider failure produces
+//! [`WriterError`].
+//!
+//! # Gotchas
+//! The native providers require a host standard-stream boundary. [`ignoreError`] removes the typed
+//! failure value and returns unit for a failed Effect.
+//!
+//! # Examples
+//! ## Write one complete stdout message
+//!
+//! ```silk
+//! import silk.effect { Effect }
+//!
+//! import silk.writer { Writer }
+//!
+//! effect fn writeMessage() -> ()
+//! ! Writer.WriterError {
+//!   let mut writer = Writer.stdoutWriterProvider()
+//!   return run Writer.writeAll(b"Silk\n")
+//!     |> Effect.provideMut<Writer>(&mut writer)
+//! }
+//!
+//! effect fn ignoreWriteFailure(error: Writer.WriterError) -> () {
+//!   return ()
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   let completed = run Effect.catchAll(writeMessage(), ignoreWriteFailure)
+//!   return 42
+//! }
+//! ```
+
+import silk.effect { Effect }
+
+import silk.result { Result }
+
+import silk.string { String }
+
+/// A typed failure from a Writer provider that did not complete one write or flush operation.
+pub struct WriterError {
+  message: string
+}
+
+/// A replaceable mutable service for complete byte writes and explicit flush operations.
+pub service Writer {
+  /// Writes one complete immutable byte sequence through the active Writer provider.
+  effect fn writeAll(val: &[u8]) -> () ! WriterError ? &mut Writer
+  /// Requests that the active Writer provider commit its buffered output.
+  effect fn flush() -> () ! WriterError ? &mut Writer
+}
+
+/// A Writer provider that writes to process standard output.
+pub struct StdoutWriter {
+  stream: bool
+}
+
+/// A Writer provider that writes to process standard error.
+pub struct StderrWriter {
+  stream: bool
+}
+
+/// Creates a process-backed Writer provider for standard output.
+pub fn stdoutWriterProvider() -> StdoutWriter {
+  return StdoutWriter { stream: false }
+}
+
+/// Creates a process-backed Writer provider for standard error.
+pub fn stderrWriterProvider() -> StderrWriter {
+  return StderrWriter { stream: true }
+}
+
+/// Runs one Effect and converts its typed failure to unit while it preserves a successful value.
+///
+/// # Details
+///
+/// This function consumes `self` one time and preserves its provider requirements. It discards the
+/// error value when the Effect fails.
+pub effect fn ignoreError<A, E, ?R>(self: once Effect<A ! E ? R>) -> A | () ? R {
+  let result = run Effect.result(move self)
+  return match move result {
+    Result.Result<A, E>.Success { value } => move value
+    Result.Result<A, E>.Failure { error: _ } => ()
+  }
+}
+
+impl Writer for StdoutWriter {
+  effect fn writeAll(self: &mut Self, val: &[u8]) -> () ! WriterError ? &mut Writer {
+    run Intrinsic.standardStreamWrite(self.stream, val)
+  }
+  effect fn flush(self: &mut Self) -> () ! WriterError ? &mut Writer {
+    return ()
+  }
+}
+
+impl Writer for StderrWriter {
+  effect fn writeAll(self: &mut Self, val: &[u8]) -> () ! WriterError ? &mut Writer {
+    run Intrinsic.standardStreamWrite(self.stream, val)
+  }
+  effect fn flush(self: &mut Self) -> () ! WriterError ? &mut Writer {
+    return ()
+  }
+}
+
+/// Writes the UTF-8 bytes of `val` through the active Writer provider.
+pub effect fn writeString(val: string) -> () ! Writer.WriterError ? &mut Writer {
+  run Writer.writeAll(String.utf8Bytes(val))
+}
