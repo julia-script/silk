@@ -200,7 +200,7 @@ change integer output.
 pub width: silk/option.Option<usize>
 ```
 
-Optional minimum visible width.
+Optional minimum visible width in Unicode scalars, not UTF-8 bytes or terminal cells.
 
 <a id="declaration-73696c6b2f666f726d61743a3a466f726d61744f7074696f6e733a3a6669656c643a31"></a>
 
@@ -210,7 +210,8 @@ Optional minimum visible width.
 pub alignment: Alignment
 ```
 
-Alignment inside the requested minimum width.
+Alignment inside the requested minimum width. `Default` is right alignment for the shared
+padding helpers and shipped integer presentations.
 
 <a id="declaration-73696c6b2f666f726d61743a3a466f726d61744f7074696f6e733a3a6669656c643a32"></a>
 
@@ -250,7 +251,8 @@ Permission for a separately documented presentation to use an alternate form.
 pub zeroPad: bool
 ```
 
-Whether integer width padding uses zeroes after the sign when precision is absent.
+Whether integer width padding uses zeroes after the sign. A supplied precision disables this
+width-driven zero padding.
 
 <a id="declaration-73696c6b2f666f726d61743a3a466f726d61744f7074696f6e733a3a6669656c643a36"></a>
 
@@ -260,7 +262,8 @@ Whether integer width padding uses zeroes after the sign when precision is absen
 pub precision: silk/option.Option<usize>
 ```
 
-Optional minimum digit count for numeric presentations.
+Optional minimum digit count for numeric presentations. For integers, supplying precision
+disables width-driven zero padding.
 
 <a id="declaration-73696c6b2f666f726d61743a3a466f726d61744f7074696f6e733a3a6669656c643a37"></a>
 
@@ -456,7 +459,12 @@ Reports whether a presentation may emit balanced ANSI styling.
 pub effect fn write(self: &mut silk/format.Formatter, bytes: &[u8]) -> () ! WriterError ? &mut Writer
 ```
 
-Writes one complete byte sequence through the ambient Writer.
+Writes one byte sequence through the ambient Writer.
+
+### Gotchas
+
+If Writer fails, this returns the original `WriterError`; any prefix accepted before the failure
+remains written.
 
 <a id="declaration-73696c6b2f666f726d61743a3a777269746554657874"></a>
 
@@ -468,6 +476,11 @@ pub effect fn writeText(self: &mut silk/format.Formatter, text: string) -> () ! 
 
 Writes valid UTF-8 content without applying width policy.
 
+### Gotchas
+
+If Writer fails, this returns the original `WriterError`; any prefix accepted before the failure
+remains written.
+
 <a id="declaration-73696c6b2f666f726d61743a3a777269746550616464696e67"></a>
 
 ## `writePadding`
@@ -477,6 +490,11 @@ pub effect fn writePadding(self: &mut silk/format.Formatter, count: usize) -> ()
 ```
 
 Writes `count` copies of the session's fill scalar in bounded chunks.
+
+### Gotchas
+
+If Writer fails, this returns the original `WriterError`; any fill accepted before the failure
+remains written.
 
 <a id="declaration-73696c6b2f666f726d61743a3a6c656164696e6750616464696e67"></a>
 
@@ -492,7 +510,10 @@ Returns the number of fill scalars before content with this visible width.
 
 A user-defined Display can use this together with [`writeLeadingPadding`](#declaration-73696c6b2f666f726d61743a3a77726974654c656164696e6750616464696e67) and
 [`writeTrailingPadding`](#declaration-73696c6b2f666f726d61743a3a7772697465547261696c696e6750616464696e67) so ANSI control bytes never count toward the visible content width.
-`Alignment.Default` and `Alignment.Right` put all fill before the content.
+`Alignment.Default` and `Alignment.Right` put all extra fill before the content;
+`Alignment.Left` puts none there. `Alignment.Center` puts half there, rounding an odd extra
+scalar down so the trailing side receives the remainder. No padding is returned when the
+requested width does not exceed `contentWidth`.
 
 <a id="declaration-73696c6b2f666f726d61743a3a747261696c696e6750616464696e67"></a>
 
@@ -506,7 +527,10 @@ Returns the number of fill scalars after content with this visible width.
 
 ### Details
 
-`Alignment.Default` and `Alignment.Right` put no fill after the content.
+`Alignment.Default` and `Alignment.Right` put no extra fill after the content;
+`Alignment.Left` puts all extra fill there. `Alignment.Center` puts half there, rounding an odd
+extra scalar up. No padding is returned when the requested width does not exceed
+`contentWidth`.
 
 <a id="declaration-73696c6b2f666f726d61743a3a77726974654c656164696e6750616464696e67"></a>
 
@@ -518,6 +542,11 @@ pub effect fn writeLeadingPadding(self: &mut silk/format.Formatter, contentWidth
 
 Emits all fill required before content with this visible width.
 
+### Gotchas
+
+If Writer fails, this returns the original `WriterError`; any leading fill accepted before the
+failure remains written.
+
 <a id="declaration-73696c6b2f666f726d61743a3a7772697465547261696c696e6750616464696e67"></a>
 
 ## `writeTrailingPadding`
@@ -527,6 +556,11 @@ pub effect fn writeTrailingPadding(self: &mut silk/format.Formatter, contentWidt
 ```
 
 Emits all fill required after content with this visible width.
+
+### Gotchas
+
+If Writer fails, this returns the original `WriterError`; any trailing fill accepted before the
+failure remains written.
 
 <a id="declaration-73696c6b2f666f726d61743a3a646973706c6179"></a>
 

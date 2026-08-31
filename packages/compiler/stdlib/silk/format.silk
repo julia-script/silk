@@ -114,9 +114,10 @@ pub enum Sign {
 /// For integers, precision disables width-driven zero padding. Alternate form and color do not
 /// change integer output.
 pub struct FormatOptions {
-  /// Optional minimum visible width.
+  /// Optional minimum visible width in Unicode scalars, not UTF-8 bytes or terminal cells.
   pub width: Option<usize>
-  /// Alignment inside the requested minimum width.
+  /// Alignment inside the requested minimum width. `Default` is right alignment for the shared
+  /// padding helpers and shipped integer presentations.
   pub alignment: Alignment
   /// One Unicode scalar repeated for ordinary padding.
   pub fill: char
@@ -124,9 +125,11 @@ pub struct FormatOptions {
   pub sign: Sign
   /// Permission for a separately documented presentation to use an alternate form.
   pub alternate: bool
-  /// Whether integer width padding uses zeroes after the sign when precision is absent.
+  /// Whether integer width padding uses zeroes after the sign. A supplied precision disables this
+  /// width-driven zero padding.
   pub zeroPad: bool
-  /// Optional minimum digit count for numeric presentations.
+  /// Optional minimum digit count for numeric presentations. For integers, supplying precision
+  /// disables width-driven zero padding.
   pub precision: Option<usize>
   /// Permission, not a requirement, to emit balanced ANSI styling.
   pub color: bool
@@ -234,7 +237,12 @@ pub fn precision(self: &Formatter) -> usize {
 /// Reports whether a presentation may emit balanced ANSI styling.
 pub fn color(self: &Formatter) -> bool { return self.options.color }
 
-/// Writes one complete byte sequence through the ambient Writer.
+/// Writes one byte sequence through the ambient Writer.
+///
+/// # Gotchas
+///
+/// If Writer fails, this returns the original `WriterError`; any prefix accepted before the failure
+/// remains written.
 pub effect fn write(
   self: &mut Formatter,
   bytes: &[u8]
@@ -243,6 +251,11 @@ pub effect fn write(
 }
 
 /// Writes valid UTF-8 content without applying width policy.
+///
+/// # Gotchas
+///
+/// If Writer fails, this returns the original `WriterError`; any prefix accepted before the failure
+/// remains written.
 pub effect fn writeText(
   self: &mut Formatter,
   text: string
@@ -346,6 +359,11 @@ effect fn writeFillGroup(
 }
 
 /// Writes `count` copies of the session's fill scalar in bounded chunks.
+///
+/// # Gotchas
+///
+/// If Writer fails, this returns the original `WriterError`; any fill accepted before the failure
+/// remains written.
 pub effect fn writePadding(
   self: &mut Formatter,
   count: usize
@@ -365,7 +383,10 @@ pub effect fn writePadding(
 ///
 /// A user-defined Display can use this together with [`writeLeadingPadding`] and
 /// [`writeTrailingPadding`] so ANSI control bytes never count toward the visible content width.
-/// `Alignment.Default` and `Alignment.Right` put all fill before the content.
+/// `Alignment.Default` and `Alignment.Right` put all extra fill before the content;
+/// `Alignment.Left` puts none there. `Alignment.Center` puts half there, rounding an odd extra
+/// scalar down so the trailing side receives the remainder. No padding is returned when the
+/// requested width does not exceed `contentWidth`.
 pub fn leadingPadding(self: &Formatter, contentWidth: usize) -> usize {
   let requested = width(&self)
   if requested <= contentWidth { return usize.ZERO }
@@ -379,7 +400,10 @@ pub fn leadingPadding(self: &Formatter, contentWidth: usize) -> usize {
 ///
 /// # Details
 ///
-/// `Alignment.Default` and `Alignment.Right` put no fill after the content.
+/// `Alignment.Default` and `Alignment.Right` put no extra fill after the content;
+/// `Alignment.Left` puts all extra fill there. `Alignment.Center` puts half there, rounding an odd
+/// extra scalar up. No padding is returned when the requested width does not exceed
+/// `contentWidth`.
 pub fn trailingPadding(self: &Formatter, contentWidth: usize) -> usize {
   let requested = width(&self)
   if requested <= contentWidth { return usize.ZERO }
@@ -390,6 +414,11 @@ pub fn trailingPadding(self: &Formatter, contentWidth: usize) -> usize {
 }
 
 /// Emits all fill required before content with this visible width.
+///
+/// # Gotchas
+///
+/// If Writer fails, this returns the original `WriterError`; any leading fill accepted before the
+/// failure remains written.
 pub effect fn writeLeadingPadding(
   self: &mut Formatter,
   contentWidth: usize
@@ -399,6 +428,11 @@ pub effect fn writeLeadingPadding(
 }
 
 /// Emits all fill required after content with this visible width.
+///
+/// # Gotchas
+///
+/// If Writer fails, this returns the original `WriterError`; any trailing fill accepted before the
+/// failure remains written.
 pub effect fn writeTrailingPadding(
   self: &mut Formatter,
   contentWidth: usize
