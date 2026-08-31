@@ -154,11 +154,11 @@ static-data text:696e666f20616c696173 bytes=696e666f20616c696173 align=1 address
 static-data text:7365636f6e640a6c696e65 bytes=7365636f6e640a6c696e65 align=1 address=i64 length=usize:i64
 static-data text:7472616365 bytes=7472616365 align=1 address=i64 length=usize:i64
 static-data text:7761726e696e67 bytes=7761726e696e67 align=1 address=i64 length=usize:i64
-usize-literal 20 bits=64 available [13999, 14001)
-usize-literal 18446744073709551615 bits=64 available [1951, 1959)
-usize-literal 0 bits=64 available [2053, 2054)
-usize-literal 0 bits=64 available [2269, 2270)
-usize-literal 1 bits=64 available [2373, 2374)
+usize-literal 20 bits=64 available [17696, 17698)
+usize-literal 18446744073709551615 bits=64 available [2049, 2057)
+usize-literal 0 bits=64 available [2151, 2152)
+usize-literal 0 bits=64 available [2367, 2368)
+usize-literal 1 bits=64 available [2471, 2472)
 usize-literal 7 bits=64 available [892, 894)
 usize-literal 0 bits=64 available [936, 938)
 usize-literal 1 bits=64 available [999, 1001)
@@ -469,12 +469,12 @@ fn silk/logger.emptyMessages params=0 locals=65 -> Array<i32, 64> entry=r0
     return %64 [6177, 6407)
 fn silk/usize.add params=2 locals=3 -> usize entry=r0
   r0 operation:
-    %2 = add %0, %1 : usize [7721, 7753)
-    return %2 [7721, 7753)
+    %2 = add %0, %1 : usize [7819, 7851)
+    return %2 [7819, 7851)
 fn silk/i32.toU8 params=1 locals=2 -> u8 entry=r0
   r0 operation:
-    %1 = convert %0 i32 -> u8 [2989, 3014)
-    return %1 [2989, 3014)
+    %1 = convert %0 i32 -> u8 [3077, 3102)
+    return %1 [3077, 3102)
 fn silk/logger.record params=3 locals=4 -> once Effect<() ! silk/logger.LogError> entry=r0
   r0 operation:
     %3 = make-effect silk/logger.record$effect$-1 captures=%0:take,%1:copy,%2:copy : once Effect<() ! silk/logger.LogError> [7623, 8775)
@@ -485,8 +485,8 @@ fn silk/string.utf8Bytes params=1 locals=2 -> &[u8] entry=r0
     return %1 [10465, 10498)
 fn silk/u8.toI32 params=1 locals=2 -> i32 entry=r0
   r0 operation:
-    %1 = convert %0 u8 -> i32 [4863, 4888)
-    return %1 [4863, 4888)
+    %1 = convert %0 u8 -> i32 [4974, 4999)
+    return %1 [4974, 4999)
 fn silk/logger.reject params=1 locals=2 -> Effect<never ! silk/logger.LogError> entry=r0
   r0 operation:
     %1 = make-effect silk/logger.reject$effect$-1 captures=%0:copy : Effect<never ! silk/logger.LogError> [2975, 3010)
