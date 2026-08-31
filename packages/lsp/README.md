@@ -60,5 +60,7 @@ vim.lsp.config('silk', {
 })
 ```
 
-The actors (`Document`, `Workspace`, `LineIndex`, `Server`) are also exported as subpaths for
-embedding the same analysis-to-protocol translation elsewhere.
+The supported actors (`Document`, `Inspection`, `LineIndex`, `Server`, and `Workspace`) are exported
+both as root namespaces and as matching subpaths for embedding the same analysis-to-protocol
+translation elsewhere. Prefer a focused import such as `@silklang/lsp/Inspection` when a module
+depends on one actor.

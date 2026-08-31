@@ -11,6 +11,20 @@ not assemble a second compiler by invoking phases directly. Reusable project dis
 source resolution, source-entry identity, target selection, and inspector projections also live
 here because the CLI, language server, and editor applications share them.
 
+Every supported actor namespace at the package root has the same explicit subpath. Prefer the
+subpath when one actor is the dependency of a module; the root remains available for compact
+embedding entry points. For example, match identities and target-dependent constant selectors are
+stable public compiler facts:
+
+```ts
+import * as Match from '@silklang/compiler/Match'
+import * as TargetConstant from '@silklang/compiler/TargetConstant'
+```
+
+A small set of operational host entry points remain subpath-only and are not actor namespaces at
+the root. Compiler-internal transition and realization modules are not part of either public
+surface.
+
 ```ts
 import { Analysis } from '@silklang/compiler'
 import * as Effect from 'effect/Effect'
