@@ -331,7 +331,7 @@ pub effect fn main() -> () ! Streams.WriterError {
     assert.deepEqual(hover?.contents, {
       kind: 'markdown',
       value:
-        '```silk\nlet mut streams: Streams.StdoutWriter\n```\n\n**Implements**\n\n- `Streams.Writer`',
+        '```silk\nlet mut streams: Streams.StdoutWriter\n```\n\n**Implements**\n\n- `Writer`',
     })
 
     const selectorOffset = source.indexOf('provideMut(') + 'provideMut'.length
