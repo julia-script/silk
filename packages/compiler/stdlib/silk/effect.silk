@@ -119,10 +119,10 @@
 // Familiar channel transformations derived from the closed compiler core. The core catches typed
 // failures and binds typed requirements; everything here is ordinary Silk.
 
-import silk.bool
+import silk.bool as bool
 import silk.logger { LogError, LogLevel, Logger }
 import silk.result { Result, failResult, succeed }
-import silk.usize
+import silk.usize as usize
 
 /// The importable name of the `silk.effect` module scope.
 ///

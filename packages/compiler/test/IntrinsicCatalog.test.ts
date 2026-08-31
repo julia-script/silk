@@ -234,8 +234,8 @@ import silk.writer { Writer, WriterError }
 import silk.effect as Effect
 pub effect fn main() -> () ! WriterError {
   let mut native = Streams.stdoutWriterProvider()
-  let first = run Effect.provideMut(Streams.writeAll(b"out"), &mut native)
-  let second = run Effect.provideMut(Streams.writeAll(b"error"), &mut native)
+  let first = run Effect.provideMut(Writer.writeAll(b"out"), &mut native)
+  let second = run Effect.provideMut(Writer.writeAll(b"error"), &mut native)
   return ()
 }`,
   `import silk.usize as usize

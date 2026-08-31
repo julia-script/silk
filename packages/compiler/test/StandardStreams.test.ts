@@ -18,14 +18,14 @@ const outputRoot = mkdtempSync(join(tmpdir(), 'silk-standard-streams-'))
 afterAll(() => rmSync(outputRoot, { recursive: true, force: true }))
 
 const source = `import silk.writer as Streams
-import silk.writer { WriterError, stdoutWriterProvider, stderrWriterProvider }
+import silk.writer { Writer, WriterError }
 import silk.effect as Effect
 pub effect fn main() -> () ! WriterError {
   let mut stdout = Streams.stdoutWriterProvider()
   let mut stderr = Streams.stderrWriterProvider()
-  let first = run Effect.provideMut(Streams.writeAll(Intrinsic.stringUtf8Bytes("heading\\n")), &mut stdout)
-  let second = run Effect.provideMut(Streams.writeAll(b"warning\\n"), &mut stderr)
-  let third = run Effect.provideMut(Streams.writeAll(Intrinsic.stringUtf8Bytes("row\\n")), &mut stdout)
+  let first = run Effect.provideMut(Writer.writeAll(Intrinsic.stringUtf8Bytes("heading\\n")), &mut stdout)
+  let second = run Effect.provideMut(Writer.writeAll(b"warning\\n"), &mut stderr)
+  let third = run Effect.provideMut(Writer.writeAll(Intrinsic.stringUtf8Bytes("row\\n")), &mut stdout)
   return ()
 }`
 
@@ -134,7 +134,7 @@ it.effect('lowers target-neutral writes through native and hosted Wasm boundarie
       mir.functions
         .flatMap(MirVerification.operations)
         .filter((operation) => operation._tag === 'HostWrite').length,
-      1,
+      2,
     )
     const llvm = yield* Analysis.codegen(native, { mode: 'release' })
     assert.include(llvm.ir, '@silk_standard_stream_write_v1')
@@ -245,11 +245,17 @@ effect fn record(
   self.writes = self.writes + 1
   return ()
 }
-impl Writer for MemoryStreams { writeAll: MemoryStreams.record }
+effect fn flush(self: &mut MemoryStreams) -> () {
+  return ()
+}
+impl Writer for MemoryStreams {
+  writeAll: MemoryStreams.record
+  flush: MemoryStreams.flush
+}
 pub effect fn main() -> () ! WriterError {
   let mut memory = MemoryStreams { writes: 0 }
-  let first = run Effect.provideMut(Streams.writeAll(Intrinsic.stringUtf8Bytes("one")), &mut memory)
-  let second = run Effect.provideMut(Streams.writeAll(Intrinsic.stringUtf8Bytes("two")), &mut memory)
+  let first = run Effect.provideMut(Writer.writeAll(Intrinsic.stringUtf8Bytes("one")), &mut memory)
+  let second = run Effect.provideMut(Writer.writeAll(Intrinsic.stringUtf8Bytes("two")), &mut memory)
   if memory.writes != 2 { let boom = 1 / 0 }
   return ()
 }`),

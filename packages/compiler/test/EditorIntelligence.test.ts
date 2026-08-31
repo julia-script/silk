@@ -842,7 +842,7 @@ fn inspect(value: Streams.StdoutWriter) -> () { return () }
 
 pub effect fn main() -> () ! Streams.WriterError {
   let mut streams = Streams.stdoutWriterProvider()
-  return run Streams.writeAll(b"Hello, world!")
+  return run Writer.writeAll(b"Hello, world!")
     |> Effect.provideMut(&mut streams)
 }`
   return Analysis.ofSource('main', encoder.encode(source)).pipe(
@@ -858,22 +858,22 @@ pub effect fn main() -> () ! Streams.WriterError {
         )
       }
 
-      assert.deepEqual(contractsAt('StdoutWriter'), ['Streams.Writer'])
-      assert.deepEqual(contractsAt('stdoutWriterProvider'), ['Streams.Writer'])
-      assert.deepEqual(contractsAt('streams', 1), ['Streams.Writer'])
+      assert.deepEqual(contractsAt('StdoutWriter'), ['Writer'])
+      assert.deepEqual(contractsAt('stdoutWriterProvider'), ['Writer'])
+      assert.deepEqual(contractsAt('streams', 1), ['Writer'])
       assert.deepEqual(
         Analysis.hoverSubjectAt(
           snapshot,
           'main',
           source.indexOf('stdoutWriterProvider()') + 'stdoutWriterProvider'.length,
         )?.implementedContracts.map((contract) => contract.text) ?? [],
-        ['Streams.Writer'],
+        ['Writer'],
       )
 
       const hints = Analysis.typeHints(snapshot, 'main', 0, encoder.encode(source).length)
       const selectors = hints.filter((hint) => hint._tag === 'ProviderSelectorTypeHint')
       assert.strictEqual(selectors.length, 1)
-      assert.strictEqual(selectors.at(0)?.presentation.text, 'Streams.Writer')
+      assert.strictEqual(selectors.at(0)?.presentation.text, 'Writer')
       assert.strictEqual(
         selectors.at(0)?.span.start,
         source.indexOf('provideMut(') + 'provideMut'.length,
@@ -889,7 +889,7 @@ pub effect fn main() -> () ! Streams.WriterError {
         Analysis.typeHints(snapshot, 'main', selectorOffset, selectorOffset + 1)
           .filter((hint) => hint._tag === 'ProviderSelectorTypeHint')
           .map((hint) => hint.presentation.text),
-        ['Streams.Writer'],
+        ['Writer'],
       )
       assert.deepEqual(
         Analysis.typeHints(snapshot, 'main', 0, encoder.encode(source).length),

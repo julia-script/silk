@@ -62,7 +62,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/unicode_tables`](./unicode-tables.md) | `UnicodeTables` | 8 | Generated canonical-normalization data for the silk.unicode public façade. |
 | [`silk/usize`](./usize.md) | `usize` | 59 | Pointer-width unsigned integers for lengths, indices, capacities, and allocation sizes. |
 | [`silk/vector`](./vector.md) | `Vector` | 20 | Growable owned sequences with allocation-aware mutation, stable sorting, and checked indexing. |
-| [`silk/writer`](./writer.md) | `Writer` | 8 | Complete-message standard-output and standard-error writes through a replaceable service. |
+| [`silk/writer`](./writer.md) | `Writer` | 8 | Complete stdout and stderr byte writes through a replaceable service. |
 
 ## See also
 

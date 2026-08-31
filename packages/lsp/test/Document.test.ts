@@ -350,7 +350,7 @@ pub effect fn main() -> () ! Streams.WriterError {
         },
         {
           position: positionAt(source, selectorOffset),
-          label: '<Streams.Writer>',
+          label: '<Writer>',
           kind: 1,
           paddingLeft: false,
           paddingRight: false,
@@ -372,7 +372,7 @@ pub effect fn main() -> () ! Streams.WriterError {
     assert.deepEqual(Document.inlayHints(document, snapshot, selectorRange), clipped)
     assert.deepEqual(
       clipped.map((hint) => hint.label),
-      ['<Streams.Writer>'],
+      ['<Writer>'],
     )
   }),
 )

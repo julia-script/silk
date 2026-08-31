@@ -54,6 +54,7 @@ import silk.effect { Effect }
 import silk.i32 as i32
 import silk.result { Result }
 import silk.writer {
+  StdoutWriter,
   WriterError,
   Writer,
   stdoutWriterProvider as nativeStreams,
@@ -138,18 +139,21 @@ pub struct StdoutLogger {}
 /// output write failure becomes a provider-defined [`LogError`].
 pub fn stdoutProvider() -> StdoutLogger { return StdoutLogger {} }
 
+effect fn writeStdoutBytes(
+  writer: &mut StdoutWriter,
+  message: &[u8]
+) -> () ! WriterError {
+  run Intrinsic.bindRequirementMut(Writer.writeAll(message), writer)
+}
+
 effect fn writeStdout(
   self: &mut StdoutLogger,
   level: LogLevel,
   message: string
 ) -> () ! LogError {
   let mut streams = nativeStreams()
-  let completed = run Effect.result(
-    Intrinsic.bindRequirementMut(
-      Writer.writeAll(stringUtf8Bytes(message)),
-      &mut streams,
-    ),
-  )
+  let bytes = stringUtf8Bytes(message)
+  let completed = run Effect.result(writeStdoutBytes(&mut streams, bytes))
   return match move completed {
     Result<(), WriterError>.Success { value: _ } => ()
     Result<(), WriterError>.Failure { error: _ } => run reject(3)
