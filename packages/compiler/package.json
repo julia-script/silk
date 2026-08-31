@@ -266,6 +266,10 @@
       "types": "./dist/Lower.d.ts",
       "import": "./dist/Lower.js"
     },
+    "./Match": {
+      "types": "./dist/Match.d.ts",
+      "import": "./dist/Match.js"
+    },
     "./Mir": {
       "types": "./dist/Mir.d.ts",
       "import": "./dist/Mir.js"
@@ -409,6 +413,10 @@
     "./Target": {
       "types": "./dist/Target.d.ts",
       "import": "./dist/Target.js"
+    },
+    "./TargetConstant": {
+      "types": "./dist/TargetConstant.d.ts",
+      "import": "./dist/TargetConstant.js"
     },
     "./WasmBackend": {
       "types": "./dist/WasmBackend.d.ts",
