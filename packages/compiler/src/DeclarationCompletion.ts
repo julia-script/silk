@@ -65,6 +65,16 @@ const withResolvedRepresentationParameters = (
       : ResolutionSeams.withRepresentationBinding(current, parameter.type, closed.type)
   }, resolvers)
 
+/** The one source module allowed to own an interface or service implementation. */
+const sourceConformanceOwner = (
+  capability: Type.Nominal,
+  provider: Type.Type,
+): string | undefined => {
+  if (Type.isNominal(provider)) return provider.module
+  if (Type.isBuiltin(provider)) return capability.module
+  return undefined
+}
+
 export const complete = (
   self: DeclarationIndex.Index,
   resolvers: ResolutionSeams.ResolutionSeams,
@@ -714,14 +724,23 @@ export const complete = (
         sourceMember?._tag === 'InterfaceDeclaration' || sourceMember?._tag === 'ServiceDeclaration'
           ? sourceMember
           : undefined
-      if (
-        sourceContract !== undefined &&
-        Type.isNominal(provider) &&
-        provider.module !== conformance.module
-      ) {
+      const conformanceOwner = sourceConformanceOwner(capability, provider)
+      if (sourceContract !== undefined && conformanceOwner === undefined) {
         diagnostics.push(
           invalidDiagnostic(
-            `implementation for ${Type.encode(provider)} must be declared in ${provider.module}, the provider's module`,
+            'interface and service providers must be nominal types or scalar types',
+            conformance.syntax.span,
+          ),
+        )
+        continue
+      }
+      if (sourceContract !== undefined && conformanceOwner !== conformance.module) {
+        const ownership = Type.isNominal(provider)
+          ? "the provider's module"
+          : "the contract's module for scalar providers"
+        diagnostics.push(
+          invalidDiagnostic(
+            `implementation for ${Type.encode(provider)} must be declared in ${conformanceOwner}, ${ownership}`,
             conformance.syntax.span,
           ),
         )
@@ -858,6 +877,9 @@ export const complete = (
         const interfaceProviderModule = Type.isNominal(provider)
           ? modules.find((candidate) => candidate.module === provider.module)
           : undefined
+        const conformanceModule = modules.find(
+          (candidate) => candidate.module === conformance.module,
+        )
         for (const contract of sourceContract.operations) {
           if (contract.name._tag !== 'Present') continue
           const mapping = mapped.get(contract.name.spelling)
@@ -874,24 +896,35 @@ export const complete = (
           }
           // Every witness uses the applied contract's literal operands. Source functions and
           // sealed intrinsics are checked by the same ownership rules.
-          if (
+          const mappedProviderTarget =
+            mapping.form === 'Mapped' &&
             Type.isNominal(provider) &&
             target._tag === 'TypePath' &&
             target.segments.length === 2 &&
             target.segments.at(0)?.spelling === provider.name &&
             target.segments.at(0)?.spelling !== 'Intrinsic'
-          ) {
+          const inlineTarget = mapping.form === 'Inline' && target._tag === 'TypePath'
+          if (inlineTarget || mappedProviderTarget) {
             const targetName = target.segments.at(1)?.spelling
-            const implementation = interfaceProviderModule?.declarations.find(
-              (declaration) =>
-                targetName !== undefined &&
-                declaration.name._tag === 'Present' &&
-                declaration.name.spelling === targetName,
-            )
+            const implementation =
+              mapping.form === 'Inline'
+                ? conformanceModule?.declarations.find(
+                    (declaration) =>
+                      declaration.conformanceImplementation?.ordinal === conformance.ordinal &&
+                      declaration.conformanceImplementation.operation === contractName,
+                  )
+                : interfaceProviderModule?.declarations.find(
+                    (declaration) =>
+                      targetName !== undefined &&
+                      declaration.name._tag === 'Present' &&
+                      declaration.name.spelling === targetName,
+                  )
             if (implementation === undefined) {
               diagnostics.push(
                 invalidDiagnostic(
-                  `mapped operation ${provider.name}.${targetName ?? '_'} does not exist`,
+                  mapping.form === 'Inline'
+                    ? `inline operation ${capability.name}.${contractName} does not exist`
+                    : `mapped operation ${Type.isNominal(provider) ? provider.name : Type.encode(provider)}.${targetName ?? '_'} does not exist`,
                   mapping.syntax.span,
                 ),
               )
@@ -951,6 +984,18 @@ export const complete = (
             else inferredWitnessArguments.set(mapping, inference.arguments)
             continue
           }
+          if (mapping.form === 'Inline') {
+            rejectIncompatibleMapping('inline witness target is unavailable')
+            continue
+          }
+          if (
+            Type.isBuiltin(provider) &&
+            mapping.form === 'Mapped' &&
+            (target._tag !== 'TypePath' || target.segments.at(0)?.spelling !== 'Intrinsic')
+          ) {
+            rejectIncompatibleMapping('scalar source witnesses must be declared inline')
+            continue
+          }
           const operation =
             target._tag === 'TypePath' &&
             target.segments.length === 2 &&
@@ -979,6 +1024,16 @@ export const complete = (
                 : InterfaceWitnessCompatibility.describe(compatibility),
             )
         }
+        continue
+      }
+
+      if (Type.equals(capability, Type.copyCapability) && !Type.isNominal(provider)) {
+        diagnostics.push(
+          invalidDiagnostic(
+            `Copy cannot be implemented for structural provider ${Type.encode(provider)}; shared references are compiler-proven Copy and every other structural type follows its sealed rule`,
+            conformance.syntax.span,
+          ),
+        )
         continue
       }
 

@@ -18,18 +18,18 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/f64`](./f64.md) | `f64` | 50 | IEEE binary64 values and Silk's default floating-point arithmetic. |
 | [`silk/fiber`](./fiber.md) | `Fiber` | 16 | Affine Fiber handles, typed outcomes, and one-observer completion. |
 | [`silk/filesystem`](./filesystem.md) | `FileSystem` | 58 | Portable normalized paths, whole-file operations, directory traversal, and explicit temp scopes. |
-| [`silk/format`](./format.md) | `Format` | 18 | Decimal rendering and complete-text parsing shared by every integer module. |
+| [`silk/format`](./format.md) | `Format` | 43 | Writer-backed presentation and complete decimal parsing. |
 | [`silk/hash`](./hash.md) | `HashKey` | 8 | Deterministic seeded hashing contracts for hash maps, hash sets, and user-defined key types. |
 | [`silk/hash_map`](./hash-map.md) | `HashMap` | 16 | Owned key-value storage with deterministic seeded hashing and open-addressed lookup. |
 | [`silk/hash_set`](./hash-set.md) | `HashSet` | 13 | Owned unique elements with deterministic seeded hashing and open-addressed membership lookup. |
 | [`silk/host_input`](./host-input.md) | `HostInput` | 10 | Explicit access to process arguments, environment values, and the working directory as bytes. |
-| [`silk/i16`](./i16.md) | `i16` | 60 | Sixteen-bit signed integers with explicit overflow, conversion, and text policies. |
-| [`silk/i32`](./i32.md) | `i32` | 60 | Thirty-two-bit signed integers and the default type of context-free integer literals. |
-| [`silk/i64`](./i64.md) | `i64` | 60 | Sixty-four-bit signed integers for large fixed-width values and exact integer protocols. |
-| [`silk/i8`](./i8.md) | `i8` | 60 | Eight-bit signed integers for compact values, byte-level formats, and narrow arithmetic. |
+| [`silk/i16`](./i16.md) | `i16` | 59 | Sixteen-bit signed integers with explicit overflow, conversion, and text policies. |
+| [`silk/i32`](./i32.md) | `i32` | 59 | Thirty-two-bit signed integers and the default type of context-free integer literals. |
+| [`silk/i64`](./i64.md) | `i64` | 59 | Sixty-four-bit signed integers for large fixed-width values and exact integer protocols. |
+| [`silk/i8`](./i8.md) | `i8` | 59 | Eight-bit signed integers for compact values, byte-level formats, and narrow arithmetic. |
 | [`silk/insecure_random`](./insecure-random.md) | `InsecureRandom` | 7 | Provider-replaceable deterministic words, booleans, bounded values, and byte filling. |
 | [`silk/insecure_seed`](./insecure-seed.md) | `InsecureSeed` | 8 | One provider-stable 128-bit value for initialization-time hash-flood hardening. |
-| [`silk/isize`](./isize.md) | `isize` | 60 | Pointer-width signed integers for offsets whose range follows the selected compilation target. |
+| [`silk/isize`](./isize.md) | `isize` | 59 | Pointer-width signed integers for offsets whose range follows the selected compilation target. |
 | [`silk/layout`](./layout.md) | `Layout` | 6 | Checked size-and-alignment descriptions used to request storage from an allocator. |
 | [`silk/local_scheduler`](./local-scheduler.md) | `LocalScheduler` | 4 | Deterministic single-threaded execution for structured Fibers. |
 | [`silk/logger`](./logger.md) | `Logger` | 14 | Typed semantic logging with replaceable stdout and bounded in-memory providers. |
@@ -54,13 +54,13 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/standard_input`](./standard-input.md) | `StandardInput` | 11 | Portable blocking reads of raw standard-input bytes through an explicit provider. |
 | [`silk/string`](./string.md) | `String` | 22 | Valid UTF-8 text, including owned storage, byte validation, and scalar-by-scalar traversal. |
 | [`silk/system_clock`](./system-clock.md) | `SystemClock` | 7 | Provider-replaceable Unix-epoch time with canonical split-second instants. |
-| [`silk/u16`](./u16.md) | `u16` | 57 | Sixteen-bit unsigned integers with explicit arithmetic and conversion failure policies. |
-| [`silk/u32`](./u32.md) | `u32` | 57 | Thirty-two-bit unsigned integers for fixed-width counts, masks, and binary fields. |
-| [`silk/u64`](./u64.md) | `u64` | 57 | Sixty-four-bit unsigned integers for wide masks, counters, hashes, and exact interchange values. |
-| [`silk/u8`](./u8.md) | `u8` | 57 | Eight-bit unsigned integers for bytes, compact counters, and exact binary representations. |
+| [`silk/u16`](./u16.md) | `u16` | 56 | Sixteen-bit unsigned integers with explicit arithmetic and conversion failure policies. |
+| [`silk/u32`](./u32.md) | `u32` | 56 | Thirty-two-bit unsigned integers for fixed-width counts, masks, and binary fields. |
+| [`silk/u64`](./u64.md) | `u64` | 56 | Sixty-four-bit unsigned integers for wide masks, counters, hashes, and exact interchange values. |
+| [`silk/u8`](./u8.md) | `u8` | 56 | Eight-bit unsigned integers for bytes, compact counters, and exact binary representations. |
 | [`silk/unicode`](./unicode.md) | `Unicode` | 6 | Explicit Unicode canonical normalization backed by the pinned Unicode 17.0.0 data set. |
 | [`silk/unicode_tables`](./unicode-tables.md) | `UnicodeTables` | 8 | Generated canonical-normalization data for the silk.unicode public façade. |
-| [`silk/usize`](./usize.md) | `usize` | 59 | Pointer-width unsigned integers for lengths, indices, capacities, and allocation sizes. |
+| [`silk/usize`](./usize.md) | `usize` | 58 | Pointer-width unsigned integers for lengths, indices, capacities, and allocation sizes. |
 | [`silk/vector`](./vector.md) | `Vector` | 20 | Growable owned sequences with allocation-aware mutation, stable sorting, and checked indexing. |
 | [`silk/writer`](./writer.md) | `Writer` | 8 | Complete stdout and stderr byte writes through a replaceable service. |
 

@@ -505,6 +505,27 @@ export const lowerBorrowedWriteSelectors = (
       )
       continue
     }
+    if (selector._tag === 'Index') {
+      const index =
+        selector.bounds._tag === 'Proven'
+          ? Object.freeze({ _tag: 'Proven' as const, value: selector.bounds.index })
+          : (() => {
+              const expression = lowerExpression(fn, selector.index)
+              return expression === undefined
+                ? undefined
+                : Object.freeze({ _tag: 'Runtime' as const, local: expression.result })
+            })()
+      if (index === undefined) return undefined
+      lowered.push(
+        Object.freeze({
+          _tag: 'ElementSelector',
+          length: selector.array.length,
+          index,
+          provenance: authored(selector.span),
+        }),
+      )
+      continue
+    }
     const index = lowerExpression(fn, selector.index)
     if (index === undefined) return undefined
     lowered.push(

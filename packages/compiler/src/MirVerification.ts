@@ -4962,13 +4962,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           }
         }
         if (operation._tag === 'ReadPlace' || operation._tag === 'CheckPlace') {
-          const selected = placeType(
-            fn,
-            self.layout,
-            operation.root,
-            operation.selectors,
-            operation._tag === 'ReadPlace',
-          )
+          const selected = placeType(fn, self.layout, operation.root, operation.selectors, true)
           const sliceSelector = operation.selectors.find(
             (selector) => selector._tag === 'SliceElementSelector',
           )
@@ -5064,7 +5058,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           }
         }
         if (operation._tag === 'WritePlace') {
-          const selected = placeType(fn, self.layout, operation.root, operation.selectors)
+          const selected = placeType(fn, self.layout, operation.root, operation.selectors, true)
           const source = fn.localTypes.at(operation.source.ordinal)
           const root = fn.localTypes.at(operation.root.ordinal)
           const sliceSelector = operation.selectors.find(

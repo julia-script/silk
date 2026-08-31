@@ -7,7 +7,9 @@ interface. `Display.display` SHALL receive the displayed value by shared borrow 
 Formatter session, return unit, fail only with `WriterError`, and require exclusive access to the
 ordinary `Writer` service. Formatter SHALL carry width, alignment, fill, sign, alternate-form,
 zero-padding, precision, and color-permission options and SHALL expose ordinary source helpers for
-writing content and padding. It MUST NOT own, capture, select, or replace the Writer provider.
+writing content and padding. A Display implementation SHALL be able to call those helpers repeatedly
+through compatible call-scoped reborrows of its mutable Formatter parameter. Formatter MUST NOT
+own, capture, select, or replace the Writer provider.
 
 `Display` SHALL mean the default human-readable presentation. Radix-specific or diagnostic
 presentations MUST NOT silently reinterpret `Display`; they require separately named presentation
@@ -27,6 +29,11 @@ contracts or operations.
 
 - **WHEN** the same Formatter options are used with two different Writer providers
 - **THEN** formatting emits the same requested byte sequence while each provider retains its own effects and failures
+
+#### Scenario: Reborrow one Formatter session
+
+- **WHEN** a Display implementation performs several option reads and Writer-backed helper calls through one `&mut Formatter` parameter
+- **THEN** each nested call receives a compatible temporary reborrow and the parent Formatter access resumes afterward
 
 ### Requirement: Formatting options have deterministic streaming semantics
 
@@ -69,9 +76,11 @@ Canonical standard-library source SHALL define an interface-owned inline `Displa
 every signed and unsigned integer type known to the scalar catalog. Integer Display SHALL emit the
 canonical decimal representation, including zero and each type's minimum and maximum value, without
 an owned `String`, allocator requirement, formatting intrinsic, one-Writer-call-per-digit loop, or
-compiler recognition of formatting declarations. It SHALL honor width, alignment, fill, sign,
-zero-padding, and precision consistently, while decimal alternate form and color permission SHALL
-not change the digits unless a separately documented presentation adds styling.
+compiler recognition of formatting declarations. Each scalar witness SHALL read its borrowed
+receiver explicitly through `self.*`, then use ordinary scalar actor operations and the shared
+source rendering core. It SHALL honor width, alignment, fill, sign, zero-padding, and precision
+consistently, while decimal alternate form and color permission SHALL not change the digits unless a
+separately documented presentation adds styling.
 
 #### Scenario: Display an integer bound
 
@@ -91,7 +100,7 @@ not change the digits unless a separately documented presentation adds styling.
 #### Scenario: Keep integer formatting ordinary source
 
 - **WHEN** equivalent formatter, interface, and integer implementations are copied under legal user names
-- **THEN** they receive the same conformance, Effect, ownership, and lowering behavior without intrinsic registration
+- **THEN** `self.*` reads each Copy scalar receiver and the implementation receives the same conformance, Effect, ownership, and lowering behavior without intrinsic registration
 
 ### Requirement: Integer parsing survives the rendering rewrite
 

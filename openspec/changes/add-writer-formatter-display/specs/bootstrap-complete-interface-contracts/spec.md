@@ -1,5 +1,42 @@
 ## MODIFIED Requirements
 
+### Requirement: Copy is a sealed zero-operation conformance
+
+`Copy` SHALL remain a compiler-sealed interface with no user-definable operations. A source
+implementation MAY be declared only in empty form for an eligible nominal aggregate in its defining
+module and SHALL publish evidence only after the compiler proves every stored field Copy, proves the
+complete type cleanup-free, and finds no `Drop` implementation, cycle, or conflicting evidence.
+
+The compiler SHALL prove every shared reference `&T` Copy independently of whether `T` is Copy,
+because duplication copies the shared reference rather than its referent. Every exclusive reference
+`&mut T` SHALL remain affine. Source MUST NOT declare `Copy` for either reference kind; such a
+declaration neither reads the referent nor overrides the sealed reference rule.
+
+#### Scenario: Reject a Copy operation body
+
+- **WHEN** an implementation of `Copy` declares or maps an operation
+- **THEN** conformance validation rejects it rather than treating duplication as user code
+
+#### Scenario: Reject Copy and Drop together
+
+- **WHEN** one provider attempts to implement both `Copy` and `Drop`
+- **THEN** the Copy implementation is invalid and no Copy witness is published
+
+#### Scenario: Prove a shared reference Copy
+
+- **WHEN** ownership asks whether `&T` is Copy for either a Copy or affine `T`
+- **THEN** the compiler proves the shared reference Copy without source conformance evidence
+
+#### Scenario: Keep an exclusive reference affine
+
+- **WHEN** ownership asks whether `&mut T` is Copy
+- **THEN** the compiler rejects duplication so two usable exclusive aliases cannot be created
+
+#### Scenario: Reject a source reference Copy implementation
+
+- **WHEN** source declares `impl Copy for &u32 {}` or a Copy implementation for any other reference
+- **THEN** conformance validation rejects the structural provider rather than publishing redundant or alias-unsafe evidence
+
 ### Requirement: Conformances are coherent provider-local facts
 
 A source conformance whose provider has an outer nominal type SHALL be declared in the module

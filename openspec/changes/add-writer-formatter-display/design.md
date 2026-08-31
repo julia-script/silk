@@ -12,6 +12,12 @@ provides the correct typed streaming boundary. Standard-library source must rema
 and the compiler may not recognize `Format`, `Formatter`, `Display`, Writer, or an integer actor by
 spelling.
 
+The selected `Display for u32` body receives `self: &u32`, but Silk has no expression that names the
+referent as a value or place. Shared references themselves are already compiler-proven `Copy`; that
+fact duplicates the reference and does not read a `u32`. Value-reference parameters also fail the
+compatible call-scoped reborrows already specified for references, although slices follow that
+model. The formatting API needs both behaviors without a formatting-specific escape hatch.
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -19,6 +25,9 @@ spelling.
 - Give every source conformance exactly one deterministic owning module, including scalar heads.
 - Treat an inline scalar witness as the canonical source function it already is throughout the
   compiler pipeline.
+- Represent and lower postfix referent projection as an ordinary place operation, including `Copy`
+  reads, compatible reborrows, and exclusive replacement.
+- Align value-reference parameter reborrowing with the existing shared/exclusive loan model.
 - Separate byte transport (`Writer`), formatting policy/session (`Formatter`), and type-directed
   presentation (`Display`).
 - Make integer presentation allocation-free while retaining precise Writer failure behavior and
@@ -34,6 +43,9 @@ spelling.
 - Atomic output across a Writer failure.
 - Source mappings from scalar conformances to ordinary actor functions; scalar source witnesses are
   inline, while sealed intrinsic mappings remain available for compiler-defined operations.
+- Pointer arithmetic, raw-pointer conversion, implicit reference-to-value conversion, or moving an
+  affine value out of borrowed storage.
+- User-defined `Copy` behavior for shared or exclusive references.
 
 ## Decisions
 
@@ -79,6 +91,63 @@ witness-effect runner construction, so downstream phases do not add scalar-speci
 Storing or re-deriving a standard-library module for each scalar was rejected. Adding a second
 lowering path was also rejected because it would let admissibility and executable selection diverge.
 
+### `.*` is a postfix referent-place projection
+
+The syntax `reference.*` appends one referent selector to the existing postfix projection chain.
+It binds and composes exactly like `.field` and `[index]`, so `reference.*.field`,
+`references[index].*`, `&reference.*`, and an exclusive `reference.* = replacement` all retain one
+left-to-right place path. The syntax tree records a distinct `ReferentProjectionExpression`; `.*`
+is not an overloadable operator and adds no prefix-precedence level.
+
+Semantic analysis requires the projection subject to have type `&T` or `&mut T` and gives the
+projected place type `T` with the original borrow root and access ceiling. An ordinary value read of
+that place succeeds only when the existing sealed `Copy` proof proves `T`; it copies the referent
+without consuming either reference or owner. Moving an affine referent remains invalid borrowed
+movement. Shared borrowing is available through either reference kind, while exclusive borrowing
+and replacement require `&mut T`. Replacement follows the existing place-replacement cleanup rule
+rather than extracting the old value through the borrow.
+
+HIR retains the reference subject, target type, access, source span, and borrow provenance as a
+referent place. MIR lowers reads, borrows, and writes through the same verified place machinery as
+field and index projections. Evaluator, native, and Wasm consume that canonical MIR; no phase
+recognizes Display or integer types, and no intrinsic call represents the projection.
+
+Prefix `*reference` was rejected because Silk's place grammar is already a left-to-right postfix
+chain and a prefix form would introduce another precedence case. An implicit expected-type-driven
+conversion from `&T` to `T` was rejected because it would make copying the reference versus reading
+its referent contextual. A reference-copy intrinsic was rejected because referent projection is a
+general language place operation rather than an external or unsafe compiler boundary.
+
+### Value references support compatible call-scoped reborrows
+
+When a shared reference parameter is borrowed for an expected shared-reference operand, the child
+loan retains the same referent and cannot strengthen access. An exclusive reference parameter may
+similarly form a shared or exclusive child loan. The parent exclusive reference is suspended for
+the nested call and restored afterward. This is the value-reference counterpart of the existing
+slice rule and makes repeated Formatter helper calls ordinary source composition.
+
+The explicit `&reference.*` and `&mut reference.*` forms name the referent place directly. Existing
+compatible argument syntax such as `helper(&mut formatter)` remains a call-scoped reborrow rather
+than constructing `&&mut Formatter`. Borrowing with no compatible reference target retains its
+ordinary type and diagnostic behavior; reborrowing never becomes a general implicit dereference.
+
+Threading exclusive references through helper return values was rejected because it distorts every
+Formatter helper signature around a missing borrow operation. Allowing references to be reborrowed
+only when their referents are slices was rejected because the reference model already specifies the
+behavior independently of referent shape.
+
+### Reference `Copy` remains sealed and structural
+
+The compiler continues to prove every shared `&T` as `Copy` regardless of whether `T` is `Copy`,
+because duplicating a shared loan duplicates no owned payload. Every exclusive `&mut T` remains
+affine to preserve uniqueness. Conformance completion rejects source `Copy` declarations whose
+provider is either reference kind before they can publish redundant or alias-unsafe evidence.
+
+`impl Copy for &u32 {}` was rejected as the mechanism for reading a scalar. Even if admitted, its
+`Self` is `&u32`, so copying it produces another `&u32`, not a `u32`. The previously accepted empty
+declaration was a validation hole caused by non-nominal providers bypassing sealed-Copy validation;
+closing that hole restores the single compiler authority rather than creating behavior.
+
 ### Formatter is mutable policy state over an ambient Writer
 
 The public shape is equivalent to:
@@ -114,6 +183,10 @@ Formatter owns options and session-local bookkeeping only. Its write and padding
 forward through the ambient mutable Writer requirement. It neither stores a Writer borrow nor
 selects a provider. Public default and options-based entry functions construct one Formatter and
 invoke the statically selected `Display` witness.
+
+Scalar Display witnesses read their borrowed receiver explicitly with `self.*`, widen the resulting
+integer through ordinary scalar actor operations, and pass it to the shared bounded rendering core.
+Nominal Display witnesses may continue to inspect Copy fields through ordinary field projection.
 
 Passing raw options directly to every Display was rejected because it leaves each implementation to
 duplicate emission and padding policy. Making Formatter a service was rejected because formatting
@@ -176,6 +249,15 @@ that could replace the original failure. Documentation and tests state this expl
 - **[Risk] Admitting compatibility without executable discovery would recreate an unlowerable
   witness gap.** → Resolve the same canonical inline identity in declaration completion,
   ConformanceProof, reachability, and lowering tests before accepting the conformance.
+- **[Risk] Referent projection could accidentally become an implicit dereference or borrowed move.**
+  → Keep `.*` explicit in syntax, HIR, and MIR; require sealed `Copy` proof for bare reads and reject
+  affine extraction in ownership tests.
+- **[Risk] Reborrowing an exclusive parameter could leave both parent and child usable.** → Give the
+  child the existing loan provenance, suspend the parent for the complete nested call, and test
+  shared, exclusive, strengthening, overlap, and restoration cases.
+- **[Risk] Backends could disagree on reference storage representation.** → Verify the same
+  canonical referent-place MIR through evaluation, direct Wasm, and the differential native corpus,
+  including scalar, zero-lane, field, and replacement cases.
 - **[Risk] Arbitrarily large width causes many Writer operations.** → Emit fill in bounded chunks;
   never allocate proportional to width and never write one scalar per operation when a chunk fits.
 - **[Risk] A Writer failure after ANSI styling can leave an external terminal styled.** → Default
@@ -185,13 +267,16 @@ that could replace the original failure. Documentation and tests state this expl
 
 1. Extend conformance ownership and canonical inline witness resolution, with focused declaration,
    proof, diagnostic, reachability, and effectful bound-call tests.
-2. Replace `silk.format` rendering with Formatter, options, Display, padding helpers, and bounded
+2. Add postfix referent projection, sealed `Copy` reads, reference-impl rejection, and compatible
+   value-reference reborrows through syntax, facts, ownership, HIR, MIR, evaluation, and backends.
+3. Replace `silk.format` rendering with Formatter, options, Display, padding helpers, and bounded
    signed/unsigned emission; keep parsing intact.
-3. Add every integer Display conformance in `silk.format`, then migrate integer actor APIs and all
-   repository callers directly to Writer-backed entry functions.
-4. Delete the String-producing rendering functions and append-based rendering engine in the same
+4. Add every integer Display conformance in `silk.format`, read scalar receivers with `self.*`,
+   then migrate integer actor APIs and all repository callers directly to Writer-backed entry
+   functions.
+5. Delete the String-producing rendering functions and append-based rendering engine in the same
    change; regenerate the stdlib embedding, manifest-derived artifacts, and documentation.
-5. Verify semantics cheaply through shared Analysis snapshots, add the formatting program to the
+6. Verify semantics cheaply through shared Analysis snapshots, add the formatting program to the
    differential native corpus where appropriate, and run the repository's required check and
    release-candidate gates.
 

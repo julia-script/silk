@@ -46,6 +46,7 @@ import type {
   PatternFieldFact,
   PatternFieldState,
   ProjectionState,
+  ReferentProjectionState,
   SemanticType,
   StatementFact,
   StructInitializerFact,
@@ -812,6 +813,9 @@ export const analyzeMove = (
 
 export const borrowRoot = (subject: ExpressionFact): BorrowRootFact | undefined => {
   if (subject._tag === 'Grouped') return borrowRoot(subject.expression)
+  if (subject._tag === 'ReferentProjection' && subject.state._tag === 'Resolved') {
+    return borrowRoot(subject.subject)
+  }
   if (subject._tag === 'FieldProjection' && subject.state._tag === 'Resolved') {
     const root = borrowRoot(subject.subject)
     return root === undefined
@@ -985,6 +989,50 @@ export const analyzeBorrow = (
       diagnostics,
       Diagnostic.invalidBorrowOperand(subjectNode?.span ?? node.span),
     )
+  }
+  const projectedReference =
+    subject._tag === 'ReferentProjection' && subject.state._tag === 'Resolved'
+      ? subject.state.reference
+      : undefined
+  const parentReference = Type.isReference(sourceType) ? sourceType : projectedReference
+  if (
+    parentReference !== undefined &&
+    (projectedReference !== undefined || (expected !== undefined && Type.isReference(expected)))
+  ) {
+    const target = parentReference.target
+    if (
+      (expected !== undefined &&
+        (!Type.isReference(expected) ||
+          !TypeInference.infer(expected.target, target, new Map()) ||
+          expected.access !== access)) ||
+      (parentReference.access === 'Shared' && access === 'Exclusive')
+    ) {
+      return unavailableBorrow(
+        node,
+        access,
+        subject,
+        diagnostics,
+        Diagnostic.invalidBorrowOperand(subjectNode?.span ?? node.span),
+      )
+    }
+    const type = Type.reference(access, target)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Borrow',
+        access,
+        subject,
+        formation: Object.freeze({
+          _tag: 'ValueReborrow',
+          root,
+          parent: parentReference,
+          suspendsParent: parentReference.access === 'Exclusive',
+        }),
+        type: availableExpressionType(type),
+        syntax: node,
+      }),
+      diagnostics,
+      type,
+    })
   }
   if (
     (expected === undefined || (!Type.isSlice(expected) && !Type.isReference(expected))) &&
@@ -3674,6 +3722,60 @@ export const analyzeProjection = (
   })
 }
 
+export const analyzeReferentProjection = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+): ExpressionResult => {
+  const subjectNode = node.children.find(isExpressionNode)
+  if (subjectNode === undefined)
+    throw new RangeError('Referent projection requires a subject expression')
+  const subject = analyzeExpression(
+    source,
+    subjectNode,
+    declarations,
+    declaration,
+    scope,
+    resolution,
+  )
+  if (subject === undefined)
+    throw new RangeError(`Cannot analyze referent projection ${subjectNode.kind}`)
+  const diagnostics: Array<Diagnostic.Diagnostic> = [...subject.diagnostics]
+  const reference =
+    subject.type !== undefined && Type.isReference(subject.type) ? subject.type : undefined
+  let state: ReferentProjectionState
+  if (reference === undefined && subject.type !== undefined) {
+    const star = directToken(node, 'Star')
+    const diagnostic = Diagnostic.invalidReferentProjection(
+      Type.encode(subject.type),
+      star?.span ?? node.span,
+    )
+    diagnostics.push(diagnostic)
+    state = Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) })
+  } else if (reference === undefined) {
+    state = Object.freeze({ _tag: 'Unavailable' })
+  } else {
+    state = Object.freeze({ _tag: 'Resolved', reference })
+  }
+  const type =
+    reference === undefined ? unavailableExpressionType : availableExpressionType(reference.target)
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'ReferentProjection',
+      subject: subject.fact,
+      ...(reference === undefined ? {} : { reference, borrowAccess: reference.access }),
+      state,
+      type,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze(diagnostics),
+    type: type._tag === 'Available' ? type.type : undefined,
+  })
+}
+
 import type { CallTypeArgumentsResult } from './CallResolution.js'
 import {
   analyzeArgumentNodes,
@@ -3777,6 +3879,7 @@ export function analyzePlaceReplace(
     assignmentRootAccess(root) === 'SharedBorrowed' ||
     (assignmentRootAccess(root) === 'ExclusiveBorrowed' &&
       destination.fact._tag !== 'IndexProjection' &&
+      destination.fact._tag !== 'ReferentProjection' &&
       destination.fact._tag !== 'FieldProjection')
   ) {
     diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
@@ -5283,6 +5386,9 @@ export const effectCaptureFacts = (
       case 'EnumValue':
         expression(fact.argument)
         return
+      case 'ReferentProjection':
+        expression(fact.subject)
+        return
       case 'Integer':
       case 'Duration':
       case 'Floating':
@@ -5866,6 +5972,10 @@ export function analyzeExpression(
       analyzeFunctionItem(source, node, declarations, resolution, expected) ??
       analyzeProjection(source, node, declarations, declaration, scope, resolution)
     )
+  }
+
+  if (node.kind === 'ReferentProjectionExpression') {
+    return analyzeReferentProjection(source, node, declarations, declaration, scope, resolution)
   }
 
   if (node.kind === 'IndexProjectionExpression') {

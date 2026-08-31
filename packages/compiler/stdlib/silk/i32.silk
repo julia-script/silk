@@ -11,7 +11,7 @@
 //! `saturating*` clamps at [`MIN`] or [`MAX`]. Signed right shifts preserve the sign bit.
 //!
 //! Decimal [`parse`] rejects trailing bytes and separates invalid syntax from out-of-range input.
-//! [`toText`] allocates an owned decimal string.
+//! Use `silk.format.Display` for allocation-free presentation.
 //!
 //! # Gotchas
 //! [`MIN`] has no positive i32 counterpart. Use [`wrappingNegate`] or [`saturatingNegate`] for its
@@ -39,8 +39,6 @@
 //! ```
 
 import silk.bool as bool
-import silk.allocator { Allocator }
-import silk.allocator { OutOfMemoryError }
 import silk.f32 as f32
 import silk.f64 as f64
 import silk.format as Format
@@ -51,7 +49,6 @@ import silk.i8 as i8
 import silk.isize as isize
 import silk.option { Option, none, some }
 import silk.result { Result }
-import silk.string { String }
 import silk.u16 as u16
 import silk.u32 as u32
 import silk.u64 as u64
@@ -379,12 +376,6 @@ pub fn greaterThan(left: i32, right: i32) -> bool {
 /// Returns `true` when `left` is greater than or equal to `right`.
 pub fn greaterOrEqual(left: i32, right: i32) -> bool {
   return Intrinsic.i32GreaterOrEqual(left, right)
-}
-
-/// Renders the value as base-10 text in new owned storage. Allocation uses the required
-/// `Allocator` and can fail with `OutOfMemoryError`.
-pub effect fn toText(value: i32) -> String ! OutOfMemoryError ? &mut Allocator {
-  return run Format.signedText(toI64(value))
 }
 
 /// Reads the complete text as a signed decimal `i32`.

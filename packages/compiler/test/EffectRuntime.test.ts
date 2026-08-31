@@ -484,7 +484,8 @@ it.effect('keeps callable Effect mapping in evaluator, LLVM, and Wasm parity', (
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     const main = instance.exports.silk_main
 
-    assert.strictEqual(MirEncoding.encode(Analysis.loweredMir(native)), golden('effect.mir.txt'))
+    const encodedMir = MirEncoding.encode(Analysis.loweredMir(native))
+    assert.strictEqual(encodedMir, golden('effect.mir.txt'))
     assert.strictEqual(logical._tag, 'Completed')
     assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42n)
     assert.include(llvm.ir, '@silk_silk_i32_add')

@@ -11,7 +11,7 @@
 //! computes modulo the target width, and `saturating*` clamps at [`MIN`] or [`MAX`].
 //!
 //! [`ZERO`] and [`ONE`] provide typed values where an uncontextualized literal would be `i32`.
-//! Decimal [`parse`] uses the target's range, while [`toText`] allocates owned text.
+//! Decimal [`parse`] uses the target's range; `silk.format.Display` presents it without allocation.
 //!
 //! # Gotchas
 //! A value valid as usize on a 64-bit target can be out of range on a 32-bit target.
@@ -32,8 +32,6 @@
 //! ```
 
 import silk.bool as bool
-import silk.allocator { Allocator }
-import silk.allocator { OutOfMemoryError }
 import silk.f32 as f32
 import silk.f64 as f64
 import silk.format as Format
@@ -45,7 +43,6 @@ import silk.i8 as i8
 import silk.isize as isize
 import silk.option { Option, none, some }
 import silk.result { Result }
-import silk.string { String }
 import silk.u16 as u16
 import silk.u32 as u32
 import silk.u64 as u64
@@ -365,12 +362,6 @@ pub fn greaterThan(left: usize, right: usize) -> bool {
 /// Returns `true` when `left` is greater than or equal to `right`.
 pub fn greaterOrEqual(left: usize, right: usize) -> bool {
   return Intrinsic.usizeGreaterOrEqual(left, right)
-}
-
-/// Renders the value as base-10 text in new owned storage. Allocation uses the required
-/// `Allocator` and can fail with `OutOfMemoryError`.
-pub effect fn toText(value: usize) -> String ! OutOfMemoryError ? &mut Allocator {
-  return run Format.unsignedText(toU64(value))
 }
 
 /// Reads the complete text as an unsigned decimal `usize`.

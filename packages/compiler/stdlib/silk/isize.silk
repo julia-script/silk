@@ -10,7 +10,7 @@
 //! conversions, division by zero, and invalid shift counts trap. `checked*` returns [`Option`],
 //! `wrapping*` uses arithmetic modulo the target width, and `saturating*` clamps at the target bound.
 //!
-//! Decimal [`parse`] and [`toText`] use the selected target range; formatting allocates owned text.
+//! Decimal [`parse`] uses the selected range; `silk.format.Display` presents it without allocation.
 //!
 //! # Gotchas
 //! Code that succeeds at a 64-bit boundary may fail or trap when compiled for a 32-bit target.
@@ -31,8 +31,6 @@
 //! ```
 
 import silk.bool as bool
-import silk.allocator { Allocator }
-import silk.allocator { OutOfMemoryError }
 import silk.f32 as f32
 import silk.f64 as f64
 import silk.format as Format
@@ -43,7 +41,6 @@ import silk.i64 as i64
 import silk.i8 as i8
 import silk.option { Option, none, some }
 import silk.result { Result }
-import silk.string { String }
 import silk.u16 as u16
 import silk.u32 as u32
 import silk.u64 as u64
@@ -381,12 +378,6 @@ pub fn greaterThan(left: isize, right: isize) -> bool {
 /// Returns `true` when `left` is greater than or equal to `right`.
 pub fn greaterOrEqual(left: isize, right: isize) -> bool {
   return Intrinsic.isizeGreaterOrEqual(left, right)
-}
-
-/// Renders the value as base-10 text in new owned storage. Allocation uses the required
-/// `Allocator` and can fail with `OutOfMemoryError`.
-pub effect fn toText(value: isize) -> String ! OutOfMemoryError ? &mut Allocator {
-  return run Format.signedText(toI64(value))
 }
 
 /// Reads the complete text as a signed decimal `isize`.

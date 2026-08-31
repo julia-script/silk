@@ -10,7 +10,7 @@
 //! when results should clamp to [`MIN`] or [`MAX`]. Signed right shifts preserve the sign bit.
 //!
 //! Decimal [`parse`] consumes the complete input and distinguishes malformed text from a value
-//! outside the i8 range. [`toText`] allocates an owned decimal string.
+//! outside the i8 range. Use `silk.format.Display` for allocation-free presentation.
 //!
 //! # Gotchas
 //! [`MIN`] has no positive i8 counterpart, so ordinary [`negate`] traps for that one value.
@@ -32,8 +32,6 @@
 //! ```
 
 import silk.bool as bool
-import silk.allocator { Allocator }
-import silk.allocator { OutOfMemoryError }
 import silk.f32 as f32
 import silk.f64 as f64
 import silk.format as Format
@@ -44,7 +42,6 @@ import silk.i64 as i64
 import silk.isize as isize
 import silk.option { Option, none, some }
 import silk.result { Result }
-import silk.string { String }
 import silk.u16 as u16
 import silk.u32 as u32
 import silk.u64 as u64
@@ -370,12 +367,6 @@ pub fn greaterThan(left: i8, right: i8) -> bool {
 /// Returns `true` when `left` is greater than or equal to `right`.
 pub fn greaterOrEqual(left: i8, right: i8) -> bool {
   return Intrinsic.i8GreaterOrEqual(left, right)
-}
-
-/// Renders the value as base-10 text in new owned storage. Allocation uses the required
-/// `Allocator` and can fail with `OutOfMemoryError`.
-pub effect fn toText(value: i8) -> String ! OutOfMemoryError ? &mut Allocator {
-  return run Format.signedText(toI64(value))
 }
 
 /// Reads the complete text as a signed decimal `i8`.

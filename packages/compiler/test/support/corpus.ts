@@ -136,6 +136,65 @@ pub fn main() -> i32 {
   return inspect(&flags)
 }`
 
+/** A generic Display call selects the interface-owned inline i32 witness on every engine. */
+export const scalarDisplayAcceptance = `import silk.effect as Effect
+import silk.format as Format
+import silk.u8 as u8
+import silk.usize as usize
+import silk.writer { Writer, WriterError }
+
+struct Capture { index: usize valid: bool }
+
+effect fn writeAll(self: &mut Capture, bytes: &[u8]) -> () {
+  let mut offset = usize.ZERO
+  while offset < bytes.length {
+    let mut expected = u8.toU8(50)
+    if self.index == usize.ZERO { expected = u8.toU8(45) }
+    if self.index == usize.ONE { expected = u8.toU8(52) }
+    if bytes[offset] != expected { self.valid = false }
+    self.index = self.index + usize.ONE
+    offset = offset + usize.ONE
+  }
+  return ()
+}
+
+effect fn flush(self: &mut Capture) -> () { return () }
+
+impl Writer for Capture {
+  writeAll: Capture.writeAll
+  flush: Capture.flush
+}
+
+effect fn render() -> i32 ! WriterError {
+  let mut capture = Capture { index: usize.ZERO, valid: true }
+  let value = -42
+  run Format.display<i32>(&value) |> Effect.provideMut<Writer>(&mut capture)
+  if !capture.valid { return 1 }
+  if capture.index != 3 { return 2 }
+  return 42
+}
+
+effect fn recover(error: WriterError) -> i32 { return 3 }
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(render(), recover)
+}`
+
+/** Explicit referent projection preserves runtime-indexed reads and writes on every engine. */
+export const referenceProjectionAcceptance = `import silk.usize as usize
+
+struct Buffer { values: [i32; 3] }
+
+fn update(buffer: &mut Buffer, index: usize) -> i32 {
+  buffer.*.values[index] = 42
+  return buffer.*.values[index]
+}
+
+pub fn main() -> i32 {
+  let mut buffer = Buffer { values: [1, 2, 3] }
+  return update(&mut buffer, usize.ONE)
+}`
+
 /** Two independent roots resume in reverse suspension order without sharing a frame stack. */
 export const independentExecutionNonLifo = `import silk.allocator { Allocator }
 import silk.allocator { Allocator }
@@ -1059,6 +1118,16 @@ export const corpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'scalar-enum-lanes',
     source: scalarEnumLaneAcceptance,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'scalar-display',
+    source: scalarDisplayAcceptance,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'reference-projection',
+    source: referenceProjectionAcceptance,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

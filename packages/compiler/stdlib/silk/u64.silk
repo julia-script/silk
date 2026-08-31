@@ -10,7 +10,7 @@
 //! [`MIN`] or [`MAX`]. Right shift inserts zero bits.
 //!
 //! Decimal [`parse`] consumes the complete input and separates malformed text from range overflow.
-//! [`toText`] allocates owned text. Conversion to a floating type may round large values.
+//! Use `silk.format.Display` for presentation. Conversion to a floating type may round large values.
 //!
 //! # Gotchas
 //! A `u64` can represent values that neither `i64` nor every target's `usize` can hold; use a
@@ -28,8 +28,6 @@
 //! ```
 
 import silk.bool as bool
-import silk.allocator { Allocator }
-import silk.allocator { OutOfMemoryError }
 import silk.f32 as f32
 import silk.f64 as f64
 import silk.format as Format
@@ -41,7 +39,6 @@ import silk.i8 as i8
 import silk.isize as isize
 import silk.option { Option, none, some }
 import silk.result { Result }
-import silk.string { String }
 import silk.u16 as u16
 import silk.u32 as u32
 import silk.u8 as u8
@@ -351,12 +348,6 @@ pub fn greaterThan(left: u64, right: u64) -> bool {
 /// Returns `true` when `left` is greater than or equal to `right`.
 pub fn greaterOrEqual(left: u64, right: u64) -> bool {
   return Intrinsic.u64GreaterOrEqual(left, right)
-}
-
-/// Renders the value as base-10 text in new owned storage. Allocation uses the required
-/// `Allocator` and can fail with `OutOfMemoryError`.
-pub effect fn toText(value: u64) -> String ! OutOfMemoryError ? &mut Allocator {
-  return run Format.unsignedText(toU64(value))
 }
 
 /// Reads the complete text as an unsigned decimal `u64`.

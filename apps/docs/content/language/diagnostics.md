@@ -16,11 +16,11 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | `LEX` | Lexical | 12 |
 | `PAR` | Parser | 5 |
 | `MOD` | Module | 3 |
-| `SEM` | Semantic | 162 |
+| `SEM` | Semantic | 163 |
 | `OWN` | Ownership | 16 |
 | `LAY` | Layout | 1 |
 
-There are 199 codes in total.
+There are 200 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -223,6 +223,7 @@ There are 199 codes in total.
 | `SEM0168` | Stable code for a variant qualifier that does not name a nominal union. | `Expected a nominal union, found <actual>` |
 | `SEM0169` | Stable code for construction through an incomplete nominal union declaration. | `Cannot construct invalid nominal union <unionName>` |
 | `SEM0170` | Stable code for a duration literal whose exact nanosecond total exceeds `u64`. | `Duration literal exceeds the u64 nanosecond range` |
+| `SEM0171` | Stable code for postfix referent projection whose subject is not a reference. | `Cannot project a referent from <actual>; the subject must be a reference` |
 
 ## Ownership (`OWN`)
 
