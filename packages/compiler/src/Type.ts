@@ -502,9 +502,9 @@ export const layout: Nominal = nominal('silk/layout', 'Layout')
 export const invalidAlignment: Nominal = nominal('silk/layout', 'InvalidAlignment')
 export const layoutOverflow: Nominal = nominal('silk/layout', 'LayoutOverflow')
 /** Explicit host capability for complete stdout and stderr byte writes. */
-export const standardStreams: Nominal = nominal('silk/standard_streams', 'StandardStreams')
+export const standardStreams: Nominal = nominal('silk/writer', 'Writer')
 /** Allocation-free typed failure returned when a host cannot commit a complete write. */
-export const streamWriteFailure: Nominal = nominal('silk/standard_streams', 'StreamWriteError')
+export const streamWriteFailure: Nominal = nominal('silk/writer', 'WriterError')
 /** A self-contained affine owner carrying one private active reclaim ticket. */
 export const allocation: Nominal = nominal('silk/core', 'Allocation')
 /** Opaque affine native file-or-directory handle used only by unsafe OS intrinsics. */

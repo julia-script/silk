@@ -316,13 +316,14 @@ pub fn main() -> i32 {
 
 it.effect('renders proved hover contracts and inferred provider selectors', () =>
   Effect.gen(function* () {
-    const source = `import silk.standard_streams as Streams
+    const source = `import silk.writer as Streams
+import silk.writer { Writer }
 import silk.effect as Effect
 
-pub effect fn main() -> () ! Streams.StreamWriteError {
-  let mut streams = Streams.nativeStandardStreamProvider()
+pub effect fn main() -> () ! Streams.WriterError {
+  let mut streams = Writer.stdoutWriterProvider()
   // π🙂 keeps the selector position on UTF-16 coordinates
-  return run Streams.send(Streams.stdout(), b"Hello\\n")
+  return run Writer.writeAll(b"Hello\\n")
     |> Effect.provideMut(&mut streams)
 }`
     const { document, snapshot } = yield* open(source)
@@ -330,7 +331,7 @@ pub effect fn main() -> () ! Streams.StreamWriteError {
     assert.deepEqual(hover?.contents, {
       kind: 'markdown',
       value:
-        '```silk\nlet mut streams: Streams.NativeStandardStreams\n```\n\n**Implements**\n\n- `Streams.StandardStreams`',
+        '```silk\nlet mut streams: Streams.StdoutWriter\n```\n\n**Implements**\n\n- `Streams.Writer`',
     })
 
     const selectorOffset = source.indexOf('provideMut(') + 'provideMut'.length
@@ -343,14 +344,14 @@ pub effect fn main() -> () ! Streams.StreamWriteError {
       [
         {
           position: positionAt(source, bindingEnd),
-          label: ': Streams.NativeStandardStreams',
+          label: ': Streams.StdoutWriter',
           kind: 1,
           paddingLeft: false,
           paddingRight: false,
         },
         {
           position: positionAt(source, selectorOffset),
-          label: '<Streams.StandardStreams>',
+          label: '<Streams.Writer>',
           kind: 1,
           paddingLeft: false,
           paddingRight: false,
@@ -362,7 +363,7 @@ pub effect fn main() -> () ! Streams.StreamWriteError {
         start: { line: 0, character: 0 },
         end: positionAt(source, selectorOffset),
       }).map((hint) => hint.label),
-      [': Streams.NativeStandardStreams'],
+      [': Streams.StdoutWriter'],
     )
     const selectorRange = {
       start: positionAt(source, selectorOffset),
@@ -372,7 +373,7 @@ pub effect fn main() -> () ! Streams.StreamWriteError {
     assert.deepEqual(Document.inlayHints(document, snapshot, selectorRange), clipped)
     assert.deepEqual(
       clipped.map((hint) => hint.label),
-      ['<Streams.StandardStreams>'],
+      ['<Streams.Writer>'],
     )
   }),
 )
@@ -435,12 +436,13 @@ pub fn broken() -> i32 { return missing() }`
 
 it.effect('does not duplicate an explicitly written provider selector', () =>
   Effect.gen(function* () {
-    const source = `import silk.standard_streams as Streams
+    const source = `import silk.writer as Streams
+import silk.writer { Writer }
 import silk.effect as Effect
-pub effect fn main() -> () ! Streams.StreamWriteError {
-  let mut streams = Streams.nativeStandardStreamProvider()
-  return run Streams.send(Streams.stdout(), b"ok\\n")
-    |> Effect.provideMut<Streams.StandardStreams>(&mut streams)
+pub effect fn main() -> () ! Streams.WriterError {
+  let mut streams = Writer.stdoutWriterProvider()
+  return run Writer.writeAll(b"ok\\n")
+    |> Effect.provideMut<Streams.Writer>(&mut streams)
 }`
     const { document, snapshot } = yield* open(source)
     assert.deepEqual(
@@ -448,7 +450,7 @@ pub effect fn main() -> () ! Streams.StreamWriteError {
         start: { line: 0, character: 0 },
         end: positionAt(source, source.length),
       }).map((hint) => hint.label),
-      [': Streams.NativeStandardStreams'],
+      [': Streams.StdoutWriter'],
     )
   }),
 )

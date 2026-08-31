@@ -10,7 +10,7 @@
 //! ordinary outcome data and promises that no later read will produce bytes. [`StreamReadError`] is
 //! reserved for a provider that could not complete a read.
 //!
-//! This service is separate from `StandardStreams`: output commits a complete message or fails,
+//! This service is separate from `Writer`: output commits a complete message or fails,
 //! while input is inherently partial and eventually ends.
 //!
 //! # Gotchas
@@ -73,7 +73,7 @@
 //! }
 //! ```
 
-// The portable byte-input boundary. `StandardStreams` writes and never reads; this service reads
+// The portable byte-input boundary. `Writer` writes and never reads; this service reads
 // and never writes. The two are separate because a write is all-or-failure while a read is
 // inherently partial and has an end.
 

@@ -17,15 +17,15 @@ const encoder = new TextEncoder()
 const outputRoot = mkdtempSync(join(tmpdir(), 'silk-standard-streams-'))
 afterAll(() => rmSync(outputRoot, { recursive: true, force: true }))
 
-const source = `import silk.standard_streams as StandardStream
-import silk.standard_streams { NativeStandardStreams }
-import silk.standard_streams { StreamWriteError }
+const source = `import silk.writer as Streams
+import silk.writer { WriterError, stdoutWriterProvider, stderrWriterProvider }
 import silk.effect as Effect
-pub effect fn main() -> () ! StreamWriteError {
-  let mut native = StandardStream.nativeStandardStreamProvider()
-  let first = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), Intrinsic.stringUtf8Bytes("heading\\n")), &mut native)
-  let second = run Effect.provideMut(StandardStream.send(StandardStream.stderr(), b"warning\\n"), &mut native)
-  let third = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), Intrinsic.stringUtf8Bytes("row\\n")), &mut native)
+pub effect fn main() -> () ! WriterError {
+  let mut stdout = Streams.stdoutWriterProvider()
+  let mut stderr = Streams.stderrWriterProvider()
+  let first = run Effect.provideMut(Streams.writeAll(Intrinsic.stringUtf8Bytes("heading\\n")), &mut stdout)
+  let second = run Effect.provideMut(Streams.writeAll(b"warning\\n"), &mut stderr)
+  let third = run Effect.provideMut(Streams.writeAll(Intrinsic.stringUtf8Bytes("row\\n")), &mut stdout)
   return ()
 }`
 
@@ -83,7 +83,7 @@ it.effect('records complete ordered writes and typed provider failure determinis
     const failing = StandardStreams.memory({ failAt: 1 })
     const failed = Analysis.evaluate(self, { standardStreams: failing.provider })
     assert.strictEqual(failed._tag, 'UnhandledFailure')
-    if (failed._tag === 'UnhandledFailure') assert.include(failed.identity, 'StreamWriteError')
+    if (failed._tag === 'UnhandledFailure') assert.include(failed.identity, 'WriterError')
     assert.strictEqual(failing.events().length, 1)
   }),
 )
@@ -234,24 +234,22 @@ it.effect('replaces the host provider with a pure source in-memory implementatio
   Effect.gen(function* () {
     const replaced = yield* Analysis.ofSourceRealized(
       'standard-streams/memory',
-      encoder.encode(`import silk.standard_streams as StandardStream
-import silk.standard_streams { StandardStreams }
-import silk.standard_streams { StreamWriteError }
+      encoder.encode(`import silk.writer as Streams
+import silk.writer { WriterError, Writer }
 import silk.effect as Effect
 struct MemoryStreams { writes: i32 }
 effect fn record(
   self: &mut MemoryStreams,
-  destination: bool,
   bytes: &[u8]
 ) -> () {
   self.writes = self.writes + 1
   return ()
 }
-impl StandardStreams for MemoryStreams { writeAll: MemoryStreams.record }
-pub effect fn main() -> () ! StreamWriteError {
+impl Writer for MemoryStreams { writeAll: MemoryStreams.record }
+pub effect fn main() -> () ! WriterError {
   let mut memory = MemoryStreams { writes: 0 }
-  let first = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), Intrinsic.stringUtf8Bytes("one")), &mut memory)
-  let second = run Effect.provideMut(StandardStream.send(StandardStream.stderr(), Intrinsic.stringUtf8Bytes("two")), &mut memory)
+  let first = run Effect.provideMut(Streams.writeAll(Intrinsic.stringUtf8Bytes("one")), &mut memory)
+  let second = run Effect.provideMut(Streams.writeAll(Intrinsic.stringUtf8Bytes("two")), &mut memory)
   if memory.writes != 2 { let boom = 1 / 0 }
   return ()
 }`),

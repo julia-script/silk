@@ -5294,10 +5294,10 @@
     },
     {
       "operation": "Intrinsic.standardStreamWrite",
-      "signature": "fn Intrinsic.standardStreamWrite(destination: bool, bytes: &[u8]) -> Effect<() ! StreamWriteError>",
+      "signature": "fn Intrinsic.standardStreamWrite(destination: bool, bytes: &[u8]) -> Effect<() ! WriterError>",
       "unsafe": false,
       "admission": "Platform",
-      "consumer": "silk/standard_streams.writeAll",
+      "consumer": "silk/writer.writeAll",
       "identity": "HostWrite",
       "hostImport": "silk_standard_stream_write_v1"
     },

@@ -52,7 +52,6 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/shared`](./shared.md) | `Shared` | 5 | Explicitly allocated, single-threaded shared ownership with callback-scoped access. |
 | [`silk/slot`](./slot.md) | `Slot` | 5 | Explicit initialization-state transitions for one slot selected from raw storage. |
 | [`silk/standard_input`](./standard-input.md) | `StandardInput` | 11 | Portable blocking reads of raw standard-input bytes through an explicit provider. |
-| [`silk/standard_streams`](./standard-streams.md) | `StandardStreams` | 7 | Complete-message standard-output and standard-error writes through a replaceable service. |
 | [`silk/string`](./string.md) | `String` | 22 | Valid UTF-8 text, including owned storage, byte validation, and scalar-by-scalar traversal. |
 | [`silk/system_clock`](./system-clock.md) | `SystemClock` | 7 | Provider-replaceable Unix-epoch time with canonical split-second instants. |
 | [`silk/u16`](./u16.md) | `u16` | 57 | Sixteen-bit unsigned integers with explicit arithmetic and conversion failure policies. |
@@ -63,6 +62,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/unicode_tables`](./unicode-tables.md) | `UnicodeTables` | 8 | Generated canonical-normalization data for the silk.unicode public façade. |
 | [`silk/usize`](./usize.md) | `usize` | 59 | Pointer-width unsigned integers for lengths, indices, capacities, and allocation sizes. |
 | [`silk/vector`](./vector.md) | `Vector` | 20 | Growable owned sequences with allocation-aware mutation, stable sorting, and checked indexing. |
+| [`silk/writer`](./writer.md) | `Writer` | 8 | Complete-message standard-output and standard-error writes through a replaceable service. |
 
 ## See also
 

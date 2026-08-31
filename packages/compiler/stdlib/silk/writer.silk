@@ -1,0 +1,60 @@
+import silk.effect { Effect }
+
+import silk.result { Result }
+
+import silk.string { String }
+
+pub struct WriterError {
+  message: string
+}
+
+pub service Writer {
+  effect fn writeAll(val: &[u8]) -> () ! WriterError ? &mut Writer
+  effect fn flush() -> () ! WriterError ? &mut Writer
+}
+
+pub struct StdoutWriter {
+  stream: bool
+}
+
+pub struct StderrWriter {
+  stream: bool
+}
+
+pub fn stdoutWriterProvider() -> StdoutWriter {
+  return StdoutWriter { stream: false }
+}
+
+pub fn stderrWriterProvider() -> StderrWriter {
+  return StderrWriter { stream: true }
+}
+
+pub effect fn ignoreError<A, E, ?R>(self: once Effect<A ! E ? R>) -> A | () ? R {
+  let result = run Effect.result(move self)
+  return match move result {
+    Result.Result<A, E>.Success { value } => move value
+    Result.Result<A, E>.Failure { error: _ } => ()
+  }
+}
+
+impl Writer for StdoutWriter {
+  effect fn writeAll(self: &mut Self, val: &[u8]) -> () ! WriterError ? &mut Writer {
+    run Intrinsic.standardStreamWrite(self.stream, val)
+  }
+  effect fn flush(self: &mut Self) -> () ! WriterError ? &mut Writer {
+    return ()
+  }
+}
+
+impl Writer for StderrWriter {
+  effect fn writeAll(self: &mut Self, val: &[u8]) -> () ! WriterError ? &mut Writer {
+    run Intrinsic.standardStreamWrite(self.stream, val)
+  }
+  effect fn flush(self: &mut Self) -> () ! WriterError ? &mut Writer {
+    return ()
+  }
+}
+
+pub effect fn writeString(val: string) -> () ! Writer.WriterError ? &mut Writer {
+  run Writer.writeAll(String.utf8Bytes(val))
+}

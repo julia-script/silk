@@ -413,9 +413,9 @@ The portable explicit service consumed by `Effect.log` and its level-specific al
 receives a closed `LogLevel` severity and one
 complete borrowed message in call order and decides whether to render it to standard output, retain
 it in memory, forward it to browser or OpenTelemetry facilities, fan it out, or discard it according
-to explicit provider policy. Logging is not `StandardStreams.writeAll`, does not expose
+to explicit provider policy. Logging is not `Writer.writeAll`, does not expose
 byte-at-a-time appends, and remains an Effect requirement until provided. The first stdout provider
-forwards complete messages through `StandardStreams`; a bounded in-memory provider proves host
+forwards complete messages through `Writer`; a bounded in-memory provider proves host
 independence and deterministic failure.
 _Avoid_: stdout logger intrinsic, console service, ambient global logger
 

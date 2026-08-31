@@ -16,7 +16,7 @@ count, which may be smaller than the buffer length. For valid non-empty reads, [
 ordinary outcome data and promises that no later read will produce bytes. [`StreamReadError`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644572726f72) is
 reserved for a provider that could not complete a read.
 
-This service is separate from `StandardStreams`: output commits a complete message or fails,
+This service is separate from `Writer`: output commits a complete message or fails,
 while input is inherently partial and eventually ends.
 
 ## Gotchas

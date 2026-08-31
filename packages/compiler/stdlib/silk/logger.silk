@@ -53,11 +53,10 @@ import silk.bool as bool
 import silk.effect { Effect }
 import silk.i32 as i32
 import silk.result { Result }
-import silk.standard_streams {
-  NativeStandardStreams,
-  StreamWriteError,
-  nativeStandardStreamProvider as nativeStreams,
-  send
+import silk.writer {
+  WriterError,
+  Writer,
+  stdoutWriterProvider as nativeStreams,
 }
 import silk.string { utf8Bytes as stringUtf8Bytes }
 import silk.u8 as u8
@@ -139,25 +138,21 @@ pub struct StdoutLogger {}
 /// output write failure becomes a provider-defined [`LogError`].
 pub fn stdoutProvider() -> StdoutLogger { return StdoutLogger {} }
 
-effect fn writeStdoutCounted(
-  streams: &mut NativeStandardStreams,
-  message: &[u8]
-) -> i32 ! StreamWriteError {
-  let written = run Intrinsic.bindRequirementMut(send(false, message), streams)
-  return 0
-}
-
 effect fn writeStdout(
   self: &mut StdoutLogger,
   level: LogLevel,
   message: string
 ) -> () ! LogError {
   let mut streams = nativeStreams()
-  let bytes = stringUtf8Bytes(message)
-  let completed = run Effect.result(writeStdoutCounted(&mut streams, bytes))
+  let completed = run Effect.result(
+    Intrinsic.bindRequirementMut(
+      Writer.writeAll(stringUtf8Bytes(message)),
+      &mut streams,
+    ),
+  )
   return match move completed {
-    Result<i32, StreamWriteError>.Success { value: success } => ()
-    Result<i32, StreamWriteError>.Failure { error: failure } => run reject(3)
+    Result<(), WriterError>.Success { value: _ } => ()
+    Result<(), WriterError>.Failure { error: _ } => run reject(3)
   }
 }
 
