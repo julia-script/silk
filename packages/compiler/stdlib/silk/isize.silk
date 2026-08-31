@@ -10,7 +10,9 @@
 //! conversions, division by zero, and invalid shift counts trap. `checked*` returns [`Option`],
 //! `wrapping*` uses arithmetic modulo the target width, and `saturating*` clamps at the target bound.
 //!
-//! Decimal [`parse`] uses the selected range; `silk.format.Display` presents it without allocation.
+//! Decimal [`parse`] uses the selected range. Use [`Format`] with `Format.display` for defaults or
+//! `Format.displayWith` for explicit options. Both operations stream through a mutable `Writer`
+//! without `Allocator`.
 //!
 //! # Gotchas
 //! Code that succeeds at a 64-bit boundary may fail or trap when compiled for a 32-bit target.
@@ -33,8 +35,7 @@
 import silk.bool as bool
 import silk.f32 as f32
 import silk.f64 as f64
-import silk.format as Format
-import silk.format { ParseError }
+import silk.format { Format, ParseError }
 import silk.i16 as i16
 import silk.i32 as i32
 import silk.i64 as i64

@@ -9,8 +9,9 @@
 //! Choose `checked*` to receive [`Option`] on invalid arithmetic, `wrapping*` for arithmetic modulo
 //! 2^16, or `saturating*` to clamp at [`MIN`] and [`MAX`]. Signed right shifts preserve the sign bit.
 //!
-//! Decimal [`parse`] requires a complete, in-range representation. Use `silk.format.Display` for
-//! allocation-free presentation.
+//! Decimal [`parse`] requires a complete, in-range representation. Use [`Format`] with
+//! `Format.display` for defaults or `Format.displayWith` for explicit options. Both operations
+//! stream through a mutable `Writer` without `Allocator`.
 //!
 //! # Gotchas
 //! [`MIN`] cannot be represented as a positive i16, so ordinary [`negate`] traps for that value.
@@ -29,8 +30,7 @@
 import silk.bool as bool
 import silk.f32 as f32
 import silk.f64 as f64
-import silk.format as Format
-import silk.format { ParseError }
+import silk.format { Format, ParseError }
 import silk.i32 as i32
 import silk.i64 as i64
 import silk.i8 as i8

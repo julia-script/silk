@@ -11,7 +11,9 @@
 //! computes modulo the target width, and `saturating*` clamps at [`MIN`] or [`MAX`].
 //!
 //! [`ZERO`] and [`ONE`] provide typed values where an uncontextualized literal would be `i32`.
-//! Decimal [`parse`] uses the target's range; `silk.format.Display` presents it without allocation.
+//! Decimal [`parse`] uses the target's range. Use [`Format`] with `Format.display` for defaults or
+//! `Format.displayWith` for explicit options. Both operations stream through a mutable `Writer`
+//! without `Allocator`.
 //!
 //! # Gotchas
 //! A value valid as usize on a 64-bit target can be out of range on a 32-bit target.
@@ -19,7 +21,7 @@
 //! # Examples
 //! ## Keep a count within the target range
 //! ```silk
-//! import silk.option { Option }
+//! import silk.option {Option}
 //!
 //! import silk.usize
 //!
@@ -34,8 +36,7 @@
 import silk.bool as bool
 import silk.f32 as f32
 import silk.f64 as f64
-import silk.format as Format
-import silk.format { ParseError }
+import silk.format { Format, ParseError }
 import silk.i16 as i16
 import silk.i32 as i32
 import silk.i64 as i64

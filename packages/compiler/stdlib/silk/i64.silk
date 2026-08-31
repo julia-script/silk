@@ -10,7 +10,9 @@
 //! clamps at [`MIN`] or [`MAX`]. Signed right shifts preserve the sign bit.
 //!
 //! Decimal [`parse`] consumes the whole input and reports syntax separately from range overflow.
-//! Use `silk.format.Display` for presentation. Conversion to `f32` or `f64` can round large integers.
+//! Use [`Format`] with `Format.display` for defaults or `Format.displayWith` for explicit options.
+//! Both operations stream through a mutable `Writer` without `Allocator`. Conversion to `f32` or
+//! `f64` can round large integers.
 //!
 //! # Gotchas
 //! [`MIN`] has no positive i64 counterpart. Use [`wrappingNegate`] or [`saturatingNegate`] for its
@@ -19,11 +21,11 @@
 //! # Examples
 //! ## Parse a complete signed decimal value
 //! ```silk
-//! import silk.format { Format }
+//! import silk.format {Format}
 //!
 //! import silk.i64
 //!
-//! import silk.result { Result }
+//! import silk.result {Result}
 //!
 //! pub fn main() -> i32 {
 //!   let parsed = i64.parse("-42")
@@ -36,8 +38,7 @@
 import silk.bool as bool
 import silk.f32 as f32
 import silk.f64 as f64
-import silk.format as Format
-import silk.format { ParseError }
+import silk.format { Format, ParseError }
 import silk.i16 as i16
 import silk.i32 as i32
 import silk.i8 as i8

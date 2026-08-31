@@ -10,12 +10,13 @@
 //! `saturating*` clamps at [`MIN`] or [`MAX`]. Right shift inserts zero bits.
 //!
 //! Decimal [`parse`] consumes the entire input and distinguishes malformed text from range
-//! overflow. Use `silk.format.Display` for allocation-free presentation.
+//! overflow. Use [`Format`] with `Format.display` for defaults or `Format.displayWith` for explicit
+//! options. Both operations stream through a mutable `Writer` without `Allocator`.
 //!
 //! # Examples
 //! ## Recover from a narrowing conversion
 //! ```silk
-//! import silk.option { Option }
+//! import silk.option {Option}
 //!
 //! import silk.u16
 //!
@@ -32,8 +33,7 @@
 import silk.bool as bool
 import silk.f32 as f32
 import silk.f64 as f64
-import silk.format as Format
-import silk.format { ParseError }
+import silk.format { Format, ParseError }
 import silk.i16 as i16
 import silk.i32 as i32
 import silk.i64 as i64

@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
+import type * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -221,6 +222,113 @@ fn invalid(token: &Token) -> () { token.* = Token { value: 1 } }`),
     assert.deepEqual(
       Analysis.diagnostics(shared).map((diagnostic) => diagnostic.code),
       ['SEM0036'],
+    )
+  }),
+)
+
+it.effect('rejects forged consuming reads and writes through shared references', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'reference-projection/forged-shared-mir',
+      ascii(`fn read(value: &i32) -> i32 { return value.* }
+pub fn main() -> i32 {
+  let value = 42
+  return read(&value)
+}`),
+      'wasm32-unknown-unknown',
+    )
+    const mir = Analysis.loweredMir(snapshot)
+    const functionIndex = mir.functions.findIndex((fn) => fn.id.name === 'read')
+    const fn = mir.functions.at(functionIndex)
+    if (fn === undefined) throw new RangeError('expected read MIR function')
+    const read = MirVerification.operations(fn).find((operation) => operation._tag === 'ReadPlace')
+    if (read === undefined) throw new RangeError('expected shared referent read')
+    const rootType = fn.localTypes.at(read.root.ordinal)
+    if (rootType === undefined) throw new RangeError('expected shared reference root type')
+
+    const consuming: Mir.MirFunction = Object.freeze({
+      ...fn,
+      regions: Object.freeze(
+        fn.regions.map((region) =>
+          region._tag === 'OperationRegion'
+            ? Object.freeze({
+                ...region,
+                operations: Object.freeze(
+                  region.operations.map(
+                    (operation): Mir.Operation =>
+                      operation === read ? Object.freeze({ ...read, consume: true }) : operation,
+                  ),
+                ),
+              })
+            : region,
+        ),
+      ),
+    })
+    const consumingModule: Mir.Module = Object.freeze({
+      ...mir,
+      functions: Object.freeze([
+        ...mir.functions.slice(0, functionIndex),
+        consuming,
+        ...mir.functions.slice(functionIndex + 1),
+      ]),
+    })
+    assert.include(
+      MirVerification.verify(consumingModule).map((violation) => violation.rule),
+      'InvalidAggregateOperation',
+    )
+
+    const sharedWrite: Mir.MirFunction = Object.freeze({
+      ...fn,
+      regions: Object.freeze(
+        fn.regions.map((region) =>
+          region._tag === 'OperationRegion'
+            ? Object.freeze({
+                ...region,
+                operations: Object.freeze(
+                  region.operations.flatMap(
+                    (operation): ReadonlyArray<Mir.Operation> =>
+                      operation === read
+                        ? [
+                            read,
+                            Object.freeze({
+                              _tag: 'CheckPlace',
+                              root: read.root,
+                              selectors: read.selectors,
+                              type: read.type,
+                              provenance: read.provenance,
+                            }),
+                            Object.freeze({
+                              _tag: 'WritePlace',
+                              root: read.root,
+                              selectors: read.selectors,
+                              source: read.destination,
+                              rootType,
+                              type: read.type,
+                              mutable: true,
+                              replacement: 'Copy',
+                              commit: 'AfterCleanup',
+                              provenance: read.provenance,
+                            }),
+                          ]
+                        : [operation],
+                  ),
+                ),
+              })
+            : region,
+        ),
+      ),
+    })
+    const sharedWriteModule: Mir.Module = Object.freeze({
+      ...mir,
+      functions: Object.freeze([
+        ...mir.functions.slice(0, functionIndex),
+        sharedWrite,
+        ...mir.functions.slice(functionIndex + 1),
+      ]),
+    })
+    assert.include(
+      MirVerification.verify(sharedWriteModule).map((violation) => violation.rule),
+      'InvalidWrite',
     )
   }),
 )

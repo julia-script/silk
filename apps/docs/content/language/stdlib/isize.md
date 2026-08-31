@@ -16,7 +16,9 @@ for files, protocols, persistent data, or any value that must mean the same thin
 conversions, division by zero, and invalid shift counts trap. `checked*` returns [`Option`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e),
 `wrapping*` uses arithmetic modulo the target width, and `saturating*` clamps at the target bound.
 
-Decimal [`parse`](#declaration-73696c6b2f6973697a653a3a7061727365) uses the selected range; `silk.format.Display` presents it without allocation.
+Decimal [`parse`](#declaration-73696c6b2f6973697a653a3a7061727365) uses the selected range. Use [`Format`](./format.md#declaration-73696c6b2f666f726d61743a3a466f726d6174) with `Format.display` for defaults or
+`Format.displayWith` for explicit options. Both operations stream through a mutable `Writer`
+without `Allocator`.
 
 ## Gotchas
 

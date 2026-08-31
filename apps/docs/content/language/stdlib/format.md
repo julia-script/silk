@@ -13,19 +13,24 @@ caller needs explicit width, alignment, fill, sign, precision, or color permissi
 ## Details
 
 A [`Formatter`](#declaration-73696c6b2f666f726d61743a3a466f726d6174746572) carries presentation policy while the ambient [`Writer`](./writer.md#declaration-73696c6b2f7772697465723a3a577269746572) owns byte transport.
-Formatting never selects a destination and never allocates an intermediate String. Width counts
-Unicode scalars rather than UTF-8 bytes or terminal cells. A Writer failure preserves any prefix
-already accepted by the provider; Formatter does not roll output back or attempt compensation.
+Formatter and the shipped integer presentations do not allocate an intermediate `String`.
+Width counts Unicode scalars rather than UTF-8 bytes or terminal cells. A Writer failure
+preserves any prefix already accepted by the provider. Formatter does not roll output back.
 
 ## Examples
 
 ### Display with defaults and explicit options
 
+This program writes `42..+42` to standard output and returns zero.
+
 ```silk
-import silk.effect { Effect }
-import silk.format { Alignment, Format, FormatOptions, Sign }
-import silk.option { Option }
-import silk.writer { Writer, WriterError }
+import silk.effect {Effect}
+
+import silk.format {Alignment, Format, FormatOptions, Sign}
+
+import silk.option {Option}
+
+import silk.writer {Writer, WriterError}
 
 effect fn render() -> () ! WriterError ? &mut Writer {
   let value = 42
@@ -38,22 +43,25 @@ effect fn render() -> () ! WriterError ? &mut Writer {
     alternate: false,
     zeroPad: false,
     precision: Option.none<usize>(),
-    color: false
+    color: false,
   }
   return run Format.displayWith(&value, move options)
 }
 
 effect fn writeExample() -> () ! WriterError {
   let mut writer = Writer.stdoutWriterProvider()
-  let completed = run render() |> Effect.provideMut<Writer>(&mut writer)
+  let completed = run render()
+    |> Effect.provideMut<Writer>(&mut writer)
   return completed
 }
 
-effect fn ignoreWriteFailure(error: WriterError) -> () { return () }
+effect fn ignoreWriteFailure(error: WriterError) -> () {
+  return ()
+}
 
 pub fn main() -> i32 {
   run Effect.catchAll(writeExample(), ignoreWriteFailure)
-  return 42
+  return 0
 }
 ```
 
@@ -95,7 +103,7 @@ Alignment of content within a requested minimum width.
 Default = 0
 ```
 
-Lets the presentation choose its semantic default. Integers use right alignment.
+Requests default alignment. The shared padding helpers and integers use right alignment.
 
 <a id="declaration-73696c6b2f666f726d61743a3a416c69676e6d656e743a3a6d656d6265723a31"></a>
 
@@ -176,6 +184,13 @@ pub struct FormatOptions
 ```
 
 Explicit policy for one formatting session.
+
+### Details
+
+[`defaultOptions`](#declaration-73696c6b2f666f726d61743a3a64656661756c744f7074696f6e73) uses no width, default alignment, a space fill, negative-only signs, no
+alternate form, no zero padding, no precision, and no color. Width counts Unicode scalars.
+For integers, precision disables width-driven zero padding. Alternate form and color do not
+change integer output.
 
 <a id="declaration-73696c6b2f666f726d61743a3a466f726d61744f7074696f6e733a3a6669656c643a30"></a>
 
@@ -275,7 +290,13 @@ Mutable presentation policy that does not store, select, or replace a Writer pro
 pub interface Display
 ```
 
-Static default human-readable presentation contract.
+Static human-readable presentation contract for Writer-backed output.
+
+### Details
+
+An implementation reads presentation policy from [`Formatter`](#declaration-73696c6b2f666f726d61743a3a466f726d6174746572) and writes through the ambient
+mutable Writer. The contract does not require Allocator. If Writer fails, an accepted prefix
+remains written and the original `WriterError` is preserved.
 
 <a id="declaration-73696c6b2f666f726d61743a3a446973706c61793a3a6f7065726174696f6e3a646973706c6179"></a>
 
@@ -287,6 +308,11 @@ effect fn display(self: &Self, formatter: &mut silk/format.Formatter) -> () ! Wr
 
 Emits one presentation through the ambient mutable Writer.
 
+#### Details
+
+This operation reads policy from `formatter`. It does not require Allocator. If Writer fails,
+an accepted prefix remains written and the original `WriterError` is preserved.
+
 <a id="declaration-73696c6b2f666f726d61743a3a64656661756c744f7074696f6e73"></a>
 
 ## `defaultOptions`
@@ -296,6 +322,11 @@ pub fn defaultOptions() -> FormatOptions
 ```
 
 Returns the canonical formatting defaults.
+
+### Details
+
+The result has no width, default alignment, a space fill, negative-only signs, no alternate
+form, no zero padding, no precision, and no color permission.
 
 <a id="declaration-73696c6b2f666f726d61743a3a6d616b65"></a>
 
@@ -461,6 +492,7 @@ Returns the number of fill scalars before content with this visible width.
 
 A user-defined Display can use this together with [`writeLeadingPadding`](#declaration-73696c6b2f666f726d61743a3a77726974654c656164696e6750616464696e67) and
 [`writeTrailingPadding`](#declaration-73696c6b2f666f726d61743a3a7772697465547261696c696e6750616464696e67) so ANSI control bytes never count toward the visible content width.
+`Alignment.Default` and `Alignment.Right` put all fill before the content.
 
 <a id="declaration-73696c6b2f666f726d61743a3a747261696c696e6750616464696e67"></a>
 
@@ -471,6 +503,10 @@ pub fn trailingPadding(self: &silk/format.Formatter, contentWidth: usize) -> usi
 ```
 
 Returns the number of fill scalars after content with this visible width.
+
+### Details
+
+`Alignment.Default` and `Alignment.Right` put no fill after the content.
 
 <a id="declaration-73696c6b2f666f726d61743a3a77726974654c656164696e6750616464696e67"></a>
 
@@ -500,7 +536,12 @@ Emits all fill required after content with this visible width.
 pub effect fn display<T>(value: &T) -> () ! WriterError ? &mut Writer
 ```
 
-Displays one value with canonical defaults.
+Displays one value with canonical defaults through the ambient mutable Writer.
+
+### Details
+
+This operation uses [`defaultOptions`](#declaration-73696c6b2f666f726d61743a3a64656661756c744f7074696f6e73) and does not require Allocator. If Writer fails, an
+accepted prefix remains written and the original `WriterError` is preserved.
 
 <a id="declaration-73696c6b2f666f726d61743a3a646973706c617957697468"></a>
 
@@ -510,7 +551,14 @@ Displays one value with canonical defaults.
 pub effect fn displayWith<T>(value: &T, options: FormatOptions) -> () ! WriterError ? &mut Writer
 ```
 
-Displays one value with explicit options.
+Displays one value with explicit options through the ambient mutable Writer.
+
+### Details
+
+Width counts Unicode scalars. For integers, precision disables width-driven zero padding.
+Alternate form and color do not change integer output. This operation does not require
+Allocator. If Writer fails, an accepted prefix remains written and the original `WriterError`
+is preserved.
 
 <a id="declaration-73696c6b2f666f726d61743a3a4e6f74414e756d626572"></a>
 

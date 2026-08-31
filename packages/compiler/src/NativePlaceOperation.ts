@@ -932,6 +932,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     }
     case 'WritePlace': {
       if (operation.rootType._tag === 'Reference') {
+        if (operation.rootType.type.access !== 'Exclusive')
+          throw new RangeError('LLVM reference write requires exclusive access')
         // Resolve the selected value address once, then store each calling lane.
         const address = NativeStorage.readLocal(nativeStorage, operation.root).at(0)
         if (address === undefined) throw new RangeError('LLVM reference write lost its address')

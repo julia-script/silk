@@ -10,7 +10,8 @@
 //! when results should clamp to [`MIN`] or [`MAX`]. Signed right shifts preserve the sign bit.
 //!
 //! Decimal [`parse`] consumes the complete input and distinguishes malformed text from a value
-//! outside the i8 range. Use `silk.format.Display` for allocation-free presentation.
+//! outside the i8 range. Use [`Format`] with `Format.display` for defaults or `Format.displayWith`
+//! for explicit options. Both operations stream through a mutable `Writer` without `Allocator`.
 //!
 //! # Gotchas
 //! [`MIN`] has no positive i8 counterpart, so ordinary [`negate`] traps for that one value.
@@ -34,8 +35,7 @@
 import silk.bool as bool
 import silk.f32 as f32
 import silk.f64 as f64
-import silk.format as Format
-import silk.format { ParseError }
+import silk.format { Format, ParseError }
 import silk.i16 as i16
 import silk.i32 as i32
 import silk.i64 as i64

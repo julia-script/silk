@@ -5663,6 +5663,8 @@ const emitWritePlaceOperation = (
   const { layout, plan, memory, slots, scalar, copy, storeAt, flushBorrowRoot } = state
 
   if (operation.rootType._tag === 'Reference') {
+    if (operation.rootType.type.access !== 'Exclusive')
+      throw new RangeError('Wasm reference write requires exclusive access')
     // Writing through the borrow resolves the selected value address once, then stores its lanes.
     const address = scalar(operation.root)
     let selected: SilkType.Type = operation.rootType.type.target
