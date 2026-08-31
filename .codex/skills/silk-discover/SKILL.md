@@ -43,9 +43,11 @@ cap the result or stop after the first strong finding.
    material coverage area remains weak or unchecked.
 6. Apply the Backlog intake bar from `WORKFLOW.md`. Immediately before the first Linear write,
    re-run the remote-main freshness gate once more and stop if it moved. File every distinct
-   investigable lead with its honest confidence and triage questions, including low-confidence
-   leads with a specific starting point. Use no priority or estimate. Use `Bug` only for directly
-   demonstrated defects; otherwise use `Improvement` or no broad label.
+   investigable lead with its honest confidence, a visible `## Why this matters` section, and
+   triage questions, including low-confidence leads with a specific starting point. The rationale
+   must connect the observation to a concrete affected workflow or system property and a possible
+   consequence if ignored; distinguish evidence from inference. Use no priority or estimate. Use
+   `Bug` only for directly demonstrated defects; otherwise use `Improvement` or no broad label.
 7. For an existing issue, add only genuinely new evidence as a dated comment. Do not reopen,
    reprioritize, or rewrite a triaged issue during discovery.
 8. Read every changed issue back. Report new issues, enriched issues, and intake exclusions limited
@@ -53,6 +55,7 @@ cap the result or stop after the first strong finding.
    report scout completion, the full coverage ledger, commands run, and material gaps.
 
 Every new issue must meet the Backlog intake bar in `WORKFLOW.md`, include concrete breadcrumbs,
-explicit triage questions, and record the source baseline. Draft acceptance is optional because
-triage owns the final specification. One excellent issue is not evidence of a thorough sweep;
-breadth is demonstrated by completed scout assignments, coverage, and the second-pass rule.
+an explicit causal justification, triage questions, and the source baseline. Draft acceptance is
+optional because triage owns the final specification. One excellent issue is not evidence of a
+thorough sweep; breadth is demonstrated by completed scout assignments, coverage, and the
+second-pass rule.
