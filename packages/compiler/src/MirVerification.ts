@@ -5001,10 +5001,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const consumingReadValid =
             operation._tag !== 'ReadPlace' ||
             operation.consume !== true ||
-            (pairedReplacement?._tag === 'WritePlace' &&
+            referenceAccess === undefined ||
+            (referenceAccess === 'Exclusive' &&
+              pairedReplacement?._tag === 'WritePlace' &&
               pairedReplacement.root.ordinal === operation.root.ordinal &&
-              samePlaceSelectors(pairedReplacement.selectors, operation.selectors) &&
-              (referenceAccess === undefined || referenceAccess === 'Exclusive'))
+              samePlaceSelectors(pairedReplacement.selectors, operation.selectors))
           const sliceSelector = operation.selectors.find(
             (selector) => selector._tag === 'SliceElementSelector',
           )
@@ -5095,7 +5096,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                     : 'InvalidSliceOperation',
                 function: fn.id,
                 region: region.id,
-                detail: `${operation._tag} does not match its root, selectors, or type`,
+                detail: !consumingReadValid
+                  ? 'consuming reference ReadPlace is not followed by a same-place replacement through an exclusive root'
+                  : `${operation._tag} does not match its root, selectors, or type`,
               }),
             )
           }
