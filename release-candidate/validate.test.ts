@@ -47,20 +47,50 @@ const installedDependencyNames = (parent: string): ReadonlyArray<string> =>
   ).sort()
 
 const installedDependencyVersion = (parent: string, name: string): string =>
-  JSON.parse(readFileSync(resolve(installedPackageRoot(parent), `../${name}/package.json`), 'utf8'))
-    .version
+  JSON.parse(
+    readFileSync(
+      resolve(
+        installedPackageRoot(parent),
+        ...parent.split('/').map(() => '..'),
+        name,
+        'package.json',
+      ),
+      'utf8',
+    ),
+  ).version
 
-const effectDependencyOverrides = installedDependencyNames('effect').map(
-  (name) => `  '${name}': ${installedDependencyVersion('effect', name)}`,
-)
+const consumerDependencyParents: ReadonlyArray<string> = Object.freeze([
+  'effect',
+  '@effect/platform-node',
+])
+
+const consumerDependencyVersions = new Map<string, string>()
+for (const parent of consumerDependencyParents) {
+  for (const name of installedDependencyNames(parent)) {
+    const version = installedDependencyVersion(parent, name)
+    const existing = consumerDependencyVersions.get(name)
+    if (existing !== undefined && existing !== version)
+      throw new Error(
+        `packed consumer dependency ${name} has incompatible installed versions ${existing} and ${version}`,
+      )
+    consumerDependencyVersions.set(name, version)
+  }
+}
+
+const consumerDependencyOverrides = Array.from(consumerDependencyVersions)
+  .sort(([left], [right]) => left.localeCompare(right))
+  .map(([name, version]) => `  '${name}': ${version}`)
 
 const consumerWorkspace = (configuration = ''): string =>
-  `overrides:\n${effectDependencyOverrides.join('\n')}\n${configuration}`
+  `overrides:\n${consumerDependencyOverrides.join('\n')}\n${configuration}`
 
-test('consumer workspaces pin Effect transitive ranges to installed versions', () => {
+test('consumer workspaces pin runtime transitive ranges to installed versions', () => {
   const workspace = consumerWorkspace()
-  for (const override of effectDependencyOverrides) expect(workspace).toContain(override)
-  expect(effectDependencyOverrides).toHaveLength(installedDependencyNames('effect').length)
+  for (const parent of consumerDependencyParents) {
+    for (const name of installedDependencyNames(parent))
+      expect(workspace).toContain(`  '${name}': ${installedDependencyVersion(parent, name)}`)
+  }
+  expect(consumerDependencyOverrides).toHaveLength(consumerDependencyVersions.size)
 })
 
 const installConsumer = (cwd: string): void => {
@@ -72,6 +102,198 @@ const installConsumer = (cwd: string): void => {
   if (result.status === 0) return
   throw new Error(`pnpm install failed in ${cwd}\n${result.stdout ?? ''}\n${result.stderr ?? ''}`)
 }
+
+type NonActorExportKind =
+  | 'binary'
+  | 'bundle'
+  | 'registration-side-effect'
+  | 'direct-class'
+  | 'other-non-actor'
+
+interface NonActorExport {
+  readonly packageName: string
+  readonly path: `./${string}`
+  readonly kind: NonActorExportKind
+  readonly reason: string
+}
+
+// Actor parity deliberately excludes only entry points whose shape is not a root actor namespace.
+// Keep every exception exact and explained: a removed path makes the parity assertion reject the
+// stale exclusion instead of silently broadening this list.
+const nonActorExports: ReadonlyArray<NonActorExport> = Object.freeze([
+  {
+    packageName: '@silklang/compiler',
+    path: './Driver',
+    kind: 'other-non-actor',
+    reason: 'standalone artifact-producing orchestration entry point',
+  },
+  {
+    packageName: '@silklang/compiler',
+    path: './NativeToolchain',
+    kind: 'other-non-actor',
+    reason: 'Node-native toolchain boundary',
+  },
+  {
+    packageName: '@silklang/compiler',
+    path: './NodeHeapObservation',
+    kind: 'other-non-actor',
+    reason: 'Node platform layer',
+  },
+  {
+    packageName: '@silklang/editor-support',
+    path: './bundle',
+    kind: 'bundle',
+    reason: 'prebuilt browser bundle',
+  },
+  {
+    packageName: '@silklang/editor-support',
+    path: './register',
+    kind: 'registration-side-effect',
+    reason: 'self-registering custom-element entry point',
+  },
+  {
+    packageName: '@silklang/llvm',
+    path: './LlvmError',
+    kind: 'direct-class',
+    reason: 'direct error-class export mirrored as a root class rather than a namespace',
+  },
+  {
+    packageName: '@silklang/lsp',
+    path: './bin',
+    kind: 'binary',
+    reason: 'stdio executable entry point',
+  },
+  {
+    packageName: '@silklang/wasm',
+    path: './WasmError',
+    kind: 'direct-class',
+    reason: 'direct error-class export mirrored as a root class rather than a namespace',
+  },
+])
+
+const excludedActorPaths = (packageName: string): ReadonlyArray<string> =>
+  nonActorExports
+    .filter((entry) => entry.packageName === packageName)
+    .map((entry) => entry.path)
+    .sort()
+
+const actorNamesOf = (
+  packageName: string,
+  deepPaths: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
+  const excluded = excludedActorPaths(packageName)
+  const stale = excluded.filter((path) => !deepPaths.includes(path))
+  if (stale.length > 0)
+    throw new Error(`${packageName} has stale non-actor export exclusions: ${stale.join(', ')}`)
+  const excludedSet = new Set(excluded)
+  return deepPaths
+    .filter((path) => path.startsWith('./') && !excludedSet.has(path))
+    .map((path) => path.slice(2))
+    .sort()
+}
+
+const assertActorSurfaceParity = (
+  packageName: string,
+  rootNames: ReadonlyArray<string>,
+  deepPaths: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
+  const actorNames = actorNamesOf(packageName, deepPaths)
+  const rootSet = new Set(rootNames)
+  const actorSet = new Set(actorNames)
+  const rootOnly = rootNames.filter((name) => !actorSet.has(name)).sort()
+  const deepOnly = actorNames.filter((name) => !rootSet.has(name)).sort()
+  if (rootOnly.length > 0 || deepOnly.length > 0)
+    throw new Error(
+      `${packageName} actor export drift: root-only [${rootOnly.join(', ')}], deep-only [${deepOnly.join(', ')}]`,
+    )
+  return actorNames
+}
+
+const assertRuntimePathsNotExported = (
+  cwd: string,
+  packageName: string,
+  names: ReadonlyArray<string>,
+): void => {
+  for (const name of names) {
+    const result = spawnSync(
+      process.execPath,
+      ['--input-type=module', '--eval', `await import('${packageName}/${name}')`],
+      { cwd, encoding: 'utf8' },
+    )
+    if (result.status === 0)
+      throw new Error(`${packageName}/${name} unexpectedly resolved from the packed package`)
+    if (!result.stderr.includes('ERR_PACKAGE_PATH_NOT_EXPORTED'))
+      throw new Error(
+        `${packageName}/${name} failed for the wrong reason\n${result.stdout}\n${result.stderr}`,
+      )
+  }
+}
+
+const assertTypeScriptActorSurfaceParity = (options: {
+  readonly cwd: string
+  readonly packageName: string
+  readonly actorNames: ReadonlyArray<string>
+  readonly forbiddenNames: ReadonlyArray<string>
+}): void => {
+  const positiveImports = options.actorNames.flatMap((name, index) => [
+    `import { ${name} as Root${index} } from '${options.packageName}'`,
+    `import * as Deep${index} from '${options.packageName}/${name}'`,
+    `const rootToDeep${index}: typeof Deep${index} = Root${index}`,
+    `const deepToRoot${index}: typeof Root${index} = Deep${index}`,
+    `void rootToDeep${index}`,
+    `void deepToRoot${index}`,
+  ])
+  const negativeImports = options.forbiddenNames.flatMap((name, index) => [
+    `// @ts-expect-error ${name} is intentionally absent from the package subpaths`,
+    `import * as ForbiddenDeep${index} from '${options.packageName}/${name}'`,
+    `// @ts-expect-error ${name} is intentionally absent from the package root`,
+    `const forbiddenRoot${index} = Root.${name}`,
+    `void ForbiddenDeep${index}`,
+    `void forbiddenRoot${index}`,
+  ])
+  writeFileSync(
+    resolve(options.cwd, 'actor-surface.ts'),
+    [`import * as Root from '${options.packageName}'`, ...positiveImports, ...negativeImports].join(
+      '\n',
+    ),
+  )
+  writeFileSync(
+    resolve(options.cwd, 'tsconfig.actor-surface.json'),
+    JSON.stringify({
+      compilerOptions: {
+        target: 'ES2022',
+        module: 'NodeNext',
+        moduleResolution: 'NodeNext',
+        strict: true,
+        noEmit: true,
+        skipLibCheck: true,
+        types: [],
+      },
+      files: ['actor-surface.ts'],
+    }),
+  )
+  const result = spawnSync(
+    resolve(workspaceRoot, 'node_modules/.bin/tsc'),
+    ['-p', 'tsconfig.actor-surface.json'],
+    { cwd: options.cwd, encoding: 'utf8', timeout: 60_000 },
+  )
+  if (result.status === 0) return
+  throw new Error(
+    `TypeScript actor parity failed for ${options.packageName}\n${result.stdout}\n${result.stderr}`,
+  )
+}
+
+test('actor parity rejects a root-only actor fixture', () => {
+  expect(() => assertActorSurfaceParity('@fixture/root-only', ['Visible'], [])).toThrow(
+    'root-only [Visible]',
+  )
+})
+
+test('actor parity rejects a deep-only actor fixture', () => {
+  expect(() => assertActorSurfaceParity('@fixture/deep-only', [], ['./Visible'])).toThrow(
+    'deep-only [Visible]',
+  )
+})
 
 test('the llvm release candidate is a self-contained ESM package', () => {
   const temporary = mkdtempSync(resolve(tmpdir(), 'silklang-release-candidate-'))
@@ -340,6 +562,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './LlvmBackend',
       './LocalSharedOwnership',
       './Lower',
+      './Match',
       './Mir',
       './MirEncoding',
       './MirVerification',
@@ -384,6 +607,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './SyntaxTree',
       './SystemClock',
       './Target',
+      './TargetConstant',
       './TargetSelector',
       './Termination',
       './Token',
@@ -482,6 +706,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     const deepPaths = Object.keys(manifest.exports)
       .filter((path) => path !== '.')
       .sort()
+    const actorPaths = actorNamesOf('@silklang/compiler', deepPaths).map((name) => `./${name}`)
     const inspectCompiler = () =>
       execFileSync(
         process.execPath,
@@ -622,12 +847,7 @@ console.log(
     root: Object.keys(api).sort(),
     toolchainIdentity: api.ToolchainIntegrity.installed().digest,
     rootNamespaces: Object.fromEntries(
-      paths
-        .filter(
-          (path) =>
-            path !== './NativeToolchain' && path !== './NodeHeapObservation' && path !== './Driver',
-        )
-        .map((path) => [path, Object.keys(api[path.slice(2)]).sort()]),
+      ${JSON.stringify(actorPaths)}.map((path) => [path, Object.keys(api[path.slice(2)]).sort()]),
     ),
     deep: Object.fromEntries(
       paths.map((path, index) => [path, Object.keys(modules[index]).sort()]),
@@ -823,13 +1043,11 @@ console.log(
       'Lexer',
       'LiteralForm',
       'LlvmBackend',
-      'LocalSharedLifecycle',
       'LocalSharedOwnership',
       'Lower',
       'Match',
       'Mir',
       'MirEncoding',
-      'MirNormalization',
       'MirVerification',
       'ModuleClosure',
       'ModuleSemantics',
@@ -883,13 +1101,24 @@ console.log(
       'WasmBackend',
       'WorkspaceInventory',
     ])
+    const actorNames = assertActorSurfaceParity('@silklang/compiler', api.root, deepPaths)
+    assertRuntimePathsNotExported(consumerRoot, '@silklang/compiler', [
+      'LocalSharedLifecycle',
+      'MirNormalization',
+    ])
+    assertTypeScriptActorSurfaceParity({
+      cwd: consumerRoot,
+      packageName: '@silklang/compiler',
+      actorNames,
+      forbiddenNames: ['LocalSharedLifecycle', 'MirNormalization'],
+    })
+    const actorNameSet = new Set(actorNames)
     expect(api.toolchainIdentity).toMatch(/^[0-9a-f]{64}$/)
     for (const [path, exports] of Object.entries(api.deep) as ReadonlyArray<
       readonly [string, ReadonlyArray<string>]
     >) {
       expect(exports.length, `${path} has no exports`).toBeGreaterThan(0)
-      if (path !== './NativeToolchain' && path !== './NodeHeapObservation' && path !== './Driver')
-        expect(api.rootNamespaces[path]).toEqual(exports)
+      if (actorNameSet.has(path.slice(2))) expect(api.rootNamespaces[path]).toEqual(exports)
     }
     expect(api.deep['./Lexer']).toContain('lex')
     expect(api.deep['./LiteralForm']).toContain('forms')
@@ -1340,7 +1569,7 @@ test('the CLI release candidate installs with its project-first command surface'
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
       ),
     )
     installConsumer(consumerRoot)
@@ -1636,10 +1865,39 @@ test('the lsp release candidate installs and answers an initialize request', asy
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  vscode-languageserver: ${lspInstalledVersion('vscode-languageserver')}\n  vscode-languageserver-textdocument: ${lspInstalledVersion('vscode-languageserver-textdocument')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  vscode-languageserver: ${lspInstalledVersion('vscode-languageserver')}\n  vscode-languageserver-textdocument: ${lspInstalledVersion('vscode-languageserver-textdocument')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
       ),
     )
     installConsumer(consumerRoot)
+
+    const deepPaths = Object.keys(manifest.exports)
+      .filter((path) => path !== '.')
+      .sort()
+    const actorPaths = actorNamesOf('@silklang/lsp', deepPaths).map((name) => `./${name}`)
+    const inspected = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          `import * as api from '@silklang/lsp'; const paths = ${JSON.stringify(actorPaths)}; const modules = await Promise.all(paths.map((path) => import(\`@silklang/lsp/\${path.slice(2)}\`))); console.log(JSON.stringify({ root: Object.keys(api).sort(), rootNamespaces: Object.fromEntries(paths.map((path) => [path, Object.keys(api[path.slice(2)]).sort()])), deep: Object.fromEntries(paths.map((path, index) => [path, Object.keys(modules[index]).sort()])) }));`,
+        ],
+        { cwd: consumerRoot, encoding: 'utf8' },
+      ),
+    )
+    expect(inspected.root).toEqual(['Document', 'Inspection', 'LineIndex', 'Server', 'Workspace'])
+    const actorNames = assertActorSurfaceParity('@silklang/lsp', inspected.root, deepPaths)
+    for (const path of actorPaths) {
+      expect(inspected.deep[path].length, `${path} has no exports`).toBeGreaterThan(0)
+      expect(inspected.rootNamespaces[path]).toEqual(inspected.deep[path])
+    }
+    assertRuntimePathsNotExported(consumerRoot, '@silklang/lsp', ['WorkspaceCatalog'])
+    assertTypeScriptActorSurfaceParity({
+      cwd: consumerRoot,
+      packageName: '@silklang/lsp',
+      actorNames,
+      forbiddenNames: ['WorkspaceCatalog'],
+    })
 
     const executable = resolve(consumerRoot, 'node_modules/.bin/silk-lsp')
     const initialize = JSON.stringify({
