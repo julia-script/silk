@@ -70,83 +70,90 @@ const compileSource = (
     ),
   )
 
-it.effect(
-  'keeps the interpreter and native execution in agreement across the corpus',
-  () =>
-    Effect.gen(function* () {
-      const selected = process.env.SILK_NATIVE_CORPUS_CASE
-      for (const program of nativeCorpus) {
-        if (selected !== undefined && program.name !== selected) continue
-        const snapshot = yield* Analysis.ofSourceRealized('memory/driver', ascii(program.source))
-        assert.strictEqual(
-          snapshot.mir._tag,
-          'Available',
-          `${program.name}: ${Analysis.diagnostics(snapshot)
-            .map((diagnostic) => diagnostic.code)
-            .join(',')}`,
-        )
-        if (snapshot.mir._tag !== 'Available') continue
-        const interpreted = Analysis.evaluate(snapshot)
-        const outcome = yield* compileSource(
-          `corpus-${program.name}`,
-          program.nativeSource ?? program.source,
-          program.nativeImports,
-        )
+/**
+ * `SILK_NATIVE_SHARD=k/n` selects every n-th corpus case starting at k (1-based), letting CI run
+ * the corpus as a job matrix instead of one serial sweep. Unset runs everything.
+ */
+const shard = /^([1-9]\d*)\/([1-9]\d*)$/.exec(process.env.SILK_NATIVE_SHARD ?? '')
+const shardedCorpus =
+  shard === null
+    ? nativeCorpus
+    : nativeCorpus.filter((_, index) => index % Number(shard[2]) === Number(shard[1]) - 1)
 
-        if (program.expected._tag === 'UnavailableEntry') {
-          assert.strictEqual(outcome._tag, 'NoEntry', program.name)
-          continue
-        }
+it.each(shardedCorpus)(
+  'runs the native corpus case $name',
+  async (program) => {
+    const selected = process.env.SILK_NATIVE_CORPUS_CASE
 
-        if (outcome._tag === 'Rejected') {
-          assert.strictEqual(program.expected._tag, 'Trap', program.name)
-          assert.strictEqual(outcome.diagnostics.length > 0, true, program.name)
-          continue
-        }
+    await Effect.gen(function* () {
+      if (selected !== undefined && program.name !== selected) return
+      const snapshot = yield* Analysis.ofSourceRealized('memory/driver', ascii(program.source))
+      assert.strictEqual(
+        snapshot.mir._tag,
+        'Available',
+        `${program.name}: ${Analysis.diagnostics(snapshot)
+          .map((diagnostic) => diagnostic.code)
+          .join(',')}`,
+      )
+      if (snapshot.mir._tag !== 'Available') return
+      const interpreted = Analysis.evaluate(snapshot)
+      const outcome = yield* compileSource(
+        `corpus-${program.name}`,
+        program.nativeSource ?? program.source,
+        program.nativeImports,
+      )
 
-        assert.strictEqual(
-          outcome._tag,
-          'Compiled',
-          outcome._tag === 'BackendFailed'
-            ? `${program.name}: ${outcome.error.message}\n${JSON.stringify(outcome.error.reason)}`
-            : program.name,
-        )
-        if (outcome._tag !== 'Compiled') continue
-
-        if (program.expected._tag === 'Completes') {
-          assert.strictEqual(interpreted._tag, 'Completed', program.name)
-          const run = yield* runCompiled(outcome.path, program.nativeEnvironment)
-          if (program.nativeStdout !== undefined)
-            assert.strictEqual(run.stdout, program.nativeStdout, program.name)
-          const nativeStatus = run.status === null ? null : BigInt(run.status)
-          // POSIX exposes only the low unsigned byte of a process exit value.
-          const interpretedStatus =
-            interpreted._tag === 'Completed' ? interpreted.result.value & 0xffn : -1n
-          assert.strictEqual(
-            nativeStatus,
-            interpretedStatus,
-            `differential divergence on ${program.name}: interpreter ${
-              interpreted._tag === 'Completed' ? interpreted.result.value : interpreted._tag
-            }, native ${run.status}`,
-          )
-          continue
-        }
-
-        if (program.expected._tag === 'Trap') {
-          const run = yield* runCompiled(outcome.path, program.nativeEnvironment)
-          assert.strictEqual(
-            run.signal !== null || (run.status !== null && run.status !== 0),
-            true,
-            `differential divergence on ${program.name}: interpreter trapped, native exited ${run.status}`,
-          )
-        }
+      if (program.expected._tag === 'UnavailableEntry') {
+        assert.strictEqual(outcome._tag, 'NoEntry', program.name)
+        return
       }
-    }),
-  // The expanded scheduler corpus crosses twenty minutes on the shared Linux runner while each
-  // selected case completes normally. Keep this bounded below the validate job's 45-minute limit.
+
+      if (outcome._tag === 'Rejected') {
+        assert.strictEqual(program.expected._tag, 'Trap', program.name)
+        assert.strictEqual(outcome.diagnostics.length > 0, true, program.name)
+        return
+      }
+
+      assert.strictEqual(
+        outcome._tag,
+        'Compiled',
+        outcome._tag === 'BackendFailed'
+          ? `${program.name}: ${outcome.error.message}\n${JSON.stringify(outcome.error.reason)}`
+          : program.name,
+      )
+      if (outcome._tag !== 'Compiled') return
+
+      if (program.expected._tag === 'Completes') {
+        assert.strictEqual(interpreted._tag, 'Completed', program.name)
+        const run = yield* runCompiled(outcome.path, program.nativeEnvironment)
+        if (program.nativeStdout !== undefined)
+          assert.strictEqual(run.stdout, program.nativeStdout, program.name)
+        const nativeStatus = run.status === null ? null : BigInt(run.status)
+        // POSIX exposes only the low unsigned byte of a process exit value.
+        const interpretedStatus =
+          interpreted._tag === 'Completed' ? interpreted.result.value & 0xffn : -1n
+        assert.strictEqual(
+          nativeStatus,
+          interpretedStatus,
+          `differential divergence on ${program.name}: interpreter ${
+            interpreted._tag === 'Completed' ? interpreted.result.value : interpreted._tag
+          }, native ${run.status}`,
+        )
+        return
+      }
+
+      if (program.expected._tag === 'Trap') {
+        const run = yield* runCompiled(outcome.path, program.nativeEnvironment)
+        assert.strictEqual(
+          run.signal !== null || (run.status !== null && run.status !== 0),
+          true,
+          `differential divergence on ${program.name}: interpreter trapped, native exited ${run.status}`,
+        )
+      }
+    }).pipe(Effect.runPromise)
+  },
   1_500_000,
 )
-
 it.effect(
   'links and runs the native system and monotonic clock ABI',
   () =>

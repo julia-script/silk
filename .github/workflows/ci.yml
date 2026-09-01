@@ -49,9 +49,47 @@ jobs:
           pnpm --filter @silklang/compiler run documentation:policy
           pnpm --filter @silklang/compiler run documentation:check
           pnpm --filter @silklang/compiler run documentation:examples
-      - run: pnpm --filter @silklang/compiler run test:native-acceptance
       - run: pnpm test:scripts
       - run: pnpm release:candidate
+
+  # The native corpus is one serial file, so it shards by corpus index (SILK_NATIVE_SHARD in
+  # DriverNativeAcceptance.test.ts) rather than by vitest --shard. The three scheduler-scale
+  # cases are adjacent in the corpus, so index-mod-3 places one per shard.
+  native-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
+            turbo-${{ runner.os }}-
+      # Distinct per-shard keys avoid same-key save races; each shard restores its own newest
+      # archive first (the one holding its cases' artifacts), then any native cache.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/silk-effect/native
+          key: silk-native-${{ runner.os }}-na${{ matrix.shard }}-${{ github.sha }}
+          restore-keys: |
+            silk-native-${{ runner.os }}-na${{ matrix.shard }}-
+            silk-native-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/turbo.mjs run build
+      - run: pnpm --filter @silklang/compiler run test:native-acceptance
+        env:
+          SILK_NATIVE_SHARD: ${{ matrix.shard }}/3
 
   compiler-tests:
     runs-on: ubuntu-latest
