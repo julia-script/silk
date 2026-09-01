@@ -47,5 +47,5 @@
 ## 6. Run repository and release gates
 
 - [x] 6.1 Run `pnpm typecheck`, `pnpm exec biome check .`, and focused compiler/standard-library tests in that order; report any failure with the exact command and whether it predates the change.
-- [ ] 6.2 Run `pnpm test` and `pnpm check`, verify `git diff --check`, and confirm no debug instrumentation, runtime reflection representation, compatibility parser, variadic fallback, or duplicate template path remains.
-- [ ] 6.3 Run `pnpm release:candidate` because compiler and standard-library package contents change, and report the exact result before implementation handoff.
+- [x] 6.2 Run `pnpm test` and `pnpm check`, verify `git diff --check`, and confirm no debug instrumentation, runtime reflection representation, compatibility parser, variadic fallback, or duplicate template path remains.
+- [x] 6.3 Run `pnpm release:candidate` because compiler and standard-library package contents change, and report the exact result before implementation handoff.
