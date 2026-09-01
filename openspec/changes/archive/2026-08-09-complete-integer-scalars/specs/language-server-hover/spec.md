@@ -8,4 +8,3 @@ Hover SHALL render lowercase integer spellings, `bool`, `()`, and `never`, never
 
 - **WHEN** an unconstrained integer literal defaults successfully
 - **THEN** hover reports `i32`
-

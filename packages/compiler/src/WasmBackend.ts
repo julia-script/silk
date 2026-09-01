@@ -8790,17 +8790,15 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     privateExecutionStackPages < 1 ||
     privateExecutionStackPages > 65536
   ) {
-    return yield* Effect.fail(
-      new Backend.BackendError({
-        operation: 'Backend.emit',
-        backend: 'Wasm',
-        message: 'privateExecutionStackPages must be an integer from 1 through 65536',
-        reason: {
-          _tag: 'UnsupportedMir',
-          detail: 'privateExecutionStackPages must be an integer from 1 through 65536',
-        },
-      }),
-    )
+    return yield* new Backend.BackendError({
+      operation: 'Backend.emit',
+      backend: 'Wasm',
+      message: 'privateExecutionStackPages must be an integer from 1 through 65536',
+      reason: {
+        _tag: 'UnsupportedMir',
+        detail: 'privateExecutionStackPages must be an integer from 1 through 65536',
+      },
+    })
   }
   const coroutineFrameMemory = suspensionEnabled ? privateMemory : undefined
   // Every function is exported so the artifact is directly instantiable for inspection; the

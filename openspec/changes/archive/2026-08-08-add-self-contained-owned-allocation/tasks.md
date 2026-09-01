@@ -98,6 +98,7 @@
 - [x] 12.1 Run focused compiler, runtime-shim, native, Wasm, language-highlighting, and Labs tests throughout implementation and resolve every in-scope failure.
 - [x] 12.2 Run `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, and `pnpm check`; report any failure with its exact command and provenance.
 - [x] 12.3 Run `pnpm release:candidate` because compiler/runtime contents, language syntax, public artifacts, and package exports change.
+
 > **12.4 finding:** the diff carries one unrelated change — `packages/llvm/src/FunctionBody.ts`
 > enriches the `FunctionBody.call` argument-mismatch message with the actual and expected type
 > tags. It is behavior-preserving debug ergonomics inherited from the interrupted session that

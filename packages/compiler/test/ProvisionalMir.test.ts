@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as Instances from '../src/Instances.js'
 import * as TypeInference from '../src/internal/TypeInference.js'
@@ -228,7 +229,7 @@ pub fn main() -> i32 {
     const captures = origins.flatMap((origin) => origin.deferred.captures)
     assert.isTrue(
       captures.some((capture) => capture.type === 'i32' && capture.access === 'Take'),
-      JSON.stringify(captures),
+      Json.stringify(captures),
     )
     assert.isTrue(
       captures.some(

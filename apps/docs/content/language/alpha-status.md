@@ -36,12 +36,12 @@ details do not change the source language contract.
 
 The bootstrap compiler recognizes this closed target set:
 
-| Target | Kind | Pointer width | Artifact paths |
-| --- | --- | ---: | --- |
-| `aarch64-apple-darwin` | native macOS on Apple silicon | 64-bit | LLVM-backed native executable |
-| `x86_64-unknown-linux-gnu` | native Linux on x64 | 64-bit | LLVM-backed native executable |
-| `aarch64-unknown-linux-gnu` | native Linux on ARM64 | 64-bit | LLVM-backed native executable |
-| `wasm32-unknown-unknown` | standalone WebAssembly | 32-bit | LLVM-backed or direct WebAssembly |
+| Target                      | Kind                          | Pointer width | Artifact paths                    |
+| --------------------------- | ----------------------------- | ------------: | --------------------------------- |
+| `aarch64-apple-darwin`      | native macOS on Apple silicon |        64-bit | LLVM-backed native executable     |
+| `x86_64-unknown-linux-gnu`  | native Linux on x64           |        64-bit | LLVM-backed native executable     |
+| `aarch64-unknown-linux-gnu` | native Linux on ARM64         |        64-bit | LLVM-backed native executable     |
+| `wasm32-unknown-unknown`    | standalone WebAssembly        |        32-bit | LLVM-backed or direct WebAssembly |
 
 The direct `wasm` backend accepts only `wasm32-unknown-unknown`. The `llvm` backend accepts every
 target above. Native linking and LLVM-backed WebAssembly finalization require a suitable Clang

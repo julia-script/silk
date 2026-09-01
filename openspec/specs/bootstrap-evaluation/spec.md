@@ -3,7 +3,9 @@
 ## Purpose
 
 Evaluate the first closed, semantically checked Silk program to an exact `i32` result while retaining a deterministic explanation of every call and value binding.
+
 ## Requirements
+
 ### Requirement: First bootstrap entry point
 
 Bootstrap evaluation SHALL execute the snapshot's lowered MIR program from the entry that instance
@@ -428,6 +430,7 @@ concrete MIR types, layouts, and instance identities. It MUST NOT introduce inte
 arguments, runtime dictionaries, or alternate generic layout decisions.
 
 #### Scenario: Evaluate two identity instances
+
 - **WHEN** one program calls concrete i32 and nominal-struct specializations
 - **THEN** evaluation preserves each concrete value and traces the two canonical instance identities
 
@@ -475,6 +478,7 @@ through distinct runtime variants. Target-selected `usize` SHALL use canonical u
 encoding.
 
 #### Scenario: Integer values retain their scalar identity
+
 - **WHEN** one evaluated program binds both `i32` and `usize` integer values
 - **THEN** both values use the same integer discriminator
 - **AND** each value records its own canonical scalar spelling and exact `bigint` payload

@@ -77,13 +77,13 @@ ordinary diagnostic for its own type, ownership, failure, requirement, or place 
 Only a form with an explicit conditional, deferred, or control-transfer rule may skip or postpone a
 child:
 
-| Form | Non-eager behavior |
-| --- | --- |
-| `left && right` | Skips `right` when `left` is `false`. |
-| `left || right` | Skips `right` when `left` is `true`. |
-| `match value { ... }` | Evaluates only the selected arm result after the scrutinee and applicable guard. |
-| `effect { ... }` or an `effect fn` call | Constructs an Effect; the deferred body runs only when that Effect is run. |
-| `return`, `fail`, `break`, `continue`, or a trap | Prevents later runtime evaluation on that path. |
+| Form                                             | Non-eager behavior                                                               |
+| ------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `left && right`                                  | Skips `right` when `left` is `false`.                                            |
+| `left                                            |                                                                                  | right` | Skips `right` when `left` is `true`. |
+| `match value { ... }`                            | Evaluates only the selected arm result after the scrutinee and applicable guard. |
+| `effect { ... }` or an `effect fn` call          | Constructs an Effect; the deferred body runs only when that Effect is run.       |
+| `return`, `fail`, `break`, `continue`, or a trap | Prevents later runtime evaluation on that path.                                  |
 
 Within the child that does execute, EVAL-001 still applies.
 
@@ -321,20 +321,20 @@ produces one diagnostic; a later independent over-budget expression may produce 
 
 Silk groups unparenthesized operators using this table, from tightest to loosest:
 
-| Level | Spellings | Associativity |
-| --- | --- | --- |
-| Postfix | `.field`, `[index]`, `(arguments)` | Left |
-| Prefix | `-value`, `!value`, `~value` | Right |
-| Multiplicative | `*`, `/`, `%` | Left |
-| Additive | `+`, `-` | Left |
-| Bitwise AND | `&` | Left |
-| Bitwise XOR | `^` | Left |
-| Bitwise OR | <code>&#124;</code> | Left |
-| Relational | `<`, `<=`, `>`, `>=` | Non-associative |
-| Equality | `==`, `!=` | Non-associative |
-| Logical AND | `&&` | Left |
-| Logical OR | <code>&#124;&#124;</code> | Left |
-| Pipeline | <code>&#124;&gt;</code> | Left |
+| Level          | Spellings                          | Associativity   |
+| -------------- | ---------------------------------- | --------------- |
+| Postfix        | `.field`, `[index]`, `(arguments)` | Left            |
+| Prefix         | `-value`, `!value`, `~value`       | Right           |
+| Multiplicative | `*`, `/`, `%`                      | Left            |
+| Additive       | `+`, `-`                           | Left            |
+| Bitwise AND    | `&`                                | Left            |
+| Bitwise XOR    | `^`                                | Left            |
+| Bitwise OR     | <code>&#124;</code>                | Left            |
+| Relational     | `<`, `<=`, `>`, `>=`               | Non-associative |
+| Equality       | `==`, `!=`                         | Non-associative |
+| Logical AND    | `&&`                               | Left            |
+| Logical OR     | <code>&#124;&#124;</code>          | Left            |
+| Pipeline       | <code>&#124;&gt;</code>            | Left            |
 
 ```silk
 fn calculate(a: i32, b: i32, c: i32) -> bool {
@@ -545,14 +545,14 @@ rounded finite results are values, not diagnostics or traps.
 
 The concrete comparison operators are available as follows:
 
-| Operand type | `==`, `!=` | `<`, `<=`, `>`, `>=` | Meaning |
-| --- | --- | --- | --- |
-| `bool` | Yes | No | Exact Boolean equality |
-| Any identical integer type | Yes | Yes | Signed or unsigned numeric order for that type |
-| `f32` or `f64` of identical width | Yes | Yes | Ordinary IEEE comparison |
-| `char` | Yes | Yes | Unicode scalar-value order |
-| `string` | Yes | No | Exact UTF-8 sequence equality |
-| One identical scalar enum type | Yes | No | Declared member identity |
+| Operand type                      | `==`, `!=` | `<`, `<=`, `>`, `>=` | Meaning                                        |
+| --------------------------------- | ---------- | -------------------- | ---------------------------------------------- |
+| `bool`                            | Yes        | No                   | Exact Boolean equality                         |
+| Any identical integer type        | Yes        | Yes                  | Signed or unsigned numeric order for that type |
+| `f32` or `f64` of identical width | Yes        | Yes                  | Ordinary IEEE comparison                       |
+| `char`                            | Yes        | Yes                  | Unicode scalar-value order                     |
+| `string`                          | Yes        | No                   | Exact UTF-8 sequence equality                  |
+| One identical scalar enum type    | Yes        | No                   | Declared member identity                       |
 
 Every comparison returns `bool` and evaluates both operands left to right exactly once.
 

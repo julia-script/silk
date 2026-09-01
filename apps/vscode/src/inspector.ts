@@ -227,7 +227,7 @@ export const registerInspector = (
  * `--vscode-*` variables, so the panel follows light, dark, and high-contrast themes.
  */
 const webviewHtml = (): string => {
-  const nonce = Math.random().toString(36).slice(2)
+  const nonce = vscode.env.sessionId
   return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>

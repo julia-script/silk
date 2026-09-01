@@ -13,4 +13,3 @@ Arithmetic, negation, equality, and ordering operators SHALL resolve for two ope
 
 - **WHEN** operands are `f32` and `f64`
 - **THEN** analysis rejects them without conversion
-

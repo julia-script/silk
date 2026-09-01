@@ -1,23 +1,23 @@
 ## 1. MIR data model
 
 - [x] 1.1 Create `packages/compiler/src/Mir.ts`: typed locals, normal and cleanup blocks,
-  operations (literal, move, canonical-target call, drop), terminators (return, jump, branch,
-  trap), provenance with generated markers
+      operations (literal, move, canonical-target call, drop), terminators (return, jump, branch,
+      trap), provenance with generated markers
 - [x] 1.2 `TargetLayout` as a separate emission-time input (triple, pointer width, endianness,
-  logical size/alignment)
+      logical size/alignment)
 - [x] 1.3 Hand-built sample modules exported for tests and the lab (straight-line call sample;
-  branch + cleanup + generated drops + trap sample)
+      branch + cleanup + generated drops + trap sample)
 
 ## 2. Verifier
 
 - [x] 2.1 Structural verifier returning ordered violations as data: entry block present,
-  terminator targets exist, referenced locals declared
+      terminator targets exist, referenced locals declared
 - [x] 2.2 Verifier tests: samples verify clean; broken module reports deterministic violations
 
 ## 3. Encoder
 
 - [x] 3.1 Deterministic textual encoder (functions, blocks, ops, terminators, types, provenance,
-  generated markers)
+      generated markers)
 - [x] 3.2 Committed goldens for both samples; byte-identical and repeat-determinism tests
 
 ## 4. Package surface
@@ -27,7 +27,7 @@
 ## 5. CFG lab
 
 - [x] 5.1 Create the direct-link `/docs/labs/mir-cfg` lab: sample picker, blocks with kinds, ops,
-  terminators, and edges; provenance on hover/focus; encoded text view
+      terminators, and edges; provenance on hover/focus; encoded text view
 - [x] 5.2 Lab tests: blocks and edges, generated-drop provenance reveal, encoded text presence
 
 ## 6. Verification

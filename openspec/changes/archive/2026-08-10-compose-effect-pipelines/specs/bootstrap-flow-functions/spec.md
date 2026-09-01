@@ -28,4 +28,3 @@ access, and cleanup MUST remain equivalent across those forms.
 
 - **WHEN** a provided Effect succeeds with an affine value that a mapper consumes
 - **THEN** the mapper receives ownership exactly once and every remaining owned component is cleaned exactly once
-

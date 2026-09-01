@@ -1,4 +1,4 @@
-'use client';
+'use client'
 import {
   type ComponentProps,
   createContext,
@@ -10,34 +10,34 @@ import {
   useMemo,
   useRef,
   useState,
-} from 'react';
-import { flushSync } from 'react-dom';
-import { Loader2, MessageCircleIcon, RefreshCw, SearchIcon, Send, X } from 'lucide-react';
-import { cn } from '../../lib/cn';
-import { buttonVariants } from '../ui/button';
-import { useChat, type UseChatHelpers } from '@ai-sdk/react';
-import { DefaultChatTransport, type Tool, type UIMessage, type UIToolInvocation } from 'ai';
-import { Markdown } from '../markdown';
+} from 'react'
+import { flushSync } from 'react-dom'
+import { Loader2, MessageCircleIcon, RefreshCw, SearchIcon, Send, X } from 'lucide-react'
+import { cn } from '../../lib/cn'
+import { buttonVariants } from '../ui/button'
+import { useChat, type UseChatHelpers } from '@ai-sdk/react'
+import { DefaultChatTransport, type Tool, type UIMessage, type UIToolInvocation } from 'ai'
+import { Markdown } from '../markdown'
 
 export type ChatUIMessage = UIMessage<
   never,
   {
     client: {
-      location: string;
-    };
+      location: string
+    }
   }
->;
+>
 
-export type SearchTool = Tool<{ query: string; limit: number }>;
+export type SearchTool = Tool<{ query: string; limit: number }>
 
 const Context = createContext<{
-  open: boolean;
-  setOpen: (open: boolean) => void;
-  chat: UseChatHelpers<ChatUIMessage>;
-} | null>(null);
+  open: boolean
+  setOpen: (open: boolean) => void
+  chat: UseChatHelpers<ChatUIMessage>
+} | null>(null)
 
 export function AISearchPanelHeader({ className, ...props }: ComponentProps<'div'>) {
-  const { setOpen } = useAISearchContext();
+  const { setOpen } = useAISearchContext()
 
   return (
     <div
@@ -69,14 +69,14 @@ export function AISearchPanelHeader({ className, ...props }: ComponentProps<'div
         <X />
       </button>
     </div>
-  );
+  )
 }
 
 export function AISearchInputActions() {
-  const { messages, status, setMessages, regenerate } = useChatContext();
-  const isLoading = status === 'streaming';
+  const { messages, status, setMessages, regenerate } = useChatContext()
+  const isLoading = status === 'streaming'
 
-  if (messages.length === 0) return null;
+  if (messages.length === 0) return null
 
   return (
     <>
@@ -110,18 +110,18 @@ export function AISearchInputActions() {
         Clear Chat
       </button>
     </>
-  );
+  )
 }
 
-const StorageKeyInput = '__ai_search_input';
+const StorageKeyInput = '__ai_search_input'
 export function AISearchInput(props: ComponentProps<'form'>) {
-  const { status, sendMessage, stop } = useChatContext();
-  const [input, setInput] = useState(() => localStorage.getItem(StorageKeyInput) ?? '');
-  const isLoading = status === 'streaming' || status === 'submitted';
+  const { status, sendMessage, stop } = useChatContext()
+  const [input, setInput] = useState(() => localStorage.getItem(StorageKeyInput) ?? '')
+  const isLoading = status === 'streaming' || status === 'submitted'
   const onStart = (e?: SyntheticEvent) => {
-    e?.preventDefault();
-    const message = input.trim();
-    if (message.length === 0) return;
+    e?.preventDefault()
+    const message = input.trim()
+    if (message.length === 0) return
 
     void sendMessage({
       role: 'user',
@@ -137,14 +137,14 @@ export function AISearchInput(props: ComponentProps<'form'>) {
           text: message,
         },
       ],
-    });
-    setInput('');
-    localStorage.removeItem(StorageKeyInput);
-  };
+    })
+    setInput('')
+    localStorage.removeItem(StorageKeyInput)
+  }
 
   useEffect(() => {
-    if (isLoading) document.getElementById('nd-ai-input')?.focus();
-  }, [isLoading]);
+    if (isLoading) document.getElementById('nd-ai-input')?.focus()
+  }, [isLoading])
 
   return (
     <form {...props} className={cn('flex items-start pe-2', props.className)} onSubmit={onStart}>
@@ -155,14 +155,14 @@ export function AISearchInput(props: ComponentProps<'form'>) {
         className="p-3"
         disabled={status === 'streaming' || status === 'submitted'}
         onChange={(e) => {
-          setInput(e.target.value);
-          localStorage.setItem(StorageKeyInput, e.target.value);
+          setInput(e.target.value)
+          localStorage.setItem(StorageKeyInput, e.target.value)
         }}
         onKeyDown={(event) => {
           // keyCode 229: Safari fires `compositionend` before this keydown, `isComposing` is already false
-          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return
           if (!event.shiftKey && event.key === 'Enter') {
-            onStart(event);
+            onStart(event)
           }
         }}
       />
@@ -197,37 +197,37 @@ export function AISearchInput(props: ComponentProps<'form'>) {
         </button>
       )}
     </form>
-  );
+  )
 }
 
 function List(props: Omit<ComponentProps<'div'>, 'dir'>) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current) return
     function callback() {
-      const container = containerRef.current;
-      if (!container) return;
+      const container = containerRef.current
+      if (!container) return
 
       container.scrollTo({
         top: container.scrollHeight,
         behavior: 'instant',
-      });
+      })
     }
 
-    const observer = new ResizeObserver(callback);
-    callback();
+    const observer = new ResizeObserver(callback)
+    callback()
 
-    const element = containerRef.current?.firstElementChild;
+    const element = containerRef.current?.firstElementChild
 
     if (element) {
-      observer.observe(element);
+      observer.observe(element)
     }
 
     return () => {
-      observer.disconnect();
-    };
-  }, []);
+      observer.disconnect()
+    }
+  }, [])
 
   return (
     <div
@@ -237,12 +237,12 @@ function List(props: Omit<ComponentProps<'div'>, 'dir'>) {
     >
       {props.children}
     </div>
-  );
+  )
 }
 
 function Input(props: ComponentProps<'textarea'>) {
-  const ref = useRef<HTMLDivElement>(null);
-  const shared = cn('col-start-1 row-start-1', props.className);
+  const ref = useRef<HTMLDivElement>(null)
+  const shared = cn('col-start-1 row-start-1', props.className)
 
   return (
     <div className="grid flex-1">
@@ -258,30 +258,30 @@ function Input(props: ComponentProps<'textarea'>) {
         {`${props.value?.toString() ?? ''}\n`}
       </div>
     </div>
-  );
+  )
 }
 
 const roleName: Record<string, string> = {
   user: 'you',
   assistant: 'fumadocs',
-};
+}
 
 function Message({ message, ...props }: { message: ChatUIMessage } & ComponentProps<'div'>) {
-  let markdown = '';
-  const searchCalls: UIToolInvocation<SearchTool>[] = [];
+  let markdown = ''
+  const searchCalls: UIToolInvocation<SearchTool>[] = []
 
   for (const part of message.parts ?? []) {
     if (part.type === 'text') {
-      markdown += part.text;
-      continue;
+      markdown += part.text
+      continue
     }
 
     if (part.type.startsWith('tool-')) {
-      const toolName = part.type.slice('tool-'.length);
-      const p = part as UIToolInvocation<Tool>;
+      const toolName = part.type.slice('tool-'.length)
+      const p = part as UIToolInvocation<Tool>
 
-      if (toolName !== 'search' || !p.toolCallId) continue;
-      searchCalls.push(p);
+      if (toolName !== 'search' || !p.toolCallId) continue
+      searchCalls.push(p)
     }
   }
 
@@ -312,24 +312,24 @@ function Message({ message, ...props }: { message: ChatUIMessage } & ComponentPr
               <p>{!call.output ? 'Searching…' : `${call.output.length} search results`}</p>
             )}
           </div>
-        );
+        )
       })}
     </div>
-  );
+  )
 }
 
 export function AISearch({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(false)
   const chat = useChat<ChatUIMessage>({
     id: 'search',
     transport: new DefaultChatTransport({
       api: '/api/chat',
     }),
-  });
+  })
 
   return (
     <Context value={useMemo(() => ({ chat, open, setOpen }), [chat, open])}>{children}</Context>
-  );
+  )
 }
 
 export function AISearchTrigger({
@@ -337,7 +337,7 @@ export function AISearchTrigger({
   className,
   ...props
 }: ComponentProps<'button'> & { position?: 'default' | 'float' }) {
-  const { open, setOpen } = useAISearchContext();
+  const { open, setOpen } = useAISearchContext()
 
   return (
     <button
@@ -354,15 +354,15 @@ export function AISearchTrigger({
     >
       {props.children}
     </button>
-  );
+  )
 }
 
 export function AISearchPanel() {
-  const { open, setOpen } = useAISearchContext();
-  const [actualOpen, setActualOpen] = useState(open);
-  useHotKey();
+  const { open, setOpen } = useAISearchContext()
+  const [actualOpen, setActualOpen] = useState(open)
+  useHotKey()
 
-  if (open && !actualOpen) setActualOpen(open);
+  if (open && !actualOpen) setActualOpen(open)
 
   return (
     <>
@@ -393,7 +393,7 @@ export function AISearchPanel() {
           )}
           onClick={() => setOpen(false)}
           onAnimationEnd={() => {
-            if (!open) flushSync(() => setActualOpen(false));
+            if (!open) flushSync(() => setActualOpen(false))
           }}
         />
       )}
@@ -408,7 +408,7 @@ export function AISearchPanel() {
               : 'animate-fd-dialog-out lg:animate-[ask-ai-close_200ms]',
           )}
           onAnimationEnd={() => {
-            if (!open) flushSync(() => setActualOpen(false));
+            if (!open) flushSync(() => setActualOpen(false))
           }}
         >
           <div className="flex flex-col size-full p-2 lg:p-3 lg:w-(--ai-chat-width)">
@@ -424,12 +424,12 @@ export function AISearchPanel() {
         </div>
       )}
     </>
-  );
+  )
 }
 
 export function AISearchPanelList({ className, style, ...props }: ComponentProps<'div'>) {
-  const chat = useChatContext();
-  const messages = chat.messages.filter((msg) => msg.role !== 'system');
+  const chat = useChatContext()
+  const messages = chat.messages.filter((msg) => msg.role !== 'system')
 
   return (
     <List
@@ -462,36 +462,36 @@ export function AISearchPanelList({ className, style, ...props }: ComponentProps
         </div>
       )}
     </List>
-  );
+  )
 }
 
 export function useHotKey() {
-  const { open, setOpen } = useAISearchContext();
+  const { open, setOpen } = useAISearchContext()
 
   const onKeyPress = useEffectEvent((e: KeyboardEvent) => {
     if (e.key === 'Escape' && open) {
-      setOpen(false);
-      e.preventDefault();
+      setOpen(false)
+      e.preventDefault()
     }
 
     if (e.key === '/' && (e.metaKey || e.ctrlKey) && !open) {
-      setOpen(true);
-      e.preventDefault();
+      setOpen(true)
+      e.preventDefault()
     }
-  });
+  })
 
   useEffect(() => {
-    window.addEventListener('keydown', onKeyPress);
-    return () => window.removeEventListener('keydown', onKeyPress);
-  }, []);
+    window.addEventListener('keydown', onKeyPress)
+    return () => window.removeEventListener('keydown', onKeyPress)
+  }, [])
 }
 
 export function useAISearchContext() {
-  const context = use(Context);
-  if (context === null) throw new Error('AI search components must be rendered inside AISearch.');
-  return context;
+  const context = use(Context)
+  if (context === null) throw new Error('AI search components must be rendered inside AISearch.')
+  return context
 }
 
 function useChatContext() {
-  return useAISearchContext().chat;
+  return useAISearchContext().chat
 }

@@ -8,6 +8,6 @@ each concrete instance. A specialization MUST NOT duplicate cleanup or re-check 
 concrete-only behavior.
 
 #### Scenario: Specialize move-only and Copy uses
+
 - **WHEN** a checked generic whole-value transfer is instantiated once with `I32` and once with a move-only struct
 - **THEN** each instance receives the correct concrete copy or cleanup actions from one generic ownership proof
-

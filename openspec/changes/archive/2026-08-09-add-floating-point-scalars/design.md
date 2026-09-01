@@ -14,7 +14,7 @@ This change follows `complete-integer-scalars` and extends its scalar catalog, e
 
 Store canonical IEEE bits, round after each `f32` operation, preserve signed zero, and canonicalize arithmetic NaNs when payload is unspecified. Bit reinterpretation preserves bits exactly.
 
-*Alternative considered:* bare JavaScript numbers. Rejected because width and representation operations become implicit.
+_Alternative considered:_ bare JavaScript numbers. Rejected because width and representation operations become implicit.
 
 ### Literal parsing controls rounding
 
@@ -37,4 +37,3 @@ Extend the catalog and syntax, then HIR/MIR/evaluator, then both backends and ed
 ## Open Questions
 
 None.
-

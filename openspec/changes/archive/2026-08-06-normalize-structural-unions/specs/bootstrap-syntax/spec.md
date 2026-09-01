@@ -26,4 +26,3 @@ SHALL retain its exact token and span. `Never` SHALL have no literal or construc
 
 - **WHEN** a function declares `Never` as its return type
 - **THEN** the concrete tree retains one complete declared-type node for the built-in type
-

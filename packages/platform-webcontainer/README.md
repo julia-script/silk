@@ -77,12 +77,12 @@ API has no backpressure protocol, so an unconsumed subscription can grow in memo
 
 `WebContainerFileSystem.layer` provides Effect's standard `FileSystem.FileSystem` service.
 
-| Classification | Operations |
-| --- | --- |
-| Native | `access`, `exists`, `makeDirectory`, `readDirectory`, `readFile`, `readFileString`, `remove`, `rename`, `watch`, `writeFile`, `writeFileString` |
-| Derived | `copy`, `copyFile`, `makeTempDirectory`, `makeTempDirectoryScoped`, `makeTempFile`, `makeTempFileScoped`, recursive `readDirectory`, `realPath`, `sink`, `stream`, `truncate` |
-| Approximated | `stat` |
-| Unsupported | `chmod`, `chown`, `glob`, `link`, `open`, `readLink`, `symlink`, `utimes` |
+| Classification | Operations                                                                                                                                                                    |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native         | `access`, `exists`, `makeDirectory`, `readDirectory`, `readFile`, `readFileString`, `remove`, `rename`, `watch`, `writeFile`, `writeFileString`                               |
+| Derived        | `copy`, `copyFile`, `makeTempDirectory`, `makeTempDirectoryScoped`, `makeTempFile`, `makeTempFileScoped`, recursive `readDirectory`, `realPath`, `sink`, `stream`, `truncate` |
+| Approximated   | `stat`                                                                                                                                                                        |
+| Unsupported    | `chmod`, `chown`, `glob`, `link`, `open`, `readLink`, `symlink`, `utimes`                                                                                                     |
 
 Unsupported operations fail immediately with a typed `PlatformError` whose description identifies
 the unsupported capability. They do not pretend the path is missing.

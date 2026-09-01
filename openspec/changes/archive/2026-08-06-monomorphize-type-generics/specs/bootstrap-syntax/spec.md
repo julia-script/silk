@@ -9,14 +9,16 @@ starts SHALL remain reserved only at primary-expression boundaries. Missing name
 brackets, and type arguments SHALL remain explicit local syntax nodes and diagnostics.
 
 #### Scenario: Parse a generic declaration and call
+
 - **WHEN** source contains `pub fn identity<T>(value: T) -> T` and `identity<I32>(1)`
 - **THEN** syntax records the declaration parameter and call specialization losslessly
 
 #### Scenario: Preserve a comparison
+
 - **WHEN** source contains `left < right`
 - **THEN** the expression remains a comparison rather than a damaged generic application
 
 #### Scenario: Keep a reserved template start distinct
+
 - **WHEN** `<Panel />` appears where a primary expression begins
 - **THEN** the parser preserves the reserved template start rather than treating `Panel` as a type argument
-

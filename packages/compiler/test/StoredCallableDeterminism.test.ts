@@ -14,8 +14,8 @@ import * as Process from './support/Process.js'
 
 const SourceSpan = Schema.Struct({
   sourceId: Schema.String,
-  start: Schema.Number,
-  end: Schema.Number,
+  start: Schema.Finite,
+  end: Schema.Finite,
 })
 const Report = Schema.Struct({
   diagnostics: Schema.Array(
@@ -27,8 +27,8 @@ const Report = Schema.Struct({
         Schema.Struct({
           label: Schema.String,
           sourceId: Schema.String,
-          start: Schema.Number,
-          end: Schema.Number,
+          start: Schema.Finite,
+          end: Schema.Finite,
         }),
       ),
     }),
@@ -36,12 +36,12 @@ const Report = Schema.Struct({
   layout: Schema.String,
   mir: Schema.String,
 })
-const Result = Schema.Union([Schema.Number, Schema.String])
+const Result = Schema.Union([Schema.Finite, Schema.String])
 const RuntimeReport = Schema.Struct({
   diagnostics: Schema.Array(Schema.String),
   evaluator: Result,
   wasm: Result,
-  native: Schema.Number,
+  native: Schema.Finite,
   instanceKeys: Schema.Array(Schema.String),
   nativeLayout: Schema.String,
   wasmLayout: Schema.String,

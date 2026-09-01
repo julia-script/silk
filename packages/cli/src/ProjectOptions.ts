@@ -30,10 +30,12 @@ export const profile = Flag.choice('profile', profiles).pipe(
 
 export const release = Flag.boolean('release').pipe(
   Flag.withDescription('Build with the release profile.'),
+  Flag.withDefault(false),
 )
 
 export const watch = Flag.boolean('watch').pipe(
   Flag.withDescription('Run again after every change to a project source file.'),
+  Flag.withDefault(false),
 )
 
 export interface Input {

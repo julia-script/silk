@@ -71,9 +71,8 @@ const staticValues = (syntax: SyntaxFile.SyntaxFile): ReadonlyArray<ReadonlyArra
 
 const nodeKinds = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.NodeKind> => [
   node.kind,
-  ...node.children.flatMap(
-    (child): ReadonlyArray<SyntaxTree.NodeKind> =>
-      SyntaxTree.isNode(child) ? nodeKinds(child) : [],
+  ...node.children.flatMap((child): ReadonlyArray<SyntaxTree.NodeKind> =>
+    SyntaxTree.isNode(child) ? nodeKinds(child) : [],
   ),
 ]
 

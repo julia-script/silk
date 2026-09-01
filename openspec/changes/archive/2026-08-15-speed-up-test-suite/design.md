@@ -13,12 +13,14 @@ See proposal.md — Why. Measured facts this design relies on (six spikes, 2026-
 ## Goals / Non-Goals
 
 **Goals**
+
 - Cut compiler-suite CPU ~35–50% by deleting redundant tests and tiering expensive legs, without losing any distinct failure mode the suite can currently catch.
-- Make determinism and native-agreement coverage *centralized* (canaries + corpus) so the marginal cost of a new language feature's tests is one corpus entry, not a new clang-spawning file.
+- Make determinism and native-agreement coverage _centralized_ (canaries + corpus) so the marginal cost of a new language feature's tests is one corpus entry, not a new clang-spawning file.
 - Stop regrowth: encode the cost rules where AI agents read them (AGENTS.md).
 - Warm caches everywhere a run can be warm (CI, worktrees, cross-process native artifacts).
 
 **Non-Goals**
+
 - No `Analysis` snapshot sharing or stdlib elaboration memoization (compiler-side; follow-up change).
 - No harness replacement (vitest stays), no worker/pool retuning beyond what exists.
 - No behavior change to the compiler beyond the opt-in disk cache default.
@@ -29,19 +31,19 @@ See proposal.md — Why. Measured facts this design relies on (six spikes, 2026-
 Fresh-process determinism catches nondeterminism whose source is process-local state (map iteration order, hashing seeds, pointer-derived ordering). That class is global to the compiler, not per-feature: any sufficiently rich program that exercises the full artifact surface will surface it. Keep `ScannerDeterminism` (stdlib imports, allocation, both release backends, HIR/ownership/MIR encodings, 7.5s), `ConditionalConformanceDeterminism` (generics, conformance memo order, both backends, 1.0s), and `StoredCallableDeterminism` (callable environments, native+wasm execution, 38.6s). `LlvmWasmDeterminism` (baseline pick) measured as a trivial-identity program whose whole surface the other canaries subsume — it is deleted with the rest. Every deleted file's per-feature byte-identity claim remains enforced by its committed-golden comparisons, which run in-process. Alternative considered: keep all 23 but share one spawned process per file — rejected, still pays 2 full release pipelines × 20 files for no added failure mode.
 
 **D2. Native agreement: corpus-only, with an explicit target-specific allowlist.**
-`DriverNativeAcceptance` is already the designated differential gate. Feature files' programs move into `test/support/corpus.ts`; their standalone `Driver.compile` + `spawnSync` legs are deleted. Native legs stay *only* where lowering is genuinely target-specific and the corpus's exit-code differential cannot express the claim: `EffectSuspensionNative`, `DropHookExecution`, `RecursionStackBoundary`, syscall-touching tests (`OsFileSystem`, `TemporaryDirectoryAcceptance`, `HostInput`, `StandardStreams`), and allocation-metrics tests. The allowlist is written down in AGENTS.md so the burden of proof is on adding a native leg, not removing one.
+`DriverNativeAcceptance` is already the designated differential gate. Feature files' programs move into `test/support/corpus.ts`; their standalone `Driver.compile` + `spawnSync` legs are deleted. Native legs stay _only_ where lowering is genuinely target-specific and the corpus's exit-code differential cannot express the claim: `EffectSuspensionNative`, `DropHookExecution`, `RecursionStackBoundary`, syscall-touching tests (`OsFileSystem`, `TemporaryDirectoryAcceptance`, `HostInput`, `StandardStreams`), and allocation-metrics tests. The allowlist is written down in AGENTS.md so the burden of proof is on adding a native leg, not removing one.
 
 **D3. Failure-ordinal sweeps: evaluator+wasm carry every ordinal, native carries boundaries.**
 The sweep's claim (typed `OutOfMemory`, exactly-once release, no partial exposure) is a semantics claim the evaluator and wasm engines check cheaply per ordinal. Native's unique contribution is leak evidence through the real allocator — preserved at first-failure, one mid-growth, and completion ordinals. This converts O(ordinals) native pipelines into O(3) per pressure program and removes the two worst single tests in the suite. The quota constant currently embedded in source per iteration also defeats the artifact cache; boundary-only native legs make that moot.
 
 **D4. Disk cache: flip the default, don't touch 66 call sites.**
-`defaultArtifactCache()` in `packages/compiler/src/NativeToolchain.ts` returns `makeDiskArtifactCache(process.env.SILK_NATIVE_CACHE_DIR)` when the variable is set, else the existing Map. Every existing `Driver.compile` caller inherits it; the vitest config env line becomes live as originally intended. Two known limitations, accepted and documented: the key hashes the clang *path* (stale after a clang upgrade at the same path — mitigated by including clang version in the key while we're there), and no eviction (mitigated: CI cache is bounded by the actions/cache limit; local dir is small — 22MB after weeks of the old spike). Honest sizing: a hit skips only the clang step (~11% of a compile) plus the shim compile, so this is a small steady win, not the headline.
+`defaultArtifactCache()` in `packages/compiler/src/NativeToolchain.ts` returns `makeDiskArtifactCache(process.env.SILK_NATIVE_CACHE_DIR)` when the variable is set, else the existing Map. Every existing `Driver.compile` caller inherits it; the vitest config env line becomes live as originally intended. Two known limitations, accepted and documented: the key hashes the clang _path_ (stale after a clang upgrade at the same path — mitigated by including clang version in the key while we're there), and no eviction (mitigated: CI cache is bounded by the actions/cache limit; local dir is small — 22MB after weeks of the old spike). Honest sizing: a hit skips only the clang step (~11% of a compile) plus the shim compile, so this is a small steady win, not the headline.
 
 **D5. CI/worktree caches.**
 `actions/cache` on `.turbo` keyed by lockfile+turbo config hash with restore-keys fallback, and on `SILK_NATIVE_CACHE_DIR`. Worktrees: `scripts/turbo.mjs` sets `TURBO_CACHE_DIR` to a repo-adjacent shared path when the checkout is under `.claude/worktrees/` (turbo hashes are repo-relative, so cross-worktree hits are sound).
 
 **D6. Perf assertions leave the correctness suite.**
-`SynchronousEffectCost` keeps only its *structural* assertions (entry structure omits foldable constructor calls — spec-mandated) and drops exact byte/branch counts and timing rounds; `OccurrencePerformance` is deleted (timed rounds on shared CI are a flake generator, and the spec makes no performance claim).
+`SynchronousEffectCost` keeps only its _structural_ assertions (entry structure omits foldable constructor calls — spec-mandated) and drops exact byte/branch counts and timing rounds; `OccurrencePerformance` is deleted (timed rounds on shared CI are a flake generator, and the spec makes no performance claim).
 
 **D7. Verification is measured, not asserted.**
 Before the deletion PR: one `vitest run --reporter=verbose` baseline, committed to the change as a ranking. After each phase: same run, diff the totals. Deletions must also pass a mutation-style spot check: for 3 sampled deleted files, re-introduce a representative historical bug (or revert its fixing commit locally) and confirm a surviving test still fails.

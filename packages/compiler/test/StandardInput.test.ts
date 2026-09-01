@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -99,7 +100,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome._tag))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome._tag))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )

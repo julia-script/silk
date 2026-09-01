@@ -16,15 +16,11 @@ Every Tiny expression produces `i32`, including comparisons normalized in Lesson
 lower the condition, compare it with an `i32` zero, and branch on the comparison:
 
 ```typescript
-const condition = yield* lowerExpression(context, expression.condition)
-const zero = yield* Constant.integerSigned(context.builder, context.i32, 0)
-const branchCondition = yield* FunctionBody.integerCompare(
-  context.body,
-  'ne',
-  condition,
-  zero,
-  freshName(context, 'condition'),
-)
+const condition = yield * lowerExpression(context, expression.condition)
+const zero = yield * Constant.integerSigned(context.builder, context.i32, 0)
+const branchCondition =
+  yield *
+  FunctionBody.integerCompare(context.body, 'ne', condition, zero, freshName(context, 'condition'))
 ```
 
 `icmp ne` returns the required `i1`. We do not change Tiny's expression type; this conversion lives
@@ -49,15 +45,10 @@ For each `if`, reserve one block number and create all destinations before emitt
 ```typescript
 const blockId = context.nextBlock
 context.nextBlock += 1
-const onTrueBlock = yield* Block.make(context.body, `if_true_${blockId}`)
-const onFalseBlock = yield* Block.make(context.body, `if_false_${blockId}`)
-const mergeBlock = yield* Block.make(context.body, `if_merge_${blockId}`)
-yield* FunctionBody.conditionalBranch(
-  context.body,
-  branchCondition,
-  onTrueBlock,
-  onFalseBlock,
-)
+const onTrueBlock = yield * Block.make(context.body, `if_true_${blockId}`)
+const onFalseBlock = yield * Block.make(context.body, `if_false_${blockId}`)
+const mergeBlock = yield * Block.make(context.body, `if_merge_${blockId}`)
+yield * FunctionBody.conditionalBranch(context.body, branchCondition, onTrueBlock, onFalseBlock)
 ```
 
 An LLVM basic block is a straight-line instruction sequence with one terminator. The conditional
@@ -89,17 +80,17 @@ Move to the true block, update `currentBlock`, lower the true expression, rememb
 that lowering ended, and terminate it with a branch to the merge. Repeat for the false expression:
 
 ```typescript
-yield* Block.setInsertionPoint(context.body, onTrueBlock)
+yield * Block.setInsertionPoint(context.body, onTrueBlock)
 context.currentBlock = onTrueBlock
-const onTrue = yield* lowerExpression(context, expression.onTrue)
+const onTrue = yield * lowerExpression(context, expression.onTrue)
 const onTruePredecessor = context.currentBlock
-yield* FunctionBody.branch(context.body, mergeBlock)
+yield * FunctionBody.branch(context.body, mergeBlock)
 
-yield* Block.setInsertionPoint(context.body, onFalseBlock)
+yield * Block.setInsertionPoint(context.body, onFalseBlock)
 context.currentBlock = onFalseBlock
-const onFalse = yield* lowerExpression(context, expression.onFalse)
+const onFalse = yield * lowerExpression(context, expression.onFalse)
 const onFalsePredecessor = context.currentBlock
-yield* FunctionBody.branch(context.body, mergeBlock)
+yield * FunctionBody.branch(context.body, mergeBlock)
 ```
 
 Remembering the actual ending block matters for nesting. If the true expression is another `if`,
@@ -118,16 +109,12 @@ Move to the merge block, create an `i32` PHI, add one incoming pair for each act
 and seal it:
 
 ```typescript
-yield* Block.setInsertionPoint(context.body, mergeBlock)
+yield * Block.setInsertionPoint(context.body, mergeBlock)
 context.currentBlock = mergeBlock
-const phi = yield* FunctionBody.phi(
-  context.body,
-  context.i32,
-  freshName(context, 'if_result'),
-)
-yield* FunctionBody.addPhiIncoming(context.body, phi, onTrue, onTruePredecessor)
-yield* FunctionBody.addPhiIncoming(context.body, phi, onFalse, onFalsePredecessor)
-return yield* FunctionBody.sealPhi(context.body, phi)
+const phi = yield * FunctionBody.phi(context.body, context.i32, freshName(context, 'if_result'))
+yield * FunctionBody.addPhiIncoming(context.body, phi, onTrue, onTruePredecessor)
+yield * FunctionBody.addPhiIncoming(context.body, phi, onFalse, onFalsePredecessor)
+return yield * FunctionBody.sealPhi(context.body, phi)
 ```
 
 A PHI is not an imperative assignment and it does not execute both branches. It says: if control

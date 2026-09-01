@@ -15,13 +15,13 @@ Status: **PASS for OpenSpec tasks 1.8 and 1.9**. Selected strategy: **direct ite
 
 ## Measured values
 
-| metric | direct | switched | retcon |
-| --- | ---: | ---: | ---: |
-| O0 compile median (ms) | 31.120 | 33.046 | 32.351 |
-| O2 compile median (ms) | 32.598 | 36.851 | 36.119 |
+| metric                         |   direct | switched |   retcon |
+| ------------------------------ | -------: | -------: | -------: |
+| O0 compile median (ms)         |   31.120 |   33.046 |   32.351 |
+| O2 compile median (ms)         |   32.598 |   36.851 |   36.119 |
 | O2 resume median (ms/boundary) | 0.001133 | 0.001150 | 0.001144 |
-| frame bytes at boundary 1 | 24 | 40 | 64 |
-| linked O2 code/data bytes | 6396 | 6572 | 6662 |
+| frame bytes at boundary 1      |       24 |       40 |       64 |
+| linked O2 code/data bytes      |     6396 |     6572 |     6662 |
 
 The generated [selection report](selection-report.md) applies every threshold and records the rejection reason for both LLVM candidates. Raw samples, MADs, exact commands, stack results, call graphs, frame layouts, semantic traces, and debug symbolization are retained in [evidence.json](evidence.json).
 

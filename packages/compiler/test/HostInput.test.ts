@@ -3,7 +3,9 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as HostInput from '../src/HostInput.js'
 import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
@@ -521,7 +523,9 @@ const defaultClang = (): string => {
   return 'clang'
 }
 
-const clang = process.env.SILK_TEST_CLANG ?? defaultClang()
+const clang = Effect.runSync(
+  Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
+)
 
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-host-input-'))
 afterAll(() => {
@@ -595,7 +599,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`)
       assert.strictEqual(
         compiled._tag,
         'Compiled',
-        JSON.stringify(compiled._tag === 'BackendFailed' ? compiled.error : compiled),
+        Json.stringify(compiled._tag === 'BackendFailed' ? compiled.error : compiled),
       )
       if (compiled._tag !== 'Compiled') return
       const run = spawnSync(compiled.path, ['alpha', 'beta', 'gamma'], {
@@ -605,7 +609,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`)
       assert.strictEqual(
         run.status,
         42,
-        JSON.stringify({ signal: run.signal, stderr: run.stderr, stdout: run.stdout }),
+        Json.stringify({ signal: run.signal, stderr: run.stderr, stdout: run.stdout }),
       )
     }),
   120_000,

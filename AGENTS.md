@@ -28,10 +28,11 @@ language definition and reference live in `apps/docs/content/reference/`.
 
 ## Repository workflow
 
-- The workspace uses pnpm, Turbo, strict TypeScript, Biome, and Vitest.
+- The workspace uses pnpm, Turbo, strict TypeScript, Oxfmt, Oxlint, and Vitest.
 - Put public LLVM code in `packages/llvm/src` and tests in `packages/llvm/test`.
 - Keep the public barrel at `packages/llvm/src/index.ts` explicit.
-- Verify changes in this order: `pnpm typecheck`, `pnpm exec biome check .`, then `pnpm test`.
+- Verify changes in this order: `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, then
+  `pnpm test`.
 - Run `pnpm check` before handoff. Run `pnpm release:candidate` when package contents or exports
   change.
 - Do not describe changes as complete when a required check was not run. Report the exact failure

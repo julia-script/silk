@@ -22,7 +22,10 @@ import {
 } from '../dist/index.js'
 import * as InstructionTable from '../dist/internal/InstructionTable.js'
 
-const build = (name, program) => ({
+const build = (
+  /** @type {string} */ name,
+  /** @type {Effect.Effect<Builder.Builder, import('../dist/WasmError.js').WasmError>} */ program,
+) => ({
   name,
   run: () =>
     Effect.runPromise(
@@ -37,12 +40,7 @@ const build = (name, program) => ({
 })
 
 export const fixtures = [
-  build(
-    'empty',
-    Effect.gen(function* () {
-      return yield* Builder.make()
-    }),
-  ),
+  build('empty', Builder.make()),
 
   build(
     'arithmetic',
@@ -431,7 +429,7 @@ fixtures.push(
             body.push(Instr.i32Const(1))
             break
           default:
-            throw new Error(`Unhandled atomic kind ${row.kind}`)
+            throw new Error('Unhandled atomic kind')
         }
         body.push(Instr.atomicAccess(mnemonic, memory))
         if (row.kind !== 'store') body.push(Instr.op('drop'))

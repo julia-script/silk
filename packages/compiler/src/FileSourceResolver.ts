@@ -73,12 +73,10 @@ export const layer = (
                   }),
                 ),
           onSuccess: (bytes) =>
-            Effect.succeed(
-              Option.some(
-                SourceResolver.resolved(
-                  Uint8Array.from(bytes),
-                  SourceOrigin.toolchainFile(sourceUrl.href),
-                ),
+            Effect.succeedSome(
+              SourceResolver.resolved(
+                Uint8Array.from(bytes),
+                SourceOrigin.toolchainFile(sourceUrl.href),
               ),
             ),
         })
@@ -99,7 +97,7 @@ export const layer = (
           return Effect.matchEffect(fileSystem.readFile(file), {
             onFailure: (cause) =>
               cause.reason._tag === 'NotFound'
-                ? Effect.succeed(Option.none())
+                ? Effect.succeedNone
                 : Effect.fail(
                     new SourceResolver.SourceResolverError({
                       operation: 'FileSourceResolver.resolve',
@@ -109,24 +107,22 @@ export const layer = (
                     }),
                   ),
             onSuccess: (bytes) =>
-              Effect.succeed(
-                Option.some(
-                  SourceResolver.resolved(Uint8Array.from(bytes), SourceOrigin.projectFile(file)),
-                ),
+              Effect.succeedSome(
+                SourceResolver.resolved(Uint8Array.from(bytes), SourceOrigin.projectFile(file)),
               ),
           })
         }),
         resolveStandardLibrary: Effect.fn('FileSourceResolver.resolveStandardLibrary')(
           readToolchainSource,
         ),
-        toolchainSources: Effect.fn('FileSourceResolver.toolchainSources')(function* () {
+        toolchainSources: Effect.gen(function* () {
           const loaded = new Map<string, SourceResolver.ResolvedSource>()
           for (const entry of Stdlib.manifest) {
             const source = yield* readToolchainSource(entry.module)
             if (Option.isSome(source)) loaded.set(entry.module, source.value)
           }
           return loaded
-        }),
+        }).pipe(Effect.withSpan('FileSourceResolver.toolchainSources')),
       }
     }),
   )

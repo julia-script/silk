@@ -15,4 +15,3 @@ ordinary Silk source over `Vector<u8>`. Its manifest dependencies SHALL use the 
 
 - **WHEN** the canonical source inventory is inspected
 - **THEN** `Bytes` contains no UTF-8 validation, formatting rules, filesystem service dependency, or platform provider
-

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync }
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as Analysis from '../src/Analysis.js'
@@ -18,7 +19,9 @@ const defaultClang = (): string => {
   return 'clang'
 }
 
-const clang = process.env.SILK_TEST_CLANG ?? defaultClang()
+const clang = Effect.runSync(
+  Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
+)
 const toolchain: NativeToolchain.Toolchain = Object.freeze({ _tag: 'Toolchain', clang })
 
 const testRoot = mkdtempSync(join(tmpdir(), 'silk-native-boundary-test-'))
@@ -356,7 +359,7 @@ it.effect('translates synchronously throwing shim-cache reads with cache-stage p
       get: () => {
         throw cause
       },
-      set: () => Effect.succeed(undefined),
+      set: () => Effect.void,
       stats: () => Object.freeze({ entries: 0, hits: 0, misses: 0 }),
     })
     const result = yield* Effect.result(
@@ -385,7 +388,7 @@ it.effect('translates synchronously throwing shim-cache writes with cache-stage 
     const cause = Object.freeze({ injected: 'cache-write' })
     const cache: NativeToolchain.ShimCache = Object.freeze({
       _tag: 'ShimCache',
-      get: () => Effect.succeed(undefined),
+      get: () => Effect.as(Effect.void, undefined),
       set: () => {
         throw cause
       },

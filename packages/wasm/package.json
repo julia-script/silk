@@ -2,33 +2,29 @@
   "name": "@silklang/wasm",
   "version": "0.0.0",
   "description": "Effect-native WebAssembly module construction with deterministic text and binary emission.",
+  "keywords": [
+    "effect",
+    "typescript",
+    "wasm",
+    "webassembly"
+  ],
+  "homepage": "https://github.com/julia-script/silk-effect#readme",
+  "bugs": {
+    "url": "https://github.com/julia-script/silk-effect/issues"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/julia-script/silk-effect.git",
     "directory": "packages/wasm"
   },
-  "homepage": "https://github.com/julia-script/silk-effect#readme",
-  "bugs": {
-    "url": "https://github.com/julia-script/silk-effect/issues"
-  },
-  "keywords": [
-    "webassembly",
-    "wasm",
-    "effect",
-    "typescript"
-  ],
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
-  "type": "module",
   "files": [
     "dist",
     "README.md",
     "LICENSE",
     "UPSTREAM.md"
   ],
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -110,6 +106,10 @@
       "types": "./dist/WatText.d.ts",
       "import": "./dist/WatText.js"
     }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "pnpm clean && tsc -p tsconfig.json",

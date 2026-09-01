@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../../dist/Analysis.js'
 import * as Hir from '../../dist/Hir.js'
@@ -272,8 +273,14 @@ pub fn main() -> i32 { return run zero() |> Effect.map(divide) }`,
 ])
 
 const temporary = mkdtempSync(join(tmpdir(), 'silk-effect-cost-'))
-const clang = process.env.SILK_EFFECT_COST_CLANG ?? 'clang'
-const artifactDirectory = process.env.SILK_EFFECT_COST_ARTIFACT_DIR
+const clang = Effect.runSync(
+  Config.string('SILK_EFFECT_COST_CLANG').pipe(Config.withDefault('clang')),
+)
+const configuredArtifactDirectory = Effect.runSync(
+  Config.string('SILK_EFFECT_COST_ARTIFACT_DIR').pipe(Config.withDefault('')),
+)
+const artifactDirectory =
+  configuredArtifactDirectory.length === 0 ? undefined : configuredArtifactDirectory
 const directStaticCases = new Set([
   'map-effect',
   'map-both-success-effect',

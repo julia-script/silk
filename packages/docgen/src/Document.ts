@@ -430,17 +430,16 @@ export const parse = (
     const parsed = markExamples(
       Object.freeze(root.children.flatMap((child) => blocks(child, block, normalized))),
     )
-    const examples = parsed.flatMap(
-      (value): ReadonlyArray<Example> =>
-        value._tag === 'CodeBlock' && value.example
-          ? [
-              Object.freeze({
-                ...(value.language === undefined ? {} : { language: value.language }),
-                code: value.value,
-                source: value.source,
-              }),
-            ]
-          : [],
+    const examples = parsed.flatMap((value): ReadonlyArray<Example> =>
+      value._tag === 'CodeBlock' && value.example
+        ? [
+            Object.freeze({
+              ...(value.language === undefined ? {} : { language: value.language }),
+              code: value.value,
+              source: value.source,
+            }),
+          ]
+        : [],
     )
     return Object.freeze({
       _tag: 'Document',

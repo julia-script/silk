@@ -1,11 +1,14 @@
 # bootstrap-hir Specification
 
 ## Purpose
+
 The resolved, typed semantic representation of elaborated function bodies: one integrated
 elaboration phase that resolves names, types expressions, validates contracts, and constructs HIR
 with canonical identities and exact source provenance, published as immutable fact tables with a
 deterministic textual encoder.
+
 ## Requirements
+
 ### Requirement: HIR carries the complete integer vocabulary
 
 HIR SHALL retain canonical lowercase integer identities, unit/bottom control flow, exact literal magnitude, conversion identity, operation mode, evaluation order, and provenance without host-number or backend-lane approximations.
@@ -398,6 +401,7 @@ clone a declaration body per concrete call, and its deterministic encoding SHALL
 from every call to its generic declaration and substitution.
 
 #### Scenario: Keep one generic body
+
 - **WHEN** one generic function is called with `i32` and `Token`
 - **THEN** HIR contains one checked declaration body and two calls with distinct concrete substitutions
 

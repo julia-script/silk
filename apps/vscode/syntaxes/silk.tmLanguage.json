@@ -1,9 +1,7 @@
 {
   "name": "silk",
   "scopeName": "source.silk",
-  "fileTypes": [
-    "silk"
-  ],
+  "fileTypes": ["silk"],
   "patterns": [
     {
       "name": "string.quoted.triple.byte.silk",

@@ -43,4 +43,3 @@ Later lessons can add grammar without reshaping already-authored AST consumers.
 ## Migration Plan
 
 Add `Expression.ts`, the arithmetic portion of `Parser.ts`, parser tests, and Lesson 5. Lesson 6 extends these files rather than replacing their public shapes.
-

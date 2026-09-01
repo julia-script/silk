@@ -1,8 +1,11 @@
 # bootstrap-floating-point-scalars Specification
 
 ## Purpose
+
 Define conservative `f32` and `f64` values, literals, operations, conversions, representation access, and deterministic cross-engine behavior for numerical Silk programs.
+
 ## Requirements
+
 ### Requirement: Floating types and literals are explicit
 
 Silk SHALL provide distinct lowercase `f32` and `f64` types. Decimal fractions and exponent literals SHALL retain exact source value until contextual rounding; an unconstrained floating literal SHALL default to `f64`.
@@ -186,10 +189,11 @@ changing their deterministic semantics or engine parity.
 Floating-point `%` SHALL produce the exact IEEE-754 remainder (fmod semantics: the result of `x - n*y` where `n` is `x/y` truncated toward zero, computed without intermediate rounding or overflow) for both `f32` and `f64`, identically on the interpreter, the wasm backend, and the native backend.
 
 #### Scenario: Extreme-magnitude operands do not overflow
+
 - **WHEN** a program evaluates `1e308 % 1e-308` as `f64` on any executor
 - **THEN** the result is the exact finite fmod value in `[0, 1e-308)` — never infinity or NaN — identically on all three executors
 
 #### Scenario: Ordinary operands agree bit-for-bit
+
 - **WHEN** the same float remainder expression is evaluated on the interpreter, the wasm backend, and the native backend
 - **THEN** all three produce the identical bit pattern
-

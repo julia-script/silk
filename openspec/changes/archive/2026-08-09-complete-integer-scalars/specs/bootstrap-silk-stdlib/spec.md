@@ -13,4 +13,3 @@ The standard library SHALL define `Some<T>`, `None`, and transparent `Option<T> 
 
 - **WHEN** checked integer arithmetic cannot represent a result
 - **THEN** it returns canonical `None`
-

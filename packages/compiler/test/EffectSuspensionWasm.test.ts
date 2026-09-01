@@ -106,12 +106,18 @@ it.effect('traps when bounded private Wasm execution-stack storage is exhausted'
     const main = instance.exports.silk_main
     assert.strictEqual(typeof main, 'function')
     if (typeof main !== 'function') return
-    let trapped = false
-    try {
-      main()
-    } catch (error) {
-      trapped = error instanceof WebAssembly.RuntimeError
-    }
+    const trapped = yield* Effect.try({
+      try: () => {
+        main()
+        return false
+      },
+      catch: (error) => error instanceof WebAssembly.RuntimeError,
+    }).pipe(
+      Effect.match({
+        onFailure: (isRuntimeError) => isRuntimeError,
+        onSuccess: () => false,
+      }),
+    )
     assert.isTrue(trapped)
     const memory = instance.exports.__silk_memory_v1
     assert.instanceOf(memory, WebAssembly.Memory)

@@ -4,7 +4,7 @@ Every claim below was measured against `main` at 30310de, and the mechanism was 
 throwaway spike that is **not part of this change**. Where a measurement contradicts issue #19, the
 measurement is stated first and the issue's text is treated as superseded.
 
-The gate is one sentence: a struct must be able to reach itself through a value whose *layout* does
+The gate is one sentence: a struct must be able to reach itself through a value whose _layout_ does
 not depend on the struct's layout, and the value behind that indirection must still be released
 exactly once at runtime.
 
@@ -40,13 +40,13 @@ same `Type.nominals` call, so **both** sites must change together.
 
 Measured on `main`:
 
-| source | diagnostics |
-| --- | --- |
-| `struct Node { next: RawBuffer<Node> }` | `["SEM0020"]`, `dependency: Unavailable` |
-| `struct Node { next: Slot<Node> }` | `["SEM0020", "SEM0054"]` |
-| `struct Cell<T> { buffer: RawBuffer<T> }` + `struct Node { next: Cell<Node> }` | `["SEM0020"]` |
-| `struct Pair<T> { value: T }` + `struct Node { next: Pair<Node> }` | `["SEM0020"]` |
-| `struct Node { anchor: [Node; 0] }` | `["SEM0020"]` |
+| source                                                                         | diagnostics                              |
+| ------------------------------------------------------------------------------ | ---------------------------------------- |
+| `struct Node { next: RawBuffer<Node> }`                                        | `["SEM0020"]`, `dependency: Unavailable` |
+| `struct Node { next: Slot<Node> }`                                             | `["SEM0020", "SEM0054"]`                 |
+| `struct Cell<T> { buffer: RawBuffer<T> }` + `struct Node { next: Cell<Node> }` | `["SEM0020"]`                            |
+| `struct Pair<T> { value: T }` + `struct Node { next: Pair<Node> }`             | `["SEM0020"]`                            |
+| `struct Node { anchor: [Node; 0] }`                                            | `["SEM0020"]`                            |
 
 The issue's requirement 5 ("accepted with no change to that check") is therefore false, and its
 premise — that `RawBuffer` and `Slot` already break cycles — is false as well.
@@ -74,7 +74,7 @@ parameters, exactly one parameter named `self` of type `&mut Provider`, returnin
 `Box.make` must allocate through `Allocator` and fail with `OutOfMemoryError`, which looks like a
 conflict — but it is not, and `Vector<T>` already shows why. Allocation lives in `append`
 (`vector.silk:97`, `! OutOfMemoryError ? &mut Allocator`) while the hook at `vector.silk:64-72` only
-*releases*, and releasing needs no allocator and cannot fail. `Box` inherits that split exactly.
+_releases_, and releasing needs no allocator and cannot fail. `Box` inherits that split exactly.
 
 ### The runtime recursion vehicle already exists and is already exercised
 
@@ -162,7 +162,7 @@ impl<T> Drop for Box<T> {
 (measured: `struct Node { anchor: [Node; 0] }` is `SEM0020` today, and this change deliberately
 leaves that conservative). `Box` never needs to borrow an empty slice, so it needs no anchor.
 
-Cost of B: the cycle fix must recognise that `Box`'s parameter is *not* reached inline, which cannot
+Cost of B: the cycle fix must recognise that `Box`'s parameter is _not_ reached inline, which cannot
 be a spelling check — `AGENTS.md` forbids recognising a library declaration by name in semantic
 analysis. It must be a general per-parameter analysis. That analysis is the whole implementation
 cost, and it buys something A does not: any user type that indirects through `RawBuffer` becomes
@@ -183,7 +183,7 @@ Why B wins:
   existing sentence, not a new rule.
 
 What B costs relative to the issue: requirement 1 as literally written ("compiler-intrinsic
-nominal") is not met. Requirement 1's *outcome* — one pointer-sized heap indirection, `MoveOnly`,
+nominal") is not met. Requirement 1's _outcome_ — one pointer-sized heap indirection, `MoveOnly`,
 allocating through `Allocator` — is met in full. If Julia wants the intrinsic spelling for a reason
 not captured here (a stable ABI symbol, a debugger contract, a plan to special-case `Box` in later
 optimisation), Option A is still available, and the cycle-detection work in section 1 of `tasks.md`
@@ -231,30 +231,30 @@ A throwaway spike on `main` (30310de) implemented the fixed point at both cycle 
 
 Cycle detection, after the change:
 
-| source | result |
-| --- | --- |
-| `struct Node { next: RawBuffer<Node> }` | accepted, `dependency: Available` |
-| `struct Cell<T> { buffer: RawBuffer<T> }` + `struct Node { next: Cell<Node> }` | accepted |
-| `struct Pair<T> { value: T }` + `struct Node { next: Pair<Node> }` | `SEM0020` — unchanged |
-| `struct Node { next: Node }` | `SEM0020` — unchanged |
-| `struct Node { anchor: [Node; 0] }` | `SEM0020` — unchanged |
+| source                                                                         | result                            |
+| ------------------------------------------------------------------------------ | --------------------------------- |
+| `struct Node { next: RawBuffer<Node> }`                                        | accepted, `dependency: Available` |
+| `struct Cell<T> { buffer: RawBuffer<T> }` + `struct Node { next: Cell<Node> }` | accepted                          |
+| `struct Pair<T> { value: T }` + `struct Node { next: Pair<Node> }`             | `SEM0020` — unchanged             |
+| `struct Node { next: Node }`                                                   | `SEM0020` — unchanged             |
+| `struct Node { anchor: [Node; 0] }`                                            | `SEM0020` — unchanged             |
 
 End-to-end, a 3-level tree (`Tree` → `Branch` → `Box<Tree>`, 7 nodes, 6 boxes):
 
-| engine | result |
-| --- | --- |
-| diagnostics | none |
-| evaluator | `Completed`, value 42, **6 `AllocationAcquire` / 6 `AllocationRelease`** |
-| Wasm (`silk_main`, release) | 42 |
-| native LLVM (clang, release) | exit 42 |
+| engine                       | result                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| diagnostics                  | none                                                                     |
+| evaluator                    | `Completed`, value 42, **6 `AllocationAcquire` / 6 `AllocationRelease`** |
+| Wasm (`silk_main`, release)  | 42                                                                       |
+| native LLVM (clang, release) | exit 42                                                                  |
 
 Negative control — byte-identical source with the `impl Drop for Box` deleted:
 
-| | |
-| --- | --- |
-| diagnostics | **none** |
-| evaluator | `Completed`, value 42, **6 acquires / 2 releases** |
-| Wasm | 42 |
+|             |                                                    |
+| ----------- | -------------------------------------------------- |
+| diagnostics | **none**                                           |
+| evaluator   | `Completed`, value 42, **6 acquires / 2 releases** |
+| Wasm        | 42                                                 |
 
 The leak is silent, produces the right answer, and passes every check the compiler has today. Only
 the acquire/release trace catches it.
@@ -273,7 +273,7 @@ all passing**.
   to it explicitly.
 - **A hook that forgets `Slot.dropValue` leaks silently.** Nothing in the type system prevents it.
   The mitigation is the negative-control test (task 4.3), which must be written as a test that
-  *fails* if the hook is removed.
+  _fails_ if the hook is removed.
 - **`[T; 0]` stays an inline reach.** Conservative and unchanged, which is why `Box` uses a
   non-generic `Vacant`. Revisiting it would let `Vector`'s `Empty<T>` shape work inside recursive
   types too, but that is a separate change.

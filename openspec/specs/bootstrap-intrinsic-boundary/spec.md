@@ -4,7 +4,9 @@
 
 Define the smallest explicit compiler primitive surface from which Silk source can build its
 standard library, services, and portable application APIs without hidden name-based privilege.
+
 ## Requirements
+
 ### Requirement: Callable compiler primitives occupy one sealed namespace
 
 Every source-callable operation selected by compiler identity SHALL be a qualified member of the

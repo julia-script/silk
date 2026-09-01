@@ -49,7 +49,7 @@ const packagesWithTests = () =>
     return testFilesIn(directory).length > 0
   })
 
-test('every package that runs vitest extends the workspace test defaults', () => {
+void test('every package that runs vitest extends the workspace test defaults', () => {
   const offenders = packagesWithTests().filter((directory) => {
     const config = join(directory, 'vitest.config.ts')
     if (!existsSync(config)) return true
@@ -71,7 +71,7 @@ test('every package that runs vitest extends the workspace test defaults', () =>
  */
 const mayChooseItsOwnWorkerCount = new Set(['packages/compiler'])
 
-test('only the critical-path package chooses its own worker count', () => {
+void test('only the critical-path package chooses its own worker count', () => {
   // Three packages carried a local `maxWorkers` before #173, each added after that package had
   // turned someone else's pull request red. A local cap looks like the bound, so the next person
   // adds a fourth instead of touching the workspace-level run. Whoever adds one now has to come
@@ -87,7 +87,7 @@ test('only the critical-path package chooses its own worker count', () => {
     chosen.filter((name) => !mayChooseItsOwnWorkerCount.has(name)),
     [],
     'How many suites overlap is bounded for the whole run by scripts/concurrency.mjs; how many ' +
-      'workers one suite uses is vitest\'s host-derived default. A package that needs to depart ' +
+      "workers one suite uses is vitest's host-derived default. A package that needs to depart " +
       'from that states why, and is listed here.',
   )
 })

@@ -70,11 +70,7 @@ it.effect(
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
       const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(
-        evaluated._tag,
-        'Completed',
-        JSON.stringify(evaluated, Json.bigIntReplacer),
-      )
+      assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
       if (evaluated._tag !== 'Completed') return
       assert.strictEqual(evaluated.result.value, 42n)
       // Two growths acquire two buffers; the migration and the final Drop hook release both,
@@ -156,11 +152,7 @@ it.effect(
       )
       assert.deepEqual(Analysis.diagnostics(wasmSnapshot), [])
       const evaluated = Analysis.evaluate(wasmSnapshot)
-      assert.strictEqual(
-        evaluated._tag,
-        'Completed',
-        JSON.stringify(evaluated, Json.bigIntReplacer),
-      )
+      assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
       if (evaluated._tag !== 'Completed') return
       assert.strictEqual(evaluated.result.value, 42n)
       assert.isTrue(
@@ -241,11 +233,7 @@ it.effect(
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
       const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(
-        evaluated._tag,
-        'Completed',
-        JSON.stringify(evaluated, Json.bigIntReplacer),
-      )
+      assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
       if (evaluated._tag !== 'Completed') return
       assert.strictEqual(evaluated.result.value, 42n)
       const acquires = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire')
@@ -561,7 +549,7 @@ const acceptOnEngines = (name: string, source: string) =>
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag !== 'Completed') throw new Error('unreachable')
     assert.strictEqual(evaluated.result.value, 42n)
 

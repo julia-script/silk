@@ -3,7 +3,7 @@
 See proposal.md — Why. The substrate from `add-self-contained-owned-allocation` is complete and
 gated; probes against the current compiler establish the exact frontier:
 
-- Generic structs, generic fields, `RawBuffer.from<T>` under a type parameter, and *concrete*
+- Generic structs, generic fields, `RawBuffer.from<T>` under a type parameter, and _concrete_
   conformance instantiations (`impl Drop for Vector<I32>`) already work with zero diagnostics.
 - The parametric form `impl<T> Drop for Vector<T>` fails in the parser (no type-parameter slot on
   `ImplDeclaration`) and in the declaration index (`SEM0083` demands concrete nominal types).
@@ -34,7 +34,7 @@ oracle.
 - Package management, versioning, a user-extensible library path, or a prelude of implicit names.
   Importing stdlib modules stays explicit.
 - Bulk byte-memory primitives (memcpy-shaped ops). Growth moves elements one slot at a time; if
-  the scanner workload proves that unacceptable, that evidence feeds a *future* change.
+  the scanner workload proves that unacceptable, that evidence feeds a _future_ change.
 - Iterators, slices over vectors, or any API surface beyond create/append/get/length/capacity/
   move/drop.
 
@@ -82,7 +82,7 @@ reuses it verbatim over a larger ordinal range; no new injection mechanism.
 
 - [Parametric substitution surfaces latent assumptions that conformance targets are concrete
   (witness lookup, `callTargets`, Lower's witness dispatch)] → the probe-passing concrete-impl path
-  stays untouched; parametric impls normalize to the same concrete witness form *before* Lower, so
+  stays untouched; parametric impls normalize to the same concrete witness form _before_ Lower, so
   downstream phases never see an unsubstituted parameter. Any place that still does is a bug found
   by the differential gates.
 - [Stdlib determinism obligations grow every future artifact check] → scope stdlib to the vector
@@ -105,7 +105,7 @@ plus expressiveness gaps Vector needs. State as of the last checkpoint:
 - **Added and shipped**: `Place.replace` atomic place swap (`PlaceReplace.test.ts`) and unsafe
   `Slot.copy` for Copy elements (`SlotCopy.test.ts`) — the machinery an `&mut self` Vector needs
   because unions cannot be projected through references.
-- **Open gap blocking Vector growth**: match patterns bind member *fields* only; there is no
+- **Open gap blocking Vector growth**: match patterns bind member _fields_ only; there is no
   whole-member binding (`Layout value => move value`). A bare `Layout` therefore cannot be
   extracted from `Layout.repeat`'s `Layout | LayoutOverflow` result, and `Layout` cannot be
   reconstructed from its fields — so runtime-count allocation is inexpressible in Silk today.

@@ -382,11 +382,10 @@ const renderIndex = (
 /** Renders one deterministic index and one structured Markdown page per manifest module. */
 export const make = (manifest: ReadonlyArray<ManifestEntry>, project: Project.Project): Result => {
   const byName = new Map(project.modules.map((module) => [module.name, module]))
-  const errors: Array<Error> = manifest.flatMap(
-    (entry): ReadonlyArray<Error> =>
-      byName.has(entry.module)
-        ? []
-        : [Object.freeze({ _tag: 'MissingModule', module: entry.module })],
+  const errors: Array<Error> = manifest.flatMap((entry): ReadonlyArray<Error> =>
+    byName.has(entry.module)
+      ? []
+      : [Object.freeze({ _tag: 'MissingModule', module: entry.module })],
   )
   errors.push(...collisions(manifest, project.modules))
   if (errors.length > 0) return Object.freeze({ _tag: 'Failure', errors: Object.freeze(errors) })

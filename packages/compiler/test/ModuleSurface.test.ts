@@ -1,5 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Result from 'effect/Result'
+import * as Schema from 'effect/Schema'
 import * as Analysis from '../src/Analysis.js'
 import * as CallableContract from '../src/CallableContract.js'
 import * as Constraint from '../src/Constraint.js'
@@ -10,6 +12,9 @@ import * as Type from '../src/Type.js'
 import { unreachable } from './support/raise.js'
 
 const encoder = new TextEncoder()
+const JsonValue = Schema.fromJsonString(Schema.Unknown)
+const decodeJson = Schema.decodeUnknownSync(JsonValue)
+const encodeJson = Schema.encodeSync(JsonValue)
 
 const surface = Effect.fnUntraced(function* (source: string) {
   const analysis = yield* Analysis.ofSource('surface/Main', encoder.encode(source))
@@ -65,7 +70,7 @@ const forgeFirstSubstitution = Effect.fnUntraced(function* (
         }),
       )
     }
-    const forged = JSON.stringify(rewrite(JSON.parse(encoded)))
+    const forged = encodeJson(rewrite(decodeJson(encoded)))
     return replaced ? forged : unreachable('expected a serialized substitution')
   })
 })
@@ -492,7 +497,7 @@ it.effect('validates canonical substitutions against their local parameter scope
       origins: [],
     })
     const rowEncoding = ModuleSurface.encodeSemanticType(rowCallable)
-    const parsedRow = yield* Effect.try(() => JSON.parse(rowEncoding))
+    const parsedRow = yield* Effect.try(() => decodeJson(rowEncoding))
     const rowEntry =
       firstSubstitution(parsedRow)?.at(0) ?? unreachable('expected row substitution entry')
     const wrongKindArgument =
@@ -697,8 +702,8 @@ it.effect('rejects forged failure and requirement member-obligation branding', (
 
     for (const key of [failureKey, requirementKey]) {
       const forged = encoded.replace(
-        `"key":${JSON.stringify(key)}`,
-        `"key":${JSON.stringify(`forged:${key}`)}`,
+        `"key":${encodeJson(key)}`,
+        `"key":${encodeJson(`forged:${key}`)}`,
       )
       assert.notStrictEqual(forged, encoded)
       const failure = yield* Effect.flip(ModuleSurface.decodeSemanticType(forged))
@@ -1140,15 +1145,15 @@ it.effect('rejects forged callable-schema brands and structural evidence', () =>
     const encoded = ModuleSurface.encodeSemanticType(callable)
     const forgeries = [
       encoded.replace(
-        `"contractKey":${JSON.stringify(callable.schema?.contractKey)}`,
+        `"contractKey":${encodeJson(callable.schema?.contractKey)}`,
         '"contractKey":"forged-contract"',
       ),
       encoded.replace(
-        `"constraintKeys":${JSON.stringify(callable.schema?.constraintKeys)}`,
+        `"constraintKeys":${encodeJson(callable.schema?.constraintKeys)}`,
         '"constraintKeys":["forged-constraint"]',
       ),
       encoded.replace(
-        `"evidenceKeys":${JSON.stringify(callable.schema?.evidenceKeys)}`,
+        `"evidenceKeys":${encodeJson(callable.schema?.evidenceKeys)}`,
         '"evidenceKeys":["forged-evidence"]',
       ),
       encoded.replace(
@@ -1357,10 +1362,13 @@ it.effect('rejects malformed semantic encodings through the typed boundary', () 
     ]
 
     for (const [operation, decoding] of cases) {
-      const failure = yield* Effect.flip(decoding)
-      assert.instanceOf(failure, ModuleSurface.ModuleSurfaceDecodeError)
-      assert.strictEqual(failure.operation, operation)
-      assert.strictEqual(failure.reason._tag, 'InvalidEncoding')
+      const result = yield* Effect.result(decoding)
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, ModuleSurface.ModuleSurfaceDecodeError)
+        assert.strictEqual(result.failure.operation, operation)
+        assert.strictEqual(result.failure.reason._tag, 'InvalidEncoding')
+      }
     }
 
     const structuredFailure = yield* Effect.flip(

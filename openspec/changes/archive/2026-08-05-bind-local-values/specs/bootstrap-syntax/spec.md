@@ -1,6 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: First function grammar
+
 The parser SHALL recognize a source file containing one or more public function declarations
 followed by end-of-file. Every function SHALL have the form `pub fn <name>(<parameters>) ->
 <return-type> { <statements> }`, where `<statements>` is zero or more binding statements followed
@@ -14,26 +15,32 @@ remain uninterpreted identifier tokens, and declaration, statement, parameter, a
 SHALL match concrete source order.
 
 #### Scenario: Parse the accepted integer fixture
+
 - **WHEN** the source bytes spell `pub fn main() -> I32 { return 42 }`
 - **THEN** the result contains one complete function declaration with an empty parameter list, an integer literal return expression, and end-of-file
 
 #### Scenario: Parse trivia between grammar elements
+
 - **WHEN** whitespace and line comments appear between every pair of grammar elements in the accepted fixture
 - **THEN** the parser recognizes the same grammatical structure while retaining the exact trivia tokens
 
 #### Scenario: Parse two functions in source order
+
 - **WHEN** `answer` returning `42` is followed by `main` returning `0`
 - **THEN** the source-file tree contains exactly two complete function declarations in that order before end-of-file
 
 #### Scenario: Parse a typed parameter reference
+
 - **WHEN** the source spells `pub fn identity(value: I32) -> I32 { return value }`
 - **THEN** the function contains one typed parameter and a bare-identifier return expression with exact concrete provenance
 
 #### Scenario: Parse the first value-carrying call
+
 - **WHEN** `identity` accepts one `I32` parameter and `main` returns `identity(42)`
 - **THEN** `main` contains one complete call expression with one decimal-integer argument
 
 #### Scenario: Parse trivia inside a call
+
 - **WHEN** whitespace and line comments appear around a call's callee, parentheses, arguments, and commas
 - **THEN** the parser recognizes the same call structure while retaining every trivia token exactly
 

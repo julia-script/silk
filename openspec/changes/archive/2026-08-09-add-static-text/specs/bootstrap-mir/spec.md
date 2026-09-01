@@ -8,4 +8,3 @@ MIR SHALL carry a canonical ordered static-data table plus immutable views with 
 
 - **WHEN** a view references a static-data entry with matching length
 - **THEN** MIR verification accepts it without an allocation operation
-

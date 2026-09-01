@@ -1,6 +1,6 @@
 ## Context
 
-Hashed collections are the first standard-library type whose behavior is supplied by the *user* of
+Hashed collections are the first standard-library type whose behavior is supplied by the _user_ of
 the type rather than by the collection. `Vector` needs nothing from its element; a `HashMap` cannot
 place a key without asking the key's own type where it goes. That question is a conformance, and
 the conformance machinery — multi-operation bounds (#103, PR #107), a call surface for operations no
@@ -106,7 +106,7 @@ Narrowing the hash first and then reducing it would put a key in different bucke
 engines, and the map would answer correctly everywhere while presenting its entries in two different
 orders — a divergence no test that only checked lookups would catch. The remainder is therefore
 taken against the width in `u64`, and only the result — already smaller than the bucket count —
-narrows. Requirement 7 says *in every engine*, and this is the line where that is won or lost.
+narrows. Requirement 7 says _in every engine_, and this is the line where that is won or lost.
 
 ### Equivalence implies equal hash is a spec requirement, not documentation
 
@@ -133,7 +133,7 @@ collapse into one.
 
 A removed slot is a mark rather than a backward shift, so a map that is filled and emptied many
 times without growing keeps probing through the marks. Growth clears them, and growth is triggered
-by occupied *and* removed slots together, so the marks cannot accumulate without bound. The
+by occupied _and_ removed slots together, so the marks cannot accumulate without bound. The
 alternative — shifting entries back on removal — moves owned keys and values on a path that has no
 other reason to move them, and this change preferred the simpler ownership.
 

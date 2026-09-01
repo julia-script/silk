@@ -1,24 +1,30 @@
 import { spawn } from 'node:child_process'
+import * as Data from 'effect/Data'
+import * as Effect from 'effect/Effect'
+
+class PublishProcessError extends Data.TaggedError('PublishProcessError') {}
 
 const warning = 'Skipped OIDC'
 
 export function runPublish(command, args, { onOutput, spawnImpl = spawn } = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawnImpl(command, args, { stdio: ['inherit', 'pipe', 'pipe'] })
+  return Effect.runPromise(
+    Effect.callback((resume) => {
+      const child = spawnImpl(command, args, { stdio: ['inherit', 'pipe', 'pipe'] })
 
-    child.stdout.setEncoding('utf8')
-    child.stderr.setEncoding('utf8')
-    child.stdout.on('data', (chunk) => {
-      process.stdout.write(chunk)
-      onOutput(chunk)
-    })
-    child.stderr.on('data', (chunk) => {
-      process.stderr.write(chunk)
-      onOutput(chunk)
-    })
-    child.on('error', reject)
-    child.on('close', (code) => resolve(code ?? 0))
-  })
+      child.stdout.setEncoding('utf8')
+      child.stderr.setEncoding('utf8')
+      child.stdout.on('data', (chunk) => {
+        process.stdout.write(chunk)
+        onOutput(chunk)
+      })
+      child.stderr.on('data', (chunk) => {
+        process.stderr.write(chunk)
+        onOutput(chunk)
+      })
+      child.on('error', (cause) => resume(Effect.fail(new PublishProcessError({ cause }))))
+      child.on('close', (code) => resume(Effect.succeed(code ?? 0)))
+    }),
+  )
 }
 
 export async function publishWithGuard({ spawnImpl } = {}) {

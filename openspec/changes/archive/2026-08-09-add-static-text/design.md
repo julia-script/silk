@@ -14,7 +14,7 @@
 
 Text validates to UTF-8; bytes preserve exact `u8` values. Both lower to compiler-owned static data plus a logical borrowed view and `usize` length. No public owning layout is exposed.
 
-*Alternative considered:* construct a growable String. Rejected because it would settle ownership and target representation without evidence.
+_Alternative considered:_ construct a growable String. Rejected because it would settle ownership and target representation without evidence.
 
 ### MIR owns a deterministic static-data table
 
@@ -37,4 +37,3 @@ Add syntax/diagnostics, then HIR/MIR static data, evaluator behavior, layouts, a
 ## Open Questions
 
 None.
-

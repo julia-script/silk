@@ -2,31 +2,27 @@
   "name": "@silklang/docgen",
   "version": "0.0.0",
   "description": "Documentation generation, doctesting, and static rendering for Silk source.",
+  "keywords": [
+    "documentation",
+    "markdown",
+    "silk"
+  ],
+  "homepage": "https://github.com/julia-script/silk-effect#readme",
+  "bugs": {
+    "url": "https://github.com/julia-script/silk-effect/issues"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/julia-script/silk-effect.git",
     "directory": "packages/docgen"
   },
-  "homepage": "https://github.com/julia-script/silk-effect#readme",
-  "bugs": {
-    "url": "https://github.com/julia-script/silk-effect/issues"
-  },
-  "keywords": [
-    "silk",
-    "documentation",
-    "markdown"
-  ],
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
-  "type": "module",
   "files": [
     "dist",
     "README.md",
     "LICENSE"
   ],
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -92,6 +88,10 @@
       "types": "./dist/Site.d.ts",
       "import": "./dist/Site.js"
     }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "pnpm clean && tsc -p tsconfig.json",

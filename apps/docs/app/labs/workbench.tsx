@@ -160,7 +160,9 @@ function SourceBody() {
         >
           format
         </button>
-        <span>{cursor === undefined ? 'no selection' : `sel [${cursor.start}, ${cursor.end})`}</span>
+        <span>
+          {cursor === undefined ? 'no selection' : `sel [${cursor.start}, ${cursor.end})`}
+        </span>
       </div>
     </>
   )
@@ -255,6 +257,19 @@ function ViewPane(props: IDockviewPanelProps<{ view: ViewId }>) {
   const isSource = definition.id === 'source'
   const result = isSource ? undefined : definition.project(context)
   const siblings = siblingsOf(definition)
+  const paneBody = (() => {
+    if (isSource) return <SourceBody />
+    if (result?.unavailable !== undefined)
+      return <EmptyState reason>{result.unavailable}</EmptyState>
+    return (
+      <RowList
+        rows={result?.rows ?? []}
+        cursor={cursor}
+        onPick={setCursor}
+        label={`${definition.title} rows`}
+      />
+    )
+  })()
 
   return (
     <div className={shell.pane}>
@@ -334,18 +349,7 @@ function ViewPane(props: IDockviewPanelProps<{ view: ViewId }>) {
         </div>
       )}
 
-      {isSource ? (
-        <SourceBody />
-      ) : result?.unavailable !== undefined ? (
-        <EmptyState reason>{result.unavailable}</EmptyState>
-      ) : (
-        <RowList
-          rows={result?.rows ?? []}
-          cursor={cursor}
-          onPick={setCursor}
-          label={`${definition.title} rows`}
-        />
-      )}
+      {paneBody}
 
       {pickerOpen ? (
         <PhasePicker active={definition.id} onPick={onPick} onClose={() => setPickerOpen(false)} />
@@ -366,7 +370,7 @@ const components = { view: ViewPane }
  * levels deep, which is the shape the 30/35/35 × 56/44 proportions can actually be applied to.
  */
 const openWorkspace = (api: DockviewApi, workspace: Workspace): void => {
-  for (const panel of [...api.panels]) api.removePanel(panel)
+  for (const panel of api.panels) api.removePanel(panel)
 
   const [a1, a2, b1, b2, c1, c2] = slotOrder.map((slot) => workspace.panes[slot])
 
@@ -680,7 +684,7 @@ function WorkbenchInner() {
               placeholder="workspace name…"
               aria-label="Name for the saved workspace"
               // The input replaces the `+` the user just clicked, so focus belongs here.
-              // biome-ignore lint/a11y/noAutofocus: appears on explicit click, in place of the trigger
+              // oxlint-disable-next-line jsx-a11y/no-autofocus -- appears on explicit click, in place of the trigger
               autoFocus
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
@@ -825,9 +829,7 @@ function WorkbenchInner() {
                 >
                   <span className={shell.sidebarRowName}>{name}</span>
                   {name === root ? <i className={shell.rootDot} title="root module" /> : null}
-                  <span className={shell.sidebarRowMeta}>
-                    {(modules[name] ?? '').length} B
-                  </span>
+                  <span className={shell.sidebarRowMeta}>{(modules[name] ?? '').length} B</span>
                 </button>
               ))}
 
@@ -923,11 +925,7 @@ function WorkbenchInner() {
         <span className={shell.statusEnd}>url synced</span>
       </div>
 
-      <PresetPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        onPick={loadPreset}
-      />
+      <PresetPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onPick={loadPreset} />
     </div>
   )
 }

@@ -13,6 +13,11 @@ import { existsSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import * as Console from 'effect/Console'
+import * as Effect from 'effect/Effect'
+
+const log = (...values) => Effect.runSync(Console.log(...values))
+const logError = (...values) => Effect.runSync(Console.error(...values))
 
 const EXTENSION_DIR_NAME = 'silk-effect.silk-language-0.0.0'
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -23,7 +28,7 @@ const installCursor = !args.has('--vscode-only')
 const installVscode = args.has('--vscode') || args.has('--vscode-only')
 
 if (args.has('--help') || args.has('-h')) {
-  console.log(`Usage: node scripts/install-local.mjs [--vscode] [--vscode-only]
+  log(`Usage: node scripts/install-local.mjs [--vscode] [--vscode-only]
 
   (default)     Symlink into ~/.cursor/extensions
   --vscode      Also symlink into ~/.vscode/extensions
@@ -33,7 +38,7 @@ if (args.has('--help') || args.has('-h')) {
 }
 
 const fail = (message) => {
-  console.error(`install-local: ${message}`)
+  logError(`install-local: ${message}`)
   process.exit(1)
 }
 
@@ -45,7 +50,7 @@ const run = (command, commandArgs, cwd) => {
   }
 }
 
-console.log('Building @silklang/lsp and silk-language…')
+log('Building @silklang/lsp and silk-language…')
 run('pnpm', ['--filter', '@silklang/lsp', '--filter', 'silk-language', 'run', 'build'], repoRoot)
 
 const entrypoint = join(packageRoot, 'dist/extension.js')
@@ -63,10 +68,10 @@ const linkExtension = (extensionsRoot, editorLabel) => {
     rmSync(linkPath, { recursive: true, force: true })
     symlinkSync(packageRoot, linkPath)
   } catch (cause) {
-    fail(`could not link ${linkPath} -> ${packageRoot}: ${cause}`)
+    fail(`could not link ${linkPath} -> ${packageRoot}: ${String(cause)}`)
   }
 
-  console.log(`${editorLabel}: ${linkPath} -> ${packageRoot}`)
+  log(`${editorLabel}: ${linkPath} -> ${packageRoot}`)
 }
 
 if (installCursor) {
@@ -76,7 +81,7 @@ if (installVscode) {
   linkExtension(join(homedir(), '.vscode/extensions'), 'VS Code')
 }
 
-console.log(`
+log(`
 Installed. Reload the editor window (Developer: Reload Window) so contributions load from this checkout.
 
 After rebuilding only the language server, run "Silk: Restart Language Server" instead of reinstalling.

@@ -425,7 +425,7 @@ by itself.
 
 Explicit imports determine the dependency-complete source closure that must parse and type-check.
 Concrete specialization and entry reachability determine the executable closure that may emit code,
-  static data, host imports, adapters, and toolchain runtime support.
+static data, host imports, adapters, and toolchain runtime support.
 
 Importing an unused module therefore has source-analysis cost but no runtime behavior. An unreachable
 function, constant, provider, or intrinsic contributes no executable support solely because its
@@ -629,14 +629,14 @@ graph and validation result.
 
 The toolchain classifies failures at the boundary that owns them:
 
-| Condition | Classification |
-| --- | --- |
-| An import names no project or canonical library module | source-resolution error |
-| A canonical module exists but its source is invalid | ordinary source diagnostic at the library location, plus broken-distribution context |
-| A reachable intrinsic does not support the selected target | compile-time target-compatibility error |
-| `main` retains a service requirement | unavailable-entry diagnostic listing the open row |
-| A matched runtime-support artifact required by the compiler is absent or incompatible | broken-toolchain error |
-| A supported host operation fails while executing | the operation's declared value, typed failure, or fatal-trap outcome |
+| Condition                                                                             | Classification                                                                       |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| An import names no project or canonical library module                                | source-resolution error                                                              |
+| A canonical module exists but its source is invalid                                   | ordinary source diagnostic at the library location, plus broken-distribution context |
+| A reachable intrinsic does not support the selected target                            | compile-time target-compatibility error                                              |
+| `main` retains a service requirement                                                  | unavailable-entry diagnostic listing the open row                                    |
+| A matched runtime-support artifact required by the compiler is absent or incompatible | broken-toolchain error                                                               |
+| A supported host operation fails while executing                                      | the operation's declared value, typed failure, or fatal-trap outcome                 |
 
 These classes do not substitute for one another. In particular, target absence is not a typed
 failure, a missing provider is not a runtime linker error, and a damaged distribution is not an

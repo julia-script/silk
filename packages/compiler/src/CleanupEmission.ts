@@ -672,18 +672,17 @@ export const withDelayedFailureLoanEndings = (
       const existing = new Set(
         (operation.failureLoanEnds ?? []).map((ending) => borrowKey(ending.borrow)),
       )
-      const appended = loans.flatMap(
-        (loan): ReadonlyArray<Mir.EndLoanOperation> =>
-          existing.has(loan.key)
-            ? []
-            : [
-                Object.freeze({
-                  _tag: 'EndLoan' as const,
-                  borrow: loan.borrow,
-                  slice: loan.slice,
-                  provenance: generated(operation.provenance.span),
-                }),
-              ],
+      const appended = loans.flatMap((loan): ReadonlyArray<Mir.EndLoanOperation> =>
+        existing.has(loan.key)
+          ? []
+          : [
+              Object.freeze({
+                _tag: 'EndLoan' as const,
+                borrow: loan.borrow,
+                slice: loan.slice,
+                provenance: generated(operation.provenance.span),
+              }),
+            ],
       )
       return appended.length === 0
         ? operation

@@ -354,9 +354,9 @@ pub fn main() -> i32 { let state = State.Ready drop state return 0 }`),
     assert.strictEqual(entry?.representation._tag, 'ScalarEnum')
     if (entry?.representation._tag !== 'ScalarEnum' || !Type.isNominal(entry.type)) return
     const enumType = entry.type
-    const malformedLane: 'u16' = 'u16'
-    const malformedBits: 16 = 16
-    const malformedSignedness: 'Signed' = 'Signed'
+    const malformedLane = 'u16' as const
+    const malformedBits = 16 as const
+    const malformedSignedness = 'Signed' as const
     const malformedRepresentation = {
       ...entry.representation,
       scalar: malformedLane,

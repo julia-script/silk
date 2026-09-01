@@ -13,10 +13,12 @@ SHALL define mapped reusable schemas, static subcommands, help traversal, branch
 application union, and handler invocation without compiler-known CLI or schema spelling.
 
 #### Scenario: Decode one selected leaf
+
 - **WHEN** the fixture selects and decodes one valid subcommand
 - **THEN** only that leaf executes and the common application handler runs exactly once
 
 #### Scenario: Avoid the handler on non-success paths
+
 - **WHEN** the fixture requests help or encounters selection or decode failure
 - **THEN** it traverses inspectable data as required and never invokes the application handler
 
@@ -27,6 +29,7 @@ branch values are consumed before their common result joins. It MUST NOT rely on
 implicit erasure, heterogeneous executable collections, or runtime interface dispatch.
 
 #### Scenario: Converge on an application action
+
 - **WHEN** distinct leaf decoders produce different domain actions
 - **THEN** each branch maps to the shared application union before the following pipeline node
 
@@ -40,6 +43,7 @@ and cleanup path for the corresponding execution. WebAssembly output MUST contai
 or `call_indirect` introduced by this capability.
 
 #### Scenario: Run the acceptance matrix
+
 - **WHEN** success, help, selection failure, decode failure, uncalled cleanup, and called cleanup
   cases run through all engines
 - **THEN** their results agree, evaluator traces satisfy the exact contract, and backend artifacts
@@ -56,6 +60,7 @@ the characterization. This empirical characterization SHALL be opt-in rather tha
 default correctness suite.
 
 #### Scenario: Establish a baseline before thresholds
+
 - **WHEN** the generated suite completes for both shapes and every size
 - **THEN** it publishes measured trends and recommendations without inventing a pre-baseline language limit
 
@@ -66,5 +71,6 @@ NOT authorize compiler recognition of `Command`, `Cli`, `Schema`, `Decoder`, or 
 allocation or erasure, a runtime interface dictionary, or weaker ownership.
 
 #### Scenario: Detect a compiler-known actor dependency
+
 - **WHEN** source spelling changes while its ordinary contracts remain equivalent
 - **THEN** compiler behavior remains unchanged or the gate fails as a release-blocking violation

@@ -576,12 +576,10 @@ export const views: ReadonlyArray<ViewDefinition> = [
           ...(runnable ? hexRows(bytes) : []),
         ],
         facts: [
-          ...artifact.symbols.slice(0, 2).map(
-            (entry): Fact => ({
-              text: `${entry.symbol} → ${entry.declaration.module}.${entry.declaration.name}`,
-              tone: 'symbol',
-            }),
-          ),
+          ...artifact.symbols.slice(0, 2).map((entry): Fact => ({
+            text: `${entry.symbol} → ${entry.declaration.module}.${entry.declaration.name}`,
+            tone: 'symbol',
+          })),
           {
             text: `${artifact.backend} · ${bytes.length} B · ${mode}`,
             tone: 'muted',

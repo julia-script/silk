@@ -20,7 +20,15 @@ export class SyntaxFormatterError extends Data.TaggedError('SyntaxFormatterError
   readonly reason: { readonly _tag: 'DamagedSyntax' }
 }> {}
 
-class SyntaxFormatterImplementationError extends Error {}
+class SyntaxFormatterImplementationError extends Data.TaggedError(
+  'SyntaxFormatterImplementationError',
+)<{
+  readonly message: string
+}> {
+  constructor(message: string) {
+    super({ message })
+  }
+}
 
 const isTrivia = (kind: Token.TokenKind): boolean =>
   kind === 'Whitespace' ||

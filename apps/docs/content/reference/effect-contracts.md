@@ -14,11 +14,11 @@ Construction and execution timing are defined separately under
 
 The complete structural form is `Effect<A ! E ? R>`:
 
-| Part | Meaning |
-| --- | --- |
-| `A` | the value produced when the Effect succeeds |
-| `E` | the ordinary value type the Effect may propagate as a typed failure |
-| `R` | the normalized row of capabilities the Effect needs when it runs |
+| Part | Meaning                                                             |
+| ---- | ------------------------------------------------------------------- |
+| `A`  | the value produced when the Effect succeeds                         |
+| `E`  | the ordinary value type the Effect may propagate as a typed failure |
+| `R`  | the normalized row of capabilities the Effect needs when it runs    |
 
 The `!` and `?` tokens label independently optional channels; they are not positional type
 arguments. Omitting `! E` gives the failure channel type `never`. Omitting `? R` gives an empty

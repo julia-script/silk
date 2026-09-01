@@ -27,7 +27,7 @@ keeps it the semantics oracle for the coming native differential checks.
 
 - No native comparison yet — `accept-end-to-end-pipeline` completes the differential harness.
 - No new execution semantics: expected results on the corpus are unchanged from the fact-based
-  evaluator; only blockage *vocabulary* changes where unavailable facts now surface as traps.
+  evaluator; only blockage _vocabulary_ changes where unavailable facts now surface as traps.
 
 ## Decisions
 

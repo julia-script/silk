@@ -18,4 +18,3 @@ Source resolution SHALL distinguish project-owned identities from reserved stand
 
 - **WHEN** browser tooling supplies the manifest's exact source bytes without a host filesystem
 - **THEN** ordinary module analysis observes the same canonical identity and source contents while the source origin remains explicitly non-file-backed
-

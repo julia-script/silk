@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as Projections from './support/projections.js'
 
@@ -180,7 +181,7 @@ const acrossEngines = (name: string, source: string) =>
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      `${name}: ${JSON.stringify(evaluated, (_, value) =>
+      `${name}: ${Json.stringify(evaluated, (_, value) =>
         typeof value === 'bigint' ? value.toString() : value,
       )}`,
     )

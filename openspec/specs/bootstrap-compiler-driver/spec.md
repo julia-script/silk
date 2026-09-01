@@ -1,11 +1,14 @@
 # bootstrap-compiler-driver Specification
 
 ## Purpose
+
 The end-to-end compiler driver: one orchestration path from a compilation request to a running
 native executable at the requested destination, with the differential harness and byte-identical
 determinism gates enforced continuously and per-phase reporting as the observability substrate
 issue 09 builds on.
+
 ## Requirements
+
 ### Requirement: The driver compiles a request to a durable executable artifact
 
 The driver SHALL orchestrate closure loading, header collection, elaboration, ownership, instance discovery, canonical target layout, MIR lowering, explicitly selected compatible backend emission, and artifact-kind-specific finalization to a requested durable destination under a fixed optimization profile. Native LLVM requests SHALL emit an object, compile the native shim, and link an executable. LLVM Wasm requests SHALL use the pinned LLVM-to-Wasm finalizer, while direct WebAssembly requests SHALL atomically commit the backend's validated module bytes without invoking Clang. The selected target-aware MIR program SHALL pass through later phases without a second layout value. An unavailable entry, unsupported backend-target pair, inconsistent layout, finalization failure, or toolchain failure SHALL surface as a closed outcome naming the failing stage and provenance, never as a thrown error.
@@ -294,10 +297,12 @@ arity and inference, and repeated-compilation determinism. Completing programs S
 evaluation, native LLVM, and direct WebAssembly for their selected targets.
 
 #### Scenario: Compare a multi-specialization program
+
 - **WHEN** the corpus compiles and runs one declaration at two concrete argument types
 - **THEN** all three engines agree on the result and repeated compilations produce identical artifacts
 
 #### Scenario: Keep invalid inference out of lowering
+
 - **WHEN** a corpus program cannot determine one type argument from supplied arguments
 - **THEN** it produces the committed semantic diagnostic and no runtime instance, layout, or MIR function
 

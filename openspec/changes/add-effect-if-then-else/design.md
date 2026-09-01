@@ -11,7 +11,7 @@ Goals:
 
 - An inline conditional in the effect world, where the branch not taken is a defined un-run value
   rather than an expression with no un-run form.
-- Laziness at *construction*, not merely at execution, so a branch that is only well-defined under
+- Laziness at _construction_, not merely at execution, so a branch that is only well-defined under
   the condition is safe to write.
 - Exactly one release of the arm that is never invoked, visible in the source.
 
@@ -24,7 +24,7 @@ to #7's pure-only restriction on `&&`/`||`, and any change to `Effect.catch` or 
 
 Recorded on #98 on 2026-08-13. A pre-built pair is simpler and matches the `bindRequirement`/
 `provide` argument style, and dropping the unselected `Effect` is an already-defined cleanup path.
-But both branches would be *constructed* at the call, so construction-time work — or a
+But both branches would be _constructed_ at the call, so construction-time work — or a
 construction-time trap — in the branch not taken would happen regardless of the condition. That is
 precisely the execution-vs-construction split that decided #7, and it is decided the same way here.
 
@@ -52,11 +52,12 @@ own recommended signature.
 
 `if` is lexed unconditionally as `IfKeyword` (`Lexer.ts:106`, in `keywordSpellings`) and Silk has no
 raw-identifier or escaped-identifier form. This is not a member-access problem that a qualified
-spelling would dodge — the *declaration* is what fails:
+spelling would dodge — the _declaration_ is what fails:
 
 ```silk
 effect fn if(condition: bool) -> i32 { return 1 }
 ```
+
 → `PAR0002`, ``Unexpected `if`; expected identifier``.
 
 `ifThenElse` names both arms explicitly, is the name the Effect ecosystem this library mirrors used
@@ -68,8 +69,8 @@ taken by a two-armed combinator. `branch` and `cond` were the other candidates c
 
 The body could rely on a generated release for the parameter that falls out of scope. Today it
 cannot, because of a defect that is pre-existing and unrelated to Effect: the generated release for
-a callable parameter emits `Drop` with a `NoCleanup` plan typed from the *declared* parameter type
-(`mode: "Take"`), while the local's own type carries the *actual* argument's mode (`mode: "Shared"`,
+a callable parameter emits `Drop` with a `NoCleanup` plan typed from the _declared_ parameter type
+(`mode: "Take"`), while the local's own type carries the _actual_ argument's mode (`mode: "Shared"`,
 because a reusable named `fn` was passed where `once fn` is declared — the weakening
 `bootstrap-callable-values` explicitly permits). `Mir.ts:3211` compares the two with
 `SilkType.equals`, which compares modes, so a no-op cleanup is rejected on a mode spelling mismatch.
@@ -84,6 +85,7 @@ fn a() -> i32 { return 7 }
 fn pick(onTrue: once fn() -> i32) -> i32 { return 0 }
 pub fn main() -> i32 { return pick(a) }
 ```
+
 → zero diagnostics, `Blocked(InvalidMir)`.
 
 `Effect.catchAll` escapes it only because its `match`-shaped body emits no generated release for

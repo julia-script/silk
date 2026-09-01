@@ -182,11 +182,11 @@ smaller protocol; existing operations and status traces remain unchanged.
 
 Four manifest modules follow the existing service/provider split:
 
-| Module | Layer | Public actor |
-|---|---|---|
-| `silk/system_clock` | portable | `Instant`, `SystemClock`, wrappers |
-| `silk/monotonic_clock` | portable | `MonotonicClock`, wrappers |
-| `silk/os_system_clock` | native provider | stateless `OsSystemClock`, `make` |
+| Module                    | Layer           | Public actor                         |
+| ------------------------- | --------------- | ------------------------------------ |
+| `silk/system_clock`       | portable        | `Instant`, `SystemClock`, wrappers   |
+| `silk/monotonic_clock`    | portable        | `MonotonicClock`, wrappers           |
+| `silk/os_system_clock`    | native provider | stateless `OsSystemClock`, `make`    |
 | `silk/os_monotonic_clock` | native provider | stateless `OsMonotonicClock`, `make` |
 
 Constructors perform no host operation. Each provider maps service operations to sibling actor

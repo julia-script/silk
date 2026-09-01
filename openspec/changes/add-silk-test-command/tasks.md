@@ -24,4 +24,4 @@
 
 ## 4. Verification
 
-- [ ] 4.1 Run focused project, source-entry, catalog, CLI parsing/help, platform-byte, HostInput, StandardStreams, evaluator workflow, status, regression, and acceptance tests, then `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and `pnpm release:candidate`; record every exact result and identify any pre-existing failure before handing off sufficiency evidence.
+- [ ] 4.1 Run focused project, source-entry, catalog, CLI parsing/help, platform-byte, HostInput, StandardStreams, evaluator workflow, status, regression, and acceptance tests, then `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, `pnpm test`, `pnpm check`, and `pnpm release:candidate`; record every exact result and identify any pre-existing failure before handing off sufficiency evidence.

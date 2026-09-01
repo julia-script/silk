@@ -10,7 +10,7 @@ Use `//!` for a module document at the beginning of a source file and `///` imme
 documented declaration. Declaration documents attach to functions, structs, fields, parameters,
 type parameters, implementations, and implementation operations.
 
-```silk
+````silk
 //! Recovery utilities.
 
 /// Recovers a [`Problem`] by returning its code.
@@ -25,7 +25,7 @@ effect fn recover(
 ) -> I32 {
   return problem.code
 }
-```
+````
 
 A blank line or ordinary `//` comment between a `///` block and its declaration breaks attachment.
 `////` is an ordinary line comment. Documentation is CommonMark rather than a tag language:

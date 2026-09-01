@@ -13,6 +13,7 @@
 
 import * as Analysis from '@silklang/compiler/Analysis'
 import * as Effect from 'effect/Effect'
+import * as Fiber from 'effect/Fiber'
 import * as Editor from './Editor.js'
 
 /** The target snippets compile against — doctest's default, for verification parity. */
@@ -115,7 +116,7 @@ export class SilkSnippetElement extends HTMLElement {
   #observer: IntersectionObserver | undefined
   #module = nextModule()
   #compiled = false
-  #recompileTimer: ReturnType<typeof setTimeout> | undefined
+  #recompileFiber: Fiber.Fiber<void, never> | undefined
 
   /** The snippet's current Silk source. */
   get source(): string {
@@ -147,11 +148,17 @@ export class SilkSnippetElement extends HTMLElement {
 
   #scheduleRecompile(): void {
     if (!this.#compiled) return
-    if (this.#recompileTimer !== undefined) clearTimeout(this.#recompileTimer)
-    this.#recompileTimer = setTimeout(() => {
-      this.#recompileTimer = undefined
-      this.#compile()
-    }, 300)
+    if (this.#recompileFiber !== undefined) Effect.runFork(Fiber.interrupt(this.#recompileFiber))
+    this.#recompileFiber = Effect.runFork(
+      Effect.sleep(300).pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            this.#recompileFiber = undefined
+            this.#compile()
+          }),
+        ),
+      ),
+    )
   }
 
   /** Compiles when the snippet first becomes visible, so page load never pays for analysis. */
@@ -159,7 +166,7 @@ export class SilkSnippetElement extends HTMLElement {
     if (!this.#semantic()) return
     if (typeof IntersectionObserver === 'undefined') {
       // No visibility signal on this platform: defer past load, then compile.
-      setTimeout(() => this.#compile(), 0)
+      Effect.runFork(Effect.sleep(0).pipe(Effect.andThen(Effect.sync(() => this.#compile()))))
       return
     }
     this.#observer = new IntersectionObserver((entries) => {
@@ -195,8 +202,8 @@ export class SilkSnippetElement extends HTMLElement {
   }
 
   #unmount(): void {
-    if (this.#recompileTimer !== undefined) clearTimeout(this.#recompileTimer)
-    this.#recompileTimer = undefined
+    if (this.#recompileFiber !== undefined) Effect.runFork(Fiber.interrupt(this.#recompileFiber))
+    this.#recompileFiber = undefined
     this.#observer?.disconnect()
     this.#observer = undefined
     this.#handle?.destroy()

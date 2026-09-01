@@ -6,8 +6,8 @@ verification only — the published runtime never invokes it.
 
 ## Pinned oracle
 
-| Tool | Version | Role |
-| --- | --- | --- |
+| Tool         | Version   | Role                                                              |
+| ------------ | --------- | ----------------------------------------------------------------- |
 | `wasm-tools` | `1.255.0` | binary validation, text→binary assembly for round-trip comparison |
 
 Install the exact pin with:

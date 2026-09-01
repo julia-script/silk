@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Schema from 'effect/Schema'
 import * as Analysis from '../src/Analysis.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -14,9 +15,9 @@ const Blocker = Schema.Struct({
 })
 
 const AllocationExpectation = Schema.Struct({
-  acquires: Schema.Number,
-  releases: Schema.Number,
-  peakLive: Schema.Number,
+  acquires: Schema.Finite,
+  releases: Schema.Finite,
+  peakLive: Schema.Finite,
 })
 
 const Manifest = Schema.Struct({
@@ -27,8 +28,8 @@ const Manifest = Schema.Struct({
   source: Schema.String,
   input: Schema.String,
   expected: Schema.Struct({
-    entryResult: Schema.Number,
-    algorithmResult: Schema.optionalKey(Schema.Number),
+    entryResult: Schema.Finite,
+    algorithmResult: Schema.optionalKey(Schema.Finite),
     summary: Schema.String,
     allocation: Schema.optionalKey(AllocationExpectation),
   }),
@@ -276,7 +277,7 @@ it.effect(
         assert.strictEqual(
           evaluated._tag,
           'Completed',
-          `${manifest.id}: ${JSON.stringify(evaluated, (_, value) =>
+          `${manifest.id}: ${Json.stringify(evaluated, (_, value) =>
             typeof value === 'bigint' ? value.toString() : value,
           )}`,
         )
@@ -302,7 +303,7 @@ it.effect(
           assert.strictEqual(
             verification._tag,
             'Valid',
-            `${manifest.id} allocation evidence: ${JSON.stringify(verification)}`,
+            `${manifest.id} allocation evidence: ${Json.stringify(verification)}`,
           )
         }
         const operations = Analysis.loweredMir(native).functions.flatMap(MirVerification.operations)

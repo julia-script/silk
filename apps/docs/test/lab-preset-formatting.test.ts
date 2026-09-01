@@ -17,7 +17,9 @@ it.effect('keeps every formatter-compatible Labs preset canonical', () =>
     for (const preset of presets) {
       for (const [module, source] of Object.entries(preset.modules)) {
         const syntax = Parser.parse(
-          Lexer.lex(SourceFile.make(`labs://${preset.label}/${module}.silk`, encoder.encode(source))),
+          Lexer.lex(
+            SourceFile.make(`labs://${preset.label}/${module}.silk`, encoder.encode(source)),
+          ),
         )
         const attempted = yield* Effect.result(Formatter.format(syntax))
         if (Result.isFailure(attempted)) {

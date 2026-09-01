@@ -186,12 +186,11 @@ export const between = (
   }
   const identities = Object.freeze(
     [...previousToCurrent.entries()]
-      .map(
-        ([previousElement, currentElement]): IdentityPair =>
-          Object.freeze({
-            previous: Option.getOrThrow(SyntaxFile.idOf(previous, previousElement)),
-            current: Option.getOrThrow(SyntaxFile.idOf(current, currentElement)),
-          }),
+      .map(([previousElement, currentElement]): IdentityPair =>
+        Object.freeze({
+          previous: Option.getOrThrow(SyntaxFile.idOf(previous, previousElement)),
+          current: Option.getOrThrow(SyntaxFile.idOf(current, currentElement)),
+        }),
       )
       .sort((left, right) => left.previous.ordinal - right.previous.ordinal),
   )

@@ -2,7 +2,7 @@
 
 Nothing in the spike checks ownership, and — decisively — nothing produces the cleanup plan that
 MIR lowering will consume to insert drops. In the pinned design the ownership phase is a
-producer, not just a gate: deterministic reclamation with no manual `free` means *something* must
+producer, not just a gate: deterministic reclamation with no manual `free` means _something_ must
 decide where cleanup happens, and that something is this phase. Landing it on the frozen grammar
 slice (where it is trivially satisfiable) establishes the phase, its fact table, and the
 cleanup-plan artifact before lowering exists to need them.

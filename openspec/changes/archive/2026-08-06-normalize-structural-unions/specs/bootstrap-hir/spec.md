@@ -17,4 +17,3 @@ control edges.
 
 - **WHEN** a mutable `Token | End` binding is assigned into a `Token | End | Fault` destination inside a loop
 - **THEN** the write source contains one canonical widening operation and the surrounding HIR region graph remains acyclic
-

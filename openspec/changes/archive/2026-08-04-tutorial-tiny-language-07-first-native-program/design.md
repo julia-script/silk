@@ -43,4 +43,3 @@ The transaction exposes missing terminators and ownership mistakes at the correc
 ## Migration Plan
 
 Add the initial `Compiler.ts`, minimal fixture/test, native validation command, and Lesson 7. Later changes generalize this compiler path; rollback leaves earlier frontend lessons intact.
-

@@ -76,10 +76,12 @@ pub fn main() -> i32 {
     label: 'trap · Call-depth evaluation limit',
     group: 'evaluation',
     root: 'main',
-    modules: { main: `pub fn main() -> i32 {
+    modules: {
+      main: `pub fn main() -> i32 {
   return main()
 }
-` },
+`,
+    },
     evaluation: { maxCallDepth: 4 },
   },
   one(
@@ -1159,10 +1161,14 @@ pub fn main() -> i32 {
 }
 `,
   ),
-  one('syntax', 'ok · Literal result', `pub fn main() -> i32 {
+  one(
+    'syntax',
+    'ok · Literal result',
+    `pub fn main() -> i32 {
   return 42
 }
-`),
+`,
+  ),
   one(
     'syntax',
     'ok · Two functions',
@@ -1215,14 +1221,22 @@ pub fn answer() -> i32 {
 }
 `,
   ),
-  one('syntax', 'trap · Direct cycle', `pub fn main() -> i32 {
+  one(
+    'syntax',
+    'trap · Direct cycle',
+    `pub fn main() -> i32 {
   return main()
 }
-`),
-  one('syntax', 'fail · Unknown call', `pub fn main() -> i32 {
+`,
+  ),
+  one(
+    'syntax',
+    'fail · Unknown call',
+    `pub fn main() -> i32 {
   return missing()
 }
-`),
+`,
+  ),
   one(
     'syntax',
     'fail · Ambiguous call',
@@ -1239,10 +1253,14 @@ pub fn main() -> i32 {
 }
 `,
   ),
-  one('syntax', 'fail · Missing callee', `pub fn main() -> i32 {
+  one(
+    'syntax',
+    'fail · Missing callee',
+    `pub fn main() -> i32 {
   return ()()
 }
-`),
+`,
+  ),
   one(
     'syntax',
     'fail · Missing call )',
@@ -1339,12 +1357,20 @@ pub fn main() -> i32 {
 }
 `,
   ),
-  one('syntax', 'trap · Missing entry', `pub fn answer() -> i32 {
+  one(
+    'syntax',
+    'trap · Missing entry',
+    `pub fn answer() -> i32 {
   return 42
 }
-`),
-  one('syntax', 'ok · Empty module', `
-`),
+`,
+  ),
+  one(
+    'syntax',
+    'ok · Empty module',
+    `
+`,
+  ),
   one(
     'syntax',
     'trap · Mutual cycle',
@@ -1357,14 +1383,22 @@ pub fn other() -> i32 {
 }
 `,
   ),
-  one('syntax', 'fail · Unresolved contract call', `pub fn main() -> i32 {
+  one(
+    'syntax',
+    'fail · Unresolved contract call',
+    `pub fn main() -> i32 {
   return missing(42)
 }
-`),
-  one('syntax', 'fail · Unknown value', `pub fn main() -> i32 {
+`,
+  ),
+  one(
+    'syntax',
+    'fail · Unknown value',
+    `pub fn main() -> i32 {
   return missing
 }
-`),
+`,
+  ),
   one(
     'syntax',
     'fail · Missing return keyword',
@@ -1393,11 +1427,19 @@ pub fn other() -> i32 {
 }
 `,
   ),
-  one('syntax', 'fail · Recovered reference', 'pub fn identity(value: i32) -> i32 { return @ value }'),
-  one('syntax', 'ok · Two parameters', `pub fn choose(left: i32, right: i32) -> i32 {
+  one(
+    'syntax',
+    'fail · Recovered reference',
+    'pub fn identity(value: i32) -> i32 { return @ value }',
+  ),
+  one(
+    'syntax',
+    'ok · Two parameters',
+    `pub fn choose(left: i32, right: i32) -> i32 {
   return left
 }
-`),
+`,
+  ),
   one(
     'syntax',
     'ok · Identifier argument',
@@ -1506,7 +1548,11 @@ pub fn main() -> i32 {
     'fail · Missing parameter comma',
     'pub fn choose(left: i32 right: i32) -> i32 { return left }',
   ),
-  one('syntax', 'fail · Malformed argument', 'pub fn main(value: i32) -> i32 { return missing(@, value) }'),
+  one(
+    'syntax',
+    'fail · Malformed argument',
+    'pub fn main(value: i32) -> i32 { return missing(@, value) }',
+  ),
   one(
     'syntax',
     'fail · Missing name',
@@ -1545,14 +1591,22 @@ pub fn main() -> i32 { return 0 }`,
   ),
   one('syntax', 'fail · Missing }', 'pub fn main() -> i32 { return 42'),
   one('syntax', 'fail · Unexpected @', 'pub fn @ main() -> i32 { return 42 }'),
-  one('syntax', 'fail · Unknown type', `pub fn main() -> Mystery {
+  one(
+    'syntax',
+    'fail · Unknown type',
+    `pub fn main() -> Mystery {
   return 42
 }
-`),
-  one('syntax', 'fail · i32 overflow', `pub fn main() -> i32 {
+`,
+  ),
+  one(
+    'syntax',
+    'fail · i32 overflow',
+    `pub fn main() -> i32 {
   return 2147483648
 }
-`),
+`,
+  ),
   one('syntax', 'fail · UTF-8', 'pub fn café() -> i32 { return 42 }'),
 
   // ---- modules --------------------------------------------------------------------------
@@ -1613,23 +1667,27 @@ pub fn main() -> i32 {
     label: 'fail · Unknown import',
     group: 'modules',
     root: 'root',
-    modules: { root: `import missing
+    modules: {
+      root: `import missing
 
 pub fn main() -> i32 {
   return 42
 }
-` },
+`,
+    },
   },
   {
     label: 'fail · Self import',
     group: 'modules',
     root: 'root',
-    modules: { root: `import root
+    modules: {
+      root: `import root
 
 pub fn main() -> i32 {
   return 42
 }
-` },
+`,
+    },
   },
   {
     label: 'ok · Unreachable island',
@@ -1695,14 +1753,16 @@ pub fn answer() -> i32 {
     label: 'fail · Duplicate in one module',
     group: 'headers',
     root: 'root',
-    modules: { root: `pub fn same() -> i32 {
+    modules: {
+      root: `pub fn same() -> i32 {
   return 1
 }
 
 pub fn same() -> i32 {
   return 2
 }
-` },
+`,
+    },
   },
   {
     label: 'fail · Missing name (header)',
@@ -1714,19 +1774,25 @@ pub fn same() -> i32 {
     label: 'fail · Unknown types',
     group: 'headers',
     root: 'root',
-    modules: { root: `pub fn puzzle(value: Mystery) -> Enigma {
+    modules: {
+      root: `pub fn puzzle(value: Mystery) -> Enigma {
   return 0
 }
-` },
+`,
+    },
   },
 
   // ---- structs --------------------------------------------------------------------------
-  one('structs', 'ok · Empty struct', `struct Marker {}
+  one(
+    'structs',
+    'ok · Empty struct',
+    `struct Marker {}
 
 pub fn main() -> i32 {
   return 42
 }
-`),
+`,
+  ),
   one(
     'structs',
     'ok · Nested physical layout',
@@ -1750,8 +1816,7 @@ pub fn main() -> i32 {
     group: 'structs',
     root: 'app/Main',
     modules: {
-      'app/Main':
-        `import model.Tree as Ast {Node}
+      'app/Main': `import model.Tree as Ast {Node}
 
 struct Root {
   selected: Node
@@ -1889,16 +1954,14 @@ pub fn main() -> i32 {
     group: 'structs',
     root: 'app/Main',
     modules: {
-      'app/Main':
-        `import model.Pair {Pair, make}
+      'app/Main': `import model.Pair {Pair, make}
 
 pub fn main() -> i32 {
   let pair = make(20, 22)
   return pair.right
 }
 `,
-      'model/Pair':
-        `pub struct Pair {
+      'model/Pair': `pub struct Pair {
   pub left: i32
   pub right: i32
 }
@@ -1935,8 +1998,7 @@ pub fn main() -> i32 {
     group: 'names',
     root: 'app/Main',
     modules: {
-      'app/Main':
-        `import compiler.Syntax {parse as read}
+      'app/Main': `import compiler.Syntax {parse as read}
 
 pub fn main() -> i32 {
   return read()
@@ -1953,8 +2015,7 @@ pub fn main() -> i32 {
     group: 'names',
     root: 'app/Main',
     modules: {
-      'app/Main':
-        `import compiler.Syntax as Tree {parse}
+      'app/Main': `import compiler.Syntax as Tree {parse}
 
 pub fn main() -> i32 {
   return Tree.parse()
@@ -1988,8 +2049,7 @@ pub fn main() -> i32 {
     group: 'names',
     root: 'app/Main',
     modules: {
-      'app/Main':
-        `import compiler.Syntax {missing}
+      'app/Main': `import compiler.Syntax {missing}
 
 pub fn main() -> i32 {
   return missing()
@@ -2018,8 +2078,7 @@ pub fn main() -> i32 {
     group: 'names',
     root: 'app/Main',
     modules: {
-      'app/Main':
-        `import compiler.Syntax {parse}
+      'app/Main': `import compiler.Syntax {parse}
 
 pub fn parse() -> i32 {
   return 0
@@ -2062,19 +2121,27 @@ pub fn b() -> i32 {
   },
 
   // ---- operators ------------------------------------------------------------------------
-  one('operators', 'ok · Operator precedence', `import silk.i32
+  one(
+    'operators',
+    'ok · Operator precedence',
+    `import silk.i32
 
 pub fn main() -> i32 {
   return 2 + 5 * 8
 }
-`),
-  one('operators', 'ok · Pipeline', `import silk.i32
+`,
+  ),
+  one(
+    'operators',
+    'ok · Pipeline',
+    `import silk.i32
 
 pub fn main() -> i32 {
   return 2
     |> i32.add(40)
 }
-`),
+`,
+  ),
   one(
     'operators',
     'ok · Unary bool pipeline',
@@ -2089,7 +2156,10 @@ pub fn main() -> i32 {
 }
 `,
   ),
-  one('operators', 'ok · bool not', `import silk.i32
+  one(
+    'operators',
+    'ok · bool not',
+    `import silk.i32
 
 pub fn main() -> i32 {
   if !(1 == 2) {
@@ -2097,11 +2167,16 @@ pub fn main() -> i32 {
   }
   return 0
 }
-`),
-  one('operators', 'trap · Negation overflow traps', `pub fn main() -> i32 {
+`,
+  ),
+  one(
+    'operators',
+    'trap · Negation overflow traps',
+    `pub fn main() -> i32 {
   return -(-2147483648)
 }
-`),
+`,
+  ),
   one(
     'operators',
     'ok · Closed operator surface',
@@ -2166,11 +2241,15 @@ pub fn main() -> i32 {
   ),
 
   // ---- arrays ---------------------------------------------------------------------------
-  one('arrays', 'ok · Array inferred', `pub fn main() -> i32 {
+  one(
+    'arrays',
+    'ok · Array inferred',
+    `pub fn main() -> i32 {
   let values = [10, 42]
   return values[1]
 }
-`),
+`,
+  ),
   one(
     'arrays',
     'ok · Array contextual',
@@ -2410,14 +2489,22 @@ pub fn main() -> i32 {
 }
 `,
   ),
-  one('ownership', 'fail · Damaged body', `pub fn main() -> i32 {
+  one(
+    'ownership',
+    'fail · Damaged body',
+    `pub fn main() -> i32 {
   return missing()
 }
-`),
-  one('ownership', 'fail · Unknown parameter type', `pub fn puzzle(value: Mystery) -> i32 {
+`,
+  ),
+  one(
+    'ownership',
+    'fail · Unknown parameter type',
+    `pub fn puzzle(value: Mystery) -> i32 {
   return value
 }
-`),
+`,
+  ),
 
   // ---- exhaustive matching --------------------------------------------------------------
   one(
@@ -2757,18 +2844,26 @@ pub fn main() -> i32 {
 }
 `,
   ),
-  one('control', 'fail · Invalid loop condition', `pub fn main() -> i32 {
+  one(
+    'control',
+    'fail · Invalid loop condition',
+    `pub fn main() -> i32 {
   while 1 {
     break
   }
   return 42
 }
-`),
-  one('control', 'fail · Invalid transfer', `pub fn main() -> i32 {
+`,
+  ),
+  one(
+    'control',
+    'fail · Invalid transfer',
+    `pub fn main() -> i32 {
   continue
   return 42
 }
-`),
+`,
+  ),
   one(
     'control',
     'fail · Incompatible loop owner',
@@ -2830,10 +2925,14 @@ pub fn main() -> i32 {
 }
 `,
   ),
-  one('discovery', 'trap · Missing entry (discovery)', `pub fn answer() -> i32 {
+  one(
+    'discovery',
+    'trap · Missing entry (discovery)',
+    `pub fn answer() -> i32 {
   return 42
 }
-`),
+`,
+  ),
 
   // ---- backend --------------------------------------------------------------------------
   one(
@@ -2860,10 +2959,14 @@ pub fn main() -> i32 {
 }
 `,
   ),
-  one('backend', 'fail · Trap body', `pub fn main() -> i32 {
+  one(
+    'backend',
+    'fail · Trap body',
+    `pub fn main() -> i32 {
   return missing()
 }
-`),
+`,
+  ),
   one(
     'backend',
     'ok · Branch diamond',
@@ -2877,24 +2980,36 @@ pub fn main() -> i32 {
 }
 `,
   ),
-  one('backend', 'ok · Checked arithmetic', `import silk.i32
+  one(
+    'backend',
+    'ok · Checked arithmetic',
+    `import silk.i32
 
 pub fn main() -> i32 {
   return i32.divide(i32.add(40, 2), 1)
 }
-`),
-  one('backend', 'trap · Overflow traps', `import silk.i32
+`,
+  ),
+  one(
+    'backend',
+    'trap · Overflow traps',
+    `import silk.i32
 
 pub fn main() -> i32 {
   return i32.add(2147483647, 1)
 }
-`),
-  one('backend', 'trap · Divide by zero traps', `import silk.i32
+`,
+  ),
+  one(
+    'backend',
+    'trap · Divide by zero traps',
+    `import silk.i32
 
 pub fn main() -> i32 {
   return i32.divide(1, 0)
 }
-`),
+`,
+  ),
   one(
     'syntax',
     'fail · Union normalization + never',

@@ -2,7 +2,9 @@ import { NodeServices } from '@effect/platform-node'
 import { assert, layer } from '@effect/vitest'
 import * as Cause from 'effect/Cause'
 import * as Config from 'effect/Config'
+import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as FileSystem from 'effect/FileSystem'
 import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
@@ -30,6 +32,11 @@ import * as Type from '../src/Type.js'
 import * as WasmBackend from '../src/WasmBackend.js'
 import * as Process from './support/Process.js'
 import { unreachable } from './support/raise.js'
+
+class WasmExecutionFailure extends Data.TaggedError('WasmExecutionFailure')<{
+  readonly message: string
+  readonly cause: unknown
+}> {}
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -105,7 +112,7 @@ const lowerSource = Effect.fnUntraced(function* (
   assert.deepEqual(
     diagnostics,
     [],
-    JSON.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
+    Json.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
   )
   const catalog = Layout.catalog(target, snapshot.index, snapshot.instances)
   const layout = Layout.plan(catalog, snapshot.instances, snapshot.index)
@@ -633,7 +640,7 @@ pub fn main() -> i32 {
             : 0
         return Object.freeze({ value, pages: pagesOf(instance), class0 })
       },
-      catch: (cause) => new Error(`failed to run ${label}`, { cause }),
+      catch: (cause) => new WasmExecutionFailure({ message: `failed to run ${label}`, cause }),
     })
   })
 

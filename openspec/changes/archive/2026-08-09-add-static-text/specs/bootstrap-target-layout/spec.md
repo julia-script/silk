@@ -8,4 +8,3 @@ Layout planning SHALL retain exact bytes, required alignment, immutable address 
 
 - **WHEN** a Wasm program reaches a text literal
 - **THEN** layout plans one immutable byte region and a 32-bit `usize` length lane
-

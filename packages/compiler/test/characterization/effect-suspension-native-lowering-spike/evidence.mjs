@@ -3,27 +3,34 @@ import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:f
 import { dirname, join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { fileURLToPath } from 'node:url'
+import * as Console from 'effect/Console'
+import * as Config from 'effect/Config'
+import * as Effect from 'effect/Effect'
+
+const log = (...values) => Effect.runSync(Console.log(...values))
+const configured = (name, fallback) =>
+  Effect.runSync(Config.string(name).pipe(Config.withDefault(fallback)))
 
 const root = dirname(fileURLToPath(import.meta.url))
 const evidenceRoot = join(root, 'evidence')
 const reportPath = join(root, 'evidence-report.md')
 const selectionPath = join(root, 'selection-report.md')
 const jsonPath = join(root, 'evidence.json')
-const llvmBin = process.env.SILK_SPIKE_LLVM_BIN ?? '/opt/homebrew/opt/llvm/bin'
+const llvmBin = configured('SILK_SPIKE_LLVM_BIN', '/opt/homebrew/opt/llvm/bin')
 const target = 'aarch64-apple-darwin'
 const coroutinePassPipeline = 'coro-early,cgscc(coro-split),coro-cleanup'
 const tools = Object.freeze({
-  clang: process.env.SILK_SPIKE_CLANG ?? join(llvmBin, 'clang'),
-  dsymutil: process.env.SILK_SPIKE_DSYMUTIL ?? join(llvmBin, 'dsymutil'),
-  llvmAs: process.env.SILK_SPIKE_LLVM_AS ?? join(llvmBin, 'llvm-as'),
-  llvmDis: process.env.SILK_SPIKE_LLVM_DIS ?? join(llvmBin, 'llvm-dis'),
-  llvmDwarfdump: process.env.SILK_SPIKE_LLVM_DWARFDUMP ?? join(llvmBin, 'llvm-dwarfdump'),
-  llvmNm: process.env.SILK_SPIKE_LLVM_NM ?? join(llvmBin, 'llvm-nm'),
-  llvmObjdump: process.env.SILK_SPIKE_LLVM_OBJDUMP ?? join(llvmBin, 'llvm-objdump'),
-  llvmReadobj: process.env.SILK_SPIKE_LLVM_READOBJ ?? join(llvmBin, 'llvm-readobj'),
-  llvmSize: process.env.SILK_SPIKE_LLVM_SIZE ?? join(llvmBin, 'llvm-size'),
-  llvmSymbolizer: process.env.SILK_SPIKE_LLVM_SYMBOLIZER ?? join(llvmBin, 'llvm-symbolizer'),
-  opt: process.env.SILK_SPIKE_OPT ?? join(llvmBin, 'opt'),
+  clang: configured('SILK_SPIKE_CLANG', join(llvmBin, 'clang')),
+  dsymutil: configured('SILK_SPIKE_DSYMUTIL', join(llvmBin, 'dsymutil')),
+  llvmAs: configured('SILK_SPIKE_LLVM_AS', join(llvmBin, 'llvm-as')),
+  llvmDis: configured('SILK_SPIKE_LLVM_DIS', join(llvmBin, 'llvm-dis')),
+  llvmDwarfdump: configured('SILK_SPIKE_LLVM_DWARFDUMP', join(llvmBin, 'llvm-dwarfdump')),
+  llvmNm: configured('SILK_SPIKE_LLVM_NM', join(llvmBin, 'llvm-nm')),
+  llvmObjdump: configured('SILK_SPIKE_LLVM_OBJDUMP', join(llvmBin, 'llvm-objdump')),
+  llvmReadobj: configured('SILK_SPIKE_LLVM_READOBJ', join(llvmBin, 'llvm-readobj')),
+  llvmSize: configured('SILK_SPIKE_LLVM_SIZE', join(llvmBin, 'llvm-size')),
+  llvmSymbolizer: configured('SILK_SPIKE_LLVM_SYMBOLIZER', join(llvmBin, 'llvm-symbolizer')),
+  opt: configured('SILK_SPIKE_OPT', join(llvmBin, 'opt')),
 })
 
 const commands = []
@@ -187,7 +194,8 @@ const cyclicComponents = (graph) => {
     } while (member !== node)
     const selfCycle =
       component.length === 1 && (graph.get(component[0]) ?? new Set()).has(component[0])
-    if (component.length > 1 || selfCycle) cycles.push(component.sort())
+    if (component.length > 1 || selfCycle)
+      cycles.push(component.sort((left, right) => left.localeCompare(right)))
   }
   for (const node of graph.keys()) if (!indices.has(node)) visit(node)
   return cycles
@@ -797,7 +805,7 @@ for (const variant of variants) {
 }
 
 writeFileSync(jsonPath, `${JSON.stringify(evidence, null, 2)}\n`)
-const formatJson = spawnSync('pnpm', ['exec', 'biome', 'format', '--write', jsonPath], {
+const formatJson = spawnSync('pnpm', ['exec', 'oxfmt', '--write', jsonPath], {
   cwd: root,
   encoding: 'utf8',
   env: process.env,
@@ -821,7 +829,7 @@ const selectionReport = `# Native suspension lowering selection\n\nDecision: **s
 writeFileSync(selectionPath, selectionReport)
 const report = `# Native suspension lowering evidence\n\nStatus: **PASS for OpenSpec tasks 1.8 and 1.9**. Selected strategy: **direct iterative state machine**.\n\n- LLVM: ${environment.clang.split('\n')[0]}\n- Target: \`${target}\`\n- Coroutine pipeline: \`${coroutinePassPipeline}\`\n- Semantic/allocation/cleanup parity: pass\n- Constant-stack watermark at depths 1, 1,000, and 100,000 under O0/O2: pass\n- Direct and indirect call-cycle audit: pass\n- Residual coroutine structure-intrinsic audit: pass\n- Retcon fallback-call and selected-inline-buffer-root audit: pass\n- Static DWARF and synthetic Silk boundary symbolization: pass\n- Second normalized semantic/depth replay: pass\n\n## Measured values\n\n| metric | direct | switched | retcon |\n| --- | ---: | ---: | ---: |\n| O0 compile median (ms) | ${benchmarkSummary.compile.O0.direct.median.toFixed(3)} | ${benchmarkSummary.compile.O0.switched.median.toFixed(3)} | ${benchmarkSummary.compile.O0.retcon.median.toFixed(3)} |\n| O2 compile median (ms) | ${benchmarkSummary.compile.O2.direct.median.toFixed(3)} | ${benchmarkSummary.compile.O2.switched.median.toFixed(3)} | ${benchmarkSummary.compile.O2.retcon.median.toFixed(3)} |\n| O2 resume median (ms/boundary) | ${benchmarkSummary.resumeO2PerBoundary.direct.median.toFixed(6)} | ${benchmarkSummary.resumeO2PerBoundary.switched.median.toFixed(6)} | ${benchmarkSummary.resumeO2PerBoundary.retcon.median.toFixed(6)} |\n| frame bytes at boundary 1 | ${semantic.direct.O2.frameLayouts[0].size} | ${semantic.switched.O2.frameLayouts[0].size} | ${semantic.retcon.O2.frameLayouts[0].size} |\n| linked O2 code/data bytes | ${linkedSize.direct.O2.codeData} | ${linkedSize.switched.O2.codeData} | ${linkedSize.retcon.O2.codeData} |\n\nThe generated [selection report](selection-report.md) applies every threshold and records the rejection reason for both LLVM candidates. Raw samples, MADs, exact commands, stack results, call graphs, frame layouts, semantic traces, and debug symbolization are retained in [evidence.json](evidence.json).\n\nRun:\n\n\`\`\`sh\nnode packages/compiler/test/characterization/effect-suspension-native-lowering-spike/evidence.mjs\n\`\`\`\n`
 writeFileSync(reportPath, report)
-console.log(
+log(
   JSON.stringify(
     {
       status: 'pass',

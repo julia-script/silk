@@ -13,6 +13,7 @@ exclusive or consuming bounds, and exclusive realizations MAY satisfy consuming 
 admission MUST be rejected.
 
 #### Scenario: Reject a take-only Effect through shared access
+
 - **WHEN** a generic body attempts to run `once Effect<A ! E ? R>` through `&Deferred`
 - **THEN** ownership reports that the whole owner must be consumed
 
@@ -23,6 +24,7 @@ the enclosing nominal without running it. The structural Effect contract SHALL r
 target ABI; only the complete nominal realization contributes build-internal lanes.
 
 #### Scenario: Construct without running
+
 - **WHEN** source constructs `Deferred` from an Effect with owned captures
 - **THEN** the captures enter the nominal environment and no Effect body executes
 
@@ -33,6 +35,7 @@ captures, loans, cleanup, and suspension state through nesting, parameters, resu
 whole-value moves. Rows SHALL remain compile-time only.
 
 #### Scenario: Run a stored Effect with exact rows
+
 - **WHEN** `Deferred<A, !E, ?R, F>` is executed under access admitted by `F`
 - **THEN** its source-observable result remains `A ! E ? R` with no runtime row dictionary
 
@@ -43,6 +46,7 @@ environment field exactly once. Direct owned extraction of the representation-be
 rejected, and scoped captures MUST NOT escape through the nominal.
 
 #### Scenario: Drop an unrun Effect
+
 - **WHEN** a `Deferred` containing an owned environment leaves scope without execution
 - **THEN** its live captures are cleaned once without entering the runner
 
@@ -54,6 +58,7 @@ invalidate dependent layouts and emitted code. No backend may reconstruct Effect
 standalone structural Effect ABI.
 
 #### Scenario: Resume one stored suspending Effect
+
 - **WHEN** a stored Effect suspends and resumes in each engine
 - **THEN** result, failure behavior, cleanup trace, and static runner identity agree
 
@@ -63,5 +68,6 @@ The unavailable-Effect-layout fence SHALL remain for any nominal storage path no
 ownership, layout, MIR, evaluator, LLVM, and direct WebAssembly.
 
 #### Scenario: Preserve the fence during partial backend support
+
 - **WHEN** evaluation supports one stored Effect shape but direct WebAssembly does not
 - **THEN** compilation rejects that shape before MIR instead of claiming the capability complete

@@ -1,4 +1,5 @@
 import * as Effect from 'effect/Effect'
+import * as Inspectable from 'effect/Inspectable'
 import * as Diagnostic from './Diagnostic.js'
 import * as Expression from './Expression.js'
 import * as Program from './Program.js'
@@ -154,7 +155,7 @@ const parseFunction = Effect.fnUntraced(function* (
       const parameterToken = yield* expect(state, 'Identifier', 'a parameter name')
       if (parameterNames.has(parameterToken.lexeme)) {
         return yield* new Diagnostic.ParseError({
-          message: `Duplicate parameter ${JSON.stringify(parameterToken.lexeme)}`,
+          message: `Duplicate parameter ${Inspectable.toStringUnknown(parameterToken.lexeme)}`,
           start: parameterToken.start,
           end: parameterToken.end,
           expected: 'a unique parameter name',

@@ -3,6 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Filesystem watching
+
 The filesystem service SHALL provide `watch` as a stream of standard watch events for an existing
 file or directory, backed by WebContainer's native watch capability rather than polling. Each
 consumer SHALL receive an independent subscription whose underlying watcher is registered when the
@@ -36,6 +37,7 @@ cannot be classified reliably SHALL be resolved using directory listings, never 
 ## MODIFIED Requirements
 
 ### Requirement: Explicit stat approximation
+
 The filesystem service SHALL derive stat answers from directory listings alone and SHALL NOT read
 file contents to answer `stat`, `access`, or `exists`. Stat results SHALL report accurate
 file-versus-directory type; file byte size and other metadata that WebContainer does not expose
@@ -62,6 +64,7 @@ metadata.
   contents
 
 ### Requirement: Unsupported operations fail explicitly
+
 Operations whose semantics cannot be upheld by WebContainer SHALL fail in the typed
 `PlatformError` channel with the operation and path and a description stating that the capability
 is unsupported. Unsupported operations SHALL include permission and ownership changes, hard and

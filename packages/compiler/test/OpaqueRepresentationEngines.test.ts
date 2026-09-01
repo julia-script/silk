@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -83,7 +84,7 @@ it.effect(
         assert.strictEqual(
           interpreted._tag,
           'Completed',
-          `${program.name}: ${interpreted._tag === 'Blocked' ? JSON.stringify(interpreted.reason) : interpreted._tag}`,
+          `${program.name}: ${interpreted._tag === 'Blocked' ? Json.stringify(interpreted.reason) : interpreted._tag}`,
         )
         if (interpreted._tag !== 'Completed') continue
         assert.strictEqual(interpreted.result.value, 42n, program.name)

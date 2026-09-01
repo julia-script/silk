@@ -29,4 +29,3 @@ stable symbols, text, binary bytes, and provenance.
 
 - **WHEN** one union program is emitted repeatedly for a supported target
 - **THEN** LLVM IR, bitcode, WAT, WebAssembly bytes, and union provenance are identical
-

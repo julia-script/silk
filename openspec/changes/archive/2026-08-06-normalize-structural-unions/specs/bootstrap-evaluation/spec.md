@@ -28,4 +28,3 @@ source provenance without exposing numeric tags as source values.
 
 - **WHEN** a mutable union containing `Token` is replaced by one containing `End`
 - **THEN** the trace records one `Token` cleanup before one committed replacement and no `End` cleanup for the old value
-

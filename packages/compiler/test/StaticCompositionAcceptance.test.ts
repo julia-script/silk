@@ -1,6 +1,7 @@
 import { NodeServices } from '@effect/platform-node'
 import { assert, layer } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
@@ -181,7 +182,7 @@ const analyze = Effect.fnUntraced(function* (id: string, source: string, target:
   assert.deepEqual(
     diagnostics,
     [],
-    JSON.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
+    Json.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
   )
   assert.strictEqual(snapshot.mir._tag, 'Available', id)
   return snapshot

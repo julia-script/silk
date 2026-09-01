@@ -14,11 +14,11 @@ All three servers avoid making every candidate file a fully analyzed root on eve
 candidate discovery on a cheaper representation and perform context-sensitive validation and edit
 synthesis on demand. Their exact boundaries differ:
 
-| Server | Project/workspace candidates | Dependency candidates | Incremental unit | Durable auto-import index? |
-| --- | --- | --- | --- | --- |
-| rust-analyzer | Per-module local symbol FSTs | Per-direct-dependency public import maps | Module locally; crate for dependencies | No dedicated durable index found |
-| TypeScript | Existing configured `Program` plus lazy export map | Lazy, bounded auto-import provider program | Program/provider graph; export map invalidated coarsely | No; live-project cache (inference) |
-| gopls | Build-aware metadata graph plus cached package symbol summaries | Persistent `GOMODCACHE` export index | Package locally; newly changed module-cache directories externally | Yes, for both generic package summaries and module-cache catalog |
+| Server        | Project/workspace candidates                                    | Dependency candidates                      | Incremental unit                                                   | Durable auto-import index?                                       |
+| ------------- | --------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| rust-analyzer | Per-module local symbol FSTs                                    | Per-direct-dependency public import maps   | Module locally; crate for dependencies                             | No dedicated durable index found                                 |
+| TypeScript    | Existing configured `Program` plus lazy export map              | Lazy, bounded auto-import provider program | Program/provider graph; export map invalidated coarsely            | No; live-project cache (inference)                               |
+| gopls         | Build-aware metadata graph plus cached package symbol summaries | Persistent `GOMODCACHE` export index       | Package locally; newly changed module-cache directories externally | Yes, for both generic package summaries and module-cache catalog |
 
 The shared lesson is not “build one global mutable symbol table.” It is “partition immutable or
 replaceable export summaries by the compiler's natural invalidation unit, then query their union.”

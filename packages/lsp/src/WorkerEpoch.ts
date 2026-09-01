@@ -1,10 +1,7 @@
 import * as Schema from 'effect/Schema'
 
 /** Identity of one replaceable project-worker lifetime. */
-export const schema = Schema.Struct({
-  _tag: Schema.Literal('WorkerEpoch'),
-  value: Schema.Natural,
-})
+export const schema = Schema.TaggedStruct('WorkerEpoch', { value: Schema.Natural })
 
 export type WorkerEpoch = typeof schema.Type
 

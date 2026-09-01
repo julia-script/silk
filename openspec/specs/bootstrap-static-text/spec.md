@@ -1,8 +1,11 @@
 # bootstrap-static-text Specification
 
 ## Purpose
+
 Provide immutable static UTF-8 and byte literals for program data and output without fixing the representation or service model of Silk's eventual owning string type.
+
 ## Requirements
+
 ### Requirement: Static text literals preserve Unicode content
 
 An escaped text literal using either one-quote or three-quote delimiters SHALL decode escapes into

@@ -57,8 +57,8 @@ Create the builder and `i32` once. Then walk the source definitions without buil
 ```typescript
 for (const definition of program.functions) {
   const parameterTypes = Array.from({ length: definition.parameters.length }, () => i32)
-  const signature = yield* Type.functionType(builder, i32, parameterTypes)
-  const handle = yield* FunctionActor.declare(builder, definition.name, signature)
+  const signature = yield * Type.functionType(builder, i32, parameterTypes)
+  const handle = yield * FunctionActor.declare(builder, definition.name, signature)
   functions.set(
     definition.name,
     Object.freeze({ handle, arity: definition.parameters.length, definition }),
@@ -76,9 +76,9 @@ fn double(x) = x * 2
 the checkpoint after pass one is:
 
 | Tiny name | Arity | LLVM symbol | Body committed? |
-| --- | ---: | --- | --- |
-| `main` | 0 | `@main` | no |
-| `double` | 1 | `@double` | no |
+| --------- | ----: | ----------- | --------------- |
+| `main`    |     0 | `@main`     | no              |
+| `double`  |     1 | `@double`   | no              |
 
 `main` can therefore refer to `@double` even though `double` appears later in the file. The table
 contains the identity before either body is lowered.
@@ -91,7 +91,7 @@ after creating `entry`, resolve every positional LLVM argument once:
 ```typescript
 const parameters = new Map<string, Value.Value>()
 for (const [index, parameter] of definition.parameters.entries()) {
-  parameters.set(parameter.name, yield* Value.argument(body, index))
+  parameters.set(parameter.name, yield * Value.argument(body, index))
 }
 ```
 
@@ -110,12 +110,7 @@ source argument count to `entry.arity` before lowering the arguments; a mismatch
 Lower each argument from left to right, then call the declared handle:
 
 ```typescript
-const result = yield* FunctionBody.callDirect(
-  context.body,
-  target.handle,
-  arguments_,
-  'called',
-)
+const result = yield * FunctionBody.callDirect(context.body, target.handle, arguments_, 'called')
 ```
 
 `callDirect` inherits the target's declared signature and checks the argument types. Its result is

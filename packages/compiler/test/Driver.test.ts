@@ -3,9 +3,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
+import * as Config from 'effect/Config'
+import * as ConfigProvider from 'effect/ConfigProvider'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
-import * as Option from 'effect/Option'
 import * as TestClock from 'effect/testing/TestClock'
 import * as Analysis from '../src/Analysis.js'
 import type * as Backend from '../src/Backend.js'
@@ -25,7 +26,9 @@ const defaultClang = (): string => {
   return 'clang'
 }
 
-const clang = process.env.SILK_TEST_CLANG ?? defaultClang()
+const clang = Effect.runSync(
+  Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
+)
 const toolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
   clang,
@@ -310,7 +313,7 @@ it.effect('rejects a mismatched distribution before resolving user imports', () 
       resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
       resolve: () => {
         projectResolutions += 1
-        return Effect.succeed(Option.none())
+        return Effect.succeedNone
       },
     })
     const outcome = yield* Driver.compile({
@@ -644,7 +647,7 @@ it.effect('translates a synchronously throwing artifact-cache write at the Drive
     const cause = Object.freeze({ injected: 'artifact-cache-write' })
     const artifactCache: NativeToolchain.ArtifactCache = Object.freeze({
       _tag: 'ArtifactCache',
-      get: () => Effect.succeed(undefined),
+      get: () => Effect.as(Effect.void, undefined),
       set: () => {
         throw cause
       },
@@ -668,45 +671,46 @@ it.effect('translates a synchronously throwing artifact-cache write at the Drive
 )
 
 it.effect('selects the durable disk cache from SILK_NATIVE_CACHE_DIR by default', () =>
-  Effect.gen(function* () {
-    const cacheDirectory = mkdtempSync(join(tmpdir(), 'silk-default-cache-'))
-    const previous = process.env.SILK_NATIVE_CACHE_DIR
-    process.env.SILK_NATIVE_CACHE_DIR = cacheDirectory
-    try {
-      // No artifactCache is pinned on either toolchain: the durable reuse below can only come
-      // from the environment-selected default, and each compile builds its own toolchain value
-      // so nothing is shared between them but the directory.
-      const source = 'pub fn main() -> i32 { return 40 + 2 }'
-      const first = yield* compileSource('default-cache-first', source, {
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang }),
-        cache: true,
-      })
-      const second = yield* compileSource('default-cache-second', source, {
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang }),
-        cache: true,
-      })
-      assert.strictEqual(first._tag, 'Compiled')
-      assert.strictEqual(second._tag, 'Compiled')
-      if (first._tag !== 'Compiled' || second._tag !== 'Compiled') return
-      assert.strictEqual(
-        first.report.some((entry) => entry.phase === 'link'),
-        true,
-      )
-      assert.strictEqual(
-        second.report.some((entry) => entry.phase === 'artifact-cache'),
-        true,
-      )
-      assert.strictEqual(
-        second.report.some((entry) => entry.phase === 'object'),
-        false,
-      )
-      assert.deepEqual(readFileSync(second.path), readFileSync(first.path))
-      const run = spawnSync(second.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42)
-    } finally {
-      if (previous === undefined) delete process.env.SILK_NATIVE_CACHE_DIR
-      else process.env.SILK_NATIVE_CACHE_DIR = previous
-      rmSync(cacheDirectory, { recursive: true, force: true })
-    }
-  }),
+  Effect.acquireUseRelease(
+    Effect.sync(() => mkdtempSync(join(tmpdir(), 'silk-default-cache-'))),
+    (cacheDirectory) =>
+      Effect.gen(function* () {
+        // No artifactCache is pinned on either toolchain: the durable reuse below can only come
+        // from the environment-selected default, and each compile builds its own toolchain value
+        // so nothing is shared between them but the directory.
+        const source = 'pub fn main() -> i32 { return 40 + 2 }'
+        const first = yield* compileSource('default-cache-first', source, {
+          toolchain: Object.freeze({ _tag: 'Toolchain', clang }),
+          cache: true,
+        })
+        const second = yield* compileSource('default-cache-second', source, {
+          toolchain: Object.freeze({ _tag: 'Toolchain', clang }),
+          cache: true,
+        })
+        assert.strictEqual(first._tag, 'Compiled')
+        assert.strictEqual(second._tag, 'Compiled')
+        if (first._tag !== 'Compiled' || second._tag !== 'Compiled') return
+        assert.strictEqual(
+          first.report.some((entry) => entry.phase === 'link'),
+          true,
+        )
+        assert.strictEqual(
+          second.report.some((entry) => entry.phase === 'artifact-cache'),
+          true,
+        )
+        assert.strictEqual(
+          second.report.some((entry) => entry.phase === 'object'),
+          false,
+        )
+        assert.deepEqual(readFileSync(second.path), readFileSync(first.path))
+        const run = spawnSync(second.path, [], { encoding: 'utf8' })
+        assert.strictEqual(run.status, 42)
+      }).pipe(
+        Effect.provideService(
+          ConfigProvider.ConfigProvider,
+          ConfigProvider.fromUnknown({ SILK_NATIVE_CACHE_DIR: cacheDirectory }),
+        ),
+      ),
+    (cacheDirectory) => Effect.sync(() => rmSync(cacheDirectory, { recursive: true, force: true })),
+  ),
 )

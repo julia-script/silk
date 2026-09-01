@@ -29,10 +29,7 @@ if (parentPort === null || Option.isNone(bootstrap)) {
       epoch: bootstrap.value.epoch,
       analyze: Workspace.analyzeProject,
       emit: Effect.fnUntraced(function* (message) {
-        yield* Effect.try({
-          try: () => port.postMessage(message),
-          catch: (cause) => cause,
-        }).pipe(Effect.orDie)
+        yield* Effect.try(() => port.postMessage(message)).pipe(Effect.orDie)
       }),
     })
     while (true) {

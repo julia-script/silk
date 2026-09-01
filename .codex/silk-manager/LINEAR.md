@@ -21,15 +21,15 @@ administration is outside issue discovery, demand, triage, work, and synchroniza
 
 ## Status mapping
 
-| Linear status | Workflow meaning |
-| --- | --- |
-| Backlog | Captured but not triaged. |
-| Todo | Triaged and ready, unless it carries the `Blocked` label. |
-| In Progress | Claimed by an active implementation task. |
-| In Review | Implementation is ready for human or PR review. |
-| Done | The accepted change is merged or otherwise delivered. |
-| Duplicate | Another linked issue owns the work. |
-| Canceled | A triage claim failed or the work was intentionally declined. |
+| Linear status | Workflow meaning                                              |
+| ------------- | ------------------------------------------------------------- |
+| Backlog       | Captured but not triaged.                                     |
+| Todo          | Triaged and ready, unless it carries the `Blocked` label.     |
+| In Progress   | Claimed by an active implementation task.                     |
+| In Review     | Implementation is ready for human or PR review.               |
+| Done          | The accepted change is merged or otherwise delivered.         |
+| Duplicate     | Another linked issue owns the work.                           |
+| Canceled      | A triage claim failed or the work was intentionally declined. |
 
 Use Linear's native `duplicateOf`, `blockedBy`, `blocks`, and `relatedTo` relations when they fit.
 Create a `Blocked` issue label only when the first real blocked issue needs it; do not create a

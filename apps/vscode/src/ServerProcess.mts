@@ -47,7 +47,7 @@ export const make = Effect.fn('ServerProcess.make')(function* (options: {
   const spawned = Deferred.makeUnsafe<void, ServerProcessError>()
   const exited = Deferred.makeUnsafe<ExitStatus>()
   child.once('spawn', () => {
-    Deferred.doneUnsafe(spawned, Effect.succeed(undefined))
+    Deferred.doneUnsafe(spawned, Effect.void)
   })
   child.once('exit', (code, signal) => {
     Deferred.doneUnsafe(exited, Effect.succeed(Object.freeze({ code, signal })))

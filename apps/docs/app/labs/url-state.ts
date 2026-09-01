@@ -113,7 +113,12 @@ export const encodeLayout = async (layout: SerializedDockview): Promise<string |
 export const decodeLayout = async (value: string): Promise<SerializedDockview | undefined> => {
   try {
     const parsed: unknown = JSON.parse(await inflate(value))
-    if (typeof parsed !== 'object' || parsed === null || !('grid' in parsed) || !('panels' in parsed))
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      !('grid' in parsed) ||
+      !('panels' in parsed)
+    )
       return undefined
     const panels = parsed.panels
     if (typeof panels !== 'object' || panels === null || Array.isArray(panels)) return undefined

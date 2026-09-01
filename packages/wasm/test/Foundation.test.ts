@@ -10,7 +10,7 @@ import type { WasmError } from '../src/WasmError.js'
 
 const failure = <A>(effect: Effect.Effect<A, WasmError>) =>
   effect.pipe(
-    Effect.map(() => undefined),
+    Effect.as(undefined),
     Effect.catchTag('WasmError', (error) => Effect.succeed(error)),
   )
 
@@ -58,11 +58,13 @@ it.effect('commits concurrent independent declarations exactly once', () =>
       Array.from({ length: 16 }, (_, index) => Func.declare(builder, type, { name: `f${index}` })),
       { concurrency: 'unbounded' },
     )
-    const names = yield* Effect.all(handles.map((handle) => Func.name(builder, handle)))
+    const names = yield* Effect.forEach(handles, (handle) => Func.name(builder, handle))
     assert.strictEqual(new Set(handles).size, 16)
     assert.deepStrictEqual(
-      [...names].sort(),
-      Array.from({ length: 16 }, (_, index) => `f${index}`).sort(),
+      [...names].sort((left, right) => (left ?? '').localeCompare(right ?? '')),
+      Array.from({ length: 16 }, (_, index) => `f${index}`).sort((left, right) =>
+        left.localeCompare(right),
+      ),
     )
   }),
 )

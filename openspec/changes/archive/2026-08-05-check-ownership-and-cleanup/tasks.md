@@ -1,12 +1,12 @@
 ## 1. Ownership phase
 
 - [x] 1.1 Create `packages/compiler/src/Ownership.ts`: `checkModule(result)` producing per-function
-  binding facts (copyable category, live range), closed verdicts (`Satisfied`/`Unavailable` with
-  causes), and the per-exit cleanup plan with ordered releases
+      binding facts (copyable category, live range), closed verdicts (`Satisfied`/`Unavailable` with
+      causes), and the per-exit cleanup plan with ordered releases
 - [x] 1.2 Deterministic textual encoder for ownership facts and cleanup plans; committed goldens
-  (parameterized fixture, damaged fixture) with byte-identical and repeat-determinism tests
+      (parameterized fixture, damaged fixture) with byte-identical and repeat-determinism tests
 - [x] 1.3 Ownership tests: copyable binding facts, unavailable verdicts with causes, empty-release
-  return exits, determinism
+      return exits, determinism
 
 ## 2. Facade
 
@@ -20,7 +20,7 @@
 ## 4. Inspector lab
 
 - [x] 4.1 Create the direct-link `/docs/labs/ownership` lab: per-function binding timelines
-  (category + live range spans), verdicts with unavailable states, cleanup plan per exit
+      (category + live range spans), verdicts with unavailable states, cleanup plan per exit
 - [x] 4.2 Lab tests: binding timeline, empty-release plan shown explicitly, unavailable verdict
 
 ## 5. Bookkeeping

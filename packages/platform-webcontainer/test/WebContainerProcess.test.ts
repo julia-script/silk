@@ -5,6 +5,8 @@ import * as Sink from 'effect/Sink'
 import * as Stream from 'effect/Stream'
 import * as WebContainerProcess from '../src/WebContainerProcess.js'
 
+const neverPromise = (): Promise<void> => Effect.runPromise(Effect.never)
+
 it.effect('preserves combined output order and releases the reader lock', () =>
   Effect.gen(function* () {
     let cancelled = 0
@@ -76,12 +78,12 @@ it.effect('releases reader and writer locks after interruption', () =>
   Effect.gen(function* () {
     const output = new ReadableStream<string>({
       pull() {
-        return new Promise<void>(() => undefined)
+        return neverPromise()
       },
     })
     const input = new WritableStream<string>({
       write() {
-        return new Promise<void>(() => undefined)
+        return neverPromise()
       },
     })
     const process = WebContainerProcess.fromWebStreams({

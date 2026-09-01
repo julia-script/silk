@@ -4,12 +4,15 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import * as Config from 'effect/Config'
+import * as Effect from 'effect/Effect'
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const fixtureRoot = resolve(packageRoot, 'fixtures/metadata')
 const moduleScript = resolve(packageRoot, 'scripts/metadata-module.mjs')
 const command = process.argv[2] ?? 'verify'
-const executable = (name, variable) => process.env[variable] ?? name
+const executable = (name, variable) =>
+  Effect.runSync(Config.string(variable).pipe(Config.withDefault(name)))
 const currentText = () => execFileSync(process.execPath, [moduleScript, 'text'])
 const currentBitcode = () => execFileSync(process.execPath, [moduleScript, 'bitcode'])
 

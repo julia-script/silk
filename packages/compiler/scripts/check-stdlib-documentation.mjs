@@ -4,6 +4,8 @@
 //   pnpm --filter @silklang/compiler documentation:policy
 
 import { readFileSync } from 'node:fs'
+import * as Data from 'effect/Data'
+import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import * as DocumentationPolicy from '../../docgen/dist/Policy.js'
 import * as DocumentationProject from '../../docgen/dist/Project.js'
@@ -11,6 +13,11 @@ import * as ProjectAnalysis from '../dist/ProjectAnalysis.js'
 import * as SourceFile from '../dist/SourceFile.js'
 import * as SourceResolver from '../dist/SourceResolver.js'
 import * as CompilerStdlib from '../dist/Stdlib.js'
+
+class DocumentationPolicyError extends Data.TaggedError('DocumentationPolicyError') {}
+
+const log = (...values) => Effect.runSync(Console.log(...values))
+const logError = (...values) => Effect.runSync(Console.error(...values))
 
 const lineAt = (bytes, offset) => {
   const limit = Math.max(0, Math.min(offset, bytes.length))
@@ -25,7 +32,11 @@ const program = Effect.gen(function* () {
     const bytes = yield* Effect.try({
       try: () =>
         Uint8Array.from(readFileSync(new URL(`../stdlib/${manifest.path}`, import.meta.url))),
-      catch: (cause) => new Error(`Missing stdlib source: ${manifest.module}`, { cause }),
+      catch: (cause) =>
+        new DocumentationPolicyError({
+          message: `Missing stdlib source: ${manifest.module}`,
+          cause,
+        }),
     })
     analyzed.push({ manifest, bytes, root: SourceFile.make(manifest.module, bytes) })
   }
@@ -60,10 +71,8 @@ const violations =
 const checkedModules = selectedModule === undefined ? CompilerStdlib.manifest.length : 1
 if (!process.argv.includes('--summary'))
   for (const { violation, path, line } of violations)
-    console.error(
-      `${path}:${line}: [${violation.code}] ${violation.identity}: ${violation.message}`,
-    )
-console.log(
+    logError(`${path}:${line}: [${violation.code}] ${violation.identity}: ${violation.message}`)
+log(
   violations.length === 0
     ? `Stdlib documentation policy: ${checkedModules} modules checked, no violations.`
     : `Stdlib documentation policy: ${checkedModules} modules checked, ${violations.length} violations.`,

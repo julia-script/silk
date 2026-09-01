@@ -353,11 +353,11 @@ source evaluation order and the final positional call `combine(1, 2, 3)`.
 
 Callable contracts distinguish three modes:
 
-| Contract | Environment access | Reuse |
-| --- | --- | --- |
-| `fn(A) -> B` | shared | repeatable |
-| `mut fn(A) -> B` | exclusive | repeatable in sequence |
-| `once fn(A) -> B` | consuming | at most once |
+| Contract          | Environment access | Reuse                  |
+| ----------------- | ------------------ | ---------------------- |
+| `fn(A) -> B`      | shared             | repeatable             |
+| `mut fn(A) -> B`  | exclusive          | repeatable in sequence |
+| `once fn(A) -> B` | consuming          | at most once           |
 
 Shared callable access may satisfy an exclusive or consuming parameter, and exclusive access may
 satisfy a consuming parameter. The reverse substitutions are invalid because they promise more

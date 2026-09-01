@@ -21,4 +21,3 @@ a process filesystem implementation by default.
 
 - **WHEN** a browser consumer imports compiler and evaluator core modules without configuring OS support
 - **THEN** module loading requires no Node filesystem module or equivalent ambient host API
-

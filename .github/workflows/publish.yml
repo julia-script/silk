@@ -34,7 +34,7 @@ jobs:
           publish: pnpm release:publish:ci
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_CONFIG_PROVENANCE: "true"
+          NPM_CONFIG_PROVENANCE: 'true'
       - if: steps.changesets.outputs.published == 'true'
         run: node .github/scripts/verify-release-trust.mjs
         env:

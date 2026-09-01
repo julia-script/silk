@@ -22,4 +22,3 @@ The planner SHALL represent `usize` as unsigned 64-bit on required native target
 
 - **WHEN** a native signature contains `usize`
 - **THEN** the plan publishes one unsigned 64-bit lane before MIR lowering
-

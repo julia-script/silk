@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -255,10 +256,17 @@ it.effect('monomorphizes one parametric Drop conformance per reachable instantia
       instance.key.declaration.name.startsWith('drop@impl'),
     )
     assert.strictEqual(instances.length, 2)
-    assert.deepEqual(instances.map((instance) => instance.key.typeArguments).sort(), [
-      ['bool'],
-      ['i32'],
-    ])
+    assert.deepEqual(
+      instances
+        .map((instance) => instance.key.typeArguments)
+        .sort((left, right) =>
+          left
+            .map(Type.encodeGenericArgument)
+            .join(',')
+            .localeCompare(right.map(Type.encodeGenericArgument).join(',')),
+        ),
+      [['bool'], ['i32']],
+    )
 
     const run = Analysis.evaluate(snapshot)
     assert.strictEqual(run._tag, 'Completed')

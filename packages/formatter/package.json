@@ -2,31 +2,27 @@
   "name": "@silklang/formatter",
   "version": "0.0.0",
   "description": "Canonical whole-source formatting for Silk Effect, including active Silk examples in source documentation.",
+  "keywords": [
+    "documentation",
+    "formatter",
+    "silk"
+  ],
+  "homepage": "https://github.com/julia-script/silk-effect#readme",
+  "bugs": {
+    "url": "https://github.com/julia-script/silk-effect/issues"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/julia-script/silk-effect.git",
     "directory": "packages/formatter"
   },
-  "homepage": "https://github.com/julia-script/silk-effect#readme",
-  "bugs": {
-    "url": "https://github.com/julia-script/silk-effect/issues"
-  },
-  "keywords": [
-    "silk",
-    "formatter",
-    "documentation"
-  ],
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
-  "type": "module",
   "files": [
     "dist",
     "README.md",
     "LICENSE"
   ],
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -40,6 +36,10 @@
       "types": "./dist/FormatterError.d.ts",
       "import": "./dist/FormatterError.js"
     }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "pnpm clean && tsc -p tsconfig.json",

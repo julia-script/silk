@@ -1,11 +1,11 @@
-import { source } from '@/lib/source';
-import { DocsLayout } from 'fumadocs-ui/layouts/docs';
-import { baseOptions } from '@/lib/layout.shared';
-import type { ReactNode } from 'react';
-import { AISearch, AISearchPanel, AISearchTrigger } from '@/components/ai/search';
-import { buttonVariants } from '@/components/ui/button';
-import { cn } from '@/lib/cn';
-import { MessageCircleIcon } from 'lucide-react';
+import { source } from '@/lib/source'
+import { DocsLayout } from 'fumadocs-ui/layouts/docs'
+import { baseOptions } from '@/lib/layout.shared'
+import type { ReactNode } from 'react'
+import { AISearch, AISearchPanel, AISearchTrigger } from '@/components/ai/search'
+import { buttonVariants } from '@/components/ui/button'
+import { cn } from '@/lib/cn'
+import { MessageCircleIcon } from 'lucide-react'
 
 export default function Layout({ children }: { children: ReactNode }) {
   return (
@@ -27,5 +27,5 @@ export default function Layout({ children }: { children: ReactNode }) {
       </AISearch>
       {children}
     </DocsLayout>
-  );
+  )
 }

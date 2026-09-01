@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
 import type * as OsFileSystemHost from '../src/OsFileSystemHost.js'
@@ -315,7 +316,7 @@ it.effect(
         profile: 'release',
         destination: join(destinationRoot, 'native'),
       }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled', JSON.stringify(compiled).slice(0, 2500))
+      assert.strictEqual(compiled._tag, 'Compiled', Json.stringify(compiled).slice(0, 2500))
       if (compiled._tag !== 'Compiled') return
       const run = spawnSync(compiled.path, [], {
         encoding: 'utf8',
@@ -324,7 +325,7 @@ it.effect(
       assert.strictEqual(
         run.status,
         42,
-        JSON.stringify({ signal: run.signal, stderr: run.stderr, stdout: run.stdout }),
+        Json.stringify({ signal: run.signal, stderr: run.stderr, stdout: run.stdout }),
       )
       // The same statement read off the real filesystem rather than through the program: both
       // scopes are gone and the promoted artifact is the only thing the parent still holds.
@@ -354,13 +355,13 @@ it.effect(
         profile: 'release',
         destination: join(destinationRoot, 'native-tree'),
       }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled', JSON.stringify(compiled).slice(0, 2500))
+      assert.strictEqual(compiled._tag, 'Compiled', Json.stringify(compiled).slice(0, 2500))
       if (compiled._tag !== 'Compiled') return
       const run = spawnSync(compiled.path, [], {
         encoding: 'utf8',
         env: { ...process.env, SILK_TEST_ROOT: nativeRoot },
       })
-      assert.strictEqual(run.status, 42, JSON.stringify({ signal: run.signal, stderr: run.stderr }))
+      assert.strictEqual(run.status, 42, Json.stringify({ signal: run.signal, stderr: run.stderr }))
       // The file, the nested directory's file, the nested directory, and the directory itself.
       assert.isFalse(existsSync(join(nativeRoot, 'tree')))
     }),
@@ -384,7 +385,7 @@ it.effect(
         profile: 'release',
         destination: join(destinationRoot, 'native-many'),
       }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled', JSON.stringify(compiled).slice(0, 2500))
+      assert.strictEqual(compiled._tag, 'Compiled', Json.stringify(compiled).slice(0, 2500))
       if (compiled._tag !== 'Compiled') return
       const run = spawnSync(compiled.path, [], {
         encoding: 'utf8',
@@ -397,7 +398,7 @@ it.effect(
       assert.strictEqual(
         run.status,
         42,
-        JSON.stringify({ signal: run.signal, stderr: run.stderr, stdout: run.stdout }),
+        Json.stringify({ signal: run.signal, stderr: run.stderr, stdout: run.stdout }),
       )
       assert.deepEqual(readdirSync(join(nativeRoot, 'many')), [])
     }),

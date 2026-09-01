@@ -43,4 +43,3 @@ One central program covers the confirmed language features and prevents unrelate
 ## Migration Plan
 
 Complete CLI integration, add `score.tiny`, end-to-end tests, and Lesson 11. Enable the documentation validation job only after it passes from a clean checkout.
-

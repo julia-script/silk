@@ -27,4 +27,3 @@ Canonical standard-library files SHALL remain ordinary Silk source compiled thro
 
 - **WHEN** a standard-library file contains a semantic error
 - **THEN** compilation reports the ordinary diagnostic against the canonical library source location
-

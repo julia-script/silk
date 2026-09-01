@@ -43,7 +43,7 @@ directly and a host that cannot answer is a failure.
 
 ### The working directory is bytes, not a `Path`
 
-`Path` is normalized UTF-8 that is always absolute *inside the selected provider's namespace*, never
+`Path` is normalized UTF-8 that is always absolute _inside the selected provider's namespace_, never
 consults a process working directory, and rejects lexical root escape. The process working directory
 is none of those things: it is a host-absolute location outside any provider root, and it may not be
 valid UTF-8. Returning it as a `Path` would either lie about the namespace or discard values a
@@ -61,7 +61,7 @@ Intrinsic.osHostVariable(name: &[u8], output: &mut [u8], reason: &mut i32, nativ
 Intrinsic.osHostWorkingDirectory(output: &mut [u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>
 ```
 
-`Some(n)` reports the value's *complete* byte length and copies the prefix that fits, so one
+`Some(n)` reports the value's _complete_ byte length and copies the prefix that fits, so one
 undersized buffer costs exactly one extra pass with an exactly sized one rather than a separate
 buffer-too-small protocol. `None` with the not-found reason is absence; `None` with any other reason
 is a host error. Reusing the shape means the operations inherit the existing unsafe acknowledgement,

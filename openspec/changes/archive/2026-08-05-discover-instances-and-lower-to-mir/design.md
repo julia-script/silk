@@ -38,7 +38,7 @@ discipline and lowering contract are the real structure.
    an error. Discovery with an unavailable entry records nothing.
 
 3. **Instance keys carry empty argument lists by construction.** `{declaration, typeArguments:
-   [], contractRow: []}` — the shape the generic language fills in; equality is structural.
+[], contractRow: []}` — the shape the generic language fills in; equality is structural.
 
 4. **Lowering is per-instance and purely local.** Each HIR body linearizes into one entry block:
    post-order over arguments (evaluation order), one fresh local per intermediate result,

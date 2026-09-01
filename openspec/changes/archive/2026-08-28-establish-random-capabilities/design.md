@@ -55,12 +55,12 @@ primitive reports only success or failure to its canonical source provider.
 
 The standard-library manifest contains these canonical modules:
 
-| Module | Provider mode | Responsibility |
-|---|---|---|
-| `silk/random` | exclusive `&mut Random` | secure exact fill and source-derived operations |
-| `silk/os_random` | stateless exclusive provider | official evaluator/native secure boundary |
-| `silk/insecure_random` | exclusive `&mut InsecureRandom` | renamed deterministic xoshiro256** stream |
-| `silk/insecure_seed` | shared `&InsecureSeed` | one immutable 128-bit seed |
+| Module                 | Provider mode                   | Responsibility                                  |
+| ---------------------- | ------------------------------- | ----------------------------------------------- |
+| `silk/random`          | exclusive `&mut Random`         | secure exact fill and source-derived operations |
+| `silk/os_random`       | stateless exclusive provider    | official evaluator/native secure boundary       |
+| `silk/insecure_random` | exclusive `&mut InsecureRandom` | renamed deterministic xoshiro256** stream       |
+| `silk/insecure_seed`   | shared `&InsecureSeed`          | one immutable 128-bit seed                      |
 
 `silk/random` defines one service operation:
 

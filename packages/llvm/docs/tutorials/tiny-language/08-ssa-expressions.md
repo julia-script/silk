@@ -72,20 +72,20 @@ The integer case still uses `Constant.integerSigned`. The unary case recursively
 operand and passes the result to `FunctionBody.negate`. For a binary node, lower the left and right
 children first, then append the matching instruction.
 
-| Tiny operator | LLVM operation | Why |
-| --- | --- | --- |
-| unary `-` | `FunctionBody.negate` | Subtracts the operand from a same-typed zero |
-| `+` | `add` | Signed and unsigned addition share this instruction |
-| `-` | `sub` | Signed and unsigned subtraction share this instruction |
-| `*` | `mul` | Signed and unsigned multiplication share this instruction |
-| `/` | `sdiv` | Tiny integers are signed and division truncates toward zero |
-| `<` | `icmp slt`, then `zext` | Signed less-than, normalized from `i1` to `i32` |
-| `>` | `icmp sgt`, then `zext` | Signed greater-than, normalized from `i1` to `i32` |
+| Tiny operator | LLVM operation          | Why                                                         |
+| ------------- | ----------------------- | ----------------------------------------------------------- |
+| unary `-`     | `FunctionBody.negate`   | Subtracts the operand from a same-typed zero                |
+| `+`           | `add`                   | Signed and unsigned addition share this instruction         |
+| `-`           | `sub`                   | Signed and unsigned subtraction share this instruction      |
+| `*`           | `mul`                   | Signed and unsigned multiplication share this instruction   |
+| `/`           | `sdiv`                  | Tiny integers are signed and division truncates toward zero |
+| `<`           | `icmp slt`, then `zext` | Signed less-than, normalized from `i1` to `i32`             |
+| `>`           | `icmp sgt`, then `zext` | Signed greater-than, normalized from `i1` to `i32`          |
 
 For example, the addition case is:
 
 ```typescript
-return yield* FunctionBody.binary(context.body, 'add', left, right, 'added')
+return yield * FunctionBody.binary(context.body, 'add', left, right, 'added')
 ```
 
 Do not add `nsw`, `nuw`, or `exact` promises. Tiny has not defined an overflow policy that would
@@ -143,20 +143,16 @@ returning that `i1` directly would violate both the language contract and `main`
 Lower `<` and `>` in two steps:
 
 ```typescript
-const comparison = yield* FunctionBody.integerCompare(
-  context.body,
-  expression.operator === '<' ? 'slt' : 'sgt',
-  left,
-  right,
-  'comparison',
-)
-return yield* FunctionBody.cast(
-  context.body,
-  'zext',
-  comparison,
-  context.i32,
-  'comparison_i32',
-)
+const comparison =
+  yield *
+  FunctionBody.integerCompare(
+    context.body,
+    expression.operator === '<' ? 'slt' : 'sgt',
+    left,
+    right,
+    'comparison',
+  )
+return yield * FunctionBody.cast(context.body, 'zext', comparison, context.i32, 'comparison_i32')
 ```
 
 Zero extension maps false to `i32 0` and true to `i32 1`. For `-1 < 0`, the checkpoint IR is:
@@ -176,12 +172,12 @@ ret i32 %comparison_i32
 Change the source string in `Cli.ts`, regenerate the IR with `pnpm --silent smoke`, compile with
 LLVM 22 Clang as in Lesson 7, and inspect each exit status:
 
-| Tiny `main` body | Important IR | Exit status |
-| --- | --- | ---: |
-| `1 + 2 * 3` | `mul` before dependent `add` | 7 |
-| `-20 / 3` | `sub` from zero, then `sdiv` | 250 (`-6` modulo 256) |
-| `-1 < 0` | `icmp slt`, then `zext` | 1 |
-| `2 > 3` | `icmp sgt`, then `zext` | 0 |
+| Tiny `main` body | Important IR                 |           Exit status |
+| ---------------- | ---------------------------- | --------------------: |
+| `1 + 2 * 3`      | `mul` before dependent `add` |                     7 |
+| `-20 / 3`        | `sub` from zero, then `sdiv` | 250 (`-6` modulo 256) |
+| `-1 < 0`         | `icmp slt`, then `zext`      |                     1 |
+| `2 > 3`          | `icmp sgt`, then `zext`      |                     0 |
 
 Add compiler tests that assert these instruction shapes and run:
 

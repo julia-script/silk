@@ -6,7 +6,7 @@ See proposal.md — Why. The compiler compiles exactly one `SyntaxFile`; ticket 
 is loading the reachable module closure of one compilation request. Issue 04 pins the semantics
 this change must respect: import paths are logical module identities (never OS paths), importing
 the current module is redundant and rejected, and **module-level import cycles are permitted** —
-only irreducible *semantic* cycles are errors, and none of those can exist yet in this slice.
+only irreducible _semantic_ cycles are errors, and none of those can exist yet in this slice.
 Issue 08 owns the final import spelling; this change ships a deliberately provisional one.
 
 ## Goals / Non-Goals
@@ -23,7 +23,7 @@ Issue 08 owns the final import spelling; this change ships a deliberately provis
 
 **Non-Goals**
 
-- No import *bindings* — no namespace aliases, no selective imports, no name-resolution effects
+- No import _bindings_ — no namespace aliases, no selective imports, no name-resolution effects
   (issue 04's binding rules arrive with declaration collection; downstream phases keep operating
   per module).
 - No filesystem: sources arrive as bytes in the request, exactly like `SourceFile` today.
@@ -33,8 +33,8 @@ Issue 08 owns the final import spelling; this change ships a deliberately provis
 
 1. **Request shape: `{ rootModule, sources: ReadonlyMap<identity, bytes> }`.** The logical module
    identity doubles as the `SourceFile` id, so spans and diagnostics already carry canonical
-   module identity with no new plumbing. A missing *root* is a caller-contract defect (rejected),
-   not a source diagnostic — there is no source position to attach it to. A missing *imported*
+   module identity with no new plumbing. A missing _root_ is a caller-contract defect (rejected),
+   not a source diagnostic — there is no source position to attach it to. A missing _imported_
    module is an ordinary diagnostic at the import name's span.
 
 2. **The `module` phase joins the closed phase union** with codes `MOD0001` (unknown module) and

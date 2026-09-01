@@ -7,7 +7,7 @@
       environment that starts empty, and an optional working directory, with `addArgument`,
       `setVariable`, and borrowed accessors.
 - [x] 1.3 Add `ProcessOutcome` as an ordinary struct holding `Exited { code output errors } |
-      Signaled { signal output errors }`, with `exited`, `signaled`, `isSignaled`, `exitCode`,
+Signaled { signal output errors }`, with `exited`, `signaled`, `isSignaled`, `exitCode`,
       `terminatingSignal`, `outputBytes`, and `errorBytes` accessors and the `submit` service effect.
 - [x] 1.4 Register the module and its prelude aliases in the standard-library manifest and
       regenerate the compiler-shipped source table.

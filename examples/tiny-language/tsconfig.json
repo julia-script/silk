@@ -13,7 +13,8 @@
     "noEmitOnError": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node"],
+    "plugins": [{ "name": "@effect/language-service", "diagnostics": false }]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

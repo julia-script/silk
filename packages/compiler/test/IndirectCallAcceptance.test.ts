@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import type * as Mir from '../src/Mir.js'
 
@@ -80,7 +81,7 @@ it.effect('calls through a function-typed parameter and agrees on the evaluator 
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        `${name}: ${JSON.stringify(evaluated, (_, value) =>
+        `${name}: ${Json.stringify(evaluated, (_, value) =>
           typeof value === 'bigint' ? value.toString() : value,
         )}`,
       )
@@ -138,7 +139,10 @@ pub fn main() -> i32 { return apply(double, 20) + apply(inc, 1) }`
     const applied = Analysis.loweredMir(snapshot)
       .functions.filter((fn) => fn.id.name === 'apply')
       .map((fn) => callableTargetName(fn.localTypes.at(0)))
-    assert.deepEqual([...applied].sort(), ['double', 'inc'])
+    assert.deepEqual(
+      [...applied].sort((left, right) => (left ?? '').localeCompare(right ?? '')),
+      ['double', 'inc'],
+    )
 
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')

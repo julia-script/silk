@@ -8,4 +8,3 @@ Hover SHALL render `f32` or `f64` from semantic facts and never substitute a bac
 
 - **WHEN** an unconstrained float literal is accepted
 - **THEN** hover reports `f64`
-

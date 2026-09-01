@@ -16,5 +16,5 @@ export class CommandExit extends Data.TaggedError('CommandExit')<{
 export const complete = Effect.fn('CommandExit.complete')(function* (
   status: number,
 ): Effect.fn.Return<void, CommandExit> {
-  if (status !== 0) yield* new CommandExit({ status })
+  if (status !== 0) return yield* new CommandExit({ status })
 })

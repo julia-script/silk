@@ -11,17 +11,17 @@ answer.
 ### The opt-out marker is `silk,ignore`, not `silk ignore`
 
 The prose documents under `apps/docs/content/language/` already spell a non-compiled example
-```` ```silk ignore ````, and `DocumentationExamples.test.ts` reads that form straight out of the
+` ```silk ignore `, and `DocumentationExamples.test.ts` reads that form straight out of the
 Markdown. A doctest workflow cannot reuse it.
 
 The documentation model parses a `///` comment with CommonMark, and CommonMark splits a fence's info
 string into a language word and a trailing meta string. The model records the language word and
-drops the meta string. So inside a documentation comment, ```` ```silk ignore ```` and
-```` ```silk ```` are byte-identical by the time they reach the JSON: both say `"language": "silk"`.
+drops the meta string. So inside a documentation comment, ` ```silk ignore ` and
+` ```silk ` are byte-identical by the time they reach the JSON: both say `"language": "silk"`.
 Honoring the space-separated form would require adding the meta string to the JSON, which is a
 schema change this change refuses to make.
 
-The comma form survives, because a comma is not whitespace: ```` ```silk,ignore ```` reaches the
+The comma form survives, because a comma is not whitespace: ` ```silk,ignore ` reaches the
 JSON as `"language": "silk,ignore"`. This is also the form Rust uses for the same job, so it is not
 a local invention. The cost is a real trap — an author who writes the prose documents' form inside a
 `///` comment gets an example that is compiled rather than skipped — and the mitigation is that the
@@ -54,7 +54,7 @@ The JSON carries `sourceId`, `start`, and `end` — module-relative bytes, delib
 numbers and deliberately not absolute paths. A report that says "byte 21874" helps nobody, so the
 workflow converts the offset into a one-based line by counting newlines in the module's source.
 
-This does not weaken the JSON-only rule for the *renderer*, which never needs a line number. It is
+This does not weaken the JSON-only rule for the _renderer_, which never needs a line number. It is
 also not re-parsing the documentation: the workflow reads the JSON for the example text, the
 language token, and the offset, and reads the source only to count newlines before that offset. The
 source lookup is a caller-supplied function, so the standard library resolves through the compiler's

@@ -61,9 +61,7 @@ it.effect('rolls back callback and validation failures without exposing partial 
         fn,
         Effect.fnUntraced(function* (body) {
           yield* Block.make(body, 'discarded')
-          return yield* Effect.fail(
-            invalidInput({ operation: 'test', message: 'discard this body', input: fn }),
-          )
+          return yield* invalidInput({ operation: 'test', message: 'discard this body', input: fn })
         }),
       ),
     )
@@ -308,9 +306,11 @@ it.effect('builds a diamond with branches, a forward-aware phi, and a direct cal
         yield* Block.setInsertionPoint(body, onTrue)
         const added = yield* FunctionBody.callDirect(body, callee, [left, right], 'added')
         if (added === undefined) {
-          return yield* Effect.fail(
-            invalidInput({ operation: 'test', message: 'expected call result', input: callee }),
-          )
+          return yield* invalidInput({
+            operation: 'test',
+            message: 'expected call result',
+            input: callee,
+          })
         }
         yield* FunctionBody.branch(body, merge)
 
@@ -444,9 +444,11 @@ it.effect('validates vararg calls and preserves call settings', () =>
           tail: 'tail',
         })
         if (result === undefined) {
-          return yield* Effect.fail(
-            invalidInput({ operation: 'test', message: 'expected call result', input: callee }),
-          )
+          return yield* invalidInput({
+            operation: 'test',
+            message: 'expected call result',
+            input: callee,
+          })
         }
         yield* FunctionBody.returnValue(body, result)
       }),

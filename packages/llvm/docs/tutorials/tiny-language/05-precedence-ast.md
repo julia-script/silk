@@ -83,13 +83,13 @@ const parseBinary = Effect.fnUntraced(function* (
 
 For `1 + 2 * 3`, the cursor and minimum precedence move like this:
 
-| Step | Remaining input | Minimum | Result being built |
-| --- | --- | ---: | --- |
-| Parse left | `+ 2 * 3` | 0 | `1` |
-| Consume `+` | `2 * 3` | 0 | parse right at 11 |
-| See `*` on right | `* 3` | 11 | `*` has 20, so keep climbing |
-| Finish right | end | 11 | `(* 2 3)` |
-| Finish outer | end | 0 | `(+ 1 (* 2 3))` |
+| Step             | Remaining input | Minimum | Result being built           |
+| ---------------- | --------------- | ------: | ---------------------------- |
+| Parse left       | `+ 2 * 3`       |       0 | `1`                          |
+| Consume `+`      | `2 * 3`         |       0 | parse right at 11            |
+| See `*` on right | `* 3`           |      11 | `*` has 20, so keep climbing |
+| Finish right     | end             |      11 | `(* 2 3)`                    |
+| Finish outer     | end             |       0 | `(+ 1 (* 2 3))`              |
 
 The table is also a text description of the tree:
 

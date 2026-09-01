@@ -135,12 +135,12 @@ these LLVM concepts carefully before you generate any IR yourself.
 
 ## Know who owns each part
 
-| Owner | Responsibility in this tutorial |
-| --- | --- |
-| You and the Tiny frontend | Define Tiny syntax and meaning; lex, parse, resolve, and lower it. |
-| `@silklang/llvm` | Construct and validate the LLVM module; emit textual IR or bitcode. |
-| Clang | Compile the emitted IR for the host target and link a native executable. |
-| The operating system | Load the executable, run `main`, and expose its exit status. |
+| Owner                     | Responsibility in this tutorial                                          |
+| ------------------------- | ------------------------------------------------------------------------ |
+| You and the Tiny frontend | Define Tiny syntax and meaning; lex, parse, resolve, and lower it.       |
+| `@silklang/llvm`          | Construct and validate the LLVM module; emit textual IR or bitcode.      |
+| Clang                     | Compile the emitted IR for the host target and link a native executable. |
+| The operating system      | Load the executable, run `main`, and expose its exit status.             |
 
 `@silklang/llvm` intentionally does not read your source file, run Clang, link an executable,
 or provide a JIT. Those boundaries keep the package deterministic and let the tutorial show each

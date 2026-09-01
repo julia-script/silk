@@ -10,6 +10,7 @@ import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as Stdlib from '@silklang/compiler/Stdlib'
 import * as WorkspaceInventory from '@silklang/compiler/WorkspaceInventory'
 import * as Effect from 'effect/Effect'
+import * as Inspectable from 'effect/Inspectable'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import { CompletionItemKind, SymbolKind } from 'vscode-languageserver-types'
@@ -168,7 +169,7 @@ pub fn main() -> i32 {
     assert.strictEqual(
       hoverText('allocator', 1),
       '```silk\nlet mut allocator: SystemAllocator\n```\n\n**Implements**\n\n- `Allocator`',
-      JSON.stringify(Analysis.diagnostics(snapshot)),
+      Inspectable.toStringUnknown(Analysis.diagnostics(snapshot)),
     )
     assert.include(hoverText('Allocator', 2) ?? '', 'pub service Allocator')
     assert.strictEqual(

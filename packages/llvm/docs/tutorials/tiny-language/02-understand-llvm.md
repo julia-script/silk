@@ -68,13 +68,13 @@ paths. We will introduce those ideas when arithmetic and conditionals make them 
 
 These files are related, but they are not interchangeable:
 
-| Artifact | Typical form | Produced here by | Consumed here by |
-| --- | --- | --- | --- |
-| Tiny source | `.tiny` text | You | Tiny lexer and parser |
-| LLVM assembly | `.ll` text | `@silklang/llvm` | Humans, Clang, LLVM tools |
-| LLVM bitcode | `.bc` bytes | `@silklang/llvm` | Clang and LLVM tools |
-| Object file | `.o` or platform equivalent | Clang/LLVM backend | Platform linker |
-| Native executable | Platform binary | Linker, driven by Clang | Operating system |
+| Artifact          | Typical form                | Produced here by        | Consumed here by          |
+| ----------------- | --------------------------- | ----------------------- | ------------------------- |
+| Tiny source       | `.tiny` text                | You                     | Tiny lexer and parser     |
+| LLVM assembly     | `.ll` text                  | `@silklang/llvm`        | Humans, Clang, LLVM tools |
+| LLVM bitcode      | `.bc` bytes                 | `@silklang/llvm`        | Clang and LLVM tools      |
+| Object file       | `.o` or platform equivalent | Clang/LLVM backend      | Platform linker           |
+| Native executable | Platform binary             | Linker, driven by Clang | Operating system          |
 
 Textual IR and bitcode encode the same kind of LLVM module. Textual `.ll` is designed to be read;
 bitcode is its compact binary representation. Neither is the host machine's object code.
@@ -95,7 +95,7 @@ operations rather than the instruction set of one physical processor.
 module. It needs an LLVM-aware consumer such as Clang; the browser playground will compile Tiny to
 IR for inspection, not execute bitcode.
 
-When one of these ideas feels blurry, ask: *which tool consumes this artifact next?* The answer
+When one of these ideas feels blurry, ask: _which tool consumes this artifact next?_ The answer
 usually restores the boundary.
 
 ## Checkpoint: label the IR

@@ -1,11 +1,14 @@
 # bootstrap-native-toolchain Specification
 
 ## Purpose
+
 Pinned-Clang process orchestration between deterministic bitcode and a runnable binary: object
 emission under fixed optimization profiles, build-scope-owned path-backed intermediates, the
 `NativeLinker` service with its `ClangLinker` implementation, and the minimal C runtime shim that
 reaches a closed native entry.
+
 ## Requirements
+
 ### Requirement: A pinned Clang emits the target object under fixed profiles
 
 Object emission SHALL invoke the caller-pinned external Clang with `-c`, the canonical target from

@@ -214,5 +214,8 @@ export const savedListAtom = Atom.make((get): ReadonlyArray<Workspace> =>
 /** Seeded arrangements plus saved ones; a saved workspace shadows a seeded one of the same name. */
 export const workspacesAtom = Atom.make((get): ReadonlyArray<Workspace> => {
   const saved = get(savedListAtom)
-  return [...seededWorkspaces.filter((seeded) => !saved.some((w) => w.name === seeded.name)), ...saved]
+  return [
+    ...seededWorkspaces.filter((seeded) => !saved.some((w) => w.name === seeded.name)),
+    ...saved,
+  ]
 })

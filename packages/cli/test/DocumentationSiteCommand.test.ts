@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
+import * as Json from '@silklang/docgen/Json'
 import * as Model from '@silklang/docgen/Model'
 import * as Effect from 'effect/Effect'
 import * as DocumentationSiteCommand from '../src/DocumentationSiteCommand.js'
@@ -60,7 +61,7 @@ it.effect('writes a site from a documentation JSON file', () =>
       const input = join(root, 'documentation.json')
       const output = join(root, 'site')
       const snippetBundle = join(root, 'silk-snippet.js')
-      writeFileSync(input, JSON.stringify(documentation))
+      writeFileSync(input, Json.encodeValue(documentation))
       writeFileSync(snippetBundle, 'customElements.define("silk-snippet", class {})')
 
       const status = yield* DocumentationSiteCommand.run({
@@ -112,11 +113,11 @@ it.effect('refuses an input that is missing, malformed, or not documentation', (
       assert.strictEqual(yield* DocumentationSiteCommand.run({ input: malformed, output }), 2)
 
       const other = join(root, 'other.json')
-      writeFileSync(other, JSON.stringify({ schema: 'something-else', modules: [] }))
+      writeFileSync(other, Json.encodeValue({ schema: 'something-else', modules: [] }))
       assert.strictEqual(yield* DocumentationSiteCommand.run({ input: other, output }), 2)
 
       const missingBundleInput = join(root, 'documentation.json')
-      writeFileSync(missingBundleInput, JSON.stringify(documentation))
+      writeFileSync(missingBundleInput, Json.encodeValue(documentation))
       assert.strictEqual(
         yield* DocumentationSiteCommand.run({
           input: missingBundleInput,

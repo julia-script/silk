@@ -12,13 +12,13 @@ object files, and executables.
 
 Tiny now exposes these expected failure families:
 
-| Tag | Owner | Representative failure |
-| --- | --- | --- |
-| `LexError` | Lexer | Unsupported source character |
-| `ParseError` | Parser | Missing `else` or trailing syntax |
-| `ResolutionError` | Tiny resolution | Unknown name, duplicate function, or wrong arity |
-| `CompileError` | Tiny-to-LLVM lowering invariant | A Tiny `i32` call unexpectedly produces no value |
-| `LlvmError` | `@silklang/llvm` | Invalid type, ownership, body, or serialization state |
+| Tag               | Owner                           | Representative failure                                |
+| ----------------- | ------------------------------- | ----------------------------------------------------- |
+| `LexError`        | Lexer                           | Unsupported source character                          |
+| `ParseError`      | Parser                          | Missing `else` or trailing syntax                     |
+| `ResolutionError` | Tiny resolution                 | Unknown name, duplicate function, or wrong arity      |
+| `CompileError`    | Tiny-to-LLVM lowering invariant | A Tiny `i32` call unexpectedly produces no value      |
+| `LlvmError`       | `@silklang/llvm`                | Invalid type, ownership, body, or serialization state |
 
 `LexError`, `ParseError`, and `ResolutionError` carry `[start, end)` source offsets. `LlvmError`
 keeps its package operation and discriminated reason unchanged. Do not catch these inside
@@ -95,16 +95,18 @@ module builder from a successful compilation.
 Create a dedicated test builder, declare `answer`, and deliberately omit its terminator:
 
 ```typescript
-const failure = yield* Effect.flip(
-  FunctionActor.buildBody(
-    builder,
-    answer,
-    Effect.fnUntraced(function* (body) {
-      yield* Block.make(body, 'entry')
-      // Deliberate break: no return terminator.
-    }),
-  ),
-)
+const failure =
+  yield *
+  Effect.flip(
+    FunctionActor.buildBody(
+      builder,
+      answer,
+      Effect.fnUntraced(function* (body) {
+        yield* Block.make(body, 'entry')
+        // Deliberate break: no return terminator.
+      }),
+    ),
+  )
 ```
 
 `Function.buildBody` validates the draft before commit. The Effect fails with `LlvmError`, and
@@ -113,15 +115,16 @@ rendering the builder still shows `declare i32 @answer()` rather than a partial 
 Now restore the body:
 
 ```typescript
-yield* FunctionActor.buildBody(
-  builder,
-  answer,
-  Effect.fnUntraced(function* (body) {
-    yield* Block.make(body, 'entry')
-    const value = yield* Constant.integerSigned(builder, i32, 42)
-    yield* FunctionBody.returnValue(body, value)
-  }),
-)
+yield *
+  FunctionActor.buildBody(
+    builder,
+    answer,
+    Effect.fnUntraced(function* (body) {
+      yield* Block.make(body, 'entry')
+      const value = yield* Constant.integerSigned(builder, i32, 42)
+      yield* FunctionBody.returnValue(body, value)
+    }),
+  )
 ```
 
 The retry succeeds and renders `define i32 @answer()` with `ret i32 42`. The failed draft released
@@ -145,9 +148,9 @@ export interface Compilation {
 After `buildProgram` returns one committed builder, serialize both formats:
 
 ```typescript
-const builder = yield* buildProgram(program)
-const ir = yield* IrText.render(builder)
-const bitcode = yield* Bitcode.encode(builder)
+const builder = yield * buildProgram(program)
+const ir = yield * IrText.render(builder)
+const bitcode = yield * Bitcode.encode(builder)
 return Object.freeze({ source, tokens, program, ir, bitcode })
 ```
 
@@ -157,14 +160,14 @@ it does not invoke Clang, LLVM tools, a server, or the filesystem.
 
 ## Use the right name for each artifact
 
-| Artifact | Typical extension | What it contains | Human-readable? |
-| --- | --- | --- | --- |
-| Tiny source | `.tiny` | Tiny grammar and functions | yes |
-| Textual LLVM IR | `.ll` | Typed LLVM module as text | yes |
-| LLVM bitcode | `.bc` | Binary serialization of LLVM IR | no |
-| VM bytecode | varies | Instructions for a particular virtual machine | usually no |
-| Object file | `.o` / `.obj` | Relocatable target machine code and metadata | no |
-| Executable | platform-specific | Linked native program | no |
+| Artifact        | Typical extension | What it contains                              | Human-readable? |
+| --------------- | ----------------- | --------------------------------------------- | --------------- |
+| Tiny source     | `.tiny`           | Tiny grammar and functions                    | yes             |
+| Textual LLVM IR | `.ll`             | Typed LLVM module as text                     | yes             |
+| LLVM bitcode    | `.bc`             | Binary serialization of LLVM IR               | no              |
+| VM bytecode     | varies            | Instructions for a particular virtual machine | usually no      |
+| Object file     | `.o` / `.obj`     | Relocatable target machine code and metadata  | no              |
+| Executable      | platform-specific | Linked native program                         | no              |
 
 LLVM bitcode is not “Tiny bytecode.” Tiny does not define a virtual instruction set or bytecode
 interpreter. Bitcode and `.ll` are two representations of the LLVM module produced after Tiny has

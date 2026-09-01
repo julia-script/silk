@@ -6,6 +6,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Unknown value reference diagnostic
+
 A present bare identifier with no matching local parameter, preceding binding, or in-scope pattern
 binding SHALL retain a `Missing` reference fact and produce one `SEM0006` diagnostic at the exact
 reference span using value-name terminology. Duplicate declarations SHALL rely on
@@ -14,14 +15,17 @@ reference. Diagnostics SHALL remain deterministic and phase-separated with exist
 parser, and semantic diagnostics.
 
 #### Scenario: Diagnose an unknown value name
+
 - **WHEN** a function returns `missing` without any in-scope value named `missing`
 - **THEN** the reference is missing and one `SEM0006` diagnostic identifies the exact identifier span as an unknown value
 
 #### Scenario: Avoid duplicate ambiguity diagnostics
+
 - **WHEN** a reference matches duplicate parameter declarations
 - **THEN** only the later declarations carry `SEM0005` and no reference-site ambiguity diagnostic is added
 
 #### Scenario: Repeat value analysis
+
 - **WHEN** equivalent value declarations and references are analyzed repeatedly in fresh processes
 - **THEN** identities, lookup outcomes, reference facts, types, compatibility, and diagnostic ordering are identical
 

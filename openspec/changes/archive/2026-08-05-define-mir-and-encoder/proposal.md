@@ -2,7 +2,7 @@
 
 MIR is the pipeline's second owned IR — the monomorphic, backend-neutral control-flow graph both
 the LLVM backend and the future WebAssembly backend consume, and the level the interpreter will
-execute. Defining MIR, its invariants, and its encoder *before* lowering exists lets the data
+execute. Defining MIR, its invariants, and its encoder _before_ lowering exists lets the data
 model, verifier, and golden tests stabilize against hand-built samples instead of co-evolving
 with a lowering pass.
 

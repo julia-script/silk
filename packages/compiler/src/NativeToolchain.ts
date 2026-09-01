@@ -212,6 +212,10 @@ export interface CleanupOperation {
   ) => void
 }
 
+class CleanupAttemptError extends Data.TaggedError('CleanupAttemptError')<{
+  readonly cause: unknown
+}> {}
+
 const nodeCleanup: CleanupOperation = Object.freeze({
   remove: (path: string, options: { readonly force: true; readonly recursive?: boolean }) =>
     rmSync(path, options),
@@ -227,27 +231,27 @@ const cleanupPath = Effect.fnUntraced(function* (
   const first = yield* Effect.result(
     Effect.try({
       try: () => cleanup.remove(path, options),
-      catch: (cause) => cause,
+      catch: (cause) => new CleanupAttemptError({ cause }),
     }),
   )
   if (Result.isSuccess(first)) return
   const retry = yield* Effect.result(
     Effect.try({
       try: () => cleanup.remove(path, options),
-      catch: (cause) => cause,
+      catch: (cause) => new CleanupAttemptError({ cause }),
     }),
   )
   if (Result.isSuccess(retry)) return
   const fallback = yield* Effect.result(
     Effect.try({
       try: () => nodeCleanup.remove(path, options),
-      catch: (cause) => cause,
+      catch: (cause) => new CleanupAttemptError({ cause }),
     }),
   )
   return yield* storageError('NativeToolchain.cleanupPath', stage, path, {
-    first: first.failure,
-    retry: retry.failure,
-    ...(Result.isFailure(fallback) ? { fallback: fallback.failure } : {}),
+    first: first.failure.cause,
+    retry: retry.failure.cause,
+    ...(Result.isFailure(fallback) ? { fallback: fallback.failure.cause } : {}),
   })
 })
 
@@ -329,9 +333,8 @@ export const makeDiskArtifactCache = (directory: string): ArtifactCache => {
 
 const processArtifactCache = new Map<string, Uint8Array>()
 
-export const defaultArtifactCache = (): ArtifactCache => {
-  const directory = process.env.SILK_NATIVE_CACHE_DIR
-  if (directory !== undefined && directory !== '') return makeDiskArtifactCache(directory)
+export const defaultArtifactCache = (directory = ''): ArtifactCache => {
+  if (directory !== '') return makeDiskArtifactCache(directory)
   return Object.freeze({
     _tag: 'ArtifactCache',
     get: (key: string) => Effect.succeed(processArtifactCache.get(key)),
@@ -463,7 +466,7 @@ export const withBuildScope = Effect.fn('NativeToolchain.withBuildScope')(functi
     run,
     (scope, exit) =>
       options.saveTemps === true
-        ? Effect.succeed(undefined)
+        ? Effect.void
         : releaseCleanup(
             exit,
             cleanupPath(

@@ -1540,13 +1540,12 @@ export const discover = (
             }),
           ])
         }),
-      ...[...finalGraph.effectIdentities].sort().map(
-        (identity): SuspensionFact =>
-          Object.freeze({
-            _tag: 'SuspensionFact',
-            subject: Object.freeze({ _tag: 'Effect', identity }),
-            summary: summaryOfNode(effectNode(identity)),
-          }),
+      ...[...finalGraph.effectIdentities].sort().map((identity): SuspensionFact =>
+        Object.freeze({
+          _tag: 'SuspensionFact',
+          subject: Object.freeze({ _tag: 'Effect', identity }),
+          summary: summaryOfNode(effectNode(identity)),
+        }),
       ),
     ]),
     residualizationDiagnostics: Object.freeze([...residualizationDiagnostics.values()]),

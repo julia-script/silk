@@ -48,4 +48,3 @@ captures, and other owned storage.
 
 - **WHEN** source attempts to place a returned slice in a struct field or array element
 - **THEN** analysis retains the stored-borrow prohibition and reports that the lifetime-bearing value is not an owned field value
-

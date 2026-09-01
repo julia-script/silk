@@ -100,17 +100,17 @@ pub fn main() -> i32 {
 }
 ```
 
-Notes on what is *not* here:
+Notes on what is _not_ here:
 
 - There is no `for` loop, no iterator, and no range. `while` is the whole vocabulary, plus `break`
   and `continue`.
 - `if` is a statement, not an expression. There is no `let x = if ...`. Declare the binding `mut`
-  and assign it in each branch, or `return` from the branches. (`match` *is* an expression, but its
+  and assign it in each branch, or `return` from the branches. (`match` _is_ an expression, but its
   scrutinee must be a struct, nominal union, structural union, or scalar enum — it does not replace a scalar
   comparison.)
 - Conditions take no parentheses and the braces are mandatory.
 
-Arithmetic is homogeneous: both operands must already be the *same* integer type. Silk performs no
+Arithmetic is homogeneous: both operands must already be the _same_ integer type. Silk performs no
 implicit widening at all, so `i32 + i64` is an error rather than a conversion. Note also that
 there is no negative integer literal — a leading `-` is a separate prefix operator, and subtracting
 from `0` is the common way to write a negative constant.
@@ -141,7 +141,7 @@ pub fn main() -> i32 {
 
 The `move` in `manhattan(move origin)` is the ownership rule in action. `Point` is a struct, and
 structs are **move-only**: passing one by value hands the whole value to `manhattan`, and Silk
-requires you to say so. Dropping the `move` is an `OWN0003` error, and using `origin` again *after*
+requires you to say so. Dropping the `move` is an `OWN0003` error, and using `origin` again _after_
 the move is an `OWN0001` error.
 
 This is why the loop counters in the previous section needed no `move`. `i32`, `bool`, strings,
@@ -259,7 +259,7 @@ pub fn main() -> i32 {
 }
 ```
 
-When already-independent types need to compose without a declaring parent, use a *structural union*
+When already-independent types need to compose without a declaring parent, use a _structural union_
 written `A | B`. A structural union value has one active member, and `match` takes it apart. `match`
 is an expression, so it can produce a value:
 
@@ -323,7 +323,7 @@ What each piece does:
   of the signature, so a caller cannot forget it.
 - `fail Overflowed {}` stops the computation with that value. It is not an exception — nothing
   unwinds invisibly, and the type system already knew it could happen.
-- Calling `checked(21)` only *builds* the computation. `run` executes it. Forgetting `run` is a
+- Calling `checked(21)` only _builds_ the computation. `run` executes it. Forgetting `run` is a
   type error, not a silently ignored value.
 - `run` propagates the failure into the enclosing effect's row, which is why `main` also declares
   `! Overflowed`.

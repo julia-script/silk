@@ -27,10 +27,7 @@ const program = Effect.gen(function* () {
   const signature = yield* Type.functionType(builder, voidType, [pointer, pointer, i32])
   const fn = yield* FunctionActor.declare(builder, 'update', signature)
   const alignment = yield* Alignment.fromByteUnits(4)
-  const volatileRead = pipe(
-    MemoryAccess.make({ alignment }),
-    MemoryAccess.withVolatile(),
-  )
+  const volatileRead = pipe(MemoryAccess.make({ alignment }), MemoryAccess.withVolatile())
   const monotonicUpdate = pipe(
     MemoryAccess.make({ alignment }),
     MemoryAccess.withAtomic('monotonic'),
@@ -63,11 +60,7 @@ const program = Effect.gen(function* () {
       // Invoke LLVM's overloaded memcpy intrinsic for a four-byte copy.
       const length = yield* Constant.integerUnsigned(builder, i64, 4)
       yield* Intrinsic.memcpy(body, destination, source, length)
-      yield* FunctionBody.store(
-        body,
-        yield* Constant.integerUnsigned(builder, i8, 0),
-        destination,
-      )
+      yield* FunctionBody.store(body, yield* Constant.integerUnsigned(builder, i8, 0), destination)
 
       // Every basic block ends with exactly one terminator.
       yield* FunctionBody.returnVoid(body)

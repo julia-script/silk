@@ -22,4 +22,3 @@ The evaluator SHALL represent target-selected `usize` exactly and use canonical 
 
 - **WHEN** native `usize` evaluates its maximum value
 - **THEN** evaluation returns `18446744073709551615` exactly
-

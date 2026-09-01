@@ -2936,27 +2936,6 @@ const usizeLiteralVerdicts = (
   })
 }
 
-const nestedStatements = (statements: ReadonlyArray<Hir.Statement>): ReadonlyArray<Hir.Statement> =>
-  Object.freeze(
-    statements.flatMap((statement): ReadonlyArray<Hir.Statement> => {
-      switch (statement._tag) {
-        case 'Unsafe':
-          return [statement, ...nestedStatements(statement.statements)]
-        case 'If':
-        case 'IfLet':
-          return [
-            statement,
-            ...nestedStatements(statement.taken),
-            ...nestedStatements(statement.otherwise),
-          ]
-        case 'While':
-          return [statement, ...nestedStatements(statement.body)]
-        default:
-          return [statement]
-      }
-    }),
-  )
-
 /** Selects runtime-reachable entries while reusing nominal decisions from the catalog. */
 export const plan = (
   self: Catalog,

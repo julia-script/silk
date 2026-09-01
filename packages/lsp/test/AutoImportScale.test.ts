@@ -6,7 +6,9 @@ import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silklang/compiler/Analysis'
 import * as WorkspaceInventory from '@silklang/compiler/WorkspaceInventory'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
+import * as Inspectable from 'effect/Inspectable'
 import * as Workspace from '../src/Workspace.js'
 import * as WorkspaceCatalog from '../src/WorkspaceCatalog.js'
 
@@ -16,6 +18,9 @@ it.effect(
   'keeps exact lookup header-only and reuses every unaffected module in a large workspace',
   () =>
     Effect.gen(function* () {
+      const measure = yield* Config.boolean('SILK_AUTO_IMPORT_MEASURE').pipe(
+        Config.withDefault(false),
+      )
       const root = mkdtempSync(join(tmpdir(), 'silk-auto-import-scale-'))
       const sourceRoot = join(root, 'src')
       mkdirSync(sourceRoot)
@@ -87,9 +92,9 @@ it.effect(
         moduleCount + 1 + revised.toolchain.size,
       )
       assert.isAtLeast(revised.observation.indexedExports, moduleCount + 1)
-      if (process.env.SILK_AUTO_IMPORT_MEASURE === '1')
+      if (measure)
         process.stderr.write(
-          `${JSON.stringify({
+          `${Inspectable.toStringUnknown({
             modules: moduleCount + 1,
             initial: session.inventory.observation,
             incremental: revised.observation,

@@ -136,4 +136,3 @@ filesystem APIs merely because `OsFileSystem` source is packaged.
 
 - **WHEN** executable closure reaches an OS intrinsic through `OsFileSystem` for direct Wasm
 - **THEN** generic target-availability validation reports the intrinsic as unavailable before emission
-

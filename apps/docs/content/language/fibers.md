@@ -132,10 +132,10 @@ outside a scheduler-owned task clock, still blocks the calling host thread.
 
 Both observation operations consume the Fiber:
 
-| Operation | Result |
-| --- | --- |
+| Operation     | Result                                                                   |
+| ------------- | ------------------------------------------------------------------------ |
 | `Fiber.await` | `Fiber.Outcome<A, E>` containing success, typed failure, or cancellation |
-| `Fiber.join` | `A`, with the child's `E` and `Fiber.Cancelled` in the failure channel |
+| `Fiber.join`  | `A`, with the child's `E` and `Fiber.Cancelled` in the failure channel   |
 
 If the child is complete, observation returns immediately. Otherwise the current task parks until
 completion wakes it. Reusing the consumed handle reports the ordinary ownership diagnostic

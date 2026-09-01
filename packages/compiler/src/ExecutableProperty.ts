@@ -275,18 +275,17 @@ export const derive = (
   index: DeclarationIndex.Index,
   callableIdentity: (self: Instances.CallableInstance) => string,
 ): ReadonlyArray<Fact> => {
-  const effects = discovery.effects.map(
-    (effect): Fact =>
-      Object.freeze({
-        _tag: 'ExecutablePropertyFact',
-        subject: Object.freeze({ _tag: 'Effect', identity: effect.identity }),
-        affinity: ExecutionAffinity.ofEnvironment(
-          index,
-          effect.captures.map((capture) => ({ type: capture.type })),
-        ),
-        detached: detachedOfEnvironment(index, effect.captures),
-        nonParking: nonParkingOfSummary(effect.suspension),
-      }),
+  const effects = discovery.effects.map((effect): Fact =>
+    Object.freeze({
+      _tag: 'ExecutablePropertyFact',
+      subject: Object.freeze({ _tag: 'Effect', identity: effect.identity }),
+      affinity: ExecutionAffinity.ofEnvironment(
+        index,
+        effect.captures.map((capture) => ({ type: capture.type })),
+      ),
+      detached: detachedOfEnvironment(index, effect.captures),
+      nonParking: nonParkingOfSummary(effect.suspension),
+    }),
   )
   const callables = discovery.callables.map((callable): Fact => {
     const identity = callableIdentity(callable)
@@ -406,12 +405,11 @@ export const derive = (
   }
   return Object.freeze(
     [...effects, ...callables]
-      .map(
-        (fact): Fact =>
-          Object.freeze({
-            ...fact,
-            detached: detachedThrough(`${fact.subject._tag}:${fact.subject.identity}`),
-          }),
+      .map((fact): Fact =>
+        Object.freeze({
+          ...fact,
+          detached: detachedThrough(`${fact.subject._tag}:${fact.subject.identity}`),
+        }),
       )
       .sort((left, right) => compareText(encodeSubject(left), encodeSubject(right))),
   )

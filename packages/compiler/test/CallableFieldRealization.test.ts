@@ -655,7 +655,7 @@ pub fn main() -> i32 {
     assert.deepEqual(
       realizations
         .map((realization) => Type.encode(realization.captures.at(0)?.type ?? Type.unit))
-        .sort(),
+        .sort((left, right) => left.localeCompare(right)),
       ['callable-field/specializations.Token<bool>', 'callable-field/specializations.Token<i32>'],
     )
     assert.deepEqual(
@@ -663,7 +663,7 @@ pub fn main() -> i32 {
         .map((realization) =>
           realization.environment?.owner.typeArguments.map(Type.encodeGenericArgument).join(','),
         )
-        .sort(),
+        .sort((left, right) => (left ?? '').localeCompare(right ?? '')),
       ['bool', 'i32'],
     )
   }),
@@ -693,7 +693,7 @@ pub fn main() -> i32 { return apply<i32>(0, 20) + apply<bool>(true, 20) }`
         .map((realization) =>
           realization.environment?.owner.typeArguments.map(Type.encodeGenericArgument).join(','),
         )
-        .sort(),
+        .sort((left, right) => (left ?? '').localeCompare(right ?? '')),
       ['bool', 'i32'],
     )
     assert.strictEqual(

@@ -31,7 +31,7 @@ kind, and the first deterministic textual encoder with goldens.
 
 1. **`Parser.parse` returns the `SyntaxFile`; `Lexer.lex` stays an intermediate.** The parser is
    where all artifact ingredients first coexist, so it bundles them; `LexicalResult` remains the
-   lexer→parser handoff value and `ParseResult` is deleted. *Alternative rejected:* a separate
+   lexer→parser handoff value and `ParseResult` is deleted. _Alternative rejected:_ a separate
    `SyntaxFile.fromSource` orchestrator — it would import both phases from the module the parser
    itself imports, creating a cycle for one convenience call.
 
@@ -39,7 +39,7 @@ kind, and the first deterministic textual encoder with goldens.
    construction and answers identity lookups from it; identity is `{sourceId, ordinal}` where the
    ordinal is the element's pre-order position. Tokens and nodes stay exactly as they are —
    `SyntaxTree.make` and `Token.make` signatures do not change, and pre-order over a deterministic
-   tree is deterministic. Foreign elements answer `None`. *Alternative rejected:* storing an id
+   tree is deterministic. Foreign elements answer `None`. _Alternative rejected:_ storing an id
    field on every node/token — threads an allocator through every construction site for no
    behavioral gain.
 

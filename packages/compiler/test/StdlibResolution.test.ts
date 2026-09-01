@@ -29,7 +29,7 @@ pub fn main() -> i32 {
 it('keeps the generated manifest ordered and byte-identical to canonical Silk files', () => {
   assert.deepEqual(
     Stdlib.manifest.map((entry) => entry.module),
-    [...Stdlib.manifest.map((entry) => entry.module)].sort(),
+    Stdlib.manifest.map((entry) => entry.module).sort(),
   )
   assert.include(
     Stdlib.manifest.map((entry) => entry.module),

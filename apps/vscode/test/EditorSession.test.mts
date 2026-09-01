@@ -6,6 +6,8 @@ import * as Fiber from 'effect/Fiber'
 import * as TestClock from 'effect/testing/TestClock'
 import * as EditorSession from '../src/EditorSession.mjs'
 
+const neverPromise = (): Promise<void> => Effect.runPromise(Effect.never)
+
 const uri = 'file:///workspace/Main.silk'
 
 class FakeProcess implements EditorSession.OwnedProcess {
@@ -25,7 +27,7 @@ class FakeProcess implements EditorSession.OwnedProcess {
 
   exit(): void {
     this.events.push(`${this.name}:exit`)
-    Deferred.doneUnsafe(this.exited, Effect.succeed(undefined))
+    Deferred.doneUnsafe(this.exited, Effect.void)
   }
 }
 
@@ -185,7 +187,7 @@ it.effect('forces acknowledged process retirement before starting a replacement'
       firstProcess,
       () => document,
       undefined,
-      () => new Promise<void>(() => undefined),
+      neverPromise,
     )
     const secondProcess = new FakeProcess('second', events)
     const second = new FakeClient('second', events, secondProcess, () => document)

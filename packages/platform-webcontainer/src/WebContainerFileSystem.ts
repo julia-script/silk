@@ -185,7 +185,7 @@ const makeService = Effect.fnUntraced(function* () {
     options?: { readonly recursive?: boolean | undefined; readonly mode?: number | undefined },
   ) {
     if (options?.mode !== undefined) {
-      return yield* Effect.fail(unsupported('makeDirectory.mode', target))
+      return yield* unsupported('makeDirectory.mode', target)
     }
     return yield* adapt(
       'makeDirectory',
@@ -224,18 +224,18 @@ const makeService = Effect.fnUntraced(function* () {
     },
   ) {
     if (options?.mode !== undefined) {
-      return yield* Effect.fail(unsupported('writeFile.mode', target))
+      return yield* unsupported('writeFile.mode', target)
     }
     const flag = options?.flag ?? 'w'
     if (flag === 'r') {
-      return yield* Effect.fail(invalidData('writeFile', target, 'The r flag is not writable'))
+      return yield* invalidData('writeFile', target, 'The r flag is not writable')
     }
     const exists = yield* pathExists(target)
     if ((flag === 'wx' || flag === 'wx+' || flag === 'ax' || flag === 'ax+') && exists) {
-      return yield* Effect.fail(alreadyExists('writeFile', target))
+      return yield* alreadyExists('writeFile', target)
     }
     if (flag === 'r+' && !exists) {
-      return yield* Effect.fail(notFound('writeFile', target))
+      return yield* notFound('writeFile', target)
     }
     if (flag === 'a' || flag === 'a+' || flag === 'ax' || flag === 'ax+') {
       const current = exists ? yield* readFile(target) : new Uint8Array(0)
@@ -257,7 +257,7 @@ const makeService = Effect.fnUntraced(function* () {
     },
   ) {
     if (options?.mode !== undefined) {
-      return yield* Effect.fail(unsupported('writeFileString.mode', target))
+      return yield* unsupported('writeFileString.mode', target)
     }
     const flag = options?.flag ?? 'w'
     if (flag === 'w' || flag === 'w+') {
@@ -304,7 +304,7 @@ const makeService = Effect.fnUntraced(function* () {
     const entries = yield* adapt('stat', target, primitive.readDirectory(parent))
     const entry = entries.find((candidate) => candidate.name === name)
     if (entry === undefined) {
-      return yield* Effect.fail(notFound('stat', target))
+      return yield* notFound('stat', target)
     }
     // File sizes are a documented zero approximation: upstream exposes no stat, and measuring
     // them by reading contents would make every tree walk O(total bytes). Use
@@ -381,18 +381,16 @@ const makeService = Effect.fnUntraced(function* () {
     },
   ) {
     if (options?.preserveTimestamps === true) {
-      return yield* Effect.fail(unsupported('copy.preserveTimestamps', fromPath))
+      return yield* unsupported('copy.preserveTimestamps', fromPath)
     }
     const source = path.normalize(fromPath)
     const destination = path.normalize(toPath)
     if (destination.startsWith(`${source}/`)) {
-      return yield* Effect.fail(
-        invalidData('copy', toPath, 'A directory cannot be copied into itself'),
-      )
+      return yield* invalidData('copy', toPath, 'A directory cannot be copied into itself')
     }
     const destinationExists = yield* pathExists(toPath)
     if (destinationExists && options?.overwrite === false) {
-      return yield* Effect.fail(alreadyExists('copy', toPath))
+      return yield* alreadyExists('copy', toPath)
     }
     const info = yield* stat(fromPath)
     if (info.type === 'File') {
@@ -430,15 +428,13 @@ const makeService = Effect.fnUntraced(function* () {
         return target
       }
     }
-    return yield* Effect.fail(
-      PlatformError.systemError({
-        _tag: 'AlreadyExists',
-        module: moduleName,
-        method: kind === 'directory' ? 'makeTempDirectory' : 'makeTempFile',
-        pathOrDescriptor: directory,
-        description: 'Unable to allocate a unique temporary entry after 100 attempts',
-      }),
-    )
+    return yield* PlatformError.systemError({
+      _tag: 'AlreadyExists',
+      module: moduleName,
+      method: kind === 'directory' ? 'makeTempDirectory' : 'makeTempFile',
+      pathOrDescriptor: directory,
+      description: 'Unable to allocate a unique temporary entry after 100 attempts',
+    })
   })
 
   const makeTempDirectory: FileSystem.FileSystem['makeTempDirectory'] = (options) =>
@@ -497,9 +493,7 @@ const makeService = Effect.fnUntraced(function* () {
           options?.chunkSize ?? FileSystem.KiB(64),
         )
         if (chunkSize === 0) {
-          return yield* Effect.fail(
-            invalidData('stream', target, 'chunkSize must be greater than zero'),
-          )
+          return yield* invalidData('stream', target, 'chunkSize must be greater than zero')
         }
         const available = Math.max(0, bytes.byteLength - offset)
         const limit =

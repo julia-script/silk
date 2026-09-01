@@ -1132,24 +1132,20 @@ const withTrappingStaticCompositionDrop = (source: string): string =>
   )
 
 const staticCompositionCorpus: ReadonlyArray<CorpusProgram> = [
-  ...staticCompositionScenarios.map(
-    (scenario): CorpusProgram => ({
-      name: `static-composition-${scenario.name}`,
-      source: selectStaticCompositionScenario(scenario.selection),
-      expected: { _tag: 'Completes', result: scenario.result },
-    }),
-  ),
+  ...staticCompositionScenarios.map((scenario): CorpusProgram => ({
+    name: `static-composition-${scenario.name}`,
+    source: selectStaticCompositionScenario(scenario.selection),
+    expected: { _tag: 'Completes', result: scenario.result },
+  })),
   ...staticCompositionScenarios
     .filter((scenario) => scenario.cleanupWitness)
-    .map(
-      (scenario): CorpusProgram => ({
-        name: `static-composition-${scenario.name}-cleanup-witness`,
-        source: withTrappingStaticCompositionDrop(
-          selectStaticCompositionScenario(scenario.selection),
-        ),
-        expected: { _tag: 'Trap' },
-      }),
-    ),
+    .map((scenario): CorpusProgram => ({
+      name: `static-composition-${scenario.name}-cleanup-witness`,
+      source: withTrappingStaticCompositionDrop(
+        selectStaticCompositionScenario(scenario.selection),
+      ),
+      expected: { _tag: 'Trap' },
+    })),
 ]
 
 export const corpus: ReadonlyArray<CorpusProgram> = [
@@ -2954,24 +2950,20 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     { name: 'dormant-cancel', result: 1111 },
     { name: 'selective-ready', result: 22 },
     { name: 'timer', result: 42 },
-  ].map(
-    (program): CorpusProgram => ({
-      name: `independent-execution-separation-${program.name}`,
-      source: independentExecutionPressure(program.name),
-      expected: { _tag: 'Completes', result: program.result },
-    }),
-  ),
+  ].map((program): CorpusProgram => ({
+    name: `independent-execution-separation-${program.name}`,
+    source: independentExecutionPressure(program.name),
+    expected: { _tag: 'Completes', result: program.result },
+  })),
   ...[
     { name: 'timer', source: 'timer', result: 42 },
     { name: 'coroutine', source: 'coroutine', result: 123 },
     { name: 'selective-ready', source: 'selective-ready', result: 22 },
-  ].map(
-    (program): CorpusProgram => ({
-      name: `independent-execution-separation-renamed-${program.name}`,
-      source: renameIndependentPolicy(independentExecutionPressure(program.source)),
-      expected: { _tag: 'Completes', result: program.result },
-    }),
-  ),
+  ].map((program): CorpusProgram => ({
+    name: `independent-execution-separation-renamed-${program.name}`,
+    source: renameIndependentPolicy(independentExecutionPressure(program.source)),
+    expected: { _tag: 'Completes', result: program.result },
+  })),
   {
     name: 'independent-execution-non-lifo',
     source: independentExecutionNonLifo,
@@ -3038,21 +3030,18 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     source: renamedLocalSharedPressure,
     expected: { _tag: 'Completes', result: 42 },
   },
-  ...([0, 1] as const).map(
-    (ordinal): CorpusProgram => ({
-      name: `local-shared-pressure-quota-${ordinal}`,
-      source: localSharedPressureFailure(ordinal),
-      expected: { _tag: 'Completes', result: 142 },
-    }),
-  ),
-  ...(['with', 'withMut'] as const).flatMap(
-    (outer): ReadonlyArray<CorpusProgram> =>
-      (['with', 'withMut'] as const).map((inner): CorpusProgram => {
-        const outerReference = outer === 'with' ? '&Counter' : '&mut Counter'
-        const innerCallback = inner === 'with' ? 'read' : 'increment'
-        return {
-          name: `local-shared-conflict-${outer}-${inner}`,
-          source: `import silk.allocator { Allocator }
+  ...([0, 1] as const).map((ordinal): CorpusProgram => ({
+    name: `local-shared-pressure-quota-${ordinal}`,
+    source: localSharedPressureFailure(ordinal),
+    expected: { _tag: 'Completes', result: 142 },
+  })),
+  ...(['with', 'withMut'] as const).flatMap((outer): ReadonlyArray<CorpusProgram> =>
+    (['with', 'withMut'] as const).map((inner): CorpusProgram => {
+      const outerReference = outer === 'with' ? '&Counter' : '&mut Counter'
+      const innerCallback = inner === 'with' ? 'read' : 'increment'
+      return {
+        name: `local-shared-conflict-${outer}-${inner}`,
+        source: `import silk.allocator { Allocator }
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.shared as Shared
@@ -3074,9 +3063,9 @@ effect fn conflictCase() -> i32 ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(conflictCase(), recover) }`,
-          expected: { _tag: 'Trap' },
-        }
-      }),
+        expected: { _tag: 'Trap' },
+      }
+    }),
   ),
   {
     name: 'local-shared-affine-movement',

@@ -1,9 +1,12 @@
 # bootstrap-intrinsic-target-availability Specification
 
 ## Purpose
+
 Define generic, reachable-only target availability for sealed compiler intrinsics so portable
 programs pay only for the platform primitives they actually execute.
+
 ## Requirements
+
 ### Requirement: Every intrinsic declares an enforced supported-target set
 
 Each sealed intrinsic operation SHALL declare the evaluator and backend targets on which it is

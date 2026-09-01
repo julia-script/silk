@@ -28,4 +28,3 @@ implementation exception.
 
 - **WHEN** types, failures, requirements, callable access, or ownership make a pipeline invalid
 - **THEN** semantic analysis reports the relevant source diagnostic and MIR emission remains unavailable without a fallback trap
-

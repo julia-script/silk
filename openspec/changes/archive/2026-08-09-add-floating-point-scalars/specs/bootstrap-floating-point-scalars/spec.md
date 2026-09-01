@@ -40,4 +40,3 @@ HIR, MIR, layout, evaluator, LLVM, and direct WebAssembly SHALL support every ad
 
 - **WHEN** an admitted finite operation or representation round trip executes
 - **THEN** evaluator, native, and WebAssembly agree on the specified value or bits
-

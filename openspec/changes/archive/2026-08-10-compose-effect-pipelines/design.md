@@ -15,7 +15,7 @@ effectful entries then lose their generated runner, while stored transforms publ
 - Preserve the language's construction-versus-execution timing, capture access, provider loan, and
   cleanup semantics.
 - Exercise the public source boundary with a compact pairwise pipeline matrix and real lexer
-pressure rather than tests of lowering helpers.
+  pressure rather than tests of lowering helpers.
 
 ## Implementation outcome
 
@@ -28,6 +28,7 @@ lower through ordinary calls and the two closed core operations; the former stor
 bookkeeping, combinator HIR/MIR operations, and fallback traps were removed entirely. The
 requirements below remain the accepted observable contract, while the mechanism described in the
 original decisions is retained only as the migration history that exposed the deeper seam.
+
 - Make incomplete valid lowering an explicit compiler invariant failure during development, never a
   generated program behavior.
 

@@ -23,4 +23,3 @@ None.
 ## Impact
 
 Adds a consumer-shaped example project, setup documentation, and a smoke check. Validation tooling will need to install the packed local package; the LLVM package API remains unchanged.
-

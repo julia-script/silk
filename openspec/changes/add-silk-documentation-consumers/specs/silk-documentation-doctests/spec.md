@@ -30,20 +30,20 @@ same value report the same examples in the same sequence.
 
 Fence attributes SHALL be read from the language token as comma-delimited words, because the
 documentation JSON records that token and does not record the rest of the info string. A block
-fenced ```` ```silk,ignore ```` SHALL be collected and SHALL be reported as skipped rather than
+fenced ` ```silk,ignore ` SHALL be collected and SHALL be reported as skipped rather than
 compiled.
 
 An attribute the workflow does not recognize SHALL fail the example rather than being discarded, so
 a misspelled marker cannot silently turn an opted-out example back into a compiled one.
 
 Because a space-separated attribute is dropped before the JSON is written, a block fenced
-```` ```silk ignore ```` inside a documentation comment is not opted out. A failure report for an
+` ```silk ignore ` inside a documentation comment is not opted out. A failure report for an
 example whose language token is exactly Silk SHALL name the comma-delimited form, so an author who
 wrote the space-separated form is told the form that works.
 
 #### Scenario: Skip an opted-out example
 
-- **WHEN** an example is fenced ```` ```silk,ignore ````
+- **WHEN** an example is fenced ` ```silk,ignore `
 - **THEN** the workflow reports it as skipped, does not compile it, and does not fail
 
 #### Scenario: Reject an unknown attribute

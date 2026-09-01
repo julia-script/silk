@@ -23,4 +23,3 @@ None.
 ## Impact
 
 Completes the tutorial example and introduces end-to-end/native validation. No library runtime behavior changes.
-

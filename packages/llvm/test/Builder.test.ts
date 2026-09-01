@@ -8,8 +8,9 @@ it.effect('serializes concurrent mutations without losing committed fragments', 
   Effect.gen(function* () {
     const builder = yield* Builder.make()
     const fragments = Array.from({ length: 64 }, (_, index) => `asm-${index}`)
-    yield* Effect.all(
-      fragments.map((fragment) => Builder.appendModuleAssembly(builder, fragment)),
+    yield* Effect.forEach(
+      fragments,
+      (fragment) => Builder.appendModuleAssembly(builder, fragment),
       { concurrency: 'unbounded' },
     )
 

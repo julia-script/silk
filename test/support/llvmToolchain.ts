@@ -1,4 +1,9 @@
 import { spawnSync } from 'node:child_process'
+import * as Config from 'effect/Config'
+import * as Effect from 'effect/Effect'
+
+const configured = (name: string): string =>
+  Effect.runSync(Config.string(name).pipe(Config.withDefault('')))
 
 /**
  * Locating the LLVM command line tools a test cross-checks itself against.
@@ -27,12 +32,12 @@ export const overrideVariable = (tool: string): string =>
  */
 export const findLlvmTool = (tool: string): string | undefined =>
   [
-    process.env[overrideVariable(tool)],
+    configured(overrideVariable(tool)),
     tool,
     ...searchPaths.map((directory) => `${directory}/${tool}`),
   ].find(
     (candidate) =>
-      candidate !== undefined &&
+      candidate.length > 0 &&
       spawnSync(candidate, ['--version'], { encoding: 'utf8' }).status === 0,
   )
 
@@ -51,19 +56,25 @@ export interface LlvmToolchain {
   readonly unavailable: () => boolean
 }
 
+export type Report = (message: string) => void
+
 /**
  * Resolves every tool a suite needs, reporting once which commands it will use or what is missing.
  *
  * `purpose` names the check in both messages, so a red CI build says what stopped running.
  */
-export const llvmToolchain = (tools: ReadonlyArray<string>, purpose: string): LlvmToolchain => {
+export const llvmToolchain = (
+  tools: ReadonlyArray<string>,
+  purpose: string,
+  report: Report,
+): LlvmToolchain => {
   const resolved = new Map(tools.map((tool) => [tool, findLlvmTool(tool)] as const))
   const missing = tools.filter((tool) => resolved.get(tool) === undefined)
 
   if (missing.length === 0) {
-    console.log(`${purpose} is using ${tools.map((tool) => resolved.get(tool)).join(', ')}`)
-  } else if (process.env.CI === undefined) {
-    console.log(`${missing.join(', ')} was not found; skipping ${purpose}`)
+    report(`${purpose} is using ${tools.map((tool) => resolved.get(tool)).join(', ')}`)
+  } else if (configured('CI').length === 0) {
+    report(`${missing.join(', ')} was not found; skipping ${purpose}`)
   }
 
   return {
@@ -76,7 +87,7 @@ export const llvmToolchain = (tools: ReadonlyArray<string>, purpose: string): Ll
     },
     unavailable: () => {
       if (missing.length === 0) return false
-      if (process.env.CI !== undefined) {
+      if (configured('CI').length > 0) {
         throw new Error(
           `${missing.join(', ')} not found in CI, so ${purpose} cannot run. Install LLVM in the workflow, or point ${missing.map(overrideVariable).join(', ')} at the binar${missing.length === 1 ? 'y' : 'ies'}.`,
         )

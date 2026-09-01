@@ -43,4 +43,3 @@ Unique names aid readable IR; sealing validates exactly one incoming value for e
 ## Migration Plan
 
 Extend expression lowering, add CFG/PHI diagrams and conditional tests, and add Lesson 10. Rollback removes the conditional lowering branch while earlier expression forms remain functional.
-

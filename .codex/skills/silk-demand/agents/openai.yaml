@@ -1,6 +1,6 @@
 interface:
-  display_name: "Silk Demand"
-  short_description: "Capture a direct request in Linear"
-  default_prompt: "Use $silk-demand to record this request as a deduplicated Silk issue in Linear."
+  display_name: 'Silk Demand'
+  short_description: 'Capture a direct request in Linear'
+  default_prompt: 'Use $silk-demand to record this request as a deduplicated Silk issue in Linear.'
 policy:
   allow_implicit_invocation: false

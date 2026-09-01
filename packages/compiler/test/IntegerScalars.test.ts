@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
@@ -49,7 +50,7 @@ it.effect('returns canonical Some and None outcomes for recoverable integer oper
     assert.strictEqual(
       outcome._tag,
       'Completed',
-      JSON.stringify(outcome, (_, value) => (typeof value === 'bigint' ? `${value}n` : value), 2),
+      Json.stringify(outcome, (_, value) => (typeof value === 'bigint' ? `${value}n` : value), 2),
     )
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
@@ -116,7 +117,7 @@ it.effect('lets checked scalar intrinsics choose a generic nominal carrier', () 
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      JSON.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? `${value}n` : value), 2),
+      Json.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? `${value}n` : value), 2),
     )
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
 
@@ -192,7 +193,7 @@ it.effect('cleans the unused affine carrier and invokes the selected carrier exa
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      JSON.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? `${value}n` : value), 2),
+      Json.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? `${value}n` : value), 2),
     )
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
     assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'CallableApply').length, 2)

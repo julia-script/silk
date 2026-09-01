@@ -1,3 +1,4 @@
+import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import type * as Builder from './Builder.js'
@@ -1065,13 +1066,11 @@ export const enumerator = Effect.fnUntraced(function* (
   options: { readonly unsigned?: boolean; readonly bitWidth?: number } = {},
 ): Effect.fn.Return<Optional, LlvmError> {
   if (options.unsigned === true && value < 0n) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'Metadata.enumerator',
-        message: 'An unsigned debug enumerator cannot have a negative value',
-        input: value,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'Metadata.enumerator',
+      message: 'An unsigned debug enumerator cannot have a negative value',
+      input: value,
+    })
   }
   return yield* debugNode(builder, 'Metadata.enumerator', (state, owner) =>
     Result.gen(function* () {
@@ -1321,13 +1320,12 @@ export interface Reachable {
 }
 
 /** @internal */
-class TraversalFailure extends Error {
+class TraversalFailure extends Data.TaggedError('MetadataTraversalFailure')<{
+  readonly message: string
   readonly state: unknown
-
+}> {
   constructor(message: string, state: unknown) {
-    super(message)
-    this.name = 'MetadataTraversalFailure'
-    this.state = state
+    super({ message, state })
   }
 }
 

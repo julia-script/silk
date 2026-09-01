@@ -4,7 +4,9 @@
 
 Give the first parsed Silk function deterministic declaration, type, value, and compatibility
 meaning while keeping incomplete syntax explicit and deferring semantic intermediate representations.
+
 ## Requirements
+
 ### Requirement: First function declaration fact
 
 Semantic analysis SHALL retain the parse result and publish one ordered function fact for every
@@ -43,20 +45,24 @@ one match, no match, and multiple matches without discarding any collected decla
 - **THEN** both function facts remain in source order, the later declaration's canonical state is a caused duplicate of the first, lookup reports multiple matches, and one `SEM0003` diagnostic identifies the later duplicate name
 
 ### Requirement: Call result typing remains independent of its argument contract
+
 Top-level call-name resolution and target-return-type facts SHALL remain independent of the
 positional argument contract. A uniquely resolved call SHALL retain its target result type even when
 its argument contract has the wrong arity, while the caller's return compatibility SHALL continue
 to compare only the returned expression type with the caller's declared return type.
 
 #### Scenario: Retain a result type across wrong arity
+
 - **WHEN** an `i32` function is called with the wrong number of otherwise available arguments
 - **THEN** the call expression type and caller return compatibility remain available while the separate call contract is an arity mismatch
 
 #### Scenario: Withhold a contract without changing name resolution
+
 - **WHEN** a mapped argument type is unavailable
 - **THEN** the call target and result type remain independently resolved while the call contract is unavailable
 
 ### Requirement: Function-local parameter declaration facts
+
 Every function fact SHALL publish one ordered parameter declaration fact for every concrete
 parameter declaration. A parameter identity SHALL combine its owning function identity with its
 zero-based concrete parameter ordinal. Each fact SHALL expose its name state, declared-type state,
@@ -65,22 +71,27 @@ present type SHALL produce `SEM0001`, and missing or damaged syntax SHALL remain
 duplicating parser diagnostics.
 
 #### Scenario: Collect one typed parameter
+
 - **WHEN** `identity` declares `value: i32`
 - **THEN** its first parameter has ordinal zero, a present name `value`, a resolved `i32` type, and provenance to the exact parameter, name, and type syntax
 
 #### Scenario: Keep parameter identities function-local
+
 - **WHEN** two functions each declare a first parameter named `value`
 - **THEN** both parameters have ordinal zero under different owning function identities and do not conflict
 
 #### Scenario: Diagnose an unknown parameter type
+
 - **WHEN** a present parameter type spells `Mystery`
 - **THEN** that parameter type is unresolved and one `SEM0001` diagnostic identifies its exact type span
 
 #### Scenario: Preserve damaged parameter syntax
+
 - **WHEN** parser recovery inserts a parameter name or type
 - **THEN** the parameter fact remains ordered with the affected state unavailable and no duplicate semantic diagnostic
 
 ### Requirement: Function-local parameter lookup
+
 Parameter lookup SHALL consider only the complete parameter collection of the enclosing function
 and SHALL distinguish exactly one match, no match, and multiple matches. Every later present
 duplicate parameter name SHALL produce one `SEM0005` diagnostic at the later declaration while all
@@ -88,18 +99,22 @@ matching parameter identities remain available in source order. Parameters in ot
 top-level function declarations MUST NOT participate in this lookup.
 
 #### Scenario: Resolve one local parameter name
+
 - **WHEN** a function declares exactly one present parameter named `value`
 - **THEN** lookup for `value` in that function resolves to its exact parameter identity
 
 #### Scenario: Do not see another function's parameter
+
 - **WHEN** only a different function declares a parameter named `value`
 - **THEN** lookup for `value` in the current function reports no match
 
 #### Scenario: Preserve duplicate parameters
+
 - **WHEN** one function declares two parameters named `value`
 - **THEN** lookup is ambiguous, both identities remain in order, and `SEM0005` identifies the second name
 
 ### Requirement: First parameter reference fact
+
 Every present bare-identifier expression SHALL resolve against the parameters of its enclosing
 function and the binding statements that precede it in that function's body. Its reference fact
 SHALL be `Resolved` with the exact parameter or binding identity and reference syntax when
@@ -110,18 +125,22 @@ inferred type; all other reference or type states SHALL keep the expression type
 A binding SHALL NOT be referenced before its own statement completes.
 
 #### Scenario: Resolve a returned parameter
+
 - **WHEN** `identity(value: i32) -> i32` returns `value`
 - **THEN** the returned expression resolves to parameter zero, has type `i32`, and the function return is compatible
 
 #### Scenario: Resolve a parameter used as an argument
+
 - **WHEN** a function passes its parameter `value` as a call argument
 - **THEN** that argument's identifier reference resolves to the enclosing function's exact parameter declaration independently of the call target
 
 #### Scenario: Preserve an ambiguous reference
+
 - **WHEN** a bare identifier matches duplicate parameters in its enclosing function
 - **THEN** the reference exposes every match, selects none, and its expression type remains unavailable
 
 #### Scenario: Preserve parser ownership for a missing reference
+
 - **WHEN** parser recovery inserts the identifier expression's token
 - **THEN** the reference and type are unavailable without a semantic diagnostic
 
@@ -136,6 +155,7 @@ A binding SHALL NOT be referenced before its own statement completes.
 - **THEN** the reference is `Missing` at that span rather than resolving forward
 
 ### Requirement: Unknown value reference diagnostic
+
 A present bare identifier with no matching local parameter, preceding binding, or in-scope pattern
 binding SHALL retain a `Missing` reference fact and produce one `SEM0006` diagnostic at the exact
 reference span using value-name terminology. Duplicate declarations SHALL rely on
@@ -144,18 +164,22 @@ reference. Diagnostics SHALL remain deterministic and phase-separated with exist
 parser, and semantic diagnostics.
 
 #### Scenario: Diagnose an unknown value name
+
 - **WHEN** a function returns `missing` without any in-scope value named `missing`
 - **THEN** the reference is missing and one `SEM0006` diagnostic identifies the exact identifier span as an unknown value
 
 #### Scenario: Avoid duplicate ambiguity diagnostics
+
 - **WHEN** a reference matches duplicate parameter declarations
 - **THEN** only the later declarations carry `SEM0005` and no reference-site ambiguity diagnostic is added
 
 #### Scenario: Repeat value analysis
+
 - **WHEN** equivalent value declarations and references are analyzed repeatedly in fresh processes
 - **THEN** identities, lookup outcomes, reference facts, types, compatibility, and diagnostic ordering are identical
 
 ### Requirement: Ordered call argument facts
+
 Every call expression SHALL publish one ordered argument fact for every concrete argument. Each
 argument fact SHALL have a zero-based ordinal, retain exact argument syntax provenance, and expose
 the existing integer or local-parameter-reference expression fact and type state. Missing or damaged
@@ -163,22 +187,27 @@ argument syntax SHALL remain unavailable without creating a semantic argument or
 diagnostics.
 
 #### Scenario: Collect a literal argument
+
 - **WHEN** `main` returns `identity(42)`
 - **THEN** the call has one argument fact at ordinal zero with exact value `42`, type `i32`, and provenance to the literal syntax
 
 #### Scenario: Collect a parameter-reference argument
+
 - **WHEN** a function calls `identity(value)` using its resolved local parameter
 - **THEN** the call's first argument retains that parameter reference and its available `i32` type
 
 #### Scenario: Preserve argument source order
+
 - **WHEN** a call contains two concrete arguments
 - **THEN** its two argument facts have ordinals zero and one matching concrete list order
 
 #### Scenario: Preserve parser ownership for a damaged argument
+
 - **WHEN** argument syntax is missing or retained in an error region
 - **THEN** no semantic argument is invented and the parser diagnostic remains the owning error
 
 ### Requirement: Analyze nested expression facts recursively
+
 Every concrete call used as an argument SHALL produce a recursive call-expression fact with its
 own exact syntax provenance, target-resolution state, ordered argument facts, positional contract,
 and result-type state. Analysis SHALL resolve and type nested expressions from their leaves outward
@@ -187,26 +216,32 @@ damaged, or type-unavailable inner expression SHALL make only its dependent oute
 unavailable and MUST NOT invent a target, binding, value, or duplicate parser-owned diagnostic.
 
 #### Scenario: Analyze one nested identity call
+
 - **WHEN** `main` returns `identity(identity(42))` and both calls resolve uniquely
 - **THEN** the outer argument contains a nested call fact whose literal argument, positional contract, result type, call-site span, and target identity are all available
 
 #### Scenario: Preserve nested sibling order
+
 - **WHEN** a call has two nested call arguments in concrete source order
 - **THEN** both outer argument ordinals and every nested argument ordinal remain deterministic and match their respective concrete lists
 
 #### Scenario: Propagate an unavailable inner target
+
 - **WHEN** an inner call target is missing or ambiguous
 - **THEN** the inner resolution and provenance remain visible while its result type and the dependent outer contract are unavailable without selecting a target or inventing a binding
 
 #### Scenario: Keep inner and outer diagnostics phase-owned
+
 - **WHEN** malformed inner syntax already has a parser diagnostic or a uniquely resolved inner call has the wrong arity
 - **THEN** analysis preserves the parser-owned error or emits the applicable inner semantic diagnostic exactly once without adding a speculative outer mismatch diagnostic
 
 #### Scenario: Repeat nested analysis
+
 - **WHEN** an equivalent nested program is analyzed repeatedly in fresh processes
 - **THEN** every nested identity, resolution state, contract, type, provenance item, and diagnostic appears in the same order
 
 ### Requirement: First positional call contract
+
 A call whose function reference resolves uniquely SHALL map argument ordinal `n` to target parameter
 ordinal `n`. Its call-contract fact SHALL be `Compatible` only when argument count equals parameter
 count and every mapped argument and parameter type is available and equal. It SHALL be
@@ -215,30 +250,37 @@ syntax-unavailable or when any mapped type is unresolved or unavailable. Every m
 retain the exact argument and target-parameter identities and syntax provenance.
 
 #### Scenario: Bind one compatible argument
+
 - **WHEN** `identity(value: i32)` is called as `identity(42)`
 - **THEN** argument zero maps to parameter zero and the call contract is compatible
 
 #### Scenario: Bind two arguments positionally
+
 - **WHEN** a uniquely resolved two-parameter function is called with two available `i32` arguments
 - **THEN** each argument maps to the parameter with the same ordinal and the call contract is compatible
 
 #### Scenario: Preserve too few arguments
+
 - **WHEN** a two-parameter target is called with one argument
 - **THEN** the call contract is an arity mismatch with expected count two and actual count one
 
 #### Scenario: Preserve too many arguments
+
 - **WHEN** a one-parameter target is called with two arguments
 - **THEN** the call contract is an arity mismatch with expected count one and actual count two
 
 #### Scenario: Withhold a contract for an unavailable type
+
 - **WHEN** a mapped parameter or argument type is unresolved or unavailable
 - **THEN** the mapping remains visible but the call contract is unavailable
 
 #### Scenario: Withhold a contract for an unresolved call
+
 - **WHEN** top-level call resolution is missing, ambiguous, or syntax-unavailable
 - **THEN** no target parameters are selected and the call contract is unavailable
 
 ### Requirement: Wrong call arity diagnostic
+
 Every uniquely resolved call with a different argument and parameter count SHALL produce one
 `SEM0007` diagnostic at the complete call span. Its reason data SHALL retain the target declaration
 identity and expected and actual counts. Type-unavailable and unresolved calls SHALL not add an
@@ -246,22 +288,27 @@ arity or type diagnostic, and the existing return-type compatibility fact SHALL 
 from this call-contract fact.
 
 #### Scenario: Diagnose too few arguments
+
 - **WHEN** a one-parameter function is called with zero arguments
 - **THEN** `SEM0007` covers the call and reports expected one and actual zero
 
 #### Scenario: Diagnose too many arguments
+
 - **WHEN** a zero-parameter function is called with one argument
 - **THEN** `SEM0007` covers the call and reports expected zero and actual one
 
 #### Scenario: Avoid cascading diagnostics
+
 - **WHEN** a call target or mapped type is unavailable
 - **THEN** the call contract is unavailable without adding `SEM0007` or a speculative type-mismatch diagnostic
 
 #### Scenario: Repeat call-contract analysis
+
 - **WHEN** equivalent calls and declarations are analyzed repeatedly in fresh processes
 - **THEN** argument ordinals, mappings, compatibility states, reason data, and diagnostics are identical
 
 ### Requirement: Built-in i32 type fact
+
 Semantic analysis SHALL resolve the exact return-type spelling `i32` for every function to the
 bootstrap signed 32-bit integer type. Any other present identifier spelling SHALL remain an explicit
 unresolved type and produce one `SEM0001` semantic diagnostic at that identifier's source span.
@@ -269,40 +316,49 @@ Missing or syntax-damaged return-type syntax SHALL remain unavailable without du
 diagnostic.
 
 #### Scenario: Resolve bootstrap return types independently
+
 - **WHEN** two functions each declare `i32`
 - **THEN** each function fact carries its own resolved built-in signed 32-bit return type and syntax provenance
 
 #### Scenario: Diagnose one unknown return type
+
 - **WHEN** one of two functions declares `Mystery`
 - **THEN** only that function's return-type fact is unresolved and one `SEM0001` diagnostic identifies `Mystery`
 
 #### Scenario: Do not guess a damaged return type
+
 - **WHEN** parser recovery leaves one function's return-type identifier missing or inside an error region
 - **THEN** that function's return-type fact is unavailable without changing the other function's facts or repeating the syntax diagnostic
 
 ### Requirement: Exact decimal i32 value fact
+
 Semantic analysis SHALL interpret each present decimal-integer return expression as an exact
 non-negative integer and publish its `i32` value when it is at most `2147483647`. A larger value
 SHALL remain explicitly unavailable and produce one `SEM0002` diagnostic covering the complete
 literal span. Analysis MUST NOT lose precision because of the host numeric representation.
 
 #### Scenario: Analyze two integer values independently
+
 - **WHEN** two functions return `42` and `0`
 - **THEN** their ordered function facts contain the exact available `i32` values `42` and `0`
 
 #### Scenario: Accept the positive i32 boundary
+
 - **WHEN** one returned literal is `2147483647`
 - **THEN** that function's expression has the exact available `i32` value `2147483647`
 
 #### Scenario: Diagnose one out-of-range integer
+
 - **WHEN** one returned literal is `2147483648`
 - **THEN** only that function's value fact is unavailable and one `SEM0002` diagnostic covers the entire literal
 
 #### Scenario: Preserve a missing integer expression
+
 - **WHEN** parser recovery inserts one function's decimal-integer token
 - **THEN** that function's value and expression-type facts are unavailable without affecting other function facts or adding a duplicate semantic diagnostic
 
 ### Requirement: First return compatibility fact
+
 Every function fact SHALL publish return compatibility as `Compatible` only when that function's
 declared return type and returned expression type are both available and equal. An integer expression
 uses its existing `i32` type. A uniquely resolved call expression SHALL use its target declaration's
@@ -311,22 +367,27 @@ the caller type, expression type, or call target is unresolved, missing, ambiguo
 one function's compatibility MUST NOT overwrite another function's facts.
 
 #### Scenario: Check an integer return
+
 - **WHEN** a function declares `i32` and returns an available `i32` integer
 - **THEN** that function reports `Compatible`
 
 #### Scenario: Check a resolved call return
+
 - **WHEN** `answer` declares `i32` and `main` declares `i32` and returns a uniquely resolved call to `answer`
 - **THEN** the call expression has type `i32` and `main` reports `Compatible`
 
 #### Scenario: Withhold compatibility for an unknown call
+
 - **WHEN** a function returns a call whose reference is missing
 - **THEN** the call expression type and caller return compatibility are `Unavailable`
 
 #### Scenario: Withhold compatibility for an ambiguous call
+
 - **WHEN** a function returns a call whose reference is ambiguous
 - **THEN** the call expression type and caller return compatibility are `Unavailable` without selecting a declaration
 
 #### Scenario: Withhold compatibility for an unresolved callee type
+
 - **WHEN** a call resolves uniquely to a declaration whose return type is unresolved or unavailable
 - **THEN** the call reference remains resolved but its expression type and caller return compatibility are `Unavailable`
 
@@ -365,6 +426,7 @@ superseded.
 - **THEN** any diagnostic reported on those dependent facts carries the unresolved-target diagnostic's identity as its cause, and no duplicate diagnostic restates the unresolved target
 
 ### Requirement: First top-level call reference fact
+
 Semantic analysis SHALL resolve every present call callee against all collected
 top-level declarations without depending on declaration order. A call-reference fact SHALL be
 `Resolved` with the exact target declaration identity and callee syntax when exactly one declaration
@@ -373,36 +435,44 @@ when parser recovery did not supply a usable callee. Forward and self references
 the same rules because this phase records relationships and does not execute functions.
 
 #### Scenario: Resolve a call to an earlier declaration
+
 - **WHEN** `answer` is declared before `main` and `main` returns `answer()`
 - **THEN** the call reference resolves to `answer`'s exact declaration identity and preserves the call-site identifier span
 
 #### Scenario: Resolve a forward call
+
 - **WHEN** `main` returns `answer()` and `answer` is declared later in the same source
 - **THEN** the call resolves to the later declaration independently of source ordering
 
 #### Scenario: Resolve a self reference as data
+
 - **WHEN** a function returns a call to its own unique name
 - **THEN** the reference resolves to that declaration without evaluating the call or deciding recursion policy
 
 #### Scenario: Preserve an ambiguous target
+
 - **WHEN** a call name matches multiple duplicate declarations
 - **THEN** the call reference is ambiguous, exposes all matching declaration identities in source order, and does not select one target
 
 ### Requirement: Unknown call target diagnostic
+
 A present call name with no matching declaration SHALL produce one `SEM0004` semantic diagnostic at
 the callee identifier span and retain a `Missing` reference fact. An ambiguous call SHALL rely on the
 existing `SEM0003` duplicate-declaration diagnostics and MUST NOT add a second ambiguity diagnostic
 at the call site. Missing or damaged callee syntax SHALL not duplicate parser diagnostics.
 
 #### Scenario: Diagnose an unknown function
+
 - **WHEN** `main` returns `missing()` and no declaration is named `missing`
 - **THEN** the call reference is missing and one `SEM0004` diagnostic identifies the exact `missing` span
 
 #### Scenario: Avoid duplicate ambiguity diagnostics
+
 - **WHEN** a call targets a name already diagnosed as duplicated
 - **THEN** the call remains ambiguous and the semantic collection contains the declaration-owned `SEM0003` diagnostics without an additional call-site ambiguity diagnostic
 
 #### Scenario: Preserve parser ownership for a missing callee
+
 - **WHEN** parser recovery inserts the call's identifier
 - **THEN** the call reference is unavailable and no `SEM0004` diagnostic is emitted
 
@@ -826,10 +896,12 @@ applied nominal types, inferred and explicit call arguments, substitutions, and 
 specializations. Every fact SHALL retain source provenance and causal diagnostic identity.
 
 #### Scenario: Inspect an inferred substitution
+
 - **WHEN** a generic call infers `T` as `Token` from its argument
 - **THEN** semantic facts expose the parameter, concrete argument, inference source, and specialized result type
 
 #### Scenario: Preserve a conflicting inference
+
 - **WHEN** two arguments require incompatible types for one parameter
 - **THEN** facts retain both constraints and one deterministic specialization diagnostic
 

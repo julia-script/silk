@@ -23,7 +23,7 @@ function fakeSpawn({ stdout = '', stderr = '', code = 0 }) {
   }
 }
 
-test('forwards publish output', async () => {
+void test('forwards publish output', async () => {
   const output = 'New tag: @silklang/llvm@0.1.0\n'
   let seen = ''
   const code = await runPublish('pnpm', ['run', 'release:publish'], {
@@ -37,7 +37,7 @@ test('forwards publish output', async () => {
   assert.equal(seen, output)
 })
 
-test('passes through a clean publish', async () => {
+void test('passes through a clean publish', async () => {
   const result = await publishWithGuard({
     spawnImpl: fakeSpawn({ stdout: 'New tag: @silklang/llvm@0.1.0\n' }),
   })
@@ -45,7 +45,7 @@ test('passes through a clean publish', async () => {
   assert.deepEqual(result, { exitCode: 0, skippedOidc: false })
 })
 
-test('detects a skipped OIDC exchange', async () => {
+void test('detects a skipped OIDC exchange', async () => {
   const result = await publishWithGuard({
     spawnImpl: fakeSpawn({ stderr: 'Skipped OIDC: no token available\n' }),
   })
@@ -53,7 +53,7 @@ test('detects a skipped OIDC exchange', async () => {
   assert.deepEqual(result, { exitCode: 0, skippedOidc: true })
 })
 
-test('propagates a failed publish', async () => {
+void test('propagates a failed publish', async () => {
   const result = await publishWithGuard({ spawnImpl: fakeSpawn({ code: 1 }) })
 
   assert.deepEqual(result, { exitCode: 1, skippedOidc: false })

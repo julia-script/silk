@@ -81,10 +81,7 @@ export const open = Effect.fn('Workspace.open')(function* (options: {
   readonly bytes: Uint8Array
 }): Effect.fn.Return<Document.Document, never, FileSystem.FileSystem | Path.Path> {
   const path = yield* Path.Path
-  const parsedUrl = yield* Effect.try({
-    try: () => new URL(options.uri),
-    catch: (cause) => cause,
-  }).pipe(Effect.option)
+  const parsedUrl = yield* Effect.try(() => new URL(options.uri)).pipe(Effect.option)
   const documentPath =
     Option.isNone(parsedUrl) || parsedUrl.value.protocol !== 'file:'
       ? Option.none<string>()

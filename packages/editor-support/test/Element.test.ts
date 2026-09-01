@@ -7,6 +7,7 @@
  */
 
 import { afterEach, assert, beforeEach, describe, it, vi } from 'vitest'
+import * as Effect from 'effect/Effect'
 import { define, type SilkSnippetElement } from '../src/Element.js'
 
 const passing = 'pub fn main() -> i32 {\n  return 0\n}'
@@ -37,9 +38,7 @@ class ObserverStub {
   }
 }
 
-const flush = async (): Promise<void> => {
-  await new Promise((resolve) => setTimeout(resolve, 0))
-}
+const flush = (): Promise<void> => Effect.runPromise(Effect.sleep(0))
 
 const snippet = (code: string, attributes: ReadonlyArray<string> = []): SilkSnippetElement => {
   const element = document.createElement('silk-snippet') as SilkSnippetElement

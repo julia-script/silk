@@ -35,4 +35,3 @@ Create the harness/status format, add all six complete programs, graduate the re
 ## Open Questions
 
 None; observed quicksort/FFT blockers are outputs of the change, not prerequisites.
-

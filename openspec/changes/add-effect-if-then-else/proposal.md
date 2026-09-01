@@ -20,7 +20,7 @@ suspended arms adds no interpreter behavior.
 - Add `Effect.ifThenElse(condition, onTrue, onFalse)` to canonical standard-library source. It
   invokes exactly one arm — the one the condition selects — and runs the Effect that arm returns.
 - Take the arms as **suspended** `once fn() -> Effect<...>` rather than as pre-built `Effect`
-  values, which is the decision recorded on #98 on 2026-08-13. This gives *construction* laziness:
+  values, which is the decision recorded on #98 on 2026-08-13. This gives _construction_ laziness:
   an arm whose body is only well-defined under the condition is never invoked, so it is never even
   built. Pre-built arms would construct both branches eagerly, and construction-time work — or a
   construction-time trap — in the branch not taken would happen regardless of the condition.

@@ -22,4 +22,3 @@ initialized-range and aliasing preconditions before invoking them.
 
 - **WHEN** a source-defined owner uses the raw-buffer view operations
 - **THEN** semantic analysis and lowering depend only on `RawBuffer` and slice invariants, not on the owner's declaration spelling
-

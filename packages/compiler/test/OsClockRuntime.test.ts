@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
+import * as Config from 'effect/Config'
+import * as Effect from 'effect/Effect'
 import * as OsRuntime from '../src/OsRuntime.js'
 import type * as Termination from '../src/Termination.js'
 import * as ToolchainPlan from '../src/ToolchainPlan.js'
@@ -12,7 +14,9 @@ afterAll(() => {
   rmSync(testRoot, { recursive: true, force: true })
 })
 
-const clang = process.env.SILK_TEST_CLANG ?? '/usr/bin/clang'
+const clang = Effect.runSync(
+  Config.string('SILK_TEST_CLANG').pipe(Config.withDefault('/usr/bin/clang')),
+)
 const termination = (...identities: ReadonlyArray<string>): Termination.Contract =>
   Object.freeze({
     _tag: 'EntryTermination',

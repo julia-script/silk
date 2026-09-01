@@ -131,21 +131,19 @@ it.effect('rejects incomplete array construction before evaluation', () =>
     const mir = Analysis.loweredMir(self)
     const malformed: Mir.Module = {
       ...mir,
-      functions: mir.functions.map(
-        (fn): Mir.MirFunction => ({
-          ...fn,
-          regions: fn.regions.map((region): Mir.Region => {
-            if (region._tag !== 'OperationRegion') return region
-            return {
-              ...region,
-              operations: region.operations.map((operation): Mir.Operation => {
-                if (operation._tag !== 'ConstructArray') return operation
-                return { ...operation, elements: operation.elements.slice(0, 2) }
-              }),
-            }
-          }),
+      functions: mir.functions.map((fn): Mir.MirFunction => ({
+        ...fn,
+        regions: fn.regions.map((region): Mir.Region => {
+          if (region._tag !== 'OperationRegion') return region
+          return {
+            ...region,
+            operations: region.operations.map((operation): Mir.Operation => {
+              if (operation._tag !== 'ConstructArray') return operation
+              return { ...operation, elements: operation.elements.slice(0, 2) }
+            }),
+          }
         }),
-      ),
+      })),
     }
 
     const violations = MirVerification.verify(malformed)

@@ -488,9 +488,8 @@ pub fn main() -> i32 {
             ? Object.freeze({
                 ...region,
                 operations: Object.freeze(
-                  region.operations.map(
-                    (operation): Mir.Operation =>
-                      operation === read ? Object.freeze({ ...read, consume: true }) : operation,
+                  region.operations.map((operation): Mir.Operation =>
+                    operation === read ? Object.freeze({ ...read, consume: true }) : operation,
                   ),
                 ),
               })
@@ -519,32 +518,31 @@ pub fn main() -> i32 {
             ? Object.freeze({
                 ...region,
                 operations: Object.freeze(
-                  region.operations.flatMap(
-                    (operation): ReadonlyArray<Mir.Operation> =>
-                      operation === read
-                        ? [
-                            read,
-                            Object.freeze({
-                              _tag: 'CheckPlace',
-                              root: read.root,
-                              selectors: read.selectors,
-                              type: read.type,
-                              provenance: read.provenance,
-                            }),
-                            Object.freeze({
-                              _tag: 'WritePlace',
-                              root: read.root,
-                              selectors: read.selectors,
-                              source: read.destination,
-                              rootType,
-                              type: read.type,
-                              mutable: true,
-                              replacement: 'Copy',
-                              commit: 'AfterCleanup',
-                              provenance: read.provenance,
-                            }),
-                          ]
-                        : [operation],
+                  region.operations.flatMap((operation): ReadonlyArray<Mir.Operation> =>
+                    operation === read
+                      ? [
+                          read,
+                          Object.freeze({
+                            _tag: 'CheckPlace',
+                            root: read.root,
+                            selectors: read.selectors,
+                            type: read.type,
+                            provenance: read.provenance,
+                          }),
+                          Object.freeze({
+                            _tag: 'WritePlace',
+                            root: read.root,
+                            selectors: read.selectors,
+                            source: read.destination,
+                            rootType,
+                            type: read.type,
+                            mutable: true,
+                            replacement: 'Copy',
+                            commit: 'AfterCleanup',
+                            provenance: read.provenance,
+                          }),
+                        ]
+                      : [operation],
                   ),
                 ),
               })

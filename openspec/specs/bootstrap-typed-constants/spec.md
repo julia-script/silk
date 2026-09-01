@@ -1,10 +1,13 @@
 # bootstrap-typed-constants Specification
 
 ## Purpose
+
 Define explicit, typed, compile-time names for primitive values and static text that improve real
 Silk programs while retaining the same runtime representation and cost as spelling their literal
 values directly.
+
 ## Requirements
+
 ### Requirement: Constants have explicit primitive contracts
 
 A top-level constant SHALL declare a name, one concrete primitive type, and one statically evaluable

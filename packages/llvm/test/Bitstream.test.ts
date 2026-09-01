@@ -51,7 +51,7 @@ it('encodes a blob beyond the 16-bit length boundary without truncation', () => 
 
   assert.lengthOf(bytes, 65_540)
   assert.deepEqual(bytes.slice(0, 4), Uint8Array.of(0, 1, 2, 3))
-  assert.deepEqual([...bytes.slice(65_536)], [0, 0, 0, 0])
+  assert.deepEqual(Array.from(bytes.slice(65_536)), [0, 0, 0, 0])
 })
 
 it('defines abbreviations, writes records, and backpatches block lengths', () => {

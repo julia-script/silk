@@ -31,4 +31,3 @@ or compiler-recognized declaration.
 - **WHEN** the compiler package and standard-library documentation are generated
 - **THEN** content verification includes the canonical random source, its generated embedding, and
   its generated reference page with no independently editable duplicate
-

@@ -1,11 +1,15 @@
 # bootstrap-diagnostics Specification
 
 ## Purpose
+
 One structured diagnostic model that every compiler phase publishes into, with error sentinels
 that preserve provenance and a single deterministic ordering authority, so tools and humans
 consume the same diagnostic data regardless of which phase produced it.
+
 ## Requirements
+
 ### Requirement: Unified diagnostic model
+
 Every diagnostic from any compiler phase SHALL be one `Diagnostic` value carrying a stable code,
 a severity, a concise message, exactly one primary source-owned span, and its structured reason
 data where the originating phase defines reasons for that code. A diagnostic MAY additionally
@@ -17,14 +21,17 @@ over-arity calls SHALL use the ordinary arity diagnostic, while valid non-empty 
 SHALL produce no arity diagnostic.
 
 #### Scenario: Every phase produces the same shape
+
 - **WHEN** one source produces lexical, parser, and semantic mistakes in a single compilation
 - **THEN** every returned diagnostic exposes the same model — stable code, severity, message, primary span, and originating phase — regardless of which phase produced it
 
 #### Scenario: Cascades name their cause
+
 - **WHEN** an unresolved name makes a dependent fact unavailable and that unavailability produces a further diagnostic
 - **THEN** the dependent diagnostic carries the originating diagnostic's identity as its cause
 
 #### Scenario: Duplicate names surface their original as a related span
+
 - **WHEN** a declaration or parameter name repeats a present earlier occurrence
 - **THEN** the duplicate's diagnostic carries the original occurrence's span as a labeled related span in addition to its structured reason data
 
@@ -34,47 +41,57 @@ SHALL produce no arity diagnostic.
 - **THEN** analysis reports the ordinary arity code and never `SEM0079`
 
 ### Requirement: Error sentinels preserve provenance
+
 Unavailable, missing, ambiguous, and damaged states in phase results SHALL retain the identity of
 the diagnostic that originated them, so dependent cascades can be suppressed or attached to the
 primary error rather than duplicated. A write destination that is unavailable because its name or
 syntax is unresolved MUST NOT additionally be diagnosed as a resolved-but-non-writable place.
 
 #### Scenario: Suppress a dependent cascade
+
 - **WHEN** a fact is unavailable because of an earlier diagnostic and a consumer would report the same underlying mistake again
 - **THEN** the consumer can identify the originating diagnostic from the sentinel and no duplicate diagnostic is emitted for the same cause
 
 #### Scenario: Suppress invalid-place after unknown name
+
 - **WHEN** an assignment destination is unavailable because its root name is unknown
 - **THEN** the unknown-value diagnostic stands alone and no invalid-assignment-place diagnostic is emitted
 
 ### Requirement: Recovery diagnostics represent independent source mistakes
+
 The parser SHALL retain every missing or unexpected CST element needed for lossless recovery while
 reporting one primary diagnostic for each independently actionable source mistake. Synthetic
 elements introduced only because a larger construct is absent MUST NOT each become equal-weight
 diagnostics.
 
 #### Scenario: Aggregate recovered return structure
+
 - **WHEN** recovery inserts both the keyword and expression leaves of one wholly absent return statement
 - **THEN** one parser diagnostic identifies the missing statement while both leaves remain queryable in the CST
 
 #### Scenario: Suppress an incomplete declaration cascade
+
 - **WHEN** source ends after the declaration prefix `pub`
 - **THEN** one parser diagnostic identifies the missing `fn` token and no dependent diagnostic is emitted for the remaining synthesized function structure
 
 #### Scenario: Resume after synchronization
+
 - **WHEN** recovery reports one syntax mistake and later consumes a concrete token expected by the grammar
 - **THEN** recovery ends and a subsequent independent syntax mistake can produce its own diagnostic
 
 #### Scenario: Exclude indentation from recovered ranges
+
 - **WHEN** an indented bare identifier is recovered as the expression after a missing `return`
 - **THEN** the missing-keyword diagnostic has an empty span at the identifier boundary, the unknown-value diagnostic covers only the identifier, and neither range includes leading trivia
 
 ### Requirement: Expected tokens use source-language descriptions
+
 Missing-token diagnostic messages SHALL describe expected tokens using their Silk source spelling
 or source-language role rather than compiler-internal token-kind identifiers. Structured reason
 data SHALL retain the stable token kind for machine consumers.
 
 #### Scenario: Describe keywords and punctuation
+
 - **WHEN** recovery expects `ReturnKeyword` or `Equals`
 - **THEN** the user-facing messages name `` `return` `` or `` `=` `` while the structured reasons retain `ReturnKeyword` or `Equals`
 

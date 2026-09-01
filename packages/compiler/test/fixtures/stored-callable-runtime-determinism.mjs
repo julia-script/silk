@@ -3,7 +3,9 @@ import { NodeServices } from '@effect/platform-node'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
+import * as Layer from 'effect/Layer'
 import * as Path from 'effect/Path'
+import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import { ChildProcess } from 'effect/unstable/process'
 import * as Analysis from '../../dist/Analysis.js'
@@ -31,24 +33,31 @@ pub fn main() -> i32 {
 }`
 const bytes = new TextEncoder().encode(source)
 const moduleName = 'fixture/stored-callable-runtime-determinism'
+const encodeJson = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Unknown, {
+    replacer: (_, value) => (typeof value === 'bigint' ? value.toString() : value),
+  }),
+)
 
 const collectText = Stream.runFold(
   () => '',
   (text, chunk) => text + chunk,
 )
 
-const runProcess = Effect.fnUntraced(function* (command, args) {
-  const process = yield* ChildProcess.make(command, args, { stdin: 'ignore' })
-  const [exitCode, stdout, stderr] = yield* Effect.all(
-    [
-      process.exitCode,
-      process.stdout.pipe(Stream.decodeText(), collectText),
-      process.stderr.pipe(Stream.decodeText(), collectText),
-    ],
-    { concurrency: 'unbounded' },
-  )
-  return Object.freeze({ exitCode, stdout, stderr })
-})
+const runProcess = Effect.fnUntraced(
+  function* (/** @type {string} */ command, /** @type {ReadonlyArray<string>} */ args) {
+    const process = yield* ChildProcess.make(command, args, { stdin: 'ignore' })
+    const [exitCode, stdout, stderr] = yield* Effect.all(
+      [
+        process.exitCode,
+        process.stdout.pipe(Stream.decodeText(), collectText),
+        process.stderr.pipe(Stream.decodeText(), collectText),
+      ],
+      { concurrency: 'unbounded' },
+    )
+    return Object.freeze({ exitCode, stdout, stderr })
+  },
+)
 
 const clang = Effect.fnUntraced(function* () {
   const configured = yield* Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(''))
@@ -59,26 +68,28 @@ const clang = Effect.fnUntraced(function* () {
   return 'clang'
 })
 
-const hash = Effect.fnUntraced(function* (value) {
+const hash = Effect.fnUntraced(function* (/** @type {Uint8Array} */ value) {
   return yield* Effect.try(() => createHash('sha256').update(value).digest('hex'))
 })
 
-const layoutHash = Effect.fnUntraced(function* (snapshot) {
+const layoutHash = Effect.fnUntraced(function* (/** @type {Analysis.Snapshot} */ snapshot) {
   const layout = Analysis.layoutOf(snapshot)
   return layout._tag === 'Available'
     ? yield* hash(LayoutEncode.encode(layout.value))
     : layout.error.message
 })
 
-const runWasm = Effect.fnUntraced(function* (artifact) {
-  return yield* Effect.try(() => {
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
-    const main = instance.exports.silk_main
-    if (typeof main !== 'function') return 'missing'
-    const result = main()
-    return typeof result === 'number' ? result : 'invalid'
-  })
-})
+const runWasm = Effect.fnUntraced(
+  function* (/** @type {import('../../dist/Backend.js').WebAssemblyModuleArtifact} */ artifact) {
+    return yield* Effect.try(() => {
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+      const main = instance.exports.silk_main
+      if (typeof main !== 'function') return 'missing'
+      const result = main()
+      return typeof result === 'number' ? result : 'invalid'
+    })
+  },
+)
 
 const program = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem
@@ -122,15 +133,10 @@ const program = Effect.gen(function* () {
     directWasm:
       !wasmArtifact.wat.includes('call_indirect') && !wasmArtifact.wat.includes('(table '),
   }
-  yield* Effect.try(() =>
-    process.stdout.write(
-      JSON.stringify(report, (_, value) => (typeof value === 'bigint' ? value.toString() : value)),
-    ),
-  )
+  yield* Effect.try(() => process.stdout.write(encodeJson(report)))
 }).pipe(
   Effect.scoped,
-  Effect.provide(NodeHeapObservation.layer),
-  Effect.provide(NodeServices.layer),
+  Effect.provide(Layer.mergeAll(NodeHeapObservation.layer, NodeServices.layer)),
 )
 
 await Effect.runPromise(program)

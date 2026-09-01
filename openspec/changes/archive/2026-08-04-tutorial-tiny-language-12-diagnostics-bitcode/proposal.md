@@ -23,4 +23,3 @@ None.
 ## Impact
 
 Adds tutorial diagnostics, failure fixtures, bitcode explanation, and tests. It consumes existing typed-error and bitcode APIs.
-

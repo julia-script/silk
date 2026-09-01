@@ -15,7 +15,7 @@ See proposal.md — Why. Current state that shapes the approach:
   bundle of the compiler resolves stdlib imports with no fetching. Labs proves in-browser
   compilation works today.
 - Doctest compiles each fence as one standalone module via `Analysis.ofSourceRealized(identity,
-  bytes, target)` with default target `wasm32-unknown-unknown`.
+bytes, target)` with default target `wasm32-unknown-unknown`.
 - The static site renderer (`packages/docgen`) renders fences as escaped `<pre><code>` strings
   (Prose.ts) from documentation JSON, where a fence's `language` field carries the full comma-form
   token (`silk,ignore`).
@@ -87,10 +87,10 @@ doctest's `Example.parseLanguage` convention: `silk` → element with `diagnosti
 site build copies the element bundle into the output and references it with a relative `<script
 type="module">` in the page template.
 
-**The renderer's dependency boundary survives the bundle** *(decided during implementation)*. The
+**The renderer's dependency boundary survives the bundle** _(decided during implementation)_. The
 site package charters itself — via two guard tests — as reading the documentation JSON and nothing
 else: no `@silklang/*` runtime dependency, no workspace import in `src/`. The bundle crosses
-that boundary as data, not types: `Site.render` stays pure and takes the bundle *contents* as an
+that boundary as data, not types: `Site.render` stays pure and takes the bundle _contents_ as an
 option, and only the command shell resolves `@silklang/editor-support/bundle` to a file
 path and reads it. The guard tests were deliberately and visibly amended — exactly the edit their
 own comments anticipate — to allowlist `@silklang/editor-support` as an opaque asset supplier and to
@@ -117,7 +117,7 @@ JavaScript, or a library caller who shipped no bundle) still reads as a code blo
 
 ## Open Questions
 
-- ~~Exact bundle-size number~~ *measured*: `silk-snippet.bundle.js` is 2.98 MB raw, ~714 KB
+- ~~Exact bundle-size number~~ _measured_: `silk-snippet.bundle.js` is 2.98 MB raw, ~714 KB
   gzipped (compiler + stdlib sources + CodeMirror). Loaded once per site and cached; lazy compile
   keeps pages responsive. The highlight-only code split remains a follow-up if this grows.
 - Whether the docs app's Markdown `silk` fences (Shiki path) should also adopt the element — a

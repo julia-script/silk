@@ -23,4 +23,3 @@ bitcode, WAT, and WebAssembly bytes exactly for equivalent inputs.
 
 - **WHEN** equivalent union programs compile repeatedly for supported targets
 - **THEN** every compiler-owned artifact and backend-private realization is byte-identical
-

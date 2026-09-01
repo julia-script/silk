@@ -1,6 +1,6 @@
 interface:
-  display_name: "Silk Sync"
-  short_description: "Reconcile Linear with Silk repository state"
-  default_prompt: "Use $silk-sync to reconcile the Silk Linear queue with repository and GitHub reality."
+  display_name: 'Silk Sync'
+  short_description: 'Reconcile Linear with Silk repository state'
+  default_prompt: 'Use $silk-sync to reconcile the Silk Linear queue with repository and GitHub reality.'
 policy:
   allow_implicit_invocation: false

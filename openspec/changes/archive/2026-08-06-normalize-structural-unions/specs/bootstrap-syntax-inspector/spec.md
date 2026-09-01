@@ -24,4 +24,3 @@ non-containing targets, and unavailable layouts without adding a standalone lega
 
 - **WHEN** a preset attempts to convert a source union whose member is absent from the target
 - **THEN** the workbench retains source members, expected context, failed mapping, and exact diagnostic without claiming HIR, MIR, or codegen exists
-

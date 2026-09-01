@@ -2,6 +2,7 @@
 import { NodeRuntime, NodeServices } from '@effect/platform-node'
 import * as NodeHeapObservation from '@silklang/compiler/NodeHeapObservation'
 import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
 import { Command } from 'effect/unstable/cli'
 import * as Cli from './Cli.js'
 
@@ -11,7 +12,6 @@ import * as Cli from './Cli.js'
  */
 Cli.command.pipe(
   Command.run({ version: '0.0.0' }),
-  Effect.provide(NodeHeapObservation.layer),
-  Effect.provide(NodeServices.layer),
+  Effect.provide(Layer.mergeAll(NodeHeapObservation.layer, NodeServices.layer)),
   NodeRuntime.runMain,
 )

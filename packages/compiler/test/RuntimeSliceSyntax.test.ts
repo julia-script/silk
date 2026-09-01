@@ -16,9 +16,8 @@ const parse = (source: string) =>
   Parser.parse(Lexer.lex(SourceFile.make('slices/Syntax', encoder.encode(source))))
 
 const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
-  node.children.flatMap(
-    (child): ReadonlyArray<SyntaxTree.Node> =>
-      SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [],
+  node.children.flatMap((child): ReadonlyArray<SyntaxTree.Node> =>
+    SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [],
   )
 
 it('parses shared and exclusive slice types and borrow expressions losslessly', () => {

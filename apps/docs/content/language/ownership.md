@@ -8,9 +8,9 @@ There are no named lifetimes, garbage collector, ambient heap, or implicit move.
 
 Every type falls into one of two ownership categories:
 
-| Category | Common examples | Consuming use |
-| --- | --- | --- |
-| Copyable | scalar values, `bool`, `char`, borrowed `string`, shared views, and fixed arrays whose elements copy | copies the value; the binding remains usable |
+| Category  | Common examples                                                                                                          | Consuming use                                    |
+| --------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| Copyable  | scalar values, `bool`, `char`, borrowed `string`, shared views, and fixed arrays whose elements copy                     | copies the value; the binding remains usable     |
 | Move-only | nominal structs, owned `String`, `Bytes`, `Vector<T>`, `Box<T>`, exclusive views, Fibers, and arrays whose elements move | requires `move`; the binding becomes unavailable |
 
 A function parameter taken by value is a consuming position. Passing a copyable value copies it.

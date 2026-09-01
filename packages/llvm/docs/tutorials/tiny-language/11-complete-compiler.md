@@ -51,7 +51,7 @@ playground can display the same values. The CLI only needs `ir`.
 Install the Node platform layer matching Effect:
 
 ```sh
-pnpm add @effect/platform-node@4.0.0-beta.102
+pnpm add @effect/platform-node@4.0.0-rc.112
 ```
 
 Use `effect/FileSystem` and `effect/Stdio` inside the CLI, then provide `NodeServices.layer` once at

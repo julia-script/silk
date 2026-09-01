@@ -2,7 +2,9 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
 import * as Analysis from '../../../dist/Analysis.js'
 import * as Driver from '../../../dist/Driver.js'
 import * as NodeHeapObservation from '../../../dist/NodeHeapObservation.js'
@@ -10,6 +12,9 @@ import * as SourceFile from '../../../dist/SourceFile.js'
 import * as SourceResolver from '../../../dist/SourceResolver.js'
 
 const encoder = new TextEncoder()
+const clang = Effect.runSync(
+  Config.string('SILK_EFFECT_STACK_CLANG').pipe(Config.withDefault('/usr/bin/clang')),
+)
 
 const argument = (name) => {
   const index = process.argv.indexOf(name)
@@ -226,11 +231,11 @@ try {
         compilation: { root: SourceFile.make(sourceId, encoder.encode(source)) },
         toolchain: Object.freeze({
           _tag: 'Toolchain',
-          clang: process.env.SILK_EFFECT_STACK_CLANG ?? '/usr/bin/clang',
+          clang,
         }),
         profile: 'release',
         destination,
-      }).pipe(Effect.provide(SourceResolver.empty), Effect.provide(NodeHeapObservation.layer)),
+      }).pipe(Effect.provide(Layer.mergeAll(SourceResolver.empty, NodeHeapObservation.layer))),
     )
     if (compiled._tag !== 'Compiled') {
       throw new Error(`native compilation failed: ${JSON.stringify(compiled)}`)

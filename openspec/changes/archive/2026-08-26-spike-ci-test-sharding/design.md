@@ -32,7 +32,7 @@ the spike lives entirely in `.github/workflows/ci.yml`.
    `pnpm --filter @silklang/compiler run test:parallel -- --shard=N/4`.
    The generator/documentation checks are seconds — they stay serial. `DriverNativeAcceptance`
    is already forced to `--maxWorkers=1` and runs once, not per shard.
-   *Alternative rejected:* splitting the turbo task — that's the follow-up cache work, not the
+   _Alternative rejected:_ splitting the turbo task — that's the follow-up cache work, not the
    wall-time spike.
 
 2. **Job topology: `validate` keeps everything except compiler vitest; a 4-way `compiler-tests`
@@ -52,7 +52,7 @@ the spike lives entirely in `.github/workflows/ci.yml`.
    4-way save races.
 
 4. **Measure on the branch's own CI.** Modify `ci.yml` directly on the spike branch — PR runs
-   of the modified workflow *are* the measurement. Three re-runs give the flake sample.
+   of the modified workflow _are_ the measurement. Three re-runs give the flake sample.
    Rollback = revert the ci.yml commit (adopt = merge it).
 
 ## Risks / Trade-offs
@@ -110,7 +110,7 @@ More shards cannot cut the max below one file's duration.
    from that suite, not from sharding.
 
 Operational notes for adoption: artifact names carry a `run_attempt` suffix because v4
-artifact names are immutable across reruns; a full re-run *deletes* the prior attempt's
+artifact names are immutable across reruns; a full re-run _deletes_ the prior attempt's
 artifacts, so download timings before rerunning; empty commits did not trigger
 `pull_request` workflow runs on this repo — trigger measurement runs with real changes or
 re-runs.

@@ -114,13 +114,11 @@ export const setBranchWeights = Effect.fnUntraced(function* (
     weights.length < 2 ||
     weights.some((weight) => !Number.isSafeInteger(weight) || weight < 0 || weight > 0xffff_ffff)
   ) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'FunctionBody.setBranchWeights',
-        message: 'Branch weights require at least two unsigned 32-bit integers',
-        input: weights,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'FunctionBody.setBranchWeights',
+      message: 'Branch weights require at least two unsigned 32-bit integers',
+      input: weights,
+    })
   }
   const builder = yield* FunctionBodyState.builder(self)
   const i32 = yield* Type.integer(builder, 32)

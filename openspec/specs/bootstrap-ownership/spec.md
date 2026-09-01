@@ -1,11 +1,14 @@
 # bootstrap-ownership Specification
 
 ## Purpose
+
 The ownership and scope phase over typed HIR: per-declaration ownership facts (bindings,
 ownership categories, live ranges, verdicts) and the target-neutral cleanup plan that MIR
 lowering will consume to insert drops — established as a producer phase with its fact table and
 artifact before any lowering exists to need them.
+
 ## Requirements
+
 ### Requirement: Ownership facts are produced once per residual specialization
 
 After private residual and cleanup-call candidate closure is complete, the ownership phase SHALL run
@@ -380,6 +383,7 @@ body with concrete-only behavior.
 - **THEN** the caller's symbolic Copy evidence satisfies the nested call without enumerating concrete types
 
 #### Scenario: Specialize affine and Copy uses
+
 - **WHEN** a checked generic whole-value transfer is instantiated once with `i32` and once with an affine struct
 - **THEN** each instance receives the correct concrete copy or cleanup actions from one generic ownership proof
 
@@ -1045,9 +1049,9 @@ rules, and cleanup plans SHALL contain no enum-specific release or drop operatio
 Loan-end analysis SHALL treat identifier and callable occurrences nested inside place-replace, effect-result, and requirement-binding expressions as uses at that occurrence: they SHALL extend the enclosing loan's live range and SHALL invalidate any earlier record that treated the callable's last invocation as its final use.
 
 #### Scenario: View used inside a place replace keeps its loan live
+
 - **WHEN** a shared view's last use sits inside a place-replace expression's value operand and the borrowed owner is mutated between the view's direct uses and that nested use
 - **THEN** ownership analysis reports owner access during the loan — the view loan's live range extends through the place-replace use rather than ending at the last direct use
-
 
 ### Requirement: Nominal union ownership follows nominal struct rules
 

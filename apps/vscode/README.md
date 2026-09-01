@@ -30,10 +30,10 @@ at the active file.
 
 ## Which workflow?
 
-| Goal | Use |
-| --- | --- |
-| Edit `.silk` in your normal Cursor window | [Install (local)](#install-local) |
-| Develop the extension or language server | [Extension Development Host](#extension-development-host) |
+| Goal                                      | Use                                                       |
+| ----------------------------------------- | --------------------------------------------------------- |
+| Edit `.silk` in your normal Cursor window | [Install (local)](#install-local)                         |
+| Develop the extension or language server  | [Extension Development Host](#extension-development-host) |
 
 ## Install (local)
 
@@ -99,10 +99,10 @@ assertion does not hold.
 
 ## Reload vs restart
 
-| Change | Action |
-| --- | --- |
-| Retargeted install, grammar (`sync:vscode`), or `extension.ts` / `package.json` contributions | **Developer: Reload Window** (main Cursor or the EDH guest) |
-| Rebuilt `@silklang/lsp` only, same extension path | **Silk: Restart Language Server** — retires the current client and starts a fresh server from the new `dist` without a window reload |
+| Change                                                                                        | Action                                                                                                                               |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Retargeted install, grammar (`sync:vscode`), or `extension.ts` / `package.json` contributions | **Developer: Reload Window** (main Cursor or the EDH guest)                                                                          |
+| Rebuilt `@silklang/lsp` only, same extension path                                             | **Silk: Restart Language Server** — retires the current client and starts a fresh server from the new `dist` without a window reload |
 
 **Silk: Restart Language Server** also recovers when the old server is unresponsive. The stable
 editor session gives protocol cleanup one bounded retirement window, forcibly terminates a process

@@ -30,4 +30,3 @@ Literal identity and content SHALL be deterministic before backend selection. Ba
 
 - **WHEN** one literal is referenced multiple times
 - **THEN** all references observe identical bytes regardless of storage coalescing
-

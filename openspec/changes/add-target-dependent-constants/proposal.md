@@ -9,7 +9,7 @@ constant contract admits one literal, and there is no one literal to write.
 
 Nothing here needs evaluating. The compiler already holds both bounds — `Scalar.range` is the table
 the checked intrinsics enforce, and it is already parameterized by pointer width. What is missing is
-a way for a declaration to *name* the fact instead of spelling a number, and a defined point at
+a way for a declaration to _name_ the fact instead of spelling a number, and a defined point at
 which the naming resolves to one value.
 
 The alternative considered and rejected on #109 was a general compile-time-evaluated initializer,

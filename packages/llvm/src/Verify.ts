@@ -208,7 +208,7 @@ const dominators = (
 ): ReadonlyArray<number | undefined> => {
   const count = body.blocks.length
   const postorder: Array<number> = []
-  const visited = new Array<boolean>(count).fill(false)
+  const visited = Array.from({ length: count }, () => false)
   const stack: Array<{ block: number; edge: number }> = []
   if (count > 0) {
     visited[0] = true
@@ -232,7 +232,7 @@ const dominators = (
   }
 
   const order = [...postorder].reverse()
-  const postorderIndex = new Array<number>(count).fill(-1)
+  const postorderIndex = Array.from({ length: count }, () => -1)
   for (let index = 0; index < postorder.length; index += 1) {
     const block = postorder[index]
     if (block !== undefined) postorderIndex[block] = index
@@ -246,7 +246,7 @@ const dominators = (
     }
   }
 
-  const immediate = new Array<number | undefined>(count).fill(undefined)
+  const immediate: Array<number | undefined> = Array.from({ length: count }, () => undefined)
   if (count > 0) immediate[0] = 0
   const intersect = (left: number, right: number): number => {
     let first = left
@@ -303,8 +303,8 @@ const dominatorIntervals = (immediate: ReadonlyArray<number | undefined>): Domin
     const parent = immediate[block]
     if (parent !== undefined && parent !== block) children[parent]?.push(block)
   }
-  const tin = new Array<number>(count).fill(-1)
-  const tout = new Array<number>(count).fill(-1)
+  const tin = Array.from({ length: count }, () => -1)
+  const tout = Array.from({ length: count }, () => -1)
   if (count === 0 || immediate[0] === undefined) return { tin, tout }
   let clock = 0
   const stack: Array<{ readonly block: number; cursor: number }> = [{ block: 0, cursor: 0 }]

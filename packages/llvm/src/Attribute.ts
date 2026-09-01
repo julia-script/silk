@@ -107,9 +107,11 @@ const validateName = Effect.fnUntraced(function* (
 ): Effect.fn.Return<ByteString.ByteString, LlvmError> {
   const value = ByteString.coerce(name)
   if (ByteString.isEmpty(value)) {
-    return yield* Effect.fail(
-      invalidInput({ operation, message: 'An LLVM attribute requires a name', input: name }),
-    )
+    return yield* invalidInput({
+      operation,
+      message: 'An LLVM attribute requires a name',
+      input: name,
+    })
   }
   return value
 })

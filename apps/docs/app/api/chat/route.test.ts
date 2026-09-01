@@ -66,18 +66,13 @@ vi.mock('@openrouter/ai-sdk-provider', () => ({
   }),
 }))
 
-import { POST } from './route'
+import { makePost } from './route'
 
-const previousApiKey = process.env.OPENROUTER_API_KEY
+const POST = makePost({ apiKey: 'test-key', model: 'test' })
 
 afterEach(() => {
   calls.count = 0
   calls.result = 'answer'
-  if (previousApiKey === undefined) {
-    delete process.env.OPENROUTER_API_KEY
-  } else {
-    process.env.OPENROUTER_API_KEY = previousApiKey
-  }
 })
 
 const request = () =>
@@ -96,8 +91,6 @@ const request = () =>
   })
 
 it('passes assistant instructions separately from the chat messages', async () => {
-  process.env.OPENROUTER_API_KEY = 'test-key'
-
   const response = await POST(request())
   const body = await response.text()
 
@@ -107,7 +100,6 @@ it('passes assistant instructions separately from the chat messages', async () =
 })
 
 it('returns a safe, actionable message when the model stream fails', async () => {
-  process.env.OPENROUTER_API_KEY = 'test-key'
   calls.result = 'error'
 
   const response = await POST(request())

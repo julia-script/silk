@@ -5,6 +5,8 @@ import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as WorkspaceInventory from '@silklang/compiler/WorkspaceInventory'
 import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
+import * as Inspectable from 'effect/Inspectable'
+import * as Console from 'effect/Console'
 import * as Fiber from 'effect/Fiber'
 import * as Queue from 'effect/Queue'
 import * as Result from 'effect/Result'
@@ -206,24 +208,20 @@ it.live('reports editor-session pressure without machine-specific thresholds', (
     assert.isAtLeast(workerSpawns, 2)
     assert.isAtLeast(workerRetirements, 1)
     assert.strictEqual(outstandingQueries, 0)
-    yield* Effect.sync(() =>
-      console.log(
-        JSON.stringify(
-          {
-            acceptedEdits: editCount,
-            workerSpawns,
-            workerRetirements,
-            maximumOutstandingQueries,
-            queryOutcomes: Object.fromEntries(outcomes),
-            finalCommitLatencyMs: finalCommitAt - startedAt,
-            heapDeltaBytes: process.memoryUsage().heapUsed - memoryBefore,
-            pendingGenerationCapacityPerProject: 1,
-            finalDiagnosticCount:
-              diagnostic._tag === 'Ready' ? diagnostic.value.items.length : null,
-          },
-          undefined,
-          2,
-        ),
+    yield* Console.log(
+      Inspectable.toStringUnknown(
+        {
+          acceptedEdits: editCount,
+          workerSpawns,
+          workerRetirements,
+          maximumOutstandingQueries,
+          queryOutcomes: Object.fromEntries(outcomes),
+          finalCommitLatencyMs: finalCommitAt - startedAt,
+          heapDeltaBytes: process.memoryUsage().heapUsed - memoryBefore,
+          pendingGenerationCapacityPerProject: 1,
+          finalDiagnosticCount: diagnostic._tag === 'Ready' ? diagnostic.value.items.length : null,
+        },
+        2,
       ),
     )
   }),

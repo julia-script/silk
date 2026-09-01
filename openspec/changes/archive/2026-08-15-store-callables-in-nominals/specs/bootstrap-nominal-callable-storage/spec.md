@@ -12,6 +12,7 @@ contains one concrete callable representation. Layout and lowering SHALL use tha
 target, ordered capture environment, access, and cleanup rather than the structural callable contract.
 
 #### Scenario: Store a capturing section
+
 - **WHEN** a nominal construction stores a section with a Copy capture
 - **THEN** the complete nominal has one finite inline capture layout and one static call target
 
@@ -22,10 +23,12 @@ Shared aggregate access SHALL permit only `fn`, exclusive aggregate access SHALL
 aggregate access MUST NOT invoke a stronger callable mode.
 
 #### Scenario: Reuse a shared callable through a borrow
+
 - **WHEN** a shared-borrowed parser stores reusable `fn(Arguments) -> A`
 - **THEN** repeated parsing invokes the static target without consuming the parser
 
 #### Scenario: Reject take-only invocation through a shared borrow
+
 - **WHEN** a shared-borrowed parser stores `once fn(Arguments) -> A`
 - **THEN** ownership rejects invocation and identifies the required whole-owner take access
 
@@ -37,6 +40,7 @@ a representation-bearing field MUST be rejected, and take-once invocation SHALL 
 aggregate.
 
 #### Scenario: Reject direct callable field extraction
+
 - **WHEN** source attempts `move parser.decode`
 - **THEN** ownership rejects the extraction before residual aggregate cleanup can double-drop captures
 
@@ -47,6 +51,7 @@ live owned capture exactly once across success, typed failure, whole-value movem
 Scoped captures MUST NOT escape through an enclosing nominal.
 
 #### Scenario: Drop an uncalled stored callable
+
 - **WHEN** a move-only nominal containing an uncalled owned-capture section leaves scope
 - **THEN** every live capture is cleaned exactly once
 
@@ -57,6 +62,7 @@ paths, concrete target, capture layout, access checks, result, and cleanup trace
 NOT add a function table or `call_indirect` for this capability.
 
 #### Scenario: Execute one stored callable through every engine
+
 - **WHEN** the same stored-callable acceptance program is evaluated, compiled natively, and emitted
   as direct WebAssembly
 - **THEN** all engines agree and structural inspection finds only direct targets
@@ -68,5 +74,6 @@ unsupported by ownership, layout, MIR, or any executable engine. A known unequal
 representation-join diagnostic instead of pretending the field has no layout.
 
 #### Scenario: Keep an unsupported path fenced
+
 - **WHEN** frontend analysis knows a callable identity but one backend cannot realize its environment
 - **THEN** compilation retains the pre-MIR fence rather than producing partial support

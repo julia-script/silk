@@ -1,10 +1,7 @@
 import * as Schema from 'effect/Schema'
 
 /** Identity of one cancellable semantic query. */
-export const schema = Schema.Struct({
-  _tag: Schema.Literal('RequestId'),
-  value: Schema.Natural,
-})
+export const schema = Schema.TaggedStruct('RequestId', { value: Schema.Natural })
 
 export type RequestId = typeof schema.Type
 

@@ -220,13 +220,13 @@ export const make = (): VirtualFileSystem => {
         directories.delete(oldNormalized)
         directories.add(newNormalized)
         const prefix = `${oldNormalized}/`
-        for (const directory of [...directories]) {
+        for (const directory of Array.from(directories)) {
           if (directory.startsWith(prefix)) {
             directories.delete(directory)
             directories.add(`${newNormalized}/${directory.slice(prefix.length)}`)
           }
         }
-        for (const [filename, contents] of [...files]) {
+        for (const [filename, contents] of Array.from(files)) {
           if (filename.startsWith(prefix)) {
             files.delete(filename)
             files.set(`${newNormalized}/${filename.slice(prefix.length)}`, contents)

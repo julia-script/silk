@@ -105,14 +105,13 @@ const replaceMirOperation = (
         Object.freeze({
           ...fn,
           regions: Object.freeze(
-            fn.regions.map(
-              (region): Mir.Region =>
-                region._tag === 'OperationRegion'
-                  ? Object.freeze({
-                      ...region,
-                      operations: Object.freeze(region.operations.map(rewrite)),
-                    })
-                  : region,
+            fn.regions.map((region): Mir.Region =>
+              region._tag === 'OperationRegion'
+                ? Object.freeze({
+                    ...region,
+                    operations: Object.freeze(region.operations.map(rewrite)),
+                  })
+                : region,
             ),
           ),
         }),
@@ -307,7 +306,7 @@ effect fn selective(flag: bool) -> i32 ! B {
 pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
     assert.deepEqual(codes(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11n)
   }),
 )
@@ -329,7 +328,7 @@ effect fn selective(flag: bool) -> i32 ! B {
     pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
     assert.deepEqual(codes(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11n)
   }),
 )
@@ -389,7 +388,7 @@ pub fn main() -> i32 {
       )
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11n)
 
     const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
@@ -447,7 +446,7 @@ pub fn main() -> i32 { return (run completedLeft()) + (run completedRight()) }
 `)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 22n)
   }),
 )
@@ -488,7 +487,7 @@ pub fn main() -> i32 { return (run completed(true)) + (run completed(false)) }
       .map((fn) => `${fn.id.module}.${fn.id.name}`)
     assert.strictEqual(new Set(runnerKeys).size, runnerKeys.length)
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 34n)
   }),
 )
@@ -644,7 +643,7 @@ effect fn recovered(flag: bool) -> i32 {
 pub fn main() -> i32 { return run recovered(true) }`)
     assert.deepEqual(codes(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 0n)
   }),
 )
@@ -662,7 +661,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(codes(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 0n)
   }),
 )
@@ -675,7 +674,7 @@ effect fn recoverText(error: string) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(failText(), recoverText) }`)
     assert.deepEqual(codes(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
   }),
 )
@@ -734,7 +733,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11n)
   }),
 )
@@ -787,11 +786,7 @@ pub fn main() -> i32 {
         assert.deepEqual(Analysis.diagnostics(self), [])
         assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
         const evaluated = Analysis.evaluate(self)
-        assert.strictEqual(
-          evaluated._tag,
-          'Completed',
-          JSON.stringify(evaluated, Json.bigIntReplacer),
-        )
+        assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
         if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 156n)
 
         const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
@@ -910,14 +905,13 @@ it.effect('requires failure-path loan endings on every MIR run form', () =>
             Object.freeze({
               ...fn,
               regions: Object.freeze(
-                fn.regions.map(
-                  (region): Mir.Region =>
-                    region._tag === 'OperationRegion'
-                      ? Object.freeze({
-                          ...region,
-                          operations: Object.freeze(region.operations.map(rewrite)),
-                        })
-                      : region,
+                fn.regions.map((region): Mir.Region =>
+                  region._tag === 'OperationRegion'
+                    ? Object.freeze({
+                        ...region,
+                        operations: Object.freeze(region.operations.map(rewrite)),
+                      })
+                    : region,
                 ),
               ),
             }),
@@ -1222,7 +1216,7 @@ it.effect('requires failure-path loan endings on every MIR run form', () =>
     }
 
     const evaluated = Analysis.evaluate(raw)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 5n)
     const wasm = yield* Analysis.codegenWasm(raw, { mode: 'release' })
     assert.strictEqual(
@@ -1353,11 +1347,7 @@ for (const [label, catch_] of [
           failureRuns.every((operation) => (operation.failureLoanEnds?.length ?? 0) > 0),
         )
         const evaluated = Analysis.evaluate(snapshot)
-        assert.strictEqual(
-          evaluated._tag,
-          'Completed',
-          JSON.stringify(evaluated, Json.bigIntReplacer),
-        )
+        assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
         if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 44n)
         const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
         assert.strictEqual(
@@ -1382,11 +1372,7 @@ for (const [label, catch_] of [
         assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
 
         const evaluated = Analysis.evaluate(self)
-        assert.strictEqual(
-          evaluated._tag,
-          'Completed',
-          JSON.stringify(evaluated, Json.bigIntReplacer),
-        )
+        assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
         if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 84n)
 
         const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
@@ -1644,14 +1630,13 @@ pub fn main() -> i32 {
     const forgedChoose: Mir.MirFunction = Object.freeze({
       ...choose,
       regions: Object.freeze(
-        choose.regions.map(
-          (region): Mir.Region =>
-            region._tag === 'OperationRegion'
-              ? Object.freeze({
-                  ...region,
-                  operations: injectBeforeEnding(region.operations),
-                })
-              : region,
+        choose.regions.map((region): Mir.Region =>
+          region._tag === 'OperationRegion'
+            ? Object.freeze({
+                ...region,
+                operations: injectBeforeEnding(region.operations),
+              })
+            : region,
         ),
       ),
     })
@@ -1683,7 +1668,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 23n)
   }),
 )
@@ -1702,11 +1687,7 @@ it.effect(
         1,
       )
       const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(
-        evaluated._tag,
-        'Completed',
-        JSON.stringify(evaluated, Json.bigIntReplacer),
-      )
+      assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
       if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
 
       const propagation =
@@ -1808,17 +1789,16 @@ it.effect('repacks heterogeneous failure payload carriers without changing membe
       ...recover,
       localTypes: Object.freeze([...recover.localTypes, targetType]),
       regions: Object.freeze(
-        recover.regions.map(
-          (region): Mir.Region =>
-            !inserted && region._tag === 'OperationRegion'
-              ? (() => {
-                  inserted = true
-                  return Object.freeze({
-                    ...region,
-                    operations: Object.freeze([pack, ...region.operations]),
-                  })
-                })()
-              : region,
+        recover.regions.map((region): Mir.Region =>
+          !inserted && region._tag === 'OperationRegion'
+            ? (() => {
+                inserted = true
+                return Object.freeze({
+                  ...region,
+                  operations: Object.freeze([pack, ...region.operations]),
+                })
+              })()
+            : region,
         ),
       ),
     })
@@ -1900,7 +1880,7 @@ it.effect('repacks heterogeneous failure payload carriers without changing membe
       'expected a propagated run boundary',
     )
     const evaluated = BootstrapEvaluation.evaluate(snapshot.instances, packedModule)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
     const artifact = yield* Backend.emit(WasmBackend.WasmBackend, packedModule, {
       mode: 'release',
@@ -1923,11 +1903,7 @@ it.effect(
       assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
 
       const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(
-        evaluated._tag,
-        'Completed',
-        JSON.stringify(evaluated, Json.bigIntReplacer),
-      )
+      assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
       if (evaluated._tag !== 'Completed') return
       assert.strictEqual(evaluated.result.value, 42n)
       assert.deepEqual(
@@ -1954,7 +1930,7 @@ it.effect('releases a reified owned residual directly from a floating union carr
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
 
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
     assert.deepEqual(
@@ -2091,14 +2067,13 @@ pub fn main() -> i32 { return run Effect.catchAll(selected(1), recoverAll) }`,
           Object.freeze({
             ...fn,
             regions: Object.freeze(
-              fn.regions.map(
-                (region): Mir.Region =>
-                  region._tag === 'OperationRegion'
-                    ? Object.freeze({
-                        ...region,
-                        operations: rewriteOperations(region.operations),
-                      })
-                    : region,
+              fn.regions.map((region): Mir.Region =>
+                region._tag === 'OperationRegion'
+                  ? Object.freeze({
+                      ...region,
+                      operations: rewriteOperations(region.operations),
+                    })
+                  : region,
               ),
             ),
           }),
@@ -2162,7 +2137,7 @@ pub fn main() -> i32 { return run Effect.catchAll(selected(1), recoverAll) }`,
       )
     }
     const evaluated = BootstrapEvaluation.evaluate(snapshot.instances, mutated)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 22n)
     const artifact = yield* Backend.emit(WasmBackend.WasmBackend, mutated, { mode: 'release' })
     assert.strictEqual(artifact._tag, 'WebAssemblyModuleArtifact')
@@ -2270,14 +2245,13 @@ pub fn main() -> i32 { return run Effect.catchAll(selected(1), recoverAll) }`,
           Object.freeze({
             ...fn,
             regions: Object.freeze(
-              fn.regions.map(
-                (region): Mir.Region =>
-                  region._tag === 'OperationRegion'
-                    ? Object.freeze({
-                        ...region,
-                        operations: injectStructuredPrefix(region.operations, region.id),
-                      })
-                    : region,
+              fn.regions.map((region): Mir.Region =>
+                region._tag === 'OperationRegion'
+                  ? Object.freeze({
+                      ...region,
+                      operations: injectStructuredPrefix(region.operations, region.id),
+                    })
+                  : region,
               ),
             ),
           }),
@@ -2377,27 +2351,25 @@ pub fn main() -> i32 { return run Effect.catchAll(layer(), recoverTop) }`,
   }),
 )
 
-it.effect('catch and catchAll no longer share a doc comment', () =>
-  Effect.gen(function* () {
-    const bytes = Stdlib.sources.get('silk/effect')
-    if (bytes === undefined) unreachable('silk/effect source is missing')
-    const effects = new TextDecoder().decode(bytes)
-    const docOf = (name: string): string => {
-      const declaration = effects.indexOf(`pub effect fn ${name}<`)
-      if (declaration < 0) unreachable(`${name} is missing from silk/effect`)
-      const before = effects.slice(0, declaration).split('\n')
-      const lines: Array<string> = []
-      for (let index = before.length - 2; index >= 0; index -= 1) {
-        const line = before[index] ?? ''
-        if (!line.startsWith('///')) break
-        lines.unshift(line)
-      }
-      return lines.join('\n')
+it('catch and catchAll no longer share a doc comment', () => {
+  const bytes = Stdlib.sources.get('silk/effect')
+  if (bytes === undefined) unreachable('silk/effect source is missing')
+  const effects = new TextDecoder().decode(bytes)
+  const docOf = (name: string): string => {
+    const declaration = effects.indexOf(`pub effect fn ${name}<`)
+    if (declaration < 0) unreachable(`${name} is missing from silk/effect`)
+    const before = effects.slice(0, declaration).split('\n')
+    const lines: Array<string> = []
+    for (let index = before.length - 2; index >= 0; index -= 1) {
+      const line = before[index] ?? ''
+      if (!line.startsWith('///')) break
+      lines.unshift(line)
     }
-    const catchDoc = docOf('catch')
-    const catchAllDoc = docOf('catchAll')
-    assert.notStrictEqual(catchDoc, '')
-    assert.notStrictEqual(catchAllDoc, '')
-    assert.notStrictEqual(catchDoc, catchAllDoc)
-  }),
-)
+    return lines.join('\n')
+  }
+  const catchDoc = docOf('catch')
+  const catchAllDoc = docOf('catchAll')
+  assert.notStrictEqual(catchDoc, '')
+  assert.notStrictEqual(catchAllDoc, '')
+  assert.notStrictEqual(catchDoc, catchAllDoc)
+})

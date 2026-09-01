@@ -53,4 +53,3 @@ deterministic availability results and artifact inventories.
 
 - **WHEN** the same executable closure is planned repeatedly for the same target
 - **THEN** diagnostics and retained intrinsic inventories are byte-for-byte deterministic
-

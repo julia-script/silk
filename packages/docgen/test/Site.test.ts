@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { createContext, runInContext } from 'node:vm'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from '../src/Json.js'
 import * as Model from '../src/Model.js'
 import * as Search from '../src/Search.js'
 import * as Site from '../src/Site.js'
@@ -21,7 +22,7 @@ const rendererActors = ['Html.ts', 'Model.ts', 'Prose.ts', 'Search.ts', 'Site.ts
  * docgen runtime dependency.
  */
 it('declares the compiler as its only workspace runtime dependency', () => {
-  const manifest: unknown = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
+  const manifest = Json.decodeSync(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
   assert.isTrue(typeof manifest === 'object' && manifest !== null)
   const dependencies =
     typeof manifest === 'object' && manifest !== null && 'dependencies' in manifest
@@ -48,7 +49,7 @@ it.effect(
     Effect.gen(function* () {
       // Parsed from text, so the renderer reads what `silk doc` writes rather than what the
       // emitter happens to hold in memory.
-      const parsed: unknown = JSON.parse(yield* encoded)
+      const parsed = yield* Json.decode(yield* encoded)
       const decoded = Model.decode(parsed)
       assert.strictEqual(decoded._tag, 'Decoded')
       if (decoded._tag !== 'Decoded') return
@@ -128,11 +129,13 @@ it.effect(
   'renders the same bytes twice',
   () =>
     Effect.gen(function* () {
-      const parsed: unknown = JSON.parse(yield* encoded)
+      const parsed = yield* Json.decode(yield* encoded)
       const decoded = Model.decode(parsed)
       if (decoded._tag !== 'Decoded') return assert.fail('expected documentation JSON')
       const first = Site.render(decoded.documentation)
-      const second = Site.render(JSON.parse(JSON.stringify(decoded.documentation)))
+      const roundTripped = Model.decode(Json.decodeSync(Json.encodeValue(parsed)))
+      if (roundTripped._tag !== 'Decoded') return assert.fail('expected documentation JSON')
+      const second = Site.render(roundTripped.documentation)
       assert.deepStrictEqual(
         second.files.map((file) => [file.path, file.contents]),
         first.files.map((file) => [file.path, file.contents]),
@@ -149,7 +152,7 @@ it.effect(
   'finds a standard-library declaration by name through the emitted index',
   () =>
     Effect.gen(function* () {
-      const decoded = Model.decode(JSON.parse(yield* encoded))
+      const decoded = Model.decode(yield* Json.decode(yield* encoded))
       if (decoded._tag !== 'Decoded') return assert.fail('expected documentation JSON')
       const site = Site.render(decoded.documentation)
       const indexFile = site.files.find((file) => file.path === 'search-index.js')

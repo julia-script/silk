@@ -1,3 +1,4 @@
+import * as Json from '@silklang/docgen/Json'
 import * as Model from '@silklang/docgen/Model'
 import * as Site from '@silklang/docgen/Site'
 import * as Console from 'effect/Console'
@@ -50,9 +51,7 @@ export const run = Effect.fn('DocumentationSiteCommand.run')(function* (
     yield* Console.error(`Cannot read documentation JSON at ${options.input}`)
     return 2
   }
-  const parsed = yield* Effect.result(
-    Effect.try({ try: (): unknown => JSON.parse(text.success), catch: () => undefined }),
-  )
+  const parsed = yield* Effect.result(Json.decode(text.success))
   if (Result.isFailure(parsed)) {
     yield* Console.error(`${options.input} does not hold valid JSON`)
     return 2

@@ -742,13 +742,7 @@ export const execute = (
           }
           break
         }
-        let command:
-          | ReturnType<typeof host.directoryCreate>
-          | ReturnType<typeof host.fileRemove>
-          | ReturnType<typeof host.directoryRemove>
-          | ReturnType<typeof host.handleClose>
-          | OsFileSystemHost.Failure
-          | undefined
+        let command: ReturnType<typeof host.directoryCreate> | OsFileSystemHost.Failure | undefined
         if (
           name === 'osDirectoryCreate' ||
           name === 'osFileRemove' ||

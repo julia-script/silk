@@ -121,7 +121,7 @@ it.effect('lowers arithmetic in AST dependency order', () =>
 it.effect('uses signed division after unary negation', () =>
   Effect.gen(function* () {
     const ir = yield* compile('fn main() = -20 / 3')
-    assert.match(ir, /%negated_0 = sub i32 zeroinitializer, 20/)
+    assert.match(ir, /%negated_0 = sub i32 0, 20/)
     assert.match(ir, /%divided_1 = sdiv i32 %negated_0, 3/)
   }),
 )

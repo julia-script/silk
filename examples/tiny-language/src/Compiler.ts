@@ -9,6 +9,7 @@ import type * as LlvmError from '@silklang/llvm/LlvmError'
 import * as Type from '@silklang/llvm/Type'
 import * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
+import * as Inspectable from 'effect/Inspectable'
 import * as Diagnostic from './Diagnostic.js'
 import type * as Expression from './Expression.js'
 import * as Lexer from './Lexer.js'
@@ -93,7 +94,7 @@ const lowerExpression = Effect.fnUntraced(function* (
       return value === undefined
         ? yield* resolutionError(
             'Compiler.lowerExpression',
-            `Unknown parameter ${JSON.stringify(expression.name)}`,
+            `Unknown parameter ${Inspectable.toStringUnknown(expression.name)}`,
             expression.start,
             expression.end,
             { _tag: 'UnknownName', name: expression.name },
@@ -175,7 +176,7 @@ const lowerExpression = Effect.fnUntraced(function* (
       if (target === undefined) {
         return yield* resolutionError(
           'Compiler.lowerExpression',
-          `Unknown function ${JSON.stringify(expression.callee)}`,
+          `Unknown function ${Inspectable.toStringUnknown(expression.callee)}`,
           expression.start,
           expression.end,
           { _tag: 'UnknownFunction', name: expression.callee },
@@ -208,7 +209,7 @@ const lowerExpression = Effect.fnUntraced(function* (
       if (result !== undefined) return result
       return yield* compileError(
         'Compiler.lowerExpression',
-        `Tiny function ${JSON.stringify(expression.callee)} unexpectedly returned void`,
+        `Tiny function ${Inspectable.toStringUnknown(expression.callee)} unexpectedly returned void`,
         expression.start,
         expression.end,
         { _tag: 'MissingCallResult', name: expression.callee },
@@ -273,7 +274,7 @@ const buildProgram = Effect.fnUntraced(function* (
     if (functionNames.has(definition.name)) {
       return yield* resolutionError(
         'Compiler.compile',
-        `Duplicate function ${JSON.stringify(definition.name)}`,
+        `Duplicate function ${Inspectable.toStringUnknown(definition.name)}`,
         definition.start,
         definition.end,
         { _tag: 'DuplicateFunction', name: definition.name },

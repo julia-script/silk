@@ -198,7 +198,7 @@ the lexer in an infinite loop.
 Create `test/Lexer.test.ts` with `it.effect` and tokenize the first function:
 
 ```typescript
-const tokens = yield* Lexer.tokenize('fn main() = 1 + 2 * 3')
+const tokens = yield * Lexer.tokenize('fn main() = 1 + 2 * 3')
 ```
 
 Assert the exact values. The result should be:

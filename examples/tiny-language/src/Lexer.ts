@@ -1,4 +1,5 @@
 import * as Effect from 'effect/Effect'
+import * as Inspectable from 'effect/Inspectable'
 import * as Diagnostic from './Diagnostic.js'
 import * as Token from './Token.js'
 
@@ -69,7 +70,7 @@ export const tokenize = Effect.fn('Lexer.tokenize')(function* (
     }
 
     return yield* new Diagnostic.LexError({
-      message: `Unexpected character ${JSON.stringify(character)}`,
+      message: `Unexpected character ${Inspectable.toStringUnknown(character)}`,
       start,
       end: start + 1,
       found: character,

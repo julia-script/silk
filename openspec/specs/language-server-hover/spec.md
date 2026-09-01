@@ -4,6 +4,7 @@
 
 Defines token-specific semantic hover for Silk source, including source-like declarations,
 intrinsic language operations, recovered programs, and anonymous expression type fallback.
+
 ## Requirements
 
 ### Requirement: Concrete provider hover lists proved contracts
@@ -25,6 +26,7 @@ proof or recognizing a standard-library declaration by spelling.
 
 - **WHEN** a concrete generic provider does not satisfy a conditional conformance's requirements
 - **THEN** hover does not advertise that contract
+
 ### Requirement: Hover renders canonical integer types
 
 Hover SHALL render lowercase integer spellings, `bool`, `()`, and `never`, never removed uppercase or backend lane names.

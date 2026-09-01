@@ -8,4 +8,3 @@ MIR SHALL represent an ordered effectful write over a destination and immutable 
 
 - **WHEN** HIR writes bytes to stdout
 - **THEN** MIR contains one target-neutral write operation after the byte view is available
-

@@ -31,4 +31,3 @@ exactly-once release MUST match evaluation.
 
 - **WHEN** verified MIR reads an initialized non-union Copy element through a shared raw-buffer borrow
 - **THEN** native and Wasm return the evaluator's value, enforce the same bounds trap, perform no write or allocation, and preserve later cleanup
-

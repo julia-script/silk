@@ -1,0 +1,55 @@
+{
+  "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
+  "extends": ["./node_modules/@effect/tsgo/oxlint-presets/recommended.json"],
+  "ignorePatterns": ["examples/tiny-language/build-js/**"],
+  "options": {
+    "denyWarnings": true
+  },
+  "rules": {
+    "no-nested-ternary": "error"
+  },
+  "overrides": [
+    {
+      // Executable scripts and tests are the owning adapters for Node, subprocess, timer, and
+      // Promise APIs. Their Effect-facing package code remains covered by the full preset.
+      "files": ["**/scripts/**", "**/test/**", "**/*.test.*", "release-candidate/**"],
+      "rules": {
+        "effecttsgo/async-function": "off",
+        "effecttsgo/global-fetch": "off",
+        "effecttsgo/global-timers": "off",
+        "effecttsgo/new-promise": "off",
+        "effecttsgo/node-builtin-import": "off"
+      }
+    },
+    {
+      // Next server components and route handlers must expose the Promise-shaped contracts Next
+      // invokes, and its build-time pages own their Node and fetch boundaries.
+      "files": ["apps/docs/**"],
+      "rules": {
+        "effecttsgo/async-function": "off",
+        "effecttsgo/global-fetch": "off",
+        "effecttsgo/node-builtin-import": "off"
+      }
+    },
+    {
+      // VS Code and vscode-languageclient require Promise-returning callbacks; these modules are
+      // the extension-host adapter rather than the Effect-native compiler or LSP core.
+      "files": ["apps/vscode/src/**", "packages/lsp/src/Server.ts"],
+      "rules": {
+        "effecttsgo/async-function": "off",
+        "effecttsgo/node-builtin-import": "off"
+      }
+    },
+    {
+      // These actors/configs are the explicit Node platform edge for otherwise Effect-native code.
+      "files": [
+        "packages/cli/src/BuildPlan.ts",
+        "packages/compiler/src/NativeToolchain.ts",
+        "packages/compiler/vitest.config.ts"
+      ],
+      "rules": {
+        "effecttsgo/node-builtin-import": "off"
+      }
+    }
+  ]
+}

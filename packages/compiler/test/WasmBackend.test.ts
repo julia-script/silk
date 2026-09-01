@@ -31,11 +31,15 @@ const run = Effect.fnUntraced(function* (text: string) {
   const bytes = (yield* emit(text)).bytes.slice()
   const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes), {})
   const main = instance.exports.silk_main as () => number
-  try {
-    return main()
-  } catch {
-    return 'trap'
-  }
+  return yield* Effect.try({
+    try: () => main(),
+    catch: () => 'trap' as const,
+  }).pipe(
+    Effect.match({
+      onFailure: (failure) => failure,
+      onSuccess: (value) => value,
+    }),
+  )
 })
 
 const binaryOperation = Effect.fnUntraced(function* (operator: string) {
@@ -687,12 +691,15 @@ it.effect(
           for (const right of operands) {
             const exact = reference(left, right)
             const traps = exact === undefined || exact > maximum || exact < minimum
-            let actual: number | 'trap'
-            try {
-              actual = calculate(left, right)
-            } catch {
-              actual = 'trap'
-            }
+            const actual = yield* Effect.try({
+              try: () => calculate(left, right),
+              catch: () => 'trap' as const,
+            }).pipe(
+              Effect.match({
+                onFailure: (failure) => failure,
+                onSuccess: (value) => value,
+              }),
+            )
             if (actual !== (traps ? 'trap' : exact)) {
               mismatches.push(
                 `i32.${operator}(${left}, ${right}) expected ${traps ? 'trap' : exact}, got ${actual}`,

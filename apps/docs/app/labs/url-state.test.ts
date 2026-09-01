@@ -50,19 +50,23 @@ describe('source encoding', () => {
   it('keeps an unknown target rather than silently compiling for the default', async () => {
     // `Target.select` turns this into an unavailable selection the panes already render, which is
     // a better answer than quietly emitting for some other target.
-    const encoded = defined(await encodeSource({
-      root: 'main',
-      modules: { main: 'pub fn main() -> i32 { return 42 }' },
-      target: 'sparc-unknown-none',
-    }))
+    const encoded = defined(
+      await encodeSource({
+        root: 'main',
+        modules: { main: 'pub fn main() -> i32 { return 42 }' },
+        target: 'sparc-unknown-none',
+      }),
+    )
     assert.strictEqual((await decodeSource(encoded))?.target, 'sparc-unknown-none')
   })
 
   it('rejects a root that names no module, which would not load', async () => {
-    const encoded = defined(await encodeSource({
-      root: 'absent',
-      modules: { main: 'pub fn main() -> i32 { return 42 }' },
-    }))
+    const encoded = defined(
+      await encodeSource({
+        root: 'absent',
+        modules: { main: 'pub fn main() -> i32 { return 42 }' },
+      }),
+    )
     assert.isUndefined(await decodeSource(encoded))
   })
 

@@ -17,4 +17,3 @@ use or target incompatibility.
 
 - **WHEN** an ordinary reachable wrapper calls one sealed restricted intrinsic
 - **THEN** executable closure preserves that canonical intrinsic identity for target validation rather than treating the wrapper's module as the availability unit
-

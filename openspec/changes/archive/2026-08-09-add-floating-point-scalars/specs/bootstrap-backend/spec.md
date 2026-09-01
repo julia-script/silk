@@ -8,4 +8,3 @@ LLVM SHALL emit ordinary float operations without implicit fast-math flags; dire
 
 - **WHEN** accepted `f64` arithmetic lowers
 - **THEN** generated artifacts contain no reassociation, no-NaN, no-infinity, or equivalent promises
-

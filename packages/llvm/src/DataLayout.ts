@@ -1,3 +1,4 @@
+import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as AddrSpace from './AddrSpace.js'
 import * as Alignment from './Alignment.js'
@@ -115,12 +116,12 @@ const defaultIntegerSpecs: ReadonlyArray<PrimitiveSpec> = Object.freeze([
 ])
 
 /** @internal */
-class DataLayoutParseFailure extends Error {
+class DataLayoutParseFailure extends Data.TaggedError('DataLayoutParseFailure')<{
+  readonly message: string
   readonly input: unknown
-
+}> {
   constructor(message: string, input: unknown) {
-    super(message)
-    this.input = input
+    super({ message, input })
   }
 }
 

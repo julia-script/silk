@@ -41,4 +41,4 @@
 - [x] 5.3 Add public Silk doc comments for Scheduler, Fiber, LocalScheduler, outcomes, errors, and provider SPI, and verify generated standard-library documentation, hover, and navigation resolve to the canonical `.silk` declarations.
 - [x] 5.4 Update the maintained language reference with explicit scheduler entry and structured Fiber semantics, omit deleted SLP workflow references, and verify documentation links and examples compile against the final API.
 - [x] 5.5 Regenerate the deterministic standard-library embedding/manifest and update namespace-resolution coverage, and verify the new modules package from canonical source with no compiler-origin branch.
-- [x] 5.6 Run `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and `pnpm release:candidate`, fixing change-caused failures and recording any exact pre-existing failure before handoff.
+- [x] 5.6 Run `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, `pnpm test`, `pnpm check`, and `pnpm release:candidate`, fixing change-caused failures and recording any exact pre-existing failure before handoff.

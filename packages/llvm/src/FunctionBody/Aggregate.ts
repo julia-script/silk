@@ -183,13 +183,11 @@ export const buildAggregate = Effect.fnUntraced(function* (
   const shape = yield* Type.aggregateShape(builder, type)
   const expectedLength = shape.length === undefined ? shape.fields.length : Number(shape.length)
   if (elements.length !== expectedLength) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'FunctionBody.buildAggregate',
-        message: 'Aggregate element count does not match its type',
-        input: elements,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'FunctionBody.buildAggregate',
+      message: 'Aggregate element count does not match its type',
+      input: elements,
+    })
   }
   let aggregate: Value.Input = yield* Constant.poison(builder, type)
   for (let index = 0; index < elements.length; index += 1) {
@@ -467,23 +465,19 @@ export const splatVector = Effect.fnUntraced(function* (
   const builder = yield* FunctionBodyState.builder(self)
   const shape = yield* Type.aggregateShape(builder, vectorType)
   if (shape.length === undefined || shape.fields.length !== 1) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'FunctionBody.splatVector',
-        message: 'splatVector requires a vector result type',
-        input: vectorType,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'FunctionBody.splatVector',
+      message: 'splatVector requires a vector result type',
+      input: vectorType,
+    })
   }
   const child = shape.fields[0]
   if (child === undefined) {
-    return yield* Effect.fail(
-      invalidState({
-        operation: 'FunctionBody.splatVector',
-        message: 'Vector child is missing',
-        state: vectorType,
-      }),
-    )
+    return yield* invalidState({
+      operation: 'FunctionBody.splatVector',
+      message: 'Vector child is missing',
+      state: vectorType,
+    })
   }
   const scalarVector = shape.scalable
     ? yield* Type.scalableVector(builder, child, 1)

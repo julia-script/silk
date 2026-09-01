@@ -27,4 +27,3 @@ view's last use.
 
 - **WHEN** a structured exit would drop an owner while a returned view derived from it remains live
 - **THEN** ownership rejects the exit rather than emitting cleanup that invalidates the view
-

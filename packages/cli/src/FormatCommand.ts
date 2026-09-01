@@ -16,6 +16,7 @@ const paths = Argument.string('path').pipe(
 
 const check = Flag.boolean('check').pipe(
   Flag.withDescription('Verify canonical formatting without writing files.'),
+  Flag.withDefault(false),
 )
 
 export interface Options {

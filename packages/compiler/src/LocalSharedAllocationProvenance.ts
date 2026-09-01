@@ -352,8 +352,8 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         span: firstReturn.span,
       })
     const parameters = Object.freeze(
-      instance.function.declaration.parameters.map(
-        (_, ordinal): Origin => Object.freeze({ _tag: 'ParameterOrigin', ordinal }),
+      instance.function.declaration.parameters.map((_, ordinal): Origin =>
+        Object.freeze({ _tag: 'ParameterOrigin', ordinal }),
       ),
     )
     const result = returns
@@ -674,58 +674,57 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     // call edge instead of requiring the helper to inline or recognizing it by declaration name.
     const forwarded =
       explicitlyBound === undefined
-        ? discovery.instances.flatMap(
-            (caller): ReadonlyArray<Provider> =>
-              caller.function.statements
-                .flatMap(Hir.statementExpressions)
-                .flatMap(Hir.expressionTree)
-                .flatMap((candidate): ReadonlyArray<Provider> => {
-                  if (candidate._tag !== 'EffectBindRequirement') return []
-                  const reachesOwner = Hir.expressionTree(candidate.protected).some((nested) => {
-                    if (nested._tag === 'ParameterReference') {
-                      const identity = Instances.parameterEffectIdentity(
-                        caller.function,
-                        caller.key,
-                        nested.parameter.ordinal,
-                      )
-                      const effect =
-                        identity === undefined
-                          ? undefined
-                          : discovery.effects.find((item) => item.identity === identity)
-                      return (
-                        effect !== undefined &&
-                        (() => {
-                          const effectOwner = instances.get(Instances.keyText(effect.owner))
-                          return (
-                            effectOwner !== undefined &&
-                            reachesExecutionOwner(effectOwner, origin.owner)
-                          )
-                        })()
-                      )
-                    }
-                    if (
-                      nested._tag !== 'Call' &&
-                      nested._tag !== 'EffectConstruct' &&
-                      nested._tag !== 'CallableApply'
+        ? discovery.instances.flatMap((caller): ReadonlyArray<Provider> =>
+            caller.function.statements
+              .flatMap(Hir.statementExpressions)
+              .flatMap(Hir.expressionTree)
+              .flatMap((candidate): ReadonlyArray<Provider> => {
+                if (candidate._tag !== 'EffectBindRequirement') return []
+                const reachesOwner = Hir.expressionTree(candidate.protected).some((nested) => {
+                  if (nested._tag === 'ParameterReference') {
+                    const identity = Instances.parameterEffectIdentity(
+                      caller.function,
+                      caller.key,
+                      nested.parameter.ordinal,
                     )
-                      return false
-                    const resultEffect = callAt(caller, nested)?.resultEffect
                     const effect =
-                      resultEffect === undefined
+                      identity === undefined
                         ? undefined
-                        : discovery.effects.find((candidate) => candidate.identity === resultEffect)
-                    if (
+                        : discovery.effects.find((item) => item.identity === identity)
+                    return (
                       effect !== undefined &&
-                      sameProvidedOwner(effect.runner, origin.owner.key.declaration)
+                      (() => {
+                        const effectOwner = instances.get(Instances.keyText(effect.owner))
+                        return (
+                          effectOwner !== undefined &&
+                          reachesExecutionOwner(effectOwner, origin.owner)
+                        )
+                      })()
                     )
-                      return true
-                    const target = targetAt(caller, nested)
-                    return target !== undefined && reachesExecutionOwner(target, origin.owner)
-                  })
-                  if (!reachesOwner) return []
-                  const selected = selectedProvider(caller, candidate.provider)
-                  return selected === undefined ? [] : [selected]
-                }),
+                  }
+                  if (
+                    nested._tag !== 'Call' &&
+                    nested._tag !== 'EffectConstruct' &&
+                    nested._tag !== 'CallableApply'
+                  )
+                    return false
+                  const resultEffect = callAt(caller, nested)?.resultEffect
+                  const effect =
+                    resultEffect === undefined
+                      ? undefined
+                      : discovery.effects.find((candidate) => candidate.identity === resultEffect)
+                  if (
+                    effect !== undefined &&
+                    sameProvidedOwner(effect.runner, origin.owner.key.declaration)
+                  )
+                    return true
+                  const target = targetAt(caller, nested)
+                  return target !== undefined && reachesExecutionOwner(target, origin.owner)
+                })
+                if (!reachesOwner) return []
+                const selected = selectedProvider(caller, candidate.provider)
+                return selected === undefined ? [] : [selected]
+              }),
           )
         : []
     const candidates =

@@ -544,13 +544,11 @@ export const structuredGetElementPtr = Effect.fnUntraced(function* (
   const indices: Array<Constant.Constant> = []
   for (const field of exact) {
     if (!Number.isSafeInteger(field) || field < 0) {
-      return yield* Effect.fail(
-        invalidInput({
-          operation: 'FunctionBody.structuredGetElementPtr',
-          message: 'Structured GEP fields must be non-negative integers',
-          input: field,
-        }),
-      )
+      return yield* invalidInput({
+        operation: 'FunctionBody.structuredGetElementPtr',
+        message: 'Structured GEP fields must be non-negative integers',
+        input: field,
+      })
     }
     indices.push(yield* Constant.integerUnsigned(builder, i32, field))
   }

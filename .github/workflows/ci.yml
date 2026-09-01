@@ -37,8 +37,10 @@ jobs:
           key: silk-native-${{ runner.os }}-${{ github.sha }}
           restore-keys: silk-native-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec biome check .
+      - run: pnpm format:check
       - run: node scripts/turbo.mjs run build
+      # Oxlint resolves public workspace subpaths through their emitted declaration files.
+      - run: pnpm lint
       - run: node scripts/turbo.mjs run typecheck
       - run: node scripts/turbo.mjs run test --filter='!@silklang/compiler'
       # The non-vitest parts of @silklang/compiler#test (its vitest payload is sharded below).

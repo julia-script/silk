@@ -34,7 +34,7 @@ the enforcement point for "every step is visualizable."
 2. **Fact types are the facade's vocabulary, not internals.** Data-model modules (`SyntaxTree`,
    `SourceFile`, `SourceSpan`, `Token`, `Diagnostic`, `Hir`, and the fact type namespaces) remain
    importable — facade answers are made of them, and type-only imports of phase namespaces stay
-   legal for annotating those answers. What tooling must not do is *run* phases: value imports of
+   legal for annotating those answers. What tooling must not do is _run_ phases: value imports of
    `Lexer`, `Parser`, `ModuleClosure`, `DeclarationIndex`, `Elaboration`, `BootstrapEvaluation`
    are the disallowed set.
 

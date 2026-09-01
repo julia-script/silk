@@ -1,6 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: First function grammar
+
 The parser SHALL recognize a source file containing zero or more top-level import or function
 declarations followed by end-of-file. Every function SHALL have the form `[pub] fn <name>(<parameters>)
 -> <return-type> { <statements> }`, where `pub` is optional and `<statements>` is zero or more binding
@@ -16,10 +17,12 @@ identifier tokens, and declaration, statement, parameter, and argument order SHA
 source order.
 
 #### Scenario: Parse an empty module
+
 - **WHEN** the source contains only end-of-file
 - **THEN** the result contains a source-file root with end-of-file, no recovered declaration, and no parser diagnostic
 
 #### Scenario: Parse the accepted integer fixture
+
 - **WHEN** the source bytes spell `pub fn main() -> I32 { return 42 }`
 - **THEN** the result contains one complete function declaration with an empty parameter list, an integer literal return expression, and end-of-file
 
@@ -29,22 +32,27 @@ source order.
 - **THEN** the result contains one complete function declaration with no public-modifier token and exact source provenance
 
 #### Scenario: Parse trivia between grammar elements
+
 - **WHEN** whitespace and line comments appear between every pair of grammar elements in the accepted fixture
 - **THEN** the parser recognizes the same grammatical structure while retaining the exact trivia tokens
 
 #### Scenario: Parse two functions in source order
+
 - **WHEN** `answer` returning `42` is followed by `main` returning `0`
 - **THEN** the source-file tree contains exactly two complete function declarations in that order before end-of-file
 
 #### Scenario: Parse a typed parameter reference
+
 - **WHEN** the source spells `pub fn identity(value: I32) -> I32 { return value }`
 - **THEN** the function contains one typed parameter and a bare-identifier return expression with exact concrete provenance
 
 #### Scenario: Parse the first value-carrying call
+
 - **WHEN** `identity` accepts one `I32` parameter and `main` returns `identity(42)`
 - **THEN** `main` contains one complete call expression with one decimal-integer argument
 
 #### Scenario: Parse trivia inside a call
+
 - **WHEN** whitespace and line comments appear around a call's callee, parentheses, arguments, and commas
 - **THEN** the parser recognizes the same call structure while retaining every trivia token exactly
 
@@ -69,6 +77,7 @@ source order.
 - **THEN** the call expression retains the actor identifier, the dot, the operation identifier, and the argument list in concrete order
 
 ### Requirement: Function-boundary recovery remains local
+
 Recovery inside one function SHALL stop at a following function's `pub` token when that token can
 begin the next declaration. Unexpected concrete input between declarations SHALL remain lossless,
 and parsing SHALL either consume a concrete token or insert missing syntax without looping. An
@@ -79,26 +88,32 @@ token expected by the grammar. At that synchronization token, ordinary diagnosti
 resume for later independent mistakes.
 
 #### Scenario: Preserve a second function after a missing brace
+
 - **WHEN** the first function omits its closing brace immediately before a valid second function
 - **THEN** the first function receives a missing right brace and the second function remains a separate complete declaration
 
 #### Scenario: Recover unexpected input between functions
+
 - **WHEN** unsupported punctuation appears after one complete function and before the next `pub`
 - **THEN** the punctuation is retained in an error region with a parser diagnostic and the following function remains parseable
 
 #### Scenario: Preserve empty module structure
+
 - **WHEN** the source is empty
 - **THEN** the parser returns only the source-file root and end-of-file without missing syntax or parser diagnostics
 
 #### Scenario: Stop an end-of-file declaration cascade
+
 - **WHEN** the source contains only `pub`
 - **THEN** the parser reports the missing `fn`, retains the remaining recovered function structure, and suppresses its dependent missing-token and missing-return diagnostics through end-of-file
 
 #### Scenario: Report again after a grammar anchor
+
 - **WHEN** one missing token starts recovery, a later expected concrete token is consumed, and another independent token is missing after that anchor
 - **THEN** the parser reports both independent mistakes without reporting dependent insertions between them
 
 ### Requirement: Missing syntax remains explicit
+
 When a required grammar element is absent at the current source position, the parser SHALL insert a
 missing element with the expected token kind and an empty source-owned span at that byte boundary.
 The parser SHALL emit a stable diagnostic for the source-level mistake without consuming an
@@ -106,14 +121,17 @@ unrelated concrete token. Multiple missing elements introduced solely to represe
 construct MAY share one construct-level diagnostic rather than producing one diagnostic per leaf.
 
 #### Scenario: Recover a missing function name
+
 - **WHEN** the source spells `pub fn () -> I32 { return 42 }`
 - **THEN** the function contains a missing identifier before `(`, the remaining structure parses, and one parser diagnostic identifies the missing name position
 
 #### Scenario: Recover a missing closing brace
+
 - **WHEN** the accepted fixture ends after the decimal integer
 - **THEN** the block contains a missing right brace at end-of-file and the parser returns the partial tree with one parser diagnostic
 
 #### Scenario: Aggregate a wholly missing return statement
+
 - **WHEN** a required-return block reaches its closing brace without a return keyword or expression
 - **THEN** the CST retains the recovered return structure and one parser diagnostic identifies the missing return statement
 

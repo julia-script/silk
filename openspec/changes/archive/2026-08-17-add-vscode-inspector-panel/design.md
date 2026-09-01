@@ -33,7 +33,7 @@ See proposal.md for motivation. Current state that shapes the design:
 - No dockview/multi-pane layout in the extension; users split with VS Code's own editor groups.
 - No marketplace packaging; the extension stays local-install.
 - No change to labs' saved layouts, URL encoding, or presets.
-- No cross-module cursor *navigation* added to the docs workbench (rows gain module identity, but
+- No cross-module cursor _navigation_ added to the docs workbench (rows gain module identity, but
   the workbench keeps its current single-cursor behavior).
 
 ## Decisions
@@ -43,7 +43,7 @@ See proposal.md for motivation. Current state that shapes the design:
 The registry (`ViewDefinition`, `views`, `viewById`, `siblingsOf`), row model types, and the
 `project-*`/`flow-model` row builders move here. Depends only on `@silklang/compiler`.
 
-*Alternative — fold into the compiler's tooling namespace:* rejected; row models and fact strips
+_Alternative — fold into the compiler's tooling namespace:_ rejected; row models and fact strips
 are a presentation vocabulary, not compiler analysis, and the compiler package should not grow a
 UI-shaped surface.
 
@@ -56,7 +56,7 @@ the webview posts a message. `ViewContext` correspondingly drops its callbacks (
 `onEvaluate`); the evaluation action becomes a request/context input (`evaluate: boolean`), which
 also matches the LSP request shape.
 
-*Alternative — keep callbacks and strip them at the wire:* rejected; two contracts for the same
+_Alternative — keep callbacks and strip them at the wire:_ rejected; two contracts for the same
 rows, and the labs "activatable = has onActivate" rule would silently diverge from the wire rule.
 
 ### D3: Spans are module-qualified
@@ -82,7 +82,7 @@ realize `Analysis.Snapshot` rooted at the request's document, cached in a
 execute-and-compare run in the server process (Node has `WebAssembly`) only when
 `evaluate: true`.
 
-*Alternative — run the compiler in the extension host or webview:* rejected; duplicates
+_Alternative — run the compiler in the extension host or webview:_ rejected; duplicates
 ProjectSession's discovery/debounce/watch machinery, and webviews cannot read the workspace.
 
 ### D5: Webview is a dumb renderer, no framework
@@ -94,7 +94,7 @@ the server, so a disposed panel loses nothing. The extension host mediates all m
 → host (`pickView`, `activateRow`, `setFilter`, `evaluate`) and host → webview (`viewResult`,
 `cursor`).
 
-*Alternative — share the labs React components:* rejected; RowList/pane chrome are entangled
+_Alternative — share the labs React components:_ rejected; RowList/pane chrome are entangled
 with atoms and dockview, and a single static list does not need a framework.
 
 ### D6: Follow-active-editor, sticky on blur

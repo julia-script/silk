@@ -3,7 +3,9 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -17,7 +19,9 @@ const defaultClang = (): string => {
   return 'clang'
 }
 
-const clang = process.env.SILK_TEST_CLANG ?? defaultClang()
+const configured = (name: string, fallback = ''): string =>
+  Effect.runSync(Config.string(name).pipe(Config.withDefault(fallback)))
+const clang = configured('SILK_TEST_CLANG', defaultClang())
 const toolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
   clang,
@@ -74,7 +78,8 @@ const compileSource = (
  * `SILK_NATIVE_SHARD=k/n` selects every n-th corpus case starting at k (1-based), letting CI run
  * the corpus as a job matrix instead of one serial sweep. Unset runs everything.
  */
-const shard = /^([1-9]\d*)\/([1-9]\d*)$/.exec(process.env.SILK_NATIVE_SHARD ?? '')
+const shard = /^([1-9]\d*)\/([1-9]\d*)$/.exec(configured('SILK_NATIVE_SHARD'))
+const selectedNativeCase = configured('SILK_NATIVE_CORPUS_CASE')
 const shardedCorpus =
   shard === null
     ? nativeCorpus
@@ -83,10 +88,8 @@ const shardedCorpus =
 it.each(shardedCorpus)(
   'runs the native corpus case $name',
   async (program) => {
-    const selected = process.env.SILK_NATIVE_CORPUS_CASE
-
     await Effect.gen(function* () {
-      if (selected !== undefined && program.name !== selected) return
+      if (selectedNativeCase.length > 0 && program.name !== selectedNativeCase) return
       const snapshot = yield* Analysis.ofSourceRealized('memory/driver', ascii(program.source))
       assert.strictEqual(
         snapshot.mir._tag,
@@ -118,7 +121,7 @@ it.each(shardedCorpus)(
         outcome._tag,
         'Compiled',
         outcome._tag === 'BackendFailed'
-          ? `${program.name}: ${outcome.error.message}\n${JSON.stringify(outcome.error.reason)}`
+          ? `${program.name}: ${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
           : program.name,
       )
       if (outcome._tag !== 'Compiled') return
@@ -193,7 +196,7 @@ pub fn main() -> i32 {
         outcome._tag,
         'Compiled',
         outcome._tag === 'BackendFailed'
-          ? `${outcome.error.message}\n${JSON.stringify(outcome.error.reason)}`
+          ? `${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
           : outcome._tag,
       )
       if (outcome._tag !== 'Compiled') return

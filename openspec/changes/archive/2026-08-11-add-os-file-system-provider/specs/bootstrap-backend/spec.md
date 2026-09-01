@@ -33,4 +33,3 @@ does not contain one.
 
 - **WHEN** a direct-Wasm program supplies an ordinary source-defined `FileSystem` and reaches no OS intrinsic
 - **THEN** emission succeeds without filesystem imports
-

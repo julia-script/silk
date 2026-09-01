@@ -22,4 +22,3 @@ MIR SHALL use zero result lanes for unit and permit `never` only on non-returnin
 
 - **WHEN** a unit function executes bare `return`
 - **THEN** MIR terminates with no scalar result local
-

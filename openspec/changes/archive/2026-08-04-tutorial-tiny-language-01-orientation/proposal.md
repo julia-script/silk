@@ -23,4 +23,3 @@ None.
 ## Impact
 
 Adds the first section and pipeline assets for the new tutorial. It affects package documentation and tutorial validation fixtures only; no runtime API changes are required.
-

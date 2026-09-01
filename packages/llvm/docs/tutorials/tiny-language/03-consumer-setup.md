@@ -30,8 +30,8 @@ Run these commands inside the empty directory:
 
 ```sh
 pnpm init
-pnpm add effect@4.0.0-beta.102 @silklang/llvm@^0.1.0
-pnpm add -D typescript@7.0.2 vitest@4.1.10 @effect/vitest@4.0.0-beta.102 @types/node@^22.13.0
+pnpm add effect@4.0.0-rc.112 @silklang/llvm@^0.1.0
+pnpm add -D typescript@7.0.2 vitest@4.1.10 @effect/vitest@4.0.0-rc.112 @types/node@^22.13.0
 ```
 
 Set `type` and the three scripts in `package.json` so it contains:
@@ -52,10 +52,10 @@ Set `type` and the three scripts in `package.json` so it contains:
   },
   "dependencies": {
     "@silklang/llvm": "^0.1.0",
-    "effect": "4.0.0-beta.102"
+    "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-beta.102",
+    "@effect/vitest": "4.0.0-rc.112",
     "@types/node": "^22.13.0",
     "typescript": "7.0.2",
     "vitest": "4.1.10"

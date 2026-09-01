@@ -1,6 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: First parameter reference fact
+
 Every present bare-identifier expression SHALL resolve against the parameters of its enclosing
 function and the binding statements that precede it in that function's body. Its reference fact
 SHALL be `Resolved` with the exact parameter or binding identity and reference syntax when
@@ -11,18 +12,22 @@ inferred type; all other reference or type states SHALL keep the expression type
 A binding SHALL NOT be referenced before its own statement completes.
 
 #### Scenario: Resolve a returned parameter
+
 - **WHEN** `identity(value: I32) -> I32` returns `value`
 - **THEN** the returned expression resolves to parameter zero, has type `I32`, and the function return is compatible
 
 #### Scenario: Resolve a parameter used as an argument
+
 - **WHEN** a function passes its parameter `value` as a call argument
 - **THEN** that argument's identifier reference resolves to the enclosing function's exact parameter declaration independently of the call target
 
 #### Scenario: Preserve an ambiguous reference
+
 - **WHEN** a bare identifier matches duplicate parameters in its enclosing function
 - **THEN** the reference exposes every match, selects none, and its expression type remains unavailable
 
 #### Scenario: Preserve parser ownership for a missing reference
+
 - **WHEN** parser recovery inserts the identifier expression's token
 - **THEN** the reference and type are unavailable without a semantic diagnostic
 
@@ -37,6 +42,7 @@ A binding SHALL NOT be referenced before its own statement completes.
 - **THEN** the reference is `Missing` at that span rather than resolving forward
 
 ### Requirement: Unknown parameter reference diagnostic
+
 A present bare identifier with no matching local parameter or preceding binding SHALL retain a
 `Missing` reference fact and produce one `SEM0006` diagnostic at the exact reference span.
 Duplicate declarations SHALL rely on declaration-owned `SEM0005` diagnostics without adding a
@@ -44,14 +50,17 @@ second ambiguity diagnostic at the reference. Diagnostics SHALL remain determini
 phase-separated with existing lexical, parser, and semantic diagnostics.
 
 #### Scenario: Diagnose an unknown value name
+
 - **WHEN** a function returns `missing` without declaring a parameter named `missing`
 - **THEN** the reference is missing and one `SEM0006` diagnostic identifies the exact identifier span
 
 #### Scenario: Avoid duplicate ambiguity diagnostics
+
 - **WHEN** a reference matches duplicate parameter declarations
 - **THEN** only the later declarations carry `SEM0005` and no reference-site ambiguity diagnostic is added
 
 #### Scenario: Repeat parameter analysis
+
 - **WHEN** equivalent parameter declarations and references are analyzed repeatedly in fresh processes
 - **THEN** parameter identities, lookup outcomes, reference facts, types, compatibility, and diagnostic ordering are identical
 

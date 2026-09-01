@@ -15,10 +15,12 @@ construction sites, private leaks, overloaded items, and partially specialized g
 be rejected with a diagnostic directing source to an opaque result when appropriate.
 
 #### Scenario: Name a specialized public function
+
 - **WHEN** a public result contains `typeof(identity<i32>)` and that item is sufficiently visible
 - **THEN** the result contract records the exact named-item representation
 
 #### Scenario: Reject a private exact identity leak
+
 - **WHEN** a public result names a private function through `typeof`
 - **THEN** analysis rejects the public contract and suggests an opaque representation result
 
@@ -30,10 +32,12 @@ binder ordinal; its public signature SHALL also include the normalized bound, re
 and enclosing binder kinds.
 
 #### Scenario: Return one capturing parser family
+
 - **WHEN** repeated calls to one producer capture different runtime values at the same specialization
 - **THEN** callers observe one opaque family instance and one layout while the captures remain data
 
 #### Scenario: Keep producers distinct
+
 - **WHEN** two declarations expose equivalent opaque bounds and result shapes
 - **THEN** their family keys remain distinct and their results do not join implicitly
 
@@ -45,10 +49,12 @@ opaque binder MUST resolve to one concrete representation; divergent return iden
 the producer.
 
 #### Scenario: Specialize a generic opaque producer
+
 - **WHEN** one opaque producer is called at `i32` and `Token`
 - **THEN** each specialization receives its own family instance and may realize a different layout
 
 #### Scenario: Reject divergent opaque branches
+
 - **WHEN** one opaque producer branch returns a hex parser and another returns a decimal parser
 - **THEN** the producer is rejected because one family instance cannot have two realizations
 
@@ -60,10 +66,12 @@ layout fingerprints. Fingerprints SHALL drive dependent invalidation without par
 source type equality or revealing private representation details.
 
 #### Scenario: Preserve identity across a value-only edit
+
 - **WHEN** a producer changes captured data without changing target or capture shape
 - **THEN** its public opaque identity and reusable layout remain stable while the producer body invalidates
 
 #### Scenario: Invalidate a capture-shape edit
+
 - **WHEN** a hidden realization adds an owned capture
 - **THEN** dependent ownership, layout, MIR, and emitted artifacts invalidate even though the public
   opaque signature is unchanged
@@ -75,5 +83,6 @@ implicitly, or dispatch indirectly. A recursive producer MUST establish its real
 construction before recursive use; realization-only cycles and inline layout cycles MUST be rejected.
 
 #### Scenario: Reject a realization-only recursion
+
 - **WHEN** an opaque producer's only representation evidence is a recursive call to itself
 - **THEN** analysis reports an opaque-realization cycle before instance discovery

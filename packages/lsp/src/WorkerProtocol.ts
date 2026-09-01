@@ -33,37 +33,26 @@ const invalidation = Schema.Struct({
 
 /** Messages accepted by a project worker. */
 export const hostSchema = Schema.Union([
-  Schema.Struct({
+  Schema.TaggedStruct('Initialize', {
     ...envelope,
-    _tag: Schema.Literal('Initialize'),
     workspace: Schema.String,
     sourceRoot: Schema.String,
   }),
-  Schema.Struct({
+  Schema.TaggedStruct('Analyze', {
     ...envelope,
-    _tag: Schema.Literal('Analyze'),
     generation: ProjectGeneration.schema,
     sources: Schema.Array(source),
     invalidation,
   }),
-  Schema.Struct({
+  Schema.TaggedStruct('SupersedeAnalysis', { ...envelope, generation: ProjectGeneration.schema }),
+  Schema.TaggedStruct('Query', {
     ...envelope,
-    _tag: Schema.Literal('SupersedeAnalysis'),
-    generation: ProjectGeneration.schema,
-  }),
-  Schema.Struct({
-    ...envelope,
-    _tag: Schema.Literal('Query'),
     generation: ProjectGeneration.schema,
     requestId: RequestId.schema,
     query: Schema.Unknown,
   }),
-  Schema.Struct({
-    ...envelope,
-    _tag: Schema.Literal('CancelQuery'),
-    requestId: RequestId.schema,
-  }),
-  Schema.Struct({ ...envelope, _tag: Schema.Literal('Shutdown') }),
+  Schema.TaggedStruct('CancelQuery', { ...envelope, requestId: RequestId.schema }),
+  Schema.TaggedStruct('Shutdown', { ...envelope }),
 ])
 
 type DecodedHostMessage = typeof hostSchema.Type
@@ -81,39 +70,31 @@ export type HostMessage =
 
 /** Messages emitted by a project worker. */
 export const workerSchema = Schema.Union([
-  Schema.Struct({ ...envelope, _tag: Schema.Literal('Ready') }),
-  Schema.Struct({
+  Schema.TaggedStruct('Ready', { ...envelope }),
+  Schema.TaggedStruct('Progress', {
     ...envelope,
-    _tag: Schema.Literal('Progress'),
     generation: ProjectGeneration.schema,
     phase: Schema.String,
   }),
-  Schema.Struct({
+  Schema.TaggedStruct('Superseded', { ...envelope, generation: ProjectGeneration.schema }),
+  Schema.TaggedStruct('Commit', {
     ...envelope,
-    _tag: Schema.Literal('Superseded'),
-    generation: ProjectGeneration.schema,
-  }),
-  Schema.Struct({
-    ...envelope,
-    _tag: Schema.Literal('Commit'),
     generation: ProjectGeneration.schema,
     uris: Schema.Array(Schema.String),
   }),
-  Schema.Struct({
+  Schema.TaggedStruct('Failure', {
     ...envelope,
-    _tag: Schema.Literal('Failure'),
     generation: ProjectGeneration.schema,
     incident: IncidentId.schema,
     message: Schema.String,
   }),
-  Schema.Struct({
+  Schema.TaggedStruct('Result', {
     ...envelope,
-    _tag: Schema.Literal('Result'),
     generation: ProjectGeneration.schema,
     requestId: RequestId.schema,
     result: Schema.Unknown,
   }),
-  Schema.Struct({ ...envelope, _tag: Schema.Literal('Stopped') }),
+  Schema.TaggedStruct('Stopped', { ...envelope }),
 ])
 
 export type WorkerMessage = typeof workerSchema.Type

@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { fileURLToPath } from 'node:url'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as Bitcode from '../dist/Bitcode.js'
 import * as Block from '../dist/Block.js'
@@ -13,7 +14,9 @@ import * as Metadata from '../dist/Metadata.js'
 import * as Type from '../dist/Type.js'
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const samples = Number(process.env.PARITY_BENCHMARK_SAMPLES ?? 7)
+const samples = Effect.runSync(
+  Config.number('PARITY_BENCHMARK_SAMPLES').pipe(Config.withDefault(7)),
+)
 
 const median = (values) =>
   [...values].sort((left, right) => left - right)[Math.floor(values.length / 2)]
@@ -34,7 +37,11 @@ const measure = async (name, workload) => {
 }
 
 const makeFunction = Effect.fn('ParityBenchmark.makeFunction')(
-  function* (builder, name, instructionCount) {
+  function* (
+    /** @type {Builder.Builder} */ builder,
+    /** @type {string} */ name,
+    /** @type {number} */ instructionCount,
+  ) {
     const i32 = yield* Type.integer(builder, 32)
     const signature = yield* Type.functionType(builder, i32, [])
     const fn = yield* FunctionActor.declare(builder, name, signature)
@@ -43,14 +50,16 @@ const makeFunction = Effect.fn('ParityBenchmark.makeFunction')(
     yield* FunctionActor.buildBody(
       builder,
       fn,
-      Effect.fn('ParityBenchmark.functionBody')(function* (body) {
-        yield* Block.make(body, 'entry')
-        let value = zero
-        for (let index = 0; index < instructionCount; index += 1) {
-          value = yield* FunctionBody.binary(body, 'add', value, one, `value.${index}`)
-        }
-        yield* FunctionBody.returnValue(body, value)
-      }),
+      Effect.fn('ParityBenchmark.functionBody')(
+        function* (/** @type {FunctionBody.FunctionBody} */ body) {
+          yield* Block.make(body, 'entry')
+          let value = zero
+          for (let index = 0; index < instructionCount; index += 1) {
+            value = yield* FunctionBody.binary(body, 'add', value, one, `value.${index}`)
+          }
+          yield* FunctionBody.returnValue(body, value)
+        },
+      ),
     )
   },
 )
@@ -96,18 +105,20 @@ const workloads = {
         yield* FunctionActor.buildBody(
           builder,
           fn,
-          Effect.fn('ParityBenchmark.controlFlowBody')(function* (body) {
-            const blocks = []
-            for (let index = 0; index < 250; index += 1) {
-              blocks.push(yield* Block.make(body, `block.${index}`))
-            }
-            for (let index = 0; index < blocks.length - 1; index += 1) {
-              yield* Block.setInsertionPoint(body, blocks[index])
-              yield* FunctionBody.branch(body, blocks[index + 1])
-            }
-            yield* Block.setInsertionPoint(body, blocks[blocks.length - 1])
-            yield* FunctionBody.returnValue(body, zero)
-          }),
+          Effect.fn('ParityBenchmark.controlFlowBody')(
+            function* (/** @type {FunctionBody.FunctionBody} */ body) {
+              const blocks = []
+              for (let index = 0; index < 250; index += 1) {
+                blocks.push(yield* Block.make(body, `block.${index}`))
+              }
+              for (let index = 0; index < blocks.length - 1; index += 1) {
+                yield* Block.setInsertionPoint(body, blocks[index])
+                yield* FunctionBody.branch(body, blocks[index + 1])
+              }
+              yield* Block.setInsertionPoint(body, blocks[blocks.length - 1])
+              yield* FunctionBody.returnValue(body, zero)
+            },
+          ),
         )
         yield* Bitcode.encode(builder)
       }),
@@ -136,26 +147,36 @@ const workloads = {
     ),
 }
 
-const instructionCandidate = (wrapper) => () =>
+const tracedInstructionCandidate = () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const builder = yield* Builder.make()
       yield* makeFunction(builder, 'candidate', 500)
-      yield* wrapper(function* () {
+      const candidate = Effect.fn('ParityBenchmark.bitstreamCandidate')(function* () {
         return yield* Bitcode.encode(builder)
-      })()
+      })
+      yield* candidate()
     }),
   )
 
-const traced = (body) => Effect.fn('ParityBenchmark.bitstreamCandidate')(body)
-const untraced = (body) => Effect.fnUntraced(body)
+const untracedInstructionCandidate = () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const builder = yield* Builder.make()
+      yield* makeFunction(builder, 'candidate', 500)
+      const candidate = Effect.fnUntraced(function* () {
+        return yield* Bitcode.encode(builder)
+      })
+      yield* candidate()
+    }),
+  )
 
 const results = []
 for (const [name, workload] of Object.entries(workloads))
   results.push(await measure(name, workload))
 const candidates = [
-  await measure('bitstream-and-instruction-loop/traced', instructionCandidate(traced)),
-  await measure('bitstream-and-instruction-loop/untraced', instructionCandidate(untraced)),
+  await measure('bitstream-and-instruction-loop/traced', tracedInstructionCandidate),
+  await measure('bitstream-and-instruction-loop/untraced', untracedInstructionCandidate),
 ]
 const tracedMedian = candidates[0].medianMs
 const untracedMedian = candidates[1].medianMs

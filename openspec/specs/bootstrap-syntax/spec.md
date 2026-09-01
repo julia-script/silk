@@ -4,7 +4,9 @@
 
 Turn the bootstrap lexer result into the smallest source-faithful grammatical structure that can
 recover from ordinary mistakes without introducing semantic or lowering representations.
+
 ## Requirements
+
 ### Requirement: Canonical integer, unit, and bottom syntax is lossless
 
 The parser SHALL preserve every lowercase integer primitive spelling, `()` in type and value positions, `never` in type positions, omitted unit results, bare `return`, and exact signed or unsigned literal tokens under existing bounded recovery rules.
@@ -15,6 +17,7 @@ The parser SHALL preserve every lowercase integer primitive spelling, `()` in ty
 - **THEN** syntax retains every token and exact span without deciding target width
 
 ### Requirement: First function grammar
+
 The parser SHALL recognize a source file containing zero or more top-level import or function
 declarations followed by end-of-file. Every function SHALL have the form `[pub] fn <name>(<parameters>)
 -> <return-type> { <statements> }`, where `pub` is optional and `<statements>` is zero or more binding
@@ -30,10 +33,12 @@ identifier tokens, and declaration, statement, parameter, and argument order SHA
 source order.
 
 #### Scenario: Parse an empty module
+
 - **WHEN** the source contains only end-of-file
 - **THEN** the result contains a source-file root with end-of-file, no recovered declaration, and no parser diagnostic
 
 #### Scenario: Parse the accepted integer fixture
+
 - **WHEN** the source bytes spell `pub fn main() -> i32 { return 42 }`
 - **THEN** the result contains one complete function declaration with an empty parameter list, an integer literal return expression, and end-of-file
 
@@ -43,22 +48,27 @@ source order.
 - **THEN** the result contains one complete function declaration with no public-modifier token and exact source provenance
 
 #### Scenario: Parse trivia between grammar elements
+
 - **WHEN** whitespace and line comments appear between every pair of grammar elements in the accepted fixture
 - **THEN** the parser recognizes the same grammatical structure while retaining the exact trivia tokens
 
 #### Scenario: Parse two functions in source order
+
 - **WHEN** `answer` returning `42` is followed by `main` returning `0`
 - **THEN** the source-file tree contains exactly two complete function declarations in that order before end-of-file
 
 #### Scenario: Parse a typed parameter reference
+
 - **WHEN** the source spells `pub fn identity(value: i32) -> i32 { return value }`
 - **THEN** the function contains one typed parameter and a bare-identifier return expression with exact concrete provenance
 
 #### Scenario: Parse the first value-carrying call
+
 - **WHEN** `identity` accepts one `i32` parameter and `main` returns `identity(42)`
 - **THEN** `main` contains one complete call expression with one decimal-integer argument
 
 #### Scenario: Parse trivia inside a call
+
 - **WHEN** whitespace and line comments appear around a call's callee, parentheses, arguments, and commas
 - **THEN** the parser recognizes the same call structure while retaining every trivia token exactly
 
@@ -83,6 +93,7 @@ source order.
 - **THEN** the call expression retains the actor identifier, the dot, the operation identifier, and the argument list in concrete order
 
 ### Requirement: First call syntax remains explicit and recoverable
+
 A call expression SHALL retain its complete callee expression, left parenthesis, ordered arguments,
 separators, right parenthesis, trivia, and exact source-owned span in concrete order. Callees MAY be
 named or qualified function references, sections, bindings, grouped expressions, or prior call
@@ -92,22 +103,27 @@ SHALL resume at the next comma, right parenthesis, enclosing brace, following de
 end-of-file.
 
 #### Scenario: Recover a missing right call parenthesis
+
 - **WHEN** a returned call spells `answer(` immediately before the function's closing brace
 - **THEN** the call contains a missing right parenthesis, the block retains its closing brace, and parsing completes
 
 #### Scenario: Recover a missing call callee
+
 - **WHEN** the returned expression consists only of `()`
 - **THEN** the call retains a missing callee and both parentheses without inventing a name
 
 #### Scenario: Preserve a supported call argument
+
 - **WHEN** the returned call spells `identity(42)`
 - **THEN** `42` is retained as the call's first decimal-integer argument rather than an error region
 
 #### Scenario: Recover between call arguments
+
 - **WHEN** unsupported punctuation appears between two otherwise valid arguments
 - **THEN** the punctuation remains in an error region and the following comma-bounded argument remains parseable
 
 #### Scenario: Keep integer expressions unchanged
+
 - **WHEN** a function returns a decimal integer
 - **THEN** its existing integer-literal concrete shape and recovery behavior remain unchanged
 
@@ -117,28 +133,34 @@ end-of-file.
 - **THEN** the concrete tree retains two ordered postfix calls, with the first producing the callee of the second
 
 ### Requirement: Parse nested call arguments losslessly
+
 The bootstrap parser SHALL accept a call expression wherever a call argument expression is allowed.
 It SHALL preserve each nested call and argument list as its own concrete branch with every token,
 separator, trivia slice, and owner-qualified half-open byte span retained exactly once. This grammar
 extension MUST NOT imply that nested calls are already semantically resolved or evaluated.
 
 #### Scenario: Parse one nested identity call
+
 - **WHEN** a function returns `identity(identity(42))`
 - **THEN** the outer argument contains a complete inner call-expression branch whose literal `42` and both parenthesis pairs retain exact source order and spans
 
 #### Scenario: Parse two nested arguments
+
 - **WHEN** a function returns `choose(identity(1), identity(2))`
 - **THEN** both outer arguments contain independent nested call branches separated by the outer comma
 
 #### Scenario: Recover a damaged inner call
+
 - **WHEN** damaged inner syntax reaches an outer sibling boundary or an inner call lacks a closing parenthesis before the outer closing parenthesis
 - **THEN** recovery records the inner error or missing token and keeps the outer argument boundary, following arguments, and enclosing call visible
 
 #### Scenario: Preserve a following declaration after nested damage
+
 - **WHEN** malformed nested call syntax is followed by another `pub fn` declaration
 - **THEN** recovery remains bounded to the damaged function and the following declaration remains a separate complete concrete branch
 
 ### Requirement: Function-boundary recovery remains local
+
 Recovery inside one function SHALL stop at a following function's `pub` token when that token can
 begin the next declaration. Unexpected concrete input between declarations SHALL remain lossless,
 and parsing SHALL either consume a concrete token or insert missing syntax without looping. An
@@ -149,22 +171,27 @@ token expected by the grammar. At that synchronization token, ordinary diagnosti
 resume for later independent mistakes.
 
 #### Scenario: Preserve a second function after a missing brace
+
 - **WHEN** the first function omits its closing brace immediately before a valid second function
 - **THEN** the first function receives a missing right brace and the second function remains a separate complete declaration
 
 #### Scenario: Recover unexpected input between functions
+
 - **WHEN** unsupported punctuation appears after one complete function and before the next `pub`
 - **THEN** the punctuation is retained in an error region with a parser diagnostic and the following function remains parseable
 
 #### Scenario: Preserve empty module structure
+
 - **WHEN** the source is empty
 - **THEN** the parser returns only the source-file root and end-of-file without missing syntax or parser diagnostics
 
 #### Scenario: Stop an end-of-file declaration cascade
+
 - **WHEN** the source contains only `pub`
 - **THEN** the parser reports the missing `fn`, retains the remaining recovered function structure, and suppresses its dependent missing-token and missing-return diagnostics through end-of-file
 
 #### Scenario: Report again after a grammar anchor
+
 - **WHEN** one missing token starts recovery, a later expected concrete token is consumed, and another independent token is missing after that anchor
 - **THEN** the parser reports both independent mistakes without reporting dependent insertions between them
 
@@ -195,24 +222,29 @@ there by a stable identity.
 - **THEN** every tree node and token leaf resolves to a stable identity qualified by the source identity
 
 ### Requirement: Typed parameter lists remain explicit and recoverable
+
 Each parameter SHALL retain its name, colon, type identifier, adjacent trivia, and source-owned span.
 Each comma SHALL remain a concrete separator rather than belonging to either neighboring parameter.
 Missing names, colons, types, commas, and closing parentheses SHALL remain explicit parser-owned
 recovery data, and a following return arrow or declaration SHALL bound recovery.
 
 #### Scenario: Parse two typed parameters
+
 - **WHEN** a function declares `(left: i32, right: i32)`
 - **THEN** the parameter list contains two ordered parameter declarations and one concrete comma separator
 
 #### Scenario: Recover a missing parameter type
+
 - **WHEN** a parameter name and colon are followed immediately by the list's right parenthesis
 - **THEN** the parameter retains a missing type identifier at that boundary and the function continues parsing at the return arrow
 
 #### Scenario: Recover a missing comma
+
 - **WHEN** two complete typed parameters are adjacent without a comma
 - **THEN** the list contains an explicit missing comma and preserves both parameters in source order
 
 ### Requirement: Missing syntax remains explicit
+
 When a required grammar element is absent at the current source position, the parser SHALL insert a
 missing element with the expected token kind and an empty source-owned span at that byte boundary.
 The parser SHALL emit a stable diagnostic for the source-level mistake without consuming an
@@ -220,28 +252,34 @@ unrelated concrete token. Multiple missing elements introduced solely to represe
 construct MAY share one construct-level diagnostic rather than producing one diagnostic per leaf.
 
 #### Scenario: Recover a missing function name
+
 - **WHEN** the source spells `pub fn () -> i32 { return 42 }`
 - **THEN** the function contains a missing identifier before `(`, the remaining structure parses, and one parser diagnostic identifies the missing name position
 
 #### Scenario: Recover a missing closing brace
+
 - **WHEN** the accepted fixture ends after the decimal integer
 - **THEN** the block contains a missing right brace at end-of-file and the parser returns the partial tree with one parser diagnostic
 
 #### Scenario: Aggregate a wholly missing return statement
+
 - **WHEN** a required-return block reaches its closing brace without a return keyword or expression
 - **THEN** the CST retains the recovered return structure and one parser diagnostic identifies the missing return statement
 
 ### Requirement: Unexpected syntax remains explicit
+
 When concrete tokens cannot satisfy the next grammar element, the parser SHALL consume a maximal
 run of unexpected non-trivia tokens into one error region until it reaches the expected token, the
 next structurally valid token, a closing brace, or end-of-file. Recovery SHALL always consume a
 concrete token or insert a missing element, and SHALL retain every skipped token in the tree.
 
 #### Scenario: Recover before a function name
+
 - **WHEN** unsupported punctuation appears between `fn` and the function name
 - **THEN** the punctuation is retained in one error region, the following identifier becomes the function name, and parsing continues through end-of-file
 
 #### Scenario: Terminate on wholly unrelated input
+
 - **WHEN** no input token begins the first function grammar
 - **THEN** the parser returns a source-file tree containing the unexpected tokens, explicit missing structure, end-of-file, and a finite ordered diagnostic collection
 
@@ -806,14 +844,17 @@ starts SHALL remain reserved only at primary-expression boundaries. Missing name
 brackets, and type arguments SHALL remain explicit local syntax nodes and diagnostics.
 
 #### Scenario: Parse a generic declaration and call
+
 - **WHEN** source contains `pub fn identity<T>(value: T) -> T` and `identity<i32>(1)`
 - **THEN** syntax records the declaration parameter and call specialization losslessly
 
 #### Scenario: Preserve a comparison
+
 - **WHEN** source contains `left < right`
 - **THEN** the expression remains a comparison rather than a damaged generic application
 
 #### Scenario: Keep a reserved template start distinct
+
 - **WHEN** `<Panel />` appears where a primary expression begins
 - **THEN** the parser preserves the reserved template start rather than treating `Panel` as a type argument
 

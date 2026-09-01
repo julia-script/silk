@@ -124,7 +124,7 @@ const callInternal = Effect.fnUntraced(function* (
           return yield* Result.fail(
             invalidInput({
               operation: 'FunctionBody.call',
-              message: `Call${name === undefined ? '' : ` ${String(name)}`} argument ${index} type does not match its parameter (${actualDescription?._tag ?? resolved.type} !== ${expectedDescription?._tag ?? expected})`,
+              message: `Call${name === undefined ? '' : ` ${ByteString.escapeForIr(ByteString.coerce(name))}`} argument ${index} type does not match its parameter (${actualDescription?._tag ?? resolved.type} !== ${expectedDescription?._tag ?? expected})`,
               input: { index, argument, actualType: resolved.type, expectedType: expected },
             }),
           )

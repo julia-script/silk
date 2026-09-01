@@ -201,21 +201,20 @@ export const hirPatternSelection = (selection: PatternSelectionFact): Hir.Patter
     ...(member === undefined ? {} : { member }),
     universal: selection.pattern._tag === 'UniversalPattern',
     bindings: Object.freeze(
-      selection.bindings.flatMap(
-        (binding): ReadonlyArray<Hir.PatternBinding> =>
-          binding.type._tag === 'Available'
-            ? [
-                Object.freeze({
-                  id: binding.id,
-                  ...(binding.name._tag === 'Present' ? { name: binding.name.spelling } : {}),
-                  ...(binding.field === undefined ? {} : { field: binding.field.id }),
-                  path: binding.path,
-                  type: binding.type.type,
-                  access: binding.access,
-                  span: binding.syntax.span,
-                }),
-              ]
-            : [],
+      selection.bindings.flatMap((binding): ReadonlyArray<Hir.PatternBinding> =>
+        binding.type._tag === 'Available'
+          ? [
+              Object.freeze({
+                id: binding.id,
+                ...(binding.name._tag === 'Present' ? { name: binding.name.spelling } : {}),
+                ...(binding.field === undefined ? {} : { field: binding.field.id }),
+                path: binding.path,
+                type: binding.type.type,
+                access: binding.access,
+                span: binding.syntax.span,
+              }),
+            ]
+          : [],
       ),
     ),
     cleanup: selection.pattern.omitted,

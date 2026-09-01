@@ -78,7 +78,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
@@ -88,7 +88,7 @@ it.effect('dispatches complete ordered messages through an ordinary source Logge
     const self = yield* snapshot(memorySource)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
 
     const hir = Projections.hirOf(self, 'silk/effect')
@@ -287,7 +287,7 @@ pub effect fn main() -> () ! LogError {
     assert.deepEqual(Analysis.diagnostics(self), [])
     const memory = StandardStreams.memory()
     const outcome = Analysis.evaluate(self, { standardStreams: memory.provider })
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
     assert.deepEqual(
       memory.events().map((event) => new TextDecoder().decode(Uint8Array.from(event.bytes))),
       ['one\n', 'two'],
@@ -454,7 +454,7 @@ it.effect('carries a provider section through a multi-hop closed forwarding chai
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      evaluated._tag === 'Blocked' ? JSON.stringify(evaluated, Json.bigIntReplacer) : undefined,
+      evaluated._tag === 'Blocked' ? Json.stringify(evaluated) : undefined,
     )
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
 
@@ -486,9 +486,7 @@ pub fn main() -> i32 {
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        evaluated._tag === 'Blocked'
-          ? `${name}: ${JSON.stringify(evaluated, Json.bigIntReplacer)}`
-          : name,
+        evaluated._tag === 'Blocked' ? `${name}: ${Json.stringify(evaluated)}` : name,
       )
       if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n, name)
       assert.isFalse(

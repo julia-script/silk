@@ -16,6 +16,7 @@ import type * as Elaboration from './Elaboration.js'
 import type { RowModel, Span } from './InspectorRow.js'
 import { spanOf as asSpan } from './InspectorRow.js'
 import type * as Instances from './Instances.js'
+import * as Intrinsic from './Intrinsic.js'
 import type * as Layout from './Layout.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
@@ -57,6 +58,9 @@ const typeText = (type: Type.Type): string => {
       return type.members.map(typeText).join(' | ')
   }
 }
+
+const callingScalarText = (scalar: Layout.CallingScalar): string =>
+  typeof scalar === 'string' ? scalar : `Address<${Type.encode(scalar.element)},i${scalar.bits}>`
 
 export const closureRows = (closure: ModuleClosure.Closure): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
@@ -892,9 +896,9 @@ const operationLabel = (operation: Mir.Operation): string => {
     case 'HostWrite':
       return `${localText(operation.destination)} = write all ${localText(operation.bytes)} to stream ${localText(operation.stream)} ! ${operation.failure.name}`
     case 'OsOpen':
-      return `${localText(operation.destination)} = ${operation.operation}(${operation.arguments.map(localText).join(', ')}) via ${localText(operation.success)}/${localText(operation.failure)}`
+      return `${localText(operation.destination)} = ${Intrinsic.operationText(operation.operation)}(${operation.arguments.map(localText).join(', ')}) via ${localText(operation.success)}/${localText(operation.failure)}`
     case 'OsCall':
-      return `${localText(operation.destination)} = ${operation.operation}(${operation.arguments.map(localText).join(', ')})`
+      return `${localText(operation.destination)} = ${Intrinsic.operationText(operation.operation)}(${operation.arguments.map(localText).join(', ')})`
     case 'SharedFromAllocation':
       return `${localText(operation.destination)} = shared core from ${localText(operation.allocation)} with ${localText(operation.value)}`
     case 'ExecutionFromAllocation':
@@ -1641,8 +1645,9 @@ export const structValueRows = (
       depth: 1,
       label: typeText(shape.type),
       detail:
-        shape.lanes.map((lane) => `${lane.type}:${selectorPathText(lane.path)}`).join(', ') ||
-        'zero runtime lanes',
+        shape.lanes
+          .map((lane) => `${callingScalarText(lane.type)}:${selectorPathText(lane.path)}`)
+          .join(', ') || 'zero runtime lanes',
     })
   }
 
@@ -1726,16 +1731,14 @@ export const arrayValueRows = (
       detail: types.length === 0 ? 'none' : `${types.length}`,
       head: true,
     },
-    ...types.map(
-      (type, ordinal): RowModel => ({
-        key: `array-type-${ordinal}`,
-        depth: 1,
-        dot: 'symbol',
-        label: typeText(type),
-        detail: `length ${type.length} · element ${typeText(type.element)}`,
-        tone: 'symbol',
-      }),
-    ),
+    ...types.map((type, ordinal): RowModel => ({
+      key: `array-type-${ordinal}`,
+      depth: 1,
+      dot: 'symbol',
+      label: typeText(type),
+      detail: `length ${type.length} · element ${typeText(type.element)}`,
+      tone: 'symbol',
+    })),
     {
       key: 'array-literals',
       label: 'literal elements',
@@ -1829,8 +1832,9 @@ export const arrayValueRows = (
       depth: 1,
       label: `${typeText(shape.type)} lanes`,
       detail:
-        shape.lanes.map((lane) => `${lane.type}:${selectorPathText(lane.path)}`).join(', ') ||
-        'zero runtime lanes',
+        shape.lanes
+          .map((lane) => `${callingScalarText(lane.type)}:${selectorPathText(lane.path)}`)
+          .join(', ') || 'zero runtime lanes',
     })
   }
 

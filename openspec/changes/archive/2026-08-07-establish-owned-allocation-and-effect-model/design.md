@@ -175,12 +175,12 @@ order already published by ownership. Explicit `drop value` consumes early.
 
 The exact exit table is:
 
-| Exit | Automatic Drop |
-| --- | --- |
-| Fallthrough, `return`, `break`, `continue` | Yes |
-| Typed failure propagation | Yes |
-| Trap/defect | No bootstrap guarantee |
-| Cancellation/interruption | Not present in bootstrap |
+| Exit                                       | Automatic Drop           |
+| ------------------------------------------ | ------------------------ |
+| Fallthrough, `return`, `break`, `continue` | Yes                      |
+| Typed failure propagation                  | Yes                      |
+| Trap/defect                                | No bootstrap guarantee   |
+| Cancellation/interruption                  | Not present in bootstrap |
 
 Safe external acquisition must establish an affine owner immediately inside the trusted unsafe shim;
 a copyable raw handle with an outstanding cleanup obligation cannot cross into safe code. Cleanup

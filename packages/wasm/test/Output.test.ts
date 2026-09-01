@@ -40,7 +40,7 @@ const utf8Vectors = [
 
 const failure = <A>(effect: Effect.Effect<A, WasmError>) =>
   effect.pipe(
-    Effect.map(() => undefined),
+    Effect.as(undefined),
     Effect.catchTag('WasmError', (error) => Effect.succeed(error)),
   )
 
@@ -129,7 +129,10 @@ it.effect('encodes a module Node’s own WebAssembly runtime accepts', () =>
   Effect.gen(function* () {
     const builder = yield* representative
     const bytes = yield* Binary.encode(builder)
-    assert.deepStrictEqual([...bytes.slice(0, 8)], [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00])
+    assert.deepStrictEqual(
+      Array.from(bytes.slice(0, 8)),
+      [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00],
+    )
     const valid = WebAssembly.validate(bytes)
     assert.isTrue(valid)
     const module = yield* Effect.promise(() => WebAssembly.compile(bytes.buffer as ArrayBuffer))

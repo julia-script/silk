@@ -8,9 +8,11 @@ the concrete provider/interface application and mapped target arguments, and MIR
 direct target with no runtime dictionary.
 
 #### Scenario: Discover two mapped target specializations
+
 - **WHEN** two concrete providers select one generic witness declaration with different kinded arguments
 - **THEN** discovery records two concrete witness target instances in deterministic order
 
 #### Scenario: Reject an unresolved target binder
+
 - **WHEN** a mapped witness target has a generic binder not inferable from its conformance and operation contract
 - **THEN** analysis rejects the mapping before instance discovery can create an open key

@@ -41,17 +41,20 @@ function Highlighted({
 }) {
   if (hits.length === 0) return <>{text}</>
   const marked = new Set(hits)
+  const segments = Array.from(
+    new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text),
+  )
   return (
     <>
-      {[...text].map((character, index) =>
+      {segments.map(({ index, segment }) =>
         marked.has(index) ? (
-          // biome-ignore lint/suspicious/noArrayIndexKey: index *is* the identity of a character
+          // oxlint-disable-next-line react/no-array-index-key -- index *is* the identity of a character
           <mark key={index} className={styles.hit}>
-            {character}
+            {segment}
           </mark>
         ) : (
-          // biome-ignore lint/suspicious/noArrayIndexKey: same
-          <span key={index}>{character}</span>
+          // oxlint-disable-next-line react/no-array-index-key -- same
+          <span key={index}>{segment}</span>
         ),
       )}
     </>
@@ -116,7 +119,7 @@ export function PresetPalette({
   }
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: backdrop click-to-dismiss; the dialog
+    // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- backdrop click-to-dismiss; the dialog
     // itself is keyboard-operable and Escape closes it.
     <div className={styles.backdrop} onClick={onClose}>
       <div

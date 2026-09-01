@@ -20,4 +20,4 @@
 ## 4. Privilege and Verification
 
 - [ ] 4.1 Inspect compiler artifacts with Test, Reporter, AssertionError, StandardRunner, and equalBytes renamed fixtures and verify no phase recognizes any public actor by spelling or selects Reporter service identity.
-- [ ] 4.2 Run focused standard-source resolution, assertion, filter, reporter, runner, presentation, allocation, and cleanup tests, then `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and `pnpm release:candidate`; record every exact result and identify any pre-existing failure before handing off command integration.
+- [ ] 4.2 Run focused standard-source resolution, assertion, filter, reporter, runner, presentation, allocation, and cleanup tests, then `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, `pnpm test`, `pnpm check`, and `pnpm release:candidate`; record every exact result and identify any pre-existing failure before handing off command integration.

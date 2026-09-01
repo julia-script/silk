@@ -1,11 +1,14 @@
 # bootstrap-mir Specification
 
 ## Purpose
+
 MIR: the monomorphic, backend-neutral basic-block control-flow graph over logical Silk types that
 every backend and the interpreter consume — its data model, structural invariants and verifier,
 the compiler-owned target/layout plan, and the deterministic textual encoder, stabilized against
 hand-built samples before lowering exists.
+
 ## Requirements
+
 ### Requirement: MIR names and closes the selected entry explicitly
 
 A MIR module SHALL retain an explicit entry descriptor independent of function order. An ordinary
@@ -486,10 +489,12 @@ retain provenance naming its generic declaration and concrete arguments, while t
 reject open type parameters or missing concrete layout entries.
 
 #### Scenario: Lower a concrete identity
+
 - **WHEN** discovery supplies `identity<Token>`
 - **THEN** MIR contains one concrete Token-typed function whose provenance names the generic declaration and `Token` argument
 
 #### Scenario: Reject open generic MIR
+
 - **WHEN** a malformed MIR function still contains type parameter `T`
 - **THEN** verification rejects it before evaluation or backend emission
 
@@ -734,6 +739,7 @@ operation and width.
 
 - **WHEN** malformed MIR assigns an `f32` cosine result to an `f64` destination
 - **THEN** verification rejects the function before evaluation or backend emission
+
 ### Requirement: MIR lowers composed Effect recipes completely
 
 MIR lowering SHALL recursively realize every semantically valid Effect recipe nested beneath
@@ -1051,7 +1057,6 @@ and no partial executable artifact SHALL exist when verification rejects the pro
 
 - **WHEN** MIR initializes one core from matching consumed inputs, clones it, invokes callback access, and drops both handles
 - **THEN** verification retains the exact target layout identity, ownership transitions, callback modes, access loan, and opaque cleanup operations for execution
-
 
 #### Scenario: Reject mismatched or incomplete initialization
 

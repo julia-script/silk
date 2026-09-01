@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -229,7 +230,7 @@ it.effect(
       assert.strictEqual(
         run.status,
         0,
-        JSON.stringify({
+        Json.stringify({
           stderr: run.stderr,
           signal: run.signal,
           error: run.error?.message,

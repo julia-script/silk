@@ -33,4 +33,3 @@ without changing the source's inferred type or fabricating a later conversion.
 
 - **WHEN** `Token | Fault` is returned where `Token | End` is declared
 - **THEN** the return facts retain both source members and identify `Fault` as preventing conversion
-

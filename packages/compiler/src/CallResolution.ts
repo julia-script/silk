@@ -2355,7 +2355,7 @@ export const finishCallableApplication = (
   callee: ExpressionResult,
   argumentsResult: ArgumentsResult,
   callTypeArguments: CallTypeArgumentsResult,
-  provenance: CallableApplyExpressionFact['provenance'] | undefined = undefined,
+  provenance?: CallableApplyExpressionFact['provenance'],
   resolution?: ResolutionContext,
   caller?: DeclarationFact,
 ): ExpressionResult => {

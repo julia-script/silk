@@ -13,9 +13,8 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
-  node.children.flatMap(
-    (child): ReadonlyArray<SyntaxTree.Node> =>
-      SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [],
+  node.children.flatMap((child): ReadonlyArray<SyntaxTree.Node> =>
+    SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [],
   )
 
 it('parses nested structural union types losslessly', () => {

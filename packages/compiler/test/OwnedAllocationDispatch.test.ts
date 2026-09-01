@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as Projections from './support/projections.js'
 
@@ -99,7 +100,7 @@ it.effect('dispatches provision through user allocator witnesses on the evaluato
     assert.strictEqual(
       delegatedRun._tag,
       'Completed',
-      JSON.stringify(delegatedRun, (_, value) =>
+      Json.stringify(delegatedRun, (_, value) =>
         typeof value === 'bigint' ? value.toString() : value,
       ),
     )
@@ -340,7 +341,7 @@ it.effect('writes forwarded exclusive provider mutations back on the evaluator a
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      JSON.stringify(evaluated, (_, value) =>
+      Json.stringify(evaluated, (_, value) =>
         typeof value === 'bigint' ? value.toString() : value,
       ),
     )

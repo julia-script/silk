@@ -123,13 +123,11 @@ export const validate = Effect.fnUntraced(function* (
 ): Effect.fn.Return<ReadonlyArray<Violation>, WasmError> {
   const implementation = host()
   if (implementation === undefined) {
-    return yield* Effect.fail(
-      invalidState({
-        operation: 'Validate.validate',
-        message: 'The host has no WebAssembly implementation to validate against',
-        state: 'WebAssembly',
-      }),
-    )
+    return yield* invalidState({
+      operation: 'Validate.validate',
+      message: 'The host has no WebAssembly implementation to validate against',
+      state: 'WebAssembly',
+    })
   }
   return yield* Effect.try({
     try: () => compile(implementation, bytes),

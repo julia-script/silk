@@ -62,13 +62,11 @@ export const fromByteUnits = Effect.fnUntraced(function* (
     }),
   )
   if (!isPowerOfTwo(value)) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'Alignment.fromByteUnits',
-        message: 'LLVM alignment must be a positive power of two',
-        input: byteUnits,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'Alignment.fromByteUnits',
+      message: 'LLVM alignment must be a positive power of two',
+      input: byteUnits,
+    })
   }
   return Object.freeze({ _tag: 'Alignment', byteUnits: value })
 })
@@ -83,13 +81,11 @@ export const fromBitUnits = Effect.fnUntraced(function* (
   bitUnits: number,
 ): Effect.fn.Return<Alignment, LlvmError> {
   if (!Number.isSafeInteger(bitUnits) || bitUnits < 8 || bitUnits % 8 !== 0) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'Alignment.fromBitUnits',
-        message: 'LLVM bit alignment must be a positive whole number of bytes',
-        input: bitUnits,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'Alignment.fromBitUnits',
+      message: 'LLVM bit alignment must be a positive whole number of bytes',
+      input: bitUnits,
+    })
   }
   return yield* fromByteUnits(BigInt(bitUnits / 8))
 })

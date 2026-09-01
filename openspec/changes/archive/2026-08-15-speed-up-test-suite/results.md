@@ -3,13 +3,13 @@
 Same machine, same all-cores contended conditions, workspace built. Baseline run on the
 merge of origin/main (691092e); final run after all changes.
 
-| Metric | Baseline | After | Delta |
-|---|---|---|---|
-| Wall | 184.0s | 133.9s | −27% |
-| Test CPU (sum of per-file) | 1,673s | 1,174s | **−30%** |
-| Test files | 233 | 213 | −20 |
-| Tests | 1,852 | 1,818 | −34 (plus ~150 native legs removed inside surviving tests) |
-| Failures | 1 (pre-existing on main) | 1 (same: WasmShadowStackHeapCollision, flagged separately) | — |
+| Metric                     | Baseline                 | After                                                      | Delta                                                      |
+| -------------------------- | ------------------------ | ---------------------------------------------------------- | ---------------------------------------------------------- |
+| Wall                       | 184.0s                   | 133.9s                                                     | −27%                                                       |
+| Test CPU (sum of per-file) | 1,673s                   | 1,174s                                                     | **−30%**                                                   |
+| Test files                 | 233                      | 213                                                        | −20                                                        |
+| Tests                      | 1,852                    | 1,818                                                      | −34 (plus ~150 native legs removed inside surviving tests) |
+| Failures                   | 1 (pre-existing on main) | 1 (same: WasmShadowStackHeapCollision, flagged separately) | —                                                          |
 
 Solo-file measurements (uncontended): LexerPressure 143→39s, StackVmPressure 82→30s,
 SynchronousEffectCost 41→10s.
