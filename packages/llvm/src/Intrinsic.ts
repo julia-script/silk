@@ -332,13 +332,11 @@ const memoryCopySignature = Effect.fnUntraced(function* (
   const source = overloads[1]
   const length = overloads[2]
   if (destination === undefined || source === undefined || length === undefined) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'Intrinsic.resolve',
-        message: 'Memory copy intrinsics require destination, source, and length overload types',
-        input: overloads,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'Intrinsic.resolve',
+      message: 'Memory copy intrinsics require destination, source, and length overload types',
+      input: overloads,
+    })
   }
   return {
     returnType: yield* Type.voidType(builder),
@@ -354,13 +352,11 @@ const memorySetSignature = Effect.fnUntraced(function* (
   const destination = overloads[0]
   const length = overloads[1]
   if (destination === undefined || length === undefined) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'Intrinsic.resolve',
-        message: 'Memory set intrinsics require destination and length overload types',
-        input: overloads,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'Intrinsic.resolve',
+      message: 'Memory set intrinsics require destination and length overload types',
+      input: overloads,
+    })
   }
   return {
     returnType: yield* Type.voidType(builder),
@@ -377,39 +373,33 @@ const overloadedRecipes: Readonly<Partial<Record<Id, OverloadedRecipe>>> = Objec
   va_start: Effect.fnUntraced(function* (builder, overloads) {
     const parameter = overloads[0]
     if (parameter === undefined) {
-      return yield* Effect.fail(
-        invalidInput({
-          operation: 'Intrinsic.resolve',
-          message: 'llvm.va_start requires one pointer overload type',
-          input: overloads,
-        }),
-      )
+      return yield* invalidInput({
+        operation: 'Intrinsic.resolve',
+        message: 'llvm.va_start requires one pointer overload type',
+        input: overloads,
+      })
     }
     return { returnType: yield* Type.voidType(builder), parameters: [parameter] }
   }),
   va_end: Effect.fnUntraced(function* (builder, overloads) {
     const parameter = overloads[0]
     if (parameter === undefined) {
-      return yield* Effect.fail(
-        invalidInput({
-          operation: 'Intrinsic.resolve',
-          message: 'llvm.va_end requires one pointer overload type',
-          input: overloads,
-        }),
-      )
+      return yield* invalidInput({
+        operation: 'Intrinsic.resolve',
+        message: 'llvm.va_end requires one pointer overload type',
+        input: overloads,
+      })
     }
     return { returnType: yield* Type.voidType(builder), parameters: [parameter] }
   }),
   va_copy: Effect.fnUntraced(function* (builder, overloads) {
     const parameter = overloads[0]
     if (parameter === undefined) {
-      return yield* Effect.fail(
-        invalidInput({
-          operation: 'Intrinsic.resolve',
-          message: 'llvm.va_copy requires one pointer overload type',
-          input: overloads,
-        }),
-      )
+      return yield* invalidInput({
+        operation: 'Intrinsic.resolve',
+        message: 'llvm.va_copy requires one pointer overload type',
+        input: overloads,
+      })
     }
     return { returnType: yield* Type.voidType(builder), parameters: [parameter, parameter] }
   }),
@@ -621,13 +611,11 @@ export const resolve = Effect.fnUntraced(function* (
   options: ResolveOptions = {},
 ): Effect.fn.Return<FunctionActor.Function, LlvmError> {
   if (!inventory.includes(id)) {
-    return yield* Effect.fail(
-      invalidState({
-        operation: 'Intrinsic.resolve',
-        message: 'Unknown pinned LLVM intrinsic',
-        state: id,
-      }),
-    )
+    return yield* invalidState({
+      operation: 'Intrinsic.resolve',
+      message: 'Unknown pinned LLVM intrinsic',
+      state: id,
+    })
   }
   const recipe = overloadedRecipes[id]
   const simple = simpleRecipes[id]
@@ -637,13 +625,11 @@ export const resolve = Effect.fnUntraced(function* (
     else if (simple !== undefined) signature = yield* simple(builder)
   }
   if (signature === undefined) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'Intrinsic.resolve',
-        message: 'This intrinsic requires an explicit typed signature',
-        input: { id, overloads },
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'Intrinsic.resolve',
+      message: 'This intrinsic requires an explicit typed signature',
+      input: { id, overloads },
+    })
   }
   const variadic = 'variadic' in signature ? signature.variadic : undefined
   const type = yield* Type.functionType(

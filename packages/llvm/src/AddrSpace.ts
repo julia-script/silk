@@ -55,13 +55,11 @@ export const make = Effect.fnUntraced(function* (
   value: number,
 ): Effect.fn.Return<AddrSpace, LlvmError> {
   if (!Number.isSafeInteger(value) || value < 0 || value > 0xff_ffff) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'AddrSpace.make',
-        message: 'LLVM address spaces are unsigned 24-bit integers',
-        input: value,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'AddrSpace.make',
+      message: 'LLVM address spaces are unsigned 24-bit integers',
+      input: value,
+    })
   }
   return Object.freeze({ _tag: 'AddrSpace', value })
 })

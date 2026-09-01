@@ -1065,13 +1065,11 @@ export const enumerator = Effect.fnUntraced(function* (
   options: { readonly unsigned?: boolean; readonly bitWidth?: number } = {},
 ): Effect.fn.Return<Optional, LlvmError> {
   if (options.unsigned === true && value < 0n) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'Metadata.enumerator',
-        message: 'An unsigned debug enumerator cannot have a negative value',
-        input: value,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'Metadata.enumerator',
+      message: 'An unsigned debug enumerator cannot have a negative value',
+      input: value,
+    })
   }
   return yield* debugNode(builder, 'Metadata.enumerator', (state, owner) =>
     Result.gen(function* () {

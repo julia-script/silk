@@ -276,13 +276,11 @@ export const integer = Effect.fnUntraced(function* (
   bitWidth: number,
 ): Effect.fn.Return<Type, LlvmError> {
   if (!Number.isSafeInteger(bitWidth) || bitWidth < 1 || bitWidth > 0xff_ffff) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'Type.integer',
-        message: 'LLVM integer width must be from 1 through 16777215 bits',
-        input: bitWidth,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'Type.integer',
+      message: 'LLVM integer width must be from 1 through 16777215 bits',
+      input: bitWidth,
+    })
   }
   return yield* intern(builder, Object.freeze({ _tag: 'Integer', bitWidth }))
 })
@@ -348,13 +346,11 @@ const vectorOf = Effect.fnUntraced(function* (
   scalable: boolean,
 ): Effect.fn.Return<Type, LlvmError> {
   if (!Number.isSafeInteger(length) || length < 1 || length > 0xffff_ffff) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'Type.vector',
-        message: 'LLVM vector length must be a positive 32-bit integer',
-        input: length,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'Type.vector',
+      message: 'LLVM vector length must be a positive 32-bit integer',
+      input: length,
+    })
   }
   const childIndex = yield* BuilderState.mutate(builder, 'Type.vector', (_state, owner) =>
     Handle.resolve(builder, owner, child, 'Type', 'Type.vector'),
@@ -461,13 +457,11 @@ export const namedStructure = Effect.fnUntraced(function* (
 ): Effect.fn.Return<Type, LlvmError> {
   const value = ByteString.coerce(name)
   if (ByteString.isEmpty(value)) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'Type.namedStructure',
-        message: 'A named LLVM structure requires a non-empty name',
-        input: name,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'Type.namedStructure',
+      message: 'A named LLVM structure requires a non-empty name',
+      input: name,
+    })
   }
   return yield* BuilderState.mutate(builder, 'Type.namedStructure', (state, owner) =>
     Result.gen(function* () {
@@ -551,13 +545,11 @@ export const targetExtension = Effect.fnUntraced(function* (
 ): Effect.fn.Return<Type, LlvmError> {
   const value = ByteString.coerce(name)
   if (ByteString.isEmpty(value)) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'Type.targetExtension',
-        message: 'A target extension type requires a non-empty name',
-        input: name,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'Type.targetExtension',
+      message: 'A target extension type requires a non-empty name',
+      input: name,
+    })
   }
   const integers = yield* Effect.fromResult(
     IntegerInput.normalizeAll(integerParameters, {

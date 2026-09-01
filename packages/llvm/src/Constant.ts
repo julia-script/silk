@@ -683,13 +683,11 @@ export const blockAddress = Effect.fnUntraced(function* (
   block: number,
 ): Effect.fn.Return<Constant, LlvmError> {
   if (!Number.isSafeInteger(block) || block < 0) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'Constant.blockAddress',
-        message: 'A block address requires a non-negative block index',
-        input: block,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'Constant.blockAddress',
+      message: 'A block address requires a non-negative block index',
+      input: block,
+    })
   }
   const reference = yield* functionConstant(builder, fn)
   const description = yield* BuilderState.mutate(builder, 'Constant.blockAddress', (state, owner) =>

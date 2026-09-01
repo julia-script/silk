@@ -313,13 +313,11 @@ export const validateLoadOrdering = Effect.fnUntraced(function* (
   ordering: AtomicOrdering,
 ): Effect.fn.Return<void, LlvmError> {
   if (ordering === 'release' || ordering === 'acq_rel') {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'MemoryAccess.validateLoadOrdering',
-        message: 'Atomic loads cannot use release or acq_rel ordering',
-        input: ordering,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'MemoryAccess.validateLoadOrdering',
+      message: 'Atomic loads cannot use release or acq_rel ordering',
+      input: ordering,
+    })
   }
 })
 
@@ -333,13 +331,11 @@ export const validateStoreOrdering = Effect.fnUntraced(function* (
   ordering: AtomicOrdering,
 ): Effect.fn.Return<void, LlvmError> {
   if (ordering === 'acquire' || ordering === 'acq_rel') {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'MemoryAccess.validateStoreOrdering',
-        message: 'Atomic stores require monotonic, release, or seq_cst ordering',
-        input: ordering,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'MemoryAccess.validateStoreOrdering',
+      message: 'Atomic stores require monotonic, release, or seq_cst ordering',
+      input: ordering,
+    })
   }
 })
 
@@ -358,13 +354,11 @@ export const validateFenceOrdering = Effect.fnUntraced(function* (
     ordering !== 'acq_rel' &&
     ordering !== 'seq_cst'
   ) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'MemoryAccess.validateFenceOrdering',
-        message: 'A fence requires acquire, release, acq_rel, or seq_cst ordering',
-        input: ordering,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'MemoryAccess.validateFenceOrdering',
+      message: 'A fence requires acquire, release, acq_rel, or seq_cst ordering',
+      input: ordering,
+    })
   }
 })
 
@@ -378,13 +372,11 @@ export const validateRmwOrdering = Effect.fnUntraced(function* (
   ordering: AtomicOrdering,
 ): Effect.fn.Return<void, LlvmError> {
   if (ordering === 'none' || ordering === 'unordered') {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'MemoryAccess.validateRmwOrdering',
-        message: 'Atomic RMW operations require at least monotonic ordering',
-        input: ordering,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'MemoryAccess.validateRmwOrdering',
+      message: 'Atomic RMW operations require at least monotonic ordering',
+      input: ordering,
+    })
   }
 })
 
@@ -410,13 +402,11 @@ export const validateCompareExchange = Effect.fnUntraced(function* (
     failure === 'release' ||
     failure === 'acq_rel'
   ) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'MemoryAccess.validateCompareExchange',
-        message: 'Compare-exchange failure ordering is not permitted by LLVM',
-        input: failure,
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'MemoryAccess.validateCompareExchange',
+      message: 'Compare-exchange failure ordering is not permitted by LLVM',
+      input: failure,
+    })
   }
   const allowedFailure: Readonly<
     Record<Exclude<AtomicOrdering, 'none' | 'unordered' | 'release' | 'acq_rel'>, number>
@@ -429,12 +419,10 @@ export const validateCompareExchange = Effect.fnUntraced(function* (
   if (success === 'seq_cst') successLimit = 2
   else if (success === 'acquire' || success === 'acq_rel') successLimit = 1
   if (allowedFailure[failure] > successLimit) {
-    return yield* Effect.fail(
-      invalidInput({
-        operation: 'MemoryAccess.validateCompareExchange',
-        message: 'Compare-exchange failure ordering cannot be stronger than success ordering',
-        input: { success, failure },
-      }),
-    )
+    return yield* invalidInput({
+      operation: 'MemoryAccess.validateCompareExchange',
+      message: 'Compare-exchange failure ordering cannot be stronger than success ordering',
+      input: { success, failure },
+    })
   }
 })
