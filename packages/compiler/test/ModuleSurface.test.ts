@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Result from 'effect/Result'
 import * as Analysis from '../src/Analysis.js'
 import * as CallableContract from '../src/CallableContract.js'
 import * as Constraint from '../src/Constraint.js'
@@ -1357,10 +1358,13 @@ it.effect('rejects malformed semantic encodings through the typed boundary', () 
     ]
 
     for (const [operation, decoding] of cases) {
-      const failure = yield* Effect.flip(decoding).pipe(Effect.orDie)
-      assert.instanceOf(failure, ModuleSurface.ModuleSurfaceDecodeError)
-      assert.strictEqual(failure.operation, operation)
-      assert.strictEqual(failure.reason._tag, 'InvalidEncoding')
+      const result = yield* Effect.result(decoding)
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, ModuleSurface.ModuleSurfaceDecodeError)
+        assert.strictEqual(result.failure.operation, operation)
+        assert.strictEqual(result.failure.reason._tag, 'InvalidEncoding')
+      }
     }
 
     const structuredFailure = yield* Effect.flip(

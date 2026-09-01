@@ -1,3 +1,4 @@
+import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import { dual } from 'effect/Function'
 import type * as Alignment from './Alignment.js'
@@ -269,10 +270,12 @@ export const renderOrdering = (ordering: AtomicOrdering): string =>
  * @since 0.0.0
  */
 /** @internal */
-class AlignmentEncodingFailure extends Error {
-  constructor(readonly alignment: Alignment.Alignment) {
-    super('LLVM instruction alignment exceeds the 6-bit bitcode encoding')
-    this.name = 'AlignmentEncodingFailure'
+class AlignmentEncodingFailure extends Data.TaggedError('AlignmentEncodingFailure')<{
+  readonly message: string
+  readonly alignment: Alignment.Alignment
+}> {
+  constructor(alignment: Alignment.Alignment) {
+    super({ message: 'LLVM instruction alignment exceeds the 6-bit bitcode encoding', alignment })
   }
 }
 

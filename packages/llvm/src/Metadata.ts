@@ -1,3 +1,4 @@
+import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import type * as Builder from './Builder.js'
@@ -1319,13 +1320,12 @@ export interface Reachable {
 }
 
 /** @internal */
-class TraversalFailure extends Error {
+class TraversalFailure extends Data.TaggedError('MetadataTraversalFailure')<{
+  readonly message: string
   readonly state: unknown
-
+}> {
   constructor(message: string, state: unknown) {
-    super(message)
-    this.name = 'MetadataTraversalFailure'
-    this.state = state
+    super({ message, state })
   }
 }
 

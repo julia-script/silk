@@ -6,12 +6,15 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as DocumentationProject from '../../docgen/dist/Project.js'
 import * as ProjectAnalysis from '../dist/ProjectAnalysis.js'
 import * as SourceFile from '../dist/SourceFile.js'
 import * as SourceResolver from '../dist/SourceResolver.js'
 import * as CompilerStdlib from '../dist/Stdlib.js'
+
+class DocumentationInventoryError extends Data.TaggedError('DocumentationInventoryError') {}
 
 const outputPath = fileURLToPath(
   new URL('../../../.scratch/document-silk-standard-library/inventory.md', import.meta.url),
@@ -88,7 +91,11 @@ const program = Effect.gen(function* () {
     const bytes = yield* Effect.try({
       try: () =>
         Uint8Array.from(readFileSync(new URL(`../stdlib/${manifest.path}`, import.meta.url))),
-      catch: (cause) => new Error(`Missing stdlib source: ${manifest.module}`, { cause }),
+      catch: (cause) =>
+        new DocumentationInventoryError({
+          message: `Missing stdlib source: ${manifest.module}`,
+          cause,
+        }),
     })
     sources.push({ manifest, bytes, root: SourceFile.make(manifest.module, bytes) })
   }
@@ -108,7 +115,8 @@ const program = Effect.gen(function* () {
       mkdirSync(dirname(outputPath), { recursive: true })
       writeFileSync(outputPath, render(modules))
     },
-    catch: (cause) => new Error(`Could not write ${outputPath}`, { cause }),
+    catch: (cause) =>
+      new DocumentationInventoryError({ message: `Could not write ${outputPath}`, cause }),
   })
   return outputPath
 })

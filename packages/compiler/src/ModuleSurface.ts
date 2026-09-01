@@ -40,7 +40,14 @@ export class ModuleSurfaceDecodeError extends Data.TaggedError('ModuleSurfaceDec
   readonly reason: { readonly _tag: 'InvalidEncoding'; readonly detail: string }
 }> {}
 
-class InvalidModuleSurfaceEncoding extends Error {}
+class InvalidModuleSurfaceEncoding extends Data.TaggedError('InvalidModuleSurfaceEncoding')<{
+  readonly message: string
+  readonly cause?: unknown
+}> {
+  constructor(message: string, options?: { readonly cause: unknown }) {
+    super(options === undefined ? { message } : { message, cause: options.cause })
+  }
+}
 
 const record = Canonical.record
 
