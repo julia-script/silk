@@ -212,6 +212,10 @@ export interface CleanupOperation {
   ) => void
 }
 
+class CleanupAttemptError extends Data.TaggedError('CleanupAttemptError')<{
+  readonly cause: unknown
+}> {}
+
 const nodeCleanup: CleanupOperation = Object.freeze({
   remove: (path: string, options: { readonly force: true; readonly recursive?: boolean }) =>
     rmSync(path, options),
@@ -224,15 +228,30 @@ const cleanupPath = Effect.fnUntraced(function* (
   cleanup: CleanupOperation,
   stage: 'scope-cleanup' | 'artifact-cleanup',
 ): Effect.fn.Return<void, ToolchainError> {
-  const first = yield* Effect.result(Effect.try(() => cleanup.remove(path, options)))
+  const first = yield* Effect.result(
+    Effect.try({
+      try: () => cleanup.remove(path, options),
+      catch: (cause) => new CleanupAttemptError({ cause }),
+    }),
+  )
   if (Result.isSuccess(first)) return
-  const retry = yield* Effect.result(Effect.try(() => cleanup.remove(path, options)))
+  const retry = yield* Effect.result(
+    Effect.try({
+      try: () => cleanup.remove(path, options),
+      catch: (cause) => new CleanupAttemptError({ cause }),
+    }),
+  )
   if (Result.isSuccess(retry)) return
-  const fallback = yield* Effect.result(Effect.try(() => nodeCleanup.remove(path, options)))
+  const fallback = yield* Effect.result(
+    Effect.try({
+      try: () => nodeCleanup.remove(path, options),
+      catch: (cause) => new CleanupAttemptError({ cause }),
+    }),
+  )
   return yield* storageError('NativeToolchain.cleanupPath', stage, path, {
-    first: first.failure,
-    retry: retry.failure,
-    ...(Result.isFailure(fallback) ? { fallback: fallback.failure } : {}),
+    first: first.failure.cause,
+    retry: retry.failure.cause,
+    ...(Result.isFailure(fallback) ? { fallback: fallback.failure.cause } : {}),
   })
 })
 
