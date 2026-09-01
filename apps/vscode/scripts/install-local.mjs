@@ -63,7 +63,7 @@ const linkExtension = (extensionsRoot, editorLabel) => {
     rmSync(linkPath, { recursive: true, force: true })
     symlinkSync(packageRoot, linkPath)
   } catch (cause) {
-    fail(`could not link ${linkPath} -> ${packageRoot}: ${cause}`)
+    fail(`could not link ${linkPath} -> ${packageRoot}: ${String(cause)}`)
   }
 
   console.log(`${editorLabel}: ${linkPath} -> ${packageRoot}`)

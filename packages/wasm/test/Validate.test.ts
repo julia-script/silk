@@ -5,6 +5,7 @@ import * as Builder from '../src/Builder.js'
 import * as Export from '../src/Export.js'
 import * as Func from '../src/Func.js'
 import * as Instr from '../src/Instr.js'
+import * as Utf8 from '../src/internal/Utf8.js'
 import * as Type from '../src/Type.js'
 import * as Validate from '../src/Validate.js'
 import * as ValType from '../src/ValType.js'
@@ -32,7 +33,7 @@ const sections = (body: ReadonlyArray<number>): ReadonlyArray<number> => [
 
 /** A `name` custom section naming function 0, the way an encoder carries declared names. */
 const named = (name: string): ReadonlyArray<number> => {
-  const bytes = [...name].map((character) => character.charCodeAt(0))
+  const bytes = Array.from(Utf8.encode(name))
   const subsection = [0x01, 0x00, bytes.length, ...bytes]
   const payload = [0x04, 0x6e, 0x61, 0x6d, 0x65, 0x01, subsection.length, ...subsection]
   return [0x00, payload.length, ...payload]

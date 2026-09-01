@@ -76,7 +76,7 @@ export const lanesFor = (
       : Layout.callableEnvironmentLanes(context.program.layout, type.environment)
   const shape = Layout.callingShape(context.program.layout, Mir.semanticType(type))
   if (shape === undefined)
-    throw new RangeError(`LLVM backend lost calling shape for ${Mir.semanticType(type)}`)
+    throw new RangeError(`LLVM backend lost calling shape for ${Mir.typeText(type)}`)
   return shape.lanes
 }
 

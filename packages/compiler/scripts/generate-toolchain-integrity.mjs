@@ -25,7 +25,7 @@ const contentIdentities = await Promise.all(
       .digest(),
   ),
 )
-contentIdentities.sort(Buffer.compare)
+contentIdentities.sort((left, right) => Buffer.compare(left, right))
 const digest = createHash('sha256')
 for (const identity of contentIdentities) digest.update(identity)
 const compilerDigest = digest.digest('hex')

@@ -426,7 +426,7 @@ fixtures.push(
             body.push(Instr.i32Const(1))
             break
           default:
-            throw new Error(`Unhandled atomic kind ${row.kind}`)
+            throw new Error('Unhandled atomic kind')
         }
         body.push(Instr.atomicAccess(mnemonic, memory))
         if (row.kind !== 'store') body.push(Instr.op('drop'))
