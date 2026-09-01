@@ -37,12 +37,7 @@ const build = (name, program) => ({
 })
 
 export const fixtures = [
-  build(
-    'empty',
-    Effect.gen(function* () {
-      return yield* Builder.make()
-    }),
-  ),
+  build('empty', Builder.make()),
 
   build(
     'arithmetic',

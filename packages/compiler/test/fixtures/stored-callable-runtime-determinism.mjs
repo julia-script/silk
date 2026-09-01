@@ -3,6 +3,7 @@ import { NodeServices } from '@effect/platform-node'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
+import * as Layer from 'effect/Layer'
 import * as Path from 'effect/Path'
 import * as Stream from 'effect/Stream'
 import { ChildProcess } from 'effect/unstable/process'
@@ -133,8 +134,7 @@ const program = Effect.gen(function* () {
   )
 }).pipe(
   Effect.scoped,
-  Effect.provide(NodeHeapObservation.layer),
-  Effect.provide(NodeServices.layer),
+  Effect.provide(Layer.mergeAll(NodeHeapObservation.layer, NodeServices.layer)),
 )
 
 await Effect.runPromise(program)

@@ -120,20 +120,18 @@ it.effect('rejects an if whose implicit else cannot produce the result', () =>
 )
 
 it.effect('checks br_table label arity agreement', () =>
-  Effect.gen(function* () {
-    yield* rejects([ValType.i32], [ValType.i32], {
-      body: [
-        Instr.block(Instr.valueBlockType(ValType.i32), [
-          Instr.block(Instr.emptyBlockType, [
-            Instr.i32Const(0),
-            Instr.localGet(0),
-            Instr.brTable([0], 1),
-          ]),
-          Instr.i32Const(2),
+  rejects([ValType.i32], [ValType.i32], {
+    body: [
+      Instr.block(Instr.valueBlockType(ValType.i32), [
+        Instr.block(Instr.emptyBlockType, [
+          Instr.i32Const(0),
+          Instr.localGet(0),
+          Instr.brTable([0], 1),
         ]),
-      ],
-    })
-  }),
+        Instr.i32Const(2),
+      ]),
+    ],
+  }).pipe(Effect.asVoid),
 )
 
 it.effect('checks calls against their function types', () =>
