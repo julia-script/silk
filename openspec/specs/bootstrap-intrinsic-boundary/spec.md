@@ -639,3 +639,80 @@ operation.
 
 - **WHEN** the intrinsic inventory is compared before and after migration
 - **THEN** abstraction-shaped Option and Result result contracts are gone, `Intrinsic.effectResult` is absent, no replacement callable operation exists, and every remaining changed primitive has one carrier-neutral contract
+
+### Requirement: Static reflection uses the minimum sealed primitive seam
+
+The sealed `Intrinsic` namespace SHALL expose only the irreducible operations required to obtain a
+concrete static type's aggregate metadata, construct and inspect immutable static sequences, and
+residualize an authorized static field descriptor as an ordinary shared field projection. Metadata
+and sequence operations SHALL be unavailable at runtime and SHALL have no evaluator, WebAssembly,
+or LLVM runtime target. The projection bridge MUST consume its descriptor during specialization and
+MUST NOT survive as a runtime intrinsic call.
+
+The projection bridge SHALL use an explicit mixed intrinsic contract: its shared owner-reference
+parameter remains a runtime lane, its `Field<Owner, Value>` parameter is a required static lane, and
+specialization emits the ordinary runtime `&Value` projection after consuming the descriptor. The
+intrinsic catalog, calling-shape verification, and residualizer MUST reject any surviving descriptor
+lane or projection-intrinsic call. Mixed parameter phases remain sealed intrinsic metadata and MUST
+NOT become a privilege inferred for ordinary functions.
+
+Template grammar, placeholder parsing, aggregate-kind policy, visibility policy, field matching,
+`Display` selection, Writer composition, and reusable reflection wrappers SHALL remain ordinary
+source. No source module, actor, operation, or descriptor spelling outside `Intrinsic` SHALL receive
+compiler privilege.
+
+#### Scenario: Copy the public reflection wrapper
+
+- **WHEN** user source defines an equivalent safe wrapper over the admitted reflection intrinsics
+- **THEN** it receives the same static descriptors and residual field projections without compiler registration
+
+#### Scenario: Reject reflection at runtime
+
+- **WHEN** a metadata or sequence intrinsic would remain in a runtime calling shape or residual body
+- **THEN** specialization reports a static-phase violation and every backend inventory remains reflection-free
+
+#### Scenario: Consume one mixed projection descriptor
+
+- **WHEN** specialization receives `&Owner` in the runtime lane and an authorized `Field<Owner, Value>` in the static lane
+- **THEN** it publishes one ordinary `&Value` field projection and no descriptor parameter or intrinsic call
+
+### Requirement: Reflection primitives cannot expose compiler identity or host state
+
+Reflection and static-sequence primitives SHALL return canonical source-semantic data only. They
+MUST NOT expose compiler addresses, host objects, allocation capacity, cache identities, backend
+layouts, mangled names, private inaccessible names, filesystem state, environment values, time, or
+randomness.
+
+#### Scenario: Repeat reflection in fresh processes
+
+- **WHEN** equivalent concrete aggregate types are reflected in two fresh compiler processes
+- **THEN** their public descriptor encodings and source provenance are identical and contain no host-specific value
+
+### Requirement: One sealed primitive exposes the selected target only to static evaluation
+
+The sealed `Intrinsic` namespace SHALL expose one safe, zero-argument, static-only target-profile
+operation returning a closed primitive profile code for the four canonical bootstrap targets. The
+operation SHALL read the compilation target selected by the compiler, SHALL be available to static
+evaluation only, and MUST NOT lower to HIR runtime operations, MIR, evaluator instructions, host
+imports, native symbols, or WebAssembly instructions. Its profile codes SHALL be deterministic and
+documented so ordinary standard-library source can map them to nominal target enums and derive all
+public target facts.
+
+No compiler phase MAY recognize the spelling of the standard-library target module, its enums,
+facts, or wrappers. The intrinsic MUST NOT expose backend objects, host detection, arbitrary target
+strings, layout offsets, feature probes, or a runtime target query.
+
+#### Scenario: Build the public target API in ordinary source
+
+- **WHEN** the standard-library target module calls the static target-profile intrinsic and maps its result to a nominal architecture enum
+- **THEN** a user target check resolves through ordinary imports, calls, enum equality, and static evaluation without compiler-known library spelling
+
+#### Scenario: Reject the target query at runtime
+
+- **WHEN** an ordinary runtime expression calls the target-profile intrinsic outside static evaluation
+- **THEN** analysis reports that the intrinsic is static-only and no runtime intrinsic inventory entry is created
+
+#### Scenario: Audit the minimal target seam
+
+- **WHEN** the intrinsic catalog and generated standard-library source are inspected
+- **THEN** exactly one static target-profile primitive exists and target policy, enums, pointer-width facts, and presentation remain ordinary source

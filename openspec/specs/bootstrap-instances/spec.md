@@ -12,42 +12,60 @@ Instance discovery SHALL start from one of the root module's three valid user en
 zero-parameter public ordinary `main() -> ()`, a unique zero-parameter public ordinary
 `main() -> i32`, or a unique zero-parameter public `effect fn main() -> () ! E` whose requirement
 row is empty and whose failure members are concrete detached owned values. Discovery SHALL retain
-the selected entry kind and normalized failure metadata and
-SHALL follow resolved local and cross-module calls in HIR transitively. The deterministic worklist
-SHALL record an instance before following it, so directly and mutually recursive programs terminate
-with each canonical instance discovered exactly once, in deterministic discovery order.
-Declarations of the closure that are not reachable from the entry SHALL NOT become instances,
-whether or not their modules are imported.
+the selected entry kind and normalized failure metadata.
+
+The compiler SHALL select the concrete compilation target before constructing the executable
+worklist. For each demanded concrete application, the realization coordinator SHALL first evaluate
+its static arguments and static body operations for that target, record the resulting canonical
+specialization key, and obtain one residual typed HIR body. It SHALL close a private candidate graph
+from direct residual calls and cleanup-edge prepass facts without publishing executable
+reachability. After that graph closes, it SHALL run ownership and cleanup exactly once over each
+successful residual specialization before admitting the resulting local and cross-module runtime
+call closure. The deterministic candidate worklist SHALL record a specialization before following
+direct calls, so directly and mutually recursive programs terminate with each canonical
+specialization discovered exactly once in deterministic order. Declarations and static applications
+not reachable from the entry SHALL NOT become runtime instances merely because their modules are
+loaded or imported.
 
 #### Scenario: Discover a call chain once each
 
 - **WHEN** ordinary `main` returns `identity(identity(42))`
-- **THEN** discovery records exactly the `main` and `identity` instances in that order
+- **THEN** discovery records exactly the `main` and `identity` runtime specializations in that order
 
 #### Scenario: Discover an effectful entry chain
 
 - **WHEN** effectful `main` runs one reachable effect function and can fail with one concrete detached owned type
-- **THEN** discovery records `main`, the reachable function, the failure runtime type, and its cleanup hooks deterministically
+- **THEN** discovery records `main`, the reachable residual function, the failure runtime type, and its cleanup hooks deterministically
 
 #### Scenario: Discover a cross-module call chain
 
-- **WHEN** root `main` calls a selectively imported public function which calls a function in a third module
-- **THEN** discovery records all three instances once under their canonical module-qualified keys in call-discovery order
+- **WHEN** root `main` calls a selectively imported public mixed function which residualizes a call into a third module
+- **THEN** discovery records all three residual runtime specializations once under their canonical module-qualified keys in call-discovery order
 
 #### Scenario: Terminate on recursion
 
-- **WHEN** `main` returns `main()`
-- **THEN** discovery records the `main` instance exactly once and terminates
+- **WHEN** one residual `main` specialization returns `main()` with the same static application
+- **THEN** discovery records that specialization exactly once and terminates
 
 #### Scenario: Terminate on cross-module mutual recursion
 
-- **WHEN** two imported public functions call one another and one is reachable from `main`
-- **THEN** discovery records each canonical instance exactly once and terminates
+- **WHEN** two imported public residual functions call one another with the same canonical static applications and one is reachable from `main`
+- **THEN** discovery records each canonical specialization exactly once and terminates
+
+#### Scenario: Distinguish static applications
+
+- **WHEN** one reachable caller applies the same declaration with two unequal canonical static argument values
+- **THEN** discovery records two distinct specializations and follows each residual body's calls independently
+
+#### Scenario: Exclude an inactive static call
+
+- **WHEN** a call appears only in the arm not selected by `static if`
+- **THEN** that call produces no worklist entry or runtime instance
 
 #### Scenario: Exclude unreachable declarations
 
-- **WHEN** the closure contains a declaration no reachable body calls
-- **THEN** it produces no instance
+- **WHEN** the closure contains a declaration no residual reachable body calls
+- **THEN** it produces no runtime instance and none of its static functions execute
 
 ### Requirement: Instance keys are canonical and normalized
 
@@ -348,3 +366,69 @@ nested metadata and SHALL not be mistaken for enclosing-instance obligations.
 
 - **WHEN** a concrete enclosing instance creates and drops an unapplied constrained callable
 - **THEN** its nested obligations remain schema metadata and erase with the callable without blocking the enclosing instance
+
+### Requirement: Instance discovery follows reflection-generated residual calls
+
+Concrete specialization SHALL complete static reflection, template validation, and heterogeneous
+iteration before publishing direct runtime call candidates. Each generated field operation SHALL
+select evidence and contribute call edges using that iteration's concrete field type. Equal
+reflection and template applications SHALL reuse one residual specialization; unequal template,
+aggregate type, visibility authority, generic argument, evidence, or static value inputs MUST NOT be
+conflated.
+
+#### Scenario: Discover heterogeneous Display instances
+
+- **WHEN** one template selects a `string` field and an `i32` field
+- **THEN** the executable closure contains the independently selected `Display<string>` and `Display<i32>` runtime operations and no descriptor instance
+
+#### Scenario: Keep templates distinct
+
+- **WHEN** the same formatting function is reached with two unequal static template values over the same argument type
+- **THEN** discovery retains two canonical residual specialization keys even if later optimization makes their emitted bytes equal
+
+### Requirement: Instance keys include canonical static values
+
+A mixed function's instance key SHALL consist of its canonical declaration identity, normalized
+concrete type and contract-row arguments, selected evidence, and the canonical encoding of every
+static value argument in parameter order. The selected target SHALL belong to the enclosing
+realization identity rather than a runtime argument. Equal keys SHALL share one residual instance;
+unequal static values MUST NOT be conflated even when their residual bodies happen to encode
+identically.
+
+#### Scenario: Deduplicate an equal static application
+
+- **WHEN** two reachable calls apply one mixed function with equal types, evidence, and canonical static values
+- **THEN** discovery records one shared runtime specialization without losing either call site's provenance
+
+#### Scenario: Keep target realizations separate
+
+- **WHEN** the same source application is realized for WebAssembly and for one native target
+- **THEN** each target obtains its own deterministic residual closure without placing the target in a runtime instance key or ABI lane
+
+### Requirement: Generated aggregates participate in canonical runtime reachability
+
+Instance discovery SHALL follow every named tuple or anonymous aggregate nominal identity that
+appears in a reachable contract, local, generic substitution, construction, projection, borrow, or
+cleanup plan. Generic instance keys SHALL use the complete occurrence-based nominal identity for an
+anonymous aggregate, so repeated uses of one bound value share a specialization while distinct
+same-shaped literal occurrences remain distinct concrete type arguments.
+
+Generated aggregate reachability and ordering SHALL be deterministic and SHALL recursively follow
+member types through the existing nominal struct rules. An unused anonymous literal in an
+unreachable declaration MUST NOT enter runtime reachability merely because its synthesized
+declaration is present in semantic facts.
+
+#### Scenario: Specialize a generic formatter-shaped consumer
+
+- **WHEN** one anonymous record binding is passed repeatedly to the same reachable generic function
+- **THEN** instance discovery records one concrete specialization for that occurrence-based aggregate type
+
+#### Scenario: Distinguish separate anonymous arguments
+
+- **WHEN** separate same-shaped record literals are passed to one generic function
+- **THEN** instance discovery retains two concrete nominal type arguments rather than merging them by shape
+
+#### Scenario: Omit an unreachable generated type
+
+- **WHEN** an anonymous aggregate occurs only inside an unreachable declaration
+- **THEN** its semantic declaration remains inspectable but is absent from runtime aggregate reachability

@@ -6,66 +6,80 @@ ownership categories, live ranges, verdicts) and the target-neutral cleanup plan
 lowering will consume to insert drops — established as a producer phase with its fact table and
 artifact before any lowering exists to need them.
 ## Requirements
-### Requirement: Ownership facts are produced once per declaration
+### Requirement: Ownership facts are produced once per residual specialization
 
-The ownership phase SHALL run once per declaration over typed HIR and SHALL publish one immutable
-ownership fact per function: its bindings with their ownership category and live range over
-source spans, and a closed verdict. Bindings SHALL cover parameters and `let` statements alike:
-a parameter is live from its declaration through the function body, and a `let` binding is live
-from its statement through its last use — its consuming move where one exists, otherwise the end
-of the function body. A function whose HIR body or contract is unavailable SHALL carry an
-explicitly unavailable verdict retaining the originating diagnostic identity where one exists,
-and MUST NOT report a satisfied check it could not perform.
+After private residual and cleanup-call candidate closure is complete, the ownership phase SHALL run
+once for each residual runtime HIR specialization and SHALL publish
+one immutable ownership fact for that specialization: its runtime bindings with their ownership
+category and live range over source spans, and a closed verdict. Static parameters, static local
+bindings, static-function locals, inactive static arms, and static evaluator storage MUST NOT appear
+as owned bindings or cleanup obligations. Runtime parameters and residual `let` statements SHALL
+retain their ordinary liveness and move behavior.
+
+A specialization whose residual HIR body or runtime contract is unavailable SHALL carry an
+explicitly unavailable verdict retaining the originating diagnostic identity where one exists and
+MUST NOT report a satisfied check it could not perform. A static evaluation that fails before
+producing residual HIR SHALL publish its static diagnostic and no ownership fact for that failed
+specialization.
+
+Cleanup-call candidate discovery MAY use a target-neutral prepass over residual types and exits, but
+that prepass MUST NOT publish ownership, liveness, borrow, or cleanup-plan facts and MUST NOT admit
+executable reachability before the residual graph is closed.
 
 #### Scenario: Check a copyable parameter
 
-- **WHEN** `pub fn identity(value: i32) -> i32 { return value }` is checked
-- **THEN** its ownership fact lists one copyable binding for `value` live from its declaration span through the function body, with a satisfied verdict
+- **WHEN** a mixed function specializes to a residual body reading one runtime `i32` parameter
+- **THEN** its ownership fact lists that copyable parameter through the residual body and omits every static input
 
 #### Scenario: Keep unavailable bodies explicit
 
-- **WHEN** a function's HIR body is unavailable after recovery or an unresolved reference
-- **THEN** its ownership verdict is explicitly unavailable, carrying the originating diagnostic's identity where one exists
+- **WHEN** selected residual HIR is unavailable after recovery or an unresolved selected reference
+- **THEN** its ownership verdict is explicitly unavailable and carries the originating diagnostic identity
+
+#### Scenario: Omit a failed static specialization
+
+- **WHEN** `compileError` or an evaluation limit prevents a specialization from producing residual HIR
+- **THEN** ownership publishes no satisfied, violated, or partial fact for that specialization
 
 #### Scenario: Range a let binding's liveness
 
-- **WHEN** a body binds `let value = 42` and returns `value`
-- **THEN** the ownership fact lists the binding live from its statement span through the end of the function body, with a satisfied verdict
+- **WHEN** a selected runtime arm binds `let value = 42` and returns `value`
+- **THEN** the residual ownership fact lists the binding from its statement through the residual return
 
 #### Scenario: End liveness at a consuming move
 
-- **WHEN** a body binds a value, moves it into a call argument, and returns the call's result
-- **THEN** the binding's live range ends at the move's span rather than the end of the body
+- **WHEN** a residual body moves one runtime binding into a call argument and later source does not use it
+- **THEN** the binding's live range ends at that move while any unselected-arm use is absent from ownership analysis
 
 ### Requirement: The cleanup plan is a target-neutral artifact
 
-The phase SHALL produce one cleanup plan per function: every structured exit path with its
-ordered releases in last-acquired, first-released order. A release SHALL record the end of one
-binding's ownership at that exit; bindings already consumed by a move before the exit MUST NOT
-be released again. The plan SHALL be target-neutral — it MUST NOT insert target-specific drops —
-and it SHALL record releases uniformly whether or not the released type carries cleanup
-behavior, so lowering and later cleanup-bearing types consume one shape. The plan SHALL expose a
+The phase SHALL produce one cleanup plan per successful residual runtime specialization: every
+structured residual exit path with its ordered releases in last-acquired, first-released order. A
+release SHALL record the end of one runtime binding's ownership at that exit; bindings already
+consumed by a move before the exit MUST NOT be released again. Static values and evaluator storage
+MUST NOT produce releases. The plan SHALL remain target-neutral, SHALL record runtime releases
+uniformly whether or not the released type carries cleanup behavior, and SHALL expose a
 deterministic textual encoding gated by committed golden files.
 
 #### Scenario: Plan the single return exit
 
-- **WHEN** a frozen-slice function with parameters is checked
-- **THEN** its cleanup plan contains one return exit at the returned expression's span with an empty release list
+- **WHEN** static selection leaves one residual return path with runtime parameters
+- **THEN** the cleanup plan contains that return exit and only the releases required by residual runtime bindings
 
 #### Scenario: Match the cleanup golden encoding
 
-- **WHEN** a committed fixture is checked and its plan encoded
-- **THEN** the encoding equals the committed golden text byte-for-byte, naming every binding, exit, and release order
+- **WHEN** a committed mixed-function fixture is specialized repeatedly with the same inputs
+- **THEN** its cleanup encoding is byte-for-byte identical and names no static binding or inactive-arm release
 
 #### Scenario: Release bindings in reverse binding order
 
-- **WHEN** a body declares `let first = 1` then `let second = 2` and returns a literal
-- **THEN** the return exit releases `second` before `first`
+- **WHEN** a selected runtime arm declares `let first = 1` then `let second = 2` and returns a literal
+- **THEN** the residual exit releases `second` before `first`
 
 #### Scenario: Skip a moved binding at the exit
 
-- **WHEN** a body moves its only binding before the return
-- **THEN** the return exit's release list omits that binding
+- **WHEN** a residual body moves its only runtime binding before return
+- **THEN** the exit release list omits that binding while static values remain outside the plan
 
 ### Requirement: Ownership output is deterministic
 
@@ -1068,3 +1082,79 @@ MUST preserve that single active obligation. Fatal traps SHALL retain the existi
 
 - **WHEN** a moved match extracts one payload field and omits another with `..`
 - **THEN** ownership transfers the extracted field once and cleans only the selected variant's omitted fields
+
+### Requirement: Ownership analyzes only generated runtime projections and values
+
+Static type descriptors, field descriptors, static sequences, parsed template values, static loop
+bindings, and inactive iterations SHALL create no runtime binding, move, borrow, loan, liveness,
+cleanup, or destructor fact. After residualization, every generated field access SHALL obey the
+ordinary ownership mode of its concrete operation. Template formatting SHALL use a shared borrow of
+the argument pack and shared field projections, so formatting MUST NOT consume or mutate the pack or
+its fields.
+
+#### Scenario: Borrow an anonymous record temporary for formatting
+
+- **WHEN** `&.{ name: "Julia", age: 32 }` is passed directly to template formatting
+- **THEN** ownership creates one hidden temporary owner, keeps it live through all generated field displays, and cleans it after the complete formatting call
+
+#### Scenario: Keep static plans outside cleanup
+
+- **WHEN** template parsing creates and replaces immutable static sequences
+- **THEN** no sequence allocation, replacement, or value appears in the runtime cleanup plan
+
+### Requirement: Tuple-backed and anonymous aggregates obey ordinary struct ownership
+
+Named tuples and anonymous aggregate values SHALL use the existing whole-value nominal struct
+ownership rules. Reads, moves, borrows, partial-move rejection, Copy evidence, mutation, and
+structured-exit cleanup MUST NOT depend on whether the nominal declaration was written in source or
+synthesized from a literal. Anonymous aggregate creation MUST NOT synthesize `Copy` evidence merely
+because every current member is Copy.
+
+Tuple cleanup order SHALL follow ordinal declaration order, and anonymous record cleanup order SHALL
+follow the canonical source field order recorded by its synthesized declaration. A move of the
+whole aggregate SHALL transfer exactly one recursive cleanup obligation; separate fields or
+positions MUST NOT become independently movable unless ordinary struct ownership later admits that
+operation for all nominal structs.
+
+#### Scenario: Move one anonymous record as a whole
+
+- **WHEN** a local anonymous record is moved into an owning generic call
+- **THEN** the source binding becomes dead and the callee receives its one declaration-ordered cleanup obligation
+
+#### Scenario: Refuse a positional partial move
+
+- **WHEN** source requests a consuming move from one position of an affine named tuple
+- **THEN** ownership rejects the partial move and retains the complete tuple owner's state
+
+#### Scenario: Avoid implicit Copy for anonymous aggregates
+
+- **WHEN** every field of an anonymous record is Copy but no nominal Copy evidence can be declared for its generated type
+- **THEN** the record remains affine while non-consuming reads of its Copy fields follow ordinary struct rules
+
+### Requirement: Referent places preserve borrowed ownership
+
+A bare referent projection SHALL read only when the target has sealed `Copy` conformance and SHALL
+leave the backing owner available. It SHALL NOT move an affine target through borrowed storage.
+Shared referents SHALL permit only shared reborrows and reads, while exclusive referents SHALL also
+permit exclusive reborrows and replacement with ordinary cleanup.
+
+#### Scenario: Read a Copy scalar through a shared reference
+
+- **WHEN** `value.*` reads `u32` from `value: &u32`
+- **THEN** the result is copied and the backing owner remains available
+
+#### Scenario: Reject an affine referent read
+
+- **WHEN** a bare projection attempts to read a non-Copy target
+- **THEN** ownership analysis rejects the borrowed move
+
+#### Scenario: Reject mutation through shared access
+
+- **WHEN** source assigns through a shared referent or requests `&mut value.*`
+- **THEN** ownership analysis rejects the access strengthening
+
+#### Scenario: Replace through exclusive access
+
+- **WHEN** source assigns a compatible value through an exclusive referent
+- **THEN** the previous referent is cleaned up exactly once
+- **AND** the exclusive owner is restored after the access ends

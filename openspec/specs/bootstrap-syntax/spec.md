@@ -1154,3 +1154,172 @@ host-stack independent even when the rejected region is substantially deeper tha
 
 - **WHEN** an over-budget expression is followed by another statement in its block and another top-level declaration
 - **THEN** both following constructs remain independently parseable and no token from either is consumed into the recovered expression
+
+### Requirement: Static iteration syntax is lossless and recoverable
+
+The parser SHALL recognize `static for <binding> in <expression> { <statements> }` exactly as a
+statement form. The syntax tree SHALL retain the `static`, `for`, and `in` keywords, binding,
+iterable expression, body, trivia, delimiters, and source spans without deciding whether the
+iterable is static, finite, homogeneous, heterogeneous, or reflectable. The form MUST NOT parse in a
+declaration list or create a declaration node.
+
+#### Scenario: Parse one static field iteration
+
+- **WHEN** source contains `static for field in Reflect.fields<Args>() { display(field) }`
+- **THEN** syntax retains one static-for statement with its complete iterable call and body in concrete order
+
+### Requirement: Static iteration recovery remains locally bounded
+
+A missing iteration binding, `in` keyword, iterable expression, opening brace, body, or closing
+brace SHALL remain explicit missing syntax under the existing bounded recovery rules. Recovery
+MUST preserve the following statement, enclosing block boundary, and following declaration.
+
+#### Scenario: Recover a missing iterable
+
+- **WHEN** `static for field in` is followed by a block and then a return statement
+- **THEN** the static-for node records a missing iterable, retains its block, and preserves the following return
+
+### Requirement: Static forms are lossless and phase-marked
+
+The lexer and parser SHALL recognize `static` and `compileError` as keywords and preserve them
+exactly in five initial forms: top-level `static fn` declarations, `static` parameter modifiers,
+`let static` bindings, statement-position `static if`, and `compileError(message)` expressions or
+statements. A static function MAY be prefixed by `pub` but MUST NOT combine `static` with `unsafe`,
+`effect`, an implementation operation, or a service or interface operation. Static parameters and
+static bindings MUST NOT also carry `mut`. Static functions SHALL otherwise use ordinary function
+grammar; static parameters SHALL
+retain an explicit type; static bindings SHALL retain an initializer; static conditionals SHALL
+retain a condition, one block, and an optional `else` block; and `compileError` SHALL retain one
+message expression without a trailing comma. The syntax tree SHALL record each form distinctly
+without deciding whether an
+expression is statically evaluable. `compileError` SHALL be dedicated syntax and MUST NOT parse as
+an identifier call that source can import, shadow, capture, or pass as a value.
+
+#### Scenario: Parse every initial static form
+
+- **WHEN** source contains a static helper and a mixed function using a static parameter, static binding, static conditional, and `compileError`
+- **THEN** the syntax tree retains every keyword, parameter, initializer, condition, arm, compile-error argument, trivia slice, and source span in concrete order
+
+#### Scenario: Keep an ordinary literal ordinary in syntax
+
+- **WHEN** a text or numeric literal appears as an argument to a static parameter
+- **THEN** syntax retains the ordinary literal expression without inserting a synthetic `static` node
+
+### Requirement: Static syntax recovery remains locally bounded
+
+A missing static function name, parameter name or type, binding initializer, conditional condition
+or arm, or compile-error argument or delimiter SHALL produce explicit missing syntax under the
+existing bounded recovery rules. Recovery inside a static or compile-error form MUST preserve a
+following statement, closing block, or declaration. `static if` SHALL be rejected in every
+declaration-list position, while `static fn` SHALL remain the only static form that introduces a
+declaration.
+
+#### Scenario: Recover a damaged static conditional
+
+- **WHEN** a static conditional omits its condition or closing brace before a following return
+- **THEN** syntax records the missing element, preserves the following return, and terminates recovery without a cascade
+
+#### Scenario: Reject a conditional top-level declaration
+
+- **WHEN** a module places `static if` around a function declaration
+- **THEN** parsing retains the damaged region and following declarations but produces no conditional declaration node
+
+### Requirement: Applied qualified members remain lossless until declaration resolution
+
+The expression grammar SHALL accept the declaration-neutral shape `Path<Arguments>.member`. The
+syntax tree SHALL preserve the owner path, every ordered type argument, the selected member,
+punctuation, trivia, and owner-qualified spans without declaring the owner to be an interface or a
+nominal union and without reinterpreting owner arguments as operation-generic arguments. Semantic
+resolution MAY then interpret a complete interface application as the qualifier of an operation in
+a direct call or as a callable expression on the right of a pipeline. Existing nominal-union
+constructors, unit values, and patterns SHALL retain the same lossless shape and meaning after
+declaration resolution.
+
+#### Scenario: Parse an applied interface operation call
+
+- **WHEN** source evaluates `Encodable<u32>.encode(&age)`
+- **THEN** syntax retains `Encodable<u32>` as the applied qualifier of operation `encode` and retains the shared-borrow argument as the call operand
+
+#### Scenario: Preserve an applied nominal-union member
+
+- **WHEN** source evaluates or patterns on an existing generic nominal-union member such as `Option<i32>.None`
+- **THEN** syntax retains the same applied owner and member tokens and semantic resolution preserves the nominal-union meaning
+
+#### Scenario: Keep owner and operation arguments distinct
+
+- **WHEN** source contains `Interface<A>.operation<B>(value)`
+- **THEN** syntax retains `A` on the applied owner and `B` on the operation call without merging or exchanging the argument lists
+
+#### Scenario: Parse an applied interface operation section
+
+- **WHEN** source evaluates `&age |> Encodable<u32>.encode`
+- **THEN** syntax retains the applied qualifier as the pipeline's callable right expression and does not invent a method call or implicit argument
+
+#### Scenario: Keep run greedy across an applied operation pipeline
+
+- **WHEN** source evaluates `run &age |> Encodable<u32>.encode`
+- **THEN** the `run` operand remains the complete pipeline under the existing run-expression boundary
+
+#### Scenario: Recover a damaged applied qualifier locally
+
+- **WHEN** an applied interface qualifier omits an argument delimiter or operation name before a valid following statement
+- **THEN** syntax records explicit missing structure within that expression and preserves the following statement without a declaration-level cascade
+
+### Requirement: Tuple and contextual record syntax is lossless and recoverable
+
+The lexer and parser SHALL reserve `tuple` and parse `tuple Name(T0, T1, ...)` as a declaration with
+ordered explicit element types. Expression grammar SHALL distinguish parenthesized expressions,
+unit, positional tuple literals, named tuple construction calls, positional projections such as
+`.0`, and record literals beginning with `.{`. Record literal members SHALL contain an identifier,
+colon, and expression. Tuple and record lists SHALL preserve commas, optional trailing commas,
+trivia, and exact source spans.
+
+Missing tuple names, element types, elements, record labels, colons, values, commas, or closing
+delimiters SHALL use the existing explicit-missing syntax and bounded expression or declaration
+recovery. A colon inside a positional tuple literal SHALL NOT create labeled-tuple syntax. The
+leading dot on a record literal SHALL keep it distinct from a block in every expression position.
+
+#### Scenario: Parse the aggregate forms distinctly
+
+- **WHEN** source contains a tuple declaration, named construction, positional literal, positional projection, record literal, grouped expression, and unit
+- **THEN** syntax retains seven distinct source forms with every token, delimiter, trivia slice, and span in source order
+
+#### Scenario: Recover a damaged record literal
+
+- **WHEN** one record member omits its colon or value before a following member and statement
+- **THEN** recovery records the missing syntax, preserves the following member and statement, and terminates without a declaration-level cascade
+
+#### Scenario: Reject labeled tuple syntax
+
+- **WHEN** a positional tuple literal contains `name: value`
+- **THEN** syntax reports the unexpected colon without reinterpreting the literal as a record or block
+
+### Requirement: Referent projection is a postfix place expression
+
+The parser SHALL recognize `reference.*` as a postfix referent projection within the repeated
+projection chain. Referent projection SHALL bind more tightly than prefix, infix, and pipeline
+operators, compose with field, index, call, borrow, and assignment syntax, and remain distinct from
+infix multiplication.
+
+#### Scenario: Parse a scalar receiver projection
+
+- **WHEN** source contains `self.*`
+- **THEN** the parser produces a referent-projection expression whose subject is `self`
+- **AND** the dot and star tokens belong to that projection
+
+#### Scenario: Compose a referent with other projections
+
+- **WHEN** source contains `items[index].*.field`
+- **THEN** parsing retains the index, referent, and field projections in source order
+- **AND** the chain can be used as a borrow or assignment subject
+
+#### Scenario: Preserve multiplication syntax
+
+- **WHEN** source contains `left * right`
+- **THEN** parsing produces an infix multiplication expression rather than a referent projection
+
+#### Scenario: Recover an incomplete referent projection
+
+- **WHEN** source contains a postfix dot whose following star or subject is missing
+- **THEN** parsing reports the ordinary local syntax failure
+- **AND** subsequent declarations remain recoverable

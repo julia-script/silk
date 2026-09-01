@@ -1288,3 +1288,66 @@ field identity from same-spelled fields in multiple variants or expose an inacti
 
 - **WHEN** `result.value` is analyzed for `Result<A, E>`
 - **THEN** facts retain the Result subject and requested field while the projection remains unavailable until a variant pattern binds the payload
+
+### Requirement: Static reflection provenance is deterministic and inspectable
+
+Semantic inspection SHALL retain the concrete type being reflected, ordered authorized member
+descriptors, static iterable encoding, per-iteration binding presentation, template segment or
+placeholder range, and generated residual operation identities. These facts SHALL distinguish
+authored syntax, static-only evaluation data, and residual runtime data without exposing compiler
+storage, private inaccessible field names, or backend details.
+
+#### Scenario: Inspect one named placeholder
+
+- **WHEN** `{age}` selects an `i32` field from an anonymous record argument pack
+- **THEN** inspection connects the placeholder byte range to the authorized field descriptor and resulting ordinary `i32` projection and Display call
+
+#### Scenario: Repeat semantic encoding
+
+- **WHEN** the same reflection-generated specialization is realized repeatedly
+- **THEN** its descriptor, iteration, template, and residual-provenance encodings are byte-identical
+
+### Requirement: Aggregate literal facts expose context and canonical identity
+
+Semantic facts SHALL record, for every tuple or record literal, whether it used an expected named
+aggregate or introduced an anonymous declaration; the canonical resulting nominal identity; every
+source element, label, or ordinal; its inferred or expected type; initializer evaluation order; and
+its mapping to canonical declaration order. Facts for failed construction SHALL retain the expected
+type when one existed, the generated occurrence identity when creation reached that point, and each
+independent arity, label, visibility, duplicate, missing, or compatibility cause.
+
+Tooling encodings SHALL present anonymous identities through stable source provenance rather than
+invented user-facing names. Repeated analysis of equal source SHALL produce identical facts and
+encodings.
+
+#### Scenario: Inspect a contextual call argument
+
+- **WHEN** an editor inspects a record literal passed to a named struct parameter
+- **THEN** semantic facts expose the parameter's canonical nominal type and every source-field mapping without requiring the type name at the call site
+
+#### Scenario: Inspect an anonymous binding
+
+- **WHEN** an editor inspects a local initialized by an uncontextualized anonymous record
+- **THEN** semantic facts expose its occurrence-based identity, ordered fields, and inferred field types without a fabricated source name
+
+### Requirement: Referent projection facts retain target and provenance
+
+Semantic analysis SHALL require a reference-typed subject for `.*` and publish the referent target
+type, shared or exclusive access, borrow provenance, availability, span, and projection-chain
+identity. A failed projection SHALL retain an explicit failed fact instead of fabricating a target.
+
+#### Scenario: Resolve a shared scalar referent
+
+- **WHEN** `value.*` is analyzed for `value: &u32`
+- **THEN** its target fact is `u32` with shared access and the provenance of `value`
+
+#### Scenario: Resolve a chained referent place
+
+- **WHEN** `value.*.field` is analyzed for a reference to a record
+- **THEN** the field fact retains the referent projection in its canonical place chain
+
+#### Scenario: Reject a non-reference subject
+
+- **WHEN** `value.*` is analyzed and `value` is not reference-typed
+- **THEN** analysis reports the dedicated invalid-referent diagnostic
+- **AND** the projection fact is unavailable

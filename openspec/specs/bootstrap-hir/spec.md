@@ -662,3 +662,93 @@ access mode, and active-variant cleanup without erasing a union to a structural 
 
 - **WHEN** a match selects `HttpError.Dns` directly from `HttpError | OutOfMemoryError`
 - **THEN** HIR retains both the outer structural member and inner nominal variant selection with exact bindings and cleanup
+
+### Requirement: Static reflection and iteration erase before runtime HIR publication
+
+Residual HIR SHALL contain only the ordinary literals, aggregate field projections, interface-
+selected calls, Writer operations, and control flow produced by successful static reflection and
+iteration. It MUST NOT contain static-for nodes, type descriptors, field descriptors, static
+sequences, template plans, reflection lookups, or runtime field selection by name or ordinal.
+Generated operations SHALL retain both their authored body provenance and the static element or
+template segment that caused their elaboration.
+
+#### Scenario: Erase a heterogeneous static loop
+
+- **WHEN** static iteration generates different `Display` calls for `string` and `i32` tuple fields
+- **THEN** HIR contains two ordinary typed calls and projections in source order and no common runtime reflection operation
+
+### Requirement: HIR retains applied interface operation evidence canonically
+
+A resolved applied interface operation SHALL carry the canonical interface identity, normalized
+interface arguments, implicit provider, selected operation, fully substituted callable contract,
+and static witness evidence in HIR before specialization. Direct calls and immediately applied
+pipeline sections that select the same provider-interface goal SHALL produce the same canonical call
+plan apart from their source provenance. HIR and later phases MUST NOT introduce an applied-interface
+runtime lookup, namespace object, generated helper call, or witness dictionary. Compiler concepts
+used by both enclosing-bound and explicitly applied forms SHALL describe general static
+interface-operation calls rather than classifying concrete applied calls as bound-only.
+
+#### Scenario: Elaborate an applied interface operation
+
+- **WHEN** `Encodable<u32>.encode(&age)` resolves through `Age: Encodable<u32>`
+- **THEN** HIR records that complete application, provider, substituted effect contract, and witness without retaining a runtime interface application
+
+#### Scenario: Canonicalize direct and piped operation calls
+
+- **WHEN** direct `Encodable<u32>.encode(&age)` and piped `&age |> Encodable<u32>.encode` forms are elaborated
+- **THEN** both identify the same static witness and ordered call operands while retaining their distinct complete source spans
+
+#### Scenario: Preserve effect construction and execution identity
+
+- **WHEN** an applied interface operation is an `effect fn` and its result is executed by `run`
+- **THEN** HIR preserves the selected witness's Effect constructor and the run site through instance discovery and lowering
+
+#### Scenario: Keep unresolved applied operations unavailable
+
+- **WHEN** semantic analysis cannot determine the complete application, provider, operation, or witness
+- **THEN** HIR contains only the unavailable expression with its originating diagnostic and exposes no executable call to realization
+
+### Requirement: Aggregate sugar erases to canonical nominal struct HIR
+
+Elaboration SHALL represent named tuple construction, contextual tuple literals, contextual record
+literals, and uncontextualized anonymous aggregate literals as the existing canonical nominal struct
+construction shape. Each construction SHALL carry one source or synthesized nominal declaration
+identity, typed initializers in canonical field or position order, and source-order evaluation
+provenance. Positional projections SHALL become canonical field projections through the synthesized
+ordinal identity.
+
+HIR MUST NOT retain a second tuple or structural-record runtime value category, generated source
+name, shape-comparison rule, or unresolved expected-type search. An invalid or ambiguous aggregate
+expression SHALL remain unavailable with its originating semantic cause rather than lowering a
+partial construction.
+
+#### Scenario: Erase a contextual record literal
+
+- **WHEN** `foo(.{ name: makeName(), age: makeAge() })` is accepted for a `Person` parameter
+- **THEN** HIR carries one canonical `Person` construction with source-order evaluation provenance and declaration-order fields
+
+#### Scenario: Erase an anonymous tuple
+
+- **WHEN** an uncontextualized tuple literal is bound locally
+- **THEN** HIR carries one construction of its synthesized nominal declaration and no tuple-specific runtime node
+
+### Requirement: HIR retains typed referent places
+
+HIR SHALL represent referent projection explicitly with its subject, target type, access,
+provenance, source span, and place-chain identity. HIR SHALL distinguish Copy reads, reborrows, and
+replacement contexts without rewriting the projection into an intrinsic call.
+
+#### Scenario: Retain a scalar Copy read
+
+- **WHEN** `self.*` is elaborated for `self: &i32`
+- **THEN** HIR contains a typed referent place followed by an ordinary Copy read
+
+#### Scenario: Retain a borrowed chained place
+
+- **WHEN** `&mut value.*.field` is elaborated
+- **THEN** HIR retains the referent and field projections plus exclusive borrow provenance
+
+#### Scenario: Omit invalid referent HIR
+
+- **WHEN** semantic analysis cannot establish a reference subject
+- **THEN** no executable referent-place HIR is produced for that expression

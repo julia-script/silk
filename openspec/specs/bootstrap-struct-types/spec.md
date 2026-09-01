@@ -119,3 +119,46 @@ indirection, or reject an import cycle that contains no inline type cycle.
 
 - **WHEN** two cyclically importing modules declare structs whose field dependency graph is acyclic
 - **THEN** their struct facts and layouts remain available without a diagnostic attributed solely to the import cycle
+
+### Requirement: Aggregate declarations publish authorized static reflection order
+
+Every concrete nominal aggregate SHALL publish a deterministic reflection kind and declaration
+order derived from its existing canonical struct representation. Named tuples and anonymous
+positional aggregates SHALL publish ordered positions. Named structs and anonymous named aggregates
+SHALL publish ordered labels. Each reflected member SHALL retain its concrete specialized field type
+and existing visibility authority without inventing structural compatibility or source-visible
+synthetic tuple fields.
+
+#### Scenario: Reflect a named tuple without synthetic labels
+
+- **WHEN** `tuple Point(u32, u32)` is reflected
+- **THEN** its descriptor contains positions zero and one with type `u32` and exposes no `_0`, `_1`, or other generated field spelling
+
+#### Scenario: Preserve source order and visibility
+
+- **WHEN** a named struct has public and private fields in declaration order
+- **THEN** authorized reflection preserves the relative order of visible public fields while revealing no inaccessible field name
+
+### Requirement: Positional and anonymous aggregates have canonical nominal declarations
+
+Each named tuple declaration SHALL enter the nominal declaration catalog with ordered synthesized
+position identities and explicit element types. Each uncontextualized tuple or record literal SHALL
+enter the semantic catalog as one compiler-synthesized nominal struct declaration keyed by its
+canonical module and source occurrence. Synthesized identities SHALL be stable across fresh
+processes and MUST NOT depend on inferred member shape, source traversal order, cache state, target,
+or backend layout.
+
+Synthesized declarations SHALL remain semantic facts rather than source declarations: they MUST NOT
+introduce a spelling into lexical lookup, imports, exports, hover text pretending that the user
+declared a name, or compiler-recognized standard-library names. Their ordered positions or fields
+SHALL otherwise participate in the same finite-layout validation as source structs.
+
+#### Scenario: Distinguish two generated declarations
+
+- **WHEN** one module contains two separate same-shaped anonymous record literals
+- **THEN** the declaration catalog records two deterministic nominal identities tied to their separate source occurrences
+
+#### Scenario: Keep a generated declaration unnameable
+
+- **WHEN** tooling and name lookup inspect an anonymous aggregate
+- **THEN** they expose its source occurrence and members without adding any identifier that source can import or write
