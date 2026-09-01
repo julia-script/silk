@@ -750,6 +750,19 @@ it('recognizes unsafe and conformance keywords only as complete words', () => {
   )
 })
 
+it('recognizes static forms only as complete keywords', () => {
+  const result = Lexer.lex(
+    SourceFile.make(
+      'memory://static-keywords.silk',
+      ascii('static statically compileError compileErrors'),
+    ),
+  )
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['StaticKeyword', 'Identifier', 'CompileErrorKeyword', 'Identifier', 'EndOfFile'],
+  )
+})
+
 it('recognizes once only as a complete callable-mode keyword', () => {
   const result = Lexer.lex(
     SourceFile.make('memory://once-keyword.silk', ascii('once fn onceOnly once_more dual')),

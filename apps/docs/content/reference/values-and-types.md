@@ -401,40 +401,45 @@ conversions use the enclosing type-mismatch diagnostic.
 
 ## Constant values
 
-### CONST-001 — A constant has an explicit scalar or string type and one static initializer
+### CONST-001 — A constant has an explicit primitive type and one static initializer
 
 **Status:** Confirmed
 
-A `const` declaration requires a type annotation. Its type is one foundational scalar type or
-`string`, and its initializer is one matching literal whose value is valid for that type. Constants
-do not infer their type, evaluate computed expressions, or hold aggregate values.
+A `const` declaration requires a type annotation. Its type is `bool`, a supported integer or
+floating-point primitive, or `string`. Its initializer is a statically evaluated expression that
+must produce exactly the declared type for the selected target. Constants do not infer their type
+or hold aggregate values.
 
 ```silk
 pub const limit: i32 = 2
 const ratio: f64 = 1.5
 const enabled: bool = true
-const separator: char = ':'
 const pattern: string = r"\d+"
 ```
 
-A constant lowers to an immediate value. It has no address and cannot be borrowed, assigned, or
-moved.
+A constant initializer may call static functions and may depend on another statically evaluated
+constant. Its selected value lowers as an immediate value with no runtime initializer, storage,
+call, or cleanup. It has no address and cannot be borrowed, assigned, or moved.
 
-**Boundary:** Function calls, operators, field access, aggregate construction, and other computed
-expressions are not constant initializers. An initializer of the wrong scalar type is also invalid.
+**Boundary:** Type inference, aggregates, ordinary function calls, Effects, service requirements,
+borrows, unsafe operations, and observable allocations are unavailable in constant initialization.
+A wrong result type, dependency cycle, selected-target range failure, or static evaluation failure
+exposes no usable constant value.
 
-**Diagnostics:** A constant outside this contract reports `SEM0086` at its declaration.
+**Diagnostics:** A declaration outside the primitive constant contract reports `SEM0086` at the
+declaration. An operation unavailable during static initialization reports `SEM0176`; selected
+compile errors, cycles, and evaluator limits retain their static diagnostic and trace.
 
-**Evidence:** [typed constant tests](../../../../packages/compiler/test/TypedConstants.test.ts),
-[numeric constant tests](../../../../packages/compiler/test/NumericConstants.test.ts),
+**Evidence:** [typed constant requirements](../../../../openspec/changes/add-static-evaluation-core/specs/bootstrap-typed-constants/spec.md),
+[static evaluation](static-evaluation.md),
 [constant analysis](../../../../packages/compiler/src/ExpressionAnalysis.ts).
 
-### CONST-002 — Target facts are the only non-literal constant initializers
+### CONST-002 — Target facts are ordinary statically evaluated source constants
 
 **Status:** Confirmed
 
-The following target facts may replace the literal in a constant declaration. The selected target
-determines their values.
+The ordinary `silk.target` module publishes these primitive constants. Their initializers use the
+same static evaluator as every other constant, and the selected target determines their values.
 
 | Fact | Type | Value |
 | --- | --- | --- |
@@ -444,22 +449,27 @@ determines their values.
 | `Target.pointerBits` | `u32` | Target pointer width in bits |
 
 ```silk
+import silk.target as Target
+
 pub const MAX: usize = Target.usizeMax
 pub const BITS: u32 = Target.pointerBits
 ```
 
-This vocabulary exists because one source literal cannot express every pointer-width bound on both
-32-bit and 64-bit targets.
+The declaration and imported module surface retain the explicit type, static initializer, and
+source provenance without claiming one target-selected value. Each concrete target realization
+publishes exactly one canonical value before residual runtime analysis.
 
-**Boundary:** `Target` is recognized only as the root of one of these initializers. An unknown fact,
-a fact used at the wrong declared type, a target fact in an ordinary expression, or a computed
-initializer such as `Target.pointerBits + 1` is invalid.
+**Boundary:** `Target` is an ordinary import alias, not a compiler-recognized spelling. Source may
+compute another primitive constant through static functions, but target selection cannot remain as
+a dynamic runtime query and cannot initialize an aggregate constant. A selected target constant may
+be used at runtime only as its embedded ordinary immediate value.
 
-**Diagnostics:** An invalid target-fact constant reports `SEM0086`. Outside a constant initializer,
-`Target` follows ordinary name resolution and is unresolved unless the program declares that name.
+**Diagnostics:** An absent import or member uses the ordinary name-resolution diagnostic. A target
+fact at the wrong declared type reports `SEM0086`. A target query that would survive as runtime work
+reports the static-phase diagnostic `SEM0176`.
 
-**Evidence:** [target-fact catalog](../../../../packages/compiler/src/TargetConstant.ts),
-[target-dependent constant tests](../../../../packages/compiler/test/TargetDependentConstants.test.ts).
+**Evidence:** [typed target constants](../../../../openspec/changes/add-static-evaluation-core/specs/bootstrap-typed-constants/spec.md),
+[static target API](static-evaluation.md#static-009--silktarget-exposes-target-information-only-as-static-source-values).
 
 ## Nominal struct values
 

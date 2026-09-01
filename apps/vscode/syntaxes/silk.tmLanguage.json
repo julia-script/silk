@@ -1,7 +1,9 @@
 {
   "name": "silk",
   "scopeName": "source.silk",
-  "fileTypes": ["silk"],
+  "fileTypes": [
+    "silk"
+  ],
   "patterns": [
     {
       "name": "string.quoted.triple.byte.silk",
@@ -329,7 +331,7 @@
     },
     {
       "name": "storage.type.silk",
-      "match": "\\b(?:pub|struct|tuple|enum|union|service|interface|role|effect|run|fail|drop|unsafe|impl|for|import|as|let|const|mut|once|move)\\b"
+      "match": "\\b(?:static|compileError|pub|struct|tuple|enum|union|service|interface|role|effect|run|fail|drop|unsafe|impl|for|import|as|let|const|mut|once|move)\\b"
     },
     {
       "name": "constant.language.boolean.silk",

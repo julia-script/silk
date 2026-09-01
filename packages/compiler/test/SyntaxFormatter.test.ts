@@ -92,9 +92,11 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'CallExpression',
   'CallTypeArgumentList',
   'ConditionalStatement',
+  'StaticConditionalStatement',
   'PatternConditionalStatement',
   'ContinueStatement',
   'ConstantDeclaration',
+  'CompileErrorExpression',
   'DropStatement',
   'DurationLiteralExpression',
   'EffectExpression',
@@ -178,6 +180,25 @@ it.effect('preserves singleton tuples and joins contextual record punctuation', 
     assert.include(text, 'let value: One = (1,)')
     assert.include(text, 'let record = .{age: 32}')
     const second = yield* SyntaxFormatter.format(parse('memory://aggregate-format-2.silk', text))
+    assert.strictEqual(formattedText(second), text)
+  }),
+)
+
+it.effect('formats static syntax canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const first = yield* SyntaxFormatter.format(
+      parse(
+        'memory://static-format.silk',
+        'pub static fn render(static template:string,value:string)->(){let static parsed=template static if true{compileError(parsed)}else{compileError("fallback")}}',
+      ),
+    )
+    const text = formattedText(first)
+    assert.include(text, 'pub static fn render')
+    assert.include(text, 'static template: string')
+    assert.include(text, 'let static parsed = template')
+    assert.include(text, 'static if true {')
+    assert.include(text, 'compileError(parsed)')
+    const second = yield* SyntaxFormatter.format(parse('memory://static-format-2.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
 )
@@ -1088,6 +1109,10 @@ enum AssertionResult { Pass, Fail, Skip }
 pub enum(u8) ExitCode { Success = 0, Failure = 1 }
 pub union Maybe<T> { None, Some { pub value: T } }
 pub role Clock
+static fn staticHelper(static value: i32) -> i32 {
+  let static retained = value
+  static if true { return compileError(retained) } else { return retained }
+}
 fn helper(value: i32, other: i32) -> i32 {
   let mut moved = move value
   let singleton = (1,)

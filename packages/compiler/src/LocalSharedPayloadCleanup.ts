@@ -15,5 +15,7 @@ export const instance = (element: Type.Type): Instances.InstanceKey =>
     _tag: 'InstanceKey',
     declaration,
     typeArguments: Object.freeze([element]),
+    evidence: Object.freeze([]),
+    staticArguments: Object.freeze([]),
     contractRow: Object.freeze([]),
   })

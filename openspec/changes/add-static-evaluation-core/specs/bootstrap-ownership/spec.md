@@ -1,8 +1,9 @@
 ## MODIFIED Requirements
 
-### Requirement: Ownership facts are produced once per declaration
+### Requirement: Ownership facts are produced once per residual specialization
 
-The ownership phase SHALL run once for each residual runtime HIR specialization and SHALL publish
+After private residual and cleanup-call candidate closure is complete, the ownership phase SHALL run
+once for each residual runtime HIR specialization and SHALL publish
 one immutable ownership fact for that specialization: its runtime bindings with their ownership
 category and live range over source spans, and a closed verdict. Static parameters, static local
 bindings, static-function locals, inactive static arms, and static evaluator storage MUST NOT appear
@@ -14,6 +15,10 @@ explicitly unavailable verdict retaining the originating diagnostic identity whe
 MUST NOT report a satisfied check it could not perform. A static evaluation that fails before
 producing residual HIR SHALL publish its static diagnostic and no ownership fact for that failed
 specialization.
+
+Cleanup-call candidate discovery MAY use a target-neutral prepass over residual types and exits, but
+that prepass MUST NOT publish ownership, liveness, borrow, or cleanup-plan facts and MUST NOT admit
+executable reachability before the residual graph is closed.
 
 #### Scenario: Check a copyable parameter
 
@@ -27,7 +32,7 @@ specialization.
 
 #### Scenario: Omit a failed static specialization
 
-- **WHEN** static panic or an evaluation limit prevents a specialization from producing residual HIR
+- **WHEN** `compileError` or an evaluation limit prevents a specialization from producing residual HIR
 - **THEN** ownership publishes no satisfied, violated, or partial fact for that specialization
 
 #### Scenario: Range a let binding's liveness

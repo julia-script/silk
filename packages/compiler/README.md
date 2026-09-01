@@ -13,12 +13,12 @@ here because the CLI, language server, and editor applications share them.
 
 Every supported actor namespace at the package root has the same explicit subpath. Prefer the
 subpath when one actor is the dependency of a module; the root remains available for compact
-embedding entry points. For example, match identities and target-dependent constant selectors are
-stable public compiler facts:
+embedding entry points. For example, match identities and deterministic static values are stable
+public compiler facts:
 
 ```ts
 import * as Match from '@silklang/compiler/Match'
-import * as TargetConstant from '@silklang/compiler/TargetConstant'
+import * as StaticValue from '@silklang/compiler/StaticValue'
 ```
 
 A small set of operational host entry points remain subpath-only and are not actor namespaces at

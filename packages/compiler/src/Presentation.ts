@@ -109,7 +109,8 @@ const typeParameterName = (parameter: DeclarationFacts.TypeParameterFact): strin
 export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
-  const kind = `${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
+  const phase = self.phase === 'Static' ? 'static ' : ''
+  const kind = `${phase}${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
   const typeParameters =
     self.typeParameters.length === 0
       ? ''
@@ -117,8 +118,9 @@ export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Pre
   const parameters = self.parameters
     .map((parameter) => {
       const parameterName = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
+      const phase = parameter.phase === 'Static' ? 'static ' : ''
       const mutability = parameter.bindingMutability === 'Mutable' ? 'mut ' : ''
-      return `${mutability}${parameterName}: ${declaredType(parameter.declaredType)}`
+      return `${phase}${mutability}${parameterName}: ${declaredType(parameter.declaredType)}`
     })
     .join(', ')
   return Object.freeze({
@@ -290,10 +292,12 @@ export const constantDeclaration = (self: DeclarationFacts.ConstantFact): Presen
 
 export const parameter = (self: DeclarationFacts.ParameterFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
+  const phase = self.phase === 'Static' ? 'static ' : ''
+  const mutability = self.bindingMutability === 'Mutable' ? 'mut ' : ''
   return Object.freeze({
     _tag: 'ParameterPresentation',
     name,
-    text: `${name}: ${declaredType(self.declaredType)}`,
+    text: `${phase}${mutability}${name}: ${declaredType(self.declaredType)}`,
   })
 }
 

@@ -46,7 +46,10 @@ export const select = (
     if (operation === undefined)
       throw new RangeError(`Executable closure retained unknown intrinsic ${key}`)
     retained.set(key, operation.id)
-    if (!operation.targets.includes(target) && !unavailable.has(key))
+    if (
+      (operation.phase === 'StaticOnly' || !operation.targets.includes(target)) &&
+      !unavailable.has(key)
+    )
       unavailable.set(key, Diagnostic.intrinsicTargetUnavailable(key, target, call.span))
   }
   if (unavailable.size > 0)

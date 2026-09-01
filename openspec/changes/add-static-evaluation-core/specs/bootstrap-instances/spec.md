@@ -8,13 +8,18 @@ zero-parameter public ordinary `main() -> ()`, a unique zero-parameter public or
 row is empty and whose failure members are concrete detached owned values. Discovery SHALL retain
 the selected entry kind and normalized failure metadata.
 
-For each demanded concrete application, discovery SHALL first evaluate its static arguments and
-static body operations for the selected target, record the resulting canonical specialization key,
-and obtain one residual typed HIR body. It SHALL follow only local and cross-module runtime calls in
-that residual HIR. The deterministic worklist SHALL record a specialization before following it, so
-directly and mutually recursive programs terminate with each canonical specialization discovered
-exactly once in deterministic order. Declarations and static applications not reachable from the
-entry SHALL NOT become runtime instances merely because their modules are loaded or imported.
+The compiler SHALL select the concrete compilation target before constructing the executable
+worklist. For each demanded concrete application, the realization coordinator SHALL first evaluate
+its static arguments and static body operations for that target, record the resulting canonical
+specialization key, and obtain one residual typed HIR body. It SHALL close a private candidate graph
+from direct residual calls and cleanup-edge prepass facts without publishing executable
+reachability. After that graph closes, it SHALL run ownership and cleanup exactly once over each
+successful residual specialization before admitting the resulting local and cross-module runtime
+call closure. The deterministic candidate worklist SHALL record a specialization before following
+direct calls, so directly and mutually recursive programs terminate with each canonical
+specialization discovered exactly once in deterministic order. Declarations and static applications
+not reachable from the entry SHALL NOT become runtime instances merely because their modules are
+loaded or imported.
 
 #### Scenario: Discover a call chain once each
 

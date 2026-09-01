@@ -16,7 +16,9 @@ import * as Type from './Type.js'
  * The canonical semantic meaning that a module exposes to other modules.
  *
  * The representation is length-framed and contains semantic values only. It deliberately excludes
- * syntax, spans, diagnostic identities, bodies, and project-owned object references.
+ * syntax, spans, diagnostic identities, body object graphs, and project-owned object references.
+ * Functions requiring static evaluation contribute only a deterministic body-template encoding so
+ * downstream invalidation observes semantic body changes without retaining source-owned nodes.
  */
 export interface ModuleSurface {
   readonly _tag: 'ModuleSurface'
@@ -1592,6 +1594,7 @@ const parameter = (value: DeclarationFacts.ParameterFact): string =>
   record('Parameter', [
     number(value.id.ordinal),
     name(value.name),
+    value.phase,
     declaredType(value.declaredType),
   ])
 
@@ -1744,6 +1747,7 @@ const declaration = (value: DeclarationFacts.DeclarationFact): string =>
     declarationIdOrdinal(value.id),
     canonicalState(value.canonical),
     value.visibility,
+    value.phase,
     value.functionKind,
     boolean(value.unsafe),
     array(value.typeParameters.map(typeParameter)),
@@ -1756,6 +1760,11 @@ const declaration = (value: DeclarationFacts.DeclarationFact): string =>
     requirementRow(value.requirementRow),
     array(value.constraints.map(constraint)),
     array(value.constraintContracts.map(encodeConstraint)),
+    optional(
+      value.bodyTemplate === undefined
+        ? undefined
+        : record('FunctionBodyTemplate', [value.bodyTemplate.canonical]),
+    ),
   ])
 
 const fieldState = (value: DeclarationFacts.FieldState): string => {
@@ -1955,10 +1964,6 @@ const constantLiteral = (value: DeclarationFacts.ConstantLiteralFact): string =>
       return record('FloatingLiteral', [value.spelling])
     case 'StringLiteral':
       return record('StringLiteral', [value.data.id])
-    // The surface names the selected fact, not a number: the value belongs to a target, and the
-    // surface is the target-independent module boundary.
-    case 'TargetConstant':
-      return record('TargetConstant', [value.selector])
     case 'Malformed':
       return record('MalformedLiteral', [value.detail])
     case 'Unavailable':
@@ -1976,6 +1981,7 @@ const constant = (value: DeclarationFacts.ConstantFact): string =>
     array(value.typeParameters.map(typeParameter)),
     name(value.name),
     declaredType(value.declaredType),
+    record('StaticExpressionTemplate', [value.initializerTemplate.canonical]),
     constantLiteral(value.literal),
   ])
 

@@ -3377,3 +3377,123 @@ fn after() -> i32 { return 1 }`,
     assert.deepEqual(reconstructedBytes(result), ascii(source))
   }
 })
+
+it('parses every initial static form losslessly without treating compileError as a call', () => {
+  const source = `static fn parse(value: string) -> string { return value }
+pub static fn render(static template: string, value: string) -> () {
+  let static parsed = template
+  static if true {
+    compileError(parsed)
+  } else {
+    compileError("fallback")
+  }
+}`
+  const result = parseText('memory/static-forms', source)
+  const declarations = directFunctionDeclarations(result.root)
+  const elements = descendants(result.root)
+  const compileErrors = elements.filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'CompileErrorExpression',
+  )
+
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.strictEqual(declarations.length, 2)
+  assert.strictEqual(
+    SyntaxTree.directToken(declarations.at(0) ?? result.root, 'StaticKeyword')?.kind,
+    'StaticKeyword',
+  )
+  assert.strictEqual(
+    SyntaxTree.directToken(declarations.at(1) ?? result.root, 'PubKeyword')?.kind,
+    'PubKeyword',
+  )
+  assert.strictEqual(
+    elements.filter(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'StaticConditionalStatement',
+    ).length,
+    1,
+  )
+  assert.strictEqual(compileErrors.length, 2)
+  assert.isTrue(
+    compileErrors.every((expression) => expression.children.filter(SyntaxTree.isNode).length === 1),
+  )
+  assert.isFalse(
+    elements.some((element) => SyntaxTree.isNode(element) && element.kind === 'CallExpression'),
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('rejects unsupported static modifier combinations and compileError arities', () => {
+  const fixtures = [
+    'static unsafe fn bad() -> () {}',
+    'static effect fn bad() -> () {}',
+    'static impl Thing for Other {}',
+    'static service Bad {}',
+    'fn bad(static mut value: i32) -> () {}',
+    'fn bad(mut static value: i32) -> () {}',
+    'fn bad() -> () { let static mut value = 1 }',
+    'fn bad() -> () { let mut static value = 1 }',
+    'fn bad() -> () { compileError() }',
+    'fn bad() -> () { compileError("bad",) }',
+    'fn bad() -> () { compileError("bad", "extra") }',
+  ]
+
+  for (const [ordinal, source] of fixtures.entries()) {
+    const result = parseText(`memory/static-rejection-${ordinal}`, source)
+    assert.isTrue(result.parserDiagnostics.length > 0, `fixture ${ordinal}`)
+    assertOriginalTokenTraversal(result)
+    assert.deepEqual(reconstructedBytes(result), ascii(source), `fixture ${ordinal}`)
+  }
+})
+
+it('keeps rejected top-level static conditionals bounded before following declarations', () => {
+  const source = `static if true {
+  fn hidden() -> () {}
+}
+fn kept() -> i32 { return 1 }`
+  const result = parseText('memory/static-declaration-rejection', source)
+  const declarations = directFunctionDeclarations(result.root)
+  const rootErrors = result.root.children.filter(
+    (element): element is SyntaxTree.Node => SyntaxTree.isNode(element) && element.kind === 'Error',
+  )
+
+  assert.isTrue(result.parserDiagnostics.length > 0)
+  assert.strictEqual(rootErrors.length, 1)
+  assert.strictEqual(declarations.length, 1)
+  assert.deepEqual(missingLeaves(declarations.at(0) ?? result.root), [])
+  assert.isFalse(
+    descendants(result.root).some(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'StaticConditionalStatement',
+    ),
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('keeps compileError dedicated and non-shadowable in value declarations', () => {
+  const source = 'fn invalid() -> () { let value = compileError }'
+  const result = parseText('memory/compile-error-value', source)
+  const elements = descendants(result.root)
+  const bindingSource = 'fn invalid() -> () { let compileError = 1 }'
+  const binding = parseText('memory/compile-error-binding', bindingSource)
+
+  assert.isTrue(result.parserDiagnostics.length > 0)
+  assert.isTrue(binding.parserDiagnostics.length > 0)
+  assert.isTrue(
+    elements.some(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'CompileErrorExpression',
+    ),
+  )
+  assert.isFalse(
+    elements.some(
+      (element) =>
+        SyntaxTree.isNode(element) &&
+        element.kind === 'IdentifierExpression' &&
+        SyntaxTree.directToken(element, 'CompileErrorKeyword') !== undefined,
+    ),
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+  assertOriginalTokenTraversal(binding)
+  assert.deepEqual(reconstructedBytes(binding), ascii(bindingSource))
+})

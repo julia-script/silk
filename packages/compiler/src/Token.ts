@@ -15,6 +15,8 @@ export type TokenKind =
   | 'ByteStringLiteral'
   | 'CharLiteral'
   | 'InvalidStaticLiteral'
+  | 'StaticKeyword'
+  | 'CompileErrorKeyword'
   | 'PubKeyword'
   | 'StructKeyword'
   | 'TupleKeyword'
@@ -99,6 +101,8 @@ const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
   ByteStringLiteral: 'byte-string literal',
   CharLiteral: 'character literal',
   InvalidStaticLiteral: 'invalid static literal',
+  StaticKeyword: '`static`',
+  CompileErrorKeyword: '`compileError`',
   PubKeyword: '`pub`',
   StructKeyword: '`struct`',
   TupleKeyword: '`tuple`',

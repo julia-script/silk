@@ -233,11 +233,17 @@ import {
 } from './ValueType.js'
 export const lowerProgram = (
   discovery: Instances.Discovery,
-  ownership: ReadonlyMap<string, Ownership.ModuleOwnership>,
   layout: Layout.Plan,
   index: DeclarationIndex.Index,
   opaqueRealizations: OpaqueRealization.Catalog,
 ): Mir.Module => {
+  const ownershipOf = (instance: Instances.Instance): Ownership.ModuleOwnership =>
+    Object.freeze({
+      _tag: 'OwnershipFacts',
+      module: instance.key.declaration.module,
+      functions: Object.freeze([instance.ownership]),
+      diagnostics: Object.freeze([]),
+    })
   const staticDataById = new Map<
     string,
     Extract<
@@ -292,7 +298,7 @@ export const lowerProgram = (
   const functions = discovery.instances.map((instance) =>
     lowerInstance(
       instance,
-      ownership.get(instance.key.declaration.module),
+      ownershipOf(instance),
       layout,
       index,
       discovery.instances,
@@ -373,7 +379,7 @@ export const lowerProgram = (
     if (generated._tag === 'BlockEffectRunner') {
       runner = lowerEffectRunner(
         generated,
-        ownership.get(generated.owner.key.declaration.module),
+        ownershipOf(generated.owner),
         layout,
         index,
         discovery.instances,
@@ -385,7 +391,7 @@ export const lowerProgram = (
     } else if (generated._tag === 'CatchEffectRunner') {
       runner = lowerCatchEffectRunner(
         generated,
-        ownership.get(generated.owner.key.declaration.module),
+        ownershipOf(generated.owner),
         layout,
         index,
         discovery.instances,
@@ -397,7 +403,7 @@ export const lowerProgram = (
     } else if (generated._tag === 'BuiltinEffectRunner') {
       runner = lowerBuiltinEffectRunner(
         generated,
-        ownership.get(generated.owner.key.declaration.module),
+        ownershipOf(generated.owner),
         layout,
         index,
         discovery.instances,
@@ -409,7 +415,7 @@ export const lowerProgram = (
     } else {
       runner = lowerWitnessEffectRunner(
         generated,
-        ownership.get(generated.owner.key.declaration.module),
+        ownershipOf(generated.owner),
         layout,
         index,
         discovery.instances,
@@ -523,6 +529,8 @@ export const lowerProgram = (
         _tag: 'InstanceKey',
         declaration: adapterId,
         typeArguments: Object.freeze([]),
+        evidence: Object.freeze([]),
+        staticArguments: Object.freeze([]),
         contractRow: Object.freeze(['generated:unit-entry']),
       })
       functions.push(
@@ -596,6 +604,8 @@ export const lowerProgram = (
       _tag: 'InstanceKey',
       declaration: adapterId,
       typeArguments: Object.freeze([]),
+      evidence: Object.freeze([]),
+      staticArguments: Object.freeze([]),
       contractRow: Object.freeze(['generated:effect-entry']),
     })
     const span = target.regions

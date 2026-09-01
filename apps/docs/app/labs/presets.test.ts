@@ -624,6 +624,7 @@ describe('preset catalog', () => {
       'silk/slot',
       'silk/string',
       'silk/system_clock',
+      'silk/target',
       'silk/u16',
       'silk/u32',
       'silk/u64',

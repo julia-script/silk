@@ -13,6 +13,7 @@ import { instanceText, operationLocals } from './MirVerification.js'
 import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StaticText from './StaticText.js'
+import * as StaticValue from './StaticValue.js'
 import type {
   SuspensionBorrowIdentity,
   SuspensionClassification,
@@ -788,6 +789,7 @@ export type Operation =
       readonly destination: LocalId
       readonly target: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
+      readonly staticArguments?: ReadonlyArray<StaticValue.Value>
       readonly arguments: ReadonlyArray<LocalId>
       readonly type: Type
       readonly provenance: Provenance
@@ -1468,6 +1470,7 @@ export const matchesInstance = (
   fn: MirFunction,
   declaration: DeclarationFacts.CanonicalId,
   typeArguments: ReadonlyArray<SilkType.GenericArgument>,
+  staticArguments: ReadonlyArray<StaticValue.Value> = Object.freeze([]),
 ): boolean =>
   fn.id.module === declaration.module &&
   fn.id.name === declaration.name &&
@@ -1478,6 +1481,11 @@ export const matchesInstance = (
       expected !== undefined &&
       SilkType.genericArgumentKey(argument) === SilkType.genericArgumentKey(expected)
     )
+  }) &&
+  fn.instance.staticArguments.length === staticArguments.length &&
+  fn.instance.staticArguments.every((argument, index) => {
+    const expected = staticArguments.at(index)
+    return expected !== undefined && StaticValue.key(argument) === StaticValue.key(expected)
   })
 
 /** Tests exact concrete instance identity, including the resolved contract row. */

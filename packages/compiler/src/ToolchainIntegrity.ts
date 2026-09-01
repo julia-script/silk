@@ -205,6 +205,7 @@ const catalogDigest = (): string =>
           entry.digest,
           entry.layer,
           ...(entry.providerTargets ?? []),
+          ...entry.staticInventory,
           ...entry.runtimeInventory,
           entry.namespace ?? '',
           ...(entry.aliases ?? []),
@@ -261,6 +262,7 @@ const installedComponents = (): ReadonlyArray<Component> => {
                 entry.module,
                 entry.digest,
                 ...(entry.providerTargets ?? []),
+                ...entry.staticInventory,
                 ...entry.runtimeInventory,
               ]
                 .map(field)
@@ -271,24 +273,26 @@ const installedComponents = (): ReadonlyArray<Component> => {
         ],
   )
   const runtime = Intrinsic.inventory().flatMap<Component>((entry) =>
-    entry.targets.map((target) =>
-      Object.freeze({
-        kind: 'RuntimeSupport',
-        id: runtimeId(target, entry.operation),
-        digest: contentDigest(
-          JSON.stringify({
-            compiler: compilerDigest,
-            target,
-            operation: entry.operation,
-            evaluator: entry.evaluator,
-            hir: entry.hir,
-            mir: entry.mir,
-            ...(entry.hostImport === undefined ? {} : { hostImport: entry.hostImport }),
+    entry.phase === 'StaticOnly'
+      ? []
+      : entry.targets.map((target) =>
+          Object.freeze({
+            kind: 'RuntimeSupport',
+            id: runtimeId(target, entry.operation),
+            digest: contentDigest(
+              JSON.stringify({
+                compiler: compilerDigest,
+                target,
+                operation: entry.operation,
+                evaluator: entry.evaluator,
+                hir: entry.hir,
+                mir: entry.mir,
+                ...(entry.hostImport === undefined ? {} : { hostImport: entry.hostImport }),
+              }),
+            ),
+            dependencies: Object.freeze([compiler.id, intrinsic.id]),
           }),
         ),
-        dependencies: Object.freeze([compiler.id, intrinsic.id]),
-      }),
-    ),
   )
   return Object.freeze([compiler, catalog, intrinsic, ...sources, ...providers, ...runtime])
 }
@@ -474,7 +478,8 @@ export const validateTarget = (
     ...new Set(
       calls.flatMap((call) => {
         const operation = Intrinsic.findOperationById(call.operation)
-        return operation === undefined || operation.targets.includes(target)
+        return operation === undefined ||
+          (operation.phase === 'Runtime' && operation.targets.includes(target))
           ? []
           : [Intrinsic.operationText(call.operation)]
       }),

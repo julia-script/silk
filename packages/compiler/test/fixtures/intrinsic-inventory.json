@@ -5449,6 +5449,34 @@
       "identity": "ContractRule.CatchFailure"
     },
     {
+      "operation": "Intrinsic.targetProfile",
+      "signature": "fn Intrinsic.targetProfile() -> u8",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/target.profile"
+    },
+    {
+      "operation": "Intrinsic.staticTextByteLength",
+      "signature": "fn Intrinsic.staticTextByteLength(value: string) -> usize",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/static_text.byteLength"
+    },
+    {
+      "operation": "Intrinsic.staticTextByteAt",
+      "signature": "fn Intrinsic.staticTextByteAt(value: string, index: usize) -> u8",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/static_text.byteAt"
+    },
+    {
+      "operation": "Intrinsic.staticTextSlice",
+      "signature": "fn Intrinsic.staticTextSlice(value: string, start: usize, end: usize) -> string",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/static_text.slice"
+    },
+    {
       "operation": "Intrinsic.enumValue",
       "signature": "fn Intrinsic.enumValue(value: <owning enum>) -> <owning enum representation>",
       "unsafe": false,

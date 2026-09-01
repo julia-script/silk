@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Lexer from '../src/Lexer.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
+import * as NameResolution from '../src/NameResolution.js'
+import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Stdlib from '../src/Stdlib.js'
@@ -13,6 +16,9 @@ import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const targetSourceUrl = new URL('../stdlib/silk/target.silk', import.meta.url)
+const targetSource = new Uint8Array(readFileSync(targetSourceUrl))
 
 const importing = `import silk.vector { Vector, length }
 
@@ -36,22 +42,136 @@ it('keeps the generated manifest ordered and byte-identical to canonical Silk fi
   }
 })
 
+it('keeps the ordinary target actor manifest entry, syntax, and intrinsic phase inventory exact', () => {
+  const manifest = JSON.parse(
+    readFileSync(new URL('../stdlib/manifest.json', import.meta.url), 'utf8'),
+  ) as ReadonlyArray<{
+    readonly module: string
+    readonly path: string
+    readonly layer: string
+    readonly namespace?: string
+    readonly aliases?: ReadonlyArray<string>
+  }>
+  const entry = manifest.find((candidate) => candidate.module === 'silk/target')
+  assert.deepEqual(entry, {
+    module: 'silk/target',
+    path: 'silk/target.silk',
+    layer: 'portable',
+    namespace: 'Target',
+    aliases: ['Arch', 'Profile'],
+  })
+
+  const syntax = Parser.parse(Lexer.lex(SourceFile.make('silk/target', targetSource)))
+  assert.deepEqual(syntax.lexicalDiagnostics, [])
+  assert.deepEqual(syntax.parserDiagnostics, [])
+
+  const generator = fileURLToPath(new URL('../scripts/generate-stdlib.mjs', import.meta.url))
+  const generated = spawnSync(process.execPath, [generator, '--stdout'], { encoding: 'utf8' })
+  assert.strictEqual(generated.status, 0, generated.stderr)
+  const targetEntry = generated.stdout.slice(
+    generated.stdout.indexOf("module: 'silk/target'"),
+    generated.stdout.indexOf("module: 'silk/u16'"),
+  )
+  assert.include(targetEntry, "staticInventory: ['targetProfile']")
+  assert.include(targetEntry, 'runtimeInventory: []')
+  assert.notInclude(targetEntry, "runtimeInventory: ['targetProfile']")
+})
+
+it.effect(
+  'publishes nominal target headers and primitive static facts without name privilege',
+  () =>
+    Effect.gen(function* () {
+      const closure = yield* ModuleClosure.load({
+        root: SourceFile.make('silk/target', targetSource),
+      }).pipe(Effect.provide(SourceResolver.memory(new Map())))
+      const index = NameResolution.analyze(closure).index
+      const module = index.modules.find((candidate) => candidate.module === 'silk/target')
+
+      assert.deepEqual(index.diagnostics, [])
+      assert.deepEqual(
+        module?.enums.map((declaration) => ({
+          name: declaration.name._tag === 'Present' ? declaration.name.spelling : undefined,
+          visibility: declaration.visibility,
+          members: declaration.members.map((member) => ({
+            name: member.name._tag === 'Present' ? member.name.spelling : undefined,
+            value:
+              member.discriminant._tag === 'Available'
+                ? member.discriminant.value
+                : member.discriminant._tag,
+          })),
+        })),
+        [
+          {
+            name: 'Profile',
+            visibility: 'Public',
+            members: [
+              { name: 'Aarch64AppleDarwin', value: 0n },
+              { name: 'Aarch64UnknownLinuxGnu', value: 1n },
+              { name: 'Wasm32UnknownUnknown', value: 2n },
+              { name: 'X86_64UnknownLinuxGnu', value: 3n },
+            ],
+          },
+          {
+            name: 'Arch',
+            visibility: 'Public',
+            members: [
+              { name: 'Aarch64', value: 0n },
+              { name: 'Wasm32', value: 1n },
+              { name: 'X86_64', value: 2n },
+            ],
+          },
+        ],
+      )
+      assert.deepEqual(
+        module?.declarations
+          .filter((declaration) => declaration.visibility === 'Public')
+          .map((declaration) => ({
+            name: declaration.name._tag === 'Present' ? declaration.name.spelling : undefined,
+            phase: declaration.phase,
+            parameterCount: declaration.parameterCount,
+          })),
+        [
+          { name: 'profile', phase: 'Static', parameterCount: 0 },
+          { name: 'arch', phase: 'Static', parameterCount: 0 },
+        ],
+      )
+      assert.deepEqual(
+        module?.constants.map((constant) => ({
+          name: constant.name._tag === 'Present' ? constant.name.spelling : undefined,
+          visibility: constant.visibility,
+          type: constant.declaredType._tag,
+        })),
+        [
+          { name: 'pointerBits', visibility: 'Public', type: 'Resolved' },
+          { name: 'usizeMax', visibility: 'Public', type: 'Resolved' },
+          { name: 'isizeMax', visibility: 'Public', type: 'Resolved' },
+          { name: 'isizeMin', visibility: 'Public', type: 'Resolved' },
+        ],
+      )
+    }),
+)
+
 it('derives deterministic catalog metadata and enforces portable dependency direction', () => {
   const byModule = new Map(Stdlib.manifest.map((entry) => [entry.module, entry] as const))
   for (const entry of Stdlib.manifest) {
     const source = new TextDecoder().decode(entry.bytes)
+    const intrinsicInventory = [
+      ...new Set(
+        [...source.matchAll(/\bIntrinsic\.([A-Za-z_][A-Za-z0-9_]*)/g)].flatMap((match) =>
+          match[1] === undefined ? [] : [match[1]],
+        ),
+      ),
+    ].sort()
     assert.strictEqual(entry.sourceIdentity, entry.module)
     assert.strictEqual(entry.documentation, entry.path)
     assert.strictEqual(createHash('sha256').update(entry.bytes).digest('hex'), entry.digest)
     assert.deepEqual(
+      entry.staticInventory,
+      intrinsicInventory.filter((operation) => operation === 'targetProfile'),
+    )
+    assert.deepEqual(
       entry.runtimeInventory,
-      [
-        ...new Set(
-          [...source.matchAll(/\bIntrinsic\.([A-Za-z_][A-Za-z0-9_]*)/g)].flatMap((match) =>
-            match[1] === undefined ? [] : [match[1]],
-          ),
-        ),
-      ].sort(),
+      intrinsicInventory.filter((operation) => operation !== 'targetProfile'),
     )
     if (entry.layer === 'portable') assert.isUndefined(entry.providerTargets)
     else assert.isAbove(entry.providerTargets?.length ?? 0, 0)
@@ -374,6 +494,7 @@ it.effect('resolves standard-library imports without vendoring source', () =>
         'silk/slot',
         'silk/string',
         'silk/system_clock',
+        'silk/target',
         'silk/u16',
         'silk/u32',
         'silk/u64',

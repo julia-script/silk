@@ -26,6 +26,7 @@ import type {
   FieldId,
   FieldOwnerId,
   FieldState,
+  FunctionBodyTemplate,
   InterfaceFact,
   MemberFact,
   ModuleHeaders,
@@ -39,6 +40,7 @@ import type {
   ServiceOperationFact,
   ServiceOperationId,
   ServiceOperationState,
+  StaticExpressionTemplate,
   StructFact,
   TypeParameterFact,
   TypePathFact,
@@ -69,7 +71,6 @@ import * as SourceSpan from './SourceSpan.js'
 import * as StaticText from './StaticText.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
-import * as TargetConstant from './TargetConstant.js'
 import * as Token from './Token.js'
 import * as Type from './Type.js'
 
@@ -78,6 +79,62 @@ export const spelling = (source: SourceFile.SourceFile, token: Token.Token): str
     SourceFile.spelling(source, token.span),
     () => new RangeError(`Header token span does not belong to source ${source.id}`),
   )
+
+const templateElement = (
+  source: SourceFile.SourceFile,
+  element: SyntaxTree.Element,
+): ReadonlyArray<unknown> | undefined => {
+  if (SyntaxTree.isNode(element))
+    return Object.freeze([
+      'Node',
+      element.kind,
+      Object.freeze(
+        element.children.flatMap((child) => {
+          const retained = templateElement(source, child)
+          return retained === undefined ? [] : [retained]
+        }),
+      ),
+    ])
+  if (SyntaxTree.isToken(element)) {
+    if (
+      element.kind === 'Whitespace' ||
+      element.kind === 'LineComment' ||
+      element.kind === 'DocComment' ||
+      element.kind === 'ModuleDocComment'
+    )
+      return undefined
+    return Object.freeze(['Token', element.kind, spelling(source, element)])
+  }
+  return Object.freeze(['Missing', element.expected])
+}
+
+const bodyTemplate = (
+  source: SourceFile.SourceFile,
+  declaration: SyntaxTree.Node,
+): FunctionBodyTemplate | undefined => {
+  const block = SyntaxTree.directNode(declaration, 'Block')
+  if (block === undefined) return undefined
+  const tokens = SyntaxTree.tokens(declaration)
+  const requiresStaticEvaluation = tokens.some(
+    (token) => token.kind === 'StaticKeyword' || token.kind === 'CompileErrorKeyword',
+  )
+  if (!requiresStaticEvaluation) return undefined
+  return Object.freeze({
+    _tag: 'FunctionBodyTemplate',
+    syntax: block,
+    canonical: JSON.stringify(templateElement(source, block)),
+  })
+}
+
+const staticExpressionTemplate = (
+  source: SourceFile.SourceFile,
+  syntax: SyntaxTree.Node,
+): StaticExpressionTemplate =>
+  Object.freeze({
+    _tag: 'StaticExpressionTemplate',
+    syntax,
+    canonical: JSON.stringify(templateElement(source, syntax)),
+  })
 
 const retainedTypePath = (
   source: SourceFile.SourceFile,
@@ -226,36 +283,7 @@ export const constantLiteral = (
       ? Object.freeze({ _tag: 'StringLiteral', data: decoded.data, token })
       : Object.freeze({ _tag: 'Malformed', detail: decoded.detail, syntax: initializer })
   }
-  const target = targetConstant(source, initializer)
-  if (target !== undefined) return target
   return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
-}
-
-/**
- * Recognizes `Target.<fact>`, the one initializer form that is not a source literal. The projection
- * is matched on syntax alone — `Target` names no declaration and resolves to nothing — so a form
- * that is already rejected today is the only form whose meaning changes.
- */
-const targetConstant = (
-  source: SourceFile.SourceFile,
-  initializer: SyntaxTree.Node,
-): ConstantLiteralFact | undefined => {
-  if (initializer.kind !== 'FieldProjectionExpression') return undefined
-  const base = SyntaxTree.directNode(initializer, 'IdentifierExpression')
-  const baseToken = base === undefined ? undefined : SyntaxTree.directToken(base, 'Identifier')
-  if (baseToken === undefined || spelling(source, baseToken) !== TargetConstant.root)
-    return undefined
-  const member = SyntaxTree.directToken(initializer, 'Identifier')
-  if (member === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
-  const memberSpelling = spelling(source, member)
-  const selector = TargetConstant.find(memberSpelling)
-  return selector === undefined
-    ? Object.freeze({
-        _tag: 'Malformed',
-        detail: `${TargetConstant.root}.${memberSpelling} names no target fact; the target facts are ${TargetConstant.all.map((candidate) => `${TargetConstant.root}.${candidate}`).join(', ')}`,
-        syntax: initializer,
-      })
-    : Object.freeze({ _tag: 'TargetConstant', selector, token: member })
 }
 
 interface AppliedRequirement {
@@ -1101,6 +1129,7 @@ const analyzeParameter = (
       _tag: 'ParameterDeclaration',
       id: Object.freeze({ _tag: 'ParameterId', function: functionId, ordinal }),
       name,
+      phase: SyntaxTree.directToken(node, 'StaticKeyword') === undefined ? 'Runtime' : 'Static',
       bindingMutability:
         SyntaxTree.directToken(node, 'MutKeyword') === undefined ? 'Immutable' : 'Mutable',
       declaredType: type.fact,
@@ -2558,6 +2587,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         typeParameters: Object.freeze([]),
         name,
         declaredType: declaredType.fact,
+        initializerTemplate: staticExpressionTemplate(source, initializer),
         literal: constantLiteral(source, initializer),
         initializer,
         syntax: node,
@@ -2898,7 +2928,14 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
     const failureRow = collectFailureRow(source, node, typeParameters.environment)
     const requirementRow = collectRequirementRow(source, node, typeParameters.environment)
     const constraints = collectConstraints(source, node, typeParameters.environment)
-    const facts = Object.freeze(parameters.map((parameter) => parameter.fact))
+    const staticFunction = SyntaxTree.directToken(node, 'StaticKeyword') !== undefined
+    const facts = Object.freeze(
+      parameters.map((parameter) =>
+        staticFunction && parameter.fact.phase !== 'Static'
+          ? Object.freeze({ ...parameter.fact, phase: 'Static' as const })
+          : parameter.fact,
+      ),
+    )
     diagnostics.push(
       ...parameters.flatMap((parameter) => parameter.diagnostics),
       ...duplicateParameterDiagnostics(facts),
@@ -2909,11 +2946,13 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
     )
     if (functionKind === 'Ordinary' && failureRow.fact.syntax !== undefined)
       diagnostics.push(Diagnostic.failureChannelOnOrdinary(failureRow.fact.syntax.span))
+    const retainedBody = bodyTemplate(source, node)
     return Object.freeze({
       _tag: 'FunctionDeclaration',
       id,
       canonical,
       visibility,
+      phase: staticFunction ? 'Static' : 'Runtime',
       functionKind,
       unsafe: SyntaxTree.directToken(node, 'UnsafeKeyword') !== undefined,
       typeParameters: typeParameters.facts,
@@ -2926,6 +2965,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       requirementRow: requirementRow.fact,
       constraints: constraints.facts,
       constraintContracts: Object.freeze([]),
+      ...(retainedBody === undefined ? {} : { bodyTemplate: retainedBody }),
       syntax: node,
     })
   })
@@ -3008,6 +3048,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
               }),
             }),
             visibility: 'Private' as const,
+            phase: 'Runtime' as const,
             functionKind:
               SyntaxTree.directToken(node, 'EffectKeyword') === undefined
                 ? ('Ordinary' as const)
@@ -3082,6 +3123,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
           }),
         }),
         visibility: 'Private' as const,
+        phase: 'Runtime' as const,
         functionKind: 'Ordinary' as const,
         unsafe: false,
         typeParameters: conformance.typeParameters,

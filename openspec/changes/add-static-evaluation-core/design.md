@@ -40,7 +40,7 @@ sealed intrinsic.
 - Static references, in-place mutation, manual allocation, Effect execution, host access, unsafe
   operations, or arbitrary runtime-function interpretation.
 - A phase-polymorphic `fn` whose execution phase is inferred from its arguments.
-- Runtime panic semantics; `static panic` is a compiler operation only.
+- Runtime panic semantics; `compileError` is a compile-time control form only.
 
 ## Decisions
 
@@ -54,17 +54,26 @@ static fn parse(value: string) -> Result { ... }
 fn render(static template: string, value: &Value) -> String {
   let static parsed = parse(template)
   static if parsed.isEmpty {
-    static panic("empty template")
+    compileError("empty template")
   }
   // ordinary runtime operations
 }
 ```
 
-The exact modifier order follows existing declaration conventions: `static fn`, `static` before a
-parameter name, and `let static` alongside existing `let mut`. A static function's ordinary local
+The exact modifier order follows existing declaration conventions: `static fn` or `pub static fn`,
+`static` before a parameter name, and `let static` as a mode distinct from `let mut`. The initial
+grammar does not combine `static` with `unsafe`, `effect`, implementation/service/interface
+operations, mutable parameters, or mutable mixed-function static bindings. `static if` is initially
+a statement form because Silk's existing block conditional is a statement; expression-position
+static selection can be added with an expression-shaped grammar rather than overloading this node.
+A static function's ordinary local
 bindings, `if`, `while`, and returns execute statically because the whole function has one phase.
-`let static` and `static if` exist for ordinary mixed functions. `static panic` stays explicit in
-both contexts because no general runtime panic is introduced by this change.
+`let static` and `static if` exist for ordinary mixed functions. `compileError(message)` is an
+inherently compile-time terminal expression, so it carries no redundant `static` prefix. It is a
+dedicated syntax form rather than an ordinary resolved call: source cannot import, shadow, capture,
+or pass it as a value, and its argument must be a statically evaluated `string`. The spelling names
+the requested outcome rather than suggesting a runtime panic or an internal compiler crash; this
+change introduces no general runtime panic.
 
 Literals are phase-available expressions rather than a second literal type. A literal directly in a
 static-demanding context is accepted. Once stored in an ordinary local it is runtime; retaining it
@@ -84,7 +93,8 @@ Declaration indexing and signature resolution remain declaration-wide. A functio
 static constructs additionally retains a source-provenanced body template. It does not publish one
 fully elaborated runtime body that contains both static arms.
 
-The executable worklist requests a concrete body using:
+Realization selects and validates the concrete compilation target before constructing the
+executable worklist. The worklist then requests a concrete body using:
 
 ```text
 declaration identity
@@ -103,6 +113,9 @@ The existing runtime pipeline then consumes the residual body:
 parsed declarations and signatures
               │
               ▼
+        target selection
+              │
+              ▼
    concrete application worklist
               │
               ▼
@@ -111,18 +124,24 @@ parsed declarations and signatures
        └─ ResidualBody
               │
               ▼
-     ownership + cleanup
+ residual ownership + cleanup
               │
               ▼
  runtime call discovery → target availability → layout → MIR → engines
 ```
 
-The worklist records a specialization key before following its residual calls, preserving the
-existing recursion-termination discipline. Equal applications reuse an immutable evaluation result.
-Static functions are invoked only from this evaluator or a constant initializer and never receive a
-runtime instance. Phase-independent signature errors remain declaration diagnostics; evaluation,
-selected-arm, panic, and resource errors belong to the demanded specialization. An uncalled static
-function is indexed and navigable but not executed.
+For each demanded application, the coordinator evaluates one residual body and records its direct
+residual call candidates privately. Candidate traversal records the specialization key before
+following those calls, preserving the existing recursion-termination discipline, but does not yet
+publish an executable closure. A cleanup-edge prepass over the closed candidate graph adds any
+cleanup-hook applications without publishing ownership facts. Once that graph is closed, the
+coordinator runs ownership and cleanup exactly once over every successful residual specialization
+and admits the resulting direct and cleanup call closure to availability and lowering. Equal
+applications reuse an immutable evaluation result. Static
+functions are invoked only from this evaluator or a constant initializer and never receive a runtime
+instance. Phase-independent signature errors remain declaration diagnostics; evaluation,
+selected-arm, compile-error, and resource errors belong to the demanded specialization. An uncalled
+static function is indexed and navigable but not executed.
 
 Alternatives rejected:
 
@@ -131,7 +150,7 @@ Alternatives rejected:
 - Let each backend evaluate conditions. Engine parity and the no-backend-reachability guarantee
   would depend on duplicated policy.
 - Eagerly evaluate every body during module loading. Static parameters are not known there, and an
-  unused static panic would reject otherwise valid executable closure.
+  unused `compileError` would reject otherwise valid executable closure.
 
 ### 3. The evaluator has its own values, not its own observable memory
 
@@ -192,10 +211,10 @@ its lexical scope and expected result type. A selected ordinary call becomes res
 static forms are evaluated recursively. An unselected arm has no resolution, type, Effect,
 requirement, ownership, call, or availability facts.
 
-`static panic` returns `StaticFailure.Deliberate` and acts as bottom for the selected expected type.
-Any residual operations accumulated earlier in the specialization are discarded with the failure.
-Runtime control flow does not alter static traversal: source that must be statically excluded must
-be placed in a `static if` arm rather than after an ordinary runtime `return`.
+`compileError` returns `StaticFailure.CompileError` and acts as bottom for the selected expected
+type. Any residual operations accumulated earlier in the specialization are discarded with the
+failure. Runtime control flow does not alter static traversal: source that must be statically
+excluded must be placed in a `static if` arm rather than after an ordinary runtime `return`.
 
 Conditional declarations are excluded syntactically. This keeps module surfaces, import resolution,
 navigation, and canonical declaration identities independent of the selected target.
@@ -228,10 +247,12 @@ Profile codes follow `Target.all` canonical order and are frozen as:
 3  x86_64-unknown-linux-gnu
 ```
 
-An ordinary `silk.target` module maps that primitive value to public nominal enums and derives
-`Target.arch`, `Target.pointerBits`, `Target.usizeMax`, `Target.isizeMax`, and `Target.isizeMin` in
-static source. The standard-library `usize` and `isize` modules import that actor and initialize
-their constants through ordinary static constant evaluation.
+An ordinary `silk.target` module maps that primitive value through zero-argument static functions
+`Target.profile()` and `Target.arch()` to public nominal enums. It derives the primitive constants
+`Target.pointerBits`, `Target.usizeMax`, `Target.isizeMax`, and `Target.isizeMin` through ordinary
+static constant evaluation. Keeping nominal values behind static functions preserves the initial
+primitive-only top-level constant contract. The standard-library `usize` and `isize` modules import
+that actor and initialize their constants through ordinary static constant evaluation.
 
 `TargetConstant`, syntax matching in `DeclarationCollection`, selector-shaped declaration facts,
 unselected placeholder values, and selector replacement in lowering are deleted. The source actor
@@ -251,23 +272,26 @@ semantics. Their initializer is now a static expression rather than a literal-or
 The evaluator must produce exactly the declared primitive value for the selected target. Aggregate
 results, type inference, ordinary calls, Effects, and runtime storage remain invalid.
 
-Constant evaluation uses the same cache, value encoding, panic behavior, target environment, and
-limits as function specialization. Constant dependency cycles are detected through the static call
-stack and reported without a partial value. HIR and module surfaces publish the selected canonical
-constant value and initializer provenance; no backend selects it again.
+Constant evaluation uses the same cache, value encoding, `compileError` behavior, target
+environment, and limits as function specialization. Constant dependency cycles are detected
+through the static call stack and reported without a partial value. Target-neutral declaration and
+module-surface facts retain the explicit declared type, initializer body template, and source
+provenance without claiming a selected value. The concrete target realization evaluates that
+template and publishes the selected canonical constant value for residual HIR and inspection; no
+backend selects it again.
 
 ### 9. Diagnostics are semantic traces, not host debugger output
 
 Static evaluation records logical frames containing the static declaration/call span, canonical
-argument presentation, selected target, and selected static-arm span. A deliberate panic, phase
-violation, cycle, or resource exhaustion converts those frames into deterministic diagnostic
+argument presentation, selected target, and selected static-arm span. A requested compile error,
+phase violation, cycle, or resource exhaustion converts those frames into deterministic diagnostic
 details and related spans. Static-text processing may attach a byte offset into the originating
 literal.
 
 Four independent budgets are checked: evaluator steps, logical call depth, retained canonical value
 bytes, and generated residual HIR nodes. Their concrete initial thresholds are compiler-owned and
 tested at boundaries; changing them is a compiler policy change, not observable successful-program
-semantics. Limit exhaustion receives a dedicated reason and never masquerades as `static panic`.
+semantics. Limit exhaustion receives a dedicated reason and never masquerades as `compileError`.
 No host stack, JavaScript cause, address, cache key, or backend detail appears in source diagnostics.
 
 ## Risks / Trade-offs

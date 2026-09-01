@@ -122,6 +122,8 @@ const executionInstance = (key: ExecutionKey): Instances.InstanceKey => {
       _tag: 'InstanceKey',
       declaration: key.runner,
       typeArguments: key.owner.typeArguments,
+      evidence: key.owner.evidence,
+      staticArguments: key.owner.staticArguments,
       contractRow: Object.freeze([
         ...key.owner.contractRow,
         `effect-site:${Hir.executableSiteKey(key.site)}`,

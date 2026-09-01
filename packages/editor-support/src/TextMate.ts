@@ -9,6 +9,8 @@ export type KeywordKind = Extract<Token.TokenKind, `${string}Keyword`>
  * removing a keyword in the compiler fails this package's typecheck until the grammar follows.
  */
 export const keywords: Record<KeywordKind, string> = {
+  StaticKeyword: 'static',
+  CompileErrorKeyword: 'compileError',
   PubKeyword: 'pub',
   StructKeyword: 'struct',
   TupleKeyword: 'tuple',

@@ -16,11 +16,11 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | `LEX` | Lexical | 12 |
 | `PAR` | Parser | 5 |
 | `MOD` | Module | 3 |
-| `SEM` | Semantic | 167 |
+| `SEM` | Semantic | 174 |
 | `OWN` | Ownership | 16 |
 | `LAY` | Layout | 1 |
 
-There are 204 codes in total.
+There are 211 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -228,6 +228,13 @@ There are 204 codes in total.
 | `SEM0173` | Stable code for using tuple syntax with a named struct or record syntax with a tuple. | `A contextual <expected> literal cannot construct <actual>` |
 | `SEM0174` | Stable code for attempting to join distinct anonymous aggregate occurrences. | `Separate anonymous aggregate occurrences do not acquire a common type` |
 | `SEM0175` | Stable code for attempting named-field construction of a positional aggregate. | `<type> is positional and cannot be constructed with named fields` |
+| `SEM0176` | Stable code for crossing from static evaluation into unavailable runtime work. | `<operation> is not available during static evaluation for <target>` |
+| `SEM0177` | Stable code for a selected source-requested compile failure. | `<detail>` |
+| `SEM0178` | Stable code for a cycle in one demanded static application. | `Static evaluation of <application> is cyclic for <target>` |
+| `SEM0179` | Stable code for exhausting the static evaluator's deterministic step budget. | `Static evaluation exceeded its step limit of <limit> for <target>` |
+| `SEM0180` | Stable code for exhausting the static evaluator's logical call-depth budget. | `Static evaluation exceeded its call-depth limit of <limit> for <target>` |
+| `SEM0181` | Stable code for exhausting the static evaluator's retained-value budget. | `Static evaluation exceeded its retained-value limit of <limit> bytes for <target>` |
+| `SEM0182` | Stable code for exhausting the static evaluator's residual-growth budget. | `Static evaluation exceeded its residual-growth limit of <limit> nodes for <target>` |
 
 ## Ownership (`OWN`)
 

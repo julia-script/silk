@@ -4,6 +4,7 @@ import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as LayoutPlan from './Layout.js'
 import type * as Mir from './Mir.js'
+import type * as StaticValue from './StaticValue.js'
 import type * as SilkType from './Type.js'
 import type * as WasmMemory from './WasmMemory.js'
 
@@ -23,10 +24,12 @@ export interface WasmEmitContext<FunctionLayout, SuspensionRuntime> {
   readonly resolve: (
     target: DeclarationFacts.CanonicalId,
     typeArguments: ReadonlyArray<SilkType.GenericArgument>,
+    staticArguments?: ReadonlyArray<StaticValue.Value>,
   ) => FuncActor.Func
   readonly resolveIndependent: (
     target: DeclarationFacts.CanonicalId,
     typeArguments: ReadonlyArray<SilkType.GenericArgument>,
+    staticArguments?: ReadonlyArray<StaticValue.Value>,
   ) => FuncActor.Func
   readonly memory: WasmMemory.MemoryContext | undefined
   readonly executionPackageCleanups: ReadonlyMap<string, ExecutionPackageCleanup>

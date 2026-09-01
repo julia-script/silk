@@ -48,6 +48,8 @@ import * as NameResolution from './NameResolution.js'
 import * as Presentation from './Presentation.js'
 import type * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as StaticEvaluation from './StaticEvaluation.js'
+import type * as StaticValue from './StaticValue.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import * as Type from './Type.js'
 export const unsafeCallDiagnostic = (
@@ -256,6 +258,12 @@ export const analyzeStatements = (
     context.regions.push(region)
     return region
   }
+
+  const staticDiagnostic = (failure: StaticEvaluation.StaticFailure): Diagnostic.Diagnostic =>
+    StaticEvaluation.diagnostic(
+      failure,
+      context.staticContext?.environment.target ?? 'unselected-target',
+    )
 
   const analyzePatternSelection = (
     element: SyntaxTree.Node,
@@ -603,6 +611,19 @@ export const analyzeStatements = (
         initializer.fact,
         context.resolution.writtenCallableBindings,
       )
+      const phase: 'Runtime' | 'Static' =
+        context.declaration.phase === 'Static' ||
+        SyntaxTree.directToken(element, 'StaticKeyword') !== undefined
+          ? 'Static'
+          : 'Runtime'
+      const evaluated =
+        phase === 'Static' && context.staticContext !== undefined
+          ? StaticEvaluation.evaluateFact(initializer.fact, context.staticContext)
+          : undefined
+      if (evaluated?._tag === 'Failed')
+        context.diagnostics.push(staticDiagnostic(evaluated.failure))
+      const staticValue: StaticValue.Value | undefined =
+        evaluated?._tag === 'Complete' ? evaluated.value : undefined
       const binding: BindingDeclarationFact = Object.freeze({
         _tag: 'BindingFact',
         id: Object.freeze({
@@ -611,16 +632,27 @@ export const analyzeStatements = (
           ordinal: bindingOrdinal,
         }),
         name,
+        phase,
         mutability:
           SyntaxTree.directToken(element, 'MutKeyword') === undefined ? 'Immutable' : 'Mutable',
         ...(resolvedDeclared === undefined ? {} : { declaredType: resolvedDeclared.fact }),
         inferredType: initializer.fact.type,
         initializer: initializer.fact,
+        ...(staticValue === undefined ? {} : { staticValue }),
         ...(exactCallable === undefined ? {} : { exactCallable }),
         ...(hasConcreteCallableIdentity ? { concreteCallableIdentity: true as const } : {}),
         syntax: element,
       })
       context.bindings.push(binding)
+      if (staticValue !== undefined && context.staticContext !== undefined) {
+        const key = StaticEvaluation.localValueKey(binding)
+        context.staticContext.values.set(key, staticValue)
+        const staticTextSpan = context.staticContext.expressionSpans.get(initializer.fact)
+        if (staticTextSpan !== undefined) context.staticContext.valueSpans.set(key, staticTextSpan)
+        const staticTextOrigin = context.staticContext.expressionOrigins.get(initializer.fact)
+        if (staticTextOrigin !== undefined)
+          context.staticContext.valueOrigins.set(key, staticTextOrigin)
+      }
       facts.push(Object.freeze({ _tag: 'BindStatement', binding, region }))
 
       if (name._tag === 'Present') {
@@ -725,6 +757,24 @@ export const analyzeStatements = (
       }
       context.diagnostics.push(...expression.diagnostics)
       if (
+        context.staticContext !== undefined &&
+        context.declaration.phase !== 'Static' &&
+        expression.fact._tag === 'CompileError'
+      ) {
+        const evaluated = StaticEvaluation.evaluateFact(expression.fact, context.staticContext)
+        if (evaluated._tag === 'Failed')
+          context.diagnostics.push(staticDiagnostic(evaluated.failure))
+        facts.push(
+          Object.freeze({
+            _tag: 'ExpressionStatement',
+            expression: expression.fact,
+            region,
+            syntax: element,
+          }),
+        )
+        continue
+      }
+      if (
         expression.type !== undefined &&
         !Type.equals(expression.type, Type.unit) &&
         !Type.isNever(expression.type)
@@ -744,6 +794,66 @@ export const analyzeStatements = (
           syntax: element,
         }),
       )
+      continue
+    }
+
+    if (element.kind === 'StaticConditionalStatement') {
+      if (context.staticContext === undefined) continue
+      const conditionNode = statementExpressionNode(element)
+      const condition = analyzeExpression(
+        context.source,
+        conditionNode,
+        context.declarations,
+        context.declaration,
+        scope,
+        context.resolution,
+        'bool',
+      )
+      if (condition === undefined)
+        throw new RangeError(`Semantic analysis cannot analyze ${conditionNode.kind}`)
+      context.diagnostics.push(...condition.diagnostics)
+      const evaluated = StaticEvaluation.evaluateFact(condition.fact, context.staticContext)
+      if (evaluated._tag === 'Failed') {
+        context.diagnostics.push(staticDiagnostic(evaluated.failure))
+        continue
+      }
+      if (evaluated.value._tag !== 'BooleanValue') {
+        context.diagnostics.push(
+          Diagnostic.staticPhaseViolation(
+            'static if condition must evaluate to bool',
+            context.staticContext.environment.target,
+            Object.freeze([]),
+            conditionNode.span,
+          ),
+        )
+        continue
+      }
+      const arms = SyntaxTree.directNodes(element, 'Block')
+      const selected = arms.at(evaluated.value.value ? 0 : 1)
+      if (selected !== undefined) {
+        const staticContext = Object.freeze({
+          ...context.staticContext,
+          trace: StaticEvaluation.appendTrace(
+            context.staticContext.trace,
+            StaticEvaluation.selectedArmFrame(
+              evaluated.value.value ? 'Taken' : 'Otherwise',
+              selected.span,
+            ),
+          ),
+        })
+        facts.push(
+          ...analyzeStatements(
+            Object.freeze({
+              ...context,
+              staticContext,
+              resolution: Object.freeze({ ...context.resolution, staticContext }),
+            }),
+            selected,
+            scope,
+            loopStack,
+          ),
+        )
+      }
       continue
     }
 
@@ -1275,6 +1385,7 @@ export const analyzeFunctionBody = (
   declaration: DeclarationFact,
   declarations: ReadonlyArray<DeclarationFact>,
   resolution: ResolutionContext,
+  staticContext?: BodyContext['staticContext'],
 ): FunctionAnalysis => {
   const blockNode = childNode(declaration.syntax, 'Block')
   const unsafeSpans: Array<SourceSpan.SourceSpan> = []
@@ -1295,6 +1406,7 @@ export const analyzeFunctionBody = (
     executableSites: executableSites(declaration.syntax),
     writtenCallableBindings: new Set<number>(),
     generatedAggregates: new Map(),
+    ...(staticContext === undefined ? {} : { staticContext }),
   })
   const context: BodyContext = {
     source,
@@ -1306,12 +1418,18 @@ export const analyzeFunctionBody = (
     loops: [],
     resolution: bodyResolution,
     nextBindingOrdinal,
+    ...(staticContext === undefined ? {} : { staticContext }),
   }
   const statements = analyzeStatements(
     context,
     blockNode,
     Object.freeze({ parameters: declaration.parameters, bindings: [], patternBindings: [] }),
   )
+  const containsStaticConditional = (node: SyntaxTree.Node): boolean =>
+    node.kind === 'StaticConditionalStatement' ||
+    node.children.some((child) => SyntaxTree.isNode(child) && containsStaticConditional(child))
+  const hasDeferredStaticConditional =
+    staticContext === undefined && containsStaticConditional(blockNode)
   const returnedBorrow = DeclarationFacts.returnedBorrow(declaration)
 
   const bindingOrigins = new Map<number, DeclarationFacts.ParameterFact | undefined>()
@@ -1377,7 +1495,7 @@ export const analyzeFunctionBody = (
     return undefined
   }
 
-  if (returnedBorrow !== undefined) {
+  if (returnedBorrow !== undefined && context.declaration.phase !== 'Static') {
     const isBorrowFreeReturn = (expression: ExpressionFact): boolean => {
       if (expression._tag === 'Grouped') return isBorrowFreeReturn(expression.expression)
       if (expression._tag === 'StaticText') return expression.data?.kind === 'Text'
@@ -1438,6 +1556,18 @@ export const analyzeFunctionBody = (
     throw new RangeError('Semantic analysis expected a terminal statement')
   const expression = terminal.expression
   const returnFlow = returnFlowOf(statements)
+  const staticEvaluationFailureCodes = new Set<Diagnostic.Code>([
+    Diagnostic.staticPhaseViolationCode,
+    Diagnostic.selectedCompileErrorCode,
+    Diagnostic.staticEvaluationCycleCode,
+    Diagnostic.staticStepLimitCode,
+    Diagnostic.staticCallDepthLimitCode,
+    Diagnostic.staticRetainedValueLimitCode,
+    Diagnostic.staticResidualGrowthLimitCode,
+  ])
+  const hasStaticEvaluationFailure = context.diagnostics.some((diagnostic) =>
+    staticEvaluationFailureCodes.has(diagnostic.code),
+  )
   let validReturnContract = declaration.returnType._tag === 'Resolved'
   if (declaration.returnType._tag === 'Resolved') {
     for (const returned of returnFlow.returns) {
@@ -1468,7 +1598,12 @@ export const analyzeFunctionBody = (
           ),
       )
     }
-    if (returnFlow.fallsThrough && !Type.equals(declaration.returnType.type, Type.unit)) {
+    if (
+      returnFlow.fallsThrough &&
+      !Type.equals(declaration.returnType.type, Type.unit) &&
+      !hasDeferredStaticConditional &&
+      !hasStaticEvaluationFailure
+    ) {
       validReturnContract = false
       context.diagnostics.push(
         Diagnostic.missingReturn(

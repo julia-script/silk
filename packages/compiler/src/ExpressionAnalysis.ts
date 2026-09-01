@@ -103,9 +103,10 @@ import {
   reachableCallableWrites,
   unsafeCallDiagnostic,
 } from './StatementAnalysis.js'
+import * as StaticEvaluation from './StaticEvaluation.js'
 import * as StaticText from './StaticText.js'
+import * as StaticValue from './StaticValue.js'
 import * as SyntaxTree from './SyntaxTree.js'
-import * as TargetConstant from './TargetConstant.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
 
@@ -299,12 +300,22 @@ export const analyzeConstant = (
   let type: SemanticType | undefined
   let detail: string | undefined
 
-  if (declared._tag !== 'Resolved' || typeof declared.type !== 'string') {
+  if (
+    declared._tag !== 'Resolved' ||
+    typeof declared.type !== 'string' ||
+    !(
+      declared.type === 'bool' ||
+      declared.type === 'char' ||
+      Type.isString(declared.type) ||
+      Scalar.isIntegerSpelling(declared.type) ||
+      Scalar.isFloatSpelling(declared.type)
+    )
+  ) {
     detail = 'the declared type must be one primitive scalar or string'
   } else if (literal._tag === 'Malformed') {
     detail = literal.detail
   } else if (literal._tag === 'Unavailable') {
-    detail = 'the initializer must be one literal'
+    type = declared.type
   } else if (Type.isString(declared.type) && literal._tag === 'StringLiteral') {
     if (literal.data.kind !== 'Text') detail = 'a byte-string literal does not produce a string'
     else {
@@ -336,21 +347,6 @@ export const analyzeConstant = (
     } else {
       type = 'u64'
       value = Object.freeze({ _tag: 'Integer', value: literal.value, type })
-    }
-  } else if (literal._tag === 'TargetConstant') {
-    // The pointer width is not known here — elaboration precedes target selection — so the fact is
-    // recorded with its widest value and its selector. `Lower` narrows it once the target is fixed.
-    const expected = TargetConstant.declaredType(literal.selector)
-    if (declared.type !== expected) {
-      detail = `${TargetConstant.root}.${literal.selector} is ${expected}, not ${Type.display(declared.type)}`
-    } else {
-      type = expected
-      value = Object.freeze({
-        _tag: 'Integer',
-        value: TargetConstant.unselected(literal.selector),
-        type,
-        target: literal.selector,
-      })
     }
   } else if (Scalar.isFloatSpelling(declared.type) && literal._tag === 'FloatingLiteral') {
     const selected = declared.type
@@ -769,9 +765,60 @@ export const analyzeConstantReference = (
           spelling(source, second),
           second,
         )
-  return lookup._tag === 'Resolved' && lookup.declaration._tag === 'ConstantDeclaration'
-    ? analyzeConstant(lookup.declaration, second ?? first, node, false)
-    : undefined
+  if (lookup._tag !== 'Resolved' || lookup.declaration._tag !== 'ConstantDeclaration')
+    return undefined
+  const result = analyzeConstant(lookup.declaration, second ?? first, node, false)
+  if (
+    lookup.declaration.literal._tag !== 'Unavailable' ||
+    resolution.staticContext?.constant === undefined
+  )
+    return result
+  const selected = resolution.staticContext.constant(
+    lookup.declaration,
+    node.span,
+    resolution.staticContext.trace,
+  )
+  if (selected._tag === 'Failed') return result
+  const value: ConstantExpressionFact['value'] = (() => {
+    const candidate = selected.value
+    if (candidate._tag === 'BooleanValue')
+      return Object.freeze({ _tag: 'Boolean' as const, value: candidate.value })
+    if (candidate._tag === 'CharacterValue')
+      return Object.freeze({ _tag: 'Character' as const, value: candidate.value })
+    if (candidate._tag === 'IntegerValue')
+      return Object.freeze({
+        _tag: 'Integer' as const,
+        value: candidate.value,
+        type: candidate.type,
+      })
+    if (candidate._tag === 'FloatValue')
+      return Object.freeze({
+        _tag: 'Floating' as const,
+        bits: candidate.bits,
+        spelling: StaticValue.encode(candidate),
+        type: candidate.type,
+      })
+    if (candidate._tag === 'TextValue') {
+      const bytes = Object.freeze([...candidate.bytes])
+      return Object.freeze({
+        _tag: 'String' as const,
+        data: Object.freeze({
+          _tag: 'StaticData' as const,
+          id: `text:${bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')}`,
+          kind: 'Text' as const,
+          bytes,
+          utf8: true,
+        }),
+      })
+    }
+    return undefined
+  })()
+  return value === undefined || result.fact._tag !== 'Constant'
+    ? result
+    : Object.freeze({
+        ...result,
+        fact: Object.freeze({ ...result.fact, value }),
+      })
 }
 
 export interface MoveResult {
@@ -4020,7 +4067,7 @@ export const intrinsicContractReference = (
   operation: Intrinsic.Operation,
   operationToken: Token.Token,
 ): Extract<CallReferenceFact, { readonly _tag: 'ResolvedIntrinsicContract' }> => {
-  if (operation.rule._tag !== 'ContractRule')
+  if (operation.rule._tag !== 'ContractRule' && operation.rule._tag !== 'StaticOnlyRule')
     throw new RangeError('intrinsic contract reference requires a contract operation')
   const contract =
     operation.rule.contract.unsafe === operation.unsafe
@@ -4126,7 +4173,7 @@ export const finishIntrinsicContractCall = (
   resolution: ResolutionContext,
   caller: DeclarationFact,
 ): ExpressionResult => {
-  if (operation.rule._tag !== 'ContractRule')
+  if (operation.rule._tag !== 'ContractRule' && operation.rule._tag !== 'StaticOnlyRule')
     throw new RangeError('intrinsic contract finisher received a non-contract operation')
   const reference = intrinsicContractReference(operation, operationToken)
   const analyzed = analyzeCallContract(
@@ -4148,6 +4195,42 @@ export const finishIntrinsicContractCall = (
     analyzed.fact._tag === 'Compatible'
       ? analyzed.fact.substitution
       : new Map<string, Type.GenericArgument>()
+  if (operation.rule._tag === 'StaticOnlyRule') {
+    const phaseDiagnostic =
+      caller.phase === 'Static' || resolution.staticContext !== undefined
+        ? undefined
+        : Diagnostic.staticPhaseViolation(
+            `Intrinsic.${operation.spelling}`,
+            'unselected-target',
+            Object.freeze([]),
+            call.span,
+          )
+    const result = Type.substitute(operation.rule.contract.result, substitution)
+    const type =
+      analyzed.fact._tag === 'Compatible' && phaseDiagnostic === undefined
+        ? availableExpressionType(result)
+        : unavailableExpressionType
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Call',
+        reference,
+        path: referencePath(call),
+        typeArguments: typeArguments.facts,
+        arguments: argumentsResult.facts,
+        mappings: analyzed.mappings,
+        contract: analyzed.fact,
+        type,
+        syntax: call,
+      }),
+      diagnostics: Object.freeze([
+        ...argumentsResult.diagnostics,
+        ...typeArguments.diagnostics,
+        ...analyzed.diagnostics,
+        ...(phaseDiagnostic === undefined ? [] : [phaseDiagnostic]),
+      ]),
+      type: type._tag === 'Available' ? type.type : undefined,
+    })
+  }
   const substitutedResult = Type.substitute(operation.rule.contract.result, substitution)
   const type =
     analyzed.fact._tag === 'Compatible' &&
@@ -4303,7 +4386,7 @@ export function analyzeBuiltinCall(
   const actor = Intrinsic.findActor(actorSpelling)
   const operation = Intrinsic.findOperation(actorSpelling, operationSpelling)
   if (
-    operation?.rule._tag === 'ContractRule' &&
+    (operation?.rule._tag === 'ContractRule' || operation?.rule._tag === 'StaticOnlyRule') &&
     isSectionArity(operation.rule.contract.parameters.length, argumentsResult.facts.length)
   )
     return finishCallableSection(
@@ -4314,7 +4397,7 @@ export function analyzeBuiltinCall(
       resolution,
       caller,
     )
-  if (operation?.rule._tag === 'ContractRule')
+  if (operation?.rule._tag === 'ContractRule' || operation?.rule._tag === 'StaticOnlyRule')
     return finishIntrinsicContractCall(
       source,
       call,
@@ -6528,6 +6611,9 @@ export const effectCaptureFacts = (
       case 'EnumValue':
         expression(fact.argument)
         return
+      case 'CompileError':
+        expression(fact.message)
+        return
       case 'ReferentProjection':
         expression(fact.subject)
         return
@@ -6888,6 +6974,7 @@ export function analyzeExpression(
       fact: Object.freeze({
         _tag: 'StaticText',
         ...(data === undefined ? {} : { data }),
+        ...(token === undefined ? {} : { token }),
         type,
         syntax: node,
       }),
@@ -6932,6 +7019,31 @@ export function analyzeExpression(
       }),
       diagnostics: Object.freeze([]),
       type: Type.unit,
+    })
+  }
+
+  if (node.kind === 'CompileErrorExpression') {
+    const messageNode = node.children.find(isExpressionNode)
+    if (messageNode === undefined) return undefined
+    const message = analyzeExpression(
+      source,
+      messageNode,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+      Type.string,
+    )
+    if (message === undefined) return undefined
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'CompileError',
+        message: message.fact,
+        type: availableExpressionType('never'),
+        syntax: node,
+      }),
+      diagnostics: message.diagnostics,
+      type: 'never',
     })
   }
 
@@ -7626,107 +7738,15 @@ export function analyzeExpression(
       ...(cause === undefined ? {} : { cause }),
     })
   }
-  if (
-    reference._tag === 'Resolved' &&
-    isSectionArity(reference.declaration.parameters.length, argumentsResult.facts.length)
-  ) {
-    return finishCallableSection(
-      node,
-      reference,
-      argumentsResult,
-      callTypeArguments,
-      resolution,
-      declaration,
-    )
-  }
-  const callContract = analyzeCallContract(
+  return finishDeclarationCall(
     node,
     reference,
-    argumentsResult.facts,
-    hasAvailableCallSyntax(node),
+    argumentsResult,
     callTypeArguments,
-    resolution,
+    missingDiagnostic,
     declaration,
-  )
-  const constraintDiagnostics = interfaceConstraintDiagnostics(
-    reference,
-    callContract,
-    resolution.index,
-    declaration,
-    node.span,
-  )
-  const unsafeDiagnostic = unsafeCallDiagnostic(
-    reference._tag === 'Resolved' && reference.declaration.unsafe,
-    reference.spelling,
-    node,
     resolution,
   )
-  const syntaxAvailable = hasAvailableCallSyntax(node)
-  const expressionType =
-    syntaxAvailable &&
-    reference._tag === 'Resolved' &&
-    reference.declaration.returnType._tag === 'Resolved' &&
-    callContract.fact._tag === 'Compatible' &&
-    constraintDiagnostics.length === 0 &&
-    unsafeDiagnostic === undefined
-      ? availableExpressionType(
-          (() => {
-            const substitution =
-              callContract.fact._tag === 'Compatible'
-                ? callContract.fact.substitution
-                : new Map<string, Type.GenericArgument>()
-            const success = Type.substitute(reference.declaration.returnType.type, substitution)
-            if (reference.declaration.functionKind !== 'Effect')
-              return Type.isEffect(success)
-                ? Type.effectWithRows(
-                    success.success,
-                    success.failureRow,
-                    effectCaptureAccess(
-                      argumentsResult.facts,
-                      resolution.index,
-                      copyAssumptionsOf(declaration),
-                    ),
-                    success.requirementRow,
-                  )
-                : success
-            return Type.effectWithRows(
-              success,
-              Type.substituteFailureRow(reference.declaration.failureRow.row, substitution),
-              effectCaptureAccess(
-                argumentsResult.facts,
-                resolution.index,
-                copyAssumptionsOf(declaration),
-              ),
-              Type.substituteRequirementsRow(
-                reference.declaration.requirementRow.row,
-                substitution,
-              ),
-            )
-          })(),
-        )
-      : unavailableExpressionType
-  return Object.freeze({
-    fact: Object.freeze({
-      _tag: 'Call',
-      reference,
-      path: referencePath(node),
-      typeArguments: callTypeArguments.facts,
-      arguments: argumentsResult.facts,
-      mappings: callContract.mappings,
-      contract: callContract.fact,
-      type: expressionType,
-      syntax: node,
-    }),
-    diagnostics: Object.freeze([
-      ...(missingDiagnostic === undefined ? [] : [missingDiagnostic]),
-      ...argumentsResult.diagnostics,
-      ...callTypeArguments.diagnostics,
-      ...callContract.diagnostics,
-      ...constraintDiagnostics,
-      ...(unsafeDiagnostic === undefined ? [] : [unsafeDiagnostic]),
-    ]),
-    type: expressionType._tag === 'Available' ? expressionType.type : undefined,
-  })
 }
 
 export const finishDeclarationCall = (
@@ -7780,6 +7800,35 @@ export const finishDeclarationCall = (
     node,
     resolution,
   )
+  const staticArguments = (() => {
+    if (reference._tag !== 'Resolved' || resolution.staticContext === undefined)
+      return Object.freeze({
+        values: Object.freeze<
+          ReadonlyArray<{ readonly parameter: ParameterFact; readonly value: StaticValue.Value }>
+        >([]),
+        diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
+      })
+    const values: Array<{ readonly parameter: ParameterFact; readonly value: StaticValue.Value }> =
+      []
+    const diagnostics: Array<Diagnostic.Diagnostic> = []
+    for (const parameter of reference.declaration.parameters) {
+      if (parameter.phase !== 'Static') continue
+      const argument = argumentsResult.facts.at(parameter.id.ordinal)
+      if (argument === undefined) continue
+      const evaluated = StaticEvaluation.evaluateFact(argument.expression, resolution.staticContext)
+      if (evaluated._tag === 'Complete') {
+        values.push(Object.freeze({ parameter, value: evaluated.value }))
+      } else {
+        diagnostics.push(
+          StaticEvaluation.diagnostic(
+            evaluated.failure,
+            resolution.staticContext.environment.target,
+          ),
+        )
+      }
+    }
+    return Object.freeze({ values: Object.freeze(values), diagnostics: Object.freeze(diagnostics) })
+  })()
   const expressionType =
     hasAvailableCallSyntax(node) &&
     callable !== undefined &&
@@ -7820,24 +7869,52 @@ export const finishDeclarationCall = (
           })(),
         )
       : unavailableExpressionType
+  const fact: Extract<ExpressionFact, { readonly _tag: 'Call' }> = Object.freeze({
+    _tag: 'Call',
+    reference,
+    path: referencePath(node),
+    typeArguments: callTypeArguments.facts,
+    arguments: argumentsResult.facts,
+    staticArguments: staticArguments.values,
+    mappings: callContract.mappings,
+    contract: callContract.fact,
+    type: expressionType,
+    syntax: node,
+  })
+  const staticContext = resolution.staticContext
+  const staticResult =
+    reference._tag === 'Resolved' &&
+    reference.declaration.phase === 'Static' &&
+    staticContext !== undefined &&
+    expressionType._tag === 'Available'
+      ? StaticEvaluation.evaluateFact(fact, staticContext)
+      : undefined
+  const staticDiagnostics =
+    staticResult?._tag === 'Failed' && staticContext !== undefined
+      ? [StaticEvaluation.diagnostic(staticResult.failure, staticContext.environment.target)]
+      : []
+  let resolvedFact = fact
+  if (staticResult?._tag === 'Complete') {
+    const staticTextSpan = staticContext?.expressionSpans.get(fact)
+    const staticTextOrigin = staticContext?.expressionOrigins.get(fact)
+    resolvedFact = Object.freeze({
+      ...fact,
+      staticValue: staticResult.value,
+      ...(staticTextSpan === undefined ? {} : { staticTextSpan }),
+      ...(staticTextOrigin === undefined ? {} : { staticTextOrigin }),
+    })
+  } else if (staticResult?._tag === 'Failed')
+    resolvedFact = Object.freeze({ ...fact, staticFailure: staticResult.failure })
   return Object.freeze({
-    fact: Object.freeze({
-      _tag: 'Call',
-      reference,
-      path: referencePath(node),
-      typeArguments: callTypeArguments.facts,
-      arguments: argumentsResult.facts,
-      mappings: callContract.mappings,
-      contract: callContract.fact,
-      type: expressionType,
-      syntax: node,
-    }),
+    fact: resolvedFact,
     diagnostics: Object.freeze([
       ...(diagnostic === undefined ? [] : [diagnostic]),
       ...argumentsResult.diagnostics,
       ...callTypeArguments.diagnostics,
       ...callContract.diagnostics,
       ...constraintDiagnostics,
+      ...staticArguments.diagnostics,
+      ...staticDiagnostics,
       ...(unsafeDiagnostic === undefined ? [] : [unsafeDiagnostic]),
     ]),
     type: expressionType._tag === 'Available' ? expressionType.type : undefined,
@@ -7964,6 +8041,19 @@ export const scopeSpanFor = (
   return parameter?.name._tag === 'Present' ? parameter.name.token.span : undefined
 }
 
+export interface StaticAnalysisContext {
+  readonly environment: StaticEvaluation.TargetEnvironment
+  readonly values: Map<string, StaticValue.Value>
+  readonly valueSpans: Map<string, SourceSpan.SourceSpan>
+  readonly valueOrigins: Map<string, StaticEvaluation.TextOrigin>
+  readonly expressionSpans: Map<ExpressionFact, SourceSpan.SourceSpan>
+  readonly expressionOrigins: Map<ExpressionFact, StaticEvaluation.TextOrigin>
+  readonly returnedTextSpan?: { value: SourceSpan.SourceSpan | undefined }
+  readonly trace: StaticEvaluation.Trace
+  readonly call: StaticEvaluation.FactEvaluationContext['call']
+  readonly constant?: NonNullable<StaticEvaluation.FactEvaluationContext['constant']>
+}
+
 export interface BodyContext {
   readonly source: SourceFile.SourceFile
   readonly declaration: DeclarationFact
@@ -7976,6 +8066,7 @@ export interface BodyContext {
   readonly nextBindingOrdinal: { value: number }
   readonly regionBase?: number
   readonly effectBlock?: true
+  readonly staticContext?: StaticAnalysisContext
 }
 
 export interface ResolutionContext {
@@ -7992,6 +8083,7 @@ export interface ResolutionContext {
   readonly executableSites?: ReadonlyMap<SyntaxTree.Node, number>
   /** Mutable callable bindings whose authored initializer is no longer their exact runtime value. */
   readonly writtenCallableBindings?: Set<number>
+  readonly staticContext?: StaticAnalysisContext
 }
 
 const aggregateKey = (nominal: Type.Nominal): string => `${nominal.module}:${nominal.name}`

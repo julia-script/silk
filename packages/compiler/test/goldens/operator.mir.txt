@@ -5,10 +5,9 @@ layout i32 size=4 align=4 repr=signed-i32
 callable-environment golden/operator.main@callable:declaration:golden/operator:main:site:0 mode=shared size=4 align=4 fields=capture0->p1:copy:value@0 view=code@0,env@8,size=16
 calling i32 lanes=1 i32[]
 usize-literal 20 bits=64 available [17696, 17698)
-usize-literal 18446744073709551615 bits=64 available [2049, 2057)
-usize-literal 0 bits=64 available [2151, 2152)
-usize-literal 0 bits=64 available [2367, 2368)
-usize-literal 1 bits=64 available [2471, 2472)
+usize-literal 0 bits=64 available [2180, 2181)
+usize-literal 0 bits=64 available [2396, 2397)
+usize-literal 1 bits=64 available [2500, 2501)
 fn golden/operator.main params=0 locals=7 -> i32 entry=r0
   r0 operation:
     %0 = literal 2 : i32 [52, 54)

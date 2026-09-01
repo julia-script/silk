@@ -365,6 +365,21 @@ export const anonymousAggregateJoinMismatchCode = 'SEM0174' as const
 /** Stable code for attempting named-field construction of a positional aggregate. */
 export const positionalFieldConstructionCode = 'SEM0175' as const
 
+/** Stable code for crossing from static evaluation into unavailable runtime work. */
+export const staticPhaseViolationCode = 'SEM0176' as const
+/** Stable code for a selected source-requested compile failure. */
+export const selectedCompileErrorCode = 'SEM0177' as const
+/** Stable code for a cycle in one demanded static application. */
+export const staticEvaluationCycleCode = 'SEM0178' as const
+/** Stable code for exhausting the static evaluator's deterministic step budget. */
+export const staticStepLimitCode = 'SEM0179' as const
+/** Stable code for exhausting the static evaluator's logical call-depth budget. */
+export const staticCallDepthLimitCode = 'SEM0180' as const
+/** Stable code for exhausting the static evaluator's retained-value budget. */
+export const staticRetainedValueLimitCode = 'SEM0181' as const
+/** Stable code for exhausting the static evaluator's residual-growth budget. */
+export const staticResidualGrowthLimitCode = 'SEM0182' as const
+
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
 export const partialMoveCode = 'OWN0002' as const
@@ -581,6 +596,13 @@ export type Code =
   | typeof contextualAggregateKindMismatchCode
   | typeof anonymousAggregateJoinMismatchCode
   | typeof positionalFieldConstructionCode
+  | typeof staticPhaseViolationCode
+  | typeof selectedCompileErrorCode
+  | typeof staticEvaluationCycleCode
+  | typeof staticStepLimitCode
+  | typeof staticCallDepthLimitCode
+  | typeof staticRetainedValueLimitCode
+  | typeof staticResidualGrowthLimitCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -611,6 +633,14 @@ export interface BuiltinEntity {
   readonly _tag: 'BuiltinTarget'
   readonly actor: string
   readonly operation: string
+}
+
+/** One deterministic source-level frame retained by a static diagnostic. */
+export interface StaticTraceFrame {
+  readonly kind: 'Call' | 'SelectedArm' | 'StaticText'
+  readonly label: string
+  readonly arguments: ReadonlyArray<string>
+  readonly span: SourceSpan.SourceSpan
 }
 
 export type ParserContext = 'syntax' | 'statement' | 'expression' | 'parameter' | 'delimiter'
@@ -688,6 +718,31 @@ export type Reason =
       readonly types: ReadonlyArray<string>
     }
   | { readonly _tag: 'PositionalFieldConstruction'; readonly type: string }
+  | {
+      readonly _tag: 'StaticPhaseViolation'
+      readonly operation: string
+      readonly target: string
+      readonly trace: ReadonlyArray<StaticTraceFrame>
+    }
+  | {
+      readonly _tag: 'SelectedCompileError'
+      readonly detail: string
+      readonly target: string
+      readonly trace: ReadonlyArray<StaticTraceFrame>
+    }
+  | {
+      readonly _tag: 'StaticEvaluationCycle'
+      readonly application: string
+      readonly target: string
+      readonly trace: ReadonlyArray<StaticTraceFrame>
+    }
+  | {
+      readonly _tag: 'StaticEvaluationLimit'
+      readonly resource: 'Steps' | 'CallDepth' | 'RetainedValueBytes' | 'ResidualNodes'
+      readonly limit: number
+      readonly target: string
+      readonly trace: ReadonlyArray<StaticTraceFrame>
+    }
   | { readonly _tag: 'UnknownModule'; readonly module: string }
   | { readonly _tag: 'SelfImport'; readonly module: string }
   | { readonly _tag: 'ReservedModuleIdentity'; readonly module: string }
@@ -2537,6 +2592,202 @@ export const positionalFieldConstruction = (
     reason: Object.freeze({ _tag: 'PositionalFieldConstruction', type }),
     span,
   })
+
+const freezeStaticTrace = (
+  trace: ReadonlyArray<StaticTraceFrame>,
+): ReadonlyArray<StaticTraceFrame> =>
+  Object.freeze(
+    trace.map((frame) =>
+      Object.freeze({
+        ...frame,
+        arguments: Object.freeze(Array.from(frame.arguments)),
+      }),
+    ),
+  )
+
+const staticTraceRelatedSpans = (
+  trace: ReadonlyArray<StaticTraceFrame>,
+): ReadonlyArray<RelatedSpan> =>
+  Object.freeze(trace.map((frame) => Object.freeze({ label: frame.label, span: frame.span })))
+
+/** Creates a diagnostic for one operation unavailable during static evaluation. */
+export const staticPhaseViolation = (
+  operation: string,
+  target: string,
+  trace: ReadonlyArray<StaticTraceFrame>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic => {
+  const frozenTrace = freezeStaticTrace(trace)
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: staticPhaseViolationCode,
+    severity: 'error',
+    message: `${operation} is not available during static evaluation for ${target}`,
+    reason: Object.freeze({
+      _tag: 'StaticPhaseViolation',
+      operation,
+      target,
+      trace: frozenTrace,
+    }),
+    span,
+    relatedSpans: staticTraceRelatedSpans(frozenTrace),
+  })
+}
+
+/** Creates the diagnostic requested by a selected `compileError` expression. */
+export const selectedCompileError = (
+  detail: string,
+  target: string,
+  trace: ReadonlyArray<StaticTraceFrame>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic => {
+  const frozenTrace = freezeStaticTrace(trace)
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: selectedCompileErrorCode,
+    severity: 'error',
+    message: `${detail}`,
+    reason: Object.freeze({
+      _tag: 'SelectedCompileError',
+      detail,
+      target,
+      trace: frozenTrace,
+    }),
+    span,
+    relatedSpans: staticTraceRelatedSpans(frozenTrace),
+  })
+}
+
+/** Creates a diagnostic for a cyclic demanded static application. */
+export const staticEvaluationCycle = (
+  application: string,
+  target: string,
+  trace: ReadonlyArray<StaticTraceFrame>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic => {
+  const frozenTrace = freezeStaticTrace(trace)
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: staticEvaluationCycleCode,
+    severity: 'error',
+    message: `Static evaluation of ${application} is cyclic for ${target}`,
+    reason: Object.freeze({
+      _tag: 'StaticEvaluationCycle',
+      application,
+      target,
+      trace: frozenTrace,
+    }),
+    span,
+    relatedSpans: staticTraceRelatedSpans(frozenTrace),
+  })
+}
+
+/** Creates a diagnostic for exhaustion of the deterministic static step budget. */
+export const staticStepLimit = (
+  limit: number,
+  target: string,
+  trace: ReadonlyArray<StaticTraceFrame>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic => {
+  const frozenTrace = freezeStaticTrace(trace)
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: staticStepLimitCode,
+    severity: 'error',
+    message: `Static evaluation exceeded its step limit of ${limit} for ${target}`,
+    reason: Object.freeze({
+      _tag: 'StaticEvaluationLimit',
+      resource: 'Steps',
+      limit,
+      target,
+      trace: frozenTrace,
+    }),
+    span,
+    relatedSpans: staticTraceRelatedSpans(frozenTrace),
+  })
+}
+
+/** Creates a diagnostic for exhaustion of the logical static call-depth budget. */
+export const staticCallDepthLimit = (
+  limit: number,
+  target: string,
+  trace: ReadonlyArray<StaticTraceFrame>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic => {
+  const frozenTrace = freezeStaticTrace(trace)
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: staticCallDepthLimitCode,
+    severity: 'error',
+    message: `Static evaluation exceeded its call-depth limit of ${limit} for ${target}`,
+    reason: Object.freeze({
+      _tag: 'StaticEvaluationLimit',
+      resource: 'CallDepth',
+      limit,
+      target,
+      trace: frozenTrace,
+    }),
+    span,
+    relatedSpans: staticTraceRelatedSpans(frozenTrace),
+  })
+}
+
+/** Creates a diagnostic for exhaustion of retained canonical static-value bytes. */
+export const staticRetainedValueLimit = (
+  limit: number,
+  target: string,
+  trace: ReadonlyArray<StaticTraceFrame>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic => {
+  const frozenTrace = freezeStaticTrace(trace)
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: staticRetainedValueLimitCode,
+    severity: 'error',
+    message: `Static evaluation exceeded its retained-value limit of ${limit} bytes for ${target}`,
+    reason: Object.freeze({
+      _tag: 'StaticEvaluationLimit',
+      resource: 'RetainedValueBytes',
+      limit,
+      target,
+      trace: frozenTrace,
+    }),
+    span,
+    relatedSpans: staticTraceRelatedSpans(frozenTrace),
+  })
+}
+
+/** Creates a diagnostic for exhaustion of residual HIR growth. */
+export const staticResidualGrowthLimit = (
+  limit: number,
+  target: string,
+  trace: ReadonlyArray<StaticTraceFrame>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic => {
+  const frozenTrace = freezeStaticTrace(trace)
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: staticResidualGrowthLimitCode,
+    severity: 'error',
+    message: `Static evaluation exceeded its residual-growth limit of ${limit} nodes for ${target}`,
+    reason: Object.freeze({
+      _tag: 'StaticEvaluationLimit',
+      resource: 'ResidualNodes',
+      limit,
+      target,
+      trace: frozenTrace,
+    }),
+    span,
+    relatedSpans: staticTraceRelatedSpans(frozenTrace),
+  })
+}
 
 /** Creates the target-independent diagnostic for a negative `usize` literal. */
 export const usizeNegative = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>

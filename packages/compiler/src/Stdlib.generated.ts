@@ -8,6 +8,7 @@ export const modules = [
     digest: '53e3c664acd30b6f891f84658154b1812c054b4c3df32a62df07ab42ffc7b598',
     documentation: 'silk/allocator.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: ['StorageFailure', 'catchFailure', 'systemAllocationAcquire'],
     namespace: 'Allocator',
     aliases: ['AllocationFailure', 'OutOfMemoryError', 'SystemAllocator'],
@@ -21,6 +22,7 @@ export const modules = [
     digest: 'fe5ffd619bfefef88c2fcd21db585ae1fbce0e6cca9dee5922c8435b88e3a03d',
     documentation: 'silk/bool.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: ['boolEquals', 'boolNot', 'boolNotEquals'],
     namespace: 'bool',
     source:
@@ -33,6 +35,7 @@ export const modules = [
     digest: '2cce3ef0deff2a4ba1a26d52b30d71690e4be13b7ed73eb8a6975d2266ce4631',
     documentation: 'silk/box.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: ['replace'],
     namespace: 'Box',
     source:
@@ -45,6 +48,7 @@ export const modules = [
     digest: '1c62c16edfa86c9ad7555fcd9d87d0f6d04a3fb28e952c810f35a6cc3f191977',
     documentation: 'silk/bytes.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'Bytes',
     source:
@@ -57,6 +61,7 @@ export const modules = [
     digest: '0110ac96a0c66c43239d2c927adcf8b8946815a30f682acd791593125123dbff',
     documentation: 'silk/char.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'charEquals',
       'charFromU32',
@@ -78,6 +83,7 @@ export const modules = [
     digest: 'f3efe203b6fc469ff952caab1bd383b8b4222b635ff1d5dd9d7ed8c9809dfbe4',
     documentation: 'silk/child_process.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'ChildProcess',
     aliases: [
@@ -99,6 +105,7 @@ export const modules = [
     digest: 'c8243ad300e697ae88d7283ddb1627db1228719a3715dd2f9aba248b06ad7a92',
     documentation: 'silk/effect.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'bindRequirement',
       'bindRequirementMut',
@@ -117,6 +124,7 @@ export const modules = [
     digest: 'a39aebe62858f8e51cc7b671e4dfa798caf167fe2e6683bc189682e49ce9b53a',
     documentation: 'silk/execution.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'Detached',
       'Execution',
@@ -139,6 +147,7 @@ export const modules = [
     digest: '6038f8dc6ef1b4209b5e54b1702b93b2d097be78823838e097c4ceeccd81211a',
     documentation: 'silk/f32.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'f32Add',
       'f32Cos',
@@ -188,6 +197,7 @@ export const modules = [
     digest: 'b34ae488484ad4c400f37b5f6ad0ab5e71e46bc10f1ef716a9895191e5df8647',
     documentation: 'silk/f64.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'f64Add',
       'f64Cos',
@@ -237,6 +247,7 @@ export const modules = [
     digest: 'c21a3fc50b2306147f7c9d399d3fc45fb1b2278fb1c5b9e35b427de3d0c5737f',
     documentation: 'silk/fiber.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: ['Wake', 'replace', 'wake'],
     namespace: 'Fiber',
     aliases: [
@@ -258,6 +269,7 @@ export const modules = [
     digest: '7d28c2af29a1dac1368f615fa08936d632ca8ac7a51c0d70b163ec5618e5ff9f',
     documentation: 'silk/filesystem.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: ['replace', 'stringFromUtf8Unchecked'],
     namespace: 'FileSystem',
     aliases: [
@@ -280,6 +292,7 @@ export const modules = [
     digest: '5eaf8846cb49eb75830879f4b09252f91ad63187a39c38ebf3613b779af5d898',
     documentation: 'silk/format.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'Format',
     aliases: ['NotANumber', 'OutOfRange', 'ParseError'],
@@ -293,6 +306,7 @@ export const modules = [
     digest: '17c839d9fd87bafa54487cfe4ce945926d40e0e5945b9e6184d144faeb886e6f',
     documentation: 'silk/hash.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'HashKey',
     aliases: ['HashSeed', 'Word'],
@@ -306,6 +320,7 @@ export const modules = [
     digest: '2652716f5499dc0c71a5032f74b016f8d9624a29f2a2d6258917f1ba4319dd1c',
     documentation: 'silk/hash_map.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: ['NonParking', 'replace'],
     namespace: 'HashMap',
     source:
@@ -318,6 +333,7 @@ export const modules = [
     digest: 'fcdc03b5b10c74f3aada8daed0d6a28a63b96335e1a06366301705975e534db4',
     documentation: 'silk/hash_set.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: ['replace'],
     namespace: 'HashSet',
     source:
@@ -330,6 +346,7 @@ export const modules = [
     digest: '6eb626155d914ff96613ff06431411b2e29b2b155fdc03dcb877d1ca7ae6b78f',
     documentation: 'silk/host_input.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'HostInput',
     aliases: ['HostInputError'],
@@ -343,6 +360,7 @@ export const modules = [
     digest: 'a0dce6b0a666dd6e423f396f2dde10f9cb73ae8954bd1aaeaf11e1cc9e1b9aea',
     documentation: 'silk/i16.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'i16Add',
       'i16BitAnd',
@@ -411,6 +429,7 @@ export const modules = [
     digest: '9be7d1f874e1ca6a1e69be9145bd34249123683f121fe365fe94fcec59524b38',
     documentation: 'silk/i32.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'i32Add',
       'i32BitAnd',
@@ -479,6 +498,7 @@ export const modules = [
     digest: '40148cef25090c4485792c18b761dfb08c20fb34a89cf8c581066f112020657c',
     documentation: 'silk/i64.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'i64Add',
       'i64BitAnd',
@@ -547,6 +567,7 @@ export const modules = [
     digest: 'fba0a30e1823916bc047c46c63e4033d3fb502da325f90ce7ab95d5790923cb7',
     documentation: 'silk/i8.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'i8Add',
       'i8BitAnd',
@@ -615,6 +636,7 @@ export const modules = [
     digest: 'ed27cebe677fce83c0f5d08716c481a8b35c0cc9e5b832116a43745a58575f46',
     documentation: 'silk/insecure_random.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'InsecureRandom',
     aliases: ['Xoshiro256StarStar'],
@@ -628,6 +650,7 @@ export const modules = [
     digest: '4a781cbefbfe14990edf5e515c647621ff5185b84286fbf55132bffc67c8dc66',
     documentation: 'silk/insecure_seed.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'InsecureSeed',
     aliases: ['FixedInsecureSeed', 'Seed'],
@@ -638,9 +661,10 @@ export const modules = [
     module: 'silk/isize',
     path: 'silk/isize.silk',
     sourceIdentity: 'silk/isize',
-    digest: '81a41ff8db89a1e3474cf7c4091a39cd334f9f799ddceaa2b3197fe6154078ed',
+    digest: '6bf1296044a4e4c0aada4010c84fd9c2ffaef85a2c984c89c17ad047129932d8',
     documentation: 'silk/isize.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'isizeAdd',
       'isizeBitAnd',
@@ -700,7 +724,7 @@ export const modules = [
     ],
     namespace: 'isize',
     source:
-      "//! Pointer-width signed integers for offsets whose range follows the selected compilation target.\n//!\n//! # When to use\n//! Use `isize` for offsets paired with target-sized counts or addresses. Use a fixed-width integer\n//! for files, protocols, persistent data, or any value that must mean the same thing on 32-bit and\n//! 64-bit targets.\n//!\n//! # Details\n//! [`BITS`], [`MIN`], and [`MAX`] are selected from the target. Ordinary arithmetic, narrowing\n//! conversions, division by zero, and invalid shift counts trap. `checked*` returns [`Option`],\n//! `wrapping*` uses arithmetic modulo the target width, and `saturating*` clamps at the target bound.\n//!\n//! Decimal [`parse`] uses the selected range. Use [`Format`] with `Format.display` for defaults or\n//! `Format.displayWith` for explicit options. Both operations stream through a mutable `Writer`\n//! without `Allocator`.\n//!\n//! # Gotchas\n//! Code that succeeds at a 64-bit boundary may fail or trap when compiled for a 32-bit target.\n//! [`MIN`] also has no positive counterpart. Use [`checkedDivide`] when division by `-1` can receive\n//! that value.\n//!\n//! # Examples\n//! ## Clamp an offset at the target boundary\n//! ```silk\n//! import silk.isize\n//!\n//! pub fn main() -> i32 {\n//!   if isize.saturatingAdd(isize.MAX, 1) != isize.MAX {\n//!     return 1\n//!   }\n//!   return 42\n//! }\n//! ```\n\nimport silk.bool as bool\nimport silk.f32 as f32\nimport silk.f64 as f64\nimport silk.format { Format, ParseError }\nimport silk.i16 as i16\nimport silk.i32 as i32\nimport silk.i64 as i64\nimport silk.i8 as i8\nimport silk.option { Option, none, some }\nimport silk.result { Result }\nimport silk.u16 as u16\nimport silk.u32 as u32\nimport silk.u64 as u64\nimport silk.u8 as u8\nimport silk.usize as usize\n\n/// The largest `isize` value for the compilation target.\n///\n/// # Details\n///\n/// This is 2147483647 on a 32-bit target and 9223372036854775807 on a 64-bit target. Checked\n/// arithmetic rejects results above it.\npub const MAX: isize = Target.isizeMax\n\n/// The smallest `isize` value for the compilation target.\n///\n/// # Details\n///\n/// This is -2147483648 on a 32-bit target and -9223372036854775808 on a 64-bit target.\npub const MIN: isize = Target.isizeMin\n\n/// The width of `isize` in bits, which is the compilation target's pointer width.\npub const BITS: u32 = Target.pointerBits\n\n/// Returns the arithmetic negation of `value` and traps when `value` is [`MIN`]. Use\n/// this function when that boundary is a program error.\npub fn negate(value: isize) -> isize {\n  return Intrinsic.isizeNegate(value)\n}\n\n/// Returns the arithmetic negation of `value`, wrapped to the `isize` range. [`MIN`]\n/// stays [`MIN`]. Use this function for deliberate modulo arithmetic.\npub fn wrappingNegate(value: isize) -> isize {\n  return Intrinsic.isizeWrappingNegate(value)\n}\n\n/// Returns the arithmetic negation of `value`, clamped to the `isize` range. [`MIN`]\n/// becomes [`MAX`]. Use this function when the positive boundary is required.\npub fn saturatingNegate(value: isize) -> isize {\n  return Intrinsic.isizeSaturatingNegate(value)\n}\n\n/// Converts `value` to `u8`. Traps if `value` is outside the `u8` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toU8(value: isize) -> u8 {\n  return Intrinsic.isizeToU8(value)\n}\n\n/// Converts `value` to `u8`, or returns `None` if `value` is outside the `u8`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToU8(value: isize) -> Option<u8> {\n  return Intrinsic.isizeCheckedToU8<Option<u8>>(value, some, none)\n}\n\n/// Converts `value` to `u16`. Traps if `value` is outside the `u16` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toU16(value: isize) -> u16 {\n  return Intrinsic.isizeToU16(value)\n}\n\n/// Converts `value` to `u16`, or returns `None` if `value` is outside the `u16`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToU16(value: isize) -> Option<u16> {\n  return Intrinsic.isizeCheckedToU16<Option<u16>>(value, some, none)\n}\n\n/// Converts `value` to `u32`. Traps if `value` is outside the `u32` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toU32(value: isize) -> u32 {\n  return Intrinsic.isizeToU32(value)\n}\n\n/// Converts `value` to `u32`, or returns `None` if `value` is outside the `u32`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToU32(value: isize) -> Option<u32> {\n  return Intrinsic.isizeCheckedToU32<Option<u32>>(value, some, none)\n}\n\n/// Converts `value` to `u64`. Traps if `value` is outside the `u64` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toU64(value: isize) -> u64 {\n  return Intrinsic.isizeToU64(value)\n}\n\n/// Converts `value` to `u64`, or returns `None` if `value` is outside the `u64`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToU64(value: isize) -> Option<u64> {\n  return Intrinsic.isizeCheckedToU64<Option<u64>>(value, some, none)\n}\n\n/// Converts `value` to `usize`. Traps if `value` is outside the `usize` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toUsize(value: isize) -> usize {\n  return Intrinsic.isizeToUsize(value)\n}\n\n/// Converts `value` to `usize`, or returns `None` if `value` is outside the `usize`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToUsize(value: isize) -> Option<usize> {\n  return Intrinsic.isizeCheckedToUsize<Option<usize>>(value, some, none)\n}\n\n/// Converts `value` to `i8`. Traps if `value` is outside the `i8` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toI8(value: isize) -> i8 {\n  return Intrinsic.isizeToI8(value)\n}\n\n/// Converts `value` to `i8`, or returns `None` if `value` is outside the `i8`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToI8(value: isize) -> Option<i8> {\n  return Intrinsic.isizeCheckedToI8<Option<i8>>(value, some, none)\n}\n\n/// Converts `value` to `i16`. Traps if `value` is outside the `i16` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toI16(value: isize) -> i16 {\n  return Intrinsic.isizeToI16(value)\n}\n\n/// Converts `value` to `i16`, or returns `None` if `value` is outside the `i16`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToI16(value: isize) -> Option<i16> {\n  return Intrinsic.isizeCheckedToI16<Option<i16>>(value, some, none)\n}\n\n/// Converts `value` to `i32`. Traps if `value` is outside the `i32` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toI32(value: isize) -> i32 {\n  return Intrinsic.isizeToI32(value)\n}\n\n/// Converts `value` to `i32`, or returns `None` if `value` is outside the `i32`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToI32(value: isize) -> Option<i32> {\n  return Intrinsic.isizeCheckedToI32<Option<i32>>(value, some, none)\n}\n\n/// Converts `value` exactly to `i64`. Every `isize` value is representable.\npub fn toI64(value: isize) -> i64 {\n  return Intrinsic.isizeToI64(value)\n}\n\n/// Converts `value` exactly to `i64` and returns `Some`. Every `isize` value is\n/// representable.\npub fn checkedToI64(value: isize) -> Option<i64> {\n  return Intrinsic.isizeCheckedToI64<Option<i64>>(value, some, none)\n}\n\n/// Returns `value` unchanged as `isize`. Use this function when generic conversion code\n/// can select `isize` as both source and destination.\npub fn toIsize(value: isize) -> isize {\n  return Intrinsic.isizeToIsize(value)\n}\n\n/// Returns `Some` with `value` unchanged as `isize`. Use this function when generic\n/// checked-conversion code can select the same source and destination type.\npub fn checkedToIsize(value: isize) -> Option<isize> {\n  return Intrinsic.isizeCheckedToIsize<Option<isize>>(value, some, none)\n}\n\n/// Converts `value` to the nearest `f32` value, with ties to even.\npub fn toF32(value: isize) -> f32 {\n  return Intrinsic.isizeToF32(value)\n}\n\n/// Converts `value` to the nearest `f64` value, with ties to even.\npub fn toF64(value: isize) -> f64 {\n  return Intrinsic.isizeToF64(value)\n}\n\n/// Returns `left + right` and traps if the result is outside the `isize` range. Use this function\n/// when overflow is a program error.\npub fn add(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeAdd(left, right)\n}\n\n/// Returns `left - right` and traps if the result is outside the `isize` range. Use this function\n/// when overflow is a program error.\npub fn subtract(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeSubtract(left, right)\n}\n\n/// Returns `left * right` and traps if the result is outside the `isize` range. Use this function\n/// when overflow is a program error.\npub fn multiply(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeMultiply(left, right)\n}\n\n/// Returns `left / right`, rounded toward zero. Traps if `right` is zero or [`MIN`] is\n/// divided by `-1`. Use this function when an invalid quotient is a program error.\npub fn divide(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeDivide(left, right)\n}\n\n/// Returns the remainder with the sign of `left`. Traps if `right` is zero or [`MIN`] is\n/// divided by `-1`. Use this function when invalid division is a program error.\npub fn remainder(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeRemainder(left, right)\n}\n\n/// Returns the bitwise AND of `left` and `right`.\npub fn bitAnd(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeBitAnd(left, right)\n}\n\n/// Returns the bitwise OR of `left` and `right`.\npub fn bitOr(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeBitOr(left, right)\n}\n\n/// Returns the bitwise exclusive OR of `left` and `right`.\npub fn bitXor(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeBitXor(left, right)\n}\n\n/// Returns `value` with each bit inverted.\npub fn bitNot(value: isize) -> isize {\n  return Intrinsic.isizeBitNot(value)\n}\n\n/// Shifts `left` bits left by `right` positions. Traps if `right` is negative or not less than\n/// [`BITS`].\npub fn shiftLeft(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeShiftLeft(left, right)\n}\n\n/// Shifts `left` bits right by `right` positions and preserves its sign. Traps if `right` is\n/// negative or not less than [`BITS`].\npub fn shiftRight(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeShiftRight(left, right)\n}\n\n/// Rotates the bits of `left` left by `right` positions.\npub fn rotateLeft(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeRotateLeft(left, right)\n}\n\n/// Rotates the bits of `left` right by `right` positions.\npub fn rotateRight(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeRotateRight(left, right)\n}\n\n/// Returns `left + right`, wrapped to the `isize` range. Use this function for\n/// deliberate modulo arithmetic.\npub fn wrappingAdd(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeWrappingAdd(left, right)\n}\n\n/// Returns `left - right`, wrapped to the `isize` range. Use this function for\n/// deliberate modulo arithmetic.\npub fn wrappingSubtract(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeWrappingSubtract(left, right)\n}\n\n/// Returns `left * right`, wrapped to the `isize` range. Use this function for\n/// deliberate modulo arithmetic.\npub fn wrappingMultiply(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeWrappingMultiply(left, right)\n}\n\n/// Returns `left + right`, clamped to [`MIN`] or [`MAX`]. Use this function when a\n/// boundary value is the required overflow result.\npub fn saturatingAdd(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeSaturatingAdd(left, right)\n}\n\n/// Returns `left - right`, clamped to [`MIN`] or [`MAX`]. Use this function when a\n/// boundary value is the required overflow result.\npub fn saturatingSubtract(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeSaturatingSubtract(left, right)\n}\n\n/// Returns `left * right`, clamped to [`MIN`] or [`MAX`]. Use this function when a\n/// boundary value is the required overflow result.\npub fn saturatingMultiply(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeSaturatingMultiply(left, right)\n}\n\n/// Returns `Some` with `left + right`, or `None` if the result is outside the `isize` range.\n/// Use this function when overflow is input data.\npub fn checkedAdd(left: isize, right: isize) -> Option<isize> {\n  return Intrinsic.isizeCheckedAdd<Option<isize>>(left, right, some, none)\n}\n\n/// Returns `Some` with `left - right`, or `None` if the result is outside the `isize` range.\n/// Use this function when overflow is input data.\npub fn checkedSubtract(left: isize, right: isize) -> Option<isize> {\n  return Intrinsic.isizeCheckedSubtract<Option<isize>>(left, right, some, none)\n}\n\n/// Returns `Some` with `left * right`, or `None` if the result is outside the `isize` range.\n/// Use this function when overflow is input data.\npub fn checkedMultiply(left: isize, right: isize) -> Option<isize> {\n  return Intrinsic.isizeCheckedMultiply<Option<isize>>(left, right, some, none)\n}\n\n/// Returns `Some` with `left / right`, or `None` if `right` is zero or [`MIN`] is\n/// divided by `-1`. Use this function when an invalid quotient is input data.\npub fn checkedDivide(left: isize, right: isize) -> Option<isize> {\n  return Intrinsic.isizeCheckedDivide<Option<isize>>(left, right, some, none)\n}\n\n/// Returns `Some` with the remainder, or `None` if `right` is zero or [`MIN`] is\n/// divided by `-1`. Use this function when invalid division is input data.\npub fn checkedRemainder(left: isize, right: isize) -> Option<isize> {\n  return Intrinsic.isizeCheckedRemainder<Option<isize>>(left, right, some, none)\n}\n\n/// Returns `true` when `left` and `right` are equal.\npub fn equals(left: isize, right: isize) -> bool {\n  return Intrinsic.isizeEquals(left, right)\n}\n\n/// Returns `true` when `left` and `right` are not equal.\npub fn notEquals(left: isize, right: isize) -> bool {\n  return Intrinsic.isizeNotEquals(left, right)\n}\n\n/// Returns `true` when `left` is less than `right`.\npub fn lessThan(left: isize, right: isize) -> bool {\n  return Intrinsic.isizeLessThan(&left, &right)\n}\n\n/// Returns `true` when `left` is less than or equal to `right`.\npub fn lessOrEqual(left: isize, right: isize) -> bool {\n  return Intrinsic.isizeLessOrEqual(left, right)\n}\n\n/// Returns `true` when `left` is greater than `right`.\npub fn greaterThan(left: isize, right: isize) -> bool {\n  return Intrinsic.isizeGreaterThan(left, right)\n}\n\n/// Returns `true` when `left` is greater than or equal to `right`.\npub fn greaterOrEqual(left: isize, right: isize) -> bool {\n  return Intrinsic.isizeGreaterOrEqual(left, right)\n}\n\n/// Reads the complete text as a signed decimal `isize`.\n///\n/// # Details\n///\n/// A failure contains `silk.format.NotANumber` for empty text, a leading `+`, a non-digit, or\n/// trailing bytes. It contains `silk.format.OutOfRange` outside the target's `isize` range.\npub fn parse(text: string) -> Result<isize, ParseError> {\n  return Format.isizeValue(text)\n}\n",
+      "//! Pointer-width signed integers for offsets whose range follows the selected compilation target.\n//!\n//! # When to use\n//! Use `isize` for offsets paired with target-sized counts or addresses. Use a fixed-width integer\n//! for files, protocols, persistent data, or any value that must mean the same thing on 32-bit and\n//! 64-bit targets.\n//!\n//! # Details\n//! [`BITS`], [`MIN`], and [`MAX`] are selected from the target. Ordinary arithmetic, narrowing\n//! conversions, division by zero, and invalid shift counts trap. `checked*` returns [`Option`],\n//! `wrapping*` uses arithmetic modulo the target width, and `saturating*` clamps at the target bound.\n//!\n//! Decimal [`parse`] uses the selected range. Use [`Format`] with `Format.display` for defaults or\n//! `Format.displayWith` for explicit options. Both operations stream through a mutable `Writer`\n//! without `Allocator`.\n//!\n//! # Gotchas\n//! Code that succeeds at a 64-bit boundary may fail or trap when compiled for a 32-bit target.\n//! [`MIN`] also has no positive counterpart. Use [`checkedDivide`] when division by `-1` can receive\n//! that value.\n//!\n//! # Examples\n//! ## Clamp an offset at the target boundary\n//! ```silk\n//! import silk.isize\n//!\n//! pub fn main() -> i32 {\n//!   if isize.saturatingAdd(isize.MAX, 1) != isize.MAX {\n//!     return 1\n//!   }\n//!   return 42\n//! }\n//! ```\n\nimport silk.bool as bool\nimport silk.f32 as f32\nimport silk.f64 as f64\nimport silk.format { Format, ParseError }\nimport silk.i16 as i16\nimport silk.i32 as i32\nimport silk.i64 as i64\nimport silk.i8 as i8\nimport silk.option { Option, none, some }\nimport silk.result { Result }\nimport silk.target as Target\nimport silk.u16 as u16\nimport silk.u32 as u32\nimport silk.u64 as u64\nimport silk.u8 as u8\nimport silk.usize as usize\n\n/// The largest `isize` value for the compilation target.\n///\n/// # Details\n///\n/// This is 2147483647 on a 32-bit target and 9223372036854775807 on a 64-bit target. Checked\n/// arithmetic rejects results above it.\npub const MAX: isize = Target.isizeMax\n\n/// The smallest `isize` value for the compilation target.\n///\n/// # Details\n///\n/// This is -2147483648 on a 32-bit target and -9223372036854775808 on a 64-bit target.\npub const MIN: isize = Target.isizeMin\n\n/// The width of `isize` in bits, which is the compilation target's pointer width.\npub const BITS: u32 = Target.pointerBits\n\n/// Returns the arithmetic negation of `value` and traps when `value` is [`MIN`]. Use\n/// this function when that boundary is a program error.\npub fn negate(value: isize) -> isize {\n  return Intrinsic.isizeNegate(value)\n}\n\n/// Returns the arithmetic negation of `value`, wrapped to the `isize` range. [`MIN`]\n/// stays [`MIN`]. Use this function for deliberate modulo arithmetic.\npub fn wrappingNegate(value: isize) -> isize {\n  return Intrinsic.isizeWrappingNegate(value)\n}\n\n/// Returns the arithmetic negation of `value`, clamped to the `isize` range. [`MIN`]\n/// becomes [`MAX`]. Use this function when the positive boundary is required.\npub fn saturatingNegate(value: isize) -> isize {\n  return Intrinsic.isizeSaturatingNegate(value)\n}\n\n/// Converts `value` to `u8`. Traps if `value` is outside the `u8` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toU8(value: isize) -> u8 {\n  return Intrinsic.isizeToU8(value)\n}\n\n/// Converts `value` to `u8`, or returns `None` if `value` is outside the `u8`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToU8(value: isize) -> Option<u8> {\n  return Intrinsic.isizeCheckedToU8<Option<u8>>(value, some, none)\n}\n\n/// Converts `value` to `u16`. Traps if `value` is outside the `u16` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toU16(value: isize) -> u16 {\n  return Intrinsic.isizeToU16(value)\n}\n\n/// Converts `value` to `u16`, or returns `None` if `value` is outside the `u16`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToU16(value: isize) -> Option<u16> {\n  return Intrinsic.isizeCheckedToU16<Option<u16>>(value, some, none)\n}\n\n/// Converts `value` to `u32`. Traps if `value` is outside the `u32` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toU32(value: isize) -> u32 {\n  return Intrinsic.isizeToU32(value)\n}\n\n/// Converts `value` to `u32`, or returns `None` if `value` is outside the `u32`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToU32(value: isize) -> Option<u32> {\n  return Intrinsic.isizeCheckedToU32<Option<u32>>(value, some, none)\n}\n\n/// Converts `value` to `u64`. Traps if `value` is outside the `u64` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toU64(value: isize) -> u64 {\n  return Intrinsic.isizeToU64(value)\n}\n\n/// Converts `value` to `u64`, or returns `None` if `value` is outside the `u64`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToU64(value: isize) -> Option<u64> {\n  return Intrinsic.isizeCheckedToU64<Option<u64>>(value, some, none)\n}\n\n/// Converts `value` to `usize`. Traps if `value` is outside the `usize` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toUsize(value: isize) -> usize {\n  return Intrinsic.isizeToUsize(value)\n}\n\n/// Converts `value` to `usize`, or returns `None` if `value` is outside the `usize`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToUsize(value: isize) -> Option<usize> {\n  return Intrinsic.isizeCheckedToUsize<Option<usize>>(value, some, none)\n}\n\n/// Converts `value` to `i8`. Traps if `value` is outside the `i8` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toI8(value: isize) -> i8 {\n  return Intrinsic.isizeToI8(value)\n}\n\n/// Converts `value` to `i8`, or returns `None` if `value` is outside the `i8`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToI8(value: isize) -> Option<i8> {\n  return Intrinsic.isizeCheckedToI8<Option<i8>>(value, some, none)\n}\n\n/// Converts `value` to `i16`. Traps if `value` is outside the `i16` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toI16(value: isize) -> i16 {\n  return Intrinsic.isizeToI16(value)\n}\n\n/// Converts `value` to `i16`, or returns `None` if `value` is outside the `i16`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToI16(value: isize) -> Option<i16> {\n  return Intrinsic.isizeCheckedToI16<Option<i16>>(value, some, none)\n}\n\n/// Converts `value` to `i32`. Traps if `value` is outside the `i32` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toI32(value: isize) -> i32 {\n  return Intrinsic.isizeToI32(value)\n}\n\n/// Converts `value` to `i32`, or returns `None` if `value` is outside the `i32`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToI32(value: isize) -> Option<i32> {\n  return Intrinsic.isizeCheckedToI32<Option<i32>>(value, some, none)\n}\n\n/// Converts `value` exactly to `i64`. Every `isize` value is representable.\npub fn toI64(value: isize) -> i64 {\n  return Intrinsic.isizeToI64(value)\n}\n\n/// Converts `value` exactly to `i64` and returns `Some`. Every `isize` value is\n/// representable.\npub fn checkedToI64(value: isize) -> Option<i64> {\n  return Intrinsic.isizeCheckedToI64<Option<i64>>(value, some, none)\n}\n\n/// Returns `value` unchanged as `isize`. Use this function when generic conversion code\n/// can select `isize` as both source and destination.\npub fn toIsize(value: isize) -> isize {\n  return Intrinsic.isizeToIsize(value)\n}\n\n/// Returns `Some` with `value` unchanged as `isize`. Use this function when generic\n/// checked-conversion code can select the same source and destination type.\npub fn checkedToIsize(value: isize) -> Option<isize> {\n  return Intrinsic.isizeCheckedToIsize<Option<isize>>(value, some, none)\n}\n\n/// Converts `value` to the nearest `f32` value, with ties to even.\npub fn toF32(value: isize) -> f32 {\n  return Intrinsic.isizeToF32(value)\n}\n\n/// Converts `value` to the nearest `f64` value, with ties to even.\npub fn toF64(value: isize) -> f64 {\n  return Intrinsic.isizeToF64(value)\n}\n\n/// Returns `left + right` and traps if the result is outside the `isize` range. Use this function\n/// when overflow is a program error.\npub fn add(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeAdd(left, right)\n}\n\n/// Returns `left - right` and traps if the result is outside the `isize` range. Use this function\n/// when overflow is a program error.\npub fn subtract(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeSubtract(left, right)\n}\n\n/// Returns `left * right` and traps if the result is outside the `isize` range. Use this function\n/// when overflow is a program error.\npub fn multiply(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeMultiply(left, right)\n}\n\n/// Returns `left / right`, rounded toward zero. Traps if `right` is zero or [`MIN`] is\n/// divided by `-1`. Use this function when an invalid quotient is a program error.\npub fn divide(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeDivide(left, right)\n}\n\n/// Returns the remainder with the sign of `left`. Traps if `right` is zero or [`MIN`] is\n/// divided by `-1`. Use this function when invalid division is a program error.\npub fn remainder(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeRemainder(left, right)\n}\n\n/// Returns the bitwise AND of `left` and `right`.\npub fn bitAnd(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeBitAnd(left, right)\n}\n\n/// Returns the bitwise OR of `left` and `right`.\npub fn bitOr(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeBitOr(left, right)\n}\n\n/// Returns the bitwise exclusive OR of `left` and `right`.\npub fn bitXor(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeBitXor(left, right)\n}\n\n/// Returns `value` with each bit inverted.\npub fn bitNot(value: isize) -> isize {\n  return Intrinsic.isizeBitNot(value)\n}\n\n/// Shifts `left` bits left by `right` positions. Traps if `right` is negative or not less than\n/// [`BITS`].\npub fn shiftLeft(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeShiftLeft(left, right)\n}\n\n/// Shifts `left` bits right by `right` positions and preserves its sign. Traps if `right` is\n/// negative or not less than [`BITS`].\npub fn shiftRight(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeShiftRight(left, right)\n}\n\n/// Rotates the bits of `left` left by `right` positions.\npub fn rotateLeft(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeRotateLeft(left, right)\n}\n\n/// Rotates the bits of `left` right by `right` positions.\npub fn rotateRight(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeRotateRight(left, right)\n}\n\n/// Returns `left + right`, wrapped to the `isize` range. Use this function for\n/// deliberate modulo arithmetic.\npub fn wrappingAdd(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeWrappingAdd(left, right)\n}\n\n/// Returns `left - right`, wrapped to the `isize` range. Use this function for\n/// deliberate modulo arithmetic.\npub fn wrappingSubtract(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeWrappingSubtract(left, right)\n}\n\n/// Returns `left * right`, wrapped to the `isize` range. Use this function for\n/// deliberate modulo arithmetic.\npub fn wrappingMultiply(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeWrappingMultiply(left, right)\n}\n\n/// Returns `left + right`, clamped to [`MIN`] or [`MAX`]. Use this function when a\n/// boundary value is the required overflow result.\npub fn saturatingAdd(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeSaturatingAdd(left, right)\n}\n\n/// Returns `left - right`, clamped to [`MIN`] or [`MAX`]. Use this function when a\n/// boundary value is the required overflow result.\npub fn saturatingSubtract(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeSaturatingSubtract(left, right)\n}\n\n/// Returns `left * right`, clamped to [`MIN`] or [`MAX`]. Use this function when a\n/// boundary value is the required overflow result.\npub fn saturatingMultiply(left: isize, right: isize) -> isize {\n  return Intrinsic.isizeSaturatingMultiply(left, right)\n}\n\n/// Returns `Some` with `left + right`, or `None` if the result is outside the `isize` range.\n/// Use this function when overflow is input data.\npub fn checkedAdd(left: isize, right: isize) -> Option<isize> {\n  return Intrinsic.isizeCheckedAdd<Option<isize>>(left, right, some, none)\n}\n\n/// Returns `Some` with `left - right`, or `None` if the result is outside the `isize` range.\n/// Use this function when overflow is input data.\npub fn checkedSubtract(left: isize, right: isize) -> Option<isize> {\n  return Intrinsic.isizeCheckedSubtract<Option<isize>>(left, right, some, none)\n}\n\n/// Returns `Some` with `left * right`, or `None` if the result is outside the `isize` range.\n/// Use this function when overflow is input data.\npub fn checkedMultiply(left: isize, right: isize) -> Option<isize> {\n  return Intrinsic.isizeCheckedMultiply<Option<isize>>(left, right, some, none)\n}\n\n/// Returns `Some` with `left / right`, or `None` if `right` is zero or [`MIN`] is\n/// divided by `-1`. Use this function when an invalid quotient is input data.\npub fn checkedDivide(left: isize, right: isize) -> Option<isize> {\n  return Intrinsic.isizeCheckedDivide<Option<isize>>(left, right, some, none)\n}\n\n/// Returns `Some` with the remainder, or `None` if `right` is zero or [`MIN`] is\n/// divided by `-1`. Use this function when invalid division is input data.\npub fn checkedRemainder(left: isize, right: isize) -> Option<isize> {\n  return Intrinsic.isizeCheckedRemainder<Option<isize>>(left, right, some, none)\n}\n\n/// Returns `true` when `left` and `right` are equal.\npub fn equals(left: isize, right: isize) -> bool {\n  return Intrinsic.isizeEquals(left, right)\n}\n\n/// Returns `true` when `left` and `right` are not equal.\npub fn notEquals(left: isize, right: isize) -> bool {\n  return Intrinsic.isizeNotEquals(left, right)\n}\n\n/// Returns `true` when `left` is less than `right`.\npub fn lessThan(left: isize, right: isize) -> bool {\n  return Intrinsic.isizeLessThan(&left, &right)\n}\n\n/// Returns `true` when `left` is less than or equal to `right`.\npub fn lessOrEqual(left: isize, right: isize) -> bool {\n  return Intrinsic.isizeLessOrEqual(left, right)\n}\n\n/// Returns `true` when `left` is greater than `right`.\npub fn greaterThan(left: isize, right: isize) -> bool {\n  return Intrinsic.isizeGreaterThan(left, right)\n}\n\n/// Returns `true` when `left` is greater than or equal to `right`.\npub fn greaterOrEqual(left: isize, right: isize) -> bool {\n  return Intrinsic.isizeGreaterOrEqual(left, right)\n}\n\n/// Reads the complete text as a signed decimal `isize`.\n///\n/// # Details\n///\n/// A failure contains `silk.format.NotANumber` for empty text, a leading `+`, a non-digit, or\n/// trailing bytes. It contains `silk.format.OutOfRange` outside the target's `isize` range.\npub fn parse(text: string) -> Result<isize, ParseError> {\n  return Format.isizeValue(text)\n}\n",
   },
   {
     module: 'silk/layout',
@@ -709,6 +733,7 @@ export const modules = [
     digest: 'ebbbcbee14bcb319a8bf8c685474316a1e814cfc35c7c664856182b2b77290fc',
     documentation: 'silk/layout.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: ['layoutOf'],
     namespace: 'Layout',
     aliases: ['InvalidAlignment', 'LayoutOverflow'],
@@ -722,6 +747,7 @@ export const modules = [
     digest: 'e748a3c6d2413ec182281e62f139f2d66f103155f02faadd4820de40f3f35408',
     documentation: 'silk/local_scheduler.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: ['Execution', 'Wake', 'replace', 'wake'],
     namespace: 'LocalScheduler',
     aliases: ['StalledError'],
@@ -735,6 +761,7 @@ export const modules = [
     digest: '2e5e30d11bdbff7f66fcb6163a6c15d0aa6e1da50a3f8889094d6c3758a6d18d',
     documentation: 'silk/logger.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: ['bindRequirementMut', 'replace'],
     namespace: 'Logger',
     aliases: ['InMemoryLogger', 'LogError', 'LogLevel', 'StdoutLogger'],
@@ -748,6 +775,7 @@ export const modules = [
     digest: '44ca4e9cf8fd379b605e54efe72bc3e7eede260fd58fb6cd5539805973bfe90d',
     documentation: 'silk/metrics.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'AllocationMetrics',
     source:
@@ -760,6 +788,7 @@ export const modules = [
     digest: '9811b9e9d2b6ddc20ad6a12286bdeba78342d596761315105d05e07fe3ad8b51',
     documentation: 'silk/monotonic_clock.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'MonotonicClock',
     source:
@@ -772,6 +801,7 @@ export const modules = [
     digest: 'ef0adfd94d51bda23103a0e2c6ad739e5deffec7af8007da6533cbc8022dfdf4',
     documentation: 'silk/numeric.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'i16Add',
       'i32Add',
@@ -795,6 +825,7 @@ export const modules = [
     digest: '354e720f9a6aa40184a45864e037a157a610e97bbef2e453029b4d7f66af28bb',
     documentation: 'silk/option.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'Option',
     aliases: ['None', 'Some'],
@@ -808,6 +839,7 @@ export const modules = [
     digest: 'b9682b375f1e3e892b2019db4f8719768dedcb7fb4be7f2dae19830c1be24398',
     documentation: 'silk/order.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'i16LessThan',
       'i32LessThan',
@@ -833,6 +865,7 @@ export const modules = [
     documentation: 'silk/os_child_process.silk',
     layer: 'target-provider',
     providerTargets: ['Evaluator', 'LLVM'],
+    staticInventory: [],
     runtimeInventory: ['osProcessCapture', 'osProcessExecute'],
     namespace: 'OsChildProcess',
     source:
@@ -846,6 +879,7 @@ export const modules = [
     documentation: 'silk/os_filesystem.silk',
     layer: 'target-provider',
     providerTargets: ['Evaluator', 'LLVM'],
+    staticInventory: [],
     runtimeInventory: [
       'osDirectoryCreate',
       'osDirectoryCreateUnique',
@@ -871,6 +905,7 @@ export const modules = [
     documentation: 'silk/os_host_input.silk',
     layer: 'target-provider',
     providerTargets: ['Evaluator', 'LLVM'],
+    staticInventory: [],
     runtimeInventory: [
       'osHostArgument',
       'osHostArgumentCount',
@@ -889,6 +924,7 @@ export const modules = [
     documentation: 'silk/os_monotonic_clock.silk',
     layer: 'target-provider',
     providerTargets: ['Evaluator', 'LLVM'],
+    staticInventory: [],
     runtimeInventory: [
       'osMonotonicClockNow',
       'osMonotonicClockResolution',
@@ -906,6 +942,7 @@ export const modules = [
     documentation: 'silk/os_random.silk',
     layer: 'target-provider',
     providerTargets: ['Evaluator', 'LLVM'],
+    staticInventory: [],
     runtimeInventory: ['osRandomFill'],
     namespace: 'OsRandom',
     source:
@@ -919,6 +956,7 @@ export const modules = [
     documentation: 'silk/os_standard_input.silk',
     layer: 'target-provider',
     providerTargets: ['Evaluator', 'LLVM'],
+    staticInventory: [],
     runtimeInventory: ['osStandardInputRead'],
     namespace: 'OsStandardInput',
     source:
@@ -932,6 +970,7 @@ export const modules = [
     documentation: 'silk/os_system_clock.silk',
     layer: 'target-provider',
     providerTargets: ['Evaluator', 'LLVM'],
+    staticInventory: [],
     runtimeInventory: ['osSystemClockNow', 'osSystemClockResolution'],
     namespace: 'OsSystemClock',
     source:
@@ -944,6 +983,7 @@ export const modules = [
     digest: '2bdcac398e714facf35e05db4bf2f149089fd7a3f58d03b40c231822e1e6896e',
     documentation: 'silk/random.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'Random',
     source:
@@ -956,6 +996,7 @@ export const modules = [
     digest: '5cffd33c3affeebc357072413ca94fab35a74a3fbef11a668ad952a5f41413b8',
     documentation: 'silk/raw_buffer.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'rawBufferCopy',
       'rawBufferCount',
@@ -977,6 +1018,7 @@ export const modules = [
     digest: 'f025bb4339f049ebfc4f6729279aa9714e31484c92deadfe130ace9071a747cd',
     documentation: 'silk/result.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'Result',
     source:
@@ -989,6 +1031,7 @@ export const modules = [
     digest: '1ed467f3c14a964f75fc2653193b416c30aaa02b6065338f87fc6e0fe699042f',
     documentation: 'silk/scheduler.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: ['Execution', 'Wake'],
     namespace: 'Scheduler',
     aliases: ['PendingPublication', 'TaskId', 'TaskIdExhaustedError'],
@@ -1002,6 +1045,7 @@ export const modules = [
     digest: 'b7c7c802e36c566fb27b9f1de1245bba5d042ae2dec665cf92867962e0ba8a44',
     documentation: 'silk/shared.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'SharedCore',
       'sharedClone',
@@ -1020,6 +1064,7 @@ export const modules = [
     digest: 'b0d0751f8d5da3f72379cbb974ac89b47242b52e28a339e5d33a59067ee39a7b',
     documentation: 'silk/slot.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: ['slotCopy', 'slotDrop', 'slotTake', 'slotWrite'],
     namespace: 'Slot',
     source:
@@ -1032,11 +1077,25 @@ export const modules = [
     digest: '46fc9635d0b3a44be51406d3f31f5f25f683e03b59a8b28ea9f3cd0636a8344d',
     documentation: 'silk/standard_input.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'StandardInput',
     aliases: ['EndOfInput', 'Filled', 'ReadOutcome', 'StreamReadError'],
     source:
       "//! Portable blocking reads of raw standard-input bytes through an explicit provider.\n//!\n//! # When to use\n//! Require [`StandardInput`] for byte-oriented input that should be replaceable in tests. Decode\n//! text separately so invalid input can be handled without losing its original bytes.\n//!\n//! # Details\n//! Each read writes only a prefix of the caller's mutable buffer and reports the exact committed\n//! count, which may be smaller than the buffer length. For valid non-empty reads, [`EndOfInput`] is\n//! ordinary outcome data and promises that no later read will produce bytes. [`StreamReadError`] is\n//! reserved for a provider that could not complete a read.\n//!\n//! This service is separate from `Writer`: output commits a complete message or fails,\n//! while input is inherently partial and eventually ends.\n//!\n//! # Gotchas\n//! The caller must supply a non-empty read buffer. A zero-length native read cannot distinguish\n//! available input from end-of-input.\n//!\n//! # Examples\n//! ## Read one byte and then observe the end of input\n//!\n//! ```silk\n//! import silk.effect { Effect }\n//!\n//! import silk.standard_input { StandardInput as Input }\n//!\n//! import silk.u8\n//!\n//! import silk.usize\n//!\n//! struct OneByte {\n//!   complete: bool\n//! }\n//!\n//! effect fn read(self: &mut OneByte, buffer: &mut [u8]) -> Input.ReadOutcome\n//! ! Input.StreamReadError {\n//!   if self.complete {\n//!     return Input.endOfInput()\n//!   }\n//!   buffer[usize.ZERO] = u8.toU8(42)\n//!   self.complete = true\n//!   return Input.filled(usize.ONE)\n//! }\n//!\n//! impl Input.StandardInput for OneByte {\n//!   read: OneByte.read\n//! }\n//!\n//! effect fn program() -> i32\n//! ! Input.StreamReadError {\n//!   let mut provider = OneByte {complete: false}\n//!   let mut buffer = [u8.toU8(0)]\n//!   let first = run Input.receive(&mut buffer)\n//!     |> Effect.provideMut<Input.StandardInput>(&mut provider)\n//!   if Input.count(&first) != usize.ONE {\n//!     return 1\n//!   }\n//!   let second = run Input.receive(&mut buffer)\n//!     |> Effect.provideMut<Input.StandardInput>(&mut provider)\n//!   if Input.isEndOfInput(&second) == false {\n//!     return 2\n//!   }\n//!   return u8.toI32(buffer[usize.ZERO])\n//! }\n//!\n//! effect fn recover(error: Input.StreamReadError) -> i32 {\n//!   return 0\n//! }\n//!\n//! pub fn main() -> i32 {\n//!   return run Effect.catchAll(program(), recover)\n//! }\n//! ```\n\n// The portable byte-input boundary. `Writer` writes and never reads; this service reads\n// and never writes. The two are separate because a write is all-or-failure while a read is\n// inherently partial and has an end.\n\nimport silk.bool as bool\nimport silk.u8 as u8\nimport silk.usize as usize\n\n/// A typed failure from a standard-input provider that could not complete one read.\npub struct StreamReadError {}\n\n/// Creates a standard-input failure for a provider that cannot complete one read.\npub fn readFailure() -> StreamReadError {\n  return StreamReadError {}\n}\n\n/// A read that committed a known prefix of the caller's buffer.\npub struct Filled {\n  /// The exact number of leading bytes written, which can be less than the buffer length.\n  pub count: usize\n}\n\n/// A valid non-empty read that observed permanent end-of-input without changing the buffer.\npub struct EndOfInput {}\n\n/// One completed read, represented as committed bytes or permanent end-of-input.\n///\n/// # Details\n///\n/// End-of-input is outcome data instead of failure. [`Filled`] identifies the exact initialized\n/// prefix; bytes after that prefix retain their previous values.\npub struct ReadOutcome {\n  /// The committed-byte count or permanent end-of-input result.\n  pub value: Filled | EndOfInput\n}\n\n/// A portable blocking service for partial reads of raw standard-input bytes.\n///\n/// # When to use\n///\n/// Use this service for replaceable byte input. Decode text in a separate operation after each read\n/// when text validation is required.\n///\n/// # Details\n///\n/// `read` changes only the reported leading prefix of the buffer. The committed count can be less\n/// than the buffer length. A host error produces [`StreamReadError`]; end-of-input does not.\n///\n/// After [`EndOfInput`] from a valid non-empty read, later reads do not produce bytes.\npub service StandardInput {\n  /// Reads at most the buffer length and reports the exact committed prefix or end-of-input.\n  ///\n  /// # Details\n  ///\n  /// Bytes after a [`Filled`] count keep their previous values. For a valid non-empty buffer,\n  /// [`EndOfInput`] means no later call produces bytes. Provider failure produces `StreamReadError`.\n  ///\n  /// # Gotchas\n  ///\n  /// `buffer` must be non-empty. A native provider cannot distinguish a zero-capacity read from\n  /// end-of-input.\n  effect fn read(\n    buffer: &mut [u8]\n  ) -> ReadOutcome ! StreamReadError ? &mut StandardInput\n}\n\n/// Creates an outcome for a read that committed exactly `count` leading bytes.\n///\n/// # Gotchas\n///\n/// A provider must not use a count greater than the buffer length passed to its read operation.\npub fn filled(count: usize) -> ReadOutcome {\n  return ReadOutcome { value: Filled { count: count } }\n}\n\n/// Creates an outcome that reports permanent end-of-input after a valid non-empty read.\npub fn endOfInput() -> ReadOutcome {\n  return ReadOutcome { value: EndOfInput {} }\n}\n\n/// Returns the committed byte count, or zero for end-of-input.\n///\n/// # Gotchas\n///\n/// A zero count does not by itself identify end-of-input. Use [`isEndOfInput`] when that\n/// distinction controls another read.\npub fn count(outcome: &ReadOutcome) -> usize {\n  return match &outcome.value {\n    Filled { count } => count\n    EndOfInput {} => usize.ZERO\n  }\n}\n\n/// Reports whether the outcome guarantees that no later read produces bytes.\npub fn isEndOfInput(outcome: &ReadOutcome) -> bool {\n  return match &outcome.value {\n    Filled { count } => false\n    EndOfInput {} => true\n  }\n}\n\n/// Reads through the active [`StandardInput`] provider into a mutable buffer.\n///\n/// # Details\n///\n/// This wrapper preserves partial-read behavior and the exclusive provider requirement. Inspect\n/// [`count`] before reading buffer bytes. Use [`isEndOfInput`] to decide when draining is complete.\n///\n/// # Gotchas\n///\n/// `buffer` must be non-empty. A native provider can otherwise report end-of-input while bytes are\n/// still available.\npub effect fn receive(\n  buffer: &mut [u8]\n) -> ReadOutcome ! StreamReadError ? &mut StandardInput {\n  return run StandardInput.read(move buffer)\n}\n",
+  },
+  {
+    module: 'silk/static_text',
+    path: 'silk/static_text.silk',
+    sourceIdentity: 'silk/static_text',
+    digest: '0fa6c614b5326bcbd1c894d08c0ce00308b020fcfe5bd50c4b674682771de176',
+    documentation: 'silk/static_text.silk',
+    layer: 'portable',
+    staticInventory: [],
+    runtimeInventory: ['staticTextByteAt', 'staticTextByteLength', 'staticTextSlice'],
+    namespace: 'StaticText',
+    source:
+      '//! Deterministic byte inspection for text available during static evaluation.\n//!\n//! # Details\n//!\n//! These operations inspect UTF-8 bytes without exposing compiler storage. They are available only\n//! to static functions and produce finite static values.\n\n/// Returns the UTF-8 byte length of `value` during static evaluation.\npub static fn byteLength(value: string) -> usize {\n  return Intrinsic.staticTextByteLength(value)\n}\n\n/// Returns one UTF-8 byte at `index`, or reports a static phase violation when out of bounds.\npub static fn byteAt(value: string, index: usize) -> u8 {\n  return Intrinsic.staticTextByteAt(value, index)\n}\n\n/// Returns the UTF-8 byte range `start..end` when both boundaries are scalar boundaries.\npub static fn slice(value: string, start: usize, end: usize) -> string {\n  return Intrinsic.staticTextSlice(value, start, end)\n}\n',
   },
   {
     module: 'silk/string',
@@ -1045,6 +1104,7 @@ export const modules = [
     digest: 'b09a3abd405af46fb39820915a441d6055256f8de05c58958ef2cbacdee76836',
     documentation: 'silk/string.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: ['stringByteLength', 'stringFromUtf8Unchecked', 'stringUtf8Bytes'],
     namespace: 'String',
     aliases: ['InvalidUtf8', 'ScalarCursor', 'ScalarStep'],
@@ -1058,11 +1118,26 @@ export const modules = [
     digest: '0434211e21e160ea897cb252469593b8deea53152cefb8fb530920b8a600a365',
     documentation: 'silk/system_clock.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'SystemClock',
     aliases: ['Instant'],
     source:
       "//! Provider-replaceable Unix-epoch time with canonical split-second instants.\n//!\n//! # When to use\n//! Require [`SystemClock`] when an application needs the current time for reporting, persistence,\n//! or exchange with an external Unix-time boundary. Use `silk.monotonic_clock` instead when\n//! measuring elapsed time.\n//!\n//! # Details\n//! [`Instant`] stores signed seconds from `1970-01-01T00:00:00Z` and a canonical non-negative\n//! nanosecond fraction. The clock may move forwards or backwards when its external reference is\n//! adjusted. Providers are explicit and lexically replaceable; importing this module installs no\n//! ambient clock.\n//!\n//! # Gotchas\n//! [`getResolution`] reports a positive nominal tick in whole nanoseconds. The tick may be a lower\n//! bound on observable precision. An invalid or unrepresentable provider result traps because this\n//! service has no typed failure channel.\n//!\n//! # Examples\n//! ## Read a fixed instant through an ordinary provider\n//! ```silk\n//! import silk.effect { Effect }\n//! import silk.system_clock { SystemClock }\n//!\n//! import silk.u64\n//!\n//! struct FixedClock {}\n//!\n//! effect fn fixedNow(self: &mut FixedClock) -> SystemClock.Instant {\n//!   return SystemClock.make(-1, 999999999)\n//! }\n//!\n//! effect fn fixedResolution(self: &mut FixedClock) -> u64 {\n//!   return u64.toU64(1)\n//! }\n//!\n//! impl SystemClock.SystemClock for FixedClock {\n//!   now: FixedClock.fixedNow\n//!   getResolution: FixedClock.fixedResolution\n//! }\n//!\n//! pub fn main() -> i32 {\n//!   let mut provider = FixedClock {}\n//!   let instant = run SystemClock.now()\n//!     |> Effect.provideMut<SystemClock.SystemClock>(&mut provider)\n//!   if SystemClock.seconds(&instant) != -1 { return 1 }\n//!   if SystemClock.nanoseconds(&instant) != 999999999 { return 2 }\n//!   return 42\n//! }\n//! ```\n\n/// A canonical point on a clock represented by signed seconds and a nanosecond fraction.\n///\n/// # Details\n///\n/// System-clock seconds are measured from `1970-01-01T00:00:00Z`. A monotonic provider may reuse\n/// this representation with an unspecified provider-local origin. The fraction is always in\n/// `0..1000000000`; consequently `{ seconds: -1, nanoseconds: 999999999 }` is one nanosecond before\n/// zero.\npub struct Instant {\n  seconds: i64\n  nanoseconds: i64\n}\n\n/// Creates a canonical split-second instant.\n///\n/// # Gotchas\n///\n/// `nanoseconds` must be non-negative and less than one billion. A noncanonical fraction traps\n/// instead of being normalized into another field pair.\npub fn make(seconds: i64, nanoseconds: i64) -> Instant {\n  if nanoseconds < 0 { let invalid = 1 / 0 }\n  if nanoseconds >= 1000000000 { let invalid = 1 / 0 }\n  return Instant { seconds: seconds, nanoseconds: nanoseconds }\n}\n\n/// Returns the signed whole-second component of an instant.\npub fn seconds(self: &Instant) -> i64 {\n  return self.seconds\n}\n\n/// Returns the canonical non-negative nanosecond fraction of an instant.\npub fn nanoseconds(self: &Instant) -> i64 {\n  return self.nanoseconds\n}\n\n/// An explicit provider of Unix-epoch time and nominal clock resolution.\n///\n/// # Details\n///\n/// Exclusive access permits deterministic providers to advance a script between calls. The\n/// service does not install an implementation or expose a clock-setting operation.\npub service SystemClock {\n  /// Reads the current Unix-epoch instant.\n  /// The result is canonical but need not be greater than an earlier read because the external\n  /// reference may be adjusted.\n  effect fn now() -> Instant ? &mut SystemClock\n\n  /// Returns the provider-reported positive nominal resolution in whole nanoseconds.\n  /// The value may be a lower bound on actual observable precision.\n  effect fn getResolution() -> u64 ? &mut SystemClock\n}\n\n/// Reads the current Unix-epoch instant from the active [`SystemClock`] provider.\n/// The result can precede an earlier result. An invalid or unrepresentable provider result traps.\npub effect fn now() -> Instant ? &mut SystemClock {\n  return run SystemClock.now()\n}\n\n/// Returns the active [`SystemClock`] provider's positive nominal resolution in nanoseconds.\n/// The result may be a lower bound on observable precision. An invalid or unrepresentable result\n/// traps.\npub effect fn getResolution() -> u64 ? &mut SystemClock {\n  return run SystemClock.getResolution()\n}\n",
+  },
+  {
+    module: 'silk/target',
+    path: 'silk/target.silk',
+    sourceIdentity: 'silk/target',
+    digest: 'cc9d0ba1a2eb165d0648708e0bf2e590a730950cc17e684e7b243f532600bf08',
+    documentation: 'silk/target.silk',
+    layer: 'portable',
+    staticInventory: ['targetProfile'],
+    runtimeInventory: [],
+    namespace: 'Target',
+    aliases: ['Arch', 'Profile'],
+    source:
+      '//! Compile-time nominal facts for the selected compilation target.\n//!\n//! # Details\n//!\n//! [`profile`] identifies\n//! the complete target profile, while [`arch`] groups profiles by instruction-set architecture.\n//! The integer facts are derived from that profile during static evaluation and have no runtime\n//! storage.\n\n/// One complete compilation-target profile with stable profile-code discriminants.\npub enum(u8) Profile {\n  /// The 64-bit Arm profile for Apple Darwin.\n  Aarch64AppleDarwin = 0,\n  /// The 64-bit Arm profile for GNU/Linux.\n  Aarch64UnknownLinuxGnu = 1,\n  /// The freestanding 32-bit WebAssembly profile.\n  Wasm32UnknownUnknown = 2,\n  /// The 64-bit x86 profile for GNU/Linux.\n  X86_64UnknownLinuxGnu = 3\n}\n\n/// One instruction-set architecture shared by one or more target profiles.\npub enum Arch {\n  /// The 64-bit Arm architecture.\n  Aarch64,\n  /// The 32-bit WebAssembly architecture.\n  Wasm32,\n  /// The 64-bit x86 architecture.\n  X86_64\n}\n\n/// Returns the selected complete target profile during static evaluation.\npub static fn profile() -> Profile {\n  let code = Intrinsic.targetProfile()\n  if code == 0 { return Profile.Aarch64AppleDarwin }\n  if code == 1 { return Profile.Aarch64UnknownLinuxGnu }\n  if code == 2 { return Profile.Wasm32UnknownUnknown }\n  if code == 3 { return Profile.X86_64UnknownLinuxGnu }\n  compileError("Intrinsic.targetProfile returned an unknown profile code")\n}\n\n/// Returns the selected instruction-set architecture during static evaluation.\npub static fn arch() -> Arch {\n  let selected = profile()\n  if selected == Profile.Aarch64AppleDarwin { return Arch.Aarch64 }\n  if selected == Profile.Aarch64UnknownLinuxGnu { return Arch.Aarch64 }\n  if selected == Profile.Wasm32UnknownUnknown { return Arch.Wasm32 }\n  if selected == Profile.X86_64UnknownLinuxGnu { return Arch.X86_64 }\n  compileError("Target.profile returned an unknown profile")\n}\n\nstatic fn selectedPointerBits() -> u32 {\n  if profile() == Profile.Wasm32UnknownUnknown { return 32 }\n  return 64\n}\n\nstatic fn selectedUsizeMax() -> usize {\n  if profile() == Profile.Wasm32UnknownUnknown { return 4294967295 }\n  return 18446744073709551615\n}\n\nstatic fn selectedIsizeMax() -> isize {\n  if profile() == Profile.Wasm32UnknownUnknown { return 2147483647 }\n  return 9223372036854775807\n}\n\nstatic fn selectedIsizeMin() -> isize {\n  if profile() == Profile.Wasm32UnknownUnknown { return -2147483648 }\n  return -9223372036854775808\n}\n\n/// The pointer width of the selected compilation target, in bits.\npub const pointerBits: u32 = selectedPointerBits()\n\n/// The greatest `usize` value supported by the selected compilation target.\npub const usizeMax: usize = selectedUsizeMax()\n\n/// The greatest `isize` value supported by the selected compilation target.\npub const isizeMax: isize = selectedIsizeMax()\n\n/// The least `isize` value supported by the selected compilation target.\npub const isizeMin: isize = selectedIsizeMin()\n',
   },
   {
     module: 'silk/u16',
@@ -1071,6 +1146,7 @@ export const modules = [
     digest: '9265f4e6b15558f1cab99b04080fe52b111468fb4e9aeae39a7546555dbdbb5a',
     documentation: 'silk/u16.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'u16Add',
       'u16BitAnd',
@@ -1136,6 +1212,7 @@ export const modules = [
     digest: '36a5c441877a898bb4a42c15482efe22eb67cc827e1c3760ed6d031a2dfc4448',
     documentation: 'silk/u32.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'u32Add',
       'u32BitAnd',
@@ -1201,6 +1278,7 @@ export const modules = [
     digest: '28af672821214b491ea3501e888dbaf4c4853d643ead9866011b1b3352698e17',
     documentation: 'silk/u64.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'u64Add',
       'u64BitAnd',
@@ -1266,6 +1344,7 @@ export const modules = [
     digest: '4d0ae5b56c1b8fb007a8f64c47f28d68f412fe4b48d25531834599312cfd45f7',
     documentation: 'silk/u8.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'u8Add',
       'u8BitAnd',
@@ -1331,6 +1410,7 @@ export const modules = [
     digest: '4bdef60cb1ff7b26685474bb52ac1fa2ba3cbee673fc54c86e5c12ea1df06496',
     documentation: 'silk/unicode.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'Unicode',
     source:
@@ -1343,6 +1423,7 @@ export const modules = [
     digest: 'd22108b55a33d1e3f0f606d2961ade0a7a8299afbc611d903cd4d0918b6e2c0a',
     documentation: 'silk/unicode_tables.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [],
     namespace: 'UnicodeTables',
     aliases: ['Decomposition', 'PairRecord'],
@@ -1353,9 +1434,10 @@ export const modules = [
     module: 'silk/usize',
     path: 'silk/usize.silk',
     sourceIdentity: 'silk/usize',
-    digest: '45d2abf40b49c66d4932beb4fd4b22272b753b40498581ee6b25a6be1b5954ef',
+    digest: 'd7edd2dff90d242d9c4f05f4a545b90141f4eeea15842cf4448c4aace549d931',
     documentation: 'silk/usize.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: [
       'usizeAdd',
       'usizeBitAnd',
@@ -1412,7 +1494,7 @@ export const modules = [
     ],
     namespace: 'usize',
     source:
-      "//! Pointer-width unsigned integers for lengths, indices, capacities, and allocation sizes.\n//!\n//! # When to use\n//! Use `usize` for values that index target memory or describe its layout. Use a fixed-width\n//! integer for serialized data, protocols, and persistent identifiers whose range must not change\n//! between 32-bit and 64-bit targets.\n//!\n//! # Details\n//! [`BITS`] and [`MAX`] follow the selected target. Ordinary arithmetic, narrowing conversions,\n//! division by zero, and invalid shift counts trap. `checked*` returns [`Option`], `wrapping*`\n//! computes modulo the target width, and `saturating*` clamps at [`MIN`] or [`MAX`].\n//!\n//! [`ZERO`] and [`ONE`] provide typed values where an uncontextualized literal would be `i32`.\n//! Decimal [`parse`] uses the target's range. Use [`Format`] with `Format.display` for defaults or\n//! `Format.displayWith` for explicit options. Both operations stream through a mutable `Writer`\n//! without `Allocator`.\n//!\n//! # Gotchas\n//! A value valid as usize on a 64-bit target can be out of range on a 32-bit target.\n//!\n//! # Examples\n//! ## Keep a count within the target range\n//! ```silk\n//! import silk.option {Option}\n//!\n//! import silk.usize\n//!\n//! pub fn main() -> i32 {\n//!   let next = usize.checkedAdd(usize.MAX, usize.ONE)\n//!   let recovered = move next\n//!     |> Option.unwrapOr<usize>(42)\n//!   return usize.toI32(recovered)\n//! }\n//! ```\n\nimport silk.bool as bool\nimport silk.f32 as f32\nimport silk.f64 as f64\nimport silk.format { Format, ParseError }\nimport silk.i16 as i16\nimport silk.i32 as i32\nimport silk.i64 as i64\nimport silk.i8 as i8\nimport silk.isize as isize\nimport silk.option { Option, none, some }\nimport silk.result { Result }\nimport silk.u16 as u16\nimport silk.u32 as u32\nimport silk.u64 as u64\nimport silk.u8 as u8\n\n/// The largest `usize` value for the compilation target.\n///\n/// # Details\n///\n/// This is 4294967295 on a 32-bit target and 18446744073709551615 on a 64-bit target. Checked\n/// arithmetic rejects results above it.\npub const MAX: usize = Target.usizeMax\n\n/// The smallest `usize` value, which is zero at each pointer width.\npub const MIN: usize = 0\n\n/// The width of `usize` in bits, which is the compilation target's pointer width.\npub const BITS: u32 = Target.pointerBits\n\n/// The `usize` zero value for a count without a typed context.\npub const ZERO: usize = 0\n\n/// The `usize` value one for a step or count that has no other type context.\npub const ONE: usize = 1\n\n/// Converts `value` to `u8`. Traps if `value` is outside the `u8` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toU8(value: usize) -> u8 {\n  return Intrinsic.usizeToU8(value)\n}\n\n/// Converts `value` to `u8`, or returns `None` if `value` is outside the `u8`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToU8(value: usize) -> Option<u8> {\n  return Intrinsic.usizeCheckedToU8<Option<u8>>(value, some, none)\n}\n\n/// Converts `value` to `u16`. Traps if `value` is outside the `u16` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toU16(value: usize) -> u16 {\n  return Intrinsic.usizeToU16(value)\n}\n\n/// Converts `value` to `u16`, or returns `None` if `value` is outside the `u16`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToU16(value: usize) -> Option<u16> {\n  return Intrinsic.usizeCheckedToU16<Option<u16>>(value, some, none)\n}\n\n/// Converts `value` to `u32`. Traps if `value` is outside the `u32` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toU32(value: usize) -> u32 {\n  return Intrinsic.usizeToU32(value)\n}\n\n/// Converts `value` to `u32`, or returns `None` if `value` is outside the `u32`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToU32(value: usize) -> Option<u32> {\n  return Intrinsic.usizeCheckedToU32<Option<u32>>(value, some, none)\n}\n\n/// Converts `value` exactly to `u64`. Every `usize` value is representable.\npub fn toU64(value: usize) -> u64 {\n  return Intrinsic.usizeToU64(value)\n}\n\n/// Converts `value` exactly to `u64` and returns `Some`. Every `usize` value is\n/// representable.\npub fn checkedToU64(value: usize) -> Option<u64> {\n  return Intrinsic.usizeCheckedToU64<Option<u64>>(value, some, none)\n}\n\n/// Returns `value` unchanged as `usize`. Use this function when generic conversion code\n/// can select `usize` as both source and destination.\npub fn toUsize(value: usize) -> usize {\n  return Intrinsic.usizeToUsize(value)\n}\n\n/// Returns `Some` with `value` unchanged as `usize`. Use this function when generic\n/// checked-conversion code can select the same source and destination type.\npub fn checkedToUsize(value: usize) -> Option<usize> {\n  return Intrinsic.usizeCheckedToUsize<Option<usize>>(value, some, none)\n}\n\n/// Converts `value` to `i8`. Traps if `value` is outside the `i8` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toI8(value: usize) -> i8 {\n  return Intrinsic.usizeToI8(value)\n}\n\n/// Converts `value` to `i8`, or returns `None` if `value` is outside the `i8`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToI8(value: usize) -> Option<i8> {\n  return Intrinsic.usizeCheckedToI8<Option<i8>>(value, some, none)\n}\n\n/// Converts `value` to `i16`. Traps if `value` is outside the `i16` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toI16(value: usize) -> i16 {\n  return Intrinsic.usizeToI16(value)\n}\n\n/// Converts `value` to `i16`, or returns `None` if `value` is outside the `i16`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToI16(value: usize) -> Option<i16> {\n  return Intrinsic.usizeCheckedToI16<Option<i16>>(value, some, none)\n}\n\n/// Converts `value` to `i32`. Traps if `value` is outside the `i32` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toI32(value: usize) -> i32 {\n  return Intrinsic.usizeToI32(value)\n}\n\n/// Converts `value` to `i32`, or returns `None` if `value` is outside the `i32`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToI32(value: usize) -> Option<i32> {\n  return Intrinsic.usizeCheckedToI32<Option<i32>>(value, some, none)\n}\n\n/// Converts `value` to `i64`. Traps if `value` is outside the `i64` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toI64(value: usize) -> i64 {\n  return Intrinsic.usizeToI64(value)\n}\n\n/// Converts `value` to `i64`, or returns `None` if `value` is outside the `i64`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToI64(value: usize) -> Option<i64> {\n  return Intrinsic.usizeCheckedToI64<Option<i64>>(value, some, none)\n}\n\n/// Converts `value` to `isize`. Traps if `value` is outside the `isize` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toIsize(value: usize) -> isize {\n  return Intrinsic.usizeToIsize(value)\n}\n\n/// Converts `value` to `isize`, or returns `None` if `value` is outside the `isize`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToIsize(value: usize) -> Option<isize> {\n  return Intrinsic.usizeCheckedToIsize<Option<isize>>(value, some, none)\n}\n\n/// Converts `value` to the nearest `f32` value, with ties to even.\npub fn toF32(value: usize) -> f32 {\n  return Intrinsic.usizeToF32(value)\n}\n\n/// Converts `value` to the nearest `f64` value, with ties to even.\npub fn toF64(value: usize) -> f64 {\n  return Intrinsic.usizeToF64(value)\n}\n\n/// Returns `left + right` and traps if the result is outside the `usize` range. Use this function\n/// when overflow is a program error.\npub fn add(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeAdd(left, right)\n}\n\n/// Returns `left - right` and traps if the result is outside the `usize` range. Use this function\n/// when overflow is a program error.\npub fn subtract(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeSubtract(left, right)\n}\n\n/// Returns `left * right` and traps if the result is outside the `usize` range. Use this function\n/// when overflow is a program error.\npub fn multiply(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeMultiply(left, right)\n}\n\n/// Returns `left / right`. Traps if `right` is zero. Use this function when a zero\n/// divisor is a program error.\npub fn divide(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeDivide(left, right)\n}\n\n/// Returns the remainder of `left / right`. Traps if `right` is zero. Use this function\n/// when a zero divisor is a program error.\npub fn remainder(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeRemainder(left, right)\n}\n\n/// Returns the bitwise AND of `left` and `right`.\npub fn bitAnd(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeBitAnd(left, right)\n}\n\n/// Returns the bitwise OR of `left` and `right`.\npub fn bitOr(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeBitOr(left, right)\n}\n\n/// Returns the bitwise exclusive OR of `left` and `right`.\npub fn bitXor(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeBitXor(left, right)\n}\n\n/// Returns `value` with each bit inverted.\npub fn bitNot(value: usize) -> usize {\n  return Intrinsic.usizeBitNot(value)\n}\n\n/// Shifts `left` bits left by `right` positions. Traps if `right` is not less than [`BITS`].\npub fn shiftLeft(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeShiftLeft(left, right)\n}\n\n/// Shifts `left` bits right by `right` positions and inserts zero bits. Traps if `right` is\n/// not less than [`BITS`].\npub fn shiftRight(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeShiftRight(left, right)\n}\n\n/// Rotates the bits of `left` left by `right` positions.\npub fn rotateLeft(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeRotateLeft(left, right)\n}\n\n/// Rotates the bits of `left` right by `right` positions.\npub fn rotateRight(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeRotateRight(left, right)\n}\n\n/// Returns `left + right`, wrapped to the `usize` range. Use this function for\n/// deliberate modulo arithmetic.\npub fn wrappingAdd(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeWrappingAdd(left, right)\n}\n\n/// Returns `left - right`, wrapped to the `usize` range. Use this function for\n/// deliberate modulo arithmetic.\npub fn wrappingSubtract(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeWrappingSubtract(left, right)\n}\n\n/// Returns `left * right`, wrapped to the `usize` range. Use this function for\n/// deliberate modulo arithmetic.\npub fn wrappingMultiply(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeWrappingMultiply(left, right)\n}\n\n/// Returns `left + right`, clamped to [`MIN`] or [`MAX`]. Use this function when a\n/// boundary value is the required overflow result.\npub fn saturatingAdd(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeSaturatingAdd(left, right)\n}\n\n/// Returns `left - right`, clamped to [`MIN`] or [`MAX`]. Use this function when a\n/// boundary value is the required overflow result.\npub fn saturatingSubtract(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeSaturatingSubtract(left, right)\n}\n\n/// Returns `left * right`, clamped to [`MIN`] or [`MAX`]. Use this function when a\n/// boundary value is the required overflow result.\npub fn saturatingMultiply(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeSaturatingMultiply(left, right)\n}\n\n/// Returns `Some` with `left + right`, or `None` if the result is outside the `usize` range.\n/// Use this function when overflow is input data.\npub fn checkedAdd(left: usize, right: usize) -> Option<usize> {\n  return Intrinsic.usizeCheckedAdd<Option<usize>>(left, right, some, none)\n}\n\n/// Returns `Some` with `left - right`, or `None` if the result is outside the `usize` range.\n/// Use this function when overflow is input data.\npub fn checkedSubtract(left: usize, right: usize) -> Option<usize> {\n  return Intrinsic.usizeCheckedSubtract<Option<usize>>(left, right, some, none)\n}\n\n/// Returns `Some` with `left * right`, or `None` if the result is outside the `usize` range.\n/// Use this function when overflow is input data.\npub fn checkedMultiply(left: usize, right: usize) -> Option<usize> {\n  return Intrinsic.usizeCheckedMultiply<Option<usize>>(left, right, some, none)\n}\n\n/// Returns `Some` with `left / right`, or `None` if `right` is zero. Use this\n/// function when a zero divisor is input data.\npub fn checkedDivide(left: usize, right: usize) -> Option<usize> {\n  return Intrinsic.usizeCheckedDivide<Option<usize>>(left, right, some, none)\n}\n\n/// Returns `Some` with the remainder, or `None` if `right` is zero. Use this function\n/// when a zero divisor is input data.\npub fn checkedRemainder(left: usize, right: usize) -> Option<usize> {\n  return Intrinsic.usizeCheckedRemainder<Option<usize>>(left, right, some, none)\n}\n\n/// Returns `true` when `left` and `right` are equal.\npub fn equals(left: usize, right: usize) -> bool {\n  return Intrinsic.usizeEquals(left, right)\n}\n\n/// Returns `true` when `left` and `right` are not equal.\npub fn notEquals(left: usize, right: usize) -> bool {\n  return Intrinsic.usizeNotEquals(left, right)\n}\n\n/// Returns `true` when `left` is less than `right`.\npub fn lessThan(left: usize, right: usize) -> bool {\n  return Intrinsic.usizeLessThan(&left, &right)\n}\n\n/// Returns `true` when `left` is less than or equal to `right`.\npub fn lessOrEqual(left: usize, right: usize) -> bool {\n  return Intrinsic.usizeLessOrEqual(left, right)\n}\n\n/// Returns `true` when `left` is greater than `right`.\npub fn greaterThan(left: usize, right: usize) -> bool {\n  return Intrinsic.usizeGreaterThan(left, right)\n}\n\n/// Returns `true` when `left` is greater than or equal to `right`.\npub fn greaterOrEqual(left: usize, right: usize) -> bool {\n  return Intrinsic.usizeGreaterOrEqual(left, right)\n}\n\n/// Reads the complete text as an unsigned decimal `usize`.\n///\n/// # Details\n///\n/// A failure contains `silk.format.NotANumber` for empty text, a sign, a non-digit, or trailing\n/// bytes. It contains `silk.format.OutOfRange` outside the target's `usize` range.\npub fn parse(text: string) -> Result<usize, ParseError> {\n  return Format.usizeValue(text)\n}\n",
+      "//! Pointer-width unsigned integers for lengths, indices, capacities, and allocation sizes.\n//!\n//! # When to use\n//! Use `usize` for values that index target memory or describe its layout. Use a fixed-width\n//! integer for serialized data, protocols, and persistent identifiers whose range must not change\n//! between 32-bit and 64-bit targets.\n//!\n//! # Details\n//! [`BITS`] and [`MAX`] follow the selected target. Ordinary arithmetic, narrowing conversions,\n//! division by zero, and invalid shift counts trap. `checked*` returns [`Option`], `wrapping*`\n//! computes modulo the target width, and `saturating*` clamps at [`MIN`] or [`MAX`].\n//!\n//! [`ZERO`] and [`ONE`] provide typed values where an uncontextualized literal would be `i32`.\n//! Decimal [`parse`] uses the target's range. Use [`Format`] with `Format.display` for defaults or\n//! `Format.displayWith` for explicit options. Both operations stream through a mutable `Writer`\n//! without `Allocator`.\n//!\n//! # Gotchas\n//! A value valid as usize on a 64-bit target can be out of range on a 32-bit target.\n//!\n//! # Examples\n//! ## Keep a count within the target range\n//! ```silk\n//! import silk.option {Option}\n//!\n//! import silk.usize\n//!\n//! pub fn main() -> i32 {\n//!   let next = usize.checkedAdd(usize.MAX, usize.ONE)\n//!   let recovered = move next\n//!     |> Option.unwrapOr<usize>(42)\n//!   return usize.toI32(recovered)\n//! }\n//! ```\n\nimport silk.bool as bool\nimport silk.f32 as f32\nimport silk.f64 as f64\nimport silk.format { Format, ParseError }\nimport silk.i16 as i16\nimport silk.i32 as i32\nimport silk.i64 as i64\nimport silk.i8 as i8\nimport silk.isize as isize\nimport silk.option { Option, none, some }\nimport silk.result { Result }\nimport silk.target as Target\nimport silk.u16 as u16\nimport silk.u32 as u32\nimport silk.u64 as u64\nimport silk.u8 as u8\n\n/// The largest `usize` value for the compilation target.\n///\n/// # Details\n///\n/// This is 4294967295 on a 32-bit target and 18446744073709551615 on a 64-bit target. Checked\n/// arithmetic rejects results above it.\npub const MAX: usize = Target.usizeMax\n\n/// The smallest `usize` value, which is zero at each pointer width.\npub const MIN: usize = 0\n\n/// The width of `usize` in bits, which is the compilation target's pointer width.\npub const BITS: u32 = Target.pointerBits\n\n/// The `usize` zero value for a count without a typed context.\npub const ZERO: usize = 0\n\n/// The `usize` value one for a step or count that has no other type context.\npub const ONE: usize = 1\n\n/// Converts `value` to `u8`. Traps if `value` is outside the `u8` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toU8(value: usize) -> u8 {\n  return Intrinsic.usizeToU8(value)\n}\n\n/// Converts `value` to `u8`, or returns `None` if `value` is outside the `u8`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToU8(value: usize) -> Option<u8> {\n  return Intrinsic.usizeCheckedToU8<Option<u8>>(value, some, none)\n}\n\n/// Converts `value` to `u16`. Traps if `value` is outside the `u16` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toU16(value: usize) -> u16 {\n  return Intrinsic.usizeToU16(value)\n}\n\n/// Converts `value` to `u16`, or returns `None` if `value` is outside the `u16`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToU16(value: usize) -> Option<u16> {\n  return Intrinsic.usizeCheckedToU16<Option<u16>>(value, some, none)\n}\n\n/// Converts `value` to `u32`. Traps if `value` is outside the `u32` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toU32(value: usize) -> u32 {\n  return Intrinsic.usizeToU32(value)\n}\n\n/// Converts `value` to `u32`, or returns `None` if `value` is outside the `u32`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToU32(value: usize) -> Option<u32> {\n  return Intrinsic.usizeCheckedToU32<Option<u32>>(value, some, none)\n}\n\n/// Converts `value` exactly to `u64`. Every `usize` value is representable.\npub fn toU64(value: usize) -> u64 {\n  return Intrinsic.usizeToU64(value)\n}\n\n/// Converts `value` exactly to `u64` and returns `Some`. Every `usize` value is\n/// representable.\npub fn checkedToU64(value: usize) -> Option<u64> {\n  return Intrinsic.usizeCheckedToU64<Option<u64>>(value, some, none)\n}\n\n/// Returns `value` unchanged as `usize`. Use this function when generic conversion code\n/// can select `usize` as both source and destination.\npub fn toUsize(value: usize) -> usize {\n  return Intrinsic.usizeToUsize(value)\n}\n\n/// Returns `Some` with `value` unchanged as `usize`. Use this function when generic\n/// checked-conversion code can select the same source and destination type.\npub fn checkedToUsize(value: usize) -> Option<usize> {\n  return Intrinsic.usizeCheckedToUsize<Option<usize>>(value, some, none)\n}\n\n/// Converts `value` to `i8`. Traps if `value` is outside the `i8` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toI8(value: usize) -> i8 {\n  return Intrinsic.usizeToI8(value)\n}\n\n/// Converts `value` to `i8`, or returns `None` if `value` is outside the `i8`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToI8(value: usize) -> Option<i8> {\n  return Intrinsic.usizeCheckedToI8<Option<i8>>(value, some, none)\n}\n\n/// Converts `value` to `i16`. Traps if `value` is outside the `i16` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toI16(value: usize) -> i16 {\n  return Intrinsic.usizeToI16(value)\n}\n\n/// Converts `value` to `i16`, or returns `None` if `value` is outside the `i16`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToI16(value: usize) -> Option<i16> {\n  return Intrinsic.usizeCheckedToI16<Option<i16>>(value, some, none)\n}\n\n/// Converts `value` to `i32`. Traps if `value` is outside the `i32` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toI32(value: usize) -> i32 {\n  return Intrinsic.usizeToI32(value)\n}\n\n/// Converts `value` to `i32`, or returns `None` if `value` is outside the `i32`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToI32(value: usize) -> Option<i32> {\n  return Intrinsic.usizeCheckedToI32<Option<i32>>(value, some, none)\n}\n\n/// Converts `value` to `i64`. Traps if `value` is outside the `i64` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toI64(value: usize) -> i64 {\n  return Intrinsic.usizeToI64(value)\n}\n\n/// Converts `value` to `i64`, or returns `None` if `value` is outside the `i64`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToI64(value: usize) -> Option<i64> {\n  return Intrinsic.usizeCheckedToI64<Option<i64>>(value, some, none)\n}\n\n/// Converts `value` to `isize`. Traps if `value` is outside the `isize` range. Use\n/// this function when an out-of-range value is a program error.\npub fn toIsize(value: usize) -> isize {\n  return Intrinsic.usizeToIsize(value)\n}\n\n/// Converts `value` to `isize`, or returns `None` if `value` is outside the `isize`\n/// range. Use this function when an out-of-range value is input data.\npub fn checkedToIsize(value: usize) -> Option<isize> {\n  return Intrinsic.usizeCheckedToIsize<Option<isize>>(value, some, none)\n}\n\n/// Converts `value` to the nearest `f32` value, with ties to even.\npub fn toF32(value: usize) -> f32 {\n  return Intrinsic.usizeToF32(value)\n}\n\n/// Converts `value` to the nearest `f64` value, with ties to even.\npub fn toF64(value: usize) -> f64 {\n  return Intrinsic.usizeToF64(value)\n}\n\n/// Returns `left + right` and traps if the result is outside the `usize` range. Use this function\n/// when overflow is a program error.\npub fn add(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeAdd(left, right)\n}\n\n/// Returns `left - right` and traps if the result is outside the `usize` range. Use this function\n/// when overflow is a program error.\npub fn subtract(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeSubtract(left, right)\n}\n\n/// Returns `left * right` and traps if the result is outside the `usize` range. Use this function\n/// when overflow is a program error.\npub fn multiply(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeMultiply(left, right)\n}\n\n/// Returns `left / right`. Traps if `right` is zero. Use this function when a zero\n/// divisor is a program error.\npub fn divide(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeDivide(left, right)\n}\n\n/// Returns the remainder of `left / right`. Traps if `right` is zero. Use this function\n/// when a zero divisor is a program error.\npub fn remainder(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeRemainder(left, right)\n}\n\n/// Returns the bitwise AND of `left` and `right`.\npub fn bitAnd(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeBitAnd(left, right)\n}\n\n/// Returns the bitwise OR of `left` and `right`.\npub fn bitOr(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeBitOr(left, right)\n}\n\n/// Returns the bitwise exclusive OR of `left` and `right`.\npub fn bitXor(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeBitXor(left, right)\n}\n\n/// Returns `value` with each bit inverted.\npub fn bitNot(value: usize) -> usize {\n  return Intrinsic.usizeBitNot(value)\n}\n\n/// Shifts `left` bits left by `right` positions. Traps if `right` is not less than [`BITS`].\npub fn shiftLeft(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeShiftLeft(left, right)\n}\n\n/// Shifts `left` bits right by `right` positions and inserts zero bits. Traps if `right` is\n/// not less than [`BITS`].\npub fn shiftRight(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeShiftRight(left, right)\n}\n\n/// Rotates the bits of `left` left by `right` positions.\npub fn rotateLeft(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeRotateLeft(left, right)\n}\n\n/// Rotates the bits of `left` right by `right` positions.\npub fn rotateRight(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeRotateRight(left, right)\n}\n\n/// Returns `left + right`, wrapped to the `usize` range. Use this function for\n/// deliberate modulo arithmetic.\npub fn wrappingAdd(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeWrappingAdd(left, right)\n}\n\n/// Returns `left - right`, wrapped to the `usize` range. Use this function for\n/// deliberate modulo arithmetic.\npub fn wrappingSubtract(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeWrappingSubtract(left, right)\n}\n\n/// Returns `left * right`, wrapped to the `usize` range. Use this function for\n/// deliberate modulo arithmetic.\npub fn wrappingMultiply(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeWrappingMultiply(left, right)\n}\n\n/// Returns `left + right`, clamped to [`MIN`] or [`MAX`]. Use this function when a\n/// boundary value is the required overflow result.\npub fn saturatingAdd(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeSaturatingAdd(left, right)\n}\n\n/// Returns `left - right`, clamped to [`MIN`] or [`MAX`]. Use this function when a\n/// boundary value is the required overflow result.\npub fn saturatingSubtract(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeSaturatingSubtract(left, right)\n}\n\n/// Returns `left * right`, clamped to [`MIN`] or [`MAX`]. Use this function when a\n/// boundary value is the required overflow result.\npub fn saturatingMultiply(left: usize, right: usize) -> usize {\n  return Intrinsic.usizeSaturatingMultiply(left, right)\n}\n\n/// Returns `Some` with `left + right`, or `None` if the result is outside the `usize` range.\n/// Use this function when overflow is input data.\npub fn checkedAdd(left: usize, right: usize) -> Option<usize> {\n  return Intrinsic.usizeCheckedAdd<Option<usize>>(left, right, some, none)\n}\n\n/// Returns `Some` with `left - right`, or `None` if the result is outside the `usize` range.\n/// Use this function when overflow is input data.\npub fn checkedSubtract(left: usize, right: usize) -> Option<usize> {\n  return Intrinsic.usizeCheckedSubtract<Option<usize>>(left, right, some, none)\n}\n\n/// Returns `Some` with `left * right`, or `None` if the result is outside the `usize` range.\n/// Use this function when overflow is input data.\npub fn checkedMultiply(left: usize, right: usize) -> Option<usize> {\n  return Intrinsic.usizeCheckedMultiply<Option<usize>>(left, right, some, none)\n}\n\n/// Returns `Some` with `left / right`, or `None` if `right` is zero. Use this\n/// function when a zero divisor is input data.\npub fn checkedDivide(left: usize, right: usize) -> Option<usize> {\n  return Intrinsic.usizeCheckedDivide<Option<usize>>(left, right, some, none)\n}\n\n/// Returns `Some` with the remainder, or `None` if `right` is zero. Use this function\n/// when a zero divisor is input data.\npub fn checkedRemainder(left: usize, right: usize) -> Option<usize> {\n  return Intrinsic.usizeCheckedRemainder<Option<usize>>(left, right, some, none)\n}\n\n/// Returns `true` when `left` and `right` are equal.\npub fn equals(left: usize, right: usize) -> bool {\n  return Intrinsic.usizeEquals(left, right)\n}\n\n/// Returns `true` when `left` and `right` are not equal.\npub fn notEquals(left: usize, right: usize) -> bool {\n  return Intrinsic.usizeNotEquals(left, right)\n}\n\n/// Returns `true` when `left` is less than `right`.\npub fn lessThan(left: usize, right: usize) -> bool {\n  return Intrinsic.usizeLessThan(&left, &right)\n}\n\n/// Returns `true` when `left` is less than or equal to `right`.\npub fn lessOrEqual(left: usize, right: usize) -> bool {\n  return Intrinsic.usizeLessOrEqual(left, right)\n}\n\n/// Returns `true` when `left` is greater than `right`.\npub fn greaterThan(left: usize, right: usize) -> bool {\n  return Intrinsic.usizeGreaterThan(left, right)\n}\n\n/// Returns `true` when `left` is greater than or equal to `right`.\npub fn greaterOrEqual(left: usize, right: usize) -> bool {\n  return Intrinsic.usizeGreaterOrEqual(left, right)\n}\n\n/// Reads the complete text as an unsigned decimal `usize`.\n///\n/// # Details\n///\n/// A failure contains `silk.format.NotANumber` for empty text, a sign, a non-digit, or trailing\n/// bytes. It contains `silk.format.OutOfRange` outside the target's `usize` range.\npub fn parse(text: string) -> Result<usize, ParseError> {\n  return Format.usizeValue(text)\n}\n",
   },
   {
     module: 'silk/vector',
@@ -1421,6 +1503,7 @@ export const modules = [
     digest: 'a9c1f96283a7211308f72d44fb64b1d3387a101ae4d17e6213b51bc22d4b758f',
     documentation: 'silk/vector.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: ['replace'],
     namespace: 'Vector',
     source:
@@ -1433,6 +1516,7 @@ export const modules = [
     digest: '6944be4263b4ac17e7a4253c949be9b148bffcb4b1b5f10ed2618c2255005c05',
     documentation: 'silk/writer.silk',
     layer: 'portable',
+    staticInventory: [],
     runtimeInventory: ['standardStreamWrite'],
     namespace: 'Writer',
     aliases: ['StdoutWriter', 'StderrWriter', 'WriterError'],

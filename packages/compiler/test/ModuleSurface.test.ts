@@ -134,16 +134,17 @@ pub const enabled: bool = true`
   }),
 )
 
-it.effect('normalizes duration constant spellings to their exact fixed-u64 surface value', () =>
+it.effect('retains constant initializer templates in the module surface', () =>
   Effect.gen(function* () {
     const compact = yield* surface('pub const timeout: u64 = 1h5m')
     const padded = yield* surface('pub const timeout: u64 = 01h05m00s')
     const changed = yield* surface('pub const timeout: u64 = 1h6m')
 
-    assert.strictEqual(ModuleSurface.equals(compact, padded), true)
+    assert.strictEqual(ModuleSurface.equals(compact, padded), false)
     assert.strictEqual(ModuleSurface.equals(compact, changed), false)
     assert.include(compact.canonical, 'DurationLiteral')
-    assert.include(compact.canonical, '3900000000000')
+    assert.include(compact.canonical, '1h5m')
+    assert.include(padded.canonical, '01h05m00s')
   }),
 )
 
@@ -157,6 +158,29 @@ pub fn answer() -> i32 { return 42 }`)
 pub fn answer() -> i32 { return 99 }`)
 
     assert.strictEqual(ModuleSurface.equals(left, right), true)
+  }),
+)
+
+it.effect('retains static modes and body-template meaning without source positions', () =>
+  Effect.gen(function* () {
+    const left = yield* surface(
+      'pub fn render(static template: string, value: i32) -> i32 { let static parsed = template return value }',
+    )
+    const repeated = yield* surface(
+      '\n\npub fn render(static template: string, value: i32) -> i32 { let static parsed = template return value }',
+    )
+    const changed = yield* surface(
+      'pub fn render(static template: string, value: i32) -> i32 { let static parsed = "changed" return value }',
+    )
+    const runtimeParameter = yield* surface(
+      'pub fn render(template: string, value: i32) -> i32 { return value }',
+    )
+
+    assert.strictEqual(ModuleSurface.equals(left, repeated), true)
+    assert.strictEqual(ModuleSurface.equals(left, changed), false)
+    assert.strictEqual(ModuleSurface.equals(left, runtimeParameter), false)
+    assert.include(left.canonical, 'Static')
+    assert.include(left.canonical, 'FunctionBodyTemplate')
   }),
 )
 
@@ -212,7 +236,7 @@ it.effect('keeps string distinct from an immutable byte view in module surfaces'
     // Pins the canonical surface encoding byte-for-byte; an encoding change must be deliberate.
     assert.strictEqual(
       text.canonical,
-      '13:ModuleSurface12:surface/Main712:5:Array701:19:FunctionDeclaration35:18:DeclarationOrdinal11:6:Number1:053:9:Canonical39:11:CanonicalId12:surface/Main8:identity6:Public8:Ordinary7:5:False7:5:Array11:6:Number1:1130:5:Array119:9:Parameter11:6:Number1:021:11:PresentName5:value67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False24:11:PresentName8:identity67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False6:4:None133:10:FailureRow6:4:True7:5:Array7:5:Array7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array137:14:RequirementRow6:4:True7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array',
+      '13:ModuleSurface12:surface/Main738:5:Array727:19:FunctionDeclaration35:18:DeclarationOrdinal11:6:Number1:053:9:Canonical39:11:CanonicalId12:surface/Main8:identity6:Public7:Runtime8:Ordinary7:5:False7:5:Array11:6:Number1:1139:5:Array128:9:Parameter11:6:Number1:021:11:PresentName5:value7:Runtime67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False24:11:PresentName8:identity67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False6:4:None133:10:FailureRow6:4:True7:5:Array7:5:Array7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array137:14:RequirementRow6:4:True7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array6:4:None7:5:Array',
     )
   }),
 )

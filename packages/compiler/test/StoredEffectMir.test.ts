@@ -34,15 +34,8 @@ const lowerStored = Effect.fnUntraced(function* (
   }).pipe(Effect.provide(SourceResolver.memory(imports)))
   const catalog = Layout.catalog(Target.wasm32UnknownUnknown, snapshot.index, snapshot.instances)
   const layout = Layout.plan(catalog, snapshot.instances, snapshot.index)
-  const ownership = new Map(
-    [name, ...imports.keys()].map((module) => [
-      module,
-      Analysis.ownershipOf(snapshot, module) ?? unreachable(`expected ownership for ${module}`),
-    ]),
-  )
   const module = Lower.lowerProgram(
     snapshot.instances,
-    ownership,
     layout,
     snapshot.index,
     OpaqueRealization.catalogOf(snapshot),

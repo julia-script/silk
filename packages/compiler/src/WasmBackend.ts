@@ -32,6 +32,7 @@ import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
 import * as Scalar from './Scalar.js'
 import * as StandardStreams from './StandardStreams.js'
+import type * as StaticValue from './StaticValue.js'
 import * as Target from './Target.js'
 import * as Transcendental from './Transcendental.js'
 import * as SilkType from './Type.js'
@@ -6564,7 +6565,7 @@ const emitCallOperation = (
     ...operation.arguments.flatMap((argument) =>
       slots(argument).map((slot) => Instr.localGet(slot)),
     ),
-    Instr.call(resolve(operation.target, operation.typeArguments)),
+    Instr.call(resolve(operation.target, operation.typeArguments, operation.staticArguments)),
     ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
     ...reloadReachableRoots(operation.arguments),
   ]
@@ -9096,9 +9097,10 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
   const resolve = (
     targetId: DeclarationFacts.CanonicalId,
     typeArguments: ReadonlyArray<SilkType.GenericArgument>,
+    staticArguments: ReadonlyArray<StaticValue.Value> = Object.freeze([]),
   ): FuncActor.Func => {
     const target = declared.find((candidate) =>
-      Mir.matchesInstance(candidate.fn, targetId, typeArguments),
+      Mir.matchesInstance(candidate.fn, targetId, typeArguments, staticArguments),
     )
     if (target === undefined) {
       const requested = typeArguments.map(SilkType.genericArgumentKey).join(', ')
@@ -9119,11 +9121,12 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
   const resolveIndependent = (
     targetId: DeclarationFacts.CanonicalId,
     typeArguments: ReadonlyArray<SilkType.GenericArgument>,
+    staticArguments: ReadonlyArray<StaticValue.Value> = Object.freeze([]),
   ): FuncActor.Func => {
     const target = declared.find((candidate) =>
-      Mir.matchesInstance(candidate.fn, targetId, typeArguments),
+      Mir.matchesInstance(candidate.fn, targetId, typeArguments, staticArguments),
     )
-    if (target === undefined) return resolve(targetId, typeArguments)
+    if (target === undefined) return resolve(targetId, typeArguments, staticArguments)
     return independentDrivers.get(Instances.keyText(target.fn.instance)) ?? target.handle
   }
 

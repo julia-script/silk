@@ -16,6 +16,12 @@ static target-profile intrinsic; the compiler MUST NOT recognize `Target` or any
 a special initializer form. A failed static evaluation, wrong result type, or selected-target range
 failure SHALL expose no usable constant value and SHALL retain the initializer's static diagnostic.
 
+Declaration indexing and target-neutral module surfaces SHALL retain a constant's explicit declared
+type, initializer body template, and source provenance without publishing a target-selected value.
+After the concrete target has been selected, the target realization SHALL evaluate that template and
+publish exactly one canonical selected constant value for residual HIR, cross-module references, and
+semantic inspection. No runtime backend SHALL select or replace the value again.
+
 #### Scenario: Declare representative scalar constants
 
 - **WHEN** a module declares boolean, `u8`, `i32`, `usize`, `f32`, and `f64` constants with fitting literals
@@ -35,6 +41,11 @@ failure SHALL expose no usable constant value and SHALL retain the initializer's
 
 - **WHEN** the standard library initializes a `usize` constant from its ordinary imported target fact on a 32-bit and a 64-bit compilation
 - **THEN** each compilation records its selected value through the static evaluator and no syntax-only target selector or backend-specific selection remains
+
+#### Scenario: Keep declaration surfaces target neutral
+
+- **WHEN** a public constant initializer depends on the selected target
+- **THEN** its declaration and module surface retain the declared type, initializer template, and provenance while each concrete target realization publishes its own selected canonical value
 
 #### Scenario: Reject a mismatched or overflowing initializer
 
