@@ -284,23 +284,57 @@ const dominators = (
   return immediate
 }
 
-/** @internal */
-const dominates = (
-  immediate: ReadonlyArray<number | undefined>,
-  ancestor: number,
-  block: number,
-): boolean => {
-  let current: number | undefined = block
-  const seen = new Set<number>()
-  while (current !== undefined) {
-    if (current === ancestor) return true
-    if (seen.has(current)) return false
-    seen.add(current)
-    const next: number | undefined = immediate[current]
-    if (next === current) return false
-    current = next
+interface DominatorIntervals {
+  readonly tin: ReadonlyArray<number>
+  readonly tout: ReadonlyArray<number>
+}
+
+/**
+ * Assigns entry/exit times of one DFS over the dominator tree so `dominates` answers in constant
+ * time; the previous per-query walk up the immediate-dominator chain was quadratic on the long
+ * single-successor chains coroutine resume dispatch emits.
+ *
+ * @internal
+ */
+const dominatorIntervals = (immediate: ReadonlyArray<number | undefined>): DominatorIntervals => {
+  const count = immediate.length
+  const children: Array<Array<number>> = Array.from({ length: count }, () => [])
+  for (let block = 1; block < count; block += 1) {
+    const parent = immediate[block]
+    if (parent !== undefined && parent !== block) children[parent]?.push(block)
   }
-  return false
+  const tin = new Array<number>(count).fill(-1)
+  const tout = new Array<number>(count).fill(-1)
+  if (count === 0 || immediate[0] === undefined) return { tin, tout }
+  let clock = 0
+  const stack: Array<{ readonly block: number; cursor: number }> = [{ block: 0, cursor: 0 }]
+  tin[0] = clock
+  clock += 1
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]
+    if (frame === undefined) break
+    const child = children[frame.block]?.[frame.cursor]
+    if (child === undefined) {
+      tout[frame.block] = clock
+      clock += 1
+      stack.pop()
+      continue
+    }
+    frame.cursor += 1
+    tin[child] = clock
+    clock += 1
+    stack.push({ block: child, cursor: 0 })
+  }
+  return { tin, tout }
+}
+
+/** @internal */
+const dominates = (intervals: DominatorIntervals, ancestor: number, block: number): boolean => {
+  if (ancestor === block) return true
+  const ancestorIn = intervals.tin[ancestor] ?? -1
+  const blockIn = intervals.tin[block] ?? -1
+  if (ancestorIn < 0 || blockIn < 0) return false
+  return ancestorIn < blockIn && (intervals.tout[block] ?? -1) < (intervals.tout[ancestor] ?? -1)
 }
 
 /** @internal */
@@ -329,6 +363,7 @@ const verifyFunction = (
     return instruction === undefined ? [] : successorsOf(instruction)
   })
   const immediate = dominators(body, successors)
+  const intervals = dominatorIntervals(immediate)
 
   /** The block and position defining a local value, or `undefined` for an argument. */
   const definitionOf = (value: number): Definition | 'argument' | 'missing' => {
@@ -379,7 +414,7 @@ const verifyFunction = (
           }
           // An incoming value must dominate the end of the edge's source block, not the phi.
           if (immediate[entry.block] === undefined) continue
-          if (!dominates(immediate, definition.block, entry.block)) {
+          if (!dominates(intervals, definition.block, entry.block)) {
             report('Instruction does not dominate all uses!', [
               `  ${localIdentifier(body, operand.value)} defined in ${blockIdentifier(body, definition.block)}`,
               `  used by ${describeInstruction(body, instruction)} in ${blockIdentifier(body, block)}, incoming from ${blockIdentifier(body, entry.block)}`,
@@ -404,7 +439,7 @@ const verifyFunction = (
         const dominated =
           definition.block === block
             ? definition.position < position
-            : dominates(immediate, definition.block, block)
+            : dominates(intervals, definition.block, block)
         if (!dominated) {
           report('Instruction does not dominate all uses!', [
             `  ${localIdentifier(body, operand.value)} defined in ${blockIdentifier(body, definition.block)}`,
