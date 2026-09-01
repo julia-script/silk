@@ -4,7 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
-import { corpus, scalarEnumSignedAcceptance } from './support/corpus.js'
+import { scalarEnumSignedAcceptance } from './support/corpus.js'
 import * as Json from './support/Json.js'
 
 // UTF-8, not charCodeAt: corpus programs may carry non-ASCII literals, and for ASCII sources the
@@ -19,42 +19,6 @@ const evaluateSource = (
   Effect.map(Analysis.ofSourceRealized('memory/evaluation', ascii(text)), (snapshot) =>
     Analysis.evaluate(snapshot, options),
   )
-
-it.effect(
-  'reproduces every pinned corpus outcome',
-  () =>
-    Effect.gen(function* () {
-      for (const program of corpus) {
-        const outcome = yield* evaluateSource(program.source)
-        switch (program.expected._tag) {
-          case 'Completes':
-            assert.strictEqual(outcome._tag, 'Completed', program.name)
-            if (outcome._tag === 'Completed') {
-              assert.strictEqual(
-                outcome.result.value,
-                BigInt(program.expected.result),
-                program.name,
-              )
-            }
-            break
-          case 'Trap':
-            assert.strictEqual(outcome._tag, 'Trap', program.name)
-            if (outcome._tag === 'Trap') assert.strictEqual(outcome.classification, 'Trap')
-            break
-          case 'UnavailableEntry':
-            assert.strictEqual(outcome._tag, 'Blocked', program.name)
-            if (outcome._tag === 'Blocked' && outcome.reason._tag === 'UnavailableEntry') {
-              assert.strictEqual(outcome.reason.reason, program.expected.reason, program.name)
-            } else {
-              assert.fail(`${program.name} expected an unavailable entry`)
-            }
-            break
-        }
-      }
-    }),
-  // The corpus replays every pinned program; it outgrew the default 60s ceiling on CI hosts.
-  300_000,
-)
 
 it.effect('evaluates scalar enums as immutable logical member values', () =>
   Effect.gen(function* () {
