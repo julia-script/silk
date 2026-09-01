@@ -47,14 +47,16 @@ const makeFunction = Effect.fn('ParityBenchmark.makeFunction')(
     yield* FunctionActor.buildBody(
       builder,
       fn,
-      Effect.fn('ParityBenchmark.functionBody')(function* (body) {
-        yield* Block.make(body, 'entry')
-        let value = zero
-        for (let index = 0; index < instructionCount; index += 1) {
-          value = yield* FunctionBody.binary(body, 'add', value, one, `value.${index}`)
-        }
-        yield* FunctionBody.returnValue(body, value)
-      }),
+      Effect.fn('ParityBenchmark.functionBody')(
+        function* (/** @type {FunctionBody.FunctionBody} */ body) {
+          yield* Block.make(body, 'entry')
+          let value = zero
+          for (let index = 0; index < instructionCount; index += 1) {
+            value = yield* FunctionBody.binary(body, 'add', value, one, `value.${index}`)
+          }
+          yield* FunctionBody.returnValue(body, value)
+        },
+      ),
     )
   },
 )
@@ -100,18 +102,20 @@ const workloads = {
         yield* FunctionActor.buildBody(
           builder,
           fn,
-          Effect.fn('ParityBenchmark.controlFlowBody')(function* (body) {
-            const blocks = []
-            for (let index = 0; index < 250; index += 1) {
-              blocks.push(yield* Block.make(body, `block.${index}`))
-            }
-            for (let index = 0; index < blocks.length - 1; index += 1) {
-              yield* Block.setInsertionPoint(body, blocks[index])
-              yield* FunctionBody.branch(body, blocks[index + 1])
-            }
-            yield* Block.setInsertionPoint(body, blocks[blocks.length - 1])
-            yield* FunctionBody.returnValue(body, zero)
-          }),
+          Effect.fn('ParityBenchmark.controlFlowBody')(
+            function* (/** @type {FunctionBody.FunctionBody} */ body) {
+              const blocks = []
+              for (let index = 0; index < 250; index += 1) {
+                blocks.push(yield* Block.make(body, `block.${index}`))
+              }
+              for (let index = 0; index < blocks.length - 1; index += 1) {
+                yield* Block.setInsertionPoint(body, blocks[index])
+                yield* FunctionBody.branch(body, blocks[index + 1])
+              }
+              yield* Block.setInsertionPoint(body, blocks[blocks.length - 1])
+              yield* FunctionBody.returnValue(body, zero)
+            },
+          ),
         )
         yield* Bitcode.encode(builder)
       }),
