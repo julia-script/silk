@@ -1,5 +1,9 @@
+import * as Console from 'effect/Console'
+import * as Effect from 'effect/Effect'
 import * as Lexer from '../dist/Lexer.js'
 import * as SourceFile from '../dist/SourceFile.js'
+
+const log = (...values) => Effect.runSync(Console.log(...values))
 
 const kibibyte = 1024
 const mebibyte = kibibyte * kibibyte
@@ -29,7 +33,7 @@ samples.sort((left, right) => left - right)
 const median = samples[Math.floor(samples.length / 2)]
 if (median === undefined) throw new Error('benchmark did not produce a median')
 
-console.log(
+log(
   JSON.stringify(
     {
       workloadBytes: bytes.length,

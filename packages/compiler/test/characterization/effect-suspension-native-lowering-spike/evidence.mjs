@@ -3,6 +3,10 @@ import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:f
 import { dirname, join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { fileURLToPath } from 'node:url'
+import * as Console from 'effect/Console'
+import * as Effect from 'effect/Effect'
+
+const log = (...values) => Effect.runSync(Console.log(...values))
 
 const root = dirname(fileURLToPath(import.meta.url))
 const evidenceRoot = join(root, 'evidence')
@@ -822,7 +826,7 @@ const selectionReport = `# Native suspension lowering selection\n\nDecision: **s
 writeFileSync(selectionPath, selectionReport)
 const report = `# Native suspension lowering evidence\n\nStatus: **PASS for OpenSpec tasks 1.8 and 1.9**. Selected strategy: **direct iterative state machine**.\n\n- LLVM: ${environment.clang.split('\n')[0]}\n- Target: \`${target}\`\n- Coroutine pipeline: \`${coroutinePassPipeline}\`\n- Semantic/allocation/cleanup parity: pass\n- Constant-stack watermark at depths 1, 1,000, and 100,000 under O0/O2: pass\n- Direct and indirect call-cycle audit: pass\n- Residual coroutine structure-intrinsic audit: pass\n- Retcon fallback-call and selected-inline-buffer-root audit: pass\n- Static DWARF and synthetic Silk boundary symbolization: pass\n- Second normalized semantic/depth replay: pass\n\n## Measured values\n\n| metric | direct | switched | retcon |\n| --- | ---: | ---: | ---: |\n| O0 compile median (ms) | ${benchmarkSummary.compile.O0.direct.median.toFixed(3)} | ${benchmarkSummary.compile.O0.switched.median.toFixed(3)} | ${benchmarkSummary.compile.O0.retcon.median.toFixed(3)} |\n| O2 compile median (ms) | ${benchmarkSummary.compile.O2.direct.median.toFixed(3)} | ${benchmarkSummary.compile.O2.switched.median.toFixed(3)} | ${benchmarkSummary.compile.O2.retcon.median.toFixed(3)} |\n| O2 resume median (ms/boundary) | ${benchmarkSummary.resumeO2PerBoundary.direct.median.toFixed(6)} | ${benchmarkSummary.resumeO2PerBoundary.switched.median.toFixed(6)} | ${benchmarkSummary.resumeO2PerBoundary.retcon.median.toFixed(6)} |\n| frame bytes at boundary 1 | ${semantic.direct.O2.frameLayouts[0].size} | ${semantic.switched.O2.frameLayouts[0].size} | ${semantic.retcon.O2.frameLayouts[0].size} |\n| linked O2 code/data bytes | ${linkedSize.direct.O2.codeData} | ${linkedSize.switched.O2.codeData} | ${linkedSize.retcon.O2.codeData} |\n\nThe generated [selection report](selection-report.md) applies every threshold and records the rejection reason for both LLVM candidates. Raw samples, MADs, exact commands, stack results, call graphs, frame layouts, semantic traces, and debug symbolization are retained in [evidence.json](evidence.json).\n\nRun:\n\n\`\`\`sh\nnode packages/compiler/test/characterization/effect-suspension-native-lowering-spike/evidence.mjs\n\`\`\`\n`
 writeFileSync(reportPath, report)
-console.log(
+log(
   JSON.stringify(
     {
       status: 'pass',

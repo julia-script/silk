@@ -7,11 +7,13 @@ import * as Document from '../src/Document.js'
 import {
   binPath,
   connect,
+  delay,
   didOpen,
   failure,
   pulledDiagnosticReport,
   pulledDiagnostics,
   response,
+  waitForExit,
 } from './StdioClient.js'
 
 const controlledBinPath = fileURLToPath(
@@ -330,7 +332,7 @@ it(
       const wedgedUri = 'file:///silk-lsp-e2e/wedged/Main.silk'
       const healthyUri = 'file:///silk-lsp-e2e/healthy/Main.silk'
       didOpen(client, wedgedUri, 'pub fn main() -> i32 { return 1 }')
-      await new Promise((resolve) => setTimeout(resolve, 1_000))
+      await delay(1_000)
       didOpen(client, healthyUri, 'pub fn main() -> i32 { return 42 }')
       await client.waitFor((message) => {
         const report = pulledDiagnosticReport(message, healthyUri)
@@ -427,7 +429,7 @@ it(
           contentChanges: [{ text: 'pub fn main() -> i32 { return 2 }' }],
         },
       })
-      await new Promise((resolve) => setTimeout(resolve, 15))
+      await delay(15)
       client.send({
         id: 2,
         method: 'textDocument/hover',
@@ -555,7 +557,7 @@ it(
 
       client.send({ id: 5, method: 'shutdown' })
       await client.waitFor((message) => response(message, 5))
-      const exit = new Promise<void>((resolve) => client.child.once('exit', () => resolve()))
+      const exit = waitForExit(client.child)
       client.send({ method: 'exit' })
       await exit
       exited = true
@@ -577,11 +579,11 @@ it('completes stdio shutdown during controlled active analysis', { timeout: 30_0
     await client.waitFor((message) => response(message, 1))
     client.send({ method: 'initialized', params: {} })
     didOpen(client, 'file:///silk-lsp-e2e/shutdown/Main.silk', 'pub fn main() -> i32 { return 1 }')
-    await new Promise((resolve) => setTimeout(resolve, 15))
+    await delay(15)
 
     client.send({ id: 2, method: 'shutdown' })
     await client.waitFor((message) => response(message, 2))
-    const exit = new Promise<void>((resolve) => client.child.once('exit', () => resolve()))
+    const exit = waitForExit(client.child)
     client.send({ method: 'exit' })
     await exit
     exited = true
@@ -876,7 +878,7 @@ it(
         method: 'workspace/didChangeWatchedFiles',
         params: { changes: [{ uri: utilUri, type: 2 }] },
       })
-      await new Promise((resolve) => setTimeout(resolve, 100))
+      await delay(100)
       const staleDiskDiagnostics = client.messages.flatMap((message) => {
         const report = pulledDiagnosticReport(message, mainUri)
         return report === undefined ? [] : report.diagnostics
@@ -887,7 +889,7 @@ it(
         method: 'textDocument/didClose',
         params: { textDocument: { uri: utilUri } },
       })
-      await new Promise((resolve) => setTimeout(resolve, 100))
+      await delay(100)
       client.send({
         method: 'workspace/didChangeWatchedFiles',
         params: { changes: [{ uri: utilUri, type: 2 }] },
@@ -941,7 +943,7 @@ it(
           changes: [{ uri: pathToFileURL(join(tmpdir(), 'unrelated.silk')).href, type: 2 }],
         },
       })
-      await new Promise((resolve) => setTimeout(resolve, 100))
+      await delay(100)
       const reportsAfterUnrelated = client.messages.filter(
         (message) => pulledDiagnosticReport(message, mainUri) !== undefined,
       ).length

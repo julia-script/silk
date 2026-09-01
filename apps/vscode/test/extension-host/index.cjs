@@ -15,8 +15,8 @@ const timeout = async (promise, label, milliseconds = 15_000) => {
 }
 
 const waitFor = async (condition, label, milliseconds = 15_000) => {
-  const started = Date.now()
-  while (Date.now() - started < milliseconds) {
+  const started = performance.now()
+  while (performance.now() - started < milliseconds) {
     const value = condition()
     if (value !== undefined) return value
     await new Promise((resolve) => setTimeout(resolve, 50))

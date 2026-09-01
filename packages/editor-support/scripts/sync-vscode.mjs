@@ -6,7 +6,11 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
+import * as Console from 'effect/Console'
+import * as Effect from 'effect/Effect'
 import { grammar, languageConfiguration } from '../dist/TextMate.js'
+
+const log = (...values) => Effect.runSync(Console.log(...values))
 
 const extensionRoot = resolve(dirname(new URL(import.meta.url).pathname), '../../../apps/vscode')
 const grammarPath = resolve(extensionRoot, 'syntaxes/silk.tmLanguage.json')
@@ -18,4 +22,4 @@ writeFileSync(configurationPath, `${JSON.stringify(languageConfiguration, null, 
 execFileSync('pnpm', ['exec', 'oxfmt', '--write', grammarPath, configurationPath], {
   stdio: 'inherit',
 })
-console.log(`wrote ${grammarPath}\nwrote ${configurationPath}`)
+log(`wrote ${grammarPath}\nwrote ${configurationPath}`)

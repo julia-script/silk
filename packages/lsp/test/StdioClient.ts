@@ -1,8 +1,27 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import * as Clock from 'effect/Clock'
+import * as Data from 'effect/Data'
+import * as Effect from 'effect/Effect'
+import * as Fiber from 'effect/Fiber'
+import * as Inspectable from 'effect/Inspectable'
+
+class StdioTimeout extends Data.TaggedError('StdioTimeout')<{
+  readonly message: string
+}> {}
 
 /** Shared stdio harness: a minimal Content-Length framed JSON-RPC client driving the real server. */
 export const binPath = fileURLToPath(new URL('../dist/bin.js', import.meta.url))
+
+export const delay = (milliseconds: number): Promise<void> =>
+  Effect.runPromise(Effect.sleep(milliseconds))
+
+export const waitForExit = (child: ChildProcess): Promise<void> =>
+  Effect.runPromise(
+    Effect.callback<void>((resume) => {
+      child.once('exit', () => resume(Effect.void))
+    }),
+  )
 
 /** A minimal Content-Length framed JSON-RPC client driving the real stdio server. */
 export interface Client {
@@ -72,7 +91,11 @@ export const connect = (entryPath = binPath): Client => {
         const request = diagnosticRequests.get(message.id)
         const error = message.error as { readonly data?: { readonly retriggerRequest?: boolean } }
         if (request !== undefined && error.data?.retriggerRequest === true)
-          setTimeout(() => pull(request.uri, openDocuments.get(request.uri)), 10)
+          Effect.runFork(
+            Effect.sleep(10).pipe(
+              Effect.andThen(Effect.sync(() => pull(request.uri, openDocuments.get(request.uri)))),
+            ),
+          )
       }
       if (message.method === 'workspace/diagnostic/refresh' && message.id !== undefined) {
         rawSend({ id: message.id, result: null })
@@ -131,33 +154,41 @@ export const connect = (entryPath = binPath): Client => {
     select: (message: Record<string, unknown>) => A | undefined,
     timeoutMilliseconds = 25_000,
   ): Promise<A> =>
-    new Promise((resolve, reject) => {
-      const startedAt = Date.now()
-      const poll = (): void => {
-        for (const message of messages) {
-          const selected = select(message)
-          if (selected !== undefined) {
-            resolve(selected)
-            return
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const startedAt = yield* Clock.currentTimeMillis
+        while (true) {
+          for (const message of messages) {
+            const selected = select(message)
+            if (selected !== undefined) return selected
           }
+          // Kept under the 30s per-test budget: this inner poll must not be the thing that fires
+          // first, or a slow runner reports a timeout instead of the test's own limit.
+          if ((yield* Clock.currentTimeMillis) - startedAt > timeoutMilliseconds)
+            return yield* new StdioTimeout({
+              message: `Timed out waiting; saw ${Inspectable.toStringUnknown(messages)}`,
+            })
+          yield* Effect.sleep(25)
         }
-        // Kept under the 30s per-test budget: this inner poll must not be the thing that fires
-        // first, or a slow runner reports a timeout instead of the test's own limit.
-        if (Date.now() - startedAt > timeoutMilliseconds) {
-          reject(new Error(`Timed out waiting; saw ${JSON.stringify(messages)}`))
-          return
-        }
-        setTimeout(poll, 25)
-      }
-      poll()
-    })
+      }),
+    )
   const close = (): Promise<void> =>
-    new Promise((resolve) => {
-      child.once('exit', () => resolve())
-      send({ id: 99, method: 'shutdown' })
-      send({ method: 'exit' })
-      setTimeout(() => child.kill(), 5_000).unref()
-    })
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const exited = Effect.callback<void>((resume) => {
+          child.once('exit', () => resume(Effect.void))
+        })
+        const exitFiber = yield* Effect.forkChild(exited)
+        send({ id: 99, method: 'shutdown' })
+        send({ method: 'exit' })
+        const killFiber = yield* Effect.sleep(5_000).pipe(
+          Effect.andThen(Effect.sync(() => child.kill())),
+          Effect.forkChild,
+        )
+        yield* Fiber.join(exitFiber)
+        yield* Fiber.interrupt(killFiber)
+      }),
+    )
   return { child, messages, send, waitFor, close }
 }
 

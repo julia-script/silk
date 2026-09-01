@@ -8,6 +8,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import * as DocumentationProject from '../../docgen/dist/Project.js'
 import * as DocumentationReference from '../../docgen/dist/Reference.js'
@@ -15,6 +16,8 @@ import * as ProjectAnalysis from '../dist/ProjectAnalysis.js'
 import * as SourceFile from '../dist/SourceFile.js'
 import * as SourceResolver from '../dist/SourceResolver.js'
 import * as Stdlib from '../dist/Stdlib.js'
+
+const logError = (...values) => Effect.runSync(Console.error(...values))
 
 const documentationRoot = fileURLToPath(
   new URL('../../../apps/docs/content/language/', import.meta.url),
@@ -41,7 +44,7 @@ const stdlibTree = async () => {
   const project = DocumentationProject.fromProjectAnalysis(analysis)
   const rendered = DocumentationReference.make(Stdlib.manifest, project)
   if (rendered._tag === 'Failure') {
-    for (const error of rendered.errors) console.error('Stdlib reference generation failed:', error)
+    for (const error of rendered.errors) logError('Stdlib reference generation failed:', error)
     process.exit(1)
   }
   return rendered.reference.files
@@ -275,10 +278,9 @@ const diagnosticsPage = () => {
   }
 
   if (collisions.size > 0) {
-    console.error('Duplicate stable diagnostic codes in src/Diagnostic.ts:')
-    for (const [code, names] of collisions)
-      console.error(`  ${code} is held by ${names.join(' and ')}`)
-    console.error('A stable code identifies one condition. Renumber the newer constant.')
+    logError('Duplicate stable diagnostic codes in src/Diagnostic.ts:')
+    for (const [code, names] of collisions) logError(`  ${code} is held by ${names.join(' and ')}`)
+    logError('A stable code identifies one condition. Renumber the newer constant.')
     process.exit(1)
   }
 
@@ -313,9 +315,9 @@ const diagnosticsPage = () => {
       entry.messages.some((message) => message.trim().length === 0),
   )
   if (missingMessages.length > 0) {
-    console.error('Diagnostic codes without a discoverable non-empty message template:')
-    for (const entry of missingMessages) console.error(`  ${entry.code} (${entry.name}Code)`)
-    console.error('Keep each code and complete message template together in a diagnostic factory.')
+    logError('Diagnostic codes without a discoverable non-empty message template:')
+    for (const entry of missingMessages) logError(`  ${entry.code} (${entry.name}Code)`)
+    logError('Keep each code and complete message template together in a diagnostic factory.')
     process.exit(1)
   }
 
@@ -382,15 +384,13 @@ const write = (name, contents) => {
   const destination = `${documentationRoot}${name}`
   if (check) {
     if (!existsSync(destination)) {
-      console.error(
-        `${name} is missing. Run pnpm --filter @silklang/compiler documentation:generate`,
-      )
+      logError(`${name} is missing. Run pnpm --filter @silklang/compiler documentation:generate`)
       process.exitCode = 1
       return
     }
     const existing = readFileSync(destination, 'utf8')
     if (existing !== contents) {
-      console.error(`${name} is stale. Run pnpm --filter @silklang/compiler documentation:generate`)
+      logError(`${name} is stale. Run pnpm --filter @silklang/compiler documentation:generate`)
       process.exitCode = 1
     }
     return
@@ -406,14 +406,14 @@ const writeStdlib = (files) => {
   if (check) {
     for (const path of expected.keys())
       if (!actual.includes(path)) {
-        console.error(
+        logError(
           `stdlib/${path} is missing. Run pnpm --filter @silklang/compiler documentation:generate`,
         )
         process.exitCode = 1
       }
     for (const path of actual)
       if (!expected.has(path)) {
-        console.error(
+        logError(
           `stdlib/${path} is extra or renamed. Run pnpm --filter @silklang/compiler documentation:generate`,
         )
         process.exitCode = 1
@@ -422,7 +422,7 @@ const writeStdlib = (files) => {
       const destination = `${stdlibRoot}${path}`
       if (!existsSync(destination)) continue
       if (readFileSync(destination, 'utf8') !== contents) {
-        console.error(
+        logError(
           `stdlib/${path} is stale. Run pnpm --filter @silklang/compiler documentation:generate`,
         )
         process.exitCode = 1

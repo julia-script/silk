@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
+import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import { llvmToolchain } from '../../../test/support/llvmToolchain.js'
 import * as Bitcode from '../src/Bitcode.js'
@@ -20,7 +21,11 @@ import { raise } from './support/raise.js'
 const directory = mkdtempSync(join(tmpdir(), 'silk-effect-llvm-roundtrip-'))
 afterAll(() => rmSync(directory, { recursive: true, force: true }))
 
-const toolchain = llvmToolchain(['llvm-as', 'llvm-dis', 'opt'], 'the IR round-trip check')
+const toolchain = llvmToolchain(
+  ['llvm-as', 'llvm-dis', 'opt'],
+  'the IR round-trip check',
+  (message) => Effect.runSync(Console.log(message)),
+)
 
 const required = <A>(value: A | undefined, message: string): A => value ?? raise(message)
 

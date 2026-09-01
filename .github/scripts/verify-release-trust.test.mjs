@@ -9,11 +9,11 @@ const trusted = {
   dist: { attestations: { provenance: {} } },
 }
 
-test('accepts a trusted publish with provenance', () => {
+void test('accepts a trusted publish with provenance', () => {
   assert.deepEqual(checkManifest('@silklang/llvm', '0.1.0', trusted), [])
 })
 
-test('rejects an untrusted publish without provenance', () => {
+void test('rejects an untrusted publish without provenance', () => {
   const failures = checkManifest('@silklang/llvm', '0.1.0', {
     version: '0.1.0',
     _npmUser: { name: 'manual' },
@@ -22,7 +22,7 @@ test('rejects an untrusted publish without provenance', () => {
   assert.equal(failures.length, 2)
 })
 
-test('reads the requested version from the registry packument', async () => {
+void test('reads the requested version from the registry packument', async () => {
   const fetchImpl = async () => ({
     ok: true,
     json: async () => ({ versions: { '0.1.0': trusted } }),
@@ -32,7 +32,7 @@ test('reads the requested version from the registry packument', async () => {
   assert.equal(manifest.version, '0.1.0')
 })
 
-test('surfaces registry errors', async () => {
+void test('surfaces registry errors', async () => {
   const fetchImpl = async () => ({ ok: false, status: 503 })
 
   await assert.rejects(

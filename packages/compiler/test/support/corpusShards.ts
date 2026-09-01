@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, describe, it } from '@effect/vitest'
+import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import { llvmToolchain } from '../../../../test/support/llvmToolchain.js'
 import * as Analysis from '../../src/Analysis.js'
@@ -81,7 +82,11 @@ export const corpusOutcomeShard = (shard: number): void => {
  * against the real one is only a claim.
  */
 export const moduleVerificationShard = (shard: number): void => {
-  const toolchain = llvmToolchain(['opt'], `the LLVM verifier cross-check (shard ${shard})`)
+  const toolchain = llvmToolchain(
+    ['opt'],
+    `the LLVM verifier cross-check (shard ${shard})`,
+    (message) => Effect.runSync(Console.log(message)),
+  )
   const destinationRoot = mkdtempSync(join(tmpdir(), `silk-module-verification-${shard}-`))
   afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 

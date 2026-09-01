@@ -51,19 +51,25 @@ export interface LlvmToolchain {
   readonly unavailable: () => boolean
 }
 
+export type Report = (message: string) => void
+
 /**
  * Resolves every tool a suite needs, reporting once which commands it will use or what is missing.
  *
  * `purpose` names the check in both messages, so a red CI build says what stopped running.
  */
-export const llvmToolchain = (tools: ReadonlyArray<string>, purpose: string): LlvmToolchain => {
+export const llvmToolchain = (
+  tools: ReadonlyArray<string>,
+  purpose: string,
+  report: Report,
+): LlvmToolchain => {
   const resolved = new Map(tools.map((tool) => [tool, findLlvmTool(tool)] as const))
   const missing = tools.filter((tool) => resolved.get(tool) === undefined)
 
   if (missing.length === 0) {
-    console.log(`${purpose} is using ${tools.map((tool) => resolved.get(tool)).join(', ')}`)
+    report(`${purpose} is using ${tools.map((tool) => resolved.get(tool)).join(', ')}`)
   } else if (process.env.CI === undefined) {
-    console.log(`${missing.join(', ')} was not found; skipping ${purpose}`)
+    report(`${missing.join(', ')} was not found; skipping ${purpose}`)
   }
 
   return {

@@ -5,6 +5,7 @@
 
 import { readFileSync } from 'node:fs'
 import * as Data from 'effect/Data'
+import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import * as DocumentationPolicy from '../../docgen/dist/Policy.js'
 import * as DocumentationProject from '../../docgen/dist/Project.js'
@@ -14,6 +15,9 @@ import * as SourceResolver from '../dist/SourceResolver.js'
 import * as CompilerStdlib from '../dist/Stdlib.js'
 
 class DocumentationPolicyError extends Data.TaggedError('DocumentationPolicyError') {}
+
+const log = (...values) => Effect.runSync(Console.log(...values))
+const logError = (...values) => Effect.runSync(Console.error(...values))
 
 const lineAt = (bytes, offset) => {
   const limit = Math.max(0, Math.min(offset, bytes.length))
@@ -67,10 +71,8 @@ const violations =
 const checkedModules = selectedModule === undefined ? CompilerStdlib.manifest.length : 1
 if (!process.argv.includes('--summary'))
   for (const { violation, path, line } of violations)
-    console.error(
-      `${path}:${line}: [${violation.code}] ${violation.identity}: ${violation.message}`,
-    )
-console.log(
+    logError(`${path}:${line}: [${violation.code}] ${violation.identity}: ${violation.message}`)
+log(
   violations.length === 0
     ? `Stdlib documentation policy: ${checkedModules} modules checked, no violations.`
     : `Stdlib documentation policy: ${checkedModules} modules checked, ${violations.length} violations.`,

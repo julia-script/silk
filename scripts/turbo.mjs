@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
+import * as Console from 'effect/Console'
+import * as Effect from 'effect/Effect'
 import { deriveConcurrency, hostParallelism, tasksOf, workersPerTask } from './concurrency.mjs'
+
+const log = (...values) => Effect.runSync(Console.log(...values))
+const logError = (...values) => Effect.runSync(Console.error(...values))
 
 /**
  * Runs Turbo with a concurrency bound derived from the host.
@@ -30,7 +35,7 @@ const concurrency = deriveConcurrency(cpus, workersPerTask(tasks, cpus), tasks.i
 const turboArgs = hasExplicitConcurrency ? args : [...args, `--concurrency=${concurrency}`]
 
 if (!hasExplicitConcurrency) {
-  console.log(`turbo: --concurrency=${concurrency} (${cpus} available cores)`)
+  log(`turbo: --concurrency=${concurrency} (${cpus} available cores)`)
 }
 
 // Resolve Turbo's own entry point rather than trusting PATH, so this behaves the same whether it
@@ -53,7 +58,7 @@ const env =
 const child = spawn(process.execPath, [turboBin, ...turboArgs], { stdio: 'inherit', env })
 
 child.on('error', (error) => {
-  console.error(`turbo: failed to start (${error.message})`)
+  logError(`turbo: failed to start (${error.message})`)
   process.exit(1)
 })
 
