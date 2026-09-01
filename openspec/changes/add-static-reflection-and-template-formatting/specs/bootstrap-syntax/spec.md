@@ -23,4 +23,3 @@ MUST preserve the following statement, enclosing block boundary, and following d
 
 - **WHEN** `static for field in` is followed by a block and then a return statement
 - **THEN** the static-for node records a missing iterable, retains its block, and preserves the following return
-

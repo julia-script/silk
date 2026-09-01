@@ -18,4 +18,3 @@ synthetic tuple fields.
 
 - **WHEN** a named struct has public and private fields in declaration order
 - **THEN** authorized reflection preserves the relative order of visible public fields while revealing no inaccessible field name
-

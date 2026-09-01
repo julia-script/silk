@@ -17,4 +17,3 @@ storage, private inaccessible field names, or backend details.
 
 - **WHEN** the same reflection-generated specialization is realized repeatedly
 - **THEN** its descriptor, iteration, template, and residual-provenance encodings are byte-identical
-

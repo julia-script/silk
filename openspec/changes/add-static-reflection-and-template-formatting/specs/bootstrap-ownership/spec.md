@@ -18,4 +18,3 @@ its fields.
 
 - **WHEN** template parsing creates and replaces immutable static sequences
 - **THEN** no sequence allocation, replacement, or value appears in the runtime cleanup plan
-

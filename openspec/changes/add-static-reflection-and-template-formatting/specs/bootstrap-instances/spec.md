@@ -18,4 +18,3 @@ conflated.
 
 - **WHEN** the same formatting function is reached with two unequal static template values over the same argument type
 - **THEN** discovery retains two canonical residual specialization keys even if later optimization makes their emitted bytes equal
-

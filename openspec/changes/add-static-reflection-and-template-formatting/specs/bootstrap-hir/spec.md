@@ -13,4 +13,3 @@ template segment that caused their elaboration.
 
 - **WHEN** static iteration generates different `Display` calls for `string` and `i32` tuple fields
 - **THEN** HIR contains two ordinary typed calls and projections in source order and no common runtime reflection operation
-
