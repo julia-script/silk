@@ -36,6 +36,7 @@ const sourceRoot = Flag.string('source-root').pipe(
 
 const stdlib = Flag.boolean('stdlib').pipe(
   Flag.withDescription('Doctest the compiler-shipped standard library instead of a JSON file.'),
+  Flag.withDefault(false),
 )
 
 const target = Flag.string('target').pipe(

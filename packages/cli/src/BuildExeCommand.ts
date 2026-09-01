@@ -49,10 +49,12 @@ const clang = Flag.string('clang').pipe(
 
 const saveTemps = Flag.boolean('save-temps').pipe(
   Flag.withDescription('Keep the build scope intermediates for inspection.'),
+  Flag.withDefault(false),
 )
 
 const timings = Flag.boolean('timings').pipe(
   Flag.withDescription('Print the per-phase timing and memory report.'),
+  Flag.withDefault(false),
 )
 
 export interface Options {

@@ -12,6 +12,7 @@
 /apps/docs/.next/
 /apps/docs/next-env.d.ts
 /apps/docs/tsconfig.tsbuildinfo
+/examples/tiny-language/build-js/
 
 .scratch
 .vercel

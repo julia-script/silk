@@ -15,6 +15,7 @@ const output = Flag.string('output').pipe(
 
 const includePrivate = Flag.boolean('include-private').pipe(
   Flag.withDescription('Include private declarations and fields in generated documentation.'),
+  Flag.withDefault(false),
 )
 
 export interface Options extends DocumentationWorkflow.Options {}
