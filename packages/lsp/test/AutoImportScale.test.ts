@@ -7,6 +7,7 @@ import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silklang/compiler/Analysis'
 import * as WorkspaceInventory from '@silklang/compiler/WorkspaceInventory'
 import * as Effect from 'effect/Effect'
+import * as Inspectable from 'effect/Inspectable'
 import * as Workspace from '../src/Workspace.js'
 import * as WorkspaceCatalog from '../src/WorkspaceCatalog.js'
 
@@ -89,7 +90,7 @@ it.effect(
       assert.isAtLeast(revised.observation.indexedExports, moduleCount + 1)
       if (process.env.SILK_AUTO_IMPORT_MEASURE === '1')
         process.stderr.write(
-          `${JSON.stringify({
+          `${Inspectable.toStringUnknown({
             modules: moduleCount + 1,
             initial: session.inventory.observation,
             incremental: revised.observation,

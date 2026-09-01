@@ -5,6 +5,7 @@ import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Path from 'effect/Path'
+import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import { ChildProcess } from 'effect/unstable/process'
 import * as Analysis from '../../dist/Analysis.js'
@@ -32,6 +33,11 @@ pub fn main() -> i32 {
 }`
 const bytes = new TextEncoder().encode(source)
 const moduleName = 'fixture/stored-callable-runtime-determinism'
+const encodeJson = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Unknown, {
+    replacer: (_, value) => (typeof value === 'bigint' ? value.toString() : value),
+  }),
+)
 
 const collectText = Stream.runFold(
   () => '',
@@ -127,11 +133,7 @@ const program = Effect.gen(function* () {
     directWasm:
       !wasmArtifact.wat.includes('call_indirect') && !wasmArtifact.wat.includes('(table '),
   }
-  yield* Effect.try(() =>
-    process.stdout.write(
-      JSON.stringify(report, (_, value) => (typeof value === 'bigint' ? value.toString() : value)),
-    ),
-  )
+  yield* Effect.try(() => process.stdout.write(encodeJson(report)))
 }).pipe(
   Effect.scoped,
   Effect.provide(Layer.mergeAll(NodeHeapObservation.layer, NodeServices.layer)),

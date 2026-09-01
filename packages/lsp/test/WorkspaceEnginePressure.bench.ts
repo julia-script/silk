@@ -5,6 +5,7 @@ import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as WorkspaceInventory from '@silklang/compiler/WorkspaceInventory'
 import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
+import * as Inspectable from 'effect/Inspectable'
 import * as Console from 'effect/Console'
 import * as Fiber from 'effect/Fiber'
 import * as Queue from 'effect/Queue'
@@ -208,7 +209,7 @@ it.live('reports editor-session pressure without machine-specific thresholds', (
     assert.isAtLeast(workerRetirements, 1)
     assert.strictEqual(outstandingQueries, 0)
     yield* Console.log(
-      JSON.stringify(
+      Inspectable.toStringUnknown(
         {
           acceptedEdits: editCount,
           workerSpawns,
@@ -220,7 +221,6 @@ it.live('reports editor-session pressure without machine-specific thresholds', (
           pendingGenerationCapacityPerProject: 1,
           finalDiagnosticCount: diagnostic._tag === 'Ready' ? diagnostic.value.items.length : null,
         },
-        undefined,
         2,
       ),
     )

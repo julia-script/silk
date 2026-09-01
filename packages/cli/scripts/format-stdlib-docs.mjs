@@ -9,6 +9,7 @@ import * as Formatter from '@silklang/formatter/Formatter'
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
+import * as Inspectable from 'effect/Inspectable'
 import * as Path from 'effect/Path'
 import * as Result from 'effect/Result'
 
@@ -60,7 +61,7 @@ const formatEmbeddedDocumentation = Effect.fnUntraced(function* (/** @type {stri
   if (Result.isFailure(attempted))
     return {
       _tag: 'Failure',
-      message: `${file}: ${attempted.failure.message}\n${JSON.stringify(attempted.failure.reason, null, 2)}`,
+      message: `${file}: ${attempted.failure.message}\n${Inspectable.toStringUnknown(attempted.failure.reason, 2)}`,
     }
 
   const canonicalSource = SourceFile.make(

@@ -1,5 +1,6 @@
 import * as Doctest from '@silklang/docgen/Doctest'
 import * as Example from '@silklang/docgen/Example'
+import * as Json from '@silklang/docgen/Json'
 import * as Report from '@silklang/docgen/Report'
 import * as Sources from '@silklang/docgen/Sources'
 import * as Stdlib from '@silklang/docgen/Stdlib'
@@ -96,10 +97,9 @@ export const run = Effect.fn('DoctestCommand.run')(function* (
       const text = yield* fileSystem
         .readFileString(options.input)
         .pipe(Effect.mapError(() => `Cannot read documentation JSON at ${options.input}`))
-      const documentation: unknown = yield* Effect.try({
-        try: (): unknown => JSON.parse(text),
-        catch: () => `${options.input} does not hold valid JSON`,
-      })
+      const documentation = yield* Json.decode(text).pipe(
+        Effect.mapError(() => `${options.input} does not hold valid JSON`),
+      )
       const lookup =
         options.sourceRoot === undefined
           ? Sources.empty

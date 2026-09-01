@@ -1,7 +1,10 @@
 import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
+import * as Schema from 'effect/Schema'
 import * as Analysis from '../../dist/Analysis.js'
+
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 /**
  * Nested and multiply-specialized stored-callable constructions: `Parser`/`Nested` violate through
@@ -43,7 +46,7 @@ NodeRuntime.runMain(
       'wasm32-unknown-unknown',
     )
     yield* Console.log(
-      JSON.stringify({
+      encodeJson({
         diagnostics: Analysis.diagnostics(snapshot).map((diagnostic) => ({
           code: diagnostic.code,
           message: diagnostic.message,

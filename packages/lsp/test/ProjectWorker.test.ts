@@ -5,6 +5,7 @@ import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as WorkspaceInventory from '@silklang/compiler/WorkspaceInventory'
 import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
+import * as Inspectable from 'effect/Inspectable'
 import * as Result from 'effect/Result'
 import { SymbolKind } from 'vscode-languageserver-types'
 import type * as Document from '../src/Document.js'
@@ -154,7 +155,7 @@ pub fn main() -> i32 {
       })
       const result = yield* take(worker, 'Result')
       if (result._tag !== 'Result') return yield* Effect.die('expected worker query result')
-      assert.include(JSON.stringify(result.result), 'Ready')
+      assert.include(Inspectable.toStringUnknown(result.result), 'Ready')
     }
     yield* worker.shutdown
     assert.strictEqual((yield* take(worker, 'Stopped'))._tag, 'Stopped')
@@ -284,7 +285,7 @@ it.effect(
       })
       const result = yield* take(worker, 'Result')
       if (result._tag !== 'Result') return yield* Effect.die('expected worker query result')
-      assert.include(JSON.stringify(result.result), 'Ready')
+      assert.include(Inspectable.toStringUnknown(result.result), 'Ready')
       yield* worker.shutdown
       assert.strictEqual((yield* take(worker, 'Stopped'))._tag, 'Stopped')
       assert.strictEqual(yield* worker.awaitExit, 0)

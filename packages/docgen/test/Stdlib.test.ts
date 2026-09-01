@@ -88,7 +88,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const documentation = yield* stdlibDocumentation
-      const parsed: unknown = JSON.parse(Json.encode(documentation))
+      const parsed = Json.decodeSync(Json.encode(documentation))
       // Compiling an example is a pure function of the collected example, and the live sweep
       // above already compiled every one — the round trip has to prove only that collection reads
       // the same examples out of what `silk doc` writes as out of the live value.
