@@ -14,9 +14,9 @@ const Blocker = Schema.Struct({
 })
 
 const AllocationExpectation = Schema.Struct({
-  acquires: Schema.Number,
-  releases: Schema.Number,
-  peakLive: Schema.Number,
+  acquires: Schema.Finite,
+  releases: Schema.Finite,
+  peakLive: Schema.Finite,
 })
 
 const Manifest = Schema.Struct({
@@ -27,8 +27,8 @@ const Manifest = Schema.Struct({
   source: Schema.String,
   input: Schema.String,
   expected: Schema.Struct({
-    entryResult: Schema.Number,
-    algorithmResult: Schema.optionalKey(Schema.Number),
+    entryResult: Schema.Finite,
+    algorithmResult: Schema.optionalKey(Schema.Finite),
     summary: Schema.String,
     allocation: Schema.optionalKey(AllocationExpectation),
   }),

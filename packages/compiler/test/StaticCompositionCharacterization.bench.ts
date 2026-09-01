@@ -13,19 +13,19 @@ const Environment = Schema.Struct({
 
 const Measurement = Schema.Struct({
   shape: Schema.Literals(['left', 'balanced']),
-  size: Schema.Number,
-  canonicalBytes: Schema.Number,
+  size: Schema.Finite,
+  canonicalBytes: Schema.Finite,
   canonicalSha256: Schema.String,
-  semanticOccurrences: Schema.Number,
-  representations: Schema.Number,
-  instances: Schema.Number,
-  layouts: Schema.Number,
-  mirFunctions: Schema.Number,
-  mirOperations: Schema.Number,
-  sampledPeakHeapBytes: Schema.Number,
-  llvmBitcodeBytes: Schema.Number,
+  semanticOccurrences: Schema.Finite,
+  representations: Schema.Finite,
+  instances: Schema.Finite,
+  layouts: Schema.Finite,
+  mirFunctions: Schema.Finite,
+  mirOperations: Schema.Finite,
+  sampledPeakHeapBytes: Schema.Finite,
+  llvmBitcodeBytes: Schema.Finite,
   llvmBitcodeSha256: Schema.String,
-  wasmBytes: Schema.Number,
+  wasmBytes: Schema.Finite,
   wasmSha256: Schema.String,
 })
 type Measurement = typeof Measurement.Type
@@ -33,7 +33,7 @@ type Measurement = typeof Measurement.Type
 const Report = Schema.Struct({
   schema: Schema.Literal(2),
   environment: Environment,
-  elapsedMs: Schema.Number,
+  elapsedMs: Schema.Finite,
   reports: Schema.Array(Measurement),
 })
 

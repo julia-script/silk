@@ -1,10 +1,7 @@
 import * as Schema from 'effect/Schema'
 
 /** Monotonic editor-owned version of one synchronized document. */
-export const schema = Schema.Struct({
-  _tag: Schema.Literal('DocumentVersion'),
-  value: Schema.Natural,
-})
+export const schema = Schema.TaggedStruct('DocumentVersion', { value: Schema.Natural })
 
 export type DocumentVersion = typeof schema.Type
 

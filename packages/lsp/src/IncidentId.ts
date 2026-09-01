@@ -1,10 +1,7 @@
 import * as Schema from 'effect/Schema'
 
 /** Stable identity of one analysis or worker-health incident. */
-export const schema = Schema.Struct({
-  _tag: Schema.Literal('IncidentId'),
-  value: Schema.Natural,
-})
+export const schema = Schema.TaggedStruct('IncidentId', { value: Schema.Natural })
 
 export type IncidentId = typeof schema.Type
 

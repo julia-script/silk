@@ -12,7 +12,7 @@ const ConformanceReport = Schema.Struct({
   termination: Schema.String,
   requirements: Schema.Array(Schema.String),
   requirementProviders: Schema.Array(Schema.String),
-  parameters: Schema.Number,
+  parameters: Schema.Finite,
 })
 
 const ProofReport = Schema.Struct({
@@ -48,7 +48,7 @@ const Report = Schema.Struct({
   mir: Schema.String,
   evaluation: Schema.Struct({
     outcome: Schema.String,
-    result: Schema.optionalKey(Schema.Number),
+    result: Schema.optionalKey(Schema.Finite),
     events: Schema.Array(Schema.String),
   }),
   wasm: Schema.String,

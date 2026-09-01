@@ -1,10 +1,7 @@
 import * as Schema from 'effect/Schema'
 
 /** Monotonic desired-state generation within one project association. */
-export const schema = Schema.Struct({
-  _tag: Schema.Literal('ProjectGeneration'),
-  value: Schema.Natural,
-})
+export const schema = Schema.TaggedStruct('ProjectGeneration', { value: Schema.Natural })
 
 export type ProjectGeneration = typeof schema.Type
 
