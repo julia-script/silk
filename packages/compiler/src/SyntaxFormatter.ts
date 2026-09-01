@@ -953,7 +953,7 @@ const printNode = (
         ),
       )
     }
-    case 'UnionVariantSelector': {
+    case 'AppliedMemberSelector': {
       const parent = directNodes(node)[0] ?? nodeOf(node, 'AppliedType')
       return FormatDocument.concat(
         printNode(context, parent, prefix, preserveBlank),
@@ -961,9 +961,9 @@ const printNode = (
         printToken(context, tokenOf(node, 'Identifier')),
       )
     }
-    case 'UnionVariantExpression': {
+    case 'AppliedMemberExpression': {
       const nodes = directNodes(node)
-      const selector = nodes[0] ?? nodeOf(node, 'UnionVariantSelector')
+      const selector = nodes[0] ?? nodeOf(node, 'AppliedMemberSelector')
       const open = directTokens(node).find((token) => token.kind === 'LeftBrace')
       if (open === undefined) return printNode(context, selector, prefix, preserveBlank)
       return FormatDocument.concat(
@@ -980,7 +980,7 @@ const printNode = (
     }
     case 'UnionVariantPattern': {
       const nodes = directNodes(node)
-      const selector = nodes[0] ?? nodeOf(node, 'UnionVariantSelector')
+      const selector = nodes[0] ?? nodeOf(node, 'AppliedMemberSelector')
       const open = directTokens(node).find((token) => token.kind === 'LeftBrace')
       if (open === undefined) return printNode(context, selector, prefix, preserveBlank)
       return FormatDocument.concat(

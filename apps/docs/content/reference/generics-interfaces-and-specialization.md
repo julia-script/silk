@@ -964,9 +964,10 @@ specific backend failure.
 
 **Status:** Confirmed
 
-`Interface.operation(arguments)` refers to the named interface operation, not to an ordinary module
-function or runtime method. The compiler must determine one complete interface application and one
-provider from the current bound contract or the supplied operands.
+`Interface.operation(arguments)` and `Interface<Arguments>.operation(arguments)` refer to a named
+interface operation, not to an ordinary module function or runtime method. The compiler must
+determine one complete interface application and one provider from the written application, the
+supplied operands, or the current bound contract.
 
 ```silk,ignore
 fn decode<T: Decoder<i32>>(value: &T) -> i32 {
@@ -977,6 +978,21 @@ fn decode<T: Decoder<i32>>(value: &T) -> i32 {
 Here the only `Decoder` bound fixes application `Decoder<i32>` and provider `T`; the operand confirms
 the same `Self`. A concrete call may similarly infer `Self` from an operand and select a unique
 visible conformance.
+
+Writing the interface arguments selects the application when one provider implements more than one
+application:
+
+```silk,ignore
+impl Encodable<u32> for Age { /* ... */ }
+impl Encodable<string> for Age { /* ... */ }
+
+let numeric = run Encodable<u32>.encode(&age)
+let textual = run &age |> Encodable<string>.encode
+```
+
+The direct and piped forms select the same static operation contract and witness. The pipeline's
+left value is the operation's leading operand; it is not method lookup and does not add an implicit
+borrow.
 
 Interface operation lookup is distinct from a same-named actor function. The qualifier identifies
 the interface declaration, while the selected static witness identifies the implementation. Import
@@ -1004,20 +1020,15 @@ pub const UserSchema =
 The explicit argument to `Schema.of<User>()` fixes `T = User`. The bound inside `Schema.of` then
 fixes `Self = User` and the `SchemaOf` application without runtime evidence.
 
-When one provider implements multiple applications of an interface, an ordinary helper may expose
-all application parameters explicitly:
-
-```silk,ignore
-fn defaultFor<To, Provider: Convert<To>>() -> To {
-  return Convert.default()
-}
-
-let value = Convert.defaultFor<i32, Settings>()
-```
+For an applied call, the compiler infers implicit `Self` from agreeing supplied operands first. A
+zero-operand operation may instead use one enclosing bound whose complete interface application
+matches the written application. A bare or applied qualified call is invalid when neither source
+identifies exactly one provider. The expected result never supplies provider evidence.
 
 Silk does not add a separate conformance-expression syntax such as
-`<Settings as Convert<i32>>.default()`. A bare qualified call outside a bound or operand context is
-invalid when it does not identify exactly one application.
+`<Settings as Convert<i32>>.default()`, create a runtime witness dictionary, or turn the selected
+operation into a method. Applied qualification is available only for compile-time `interface`
+operations; a `service` operation continues to use service requirement semantics.
 
 **Diagnostics:** No applicable interface contract reports a missing-bound or missing-conformance
 diagnostic at the operation. More than one reports an ambiguous-interface-application diagnostic
@@ -1468,9 +1479,10 @@ impl Convert<string> for Settings { /* ... */ }
 ```
 
 `Convert.default()` alone cannot choose between the two applications, and its expected result must
-not decide. The caller selects through an ordinary generic actor helper whose explicit arguments
-establish a unique bound, as specified by INTF-006. Interface selection introduces no separate
-conformance-expression syntax and no expected-result inference.
+not decide. A call with a value operand can select both parts explicitly as
+`Convert<i32>.convert(&settings)`. A zero-operand call such as `Convert<i32>.default()` additionally
+needs one matching enclosing bound to establish `Self`. Interface selection introduces no separate
+conformance-expression syntax, runtime dispatch, or expected-result inference.
 
 ## Confirmed cross-area constraints
 

@@ -39,7 +39,22 @@ export const parseTypePath = (
   } else first = expect(initial, 'Identifier', ['Dot', ...following])
   let state = first.state
   let children: ReadonlyArray<SyntaxTree.Element> = first.elements
-  if (!fieldStartsHere && nextSignificantKind(state) === 'Dot') {
+  const tokenAfterQualifiedMember = peek(state, 2)
+  const dotStartsRecoveredEnclosingMember =
+    following.includes('Dot') &&
+    nextSignificantKind(state) === 'Dot' &&
+    peek(state, 1) === 'Identifier' &&
+    (tokenAfterQualifiedMember === 'LeftParenthesis' ||
+      tokenAfterQualifiedMember === 'LetKeyword' ||
+      tokenAfterQualifiedMember === 'ConstKeyword' ||
+      tokenAfterQualifiedMember === 'ReturnKeyword' ||
+      tokenAfterQualifiedMember === 'RightBrace' ||
+      tokenAfterQualifiedMember === 'EndOfFile')
+  if (
+    !fieldStartsHere &&
+    nextSignificantKind(state) === 'Dot' &&
+    !dotStartsRecoveredEnclosingMember
+  ) {
     const dot = expect(state, 'Dot', ['Identifier', ...following])
     const member = expect(dot.state, 'Identifier', following)
     state = member.state

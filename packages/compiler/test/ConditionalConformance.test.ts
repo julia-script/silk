@@ -601,7 +601,7 @@ pub fn main() -> i32 {
     assert.isDefined(hir)
     if (hir === undefined) return
     const encodedHir = Hir.encode(hir)
-    assert.include(encodedHir, `bound ${module}.Renderer.render over T`)
+    assert.include(encodedHir, `interface ${module}.Renderer.render over T`)
     const renderQuestion = hir.functions
       .find(
         (fn) =>
@@ -609,9 +609,9 @@ pub fn main() -> i32 {
       )
       ?.statements.flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)
-      .find((expression) => expression._tag === 'BoundOperationCall')
-    assert.strictEqual(renderQuestion?._tag, 'BoundOperationCall')
-    if (renderQuestion?._tag !== 'BoundOperationCall') return
+      .find((expression) => expression._tag === 'InterfaceOperationCall')
+    assert.strictEqual(renderQuestion?._tag, 'InterfaceOperationCall')
+    if (renderQuestion?._tag !== 'InterfaceOperationCall') return
     assert.strictEqual(Type.encode(renderQuestion.provider), 'T')
     assert.strictEqual(Type.encode(renderQuestion.capability), `${module}.Renderer`)
     assert.deepEqual(
@@ -725,7 +725,7 @@ pub fn main() -> i32 {
     // over — and no witness. Which conformance answers it is decided per specialization, so a
     // generic body that already carried an answer would have to carry one answer for every provider.
     assert.isTrue(
-      encoded.includes('bound conditional-conformance/generic-hir.Decoder.decode over S'),
+      encoded.includes('interface conditional-conformance/generic-hir.Decoder.decode over S'),
     )
     for (const spelling of ['witness', 'dictionary', 'vtable'])
       assert.isFalse(encoded.includes(spelling), `${spelling} reached generic HIR`)

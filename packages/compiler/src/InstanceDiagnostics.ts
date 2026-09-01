@@ -409,7 +409,7 @@ export const unlowerableWitnessViolations = (
         .flatMap(Hir.statementExpressions)
         .flatMap(Hir.expressionTree)
         .flatMap((expression) => {
-          if (expression._tag !== 'BoundOperationCall') return []
+          if (expression._tag !== 'InterfaceOperationCall') return []
           const capability = Type.substitute(expression.capability, instance.substitution)
           const provider = Type.substitute(expression.provider, instance.substitution)
           if (!Type.isNominal(capability)) return []

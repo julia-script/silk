@@ -1013,7 +1013,7 @@ export const retainedEffectLoans = (
       continue
     }
     if (
-      (child._tag === 'BuiltinCall' || child._tag === 'BoundOperationCall') &&
+      (child._tag === 'BuiltinCall' || child._tag === 'InterfaceOperationCall') &&
       child.witnessEffectSite !== undefined
     ) {
       for (const loan of fn.ownership?.loans ?? []) {

@@ -5,6 +5,8 @@ import * as Hir from '../src/Hir.js'
 import * as InstanceDiagnostics from '../src/InstanceDiagnostics.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
 import * as Projections from './support/projections.js'
 import * as WasmMain from './support/WasmMain.js'
@@ -83,6 +85,435 @@ fn cellDigest(left: &Cell, right: &Cell) -> u64 {
 impl Keyed for Cell { equals: Cell.cellEquals digest: Cell.cellDigest }
 
 fn digestOf<T: Keyed>(left: T, right: T) -> u64 { return Keyed.digest(&left, &right) }`
+
+it.effect('selects explicit interface applications in direct and pipeline effect calls', () =>
+  Effect.gen(function* () {
+    const module = 'interface-operation-witness/applied-calls'
+    const source = `import silk.u32 as u32
+
+pub interface Encodable<A> {
+  effect fn encode(self: &Self) -> A
+}
+
+struct Age { value: u32 }
+
+impl Encodable<u32> for Age {
+  effect fn encode(self: &Self) -> u32 { return self.value }
+}
+
+impl Encodable<string> for Age {
+  effect fn encode(self: &Self) -> string { return "32" }
+}
+
+pub fn main() -> i32 {
+  let schema = Age { value: 32 }
+  let encodedU32 = run Encodable<u32>.encode(&schema)
+  let encodedString = run &schema |> Encodable<string>.encode
+  let groupedU32 = run &schema |> (Encodable<u32>.encode)
+  if groupedU32 != encodedU32 { return 0 }
+  return u32.toI32(encodedU32) + 10
+}`
+    const snapshot = yield* analyzed(module, source, 'wasm32-unknown-unknown')
+    assert.deepEqual(messages(snapshot), [])
+
+    const main = Projections.hirOf(snapshot, module)?.functions.find(
+      (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'main',
+    )
+    const calls =
+      main?.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .filter((expression) => expression._tag === 'InterfaceOperationCall') ?? []
+    assert.strictEqual(calls.length, 3)
+    assert.deepEqual(
+      calls.map((call) => Type.encode(call.capability)),
+      [`${module}.Encodable<u32>`, `${module}.Encodable<string>`, `${module}.Encodable<u32>`],
+    )
+    assert.deepEqual(
+      calls.map((call) => Type.encode(call.provider)),
+      [`${module}.Age`, `${module}.Age`, `${module}.Age`],
+    )
+    assert.isTrue(calls.every((call) => call.witnessEffectSite !== undefined))
+    assert.strictEqual(
+      new Set(calls.map((call) => call.witnessEffectSite?.ordinal)).size,
+      calls.length,
+    )
+
+    const appliedOffset = source.indexOf('Encodable<u32>.encode(&schema)')
+    const ownerOccurrence = Analysis.semanticOccurrenceAt(snapshot, module, appliedOffset)
+    const argumentOccurrence = Analysis.semanticOccurrenceAt(
+      snapshot,
+      module,
+      appliedOffset + 'Encodable<'.length,
+    )
+    const operationOccurrence = Analysis.semanticOccurrenceAt(
+      snapshot,
+      module,
+      appliedOffset + 'Encodable<u32>.'.length,
+    )
+    assert.strictEqual(ownerOccurrence?.role, 'Type')
+    assert.strictEqual(ownerOccurrence?.resolution._tag, 'Available')
+    assert.strictEqual(argumentOccurrence?.role, 'Type')
+    assert.strictEqual(operationOccurrence?.role, 'Operation')
+    assert.strictEqual(operationOccurrence?.resolution._tag, 'Available')
+
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const direct = yield* WasmMain.invoke(wasm.bytes, 'BoundOperationWitness.appliedCalls')
+    assert.strictEqual(direct, 42)
+
+    const effectEntry = yield* analyzed(
+      'interface-operation-witness/applied-effect-entry',
+      `pub interface Encodable<A> {
+  effect fn encode(self: &Self) -> A
+}
+struct Age { value: u32 }
+impl Encodable<u32> for Age {
+  effect fn encode(self: &Self) -> u32 { return self.value }
+}
+pub effect fn main() -> () {
+  let schema = Age { value: 32 }
+  let encoded = run Encodable<u32>.encode(&schema)
+}`,
+    )
+    assert.deepEqual(messages(effectEntry), [])
+  }),
+)
+
+it.effect('keeps invalid applied interface operations out of realization', () =>
+  Effect.gen(function* () {
+    const prelude = `pub interface Encodable<A> {
+  effect fn encode(self: &Self) -> A
+}
+struct Age { value: u32 }
+struct Other { value: u32 }
+impl Encodable<u32> for Age {
+  effect fn encode(self: &Self) -> u32 { return self.value }
+}`
+    const escaping = yield* analyzed(
+      'interface-operation-witness/escaping-section',
+      `${prelude}
+pub fn main() -> i32 {
+  let encoder = Encodable<u32>.encode
+  return 0
+}`,
+    )
+    assert.include(
+      Analysis.diagnostics(escaping).map((diagnostic) => diagnostic.code),
+      'SEM0099',
+    )
+
+    const missing = yield* analyzed(
+      'interface-operation-witness/missing-conformance',
+      `${prelude}
+pub fn main() -> i32 {
+  let value = Other { value: 32 }
+  let encoded = run Encodable<u32>.encode(&value)
+  return 0
+}`,
+    )
+    assert.include(
+      Analysis.diagnostics(missing).map((diagnostic) => diagnostic.code),
+      'SEM0121',
+    )
+    const calls = Projections.hirOf(
+      missing,
+      'interface-operation-witness/missing-conformance',
+    )?.functions.flatMap((fn) =>
+      fn.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .filter((expression) => expression._tag === 'InterfaceOperationCall'),
+    )
+    assert.deepEqual(calls, [])
+
+    const ambiguous = yield* analyzed(
+      'interface-operation-witness/ambiguous-fallback',
+      `interface Seed<A> { fn seed() -> A }
+fn ambiguous<A: Seed<i32>, B: Seed<i32>>() -> i32 {
+  return Seed<i32>.seed()
+}
+pub fn main() -> i32 { return 0 }`,
+    )
+    assert.include(
+      Analysis.diagnostics(ambiguous).map((diagnostic) => diagnostic.code),
+      'SEM0097',
+    )
+
+    const appliedService = yield* analyzed(
+      'interface-operation-witness/applied-service',
+      `service Source<A> { effect fn read() -> A ? &Source<A> }
+pub fn main() -> i32 {
+  let value = run Source<i32>.read()
+  return 0
+}`,
+    )
+    assert.include(
+      Analysis.diagnostics(appliedService).map((diagnostic) => diagnostic.code),
+      'SEM0010',
+    )
+
+    const resultDirected = yield* analyzed(
+      'interface-operation-witness/result-does-not-select',
+      `interface Seed<A> { fn seed() -> A }
+struct Age { value: i32 }
+impl Seed<i32> for Age { fn seed() -> i32 { return 32 } }
+fn selectedByResult() -> i32 { return Seed<i32>.seed() }
+pub fn main() -> i32 { return 0 }`,
+    )
+    assert.include(
+      Analysis.diagnostics(resultDirected).map((diagnostic) => diagnostic.code),
+      'SEM0099',
+    )
+
+    const conflictingSelf = yield* analyzed(
+      'interface-operation-witness/conflicting-self',
+      `interface Pair<A> { fn combine(left: &Self, right: &Self) -> A }
+struct Age { value: i32 }
+struct Other { value: i32 }
+impl Pair<i32> for Age { fn combine(left: &Self, right: &Self) -> i32 { return 1 } }
+pub fn main() -> i32 {
+  let age = Age { value: 1 }
+  let other = Other { value: 2 }
+  return Pair<i32>.combine(&age, &other)
+}`,
+    )
+    const conflict = Analysis.diagnostics(conflictingSelf).find(
+      (diagnostic) => diagnostic.code === 'SEM0100',
+    )
+    assert.strictEqual(conflict?.reason._tag, 'TypeArgumentConflict')
+    if (conflict?.reason._tag === 'TypeArgumentConflict') {
+      assert.strictEqual(conflict.reason.parameter, 'Self')
+      assert.include(conflict.reason.written, 'Age')
+      assert.include(conflict.reason.implied, 'Other')
+    }
+
+    const invalidOwnerApplications: ReadonlyArray<readonly [string, string, string]> = [
+      [
+        'unknown-member',
+        `${prelude}
+pub fn main() -> i32 {
+  let value = Age { value: 32 }
+  let encoded = run Encodable<u32>.missing(&value)
+  return 0
+}`,
+        'SEM0010',
+      ],
+      [
+        'wrong-arity',
+        `${prelude}
+pub fn main() -> i32 {
+  let value = Age { value: 32 }
+  let encoded = run Encodable<u32, string>.encode(&value)
+  return 0
+}`,
+        'SEM0051',
+      ],
+      [
+        'wrong-kind',
+        `interface Needs<?R> { fn inspect(self: &Self) -> i32 }
+struct Age { value: i32 }
+pub fn main() -> i32 {
+  let age = Age { value: 32 }
+  return Needs<i32>.inspect(&age)
+}`,
+        'SEM0088',
+      ],
+    ]
+    for (const [name, source, code] of invalidOwnerApplications) {
+      const snapshot = yield* analyzed(`interface-operation-witness/${name}`, source)
+      assert.include(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        code,
+      )
+    }
+  }),
+)
+
+it.effect('uses operand provider evidence before one enclosing-bound fallback', () =>
+  Effect.gen(function* () {
+    const value = yield* evaluatedValue(
+      'interface-operation-witness/provider-evidence',
+      `interface Seed<A> {
+  fn seed() -> A
+}
+interface Encodable<A> {
+  fn encode(self: &Self) -> A
+}
+struct Age { value: i32 }
+impl Seed<i32> for Age {
+  fn seed() -> i32 { return 20 }
+}
+impl Encodable<i32> for Age {
+  fn encode(self: &Self) -> i32 { return self.value }
+}
+fn seeded<T: Seed<i32>>() -> i32 {
+  return Seed<i32>.seed()
+}
+fn encodeConcrete<T: Encodable<i32>>(age: &Age) -> i32 {
+  return Encodable<i32>.encode(age)
+}
+pub fn main() -> i32 {
+  let age = Age { value: 22 }
+  return seeded<Age>() + encodeConcrete<Age>(&age)
+}`,
+    )
+    assert.strictEqual(value, 42)
+  }),
+)
+
+it.effect('preserves ownership and Effect rows through applied interface calls', () =>
+  Effect.gen(function* () {
+    const module = 'interface-operation-witness/applied-contract-shapes'
+    const snapshot = yield* analyzed(
+      module,
+      `import silk.effect as Effect
+
+service Clock {}
+struct Problem {}
+interface Access<A> {
+  fn consume(value: Self) -> A
+  fn mutate(value: &mut Self) -> A
+}
+interface Pending<A> {
+  effect fn read(value: &Self) -> A ! Problem ? &Clock
+}
+struct Cell { value: i32 }
+impl Access<i32> for Cell {
+  fn consume(value: Self) -> i32 { return value.value }
+  fn mutate(value: &mut Self) -> i32 {
+    value.value = 22
+    return value.value
+  }
+}
+impl Pending<i32> for Cell {
+  effect fn read(value: &Self) -> i32 { return value.value }
+}
+fn consume(value: Cell) -> i32 { return Access<i32>.consume(move value) }
+fn mutate(value: &mut Cell) -> i32 { return Access<i32>.mutate(value) }
+fn pending(value: &Cell) -> Effect<i32 ! Problem ? &Clock> {
+  return Pending<i32>.read(value)
+}
+pub fn main() -> i32 {
+  let owned = consume(Cell { value: 20 })
+  let mut cell = Cell { value: 0 }
+  return owned + mutate(&mut cell)
+}`,
+    )
+    assert.deepEqual(messages(snapshot), [])
+
+    const pending = Projections.hirOf(snapshot, module)?.functions.find(
+      (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'pending',
+    )
+    const call = pending?.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+      .find((expression) => expression._tag === 'InterfaceOperationCall')
+    assert.strictEqual(call?._tag, 'InterfaceOperationCall')
+    if (call?._tag === 'InterfaceOperationCall') {
+      assert.deepEqual(call.contract.failureRow.failures.map(Type.encode), [`${module}.Problem`])
+      assert.deepEqual(
+        call.contract.requirementRow.requirements.map((requirement) => ({
+          capability: Type.encode(requirement.capability),
+          access: requirement.access,
+        })),
+        [{ capability: `${module}.Clock`, access: 'Shared' }],
+      )
+    }
+
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
+it.effect('indexes namespace-qualified applied interface owners without duplicate call paths', () =>
+  Effect.gen(function* () {
+    const module = 'interface-operation-witness/qualified-tooling'
+    const source = `import model.Encoding as Model
+pub fn main() -> i32 {
+  let age = Model.Age { value: 42 }
+  return Model.Encodable<i32>.encode(&age)
+}`
+    const snapshot = yield* Analysis.makeRealized({
+      root: SourceFile.make(module, ascii(source)),
+    }).pipe(
+      Effect.provide(
+        SourceResolver.memory(
+          new Map([
+            [
+              'model/Encoding',
+              ascii(`pub interface Encodable<A> { fn encode(value: &Self) -> A }
+pub struct Age { pub value: i32 }
+impl Encodable<i32> for Age {
+  fn encode(value: &Self) -> i32 { return value.value }
+}`),
+            ],
+          ]),
+        ),
+      ),
+    )
+    assert.deepEqual(messages(snapshot), [])
+
+    const appliedOffset = source.indexOf('Model.Encodable<i32>.encode')
+    const namespace = Analysis.semanticOccurrenceAt(snapshot, module, appliedOffset)
+    const owner = Analysis.semanticOccurrenceAt(snapshot, module, appliedOffset + 'Model.'.length)
+    const operation = Analysis.semanticOccurrenceAt(
+      snapshot,
+      module,
+      appliedOffset + 'Model.Encodable<i32>.'.length,
+    )
+    assert.strictEqual(namespace?.role, 'Actor')
+    assert.strictEqual(namespace?.resolution._tag, 'Available')
+    assert.strictEqual(owner?.role, 'Type')
+    assert.strictEqual(owner?.resolution._tag, 'Available')
+    assert.strictEqual(operation?.role, 'Operation')
+    assert.strictEqual(operation?.resolution._tag, 'Available')
+
+    const inaccessible = yield* Analysis.makeRealized({
+      root: SourceFile.make(
+        `${module}/inaccessible`,
+        ascii(`import model.Hidden as Model
+pub fn main() -> i32 {
+  let age = Model.Age { value: 42 }
+  return Model.Encodable<i32>.encode(&age)
+}`),
+      ),
+    }).pipe(
+      Effect.provide(
+        SourceResolver.memory(
+          new Map([
+            [
+              'model/Hidden',
+              ascii(`interface Encodable<A> { fn encode(value: &Self) -> A }
+pub struct Age { pub value: i32 }
+impl Encodable<i32> for Age {
+  fn encode(value: &Self) -> i32 { return value.value }
+}`),
+            ],
+          ]),
+        ),
+      ),
+    )
+    assert.include(
+      Analysis.diagnostics(inaccessible).map((diagnostic) => diagnostic.code),
+      'SEM0009',
+    )
+    const inaccessibleCalls = Projections.hirOf(
+      inaccessible,
+      `${module}/inaccessible`,
+    )?.functions.flatMap((fn) =>
+      fn.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .filter((expression) => expression._tag === 'InterfaceOperationCall'),
+    )
+    assert.deepEqual(inaccessibleCalls, [])
+  }),
+)
 
 it.effect(
   'returns the source witness result from a non-operator bound call on the evaluator and Wasm',
@@ -342,9 +773,9 @@ pub fn main() -> i32 {
     const bound = pending?.statements
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)
-      .find((expression) => expression._tag === 'BoundOperationCall')
-    assert.strictEqual(bound?._tag, 'BoundOperationCall')
-    if (bound?._tag !== 'BoundOperationCall') return
+      .find((expression) => expression._tag === 'InterfaceOperationCall')
+    assert.strictEqual(bound?._tag, 'InterfaceOperationCall')
+    if (bound?._tag !== 'InterfaceOperationCall') return
     assert.deepEqual(bound.contract.failureRow.failures.map(Type.encode), [`${module}.Problem`])
     assert.deepEqual(
       bound.contract.requirementRow.requirements.map((requirement) => ({
@@ -488,9 +919,9 @@ pub fn main() -> i32 {
     const bound = pending?.statements
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)
-      .find((expression) => expression._tag === 'BoundOperationCall')
-    assert.strictEqual(bound?._tag, 'BoundOperationCall')
-    if (bound?._tag !== 'BoundOperationCall') return
+      .find((expression) => expression._tag === 'InterfaceOperationCall')
+    assert.strictEqual(bound?._tag, 'InterfaceOperationCall')
+    if (bound?._tag !== 'InterfaceOperationCall') return
     assert.deepEqual(bound.contract.failureRow.failures.map(Type.encode), [`${module}.Problem`])
 
     const owner =
@@ -674,9 +1105,9 @@ pub fn main() -> i32 {
     const call = pending.statements
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)
-      .find((expression) => expression._tag === 'BoundOperationCall')
-    assert.strictEqual(call?._tag, 'BoundOperationCall')
-    if (call?._tag !== 'BoundOperationCall') return
+      .find((expression) => expression._tag === 'InterfaceOperationCall')
+    assert.strictEqual(call?._tag, 'InterfaceOperationCall')
+    if (call?._tag !== 'InterfaceOperationCall') return
     assert.deepEqual(
       call.contract.requirementRow.requirements.map((requirement) => ({
         capability: Type.encode(requirement.capability),

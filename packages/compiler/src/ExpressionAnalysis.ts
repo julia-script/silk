@@ -1925,7 +1925,7 @@ export const analyzePattern = (
     })
   }
 
-  const variantSelector = SyntaxTree.directNode(node, 'UnionVariantSelector')
+  const variantSelector = SyntaxTree.directNode(node, 'AppliedMemberSelector')
   const unionTarget =
     variantSelector === undefined
       ? bareUnionPatternTarget
@@ -2857,7 +2857,7 @@ export const analyzeAggregateLiteral = (
   scope: Scope,
   resolution: ResolutionContext,
 ): ExpressionResult => {
-  const selector = SyntaxTree.directNode(node, 'UnionVariantSelector')
+  const selector = SyntaxTree.directNode(node, 'AppliedMemberSelector')
   const unionTarget =
     selector === undefined
       ? resolveBareUnionVariantTarget(source, node, resolution)
@@ -3785,6 +3785,7 @@ import {
   analyzeFunctionItem,
   boundOperationReference,
   builtinSignature,
+  callArityDiagnostic,
   captureAccess,
   copyAssumptionsOf,
   executableSite,
@@ -4695,7 +4696,7 @@ export const finishInterfaceOperator = (
     }),
   )
   const reference: CallReferenceFact = Object.freeze({
-    _tag: 'ResolvedBoundOperation',
+    _tag: 'ResolvedInterfaceOperation',
     spelling: selection.label,
     token: operatorToken,
     capability: selection.capability,
@@ -5074,6 +5075,404 @@ export const analyzeOperatorExpression = (
   })
 }
 
+type AppliedInterfaceOperationTarget =
+  | {
+      readonly _tag: 'Resolved'
+      readonly interface: DeclarationFacts.InterfaceFact
+      readonly capability: Type.Nominal
+      readonly application: DeclarationFacts.DeclaredTypeFact
+      readonly reference: Extract<
+        CallReferenceFact,
+        { readonly _tag: 'ResolvedInterfaceOperation' }
+      >
+      readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+    }
+  | {
+      readonly _tag: 'Invalid'
+      readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+    }
+
+const appliedMemberExpression = (node: SyntaxTree.Node): SyntaxTree.Node | undefined => {
+  let callee = node.kind === 'CallExpression' ? callCallee(node) : node
+  while (callee.kind === 'GroupedExpression') {
+    const grouped = callee.children.find(isExpressionNode)
+    if (grouped === undefined) return undefined
+    callee = grouped
+  }
+  return callee.kind === 'AppliedMemberExpression' ? callee : undefined
+}
+
+const appliedMemberParts = (
+  node: SyntaxTree.Node,
+):
+  | {
+      readonly owner: SyntaxTree.Node
+      readonly member: Token.Token
+    }
+  | undefined => {
+  const expression = appliedMemberExpression(node)
+  if (expression === undefined) return undefined
+  const selector = SyntaxTree.directNode(expression, 'AppliedMemberSelector')
+  const owner = selector === undefined ? undefined : SyntaxTree.directNode(selector, 'AppliedType')
+  const member = selector === undefined ? undefined : directToken(selector, 'Identifier')
+  return selector === undefined || owner === undefined || member === undefined
+    ? undefined
+    : Object.freeze({ owner, member })
+}
+
+const appliedInterfaceOwnerDeclaration = (
+  source: SourceFile.SourceFile,
+  owner: SyntaxTree.Node,
+  resolution: ResolutionContext,
+): DeclarationFacts.ContractFact | undefined => {
+  const path = SyntaxTree.directNode(owner, 'TypePath')
+  const token =
+    path === undefined
+      ? undefined
+      : SyntaxTree.tokens(path)
+          .filter((item) => item.kind === 'Identifier')
+          .at(-1)
+  if (token === undefined) return undefined
+  const lookup = NameResolution.lookup(resolution.scope, resolution.index, spelling(source, token))
+  return lookup._tag === 'Resolved' &&
+    (lookup.declaration._tag === 'InterfaceDeclaration' ||
+      lookup.declaration._tag === 'ServiceDeclaration')
+    ? lookup.declaration
+    : undefined
+}
+
+const isInterfaceFact = (
+  declaration: DeclarationFacts.ContractFact,
+): declaration is DeclarationFacts.InterfaceFact =>
+  declaration._tag === 'InterfaceDeclaration' && declaration.dependencyEligible === false
+
+const resolveAppliedInterfaceOperationTarget = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  caller: DeclarationFact,
+  resolution: ResolutionContext,
+): AppliedInterfaceOperationTarget | undefined => {
+  const parts = appliedMemberParts(node)
+  if (parts === undefined) return undefined
+  const ownerResult = resolvePatternType(source, parts.owner, resolution, caller)
+  const ownerType = ownerResult.type
+  const resolvedDeclaration =
+    ownerType !== undefined && Type.isNominal(ownerType)
+      ? DeclarationFacts.byCanonical(resolution.index, {
+          _tag: 'CanonicalDeclarationId',
+          module: ownerType.module,
+          name: ownerType.name,
+        })
+      : undefined
+  const ownerDeclaration =
+    resolvedDeclaration?._tag === 'InterfaceDeclaration' ||
+    resolvedDeclaration?._tag === 'ServiceDeclaration'
+      ? resolvedDeclaration
+      : appliedInterfaceOwnerDeclaration(source, parts.owner, resolution)
+  if (ownerDeclaration === undefined) return undefined
+  const member = spelling(source, parts.member)
+  if (ownerDeclaration._tag === 'ServiceDeclaration') {
+    return Object.freeze({
+      _tag: 'Invalid',
+      diagnostics: Diagnostic.merge(ownerResult.diagnostics, [
+        Diagnostic.unknownActorOperation(
+          Type.encode(ownerType ?? ownerDeclaration.self),
+          member,
+          parts.member.span,
+        ),
+      ]),
+    })
+  }
+  if (!isInterfaceFact(ownerDeclaration)) return undefined
+  if (ownerType === undefined || !Type.isNominal(ownerType)) {
+    return Object.freeze({
+      _tag: 'Invalid',
+      diagnostics:
+        ownerResult.diagnostics.length > 0
+          ? ownerResult.diagnostics
+          : Object.freeze([
+              Diagnostic.typeArgumentInference(
+                ownerDeclaration.canonical._tag === 'Canonical'
+                  ? ownerDeclaration.canonical.id.name
+                  : 'interface',
+                parts.owner.span,
+              ),
+            ]),
+    })
+  }
+  const application = DeclarationFacts.interfaceApplication(
+    ownerDeclaration,
+    ownerType,
+    ownerDeclaration.self,
+  )
+  const operation = application?.operations.find(
+    (candidate) =>
+      candidate.declaration.name._tag === 'Present' &&
+      candidate.declaration.name.spelling === member,
+  )
+  const contract = operation === undefined ? undefined : interfaceOperationContract(operation)
+  if (application === undefined || operation === undefined || contract === undefined) {
+    return Object.freeze({
+      _tag: 'Invalid',
+      diagnostics: Diagnostic.merge(ownerResult.diagnostics, [
+        Diagnostic.unknownActorOperation(Type.encode(ownerType), member, parts.member.span),
+      ]),
+    })
+  }
+  return Object.freeze({
+    _tag: 'Resolved',
+    interface: ownerDeclaration,
+    capability: ownerType,
+    application: ownerResult.declared,
+    reference: Object.freeze({
+      _tag: 'ResolvedInterfaceOperation' as const,
+      spelling: `${Type.encode(ownerType)}.${member}`,
+      token: parts.member,
+      capability: ownerType,
+      provider: ownerDeclaration.self,
+      operation: member,
+      declaration: contract.declaration,
+      interfaceContract: contract.contract,
+      parameters: contract.parameters,
+      result: contract.result,
+    }),
+    diagnostics: ownerResult.diagnostics,
+  })
+}
+
+const fallbackAppliedInterfaceProviders = (
+  caller: DeclarationFact,
+  capability: Type.Nominal,
+  operation: string,
+): ReadonlyArray<Type.Type> => {
+  const unique = new Map<string, Type.Type>()
+  for (const parameter of caller.typeParameters) {
+    for (const bound of parameter.bounds) {
+      if (
+        bound._tag !== 'ResolvedBound' ||
+        !Type.equals(bound.application.capability, capability) ||
+        !bound.application.operations.some(
+          (candidate) =>
+            candidate.declaration.name._tag === 'Present' &&
+            candidate.declaration.name.spelling === operation,
+        )
+      )
+        continue
+      unique.set(Type.key(parameter.type), parameter.type)
+    }
+  }
+  return Object.freeze([...unique.values()])
+}
+
+const hasAppliedInterfaceBound = (
+  caller: DeclarationFact,
+  provider: Type.Type,
+  capability: Type.Nominal,
+): boolean =>
+  caller.typeParameters.some(
+    (parameter) =>
+      Type.equals(parameter.type, provider) &&
+      parameter.bounds.some(
+        (bound) =>
+          bound._tag === 'ResolvedBound' && Type.equals(bound.application.capability, capability),
+      ),
+  )
+
+const resolveAppliedInterfaceProvider = (
+  node: SyntaxTree.Node,
+  target: Extract<AppliedInterfaceOperationTarget, { readonly _tag: 'Resolved' }>,
+  argumentsResult: ArgumentsResult,
+  caller: DeclarationFact,
+  resolution: ResolutionContext,
+):
+  | {
+      readonly reference: Extract<
+        CallReferenceFact,
+        { readonly _tag: 'ResolvedInterfaceOperation' }
+      >
+    }
+  | { readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic> } => {
+  if (target.reference.parameters.length !== argumentsResult.facts.length) {
+    return Object.freeze({
+      diagnostics: Object.freeze([
+        callArityDiagnostic(
+          target.reference,
+          target.reference.parameters.length,
+          argumentsResult.facts.length,
+          node.span,
+        ),
+      ]),
+    })
+  }
+  const substitution = new Map<string, Type.GenericArgument>()
+  const inferenceDiagnostics: Array<Diagnostic.Diagnostic> = []
+  let providerOrigin: SourceSpan.SourceSpan | undefined
+  for (const [ordinal, argument] of argumentsResult.facts.entries()) {
+    const expected = target.reference.parameters.at(ordinal)
+    if (expected === undefined || argument.type._tag !== 'Available') continue
+    const providerKey = Type.key(target.interface.self)
+    const previousProvider = substitution.get(providerKey)
+    const inference = TypeInference.inferOpenGenericArguments(
+      expected,
+      argument.type.type,
+      substitution,
+    )
+    if (!inference.matches) {
+      const providerConflict = inference.conflicts.find((conflict) =>
+        Type.equals(conflict.parameter, target.interface.self),
+      )
+      inferenceDiagnostics.push(
+        providerConflict === undefined
+          ? Diagnostic.argumentTypeMismatch(
+              Type.encode(expected),
+              Type.encode(argument.type.type),
+              argument.syntax.span,
+            )
+          : Diagnostic.typeArgumentConflict(
+              target.reference.spelling,
+              'Self',
+              Type.encodeGenericArgument(providerConflict.previous),
+              Type.encodeGenericArgument(providerConflict.conflicting),
+              argument.syntax.span,
+              providerOrigin,
+            ),
+      )
+    } else if (previousProvider === undefined && substitution.has(providerKey)) {
+      providerOrigin = argument.syntax.span
+    }
+  }
+  if (inferenceDiagnostics.length > 0)
+    return Object.freeze({ diagnostics: Object.freeze(inferenceDiagnostics) })
+  const inferredProvider = substitution.get(Type.key(target.interface.self))
+  let provider: Type.Type | undefined =
+    inferredProvider !== undefined && Type.isTypeArgument(inferredProvider)
+      ? inferredProvider
+      : undefined
+  if (provider === undefined) {
+    const fallback = fallbackAppliedInterfaceProviders(
+      caller,
+      target.capability,
+      target.reference.operation,
+    )
+    if (fallback.length > 1) {
+      return Object.freeze({
+        diagnostics: Object.freeze([
+          Diagnostic.ambiguousBoundOperation(
+            target.reference.spelling,
+            fallback.map(Type.encode),
+            target.reference.token.span,
+          ),
+        ]),
+      })
+    }
+    provider = fallback.at(0)
+  }
+  if (provider === undefined) {
+    return Object.freeze({
+      diagnostics: Object.freeze([
+        Diagnostic.uninferredTypeParameter(
+          target.reference.spelling,
+          'Self',
+          target.reference.token.span,
+        ),
+      ]),
+    })
+  }
+  const proof = ConformanceProof.prove(resolution.index, provider, target.capability)
+  if (!hasAppliedInterfaceBound(caller, provider, target.capability) && proof._tag !== 'Proved') {
+    return Object.freeze({
+      diagnostics: Object.freeze([
+        Diagnostic.unprovenConformance(
+          `${Type.encode(provider)}: ${Type.encode(target.capability)}`,
+          'no coherent conformance satisfies the applied interface operation',
+          Object.freeze([]),
+          target.reference.token.span,
+        ),
+      ]),
+    })
+  }
+  const application = DeclarationFacts.interfaceApplication(
+    target.interface,
+    target.capability,
+    provider,
+  )
+  const operation = application?.operations.find(
+    (candidate) =>
+      candidate.declaration.name._tag === 'Present' &&
+      candidate.declaration.name.spelling === target.reference.operation,
+  )
+  const contract = operation === undefined ? undefined : interfaceOperationContract(operation)
+  if (application?.available !== true || operation === undefined || contract === undefined) {
+    return Object.freeze({
+      diagnostics: Object.freeze([
+        Diagnostic.unprovenConformance(
+          `${Type.encode(provider)}: ${Type.encode(target.capability)}`,
+          'the selected interface application has no complete operation contract',
+          Object.freeze([]),
+          target.reference.token.span,
+        ),
+      ]),
+    })
+  }
+  return Object.freeze({
+    reference: Object.freeze({
+      ...target.reference,
+      provider,
+      declaration: contract.declaration,
+      interfaceContract: contract.contract,
+      parameters: contract.parameters,
+      result: contract.result,
+    }),
+  })
+}
+
+const finishAppliedInterfaceOperation = (
+  node: SyntaxTree.Node,
+  target: AppliedInterfaceOperationTarget,
+  argumentsResult: ArgumentsResult,
+  callTypeArguments: CallTypeArgumentsResult,
+  caller: DeclarationFact,
+  resolution: ResolutionContext,
+): ExpressionResult => {
+  if (target._tag === 'Invalid')
+    return Object.freeze({
+      fact: unavailableExpression(node),
+      diagnostics: Diagnostic.merge(target.diagnostics, argumentsResult.diagnostics),
+      type: undefined,
+    })
+  const provider = resolveAppliedInterfaceProvider(
+    node,
+    target,
+    argumentsResult,
+    caller,
+    resolution,
+  )
+  if ('diagnostics' in provider)
+    return Object.freeze({
+      fact: unavailableExpression(node),
+      diagnostics: Diagnostic.merge(
+        target.diagnostics,
+        argumentsResult.diagnostics,
+        callTypeArguments.diagnostics,
+        provider.diagnostics,
+      ),
+      type: undefined,
+    })
+  const completed = finishInterfaceOperationCall(
+    node,
+    provider.reference,
+    argumentsResult,
+    callTypeArguments,
+    resolution,
+    node,
+    target.application,
+  )
+  return Object.freeze({
+    ...completed,
+    diagnostics: Diagnostic.merge(target.diagnostics, completed.diagnostics),
+  })
+}
+
 export const analyzePipelineExpression = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
@@ -5084,6 +5483,39 @@ export const analyzePipelineExpression = (
 ): ExpressionResult => {
   const inputNode = pipelineInput(node)
   const target = pipelineCallable(node)
+  const appliedTarget =
+    target === undefined
+      ? undefined
+      : resolveAppliedInterfaceOperationTarget(source, target, declaration, resolution)
+  if (appliedTarget !== undefined) {
+    const input =
+      inputNode === undefined
+        ? undefined
+        : analyzeExpression(
+            source,
+            inputNode,
+            declarations,
+            declaration,
+            scope,
+            resolution,
+            appliedTarget._tag === 'Resolved'
+              ? appliedTarget.reference.parameters.at(0)
+              : undefined,
+            true,
+          )
+    const inputFact = input?.fact ?? unavailableExpression(inputNode ?? node)
+    return finishAppliedInterfaceOperation(
+      node,
+      appliedTarget,
+      Object.freeze({
+        facts: Object.freeze([argumentFact(declaration, node.span, inputFact, 0)]),
+        diagnostics: input?.diagnostics ?? Object.freeze([]),
+      }),
+      Object.freeze({ explicit: false, facts: Object.freeze([]), diagnostics: Object.freeze([]) }),
+      declaration,
+      resolution,
+    )
+  }
   const callable =
     target === undefined
       ? undefined
@@ -5504,7 +5936,7 @@ export function analyzeExpression(
           return fact.reference.intrinsic.unsafe
         case 'ResolvedServiceOperation':
           return fact.reference.operation.unsafe
-        case 'ResolvedBoundOperation':
+        case 'ResolvedInterfaceOperation':
           return fact.reference.interfaceContract.unsafe
         default:
           return false
@@ -5955,7 +6387,30 @@ export function analyzeExpression(
     )
   }
 
-  if (node.kind === 'StructLiteralExpression' || node.kind === 'UnionVariantExpression') {
+  if (node.kind === 'AppliedMemberExpression') {
+    const applied = resolveAppliedInterfaceOperationTarget(source, node, declaration, resolution)
+    if (applied !== undefined) {
+      const diagnostic =
+        applied._tag === 'Resolved'
+          ? Diagnostic.uninferredTypeParameter(
+              applied.reference.spelling,
+              'Self',
+              applied.reference.token.span,
+            )
+          : undefined
+      return Object.freeze({
+        fact: unavailableExpression(node),
+        diagnostics: Diagnostic.merge(
+          applied.diagnostics,
+          diagnostic === undefined ? [] : [diagnostic],
+        ),
+        type: undefined,
+      })
+    }
+    return analyzeAggregateLiteral(source, node, declarations, declaration, scope, resolution)
+  }
+
+  if (node.kind === 'StructLiteralExpression') {
     return analyzeAggregateLiteral(source, node, declarations, declaration, scope, resolution)
   }
 
@@ -6015,6 +6470,34 @@ export function analyzeExpression(
   if (node.kind !== 'CallExpression') return undefined
 
   const callTypeArguments = analyzeCallTypeArguments(source, node, declaration, resolution)
+  const appliedTarget = resolveAppliedInterfaceOperationTarget(
+    source,
+    node,
+    declaration,
+    resolution,
+  )
+  if (appliedTarget !== undefined) {
+    const argumentList = childNode(node, 'ArgumentList')
+    const argumentNodes = argumentList.children.filter(isRecursiveArgumentNode)
+    const argumentsResult = analyzeArgumentNodes(
+      source,
+      node,
+      argumentNodes,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+      appliedTarget._tag === 'Resolved' ? appliedTarget.reference.parameters : Object.freeze([]),
+    )
+    return finishAppliedInterfaceOperation(
+      node,
+      appliedTarget,
+      argumentsResult,
+      callTypeArguments,
+      declaration,
+      resolution,
+    )
+  }
   const argumentsResult = analyzeArguments(
     source,
     node,
@@ -6177,7 +6660,7 @@ export function analyzeExpression(
         )
       }
       if (bound !== undefined)
-        return finishBoundOperationCall(
+        return finishInterfaceOperationCall(
           node,
           bound.reference,
           argumentsResult,
@@ -6629,21 +7112,18 @@ export const finishDeclarationCall = (
   })
 }
 
-/**
- * Finishes one call to an operation the enclosing declaration's bound declares.
- *
- * The contract is the interface's own, over the bounded parameter, so the call checks exactly like
- * a compiler-known operation's. It carries no type arguments of its own: the only type the call
- * varies over is the bounded parameter, and that one is supplied by the specialization of the
- * declaration this body belongs to.
- */
-export const finishBoundOperationCall = (
+/** Finishes one statically selected interface operation call. */
+export const finishInterfaceOperationCall = (
   node: SyntaxTree.Node,
-  reference: Extract<CallReferenceFact, { readonly _tag: 'ResolvedBoundOperation' }>,
+  reference: Extract<CallReferenceFact, { readonly _tag: 'ResolvedInterfaceOperation' }>,
   argumentsResult: ArgumentsResult,
   callTypeArguments: CallTypeArgumentsResult,
   resolution: ResolutionContext,
+  effectSiteNode: SyntaxTree.Node = node,
+  interfaceApplication?: DeclarationFacts.DeclaredTypeFact,
 ): ExpressionResult => {
+  const syntaxAvailable =
+    node.kind === 'PipelineExpression' ? isAvailableSyntax(node) : hasAvailableCallSyntax(node)
   const typeArgumentDiagnostic =
     callTypeArguments.explicit && callTypeArguments.facts.length > 0
       ? Diagnostic.typeArgumentArity(
@@ -6653,7 +7133,7 @@ export const finishBoundOperationCall = (
           node.span,
         )
       : undefined
-  const callContract = analyzeCallContract(node, reference, argumentsResult.facts)
+  const callContract = analyzeCallContract(node, reference, argumentsResult.facts, syntaxAvailable)
   const unsafeDiagnostic = unsafeCallDiagnostic(
     reference.interfaceContract.unsafe,
     reference.spelling,
@@ -6661,7 +7141,7 @@ export const finishBoundOperationCall = (
     resolution,
   )
   const expressionType =
-    hasAvailableCallSyntax(node) &&
+    syntaxAvailable &&
     typeArgumentDiagnostic === undefined &&
     callContract.fact._tag === 'Compatible' &&
     unsafeDiagnostic === undefined
@@ -6672,12 +7152,14 @@ export const finishBoundOperationCall = (
       _tag: 'Call',
       reference,
       path: referencePath(node),
+      ...(interfaceApplication === undefined ? {} : { interfaceApplication }),
       typeArguments: callTypeArguments.facts,
       arguments: argumentsResult.facts,
       mappings: callContract.mappings,
       contract: callContract.fact,
-      ...(reference.interfaceContract.functionKind === 'Effect'
-        ? { witnessEffectSite: executableSite('EffectSiteId', resolution, node) }
+      ...(expressionType._tag === 'Available' &&
+      reference.interfaceContract.functionKind === 'Effect'
+        ? { witnessEffectSite: executableSite('EffectSiteId', resolution, effectSiteNode) }
         : {}),
       type: expressionType,
       syntax: node,

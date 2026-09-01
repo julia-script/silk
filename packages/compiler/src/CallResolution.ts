@@ -30,8 +30,10 @@ import {
   childNode,
   contextualIntegerCompatible,
   isAvailableSyntax,
+  isExpressionNode,
   isRecursiveArgumentNode,
   lookupDeclaration,
+  pipelineCallable,
   referencePath,
   spelling,
   typesCompatible,
@@ -499,7 +501,7 @@ export const callArityDiagnostic = (
         | 'ResolvedBuiltin'
         | 'ResolvedIntrinsicContract'
         | 'ResolvedServiceOperation'
-        | 'ResolvedBoundOperation'
+        | 'ResolvedInterfaceOperation'
     }
   >,
   expectedCount: number,
@@ -521,7 +523,7 @@ export const callArityDiagnostic = (
       actor: 'Intrinsic',
       operation: reference.intrinsic.spelling,
     })
-  } else if (reference._tag === 'ResolvedBoundOperation') {
+  } else if (reference._tag === 'ResolvedInterfaceOperation') {
     target = Object.freeze({
       _tag: 'BuiltinTarget',
       actor: reference.capability.name,
@@ -912,9 +914,9 @@ export const analyzeCallContract = (
       diagnostics: Object.freeze([]),
     })
   }
-  // A bound operation's contract is a fixed parameter and result list over the bounded parameter,
+  // A static interface operation's contract is a fixed parameter and result list over its provider,
   // exactly like a compiler-known operation's, so both are checked the same way.
-  if (reference._tag === 'ResolvedBuiltin' || reference._tag === 'ResolvedBoundOperation') {
+  if (reference._tag === 'ResolvedBuiltin' || reference._tag === 'ResolvedInterfaceOperation') {
     const unavailableArgument = argumentsList.find((argument) => argument.type._tag !== 'Available')
     if (unavailableArgument !== undefined) {
       return Object.freeze({
@@ -1601,7 +1603,10 @@ export const boundOperationReference = (
 ):
   | {
       readonly _tag: 'BoundOperation'
-      readonly reference: Extract<CallReferenceFact, { readonly _tag: 'ResolvedBoundOperation' }>
+      readonly reference: Extract<
+        CallReferenceFact,
+        { readonly _tag: 'ResolvedInterfaceOperation' }
+      >
     }
   | { readonly _tag: 'AmbiguousBound'; readonly parameters: ReadonlyArray<string> }
   | undefined => {
@@ -1645,7 +1650,7 @@ export const boundOperationReference = (
   return Object.freeze({
     _tag: 'BoundOperation',
     reference: Object.freeze({
-      _tag: 'ResolvedBoundOperation' as const,
+      _tag: 'ResolvedInterfaceOperation' as const,
       spelling: `${qualifier}.${member}`,
       token: memberToken,
       capability: bound.application.capability,
@@ -2217,8 +2222,18 @@ export function executableSite(
 
 export const executableSites = (root: SyntaxTree.Node): ReadonlyMap<SyntaxTree.Node, number> => {
   const sites = new Map<SyntaxTree.Node, number>()
+  const isAppliedInterfacePipeline = (node: SyntaxTree.Node): boolean => {
+    if (node.kind !== 'PipelineExpression') return false
+    let target = pipelineCallable(node)
+    while (target?.kind === 'GroupedExpression') target = target.children.find(isExpressionNode)
+    return target?.kind === 'AppliedMemberExpression'
+  }
   const visit = (node: SyntaxTree.Node): void => {
-    if (node.kind === 'CallExpression' || node.kind === 'EffectExpression')
+    if (
+      node.kind === 'CallExpression' ||
+      node.kind === 'EffectExpression' ||
+      isAppliedInterfacePipeline(node)
+    )
       sites.set(node, sites.size)
     for (const child of node.children) if (SyntaxTree.isNode(child)) visit(child)
   }

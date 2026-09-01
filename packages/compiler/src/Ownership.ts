@@ -960,7 +960,7 @@ const checkExpression = (
       }
       return
     }
-    case 'BoundOperationCall': {
+    case 'InterfaceOperationCall': {
       for (const [ordinal, argument] of expression.arguments.entries()) {
         const operand = expression.contract.operands.at(ordinal)
         const type = operand?.type._tag === 'Resolved' ? operand.type.type : undefined

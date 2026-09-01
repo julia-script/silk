@@ -760,7 +760,7 @@ const enclosingStructLiteral = (
       }
     | undefined
   const visit = (node: SyntaxTree.Node): void => {
-    if (node.kind === 'StructLiteralExpression' || node.kind === 'UnionVariantExpression') {
+    if (node.kind === 'StructLiteralExpression' || node.kind === 'AppliedMemberExpression') {
       const target = node.children[0]
       const leftBrace = node.children.find(
         (child) => SyntaxTree.isToken(child) && child.kind === 'LeftBrace',
@@ -822,9 +822,9 @@ export const signatureHelp = (
     const structLiteral = enclosingStructLiteral(syntax.root, offset)
     if (structLiteral === undefined) return undefined
     const variantSelector =
-      SyntaxTree.directNode(structLiteral.literal, 'UnionVariantSelector') ??
+      SyntaxTree.directNode(structLiteral.literal, 'AppliedMemberSelector') ??
       (SyntaxTree.isNode(structLiteral.target) &&
-      structLiteral.target.kind === 'UnionVariantSelector'
+      structLiteral.target.kind === 'AppliedMemberSelector'
         ? structLiteral.target
         : undefined)
     let targetPath = structLiteral.target

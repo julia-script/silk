@@ -407,8 +407,11 @@ applies when the exact source is a supplied argument or a trailing capture of a 
 opaque callable values do not invent a source.
 
 **Boundary:** The right side may be a function item, section, binding, grouped expression, or any
-other compatible unary callable. It does not perform method lookup, open a namespace, import a name,
-or change the callable's ownership contract.
+other compatible unary callable. An applied interface operation such as
+`Encodable<u32>.encode` is completed by the pipeline's left operand and is equivalent to the direct
+static call `Encodable<u32>.encode(left)`. The pipeline does not perform method lookup, open a
+namespace, import a name, infer an interface application from the result, or change the callable's
+ownership contract.
 
 **Diagnostics:** A non-callable right expression reports `SEM0075`. A callable with incompatible
 arity, parameter type, result use, or invocation mode reports the corresponding callable or
