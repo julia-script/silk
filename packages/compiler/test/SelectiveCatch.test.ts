@@ -2371,27 +2371,25 @@ pub fn main() -> i32 { return run Effect.catchAll(layer(), recoverTop) }`,
   }),
 )
 
-it.effect('catch and catchAll no longer share a doc comment', () =>
-  Effect.gen(function* () {
-    const bytes = Stdlib.sources.get('silk/effect')
-    if (bytes === undefined) unreachable('silk/effect source is missing')
-    const effects = new TextDecoder().decode(bytes)
-    const docOf = (name: string): string => {
-      const declaration = effects.indexOf(`pub effect fn ${name}<`)
-      if (declaration < 0) unreachable(`${name} is missing from silk/effect`)
-      const before = effects.slice(0, declaration).split('\n')
-      const lines: Array<string> = []
-      for (let index = before.length - 2; index >= 0; index -= 1) {
-        const line = before[index] ?? ''
-        if (!line.startsWith('///')) break
-        lines.unshift(line)
-      }
-      return lines.join('\n')
+it('catch and catchAll no longer share a doc comment', () => {
+  const bytes = Stdlib.sources.get('silk/effect')
+  if (bytes === undefined) unreachable('silk/effect source is missing')
+  const effects = new TextDecoder().decode(bytes)
+  const docOf = (name: string): string => {
+    const declaration = effects.indexOf(`pub effect fn ${name}<`)
+    if (declaration < 0) unreachable(`${name} is missing from silk/effect`)
+    const before = effects.slice(0, declaration).split('\n')
+    const lines: Array<string> = []
+    for (let index = before.length - 2; index >= 0; index -= 1) {
+      const line = before[index] ?? ''
+      if (!line.startsWith('///')) break
+      lines.unshift(line)
     }
-    const catchDoc = docOf('catch')
-    const catchAllDoc = docOf('catchAll')
-    assert.notStrictEqual(catchDoc, '')
-    assert.notStrictEqual(catchAllDoc, '')
-    assert.notStrictEqual(catchDoc, catchAllDoc)
-  }),
-)
+    return lines.join('\n')
+  }
+  const catchDoc = docOf('catch')
+  const catchAllDoc = docOf('catchAll')
+  assert.notStrictEqual(catchDoc, '')
+  assert.notStrictEqual(catchAllDoc, '')
+  assert.notStrictEqual(catchDoc, catchAllDoc)
+})

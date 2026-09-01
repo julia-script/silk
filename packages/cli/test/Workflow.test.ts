@@ -459,9 +459,11 @@ it.live(
         project: Project.Project,
         _selection: Workflow.ProjectSelection,
       ) {
-        observed.push(new TextDecoder().decode(project.entry.bytes))
-        const status: Workflow.ExitStatus = 0
-        return status
+        return yield* Effect.sync(() => {
+          observed.push(new TextDecoder().decode(project.entry.bytes))
+          const status: Workflow.ExitStatus = 0
+          return status
+        })
       })
 
       const watching = yield* Effect.forkChild(

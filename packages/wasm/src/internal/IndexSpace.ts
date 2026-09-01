@@ -34,7 +34,7 @@ const resolveKind = (
     ;(entry.importSource === undefined ? defined : imported).push(entryIndex)
   }
   const order = [...imported, ...defined]
-  const indices = new Array<number>(entries.length)
+  const indices = Array.from({ length: entries.length }, () => 0)
   for (const [emitted, entryIndex] of order.entries()) {
     indices[entryIndex] = emitted
   }

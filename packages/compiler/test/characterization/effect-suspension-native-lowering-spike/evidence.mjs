@@ -187,7 +187,8 @@ const cyclicComponents = (graph) => {
     } while (member !== node)
     const selfCycle =
       component.length === 1 && (graph.get(component[0]) ?? new Set()).has(component[0])
-    if (component.length > 1 || selfCycle) cycles.push(component.sort())
+    if (component.length > 1 || selfCycle)
+      cycles.push(component.sort((left, right) => left.localeCompare(right)))
   }
   for (const node of graph.keys()) if (!indices.has(node)) visit(node)
   return cycles

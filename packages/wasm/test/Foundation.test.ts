@@ -61,8 +61,10 @@ it.effect('commits concurrent independent declarations exactly once', () =>
     const names = yield* Effect.forEach(handles, (handle) => Func.name(builder, handle))
     assert.strictEqual(new Set(handles).size, 16)
     assert.deepStrictEqual(
-      [...names].sort(),
-      Array.from({ length: 16 }, (_, index) => `f${index}`).sort(),
+      [...names].sort((left, right) => (left ?? '').localeCompare(right ?? '')),
+      Array.from({ length: 16 }, (_, index) => `f${index}`).sort((left, right) =>
+        left.localeCompare(right),
+      ),
     )
   }),
 )

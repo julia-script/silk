@@ -70,33 +70,35 @@ export interface Options {
  * @since 0.0.0
  */
 export const make = Effect.fnUntraced(function* (options: Options = {}) {
-  const self: Builder = Object.freeze({ _tag: 'Builder' })
-  ModuleState.register(self, {
-    owner: OwnedHandle.makeOwner(),
-    value: {
-      moduleName: options.moduleName,
-      types: [],
-      typeHandles: [],
-      typeKeys: new Map(),
-      recGroups: [],
-      funcs: [],
-      funcHandles: [],
-      tables: [],
-      tableHandles: [],
-      memories: [],
-      memoryHandles: [],
-      globals: [],
-      globalHandles: [],
-      tags: [],
-      tagHandles: [],
-      elems: [],
-      elemHandles: [],
-      datas: [],
-      dataHandles: [],
-      exports: [],
-      exportNameKeys: new Set(),
-      start: undefined,
-    },
+  return yield* Effect.sync(() => {
+    const self: Builder = Object.freeze({ _tag: 'Builder' })
+    ModuleState.register(self, {
+      owner: OwnedHandle.makeOwner(),
+      value: {
+        moduleName: options.moduleName,
+        types: [],
+        typeHandles: [],
+        typeKeys: new Map(),
+        recGroups: [],
+        funcs: [],
+        funcHandles: [],
+        tables: [],
+        tableHandles: [],
+        memories: [],
+        memoryHandles: [],
+        globals: [],
+        globalHandles: [],
+        tags: [],
+        tagHandles: [],
+        elems: [],
+        elemHandles: [],
+        datas: [],
+        dataHandles: [],
+        exports: [],
+        exportNameKeys: new Set(),
+        start: undefined,
+      },
+    })
+    return self
   })
-  return self
 })

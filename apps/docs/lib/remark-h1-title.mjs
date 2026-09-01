@@ -1,7 +1,7 @@
 /**
  * Use a document's leading `# H1` as its Fumadocs title and drop it from the body.
  *
- * Package docs under `packages/*​/docs` are plain Markdown with no frontmatter — they are
+ * Package docs under each package's `docs` directory are plain Markdown with no frontmatter — they are
  * published to npm and read on GitHub, where frontmatter would render as noise. This lets the
  * site derive titles without every package having to maintain a parallel frontmatter block.
  *

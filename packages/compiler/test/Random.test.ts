@@ -156,7 +156,8 @@ it.effect('redacts returned and thrown host payloads to closed failure categorie
         throw new Error(canary)
       },
     })
-    const sparse: Array<number> = new Array(3)
+    const sparse: Array<number> = []
+    sparse.length = 3
     const throwingIterator = [40, 1, 1]
     Object.defineProperty(throwingIterator, Symbol.iterator, {
       get: () => {
@@ -248,6 +249,8 @@ it.effect('stages every evaluator failure before touching caller storage', () =>
     const exhausted = RandomHost.scripted([])
     assert.strictEqual(exhausted._tag, 'Constructed')
     if (exhausted._tag !== 'Constructed') return
+    const sparseBytes: Array<number> = []
+    sparseBytes.length = 3
     const providers: ReadonlyArray<RandomHost.Provider> = [
       RandomHost.failing(),
       exhausted.value.provider,
@@ -259,7 +262,7 @@ it.effect('stages every evaluator failure before touching caller storage', () =>
           throw new Error('secret')
         },
       },
-      { fill: () => ({ _tag: 'Filled', bytes: new Array<number>(3) }) },
+      { fill: () => ({ _tag: 'Filled', bytes: sparseBytes }) },
     ]
     for (const randomHost of providers) {
       const output = [90, 91, 92]

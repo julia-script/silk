@@ -138,7 +138,10 @@ pub fn main() -> i32 { return apply(double, 20) + apply(inc, 1) }`
     const applied = Analysis.loweredMir(snapshot)
       .functions.filter((fn) => fn.id.name === 'apply')
       .map((fn) => callableTargetName(fn.localTypes.at(0)))
-    assert.deepEqual([...applied].sort(), ['double', 'inc'])
+    assert.deepEqual(
+      [...applied].sort((left, right) => (left ?? '').localeCompare(right ?? '')),
+      ['double', 'inc'],
+    )
 
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
