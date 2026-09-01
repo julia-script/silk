@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect'
 import * as vscode from 'vscode'
 import {
   DiagnosticRefreshRequest,
@@ -99,9 +100,15 @@ export const make = (options: {
           cause.data.retriggerRequest
         const current = retrigger ? documentFor(uri) : undefined
         if (current !== undefined)
-          setTimeout(() => {
-            if (!disposed && options.gate.isCurrent(uri, current.version)) pull(current)
-          }, 10)
+          Effect.runFork(
+            Effect.sleep(10).pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  if (!disposed && options.gate.isCurrent(uri, current.version)) pull(current)
+                }),
+              ),
+            ),
+          )
         else options.client.error(`Silk diagnostic pull failed for ${uri}`, cause, false)
       })
   }
