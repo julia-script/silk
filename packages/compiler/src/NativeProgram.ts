@@ -503,6 +503,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       reason: { _tag: 'InvalidModule', violations },
     })
   }
+  const context = yield* Effect.context<never>()
 
   return {
     symbols: declared.map((entry) =>
@@ -518,7 +519,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ...(suspensionEnabled ? CoroutineRuntime.symbols : []),
     ]),
     runtimeFeatures: Object.freeze([...runtimeFeatures].sort()),
-    renderIr: () => Effect.runSync(IrText.render(builder)),
+    renderIr: () => Effect.runSyncWith(context)(IrText.render(builder)),
     bitcode: yield* Bitcode.encode(builder),
   }
 })
