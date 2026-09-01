@@ -33,6 +33,366 @@ const multiSnapshot = (rootModule: string, sources: ReadonlyMap<string, Uint8Arr
   )
 }
 
+it.effect('erases contextual tuple values and ordinal projections through nominal struct HIR', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'tuple-values/main',
+      ascii(`tuple Point(i32, i32)
+fn make() -> Point { return (1, 2) }
+fn direct() -> Point { return Point(3, 4) }
+fn typed() -> i32 { let point: Point = (5, 6) return point.0 + point.1 }
+pub fn main() -> i32 { let point = direct() return point.0 + point.1 + typed() }`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const make = Analysis.rootAnalysis(self).functions.at(0)?.returnedExpression
+    assert.strictEqual(make?._tag, 'StructLiteral')
+    if (make?._tag === 'StructLiteral' && make.target._tag === 'Resolved') {
+      assert.strictEqual(make.target.struct.aggregateKind, 'Positional')
+      assert.deepEqual(
+        make.target.struct.fields.map((field) => field.member),
+        [
+          { _tag: 'OrdinalAggregateMember', ordinal: 0 },
+          { _tag: 'OrdinalAggregateMember', ordinal: 1 },
+        ],
+      )
+    }
+    const hir = Analysis.rootAnalysis(self).hir.functions.at(0)
+    assert.strictEqual(hir === undefined ? undefined : Hir.returned(hir)._tag, 'Construct')
+    const directHir = Analysis.rootAnalysis(self).hir.functions.at(1)
+    assert.strictEqual(
+      directHir === undefined ? undefined : Hir.returned(directHir)._tag,
+      'Construct',
+    )
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 18n)
+  }),
+)
+
+it.effect('finalizes one uncontextualized record literal as an anonymous nominal struct', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'record-values/main',
+      ascii(`pub fn main() -> i32 {
+  let person = .{ name: "Julia", age: 32 }
+  return person.age
+}`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const generated = Analysis.rootAnalysis(self).generatedAggregates
+    assert.strictEqual(generated.length, 1)
+    assert.strictEqual(generated.at(0)?.aggregateKind, 'AnonymousNamed')
+    assert.strictEqual(generated.at(0)?.name._tag, 'Unavailable')
+    const anonymous = generated.at(0)
+    const anonymousCanonical = anonymous?.canonical
+    const anonymousType =
+      anonymousCanonical?._tag === 'Canonical'
+        ? Type.nominal(anonymousCanonical.id.module, anonymousCanonical.id.name)
+        : undefined
+    assert.strictEqual(
+      anonymousType === undefined ? undefined : Type.anonymousAggregateDisplay(anonymousType),
+      'anonymous record',
+    )
+    assert.include(
+      anonymousType === undefined ? '' : Type.encode(anonymousType),
+      '@AnonymousNamed:',
+    )
+    assert.strictEqual(
+      anonymousCanonical?._tag !== 'Canonical'
+        ? undefined
+        : Analysis.lookupName(self, 'record-values/main', anonymousCanonical.id.name)._tag,
+      'Missing',
+    )
+    assert.strictEqual(
+      anonymous === undefined
+        ? undefined
+        : Analysis.declarationIndex(self).modules.at(0)?.structs.includes(anonymous),
+      false,
+    )
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 32n)
+  }),
+)
+
+it.effect('finalizes one uncontextualized tuple and projects it by ordinal', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'tuple-values/anonymous',
+      ascii(`pub fn main() -> i32 {
+  let args = ("Julia", 32)
+  return args.1
+}`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const generated = Analysis.rootAnalysis(self).generatedAggregates
+    assert.strictEqual(generated.length, 1)
+    assert.strictEqual(generated.at(0)?.aggregateKind, 'AnonymousPositional')
+    const anonymous = generated.at(0)
+    const canonical = anonymous?.canonical
+    const type =
+      canonical?._tag === 'Canonical'
+        ? Type.nominal(canonical.id.module, canonical.id.name)
+        : undefined
+    assert.strictEqual(
+      type === undefined ? undefined : Type.anonymousAggregateDisplay(type),
+      'anonymous tuple',
+    )
+    assert.include(type === undefined ? '' : Type.encode(type), '@AnonymousPositional:')
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 32n)
+  }),
+)
+
+it.effect('infers named tuple type arguments from positional construction', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'tuple-values/generic',
+      ascii(`tuple Box<T>(T)
+fn boxed() -> Box<i32> { return Box(42) }
+pub fn main() -> i32 { return boxed().0 }`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const returned = Analysis.rootAnalysis(self).functions.at(0)?.returnedExpression
+    assert.strictEqual(
+      returned?.type._tag === 'Available' ? Type.encode(returned.type.type) : undefined,
+      'tuple-values/generic.Box<i32>',
+    )
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+  }),
+)
+
+it.effect('infers an open generic tuple argument from a contextual literal', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'tuple-values/generic-context',
+      ascii(`tuple Box<T>(T)
+fn accept<T>(box: Box<T>) -> i32 { drop box return 42 }
+pub fn main() -> i32 { return accept((32,)) }`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+  }),
+)
+
+it.effect('lets value-scope callables shadow named tuple constructors', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'tuple-values/shadow',
+      ascii(`tuple Point(i32)
+fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { let Point = identity return Point(42) }`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const returned = Analysis.rootAnalysis(self).functions.at(1)?.returnedExpression
+    assert.strictEqual(returned?._tag, 'CallableApply')
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+  }),
+)
+
+it.effect('uses known call parameters as contextual record authority', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'record-values/context',
+      ascii(`struct Person { name: string age: i32 }
+fn age(person: Person) -> i32 { return person.age }
+pub fn main() -> i32 { return age(.{ name: "Julia", age: 32 }) }`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(Analysis.rootAnalysis(self).generatedAggregates.length, 0)
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 32n)
+  }),
+)
+
+it.effect('infers generic named struct arguments through a contextual record call', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'record-values/generic-context',
+      ascii(`struct Box<T> { value: T }
+fn accept<T>(box: Box<T>) -> i32 { drop box return 42 }
+pub fn main() -> i32 { return accept(.{ value: 32 }) }`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(Analysis.rootAnalysis(self).generatedAggregates.length, 0)
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+  }),
+)
+
+it.effect('preserves an anonymous record identity through a generic call', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'record-values/generic',
+      ascii(`fn identity<T>(value: T) -> T { return move value }
+pub fn main() -> i32 {
+  let args = .{ name: "Julia", age: 32 }
+  let same = identity(move args)
+  return same.age
+}`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(Analysis.rootAnalysis(self).generatedAggregates.length, 1)
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 32n)
+  }),
+)
+
+it.effect('rejects anonymous branch unification but accepts an explicit named context', () =>
+  Effect.gen(function* () {
+    const invalid = yield* Analysis.ofSource(
+      'record-values/branch-invalid',
+      ascii(`enum Choice { First, Second }
+fn choose(value: Choice) -> i32 {
+  let person = match value {
+    Choice.First => .{ name: "Julia", age: 32 }
+    Choice.Second => .{ name: "Maria", age: 28 }
+  }
+  return 0
+}`),
+    )
+    assert.include(
+      Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
+      'SEM0174',
+    )
+
+    const accepted = yield* Analysis.ofSourceRealized(
+      'record-values/branch-context',
+      ascii(`enum Choice { First, Second }
+struct Person { name: string age: i32 }
+fn choose(value: Choice) -> Person {
+  let person: Person = match value {
+    Choice.First => .{ name: "Julia", age: 32 }
+    Choice.Second => .{ name: "Maria", age: 28 }
+  }
+  return move person
+}
+pub fn main() -> i32 { return choose(Choice.First).age }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(accepted), [])
+    const evaluated = Analysis.evaluate(accepted)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 32n)
+  }),
+)
+
+it.effect('reports aggregate-specific construction diagnostics', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'tuple-values/diagnostics',
+      ascii(`tuple Point(i32, i32)
+struct Person { age: i32 }
+fn short() -> Point { return Point(1) }
+fn named() -> Point { return Point { _0: 1, _1: 2 } }
+fn wrongRecord() -> Point { return .{ age: 1 } }
+fn wrongTuple() -> Person { return (1,) }
+fn duplicateAnonymous() -> i32 { let value = .{ age: 1, age: 2 } return 0 }`),
+    )
+    const diagnostics = Analysis.diagnostics(self).filter((diagnostic) =>
+      ['SEM0172', 'SEM0173', 'SEM0175'].includes(diagnostic.code),
+    )
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0172', 'SEM0175', 'SEM0173', 'SEM0173'],
+    )
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.reason._tag),
+      [
+        'TupleArityMismatch',
+        'PositionalFieldConstruction',
+        'ContextualAggregateKindMismatch',
+        'ContextualAggregateKindMismatch',
+      ],
+    )
+    assert.ok(diagnostics.every((diagnostic) => diagnostic.span.end > diagnostic.span.start))
+    assert.strictEqual(
+      Analysis.diagnostics(self).filter((diagnostic) => diagnostic.code === 'SEM0023').length,
+      1,
+    )
+  }),
+)
+
+it.effect('keeps separate same-shaped anonymous record occurrences nominally incompatible', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'record-values/assignment',
+      ascii(`pub fn main() -> i32 {
+  let mut person = .{ name: "Julia", age: 32 }
+  person = .{ name: "Julia", age: 32 }
+  return 0
+}`),
+    )
+
+    assert.include(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      'SEM0037',
+    )
+    const generated = Analysis.rootAnalysis(self).generatedAggregates
+    assert.strictEqual(generated.length, 2)
+    const first = generated.at(0)?.canonical
+    const second = generated.at(1)?.canonical
+    assert.notStrictEqual(
+      first?._tag === 'Canonical' ? first.id.name : undefined,
+      second?._tag === 'Canonical' ? second.id.name : undefined,
+    )
+
+    const equality = yield* Analysis.ofSource(
+      'record-values/equality',
+      ascii(`pub fn main() -> i32 {
+  let first = .{ age: 32 }
+  let second = .{ age: 32 }
+  if first == second { return 1 }
+  return 0
+}`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(equality).map((diagnostic) => diagnostic.code),
+      ['SEM0135'],
+    )
+    const equalityDiagnostic = Analysis.diagnostics(equality).at(0)
+    assert.strictEqual(equalityDiagnostic?.reason._tag, 'OperatorNotApplicable')
+    assert.notInclude(equalityDiagnostic?.message ?? '', '@Anonymous')
+    assert.strictEqual(Analysis.rootAnalysis(equality).generatedAggregates.length, 2)
+  }),
+)
+
+it.effect('keeps an all-Copy anonymous record affine as a whole value', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'record-values/ownership',
+      ascii(`pub fn main() -> i32 {
+  let original = .{ value: 42 }
+  let moved = move original
+  return original.value
+}`),
+    )
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['OWN0001'],
+    )
+  }),
+)
+
 it.effect(
   'retains source field order while elaborating canonical construction and projection',
   () =>
@@ -825,6 +1185,26 @@ pub fn main() -> i32 { let secret = Model.Secret { value: 1 } return secret.valu
       ['SEM0021'],
     )
     assert.notInclude(Analysis.diagnostics(privateField).at(0)?.message ?? '', 'key')
+
+    const contextualPrivateField = yield* multiSnapshot(
+      'app/Main',
+      new Map([
+        [
+          'model/Secret',
+          ascii(`pub struct Secret { pub value: i32 key: i32 }
+pub fn inspect(secret: Secret) -> i32 { return secret.value }`),
+        ],
+        [
+          'app/Main',
+          ascii(`import model.Secret { inspect }
+pub fn main() -> i32 { return inspect(.{ value: 1, key: 7 }) }`),
+        ],
+      ]),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(contextualPrivateField).map((diagnostic) => diagnostic.code),
+      ['SEM0021'],
+    )
   }),
 )
 

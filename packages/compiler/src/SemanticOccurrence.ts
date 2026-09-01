@@ -1133,6 +1133,8 @@ const collectStatement = (
           available(Object.freeze({ _tag: 'BindingIdentity', id: statement.binding.id })),
           locationOfBinding(statement.binding),
         )
+      if (statement.binding.declaredType !== undefined)
+        collectDeclaredType(statement.binding.declaredType, index, scope, pending)
       collectExpression(statement.binding.initializer, index, scope, pending)
       return
     case 'PatternBindStatement':

@@ -52,6 +52,7 @@ export interface BindingDeclarationFact {
   readonly id: Hir.BindingId
   readonly name: DeclaredName
   readonly mutability: 'Immutable' | 'Mutable'
+  readonly declaredType?: DeclaredTypeFact
   readonly inferredType: ExpressionTypeFact
   readonly initializer: ExpressionFact
   /** Exact callable value captured when this binding was initialized, before later source writes. */
@@ -523,7 +524,8 @@ export type StructTargetFact =
       readonly _tag: 'Resolved'
       readonly struct: DeclarationFacts.StructFact
       readonly type: Type.Nominal
-      readonly token: Token.Token
+      /** Present for source-named constructors; occurrence-generated literals have no type token. */
+      readonly token?: Token.Token
     }
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
 
@@ -1279,6 +1281,7 @@ export interface FunctionFact {
   readonly returnedExpression: ExpressionFact
   readonly returnCompatibility: ReturnCompatibility
   readonly returnedBorrow?: DeclarationFacts.ReturnedBorrowFact
+  readonly generatedAggregates: ReadonlyArray<DeclarationFacts.StructFact>
 }
 
 /** Stable identity of one parent-linked lexical scope in an elaborated function. */
@@ -1307,6 +1310,7 @@ export interface Result {
   readonly _tag: 'Elaboration'
   readonly syntax: SyntaxFile.SyntaxFile
   readonly functions: ReadonlyArray<FunctionFact>
+  readonly generatedAggregates: ReadonlyArray<DeclarationFacts.StructFact>
   readonly lexicalScopes: ReadonlyArray<LexicalScopeFact>
   readonly hir: Hir.Module
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -1453,8 +1457,11 @@ export const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.fr
   'MatchExpression',
   'StructLiteralExpression',
   'AppliedMemberExpression',
+  'TupleLiteralExpression',
+  'ContextualRecordLiteralExpression',
   'ArrayLiteralExpression',
   'FieldProjectionExpression',
+  'OrdinalProjectionExpression',
   'ReferentProjectionExpression',
   'IndexProjectionExpression',
   'CallExpression',
@@ -1478,8 +1485,11 @@ export const isRecursiveArgumentNode = (element: SyntaxTree.Element): element is
     element.kind === 'MatchExpression' ||
     element.kind === 'StructLiteralExpression' ||
     element.kind === 'AppliedMemberExpression' ||
+    element.kind === 'TupleLiteralExpression' ||
+    element.kind === 'ContextualRecordLiteralExpression' ||
     element.kind === 'ArrayLiteralExpression' ||
     element.kind === 'FieldProjectionExpression' ||
+    element.kind === 'OrdinalProjectionExpression' ||
     element.kind === 'ReferentProjectionExpression' ||
     element.kind === 'IndexProjectionExpression' ||
     element.kind === 'GroupedExpression' ||
@@ -2135,6 +2145,7 @@ export const elaborateModule = (input: Input): Result => {
     _tag: 'Elaboration',
     syntax,
     functions,
+    generatedAggregates: Object.freeze(functions.flatMap((fact) => fact.generatedAggregates)),
     lexicalScopes: lexicalScopesOf(syntax.source, functions),
     hir,
     diagnostics: Object.freeze(diagnostics),

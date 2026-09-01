@@ -1774,6 +1774,9 @@ const fieldState = (value: DeclarationFacts.FieldState): string => {
 const field = (value: DeclarationFacts.FieldFact): string =>
   record('StructField', [
     number(value.id.ordinal),
+    value.member._tag === 'LabeledAggregateMember'
+      ? record('LabeledAggregateMember', [value.member.label])
+      : record('OrdinalAggregateMember', [number(value.member.ordinal)]),
     fieldState(value.state),
     value.visibility,
     name(value.name),
@@ -1854,6 +1857,7 @@ const struct = (value: DeclarationFacts.StructFact): string =>
     value.visibility,
     array(value.typeParameters.map(typeParameter)),
     name(value.name),
+    value.aggregateKind,
     array(value.fields.map(field)),
     structDependency(value.dependency),
   ])

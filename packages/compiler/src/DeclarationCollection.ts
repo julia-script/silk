@@ -1,4 +1,5 @@
 import * as Option from 'effect/Option'
+import * as AggregateIdentity from './AggregateIdentity.js'
 import type {
   ArrayLengthFact,
   BoundFact,
@@ -1161,12 +1162,39 @@ const collectFields = (
     return Object.freeze({
       _tag: 'AggregateField',
       id,
+      member: AggregateIdentity.labeled(name._tag === 'Present' ? name.spelling : ''),
       state,
       visibility:
         SyntaxTree.directToken(fieldNode, 'PubKeyword') === undefined ? 'Private' : 'Public',
       name,
       declaredType: type.fact,
       syntax: fieldNode,
+    })
+  })
+  return Object.freeze({ fields: Object.freeze(fields), diagnostics: Object.freeze(diagnostics) })
+}
+
+/** Collects declaration-ordered tuple positions without inventing source field spellings. */
+const collectPositionalFields = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  owner: FieldOwnerId,
+  typeParameters: ReadonlyMap<string, Type.Parameter>,
+) => {
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const fields = node.children.filter(isDeclaredTypeNode).map((typeSyntax, ordinal): FieldFact => {
+    const id: FieldId = Object.freeze({ _tag: 'FieldId', owner, ordinal })
+    const declaredType = analyzeDeclaredType(source, typeSyntax, typeParameters)
+    diagnostics.push(...declaredType.diagnostics)
+    return Object.freeze({
+      _tag: 'AggregateField',
+      id,
+      member: AggregateIdentity.ordinal(ordinal),
+      state: Object.freeze({ _tag: 'Unique', id }),
+      visibility: 'Public',
+      name: Object.freeze({ _tag: 'Unavailable', syntax: typeSyntax }),
+      declaredType: declaredType.fact,
+      syntax: typeSyntax,
     })
   })
   return Object.freeze({ fields: Object.freeze(fields), diagnostics: Object.freeze(diagnostics) })
@@ -2268,6 +2296,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       SyntaxTree.isNode(element) &&
       (element.kind === 'FunctionDeclaration' ||
         element.kind === 'StructDeclaration' ||
+        element.kind === 'TupleDeclaration' ||
         element.kind === 'EnumDeclaration' ||
         element.kind === 'UnionDeclaration' ||
         element.kind === 'ServiceDeclaration' ||
@@ -2574,6 +2603,34 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         visibility,
         typeParameters: typeParameters.facts,
         name,
+        ...(name._tag === 'Present'
+          ? { identity: AggregateIdentity.source(source.id, name.spelling, 'Named') }
+          : {}),
+        aggregateKind: 'Named',
+        fields: collected.fields,
+        dependency: Object.freeze({ _tag: 'Available', types: Object.freeze([]) }),
+        syntax: node,
+      })
+    }
+    if (node.kind === 'TupleDeclaration') {
+      const collected = collectPositionalFields(
+        source,
+        node,
+        Object.freeze({ _tag: 'StructFieldOwnerId', declaration: id }),
+        typeParameters.environment,
+      )
+      diagnostics.push(...collected.diagnostics)
+      return Object.freeze({
+        _tag: 'StructDeclaration',
+        id,
+        canonical,
+        visibility,
+        typeParameters: typeParameters.facts,
+        name,
+        ...(name._tag === 'Present'
+          ? { identity: AggregateIdentity.source(source.id, name.spelling, 'Positional') }
+          : {}),
+        aggregateKind: 'Positional',
         fields: collected.fields,
         dependency: Object.freeze({ _tag: 'Available', types: Object.freeze([]) }),
         syntax: node,

@@ -43,6 +43,7 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
     kind === 'EffectKeyword' ||
     kind === 'UnsafeKeyword' ||
     kind === 'StructKeyword' ||
+    kind === 'TupleKeyword' ||
     kind === 'EnumKeyword' ||
     kind === 'UnionKeyword' ||
     kind === 'ServiceKeyword' ||
@@ -59,6 +60,7 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
     (following === 'UnsafeKeyword' &&
       (peek(state, 2) === 'FnKeyword' || peek(state, 2) === 'EffectKeyword')) ||
     following === 'StructKeyword' ||
+    following === 'TupleKeyword' ||
     following === 'EnumKeyword' ||
     following === 'UnionKeyword' ||
     following === 'ServiceKeyword' ||
@@ -263,6 +265,58 @@ export const parseStructDeclaration = (initial: State): NodeResult => {
   return Object.freeze({
     state: right.state,
     node: syntaxNode(right.state, 'StructDeclaration', [...children, ...right.elements]),
+  })
+}
+
+/** Parses the nominal positional aggregate declaration `tuple Name(T0, T1, ...)`. */
+export const parseTupleDeclaration = (initial: State): NodeResult => {
+  const hasPublicModifier = nextSignificantKind(initial) === 'PubKeyword'
+  const pubKeyword = hasPublicModifier
+    ? expect(initial, 'PubKeyword', ['TupleKeyword', 'Identifier', 'LeftParenthesis'])
+    : Object.freeze({ state: initial, elements: Object.freeze([]) })
+  const keyword = expect(pubKeyword.state, 'TupleKeyword', ['Identifier', 'LeftParenthesis'])
+  const name = expect(keyword.state, 'Identifier', [
+    'Less',
+    'LeftParenthesis',
+    ...topLevelFollowing,
+  ])
+  const typeParameters =
+    nextSignificantKind(name.state) === 'Less'
+      ? parseTypeParameterList(name.state, ['LeftParenthesis'])
+      : undefined
+  const left = expect(typeParameters?.state ?? name.state, 'LeftParenthesis', [
+    ...typeStarts,
+    'RightParenthesis',
+  ])
+  let state = left.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+    ...pubKeyword.elements,
+    ...keyword.elements,
+    ...name.elements,
+    ...(typeParameters === undefined ? [] : [typeParameters.node]),
+    ...left.elements,
+  ])
+  let first = true
+  while (
+    nextSignificantKind(state) !== 'RightParenthesis' &&
+    nextSignificantKind(state) !== 'EndOfFile' &&
+    !beginsTopLevelDeclaration(state)
+  ) {
+    if (!first) {
+      const comma = expect(state, 'Comma', [...typeStarts, 'RightParenthesis'])
+      children = Object.freeze([...children, ...comma.elements])
+      state = comma.state
+      if (nextSignificantKind(state) === 'RightParenthesis') break
+    }
+    const element = parseType(state, ['Comma', 'RightParenthesis', ...topLevelFollowing], true)
+    children = Object.freeze([...children, element.node])
+    state = element.state
+    first = false
+  }
+  const right = expect(state, 'RightParenthesis', topLevelFollowing)
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'TupleDeclaration', [...children, ...right.elements]),
   })
 }
 
@@ -594,6 +648,7 @@ const parseServiceLikeDeclaration = (initial: State, kind: 'Service' | 'Interfac
     nextSignificantKind(state) !== 'PubKeyword' &&
     nextSignificantKind(state) !== 'ConstKeyword' &&
     nextSignificantKind(state) !== 'StructKeyword' &&
+    nextSignificantKind(state) !== 'TupleKeyword' &&
     nextSignificantKind(state) !== 'EnumKeyword' &&
     nextSignificantKind(state) !== 'UnionKeyword' &&
     nextSignificantKind(state) !== 'ServiceKeyword' &&
@@ -707,6 +762,7 @@ export const parseTopLevelDeclaration = (state: State): NodeResult => {
     return parseServiceDeclaration(state)
   if (kind === 'StructKeyword' || following === 'StructKeyword')
     return parseStructDeclaration(state)
+  if (kind === 'TupleKeyword' || following === 'TupleKeyword') return parseTupleDeclaration(state)
   if (kind === 'EnumKeyword' || following === 'EnumKeyword') return parseEnumDeclaration(state)
   if (kind === 'UnionKeyword' || following === 'UnionKeyword') return parseUnionDeclaration(state)
   return parseFunctionDeclaration(state)
@@ -722,6 +778,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     lookaheadToken.kind !== 'EffectKeyword' &&
     lookaheadToken.kind !== 'UnsafeKeyword' &&
     lookaheadToken.kind !== 'StructKeyword' &&
+    lookaheadToken.kind !== 'TupleKeyword' &&
     lookaheadToken.kind !== 'EnumKeyword' &&
     lookaheadToken.kind !== 'UnionKeyword' &&
     lookaheadToken.kind !== 'ServiceKeyword' &&

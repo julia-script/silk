@@ -44,6 +44,7 @@ const overBudgetBoundaries: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'ElseKeyword',
   'PubKeyword',
   'StructKeyword',
+  'TupleKeyword',
   'EnumKeyword',
   'UnionKeyword',
   'FnKeyword',
@@ -441,6 +442,7 @@ export const primaryKind = (
   | 'Call'
   | 'StructLiteral'
   | 'AppliedMember'
+  | 'ContextualRecordLiteral'
   | 'ArrayLiteral'
   | 'Match'
   | 'Grouped'
@@ -476,6 +478,7 @@ export const primaryKind = (
     if (token.kind === 'UnsafeKeyword') return 'Unsafe'
     if (token.kind === 'MatchKeyword') return 'Match'
     if (token.kind === 'LeftBracket') return 'ArrayLiteral'
+    if (token.kind === 'Dot' && peek(state, 1) === 'LeftBrace') return 'ContextualRecordLiteral'
     if (token.kind === 'Identifier') {
       if (hasAppliedMember(state)) return 'AppliedMember'
       const following = peek(state, 1)
@@ -508,11 +511,17 @@ export const primaryKind = (
       token.kind === 'FailKeyword' ||
       token.kind === 'PubKeyword' ||
       token.kind === 'StructKeyword' ||
+      token.kind === 'TupleKeyword' ||
       token.kind === 'EnumKeyword' ||
       token.kind === 'UnionKeyword' ||
       token.kind === 'FnKeyword' ||
       token.kind === 'EffectKeyword' ||
       token.kind === 'ImportKeyword' ||
+      token.kind === 'WhileKeyword' ||
+      token.kind === 'BreakKeyword' ||
+      token.kind === 'ContinueKeyword' ||
+      token.kind === 'DropKeyword' ||
+      token.kind === 'ElseKeyword' ||
       token.kind === 'EndOfFile'
     ) {
       return recoveryKind
@@ -534,10 +543,20 @@ export const remainingRightParentheses = (state: State): number => {
       token.kind === 'RightBrace' ||
       token.kind === 'PubKeyword' ||
       token.kind === 'StructKeyword' ||
+      token.kind === 'TupleKeyword' ||
       token.kind === 'EnumKeyword' ||
       token.kind === 'UnionKeyword' ||
       token.kind === 'FnKeyword' ||
       token.kind === 'ImportKeyword' ||
+      token.kind === 'LetKeyword' ||
+      token.kind === 'ReturnKeyword' ||
+      token.kind === 'IfKeyword' ||
+      token.kind === 'WhileKeyword' ||
+      token.kind === 'BreakKeyword' ||
+      token.kind === 'ContinueKeyword' ||
+      token.kind === 'FailKeyword' ||
+      token.kind === 'DropKeyword' ||
+      token.kind === 'ElseKeyword' ||
       token.kind === 'EndOfFile'
     ) {
       break
@@ -569,10 +588,20 @@ export const expectCallRightParenthesis = (
     'RightBrace',
     'PubKeyword',
     'StructKeyword',
+    'TupleKeyword',
     'EnumKeyword',
     'UnionKeyword',
     'FnKeyword',
     'ImportKeyword',
+    'LetKeyword',
+    'ReturnKeyword',
+    'IfKeyword',
+    'WhileKeyword',
+    'BreakKeyword',
+    'ContinueKeyword',
+    'FailKeyword',
+    'DropKeyword',
+    'ElseKeyword',
   ])
 }
 
@@ -587,6 +616,7 @@ export function parseArgumentList(
     'RightBrace',
     'PubKeyword',
     'StructKeyword',
+    'TupleKeyword',
     'EnumKeyword',
     'UnionKeyword',
     'FnKeyword',
@@ -602,6 +632,7 @@ export function parseArgumentList(
     kind !== 'RightBrace' &&
     kind !== 'PubKeyword' &&
     kind !== 'StructKeyword' &&
+    kind !== 'TupleKeyword' &&
     kind !== 'EnumKeyword' &&
     kind !== 'UnionKeyword' &&
     kind !== 'FnKeyword' &&
@@ -621,6 +652,7 @@ export function parseArgumentList(
       kind === 'RightBrace' ||
       kind === 'PubKeyword' ||
       kind === 'StructKeyword' ||
+      kind === 'TupleKeyword' ||
       kind === 'EnumKeyword' ||
       kind === 'UnionKeyword' ||
       kind === 'FnKeyword' ||
@@ -634,6 +666,7 @@ export function parseArgumentList(
       'RightBrace',
       'PubKeyword',
       'StructKeyword',
+      'TupleKeyword',
       'EnumKeyword',
       'UnionKeyword',
       'FnKeyword',
@@ -761,6 +794,7 @@ export function parseStructLiteralExpression(
     kind !== 'ReturnKeyword' &&
     kind !== 'PubKeyword' &&
     kind !== 'StructKeyword' &&
+    kind !== 'TupleKeyword' &&
     kind !== 'EnumKeyword' &&
     kind !== 'UnionKeyword' &&
     kind !== 'FnKeyword' &&
@@ -794,6 +828,53 @@ export function parseStructLiteralExpression(
     node: syntaxNode(rightBrace.state, 'StructLiteralExpression', [
       ...children,
       ...rightBrace.elements,
+    ]),
+  })
+}
+
+/** Parses the targetless record form `.{ field: value, ... }`. */
+export function parseContextualRecordLiteralExpression(
+  initial: State,
+  reservedForEnclosingCalls: number,
+  depth: number,
+): NodeResult {
+  const dot = expect(initial, 'Dot', ['LeftBrace'])
+  const left = expect(dot.state, 'LeftBrace', ['Identifier', 'RightBrace', ...expressionFollowing])
+  let state = left.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+    ...dot.elements,
+    ...left.elements,
+  ])
+  while (
+    nextSignificantKind(state) !== 'RightBrace' &&
+    nextSignificantKind(state) !== 'EndOfFile' &&
+    !expressionFollowing.includes(nextSignificantKind(state) ?? 'EndOfFile')
+  ) {
+    const field = expect(state, 'Identifier', ['Colon', ...expressionStarts, 'RightBrace'])
+    const colon = expect(field.state, 'Colon', [...expressionStarts, 'Comma', 'RightBrace'])
+    const value = parseChildExpression(colon.state, depth, true, (childDepth) =>
+      parseExpression(colon.state, reservedForEnclosingCalls, 'Identifier', true, childDepth),
+    )
+    children = Object.freeze([
+      ...children,
+      syntaxNode(value.state, 'StructFieldInitializer', [
+        ...field.elements,
+        ...colon.elements,
+        value.node,
+      ]),
+    ])
+    state = value.state
+    if (nextSignificantKind(state) === 'RightBrace') break
+    const comma = expect(state, 'Comma', ['Identifier', 'RightBrace', ...expressionFollowing])
+    children = Object.freeze([...children, ...comma.elements])
+    state = comma.state
+  }
+  const right = expect(state, 'RightBrace', expressionFollowing)
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'ContextualRecordLiteralExpression', [
+      ...children,
+      ...right.elements,
     ]),
   })
 }
@@ -894,6 +975,29 @@ export function parseGroupedExpression(
   const expression = parseChildExpression(left.state, depth, true, (childDepth) =>
     parseExpression(left.state, reservedForEnclosingCalls + 1, 'Identifier', true, childDepth),
   )
+  if (nextSignificantKind(expression.state) === 'Comma') {
+    let state = expression.state
+    let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+      ...left.elements,
+      expression.node,
+    ])
+    while (nextSignificantKind(state) === 'Comma') {
+      const comma = expect(state, 'Comma', [...expressionStarts, 'RightParenthesis'])
+      children = Object.freeze([...children, ...comma.elements])
+      state = comma.state
+      if (nextSignificantKind(state) === 'RightParenthesis') break
+      const element = parseChildExpression(state, depth, true, (childDepth) =>
+        parseExpression(state, reservedForEnclosingCalls + 1, 'Identifier', true, childDepth),
+      )
+      children = Object.freeze([...children, element.node])
+      state = element.state
+    }
+    const right = expectCallRightParenthesis(state, reservedForEnclosingCalls)
+    return Object.freeze({
+      state: right.state,
+      node: syntaxNode(right.state, 'TupleLiteralExpression', [...children, ...right.elements]),
+    })
+  }
   const right = expectCallRightParenthesis(expression.state, reservedForEnclosingCalls)
   return Object.freeze({
     state: right.state,
@@ -1374,6 +1478,7 @@ export const reservedTemplateBoundaries: ReadonlyArray<Token.TokenKind> = Object
   'ElseKeyword',
   'PubKeyword',
   'StructKeyword',
+  'TupleKeyword',
   'EnumKeyword',
   'UnionKeyword',
   'FnKeyword',
@@ -1469,6 +1574,8 @@ export function parsePrimaryExpression(
     return parseStructLiteralExpression(initial, reservedForEnclosingCalls, depth)
   if (kind === 'AppliedMember')
     return parseAppliedMemberExpression(initial, reservedForEnclosingCalls, depth)
+  if (kind === 'ContextualRecordLiteral')
+    return parseContextualRecordLiteralExpression(initial, reservedForEnclosingCalls, depth)
   if (kind === 'ArrayLiteral')
     return parseArrayLiteralExpression(initial, reservedForEnclosingCalls, depth)
   if (kind === 'Match') return parseMatchExpression(initial, reservedForEnclosingCalls, depth)
@@ -1574,7 +1681,12 @@ export function parseProjectionChain(initial: NodeResult, depth: number): NodeRe
       continue
     }
     if (nextSignificantKind(result.state) === 'Dot') {
-      const dot = expect(result.state, 'Dot', ['Identifier', 'Star', ...expressionFollowing])
+      const dot = expect(result.state, 'Dot', [
+        'Identifier',
+        'Star',
+        'DecimalInteger',
+        ...expressionFollowing,
+      ])
       if (nextSignificantKind(dot.state) === 'Star') {
         const star = expect(dot.state, 'Star', expressionFollowing)
         result = Object.freeze({
@@ -1583,6 +1695,18 @@ export function parseProjectionChain(initial: NodeResult, depth: number): NodeRe
             result.node,
             ...dot.elements,
             ...star.elements,
+          ]),
+        })
+        continue
+      }
+      if (nextSignificantKind(dot.state) === 'DecimalInteger') {
+        const ordinal = expect(dot.state, 'DecimalInteger', expressionFollowing)
+        result = Object.freeze({
+          state: ordinal.state,
+          node: syntaxNode(ordinal.state, 'OrdinalProjectionExpression', [
+            result.node,
+            ...dot.elements,
+            ...ordinal.elements,
           ]),
         })
         continue

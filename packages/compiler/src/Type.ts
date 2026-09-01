@@ -2163,6 +2163,13 @@ const executableAccessPrefix = (access: CallableMode | Effect['access']): string
   }
 }
 
+/** Returns the source-facing category of one compiler-minted anonymous aggregate. */
+export const anonymousAggregateDisplay = (self: Nominal): string | undefined => {
+  if (self.name.startsWith('@AnonymousPositional:')) return 'anonymous tuple'
+  if (self.name.startsWith('@AnonymousNamed:')) return 'anonymous record'
+  return undefined
+}
+
 /** Encodes one type for deterministic compiler facts and diagnostics. */
 export const encode = (self: Type): string => {
   if (typeof self === 'string') return self
@@ -2207,6 +2214,12 @@ export const encode = (self: Type): string => {
   if (isRepresented(self)) return encode(self.contract)
   return self.members.map(encode).join(' | ')
 }
+
+/** Renders a semantic type without exposing compiler-minted anonymous aggregate spellings. */
+export const display = (self: Type): string =>
+  encode(self)
+    .replace(/(?:[^\s<>,()&|]+\.)?@AnonymousPositional:\d+:\d+/g, 'anonymous tuple')
+    .replace(/(?:[^\s<>,()&|]+\.)?@AnonymousNamed:\d+:\d+/g, 'anonymous record')
 
 /** Renders one normalized requirement member with its access demand and optional nominal role. */
 export const encodeRequirement = (

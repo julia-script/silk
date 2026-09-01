@@ -147,9 +147,13 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'SliceType',
   'SourceFile',
   'StructDeclaration',
+  'TupleDeclaration',
   'StructField',
   'StructFieldInitializer',
   'StructLiteralExpression',
+  'TupleLiteralExpression',
+  'ContextualRecordLiteralExpression',
+  'OrdinalProjectionExpression',
   'TypeArgumentList',
   'TypeParameter',
   'TypeParameterList',
@@ -160,6 +164,23 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'UniversalPattern',
   'WhileStatement',
 ])
+
+it.effect('preserves singleton tuples and joins contextual record punctuation', () =>
+  Effect.gen(function* () {
+    const first = yield* SyntaxFormatter.format(
+      parse(
+        'memory://aggregate-format.silk',
+        'tuple One(i32) fn one()->One { let value: One=(1,) let record= . {age:32} return value }',
+      ),
+    )
+    const text = formattedText(first)
+    assert.include(text, 'tuple One(i32)')
+    assert.include(text, 'let value: One = (1,)')
+    assert.include(text, 'let record = .{age: 32}')
+    const second = yield* SyntaxFormatter.format(parse('memory://aggregate-format-2.silk', text))
+    assert.strictEqual(formattedText(second), text)
+  }),
+)
 
 it.effect('formats a generic effect catch pipeline canonically and idempotently', () =>
   Effect.gen(function* () {
@@ -1059,6 +1080,7 @@ pub struct Pair {
   right: bool
   choice: Alpha | (Beta | Alpha)
 }
+pub tuple Point(i32, i32)
 pub struct Span { start: i32 end: i32 }
 pub struct Token { span: Span }
 pub struct End {}
@@ -1068,6 +1090,10 @@ pub union Maybe<T> { None, Some { pub value: T } }
 pub role Clock
 fn helper(value: i32, other: i32) -> i32 {
   let mut moved = move value
+  let singleton = (1,)
+  let record = .{ value: 1 }
+  let point = Point(1, 2)
+  let first = point.0
   while moved < other {
     if false { break } else { continue }
   }

@@ -1,4 +1,5 @@
 import * as Option from 'effect/Option'
+import * as AggregateIdentity from './AggregateIdentity.js'
 import * as CallableContract from './CallableContract.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as Constraint from './Constraint.js'
@@ -341,7 +342,7 @@ export const analyzeConstant = (
     // recorded with its widest value and its selector. `Lower` narrows it once the target is fixed.
     const expected = TargetConstant.declaredType(literal.selector)
     if (declared.type !== expected) {
-      detail = `${TargetConstant.root}.${literal.selector} is ${expected}, not ${Type.encode(declared.type)}`
+      detail = `${TargetConstant.root}.${literal.selector} is ${expected}, not ${Type.display(declared.type)}`
     } else {
       type = expected
       value = Object.freeze({
@@ -365,7 +366,7 @@ export const analyzeConstant = (
       })
     }
   } else {
-    detail = `the literal kind does not match ${declared._tag === 'Resolved' ? Type.encode(declared.type) : 'the declared type'}`
+    detail = `the literal kind does not match ${declared._tag === 'Resolved' ? Type.display(declared.type) : 'the declared type'}`
   }
 
   let diagnostic: Diagnostic.Diagnostic | undefined
@@ -622,8 +623,8 @@ export const analyzeEnumMember = (
     !Type.equals(nominal, expected)
   ) {
     wrongEnum = Diagnostic.wrongEnumMember(
-      Type.encode(expected),
-      Type.encode(nominal),
+      Type.display(expected),
+      Type.display(nominal),
       memberPathSpan,
     )
   } else if (
@@ -632,7 +633,7 @@ export const analyzeEnumMember = (
     Scalar.isIntegerSpelling(expected)
   ) {
     wrongEnum = Diagnostic.enumIntegerMismatch(
-      Type.encode(nominal),
+      Type.display(nominal),
       expected,
       'EnumToInteger',
       memberPathSpan,
@@ -695,21 +696,21 @@ const analyzeEnumValueCall = (
     mismatch = undefined
   } else if (enumFactByType(resolution.index, actual) !== undefined) {
     mismatch = Diagnostic.wrongEnumMember(
-      Type.encode(operation.parameter),
-      Type.encode(actual),
+      Type.display(operation.parameter),
+      Type.display(actual),
       argument?.syntax.span ?? node.span,
     )
   } else if (typeof actual === 'string' && Scalar.isIntegerSpelling(actual)) {
     mismatch = Diagnostic.enumIntegerMismatch(
-      Type.encode(operation.parameter),
+      Type.display(operation.parameter),
       actual,
       'IntegerToEnum',
       argument?.syntax.span ?? node.span,
     )
   } else {
     mismatch = Diagnostic.argumentTypeMismatch(
-      Type.encode(operation.parameter),
-      Type.encode(actual),
+      Type.display(operation.parameter),
+      Type.display(actual),
       argument?.syntax.span ?? node.span,
     )
   }
@@ -1227,6 +1228,7 @@ export const intrinsicStruct = (
         : 'Private',
     typeParameters: Object.freeze([]),
     name: Object.freeze({ _tag: 'Present', spelling: type.name, token }),
+    aggregateKind: 'Named',
     fields: Object.freeze(
       fieldTypes.map(([name, fieldType], fieldOrdinal) =>
         Object.freeze({
@@ -1236,6 +1238,7 @@ export const intrinsicStruct = (
             owner: Object.freeze({ _tag: 'StructFieldOwnerId' as const, declaration: id }),
             ordinal: fieldOrdinal,
           }),
+          member: AggregateIdentity.labeled(name),
           state: Object.freeze({
             _tag: 'Unique' as const,
             id: Object.freeze({
@@ -1413,7 +1416,7 @@ export const resolveStructTarget = (
   }
   const token = SyntaxTree.tokens(syntax).find((candidate) => candidate.kind === 'Identifier')
   const diagnostic = Diagnostic.expectedType(
-    resolved.fact._tag === 'Resolved' ? Type.encode(resolved.fact.type) : 'unavailable struct',
+    resolved.fact._tag === 'Resolved' ? Type.display(resolved.fact.type) : 'unavailable struct',
     token?.span ?? syntax.span,
   )
   return Object.freeze({
@@ -1441,12 +1444,12 @@ const selectedUnionVariant = (
   const variant = DeclarationFacts.lookupUnionVariant(union.variants, variantName)
   if (variant._tag !== 'Resolved')
     return unavailableUnionVariantTarget(
-      Diagnostic.unknownUnionVariant(Type.encode(type), variantName, token.span),
+      Diagnostic.unknownUnionVariant(Type.display(type), variantName, token.span),
       diagnostics,
     )
   if (union.validity._tag !== 'Valid')
     return unavailableUnionVariantTarget(
-      Diagnostic.invalidNominalUnionConstruction(Type.encode(type), token.span),
+      Diagnostic.invalidNominalUnionConstruction(Type.display(type), token.span),
       diagnostics,
     )
   return Object.freeze({
@@ -1506,7 +1509,7 @@ export const resolveUnionVariantTarget = (
         })
   if (base === undefined || declaration?._tag !== 'UnionDeclaration') {
     const diagnostic = Diagnostic.expectedNominalUnion(
-      base === undefined ? 'unavailable type' : Type.encode(base),
+      base === undefined ? 'unavailable type' : Type.display(base),
       parentSyntax.span,
     )
     return unavailableUnionVariantTarget(diagnostic, analyzed.diagnostics)
@@ -1538,7 +1541,7 @@ export const resolveUnionVariantTarget = (
       parameter.type.kind !== 'EffectRepresentation',
   )
   if (supplied.length > sourceParameters.length) {
-    const diagnostic = Diagnostic.expectedNominalUnion(Type.encode(base), parentSyntax.span)
+    const diagnostic = Diagnostic.expectedNominalUnion(Type.display(base), parentSyntax.span)
     return unavailableUnionVariantTarget(diagnostic, analyzed.diagnostics)
   }
   const resolvedArguments = supplied.map((argument) =>
@@ -1580,7 +1583,7 @@ export const resolveUnionVariantTarget = (
       arguments_,
     ) === undefined
   ) {
-    const diagnostic = Diagnostic.expectedNominalUnion(Type.encode(base), parentSyntax.span)
+    const diagnostic = Diagnostic.expectedNominalUnion(Type.display(base), parentSyntax.span)
     return unavailableUnionVariantTarget(
       diagnostic,
       Diagnostic.merge(
@@ -1973,13 +1976,13 @@ export const analyzePattern = (
   for (const parameter of unresolvedParameters) {
     diagnostics.push(
       Diagnostic.uninferredTypeParameter(
-        nominal === undefined ? 'unknown aggregate' : Type.encode(nominal),
+        nominal === undefined ? 'unknown aggregate' : Type.display(nominal),
         parameter.type.name,
         parameter.syntax.span,
       ),
     )
   }
-  const label = nominal === undefined ? 'unknown aggregate' : Type.encode(nominal)
+  const label = nominal === undefined ? 'unknown aggregate' : Type.display(nominal)
   const outsideDefiningModule = nominal !== undefined && nominal.module !== source.id
   const seen = new Map<string, PatternFieldFact>()
   const bindings: Array<PatternBindingFact> = []
@@ -2074,8 +2077,8 @@ export const analyzePattern = (
         counters.invalid = true
         diagnostics.push(
           Diagnostic.matchMemberNotInScrutinee(
-            Type.encode(nested.member),
-            Type.encode(expected),
+            Type.display(nested.member),
+            Type.display(expected),
             nestedNode.span,
           ),
         )
@@ -2351,8 +2354,8 @@ export const analyzeMatch = (
     ) {
       diagnostics.push(
         Diagnostic.matchMemberNotInScrutinee(
-          Type.encode(member.type),
-          scrutinee?.type === undefined ? 'unknown' : Type.encode(scrutinee.type),
+          Type.display(member.type),
+          scrutinee?.type === undefined ? 'unknown' : Type.display(scrutinee.type),
           pattern.syntax.span,
         ),
       )
@@ -2410,7 +2413,7 @@ export const analyzeMatch = (
       diagnostics.push(...guard.diagnostics)
       if (guard.type !== undefined && guard.type !== 'bool') {
         diagnostics.push(
-          Diagnostic.matchGuardNotBool(Type.encode(guard.type), guardNode?.span ?? armNode.span),
+          Diagnostic.matchGuardNotBool(Type.display(guard.type), guardNode?.span ?? armNode.span),
         )
       }
     }
@@ -2471,7 +2474,18 @@ export const analyzeMatch = (
   const unavailableReachableResult = arms.some(
     (arm) => arm.reachable && arm.result.type._tag !== 'Available',
   )
-  const joined = Match.join(reachableTypes)
+  const anonymousTypes = reachableTypes.filter((type) => {
+    if (!Type.isNominal(type)) return false
+    const aggregate = aggregateByNominal(resolution, type)
+    return (
+      aggregate?.aggregateKind === 'AnonymousNamed' ||
+      aggregate?.aggregateKind === 'AnonymousPositional'
+    )
+  })
+  const anonymousDisagreement = new Set(anonymousTypes.map(Type.key)).size > 1
+  const joined: Match.Join = anonymousDisagreement
+    ? Object.freeze({ _tag: 'Incompatible', types: Object.freeze(reachableTypes) })
+    : Match.join(reachableTypes)
   if (joined._tag === 'Incompatible') {
     let divergentRepresentations:
       | {
@@ -2497,16 +2511,23 @@ export const analyzeMatch = (
       }
       if (divergentRepresentations !== undefined) break
     }
-    diagnostics.push(
-      divergentRepresentations === undefined
-        ? Diagnostic.incompatibleMatchResults(joined.types.map(Type.encode), node.span)
-        : Diagnostic.divergentRepresentationJoin(
-            Type.encodeGenericArgument(divergentRepresentations.divergence.left),
-            Type.encodeGenericArgument(divergentRepresentations.divergence.right),
-            divergentRepresentations.spans,
-            node.span,
-          ),
-    )
+    let diagnostic: Diagnostic.Diagnostic
+    if (anonymousDisagreement) {
+      diagnostic = Diagnostic.anonymousAggregateJoinMismatch(
+        joined.types.map(Type.display),
+        node.span,
+      )
+    } else if (divergentRepresentations === undefined) {
+      diagnostic = Diagnostic.incompatibleMatchResults(joined.types.map(Type.encode), node.span)
+    } else {
+      diagnostic = Diagnostic.divergentRepresentationJoin(
+        Type.encodeGenericArgument(divergentRepresentations.divergence.left),
+        Type.encodeGenericArgument(divergentRepresentations.divergence.right),
+        divergentRepresentations.spans,
+        node.span,
+      )
+    }
+    diagnostics.push(diagnostic)
   }
   const hasInvalidGuard = arms.some(
     (arm) =>
@@ -2856,6 +2877,7 @@ export const analyzeAggregateLiteral = (
   declaration: DeclarationFact,
   scope: Scope,
   resolution: ResolutionContext,
+  contextualTarget?: StructTargetResult,
 ): ExpressionResult => {
   const selector = SyntaxTree.directNode(node, 'AppliedMemberSelector')
   const unionTarget =
@@ -2863,7 +2885,9 @@ export const analyzeAggregateLiteral = (
       ? resolveBareUnionVariantTarget(source, node, resolution)
       : resolveUnionVariantTarget(source, selector, resolution, declaration)
   let targetSyntax: SyntaxTree.Node
-  if (selector !== undefined) {
+  if (contextualTarget !== undefined) {
+    targetSyntax = node
+  } else if (selector !== undefined) {
     targetSyntax = SyntaxTree.directNode(selector, 'AppliedType') ?? childNode(selector, 'TypePath')
   } else if (unionTarget !== undefined && node.kind === 'FieldProjectionExpression') {
     targetSyntax = node
@@ -2871,7 +2895,9 @@ export const analyzeAggregateLiteral = (
     targetSyntax = SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
   }
   const target =
-    unionTarget ?? resolveStructTarget(source, targetSyntax, resolution, declaration, true)
+    contextualTarget ??
+    unionTarget ??
+    resolveStructTarget(source, targetSyntax, resolution, declaration, true)
   const diagnostics: Array<Diagnostic.Diagnostic> = [...target.diagnostics]
   let aggregate: DeclarationFacts.StructFact | DeclarationFacts.UnionFact | undefined
   let aggregateFields: ReadonlyArray<DeclarationFacts.FieldFact> = Object.freeze([])
@@ -2885,14 +2911,27 @@ export const analyzeAggregateLiteral = (
     }
   }
   const nominal = target.fact._tag === 'Resolved' ? target.fact.type : undefined
-  const nominalLabel = nominal === undefined ? 'unknown aggregate' : Type.encode(nominal)
+  const nominalLabel = nominal === undefined ? 'unknown aggregate' : Type.display(nominal)
+  const forbiddenPositionalFields =
+    aggregate?._tag === 'StructDeclaration' &&
+    aggregate.aggregateKind === 'Positional' &&
+    node.kind === 'StructLiteralExpression'
+  if (forbiddenPositionalFields)
+    diagnostics.push(Diagnostic.positionalFieldConstruction(nominalLabel, node.span))
   const inferredArguments = new Map<string, InferredStructArgument>()
   const argumentOrigins = new Map<string, ReadonlyArray<SourceSpan.SourceSpan>>()
   const explicitArguments = new Set<string>()
   if (aggregate !== undefined && nominal !== undefined) {
     for (const [ordinal, parameter] of aggregate.typeParameters.entries()) {
       const argument = nominal.arguments.at(ordinal)
-      if (argument === undefined || isOwnStructArgument(parameter.type, argument)) continue
+      if (
+        argument === undefined ||
+        isOwnStructArgument(parameter.type, argument) ||
+        (contextualTarget !== undefined &&
+          Type.isTypeArgument(argument) &&
+          Type.isParameter(argument))
+      )
+        continue
       const parameterKey = Type.key(parameter.type)
       inferredArguments.set(parameterKey, Object.freeze({ argument, span: targetSyntax.span }))
       argumentOrigins.set(parameterKey, Object.freeze([targetSyntax.span]))
@@ -2910,7 +2949,7 @@ export const analyzeAggregateLiteral = (
     aggregateFields.every((field) => field.visibility === 'Public' || definingModule === source.id)
   const accessDiagnostic =
     nominal !== undefined && !authorized
-      ? Diagnostic.inaccessibleStructConstruction(Type.encode(nominal), node.span)
+      ? Diagnostic.inaccessibleStructConstruction(Type.display(nominal), node.span)
       : undefined
   if (accessDiagnostic !== undefined) diagnostics.push(accessDiagnostic)
 
@@ -2951,7 +2990,9 @@ export const analyzeAggregateLiteral = (
       let state: StructInitializerState = Object.freeze({ _tag: 'Unavailable' })
       if (name !== undefined && nameToken !== undefined && aggregate !== undefined) {
         const previous = seen.get(name)
-        if (fieldLookup?._tag !== 'Resolved') {
+        if (forbiddenPositionalFields) {
+          state = Object.freeze({ _tag: 'Unavailable' })
+        } else if (fieldLookup?._tag !== 'Resolved') {
           const diagnostic = Diagnostic.unknownStructField(nominalLabel, name, nameToken.span)
           diagnostics.push(diagnostic)
           state = Object.freeze({ _tag: 'Unknown', cause: Diagnostic.identity(diagnostic) })
@@ -3034,8 +3075,8 @@ export const analyzeAggregateLiteral = (
             if (actualRepresentation === undefined) {
               representationDiagnostic = Diagnostic.structFieldTypeMismatch(
                 name,
-                Type.encode(specializedExpectedType),
-                Type.encode(expression.type),
+                Type.display(specializedExpectedType),
+                Type.display(expression.type),
                 expressionNode.span,
               )
             } else if (requiredArgument._tag === 'RepresentationParameterArgument') {
@@ -3074,8 +3115,8 @@ export const analyzeAggregateLiteral = (
                       : undefined
                   representationDiagnostic = Diagnostic.incompatibleRepresentationBound(
                     parameter.name,
-                    Type.encode(specializedExpectedType.representation.requiredBound),
-                    Type.encode(represented.contract),
+                    Type.display(specializedExpectedType.representation.requiredBound),
+                    Type.display(represented.contract),
                     expressionNode.span,
                     {
                       ...(requiredParameter === undefined
@@ -3222,8 +3263,8 @@ export const analyzeAggregateLiteral = (
               unionConversionDiagnostic(actualValue, compatibleExpected, expressionNode.span) ??
               Diagnostic.structFieldTypeMismatch(
                 name,
-                Type.encode(compatibleExpected),
-                Type.encode(actualValue),
+                Type.display(compatibleExpected),
+                Type.display(actualValue),
                 expressionNode.span,
               )
             diagnostics.push(diagnostic)
@@ -3309,7 +3350,7 @@ export const analyzeAggregateLiteral = (
       if (field.visibility === 'Private' && completedNominal.module !== source.id) continue
       diagnostics.push(
         Diagnostic.missingStructInitializer(
-          Type.encode(completedNominal),
+          Type.display(completedNominal),
           field.name.spelling,
           node.span,
         ),
@@ -3334,6 +3375,7 @@ export const analyzeAggregateLiteral = (
     aggregate !== undefined &&
     completedNominal !== undefined &&
     authorized &&
+    !forbiddenPositionalFields &&
     SyntaxTree.isAvailableSyntax(node) &&
     fields.length === aggregateFields.length &&
     initializers.length === aggregateFields.length &&
@@ -3436,8 +3478,8 @@ export const analyzeArrayLiteral = (
         ) ??
         unionConversionDiagnostic(element.type, elementType, elementNode.span) ??
         Diagnostic.arrayElementTypeMismatch(
-          Type.encode(elementType),
-          Type.encode(element.type),
+          Type.display(elementType),
+          Type.display(element.type),
           ordinal,
           elementNode.span,
         )
@@ -3545,10 +3587,10 @@ export const analyzeIndexProjection = (
     subject.type !== undefined && Type.isFixedArray(subject.type) ? subject.type : undefined
   const slice = subject.type !== undefined && Type.isSlice(subject.type) ? subject.type : undefined
   if (subject.type !== undefined && array === undefined && slice === undefined) {
-    diagnostics.push(Diagnostic.indexOnNonArray(Type.encode(subject.type), subjectNode.span))
+    diagnostics.push(Diagnostic.indexOnNonArray(Type.display(subject.type), subjectNode.span))
   }
   if (index.type !== undefined && index.type !== 'usize') {
-    diagnostics.push(Diagnostic.indexNotUsize(Type.encode(index.type), indexNode.span))
+    diagnostics.push(Diagnostic.indexNotUsize(Type.display(index.type), indexNode.span))
   }
   let bounds: BoundsFact = Object.freeze({ _tag: 'Unavailable' })
   if (array !== undefined && index.type === 'usize') {
@@ -3626,8 +3668,14 @@ export const analyzeProjection = (
   )
   if (subject === undefined) throw new RangeError(`Cannot analyze projection ${subjectNode.kind}`)
   const diagnostics: Array<Diagnostic.Diagnostic> = [...subject.diagnostics]
-  const fieldToken = directToken(node, 'Identifier')
-  const fieldName = fieldToken === undefined ? undefined : spelling(source, fieldToken)
+  const ordinalToken = directToken(node, 'DecimalInteger')
+  const ordinal =
+    ordinalToken === undefined ? undefined : Number.parseInt(spelling(source, ordinalToken), 10)
+  const labeledToken = directToken(node, 'Identifier')
+  const fieldToken = ordinalToken ?? labeledToken
+  let fieldName: string | undefined
+  if (ordinal !== undefined) fieldName = `${ordinal}`
+  else if (labeledToken !== undefined) fieldName = spelling(source, labeledToken)
   // A reference projects the fields of its target: the read happens through the borrow, so
   // the projected value is typed by the target while consumption stays a partial-move error.
   const reference =
@@ -3656,28 +3704,30 @@ export const analyzeProjection = (
     type = 'usize'
   } else if (slice !== undefined && fieldName !== undefined && fieldToken !== undefined) {
     const diagnostic = Diagnostic.unknownProjectedField(
-      Type.encode(slice),
+      Type.display(slice),
       fieldName,
       fieldToken.span,
     )
     diagnostics.push(diagnostic)
     state = Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) })
   } else if (subject.type !== undefined && nominal === undefined && fieldToken !== undefined) {
-    const diagnostic = Diagnostic.projectionOnNonStruct(Type.encode(subject.type), fieldToken.span)
+    const diagnostic = Diagnostic.projectionOnNonStruct(Type.display(subject.type), fieldToken.span)
     diagnostics.push(diagnostic)
     state = Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) })
   } else if (nominal !== undefined && fieldName !== undefined && fieldToken !== undefined) {
-    const member = DeclarationFacts.byCanonical(resolution.index, {
-      _tag: 'CanonicalDeclarationId',
-      module: nominal.module,
-      name: nominal.name,
-    })
-    const struct = member?._tag === 'StructDeclaration' ? member : undefined
+    const struct = aggregateByNominal(resolution, nominal)
     const lookup =
-      struct === undefined ? undefined : DeclarationFacts.lookupField(struct.fields, fieldName)
+      struct === undefined
+        ? undefined
+        : DeclarationFacts.lookupAggregateMember(
+            struct.fields,
+            ordinal === undefined
+              ? AggregateIdentity.labeled(fieldName)
+              : AggregateIdentity.ordinal(ordinal),
+          )
     if (lookup?._tag !== 'Resolved') {
       const diagnostic = Diagnostic.unknownProjectedField(
-        Type.encode(nominal),
+        Type.display(nominal),
         fieldName,
         fieldToken.span,
       )
@@ -3685,7 +3735,7 @@ export const analyzeProjection = (
       state = Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) })
     } else if (lookup.field.visibility === 'Private' && nominal.module !== source.id) {
       const diagnostic = Diagnostic.inaccessibleProjectedField(
-        Type.encode(nominal),
+        Type.display(nominal),
         fieldName,
         fieldToken.span,
       )
@@ -3902,8 +3952,8 @@ export function analyzePlaceReplace(
       ) ??
         unionConversionDiagnostic(value.type, destination.type, valueNode.span) ??
         Diagnostic.assignmentTypeMismatch(
-          Type.encode(destination.type),
-          Type.encode(value.type),
+          Type.display(destination.type),
+          Type.display(value.type),
           valueNode.span,
         ),
     )
@@ -4438,6 +4488,666 @@ export const builtinArgumentMappings = (
   )
 }
 
+interface AggregateElementAnalysis {
+  readonly expression: ExpressionFact
+  readonly type?: SemanticType
+  readonly syntax: SyntaxTree.Node
+  readonly label?: string
+  readonly token?: Token.Token
+}
+
+const generatedAggregate = (
+  source: SourceFile.SourceFile,
+  syntax: SyntaxTree.Node,
+  kind: 'AnonymousNamed' | 'AnonymousPositional',
+  elements: ReadonlyArray<AggregateElementAnalysis & { readonly type: SemanticType }>,
+  resolution: ResolutionContext,
+): { readonly struct: DeclarationFacts.StructFact; readonly type: Type.Nominal } => {
+  const identity = AggregateIdentity.anonymous(source.id, syntax.span, kind)
+  const type = AggregateIdentity.nominal(identity)
+  const id: DeclarationFacts.DeclarationId = Object.freeze({
+    _tag: 'DeclarationId',
+    sourceId: source.id,
+    ordinal: -1 - syntax.span.start * 2 - (kind === 'AnonymousPositional' ? 1 : 0),
+  })
+  const fields = elements.map((element, ordinal): DeclarationFacts.FieldFact => {
+    const fieldId: DeclarationFacts.FieldId = Object.freeze({
+      _tag: 'FieldId',
+      owner: Object.freeze({ _tag: 'StructFieldOwnerId', declaration: id }),
+      ordinal,
+    })
+    const token =
+      element.token ?? SyntaxTree.tokens(element.syntax).at(0) ?? SyntaxTree.tokens(syntax).at(0)
+    if (token === undefined)
+      throw new RangeError('Generated aggregate member requires source syntax')
+    const labeled = kind === 'AnonymousNamed'
+    const label = element.label
+    return Object.freeze({
+      _tag: 'AggregateField',
+      id: fieldId,
+      member:
+        labeled && label !== undefined
+          ? AggregateIdentity.labeled(label)
+          : AggregateIdentity.ordinal(ordinal),
+      state: Object.freeze({ _tag: 'Unique', id: fieldId }),
+      visibility: 'Public',
+      name:
+        labeled && label !== undefined
+          ? Object.freeze({ _tag: 'Present', spelling: label, token })
+          : Object.freeze({ _tag: 'Unavailable', syntax: element.syntax }),
+      declaredType: Object.freeze({
+        _tag: 'Resolved',
+        type: element.type,
+        spelling: Type.encode(element.type),
+        token,
+        syntax: element.syntax,
+      }),
+      syntax: element.syntax,
+    })
+  })
+  const dependencies = new Map<string, Type.Nominal>()
+  for (const element of elements)
+    for (const dependency of Type.nominals(element.type))
+      dependencies.set(Type.key(dependency), dependency)
+  const struct: DeclarationFacts.StructFact = Object.freeze({
+    _tag: 'StructDeclaration',
+    id,
+    canonical: Object.freeze({
+      _tag: 'Canonical',
+      id: Object.freeze({
+        _tag: 'CanonicalDeclarationId',
+        module: identity.module,
+        name: AggregateIdentity.internalName(identity),
+      }),
+    }),
+    visibility: 'Private',
+    typeParameters: Object.freeze([]),
+    name: Object.freeze({ _tag: 'Unavailable', syntax }),
+    identity,
+    aggregateKind: kind,
+    fields: Object.freeze(fields),
+    dependency: Object.freeze({
+      _tag: 'Available',
+      types: Object.freeze([...dependencies.values()].sort(Type.compare)),
+    }),
+    syntax,
+  })
+  resolution.generatedAggregates?.set(aggregateKey(type), struct)
+  return Object.freeze({ struct, type })
+}
+
+const analyzeAggregateElements = (
+  source: SourceFile.SourceFile,
+  syntax: SyntaxTree.Node,
+  elementSyntax: ReadonlyArray<{
+    readonly expression: SyntaxTree.Node
+    readonly label?: string
+    readonly token?: Token.Token
+    readonly initializerSyntax?: SyntaxTree.Node
+  }>,
+  struct: DeclarationFacts.StructFact,
+  nominal: Type.Nominal,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+  preanalyzed: ReadonlyArray<ExpressionResult> = Object.freeze([]),
+): ExpressionResult => {
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const substitution =
+    TypeInference.substitution(
+      struct.typeParameters.map((parameter) => parameter.type),
+      nominal.arguments,
+    ) ?? new Map()
+  const positional =
+    struct.aggregateKind === 'Positional' || struct.aggregateKind === 'AnonymousPositional'
+  if (positional && elementSyntax.length !== struct.fields.length)
+    diagnostics.push(
+      Diagnostic.tupleArityMismatch(
+        Type.display(nominal),
+        struct.fields.length,
+        elementSyntax.length,
+        syntax.span,
+      ),
+    )
+  const seen = new Map<string, SourceSpan.SourceSpan>()
+  const initializers: Array<StructInitializerFact> = []
+  const mapped: Array<{ field: DeclarationFacts.FieldFact; initializer: StructInitializerFact }> =
+    []
+  for (const [ordinal, element] of elementSyntax.entries()) {
+    let field: DeclarationFacts.FieldFact | undefined
+    if (positional) field = struct.fields.at(ordinal)
+    else if (element.label !== undefined) {
+      const lookup = DeclarationFacts.lookupField(struct.fields, element.label)
+      if (lookup._tag === 'Resolved') field = lookup.field
+    }
+    const expected =
+      field?.declaredType._tag === 'Resolved'
+        ? Type.substitute(field.declaredType.type, substitution)
+        : undefined
+    const analyzed =
+      preanalyzed.at(ordinal) ??
+      analyzeExpression(
+        source,
+        element.expression,
+        declarations,
+        declaration,
+        scope,
+        resolution,
+        expected,
+      )
+    if (analyzed === undefined)
+      throw new RangeError(`Cannot analyze aggregate member ${element.expression.kind}`)
+    diagnostics.push(...analyzed.diagnostics)
+    let state: StructInitializerState = Object.freeze({ _tag: 'Unavailable' })
+    if (!positional && element.label !== undefined) {
+      const previous = seen.get(element.label)
+      if (previous !== undefined && field !== undefined) {
+        const diagnostic = Diagnostic.duplicateStructInitializer(
+          element.label,
+          previous,
+          element.token?.span ?? element.expression.span,
+        )
+        diagnostics.push(diagnostic)
+        state = Object.freeze({
+          _tag: 'Duplicate',
+          field,
+          cause: Diagnostic.identity(diagnostic),
+        })
+      } else if (field === undefined) {
+        const diagnostic = Diagnostic.unknownStructField(
+          Type.display(nominal),
+          element.label,
+          element.token?.span ?? element.expression.span,
+        )
+        diagnostics.push(diagnostic)
+        state = Object.freeze({ _tag: 'Unknown', cause: Diagnostic.identity(diagnostic) })
+      }
+      seen.set(element.label, element.token?.span ?? element.expression.span)
+    }
+    if (field !== undefined && state._tag === 'Unavailable') {
+      if (field.visibility === 'Private' && nominal.module !== source.id) {
+        const diagnostic = Diagnostic.inaccessibleProjectedField(
+          Type.display(nominal),
+          element.label ?? `${ordinal}`,
+          element.token?.span ?? element.expression.span,
+        )
+        diagnostics.push(diagnostic)
+        state = Object.freeze({
+          _tag: 'Inaccessible',
+          field,
+          cause: Diagnostic.identity(diagnostic),
+        })
+      } else if (
+        expected !== undefined &&
+        analyzed.type !== undefined &&
+        !typesCompatible(analyzed.type, expected) &&
+        !contextualIntegerCompatible(analyzed.fact, expected)
+      ) {
+        const diagnostic = Diagnostic.structFieldTypeMismatch(
+          element.label ?? `${ordinal}`,
+          Type.display(expected),
+          Type.display(analyzed.type),
+          element.expression.span,
+        )
+        diagnostics.push(diagnostic)
+        state = Object.freeze({
+          _tag: 'TypeMismatch',
+          field,
+          cause: Diagnostic.identity(diagnostic),
+        })
+      } else if (analyzed.type !== undefined) {
+        state = Object.freeze({ _tag: 'Resolved', field })
+      }
+    }
+    const initializer: StructInitializerFact = Object.freeze({
+      _tag: 'StructInitializer',
+      name: positional ? undefined : element.label,
+      ...(element.token === undefined ? {} : { token: element.token }),
+      expression: analyzed.fact,
+      state,
+      syntax: element.initializerSyntax ?? element.expression,
+    })
+    initializers.push(initializer)
+    if (state._tag === 'Resolved') mapped.push(Object.freeze({ field: state.field, initializer }))
+  }
+  if (!positional) {
+    for (const field of struct.fields) {
+      if (field.name._tag !== 'Present' || seen.has(field.name.spelling)) continue
+      diagnostics.push(
+        Diagnostic.missingStructInitializer(nominal.name, field.name.spelling, syntax.span),
+      )
+    }
+  }
+  const authorized =
+    (struct.visibility === 'Public' || nominal.module === source.id) &&
+    struct.fields.every((field) => field.visibility === 'Public' || nominal.module === source.id)
+  const complete =
+    SyntaxTree.isAvailableSyntax(syntax) &&
+    authorized &&
+    initializers.length === struct.fields.length &&
+    mapped.length === struct.fields.length &&
+    initializers.every((initializer) => initializer.state._tag === 'Resolved')
+  const type = complete ? availableExpressionType(nominal) : unavailableExpressionType
+  const token = SyntaxTree.tokens(syntax).find((candidate) => candidate.kind === 'Identifier')
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'StructLiteral',
+      target: Object.freeze({
+        _tag: 'Resolved',
+        struct,
+        type: nominal,
+        ...(token === undefined || struct.aggregateKind.startsWith('Anonymous') ? {} : { token }),
+      }),
+      authorized,
+      typeArguments: Object.freeze([]),
+      initializers: Object.freeze(initializers),
+      fields: Object.freeze(
+        struct.fields.flatMap((field) => {
+          const pair = mapped.find((candidate) =>
+            DeclarationFacts.sameFieldId(candidate.field.id, field.id),
+          )
+          return pair === undefined ? [] : [pair]
+        }),
+      ),
+      type,
+      syntax,
+    }),
+    diagnostics: Object.freeze(diagnostics),
+    type: complete ? nominal : undefined,
+  })
+}
+
+const positionalElements = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> => {
+  if (node.kind === 'TupleLiteralExpression') return node.children.filter(isExpressionNode)
+  const argumentsList = SyntaxTree.directNode(node, 'ArgumentList')
+  return argumentsList?.children.filter(isRecursiveArgumentNode) ?? Object.freeze([])
+}
+
+const contextualRecordElements = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+): ReadonlyArray<{
+  readonly expression: SyntaxTree.Node
+  readonly label?: string
+  readonly token?: Token.Token
+  readonly initializerSyntax?: SyntaxTree.Node
+}> =>
+  Object.freeze(
+    SyntaxTree.directNodes(node, 'StructFieldInitializer').flatMap((initializer) => {
+      const expression = initializer.children.find(isExpressionNode)
+      const token = directToken(initializer, 'Identifier')
+      return expression === undefined
+        ? []
+        : [
+            Object.freeze({
+              expression,
+              ...(token === undefined ? {} : { label: spelling(source, token), token }),
+              initializerSyntax: initializer,
+            }),
+          ]
+    }),
+  )
+
+const expectedAggregate = (
+  expected: SemanticType | undefined,
+  resolution: ResolutionContext,
+): { readonly struct: DeclarationFacts.StructFact; readonly type: Type.Nominal } | undefined => {
+  if (expected === undefined || !Type.isNominal(expected)) return undefined
+  const struct = aggregateByNominal(resolution, expected)
+  return struct === undefined || struct.aggregateKind.startsWith('Anonymous')
+    ? undefined
+    : Object.freeze({ struct, type: expected })
+}
+
+const analyzeTupleLiteral = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+  expected?: SemanticType,
+): ExpressionResult => {
+  const elements = positionalElements(node)
+  const contextual = expectedAggregate(expected, resolution)
+  if (contextual !== undefined && contextual.struct.aggregateKind === 'Positional') {
+    const substitution = new Map<string, Type.GenericArgument>()
+    for (const [ordinal, parameter] of contextual.struct.typeParameters.entries()) {
+      const argument = contextual.type.arguments.at(ordinal)
+      if (argument !== undefined && !(Type.isTypeArgument(argument) && Type.isParameter(argument)))
+        substitution.set(Type.key(parameter.type), argument)
+    }
+    const preanalyzed = elements.map((element, ordinal): ExpressionResult => {
+      const field = contextual.struct.fields.at(ordinal)
+      const specialized =
+        field?.declaredType._tag === 'Resolved'
+          ? Type.substitute(field.declaredType.type, substitution)
+          : undefined
+      const result = analyzeExpression(
+        source,
+        element,
+        declarations,
+        declaration,
+        scope,
+        resolution,
+        specialized !== undefined && Type.isConcrete(specialized) ? specialized : undefined,
+      )
+      if (result === undefined)
+        throw new RangeError(`Cannot analyze contextual tuple element ${element.kind}`)
+      if (field?.declaredType._tag === 'Resolved' && result.type !== undefined) {
+        const candidate = new Map(substitution)
+        if (TypeInference.infer(field.declaredType.type, result.type, candidate)) {
+          for (const [key, argument] of candidate) substitution.set(key, argument)
+        }
+      }
+      return result
+    })
+    const arguments_ = contextual.struct.typeParameters.map(
+      (parameter, ordinal) =>
+        substitution.get(Type.key(parameter.type)) ??
+        contextual.type.arguments.at(ordinal) ??
+        Type.parameterArgument(parameter.type),
+    )
+    const inferredType = Type.nominal(
+      contextual.type.module,
+      contextual.type.name,
+      Object.freeze(arguments_),
+    )
+    return analyzeAggregateElements(
+      source,
+      node,
+      elements.map((expression) => Object.freeze({ expression })),
+      contextual.struct,
+      inferredType,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+      preanalyzed,
+    )
+  }
+  if (contextual !== undefined) {
+    const diagnostic = Diagnostic.contextualAggregateKindMismatch(
+      'tuple',
+      Type.display(contextual.type),
+      node.span,
+    )
+    return Object.freeze({
+      fact: unavailableExpression(node),
+      diagnostics: Object.freeze([diagnostic]),
+      type: undefined,
+    })
+  }
+  const analyzed = elements.map((expression): ExpressionResult => {
+    const result = analyzeExpression(
+      source,
+      expression,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+    )
+    if (result === undefined)
+      throw new RangeError(`Cannot analyze tuple element ${expression.kind}`)
+    return result
+  })
+  const diagnostics = analyzed.flatMap((element) => element.diagnostics)
+  if (analyzed.some((element) => element.type === undefined))
+    return Object.freeze({
+      fact: unavailableExpression(node),
+      diagnostics: Object.freeze(diagnostics),
+      type: undefined,
+    })
+  const generated = generatedAggregate(
+    source,
+    node,
+    'AnonymousPositional',
+    analyzed.map((element, ordinal) =>
+      Object.freeze({
+        expression: element.fact,
+        type: element.type ?? Type.unit,
+        syntax: elements.at(ordinal) ?? node,
+      }),
+    ),
+    resolution,
+  )
+  return analyzeAggregateElements(
+    source,
+    node,
+    elements.map((expression) => Object.freeze({ expression })),
+    generated.struct,
+    generated.type,
+    declarations,
+    declaration,
+    scope,
+    resolution,
+    analyzed,
+  )
+}
+
+const analyzeContextualRecordLiteral = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+  expected?: SemanticType,
+): ExpressionResult => {
+  const elements = contextualRecordElements(source, node)
+  const contextual = expectedAggregate(expected, resolution)
+  if (contextual !== undefined && contextual.struct.aggregateKind === 'Named')
+    return analyzeAggregateLiteral(
+      source,
+      node,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+      Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Resolved',
+          struct: contextual.struct,
+          type: contextual.type,
+        }),
+        diagnostics: Object.freeze([]),
+      }),
+    )
+  if (contextual !== undefined) {
+    const diagnostic = Diagnostic.contextualAggregateKindMismatch(
+      'record',
+      Type.display(contextual.type),
+      node.span,
+    )
+    return Object.freeze({
+      fact: unavailableExpression(node),
+      diagnostics: Object.freeze([diagnostic]),
+      type: undefined,
+    })
+  }
+  const analyzed = elements.map((element): ExpressionResult => {
+    const result = analyzeExpression(
+      source,
+      element.expression,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+    )
+    if (result === undefined)
+      throw new RangeError(`Cannot analyze record member ${element.expression.kind}`)
+    return result
+  })
+  if (analyzed.some((element) => element.type === undefined))
+    return Object.freeze({
+      fact: unavailableExpression(node),
+      diagnostics: Object.freeze(analyzed.flatMap((element) => element.diagnostics)),
+      type: undefined,
+    })
+  const labels = new Map<string, SourceSpan.SourceSpan>()
+  const duplicateDiagnostics: Array<Diagnostic.Diagnostic> = []
+  for (const element of elements) {
+    if (element.label === undefined) continue
+    const span = element.token?.span ?? element.expression.span
+    const previous = labels.get(element.label)
+    if (previous !== undefined)
+      duplicateDiagnostics.push(
+        Diagnostic.duplicateStructInitializer(element.label, previous, span),
+      )
+    else labels.set(element.label, span)
+  }
+  if (duplicateDiagnostics.length > 0)
+    return Object.freeze({
+      fact: unavailableExpression(node),
+      diagnostics: Diagnostic.merge(
+        analyzed.flatMap((element) => element.diagnostics),
+        duplicateDiagnostics,
+      ),
+      type: undefined,
+    })
+  const generated = generatedAggregate(
+    source,
+    node,
+    'AnonymousNamed',
+    analyzed.map((element, ordinal) => {
+      const syntaxElement = elements.at(ordinal)
+      return Object.freeze({
+        expression: element.fact,
+        type: element.type ?? Type.unit,
+        syntax: syntaxElement?.expression ?? node,
+        ...(syntaxElement?.label === undefined ? {} : { label: syntaxElement.label }),
+        ...(syntaxElement?.token === undefined ? {} : { token: syntaxElement.token }),
+      })
+    }),
+    resolution,
+  )
+  return analyzeAggregateElements(
+    source,
+    node,
+    elements,
+    generated.struct,
+    generated.type,
+    declarations,
+    declaration,
+    scope,
+    resolution,
+    analyzed,
+  )
+}
+
+const tupleConstructor = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+): ExpressionResult | undefined => {
+  const tokens = callReferenceTokens(node)
+  const first = tokens.at(0)
+  const second = tokens.at(1)
+  let candidate: DeclarationFacts.MemberFact | undefined
+  if (first !== undefined && second === undefined) {
+    if (scopeSpanFor(scope, spelling(source, first)) !== undefined) return undefined
+    const lookup = NameResolution.lookup(
+      resolution.scope,
+      resolution.index,
+      spelling(source, first),
+    )
+    if (lookup._tag === 'Resolved') candidate = lookup.declaration
+  } else if (first !== undefined && second !== undefined) {
+    if (scopeSpanFor(scope, spelling(source, first)) !== undefined) return undefined
+    const qualifier = NameResolution.lookup(
+      resolution.scope,
+      resolution.index,
+      spelling(source, first),
+    )
+    if (qualifier._tag === 'Namespace') {
+      const lookup = DeclarationFacts.member(
+        resolution.index,
+        qualifier.module,
+        spelling(source, second),
+      )
+      if (lookup._tag === 'Resolved') candidate = lookup.declaration
+    }
+  }
+  if (candidate?._tag !== 'StructDeclaration' || candidate.aggregateKind !== 'Positional')
+    return undefined
+  if (candidate.canonical._tag !== 'Canonical') return undefined
+
+  const elements = positionalElements(node)
+  const typeArguments = analyzeCallTypeArguments(source, node, declaration, resolution)
+  const parameters = candidate.typeParameters.map((parameter) => parameter.type)
+  const substitution = new Map<string, Type.GenericArgument>()
+  if (typeArguments.explicit && typeArguments.types !== undefined) {
+    for (const [ordinal, supplied] of typeArguments.types.entries()) {
+      const parameter = parameters.at(ordinal)
+      if (parameter === undefined || parameter.kind !== 'Value' || !Type.isTypeArgument(supplied))
+        continue
+      substitution.set(Type.key(parameter), supplied)
+    }
+  }
+  const preanalyzed = elements.map((element, ordinal): ExpressionResult => {
+    const field = candidate.fields.at(ordinal)
+    const expected =
+      field?.declaredType._tag === 'Resolved'
+        ? Type.substitute(field.declaredType.type, substitution)
+        : undefined
+    const result = analyzeExpression(
+      source,
+      element,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+      expected,
+    )
+    if (result === undefined)
+      throw new RangeError(`Cannot analyze tuple constructor argument ${element.kind}`)
+    if (field?.declaredType._tag === 'Resolved' && result.type !== undefined)
+      TypeInference.infer(field.declaredType.type, result.type, substitution)
+    return result
+  })
+  const diagnostics: Array<Diagnostic.Diagnostic> = [...typeArguments.diagnostics]
+  const arguments_: Array<Type.GenericArgument> = []
+  for (const parameter of candidate.typeParameters) {
+    const argument = substitution.get(Type.key(parameter.type))
+    if (argument === undefined) {
+      diagnostics.push(
+        Diagnostic.uninferredTypeParameter(
+          candidate.canonical.id.name,
+          parameter.type.name,
+          parameter.syntax.span,
+        ),
+      )
+      arguments_.push(Type.parameterArgument(parameter.type))
+    } else arguments_.push(argument)
+  }
+  const nominal = Type.nominal(
+    candidate.canonical.id.module,
+    candidate.canonical.id.name,
+    Object.freeze(arguments_),
+  )
+  const analyzed = analyzeAggregateElements(
+    source,
+    node,
+    elements.map((expression) => Object.freeze({ expression })),
+    candidate,
+    nominal,
+    declarations,
+    declaration,
+    scope,
+    resolution,
+    preanalyzed,
+  )
+  return Object.freeze({
+    fact: analyzed.fact,
+    diagnostics: Diagnostic.merge(diagnostics, analyzed.diagnostics),
+    type: analyzed.type,
+  })
+}
+
 export const analyzeGroupedExpression = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
@@ -4521,8 +5231,8 @@ export const analyzeShortCircuitExpression = (
     argument.type._tag === 'Available' && !Type.equals(argument.type.type, boolean)
       ? [
           Diagnostic.argumentTypeMismatch(
-            Type.encode(boolean),
-            Type.encode(argument.type.type),
+            Type.display(boolean),
+            Type.display(argument.type.type),
             argument.syntax.span,
           ),
         ]
@@ -4990,7 +5700,7 @@ export const analyzeOperatorExpression = (
     }
     const operatorSpelling = spelling(source, operatorToken)
     const operandTypes = argumentsResult.facts.flatMap((argument) =>
-      argument.type._tag === 'Available' ? [Type.encode(argument.type.type)] : [],
+      argument.type._tag === 'Available' ? [Type.display(argument.type.type)] : [],
     )
     const diagnostic =
       candidates.length > 1
@@ -6305,7 +7015,7 @@ export function analyzeExpression(
       )
     const diagnostics = [...subject.diagnostics]
     if (effect === undefined && subject.type !== undefined)
-      diagnostics.push(Diagnostic.runNonEffect(Type.encode(subject.type), node.span))
+      diagnostics.push(Diagnostic.runNonEffect(Type.display(subject.type), node.span))
     if (unhandled.length > 0 || symbolicFailuresUnhandled)
       diagnostics.push(
         Diagnostic.unhandledEffectFailures(
@@ -6414,8 +7124,28 @@ export function analyzeExpression(
     return analyzeAggregateLiteral(source, node, declarations, declaration, scope, resolution)
   }
 
+  if (node.kind === 'TupleLiteralExpression') {
+    return analyzeTupleLiteral(source, node, declarations, declaration, scope, resolution, expected)
+  }
+
+  if (node.kind === 'ContextualRecordLiteralExpression') {
+    return analyzeContextualRecordLiteral(
+      source,
+      node,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+      expected,
+    )
+  }
+
   if (node.kind === 'ArrayLiteralExpression') {
     return analyzeArrayLiteral(source, node, declarations, declaration, scope, resolution, expected)
+  }
+
+  if (node.kind === 'OrdinalProjectionExpression') {
+    return analyzeProjection(source, node, declarations, declaration, scope, resolution)
   }
 
   if (node.kind === 'FieldProjectionExpression') {
@@ -6465,6 +7195,8 @@ export function analyzeExpression(
   if (node.kind === 'PipelineExpression' || node.kind === 'CallExpression') {
     if (node.kind === 'PipelineExpression')
       return analyzePipelineExpression(source, node, declarations, declaration, scope, resolution)
+    const constructed = tupleConstructor(source, node, declarations, declaration, scope, resolution)
+    if (constructed !== undefined) return constructed
   }
 
   if (node.kind !== 'CallExpression') return undefined
@@ -7249,6 +7981,8 @@ export interface BodyContext {
 export interface ResolutionContext {
   readonly scope: NameResolution.ModuleScope
   readonly index: DeclarationIndex.Index
+  /** Occurrence-generated aggregates are semantic facts, deliberately outside lexical lookup. */
+  readonly generatedAggregates?: Map<string, DeclarationFacts.StructFact>
   readonly unsafeSpans?: ReadonlyArray<SourceSpan.SourceSpan>
   /** Exact direct-call spans acknowledged by the expression form `unsafe call(...)`. */
   readonly unsafeCallSpans?: ReadonlyArray<SourceSpan.SourceSpan>
@@ -7258,6 +7992,22 @@ export interface ResolutionContext {
   readonly executableSites?: ReadonlyMap<SyntaxTree.Node, number>
   /** Mutable callable bindings whose authored initializer is no longer their exact runtime value. */
   readonly writtenCallableBindings?: Set<number>
+}
+
+const aggregateKey = (nominal: Type.Nominal): string => `${nominal.module}:${nominal.name}`
+
+export const aggregateByNominal = (
+  resolution: ResolutionContext,
+  nominal: Type.Nominal,
+): DeclarationFacts.StructFact | undefined => {
+  const generated = resolution.generatedAggregates?.get(aggregateKey(nominal))
+  if (generated !== undefined) return generated
+  const member = DeclarationFacts.byCanonical(resolution.index, {
+    _tag: 'CanonicalDeclarationId',
+    module: nominal.module,
+    name: nominal.name,
+  })
+  return member?._tag === 'StructDeclaration' ? member : undefined
 }
 
 export const unsafeCallAuthorized = (

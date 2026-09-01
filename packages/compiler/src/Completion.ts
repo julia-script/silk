@@ -396,11 +396,15 @@ const fieldCandidates = (
   module: string,
 ): ReadonlyArray<Candidate> => {
   if (type === undefined) return Object.freeze([])
-  const declaration = index.modules
-    .find((headers) => headers.module === type.module)
-    ?.structs.find(
-      (struct) => struct.canonical._tag === 'Canonical' && struct.canonical.id.name === type.name,
-    )
+  const resolved = DeclarationFacts.byCanonical(
+    index,
+    Object.freeze({
+      _tag: 'CanonicalDeclarationId',
+      module: type.module,
+      name: type.name,
+    }),
+  )
+  const declaration = resolved?._tag === 'StructDeclaration' ? resolved : undefined
   return Object.freeze(
     (declaration?.fields ?? []).flatMap((field) =>
       field.name._tag !== 'Present' || (field.visibility === 'Private' && type.module !== module)
