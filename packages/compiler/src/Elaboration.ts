@@ -52,6 +52,7 @@ export interface BindingDeclarationFact {
   readonly id: Hir.BindingId
   readonly name: DeclaredName
   readonly mutability: 'Immutable' | 'Mutable'
+  readonly declaredType?: DeclaredTypeFact
   readonly inferredType: ExpressionTypeFact
   readonly initializer: ExpressionFact
   /** Exact callable value captured when this binding was initialized, before later source writes. */
@@ -206,13 +207,12 @@ export type CallReferenceFact =
       readonly operation: DeclarationFacts.ServiceOperationFact
     }
   /**
-   * One operation of a type parameter's bound, reached through the bound's own name. The contract
-   * is the interface's own declaration over the bounded parameter, checked once before any concrete
-   * argument exists; which implementation runs is the witness's answer at specialization, not one
-   * this reference records.
+   * One statically selected interface operation. The normalized capability and provider identify
+   * the conformance question; which implementation runs is the witness's answer at specialization,
+   * not one this reference records.
    */
   | {
-      readonly _tag: 'ResolvedBoundOperation'
+      readonly _tag: 'ResolvedInterfaceOperation'
       readonly spelling: string
       readonly token: Token.Token
       readonly capability: Type.Nominal
@@ -524,7 +524,8 @@ export type StructTargetFact =
       readonly _tag: 'Resolved'
       readonly struct: DeclarationFacts.StructFact
       readonly type: Type.Nominal
-      readonly token: Token.Token
+      /** Present for source-named constructors; occurrence-generated literals have no type token. */
+      readonly token?: Token.Token
     }
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
 
@@ -1004,6 +1005,7 @@ export type ExpressionFact =
       readonly _tag: 'Call'
       readonly reference: CallReferenceFact
       readonly path: ReferencePathFact
+      readonly interfaceApplication?: DeclarationFacts.DeclaredTypeFact
       readonly typeArguments: ReadonlyArray<TypeArgumentFact>
       readonly arguments: ReadonlyArray<ArgumentFact>
       readonly mappings: ReadonlyArray<ArgumentMappingFact>
@@ -1279,6 +1281,7 @@ export interface FunctionFact {
   readonly returnedExpression: ExpressionFact
   readonly returnCompatibility: ReturnCompatibility
   readonly returnedBorrow?: DeclarationFacts.ReturnedBorrowFact
+  readonly generatedAggregates: ReadonlyArray<DeclarationFacts.StructFact>
 }
 
 /** Stable identity of one parent-linked lexical scope in an elaborated function. */
@@ -1307,6 +1310,7 @@ export interface Result {
   readonly _tag: 'Elaboration'
   readonly syntax: SyntaxFile.SyntaxFile
   readonly functions: ReadonlyArray<FunctionFact>
+  readonly generatedAggregates: ReadonlyArray<DeclarationFacts.StructFact>
   readonly lexicalScopes: ReadonlyArray<LexicalScopeFact>
   readonly hir: Hir.Module
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -1452,9 +1456,12 @@ export const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.fr
   'BorrowExpression',
   'MatchExpression',
   'StructLiteralExpression',
-  'UnionVariantExpression',
+  'AppliedMemberExpression',
+  'TupleLiteralExpression',
+  'ContextualRecordLiteralExpression',
   'ArrayLiteralExpression',
   'FieldProjectionExpression',
+  'OrdinalProjectionExpression',
   'ReferentProjectionExpression',
   'IndexProjectionExpression',
   'CallExpression',
@@ -1477,9 +1484,12 @@ export const isRecursiveArgumentNode = (element: SyntaxTree.Element): element is
     element.kind === 'BorrowExpression' ||
     element.kind === 'MatchExpression' ||
     element.kind === 'StructLiteralExpression' ||
-    element.kind === 'UnionVariantExpression' ||
+    element.kind === 'AppliedMemberExpression' ||
+    element.kind === 'TupleLiteralExpression' ||
+    element.kind === 'ContextualRecordLiteralExpression' ||
     element.kind === 'ArrayLiteralExpression' ||
     element.kind === 'FieldProjectionExpression' ||
+    element.kind === 'OrdinalProjectionExpression' ||
     element.kind === 'ReferentProjectionExpression' ||
     element.kind === 'IndexProjectionExpression' ||
     element.kind === 'GroupedExpression' ||
@@ -1505,6 +1515,10 @@ export const callCallee = (node: SyntaxTree.Node): SyntaxTree.Node =>
 
 export const callReferenceTokens = (node: SyntaxTree.Node): ReadonlyArray<Token.Token> => {
   const callee = callCallee(node)
+  if (callee.kind === 'PipelineExpression') {
+    const target = pipelineCallable(callee)
+    return target === undefined ? Object.freeze([]) : callReferenceTokens(target)
+  }
   if (callee.kind === 'GroupedExpression') {
     const expression = callee.children.find(isExpressionNode)
     return expression === undefined ? Object.freeze([]) : callReferenceTokens(expression)
@@ -1512,6 +1526,22 @@ export const callReferenceTokens = (node: SyntaxTree.Node): ReadonlyArray<Token.
   if (callee.kind === 'IdentifierExpression') {
     const identifier = directToken(callee, 'Identifier')
     return identifier === undefined ? Object.freeze([]) : Object.freeze([identifier])
+  }
+  if (callee.kind === 'AppliedMemberExpression') {
+    const selector = SyntaxTree.directNode(callee, 'AppliedMemberSelector')
+    const owner =
+      selector === undefined ? undefined : SyntaxTree.directNode(selector, 'AppliedType')
+    const path = owner === undefined ? undefined : SyntaxTree.directNode(owner, 'TypePath')
+    const qualifier =
+      path === undefined
+        ? undefined
+        : SyntaxTree.tokens(path)
+            .filter((token) => token.kind === 'Identifier')
+            .at(-1)
+    const member = selector === undefined ? undefined : directToken(selector, 'Identifier')
+    return qualifier === undefined || member === undefined
+      ? Object.freeze([])
+      : Object.freeze([qualifier, member])
   }
   if (callee.kind !== 'FieldProjectionExpression') return Object.freeze([])
   const subject = callee.children.find(isExpressionNode)
@@ -2115,6 +2145,7 @@ export const elaborateModule = (input: Input): Result => {
     _tag: 'Elaboration',
     syntax,
     functions,
+    generatedAggregates: Object.freeze(functions.flatMap((fact) => fact.generatedAggregates)),
     lexicalScopes: lexicalScopesOf(syntax.source, functions),
     hir,
     diagnostics: Object.freeze(diagnostics),

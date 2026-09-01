@@ -407,8 +407,11 @@ applies when the exact source is a supplied argument or a trailing capture of a 
 opaque callable values do not invent a source.
 
 **Boundary:** The right side may be a function item, section, binding, grouped expression, or any
-other compatible unary callable. It does not perform method lookup, open a namespace, import a name,
-or change the callable's ownership contract.
+other compatible unary callable. An applied interface operation such as
+`Encodable<u32>.encode` is completed by the pipeline's left operand and is equivalent to the direct
+static call `Encodable<u32>.encode(left)`. The pipeline does not perform method lookup, open a
+namespace, import a name, infer an interface application from the result, or change the callable's
+ownership contract.
 
 **Diagnostics:** A non-callable right expression reports `SEM0075`. A callable with incompatible
 arity, parameter type, result use, or invocation mode reports the corresponding callable or
@@ -710,8 +713,10 @@ diagnostic. Escaping a borrowed narrowed binding reports `OWN0006`.
 **Status:** Confirmed
 
 The type of a match expression is computed from reachable arm results. Equal types remain that
-type. Distinct ordinary value types form one normalized structural union. An arm of type `never`
-contributes no result member.
+type. Distinct source-declared nominal value types form one normalized structural union. An arm of
+type `never` contributes no result member. Separate occurrence-generated anonymous tuple or record
+types do not implicitly join; they require an independently known named aggregate expectation that
+is supplied to every arm before analysis.
 
 ```silk
 struct Left { value: i32 }
@@ -729,7 +734,8 @@ The result is the normalized union `Left | Right`, independent of arm order.
 
 **Boundary:** Result joining does not convert any arm result or erase its ownership and lifetime
 properties. If a result type is unavailable or cannot legally be stored in the resulting union, the
-match result is unavailable.
+match result is unavailable. Same-shaped anonymous aggregate occurrences are distinct nominal
+types, not candidates for structural-union synthesis.
 
 **Diagnostics:** An invalid reachable result union reports `SEM0049` and lists the contributing
 types and the precise unavailable member. An unreachable arm contributes neither a result type nor

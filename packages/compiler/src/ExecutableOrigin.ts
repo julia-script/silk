@@ -58,7 +58,7 @@ export const reachableIntrinsics = (
       for (const root of Hir.statementExpressions(statement)) {
         for (const expression of Hir.expressionTree(root)) {
           const selected =
-            expression._tag === 'BoundOperationCall'
+            expression._tag === 'InterfaceOperationCall'
               ? (() => {
                   const capability = Type.substitute(expression.capability, instance.substitution)
                   return Type.isNominal(capability)
@@ -340,7 +340,7 @@ export const make = (operations: Operations) => {
     if (expression._tag === 'ArrayConstruct') {
       return expression.elements.flatMap((element) => callTargets(element, index, substitution))
     }
-    if (expression._tag === 'BuiltinCall' || expression._tag === 'BoundOperationCall') {
+    if (expression._tag === 'BuiltinCall' || expression._tag === 'InterfaceOperationCall') {
       return expression.arguments.flatMap((argument) => callTargets(argument, index, substitution))
     }
     if (expression._tag === 'FunctionItem') return []
@@ -478,13 +478,13 @@ export const make = (operations: Operations) => {
   }
 
   /**
-   * Collects the provider functions a specialized body's bound operations dispatch to.
+   * Collects the provider functions static interface operations dispatch to.
    *
-   * A source witness is reachable through the operator that spells its operation, or through the
-   * bound's own name when no operator spells it, and through no ordinary call — so discovery has to
-   * read the conformance itself. Both spellings walk one conformance, because the witness a
-   * specialization selects does not depend on how the body names the operation; a scalar argument
-   * maps the same operation to a sealed intrinsic and contributes no target.
+   * A source witness is reachable through an operator, a bound qualifier, or an explicitly applied
+   * interface qualifier, and through no ordinary call — so discovery has to read the conformance
+   * itself. Every spelling walks one conformance because the selected witness does not depend on
+   * how the body names the operation; a scalar argument maps the same operation to a sealed
+   * intrinsic and contributes no target.
    */
   const interfaceWitnessTargets = (
     fn: Hir.HirFunction,
@@ -492,7 +492,7 @@ export const make = (operations: Operations) => {
     substitution: Type.Substitution,
   ): ReadonlyArray<CallTarget> => {
     const walk = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
-      let bound:
+      let selection:
         | {
             readonly capability: Type.Nominal
             readonly provider: Type.Type
@@ -501,23 +501,28 @@ export const make = (operations: Operations) => {
           }
         | undefined
       if (expression._tag === 'BuiltinCall') {
-        bound = expression.interfaceOperation
-      } else if (expression._tag === 'BoundOperationCall') {
-        bound = expression
+        selection = expression.interfaceOperation
+      } else if (expression._tag === 'InterfaceOperationCall') {
+        selection = expression
       } else {
-        bound = undefined
+        selection = undefined
       }
       const capability =
-        bound === undefined ? undefined : Type.substitute(bound.capability, substitution)
+        selection === undefined ? undefined : Type.substitute(selection.capability, substitution)
       const provider =
-        bound === undefined ? undefined : Type.substitute(bound.provider, substitution)
+        selection === undefined ? undefined : Type.substitute(selection.provider, substitution)
       const target =
-        bound === undefined ||
+        selection === undefined ||
         provider === undefined ||
         capability === undefined ||
         !Type.isNominal(capability)
           ? undefined
-          : ConformanceProof.interfaceWitnessTarget(index, provider, capability, bound.operation)
+          : ConformanceProof.interfaceWitnessTarget(
+              index,
+              provider,
+              capability,
+              selection.operation,
+            )
       const dependencies =
         provider === undefined || capability === undefined || !Type.isNominal(capability)
           ? []
@@ -1028,7 +1033,7 @@ export const make = (operations: Operations) => {
         children.flatMap((child) => serviceEffectRecipes(child, context, resolving)),
       )
     }
-    if (expression._tag === 'BuiltinCall' || expression._tag === 'BoundOperationCall')
+    if (expression._tag === 'BuiltinCall' || expression._tag === 'InterfaceOperationCall')
       return Object.freeze(
         expression.arguments.flatMap((argument) =>
           serviceEffectRecipes(argument, context, resolving),
@@ -1516,7 +1521,7 @@ export const make = (operations: Operations) => {
         )
     }
     if (
-      (expression._tag === 'BoundOperationCall' || expression._tag === 'BuiltinCall') &&
+      (expression._tag === 'InterfaceOperationCall' || expression._tag === 'BuiltinCall') &&
       expression.witnessEffectSite !== undefined
     )
       return effectIdentity(context.owner, expression.witnessEffectSite)
@@ -2536,11 +2541,11 @@ export const make = (operations: Operations) => {
       const selectedInterfaceEffectTarget = (
         expression: Extract<
           Hir.Expression,
-          { readonly _tag: 'BoundOperationCall' | 'BuiltinCall' }
+          { readonly _tag: 'InterfaceOperationCall' | 'BuiltinCall' }
         >,
       ): InstanceKey | undefined => {
         const bound =
-          expression._tag === 'BoundOperationCall' ? expression : expression.interfaceOperation
+          expression._tag === 'InterfaceOperationCall' ? expression : expression.interfaceOperation
         if (bound === undefined || expression.witnessEffectSite === undefined) return undefined
         const capability = Type.substitute(bound.capability, instance.substitution)
         const provider = Type.substitute(bound.provider, instance.substitution)
@@ -2580,7 +2585,7 @@ export const make = (operations: Operations) => {
           ])
         }
         if (
-          (expression._tag === 'BoundOperationCall' || expression._tag === 'BuiltinCall') &&
+          (expression._tag === 'InterfaceOperationCall' || expression._tag === 'BuiltinCall') &&
           expression.witnessEffectSite !== undefined
         ) {
           const identity = effectIdentity(instance.key, expression.witnessEffectSite)
@@ -2823,7 +2828,7 @@ export const make = (operations: Operations) => {
           if (target !== undefined) addDependency(execution, instanceNode(target))
           recordForwardedServiceTargets(expression, execution)
         } else if (
-          (expression._tag === 'BoundOperationCall' || expression._tag === 'BuiltinCall') &&
+          (expression._tag === 'InterfaceOperationCall' || expression._tag === 'BuiltinCall') &&
           expression.witnessEffectSite !== undefined
         ) {
           for (const target of executionTargets(expression)) addDependency(execution, target)

@@ -1111,6 +1111,33 @@ export const corpus: ReadonlyArray<CorpusProgram> = [
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'tuple-record-aggregates',
+    source: `tuple Point(i32, i32)
+struct Pair { left: i32 right: i32 }
+enum Choice { First, Second }
+fn identity<T>(value: T) -> T { return move value }
+fn sumPair(value: Pair) -> i32 { return value.left + value.right }
+fn select(choice: Choice) -> Pair {
+  let selected: Pair = match choice {
+    Choice.First => .{ left: 20, right: 22 }
+    Choice.Second => .{ left: 21, right: 21 }
+  }
+  return move selected
+}
+pub fn main() -> i32 {
+  let point = Point(20, 22)
+  if point.0 + point.1 != 42 { return 1 }
+  let coordinates = (20, 22)
+  if coordinates.0 + coordinates.1 != 42 { return 2 }
+  let record = identity(.{ left: 20, right: 22 })
+  if record.left + record.right != 42 { return 3 }
+  if sumPair(.{ left: 20, right: 22 }) != 42 { return 4 }
+  let selected = select(Choice.First)
+  return selected.left + selected.right
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'scalar-enum-signed',
     source: scalarEnumSignedAcceptance,
     expected: { _tag: 'Completes', result: 42 },
@@ -1471,6 +1498,28 @@ pub fn main() -> i32 {
   let scaled = doubled(Vector { value: 21 })
   let unit = Vector { value: 1 }
   return move scaled * move unit
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'applied-interface-operation-calls',
+    source: `interface Encodable<Format> {
+  effect fn encode(self: &Self) -> i32
+}
+struct Numeric {}
+struct Textual {}
+struct Age { value: i32 }
+impl Encodable<Numeric> for Age {
+  effect fn encode(self: &Self) -> i32 { return self.value }
+}
+impl Encodable<Textual> for Age {
+  effect fn encode(self: &Self) -> i32 { return 10 }
+}
+pub fn main() -> i32 {
+  let age = Age { value: 32 }
+  let numeric = run Encodable<Numeric>.encode(&age)
+  let textual = run &age |> Encodable<Textual>.encode
+  return numeric + textual
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },

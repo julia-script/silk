@@ -291,26 +291,26 @@ export const endWitnessReborrows = (
 }
 
 export const witnessEffectContract = (
-  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' | 'BoundOperationCall' }>,
+  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' | 'InterfaceOperationCall' }>,
 ): DeclarationFacts.InterfaceOperationApplicationFact | undefined =>
-  expression._tag === 'BoundOperationCall'
+  expression._tag === 'InterfaceOperationCall'
     ? expression.contract
     : expression.interfaceOperation?.contract
 
 export const lowerWitnessEffect = (
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' | 'BoundOperationCall' }>,
+  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' | 'InterfaceOperationCall' }>,
 ): LoweredExpression | undefined => {
   const site = expression.witnessEffectSite
   const contract = witnessEffectContract(expression)
   if (site === undefined || contract === undefined) return undefined
   const capability = fn.semantic(
-    expression._tag === 'BoundOperationCall'
+    expression._tag === 'InterfaceOperationCall'
       ? expression.capability
       : (expression.interfaceOperation?.capability ?? 'never'),
   )
   const provider = fn.semantic(
-    expression._tag === 'BoundOperationCall'
+    expression._tag === 'InterfaceOperationCall'
       ? expression.provider
       : (expression.interfaceOperation?.provider ?? 'never'),
   )
@@ -319,7 +319,7 @@ export const lowerWitnessEffect = (
     fn.index,
     provider,
     capability,
-    expression._tag === 'BoundOperationCall'
+    expression._tag === 'InterfaceOperationCall'
       ? expression.operation
       : (expression.interfaceOperation?.operation ?? ''),
   )
@@ -327,7 +327,7 @@ export const lowerWitnessEffect = (
     fn.index,
     provider,
     capability,
-    expression._tag === 'BoundOperationCall'
+    expression._tag === 'InterfaceOperationCall'
       ? expression.operation
       : (expression.interfaceOperation?.operation ?? ''),
   )
@@ -380,16 +380,16 @@ export const lowerWitnessEffect = (
 }
 
 /**
- * Redirects one bound operation call to the provider's own function, the fallback the operator path
- * reaches through `lowerInterfaceWitnessCall`.
+ * Redirects one static interface-operation call to the provider's own function, the fallback the
+ * operator path reaches through `lowerInterfaceWitnessCall`.
  *
- * Named bound calls already elaborated and ownership-checked their arguments against the literal
+ * Interface calls already elaborated and ownership-checked their arguments against the literal
  * applied contract. Lowering therefore forwards those locals unchanged; introducing any borrow or
  * move here would restore a second hidden user-interface calling convention.
  */
-export const lowerBoundWitnessCall = (
+export const lowerStaticInterfaceWitnessCall = (
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'BoundOperationCall' }>,
+  expression: Extract<Hir.Expression, { readonly _tag: 'InterfaceOperationCall' }>,
   provider: Type.Type,
   capability: Type.Nominal,
   argumentLocals: ReadonlyArray<Mir.LocalId>,

@@ -664,9 +664,9 @@ const callResolution = (
           : available(Object.freeze({ _tag: 'IntrinsicOperationIdentity', id: operation.id })),
     })
   }
-  if (reference._tag === 'ResolvedBoundOperation') {
-    // A bound operation is declared once, by the interface, and answered per specialization by a
-    // witness. The declaration is what a reader navigates to, so that is what the occurrence names.
+  if (reference._tag === 'ResolvedInterfaceOperation') {
+    // An interface operation is declared once and answered per specialization by a witness. The
+    // declaration is what a reader navigates to, so that is what the occurrence names.
     const declaration = locationOfServiceOperation(reference.declaration)
     return Object.freeze({
       resolution:
@@ -719,6 +719,7 @@ const collectCallReference = (
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
+  qualifierOwnedByTypeApplication = false,
 ): void => {
   let tokens: ReadonlyArray<Token.Token>
   if (path?._tag === 'ReferencePath') {
@@ -729,7 +730,7 @@ const collectCallReference = (
     tokens = Object.freeze([])
   }
   const qualifier = tokens.length > 1 ? tokens.at(0) : undefined
-  if (qualifier !== undefined) {
+  if (qualifier !== undefined && !qualifierOwnedByTypeApplication) {
     const qualifierName = 'spelling' in reference ? reference.spelling.split('.').at(0) : undefined
     if (qualifierName !== undefined)
       collectQualifier(qualifier, qualifierName, scope, index, pending)
@@ -741,7 +742,7 @@ const collectCallReference = (
     selected?.span,
     reference._tag === 'ResolvedBuiltin' ||
       reference._tag === 'ResolvedServiceOperation' ||
-      reference._tag === 'ResolvedBoundOperation'
+      reference._tag === 'ResolvedInterfaceOperation'
       ? 'Operation'
       : 'Value',
     resolved.resolution,
@@ -948,7 +949,16 @@ const collectExpression = (
       return
     }
     case 'Call':
-      collectCallReference(expression.reference, expression.path, index, scope, pending)
+      collectCallReference(
+        expression.reference,
+        expression.path,
+        index,
+        scope,
+        pending,
+        expression.interfaceApplication !== undefined,
+      )
+      if (expression.interfaceApplication !== undefined)
+        collectDeclaredType(expression.interfaceApplication, index, scope, pending)
       for (const typeArgument of expression.typeArguments)
         collectDeclaredType(typeArgument.declared, index, scope, pending)
       for (const argument of expression.arguments)
@@ -1123,6 +1133,8 @@ const collectStatement = (
           available(Object.freeze({ _tag: 'BindingIdentity', id: statement.binding.id })),
           locationOfBinding(statement.binding),
         )
+      if (statement.binding.declaredType !== undefined)
+        collectDeclaredType(statement.binding.declaredType, index, scope, pending)
       collectExpression(statement.binding.initializer, index, scope, pending)
       return
     case 'PatternBindStatement':

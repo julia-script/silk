@@ -434,9 +434,9 @@ const storedCallableInvocationAccess = (
   const receiver = receiverAccess(state, callee)
   if (FieldRealization.admitsMode(receiver, access)) return undefined
   return Diagnostic.storedCallableInvocationAccess(
-    Type.encode(callee.nominal),
+    Type.display(callee.nominal),
     `#${callee.field.ordinal}`,
-    Type.encode(contract),
+    Type.display(contract),
     receiver,
     access,
     span,
@@ -455,9 +455,9 @@ const storedEffectRunAccess = (
   const receiver = receiverAccess(state, subject)
   if (FieldRealization.admitsMode(receiver, contract.access)) return undefined
   return Diagnostic.storedEffectRunAccess(
-    Type.encode(subject.nominal),
+    Type.display(subject.nominal),
     `#${subject.field.ordinal}`,
-    Type.encode(contract),
+    Type.display(contract),
     receiver,
     contract.access,
     span,
@@ -960,7 +960,7 @@ const checkExpression = (
       }
       return
     }
-    case 'BoundOperationCall': {
+    case 'InterfaceOperationCall': {
       for (const [ordinal, argument] of expression.arguments.entries()) {
         const operand = expression.contract.operands.at(ordinal)
         const type = operand?.type._tag === 'Resolved' ? operand.type.type : undefined

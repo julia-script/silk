@@ -1,3 +1,4 @@
+import type * as AggregateIdentity from './AggregateIdentity.js'
 import * as CallableContract from './CallableContract.js'
 import type * as ConformanceHead from './ConformanceHead.js'
 import type * as Constraint from './Constraint.js'
@@ -580,6 +581,8 @@ export type FieldState =
 export interface FieldFact {
   readonly _tag: 'AggregateField'
   readonly id: FieldId
+  /** Labeled source fields and positional tuple elements remain disjoint identities. */
+  readonly member: AggregateIdentity.MemberIdentity
   readonly state: FieldState
   readonly visibility: 'Public' | 'Private'
   readonly name: DeclaredName
@@ -604,6 +607,10 @@ export interface StructFact {
   readonly visibility: 'Public' | 'Private'
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly name: DeclaredName
+  /** Canonical source or literal-occurrence identity for this nominal aggregate. */
+  readonly identity?: AggregateIdentity.AggregateIdentity
+  /** Source structs, tuples, and anonymous literals all use one nominal aggregate fact. */
+  readonly aggregateKind: 'Named' | 'Positional' | 'AnonymousNamed' | 'AnonymousPositional'
   readonly fields: ReadonlyArray<FieldFact>
   readonly dependency: StructDependency
   readonly syntax: SyntaxTree.Node
@@ -1717,6 +1724,28 @@ export const lookupField = (fields: ReadonlyArray<FieldFact>, name: string): Fie
     : Object.freeze({ _tag: 'Ambiguous', spelling: name, fields: Object.freeze(matches) })
 }
 
+/** Looks up one aggregate member without conflating ordinal positions with source field names. */
+export const lookupAggregateMember = (
+  fields: ReadonlyArray<FieldFact>,
+  member: AggregateIdentity.MemberIdentity,
+): FieldLookup => {
+  const matches = fields.filter((field) => {
+    if (field.member._tag !== member._tag) return false
+    return field.member._tag === 'LabeledAggregateMember' &&
+      member._tag === 'LabeledAggregateMember'
+      ? field.member.label === member.label
+      : field.member._tag === 'OrdinalAggregateMember' &&
+          member._tag === 'OrdinalAggregateMember' &&
+          field.member.ordinal === member.ordinal
+  })
+  const spelling = member._tag === 'LabeledAggregateMember' ? member.label : `${member.ordinal}`
+  const first = matches.at(0)
+  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling })
+  return matches.length === 1
+    ? Object.freeze({ _tag: 'Resolved', spelling, field: first })
+    : Object.freeze({ _tag: 'Ambiguous', spelling, fields: Object.freeze(matches) })
+}
+
 export const lookup = (self: Index, module: string, name: string): DeclarationLookup =>
   lookupDeclaration(
     self.modules.find((candidate) => candidate.module === module)?.declarations ??
@@ -1776,6 +1805,8 @@ export const unionByName = (self: Index, module: string, name: string): UnionLoo
 
 /** Looks up one completed declaration by canonical identity. */
 export const byCanonical = (self: Index, id: CanonicalId): MemberFact | undefined => {
+  const generated = self.generatedAggregates.get(`${id.module}:${id.name}`)
+  if (generated !== undefined) return generated
   const result = member(self, id.module, id.name)
   return result._tag === 'Resolved' && result.declaration.canonical._tag === 'Canonical'
     ? result.declaration

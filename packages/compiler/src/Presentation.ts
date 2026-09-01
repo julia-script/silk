@@ -179,7 +179,7 @@ export const structDeclaration = (self: DeclarationFacts.StructFact): Presentati
   return Object.freeze({
     _tag: 'StructPresentation',
     name,
-    text: `${visibility}struct ${name}${typeParameters}`,
+    text: `${visibility}${self.aggregateKind === 'Positional' ? 'tuple' : 'struct'} ${name}${typeParameters}`,
   })
 }
 
@@ -344,6 +344,8 @@ export const type = (
   if (Type.equals(self, Type.unit)) return '()'
   if (typeof self === 'string') return self
   if (Type.isNominal(self)) {
+    const anonymous = Type.anonymousAggregateDisplay(self)
+    if (anonymous !== undefined) return anonymous
     let base: string
     if (self.module === module || self.module === 'silk/core') {
       base = self.name
@@ -447,6 +449,8 @@ const scopedNominalBase = (
   module: string,
   scope: NameResolution.ModuleScope | undefined,
 ): string => {
+  const anonymous = Type.anonymousAggregateDisplay(self)
+  if (anonymous !== undefined) return anonymous
   if (self.module === module) return self.name
   const imported = importedMemberSpelling(self, scope)
   if (imported !== undefined) return imported

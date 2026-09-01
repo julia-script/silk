@@ -31,7 +31,7 @@ export interface GeneratedWitnessEffectRunner {
   readonly owner: Instances.Instance
   readonly expression: Extract<
     Hir.Expression,
-    { readonly _tag: 'BuiltinCall' | 'BoundOperationCall' }
+    { readonly _tag: 'BuiltinCall' | 'InterfaceOperationCall' }
   >
   readonly target?: ConformanceProof.InterfaceWitnessTarget
   readonly intrinsic?: Intrinsic.Operation

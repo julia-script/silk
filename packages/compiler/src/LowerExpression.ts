@@ -66,7 +66,7 @@ import {
   storedCallableValueType,
   storedEffectValueType,
 } from './ValueType.js'
-import { lowerBoundWitnessCall, lowerWitnessEffect } from './WitnessLowering.js'
+import { lowerStaticInterfaceWitnessCall, lowerWitnessEffect } from './WitnessLowering.js'
 
 export function lowerExpression(
   fn: FunctionLowering,
@@ -922,7 +922,7 @@ export function lowerExpressionInner(
           if (
             expression.subject._tag === 'EffectConstruct' ||
             ((expression.subject._tag === 'BuiltinCall' ||
-              expression.subject._tag === 'BoundOperationCall') &&
+              expression.subject._tag === 'InterfaceOperationCall') &&
               expression.subject.witnessEffectSite !== undefined)
           )
             endLoans(fn, expression.subject.loanEnds, expression.span)
@@ -2009,12 +2009,12 @@ export function lowerExpressionInner(
       }
       return { result: destination }
     }
-    case 'BoundOperationCall': {
+    case 'InterfaceOperationCall': {
       if (expression.witnessEffectSite !== undefined) return lowerWitnessEffect(fn, expression)
-      // The bound named the operation; the specialization names the witness. Only here is the type
-      // argument known, so only here can the conformance say which compiler-known operation the
-      // call runs — two providers of one interface may answer one operation with two unrelated
-      // instructions, and an operator's width-neutral lowering cannot stand in for that.
+      // The static interface application names the operation and provider; specialization makes
+      // that conformance evidence concrete. Only here can the conformance say which compiler-known
+      // operation the call runs — two providers of one interface may answer one operation with two
+      // unrelated instructions, and an operator's width-neutral lowering cannot stand in for that.
       const capability = fn.semantic(expression.capability)
       const provider = fn.semantic(expression.provider)
       if (!Type.isNominal(capability)) return undefined
@@ -2034,7 +2034,13 @@ export function lowerExpressionInner(
           if (lowered === undefined) return undefined
           argumentLocals.push(lowered.result)
         }
-        const result = lowerBoundWitnessCall(fn, expression, provider, capability, argumentLocals)
+        const result = lowerStaticInterfaceWitnessCall(
+          fn,
+          expression,
+          provider,
+          capability,
+          argumentLocals,
+        )
         if (result === undefined) return undefined
         for (const authored of expression.loanEnds) {
           const borrow = fn.recipeBorrow(authored)

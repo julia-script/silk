@@ -1,6 +1,8 @@
 import { concreteCallableIdentity, exactCallableOf, executableSites } from './CallResolution.js'
+import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as DeclarationResolution from './DeclarationResolution.js'
 import * as Diagnostic from './Diagnostic.js'
 import type {
   BindingDeclarationFact,
@@ -42,6 +44,7 @@ import {
 } from './ExpressionAnalysis.js'
 import type * as Hir from './Hir.js'
 import * as Match from './Match.js'
+import * as NameResolution from './NameResolution.js'
 import * as Presentation from './Presentation.js'
 import type * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -517,6 +520,46 @@ export const analyzeStatements = (
       const bindingOrdinal = context.nextBindingOrdinal.value
       context.nextBindingOrdinal.value += 1
       const initializerNode = statementExpressionNode(element)
+      const declaredSyntax =
+        SyntaxTree.directToken(element, 'Colon') === undefined
+          ? undefined
+          : element.children.find(
+              (child): child is SyntaxTree.Node =>
+                SyntaxTree.isNode(child) && DeclarationCollection.isDeclaredTypeNode(child),
+            )
+      const analyzedDeclared =
+        declaredSyntax === undefined
+          ? undefined
+          : DeclarationCollection.analyzeDeclaredType(
+              context.source,
+              declaredSyntax,
+              new Map(
+                context.declaration.typeParameters.flatMap((parameter) =>
+                  parameter.name._tag === 'Present'
+                    ? [[parameter.name.spelling, parameter.type] as const]
+                    : [],
+                ),
+              ),
+            )
+      const nameResolution: NameResolution.Resolution = Object.freeze({
+        _tag: 'NameResolution',
+        modules: Object.freeze([context.resolution.scope]),
+        diagnostics: Object.freeze([]),
+      })
+      const resolvedDeclared =
+        analyzedDeclared === undefined
+          ? undefined
+          : DeclarationResolution.resolveTypeFact(
+              context.resolution.index,
+              context.source.id,
+              analyzedDeclared.fact,
+              (module, path) =>
+                NameResolution.resolveType(nameResolution, context.resolution.index, module, path),
+            )
+      if (analyzedDeclared !== undefined) context.diagnostics.push(...analyzedDeclared.diagnostics)
+      if (resolvedDeclared !== undefined) context.diagnostics.push(...resolvedDeclared.diagnostics)
+      const expected =
+        resolvedDeclared?.fact._tag === 'Resolved' ? resolvedDeclared.fact.type : undefined
       const initializer = analyzeExpression(
         context.source,
         initializerNode,
@@ -524,13 +567,25 @@ export const analyzeStatements = (
         context.declaration,
         scope,
         context.resolution,
-        undefined,
+        expected,
         true,
       )
       if (initializer === undefined) {
         throw new RangeError(`Semantic analysis cannot analyze ${initializerNode.kind}`)
       }
       context.diagnostics.push(...initializer.diagnostics)
+      if (
+        expected !== undefined &&
+        initializer.type !== undefined &&
+        !typesCompatible(initializer.type, expected)
+      )
+        context.diagnostics.push(
+          Diagnostic.assignmentTypeMismatch(
+            Type.encode(expected),
+            Type.encode(initializer.type),
+            initializerNode.span,
+          ),
+        )
 
       if (
         SyntaxTree.directToken(element, 'MutKeyword') !== undefined &&
@@ -558,6 +613,7 @@ export const analyzeStatements = (
         name,
         mutability:
           SyntaxTree.directToken(element, 'MutKeyword') === undefined ? 'Immutable' : 'Mutable',
+        ...(resolvedDeclared === undefined ? {} : { declaredType: resolvedDeclared.fact }),
         inferredType: initializer.fact.type,
         initializer: initializer.fact,
         ...(exactCallable === undefined ? {} : { exactCallable }),
@@ -1238,6 +1294,7 @@ export const analyzeFunctionBody = (
       : {}),
     executableSites: executableSites(declaration.syntax),
     writtenCallableBindings: new Set<number>(),
+    generatedAggregates: new Map(),
   })
   const context: BodyContext = {
     source,
@@ -1432,6 +1489,7 @@ export const analyzeFunctionBody = (
       regionOrder: Object.freeze([...context.regions]),
       returnedExpression: expression,
       returnCompatibility,
+      generatedAggregates: Object.freeze([...(bodyResolution.generatedAggregates?.values() ?? [])]),
       ...(returnedBorrow === undefined ? {} : { returnedBorrow }),
     }),
     diagnostics: Object.freeze([...context.diagnostics]),
