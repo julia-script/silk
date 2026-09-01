@@ -299,7 +299,13 @@ effect fn rejectPrepared(
   return ()
 }`
 
-const allocationOrdinalSource = (quota: number): string => {
+/**
+ * One program sweeps every allocation ordinal itself: `scenario` takes the quota at runtime and
+ * `sweep` drives quotas 0..19, marking each iteration with `sweepIterationStarted` so the test
+ * can segment a single evaluator trace per quota. Compiling once replaced twenty full pipelines
+ * whose sources differed only in one integer literal.
+ */
+const allocationOrdinalSweepSource: string = (() => {
   const base = forkChild.toString()
   return base
     .replace(
@@ -402,7 +408,7 @@ const allocationOrdinalSource = (quota: number): string => {
       `effect fn scenario() -> i32 ! Allocator.OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let audit =`,
-      `effect fn scenario() -> i32 ! Allocator.OutOfMemoryError {
+      `effect fn scenario(quota: i32) -> i32 ! Allocator.OutOfMemoryError {
   let mut bootstrap = Allocator.systemAllocatorProvider()
   let audit =`,
     )
@@ -410,7 +416,7 @@ const allocationOrdinalSource = (quota: number): string => {
       `  let audit = run Shared.make<Audit>(Audit {
     rootPreparations: 0,`,
       `  let audit = run Shared.make<Audit>(Audit {
-    remaining: ${quota},
+    remaining: quota,
     requests: 0,
     refusals: 0,
     rootPreparations: 0,`,
@@ -508,7 +514,33 @@ const allocationOrdinalSource = (quota: number): string => {
   return 7
 }`,
     )
+    .replace(
+      `pub fn main() -> i32 {
+  return run Effect.catchAll(scenario(), recover)
+}`,
+      `fn sweepIterationStarted() -> () { return () }
+
+fn expectedOutcome(quota: i32) -> i32 {
+  if quota < 10 { return 7 }
+  return 42
 }
+
+effect fn sweep() -> i32 {
+  let mut quota = 0
+  while quota < 20 {
+    sweepIterationStarted()
+    let outcome = run Effect.catchAll(scenario(quota), recover)
+    if outcome != expectedOutcome(quota) { return 0 - (quota + 1) }
+    quota = quota + 1
+  }
+  return 42
+}
+
+pub fn main() -> i32 {
+  return run sweep()
+}`,
+    )
+})()
 
 it.effect('dispatches Scheduler.prepare to a renamed ordinary-source provider', () =>
   Effect.gen(function* () {
@@ -1417,33 +1449,44 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const terminalQuota = 19
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'scheduler-fiber/allocation-ordinals',
+        ascii(allocationOrdinalSweepSource),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        [],
+        describe(Analysis.diagnostics(snapshot)),
+      )
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+
+      // Twenty ordinals share one evaluation; the raised step ceiling is the sum of what the
+      // per-quota runs used separately, not a change in what any single run may cost.
+      const evaluated = Analysis.evaluate(snapshot, { maxSteps: 50_000_000 })
+      assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result.value, 42n)
+
+      const markers = evaluated.trace.flatMap((event, index) =>
+        event._tag === 'Call' && event.target.name === 'sweepIterationStarted' ? [index] : [],
+      )
+      assert.lengthOf(markers, terminalQuota + 1)
+
       for (let quota = 0; quota <= terminalQuota; quota++) {
         const label = `q${quota}`
-        const source = allocationOrdinalSource(quota)
-        const snapshot = yield* Analysis.ofSourceRealized(
-          `scheduler-fiber/allocation-ordinals/${label}`,
-          ascii(source),
-          'wasm32-unknown-unknown',
+        const from = markers[quota] ?? 0
+        const segment = evaluated.trace.slice(
+          from + 1,
+          markers[quota + 1] ?? evaluated.trace.length,
         )
-        assert.deepEqual(
-          Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-          [],
-          `${label}: ${describe(Analysis.diagnostics(snapshot))}`,
-        )
-
-        const evaluated = Analysis.evaluate(snapshot)
-        assert.strictEqual(evaluated._tag, 'Completed', `${label}: ${describe(evaluated)}`)
-        if (evaluated._tag !== 'Completed') continue
 
         const publicationReached = 17 <= quota
         const rejectedLifetimeReached = 15 <= quota
         const childPreparationReached = 10 <= quota
-        const expected = childPreparationReached ? 42 : 7
-        assert.strictEqual(evaluated.result.value, BigInt(expected), label)
 
         const callCount = (name: string): number =>
-          evaluated.trace.filter((event) => event._tag === 'Call' && event.target.name === name)
-            .length
+          segment.filter((event) => event._tag === 'Call' && event.target.name === name).length
         assert.strictEqual(callCount('taskIdentityRefusalObserved'), 0, label)
         assert.strictEqual(callCount('wrongRejectionFailure'), 0, label)
         assert.strictEqual(callCount('rejectedBodyActivated'), 0, label)
@@ -1466,30 +1509,22 @@ it.effect(
           label,
         )
         assert.strictEqual(callCount('rejectionObserved'), childPreparationReached ? 1 : 0, label)
+        const callIndex = (name: string): number =>
+          segment.findIndex((event) => event._tag === 'Call' && event.target.name === name)
         if (rejectedLifetimeReached) {
-          const releasedTask = evaluated.trace.findIndex(
-            (event) => event._tag === 'Call' && event.target.name === 'rejectedTaskReleased',
-          )
-          const observed = evaluated.trace.findIndex(
-            (event) => event._tag === 'Call' && event.target.name === 'rejectionObserved',
-          )
-          assert.isBelow(releasedTask, observed, label)
+          assert.isBelow(callIndex('rejectedTaskReleased'), callIndex('rejectionObserved'), label)
         }
         if (publicationReached) {
-          const callIndex = (name: string): number =>
-            evaluated.trace.findIndex(
-              (event) => event._tag === 'Call' && event.target.name === name,
-            )
           const releasedTask = callIndex('rejectedTaskReleased')
           if (quota < terminalQuota)
             assert.isBelow(releasedTask, callIndex('publicationInsertionRefused'), label)
           else assert.isBelow(callIndex('publicationInsertionAccepted'), releasedTask, label)
         }
 
-        const acquired = evaluated.trace.flatMap((event) =>
+        const acquired = segment.flatMap((event) =>
           event._tag === 'AllocationAcquire' ? [event.ticket] : [],
         )
-        const released = evaluated.trace.flatMap((event) =>
+        const released = segment.flatMap((event) =>
           event._tag === 'AllocationRelease' ? [event.ticket] : [],
         )
         assert.strictEqual(acquired.length, quota < terminalQuota ? quota + 1 : 20, label)
@@ -1498,14 +1533,11 @@ it.effect(
           acquired.toSorted((left, right) => left - right),
           `${label}: ${describe({ acquired, released })}`,
         )
-
-        if (quota === terminalQuota)
-          assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-
-        const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-        const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-        assert.strictEqual((instance.exports.silk_main as () => number)(), expected, label)
       }
+
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
     }),
   600_000,
 )
