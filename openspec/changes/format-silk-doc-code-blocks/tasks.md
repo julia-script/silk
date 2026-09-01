@@ -30,7 +30,7 @@
 - [ ] 5.2 Extend release-candidate validation for the compiler `./SyntaxFormatter` replacement and formatter package pack/offline-install/API-parity contents (`dist`, README, LICENSE, and no source/test files), add precise release metadata for compiler, documentation, formatter, CLI, and LSP, and verify the focused release-candidate test recognizes every intended export and archive dependency.
 - [ ] 5.3 Run the public formatter over shipped Silk sources through a committed package script or other durable checked entry point, inspect and retain only canonical embedded-source changes, regenerate `Stdlib.generated.ts` and `apps/docs/content/language/stdlib` through the existing generators when source documentation changes, and verify shipped source formatting plus generated-artifact checks are clean afterward.
 - [ ] 5.4 Run `pnpm typecheck` and resolve every strict TypeScript or package-boundary failure introduced by the change.
-- [ ] 5.5 Run `pnpm exec biome check .` and resolve every formatting or lint failure introduced by the change.
+- [ ] 5.5 Run `pnpm format:check` and `pnpm lint`, and resolve every formatting or lint failure introduced by the change.
 - [ ] 5.6 Run `pnpm test` and resolve every unit, integration, documentation, CLI, LSP, and release-validation regression introduced by the change.
 - [ ] 5.7 Run `pnpm check` and verify the repository's complete required handoff gate passes.
 - [ ] 5.8 Run `pnpm release:candidate` and verify the new package, breaking exports, release metadata, generated source and documentation inventories, and publish contents pass release validation.

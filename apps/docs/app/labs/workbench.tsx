@@ -680,7 +680,7 @@ function WorkbenchInner() {
               placeholder="workspace name…"
               aria-label="Name for the saved workspace"
               // The input replaces the `+` the user just clicked, so focus belongs here.
-              // biome-ignore lint/a11y/noAutofocus: appears on explicit click, in place of the trigger
+              // oxlint-disable-next-line jsx-a11y/no-autofocus -- appears on explicit click, in place of the trigger
               autoFocus
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {

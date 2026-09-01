@@ -21,4 +21,4 @@
 
 ## 4. Verification
 
-- [ ] 4.1 Run the focused seeded-Random, user/stdlib catalog, custom-runner, Reporter, filter, status, path, trap, and privilege suites, then `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and `pnpm release:candidate`; record every exact result and identify any pre-existing failure before declaring SLP-0004 implementation-ready.
+- [ ] 4.1 Run the focused seeded-Random, user/stdlib catalog, custom-runner, Reporter, filter, status, path, trap, and privilege suites, then `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, `pnpm test`, `pnpm check`, and `pnpm release:candidate`; record every exact result and identify any pre-existing failure before declaring SLP-0004 implementation-ready.

@@ -45,12 +45,12 @@ function Highlighted({
     <>
       {[...text].map((character, index) =>
         marked.has(index) ? (
-          // biome-ignore lint/suspicious/noArrayIndexKey: index *is* the identity of a character
+          // oxlint-disable-next-line react/no-array-index-key -- index *is* the identity of a character
           <mark key={index} className={styles.hit}>
             {character}
           </mark>
         ) : (
-          // biome-ignore lint/suspicious/noArrayIndexKey: same
+          // oxlint-disable-next-line react/no-array-index-key -- same
           <span key={index}>{character}</span>
         ),
       )}
@@ -116,7 +116,7 @@ export function PresetPalette({
   }
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: backdrop click-to-dismiss; the dialog
+    // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- backdrop click-to-dismiss; the dialog
     // itself is keyboard-operable and Escape closes it.
     <div className={styles.backdrop} onClick={onClose}>
       <div

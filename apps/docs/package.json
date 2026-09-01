@@ -14,7 +14,7 @@
   "dependencies": {
     "@ai-sdk/react": "^4.0.86",
     "@base-ui/react": "^1.7.0",
-    "@effect/atom-react": "4.0.0-beta.102",
+    "@effect/atom-react": "4.0.0-rc.112",
     "@fuma-translate/react": "^1.0.2",
     "@fumadocs/base-ui": "^16.15.4",
     "@openrouter/ai-sdk-provider": "^3.0.0",
@@ -58,6 +58,6 @@
     "@types/react-dom": "^19.2.3",
     "postcss": "^8.5.24",
     "tailwindcss": "^4.3.3",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   }
 }

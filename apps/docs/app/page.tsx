@@ -35,7 +35,7 @@ export default function Home() {
         <Link href="/docs/language">docs</Link>
       </header>
       {/* Repo-authored content, not user-supplied. */}
-      {/* biome-ignore lint/security/noDangerouslySetInnerHtml: repo-authored page content */}
+      {/* oxlint-disable-next-line react/no-danger -- repo-authored page content */}
       <article dangerouslySetInnerHTML={{ __html: html }} />
       <RegisterSnippets />
     </div>

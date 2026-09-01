@@ -43,7 +43,7 @@ Otherwise set it to In Progress and read it back before editing.
 ## Verification and review
 
 Use the cheapest tests that falsify each claim, while following the repository's required order:
-`pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, then `pnpm check`. Run
+`pnpm typecheck`, `pnpm format:check`, `pnpm lint`, `pnpm test`, then `pnpm check`. Run
 `pnpm release:candidate` when package contents or exports change. Do not say work is complete when a
 required check was skipped or failed; name the exact gap and whether it predates the change.
 

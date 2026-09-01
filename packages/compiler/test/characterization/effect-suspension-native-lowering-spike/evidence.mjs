@@ -797,7 +797,7 @@ for (const variant of variants) {
 }
 
 writeFileSync(jsonPath, `${JSON.stringify(evidence, null, 2)}\n`)
-const formatJson = spawnSync('pnpm', ['exec', 'biome', 'format', '--write', jsonPath], {
+const formatJson = spawnSync('pnpm', ['exec', 'oxfmt', '--write', jsonPath], {
   cwd: root,
   encoding: 'utf8',
   env: process.env,

@@ -37,7 +37,8 @@ jobs:
           key: silk-native-${{ runner.os }}-${{ github.sha }}
           restore-keys: silk-native-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec biome check .
+      - run: pnpm format:check
+      - run: pnpm lint
       - run: node scripts/turbo.mjs run build
       - run: node scripts/turbo.mjs run typecheck
       - run: node scripts/turbo.mjs run test --filter='!@silklang/compiler'

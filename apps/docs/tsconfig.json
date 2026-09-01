@@ -17,7 +17,7 @@
     "paths": {
       "@/*": ["./*"]
     },
-    "plugins": [{ "name": "next" }]
+    "plugins": [{ "name": "next" }, { "name": "@effect/language-service", "diagnostics": false }]
   },
   "include": [
     "next-env.d.ts",

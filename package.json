@@ -3,17 +3,17 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@11.10.0",
-  "engines": {
-    "node": ">=22.13.0"
-  },
   "scripts": {
     "build": "node scripts/turbo.mjs run build",
     "changeset": "changeset",
-    "check": "biome check . && node scripts/turbo.mjs run build && node scripts/turbo.mjs run typecheck test && pnpm test:scripts",
-    "check:write": "biome check --write .",
+    "check": "oxfmt --check . && oxlint . && node scripts/turbo.mjs run build && node scripts/turbo.mjs run typecheck test && pnpm test:scripts",
+    "check:write": "oxfmt --write . && oxlint --fix .",
     "dev": "node scripts/turbo.mjs run dev --concurrency=15",
-    "format": "biome format --write .",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
+    "prepare": "effect-tsgo patch --oxlint",
     "prototype:bootstrap-syntax": "node .scratch/bootstrap-language/prototype-syntax/tui.mjs",
     "release:candidate": "pnpm build && vitest run release-candidate/validate.test.ts --exclude '.claude/**'",
     "release:publish": "changeset publish",
@@ -24,10 +24,17 @@
     "typecheck": "node scripts/turbo.mjs run typecheck"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.4",
     "@changesets/cli": "^2.31.1",
+    "@effect/tsgo": "0.39.0",
+    "oxfmt": "0.66.0",
+    "oxlint": "1.80.0",
+    "oxlint-tsgolint": "7.0.2001",
     "turbo": "2.10.5",
     "typescript": "7.0.2",
     "vitest": "4.1.10"
-  }
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "packageManager": "pnpm@11.10.0"
 }

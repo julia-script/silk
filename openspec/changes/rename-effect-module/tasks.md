@@ -20,6 +20,6 @@
 ## 4. Validation and Reconciliation
 
 - [x] 4.1 Run focused parser, module, name-resolution, completion, auto-import, and standard-library tests and verify every new scenario passes
-- [x] 4.2 Run `pnpm typecheck`, `pnpm exec biome check .`, and `pnpm test`; record and resolve every change-related failure
+- [x] 4.2 Run `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, and `pnpm test`; record and resolve every change-related failure
 - [x] 4.3 Run `pnpm check` and `pnpm release:candidate`; verify the repository and package contents pass their required handoff gates
 - [x] 4.4 Audit implementation, OpenSpec artifacts, and generated outputs against the canonical language rules; resolve any divergence

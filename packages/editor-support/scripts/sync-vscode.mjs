@@ -15,7 +15,7 @@ const configurationPath = resolve(extensionRoot, 'language-configuration.json')
 mkdirSync(dirname(grammarPath), { recursive: true })
 writeFileSync(grammarPath, `${JSON.stringify(grammar, null, 2)}\n`)
 writeFileSync(configurationPath, `${JSON.stringify(languageConfiguration, null, 2)}\n`)
-execFileSync('pnpm', ['exec', 'biome', 'format', '--write', grammarPath, configurationPath], {
+execFileSync('pnpm', ['exec', 'oxfmt', '--write', grammarPath, configurationPath], {
   stdio: 'inherit',
 })
 console.log(`wrote ${grammarPath}\nwrote ${configurationPath}`)

@@ -10,6 +10,9 @@ const editorIsolationHeaders = [
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
+  experimental: {
+    useTypeScriptCli: true,
+  },
   // ponytail: content lives in packages/*/docs, outside this app's root.
   outputFileTracingRoot: new URL('../../', import.meta.url).pathname,
   async headers() {
