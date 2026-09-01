@@ -3118,3 +3118,100 @@ fn after() -> i32 { return 1 }`
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
+
+it('distinguishes tuple and contextual record source forms', () => {
+  const source = `tuple Point(i32, i32)
+fn use(point: Point) -> i32 {
+  let positional = (1, 2)
+  let singleton = (1,)
+  let record = .{ name: "Silk", count: 2 }
+  return point.0
+}`
+  const result = parseText('memory/aggregate-syntax', source)
+  const kinds = descendants(result.root).flatMap((element) =>
+    SyntaxTree.isNode(element) ? [element.kind] : [],
+  )
+
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.include(kinds, 'TupleDeclaration')
+  assert.strictEqual(kinds.filter((kind) => kind === 'TupleLiteralExpression').length, 2)
+  assert.include(kinds, 'ContextualRecordLiteralExpression')
+  assert.include(kinds, 'OrdinalProjectionExpression')
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('bounds damaged contextual records before following declarations', () => {
+  const source = `fn broken() -> i32 {
+  let value = .{ first 1, second: 2 }
+  return 0
+}
+fn after() -> i32 { return 1 }`
+  const result = parseText('memory/damaged-contextual-record', source)
+  const declarations = directFunctionDeclarations(result.root)
+  const records = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'ContextualRecordLiteralExpression',
+  )
+
+  assert.strictEqual(declarations.length, 2)
+  assert.strictEqual(records.length, 1)
+  assert.isTrue(missingLeaves(records.at(0) ?? result.root).length > 0)
+  assert.deepEqual(missingLeaves(declarations.at(1) ?? result.root), [])
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('bounds damaged tuple and record forms before following syntax', () => {
+  const fixtures = [
+    `tuple (i32, i32)
+fn after() -> i32 { return 1 }`,
+    `tuple Broken(i32, , bool)
+fn after() -> i32 { return 1 }`,
+    `tuple Broken(i32, bool
+fn after() -> i32 { return 1 }`,
+    `fn broken() -> i32 { return missing(
+tuple Kept(i32)
+fn after() -> i32 { return 1 }`,
+    `fn broken() -> i32 {
+  let value = (1, , 2)
+  return 0
+}
+fn after() -> i32 { return 1 }`,
+    `fn broken() -> i32 {
+  let value = (name: 1, age: 2)
+  return 0
+}
+fn after() -> i32 { return 1 }`,
+    `fn broken() -> i32 {
+  let value = .{ : 1, age: 2 }
+  return 0
+}
+fn after() -> i32 { return 1 }`,
+    `fn broken() -> i32 {
+  let value = .{ name:, age: 2 }
+  return 0
+}
+fn after() -> i32 { return 1 }`,
+  ]
+
+  for (const [ordinal, source] of fixtures.entries()) {
+    const result = parseText(`memory/damaged-aggregate-${ordinal}`, source)
+    const declarations = directFunctionDeclarations(result.root)
+    const following = declarations.at(-1)
+    assert.isTrue(result.parserDiagnostics.length > 0, `fixture ${ordinal}`)
+    assert.strictEqual(
+      following === undefined ? undefined : missingLeaves(following).length,
+      0,
+      `fixture ${ordinal}`,
+    )
+    if (source.includes('tuple Kept')) {
+      const tuples = result.root.children.filter(
+        (element): element is SyntaxTree.Node =>
+          SyntaxTree.isNode(element) && element.kind === 'TupleDeclaration',
+      )
+      assert.strictEqual(tuples.length, 1, `fixture ${ordinal}`)
+      assert.deepEqual(missingLeaves(tuples.at(0) ?? result.root), [], `fixture ${ordinal}`)
+    }
+    assertOriginalTokenTraversal(result)
+    assert.deepEqual(reconstructedBytes(result), ascii(source))
+  }
+})

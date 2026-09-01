@@ -10,6 +10,8 @@ pub struct Pair {
   choice: Alpha | (Beta | Alpha)
 }
 
+pub tuple Point(i32, i32)
+
 pub struct Span {
   start: i32
   end: i32
@@ -41,6 +43,10 @@ pub role Clock
 
 fn helper(value: i32, other: i32) -> i32 {
   let mut moved = move value
+  let singleton = (1,)
+  let record = .{value: 1}
+  let point = Point(1, 2)
+  let first = point.0
   while moved < other {
     if false {
       break

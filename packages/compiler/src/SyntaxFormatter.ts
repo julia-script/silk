@@ -229,6 +229,7 @@ const printDelimited = (
   commas: ReadonlyArray<Token.Token>,
   close: Token.Token,
   prefix: FormatDocument.Document,
+  forceTrailingComma = false,
 ): FormatDocument.Document => {
   const openDocument = printToken(context, open, prefix)
   if (items.length === 0) return FormatDocument.concat(openDocument, printToken(context, close))
@@ -251,12 +252,14 @@ const printDelimited = (
     )
   })
   const originalTrailingComma = commas.at(items.length - 1)
+  let trailing: FormatDocument.Document
+  if (!forceTrailingComma) trailing = trailingComma(context, originalTrailingComma)
+  else if (originalTrailingComma === undefined) trailing = FormatDocument.text(',')
+  else trailing = printToken(context, originalTrailingComma)
   return FormatDocument.group(
     FormatDocument.concat(
       openDocument,
-      FormatDocument.indent(
-        FormatDocument.concat(...itemDocuments, trailingComma(context, originalTrailingComma)),
-      ),
+      FormatDocument.indent(FormatDocument.concat(...itemDocuments, trailing)),
       printToken(context, close, breakLine),
     ),
   )
@@ -343,6 +346,36 @@ const printStructDeclaration = (
       ),
     ),
     printToken(context, close, FormatDocument.hardLine),
+  )
+}
+
+const printTupleDeclaration = (
+  context: Context,
+  node: SyntaxTree.Node,
+  prefix: FormatDocument.Document,
+): FormatDocument.Document => {
+  const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
+  const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
+  const elements = directNodes(node).filter((child) => child.kind !== 'TypeParameterList')
+  return FormatDocument.concat(
+    ...(publicKeyword === undefined
+      ? []
+      : [printToken(context, publicKeyword, prefix), FormatDocument.text(' ')]),
+    printToken(
+      context,
+      tokenOf(node, 'TupleKeyword'),
+      publicKeyword === undefined ? prefix : FormatDocument.empty,
+    ),
+    printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+    ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
+    printDelimited(
+      context,
+      tokenOf(node, 'LeftParenthesis'),
+      elements,
+      commaTokens(node),
+      tokenOf(node, 'RightParenthesis'),
+      FormatDocument.empty,
+    ),
   )
 }
 
@@ -871,6 +904,8 @@ const printNode = (
     }
     case 'StructDeclaration':
       return printStructDeclaration(context, node, prefix)
+    case 'TupleDeclaration':
+      return printTupleDeclaration(context, node, prefix)
     case 'EnumDeclaration':
       return printEnumDeclaration(context, node, prefix)
     case 'UnionDeclaration':
@@ -1265,16 +1300,24 @@ const printNode = (
       )
     case 'BindingStatement': {
       const mutableKeyword = directTokens(node).find((token) => token.kind === 'MutKeyword')
+      const nodes = directNodes(node)
+      const annotated = directTokens(node).some((token) => token.kind === 'Colon')
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'LetKeyword'), prefix, preserveBlank),
         ...(mutableKeyword === undefined
           ? []
           : [printToken(context, mutableKeyword, FormatDocument.text(' '))]),
         printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+        ...(annotated
+          ? [
+              printToken(context, tokenOf(node, 'Colon')),
+              printNode(context, nodes.at(0) ?? nodeOf(node, 'TypePath'), FormatDocument.text(' ')),
+            ]
+          : []),
         printToken(context, tokenOf(node, 'Equals'), FormatDocument.text(' ')),
         printNode(
           context,
-          directNodes(node)[0] ?? nodeOf(node, 'IdentifierExpression'),
+          nodes.at(-1) ?? nodeOf(node, 'IdentifierExpression'),
           FormatDocument.text(' '),
         ),
       )
@@ -1544,6 +1587,28 @@ const printNode = (
         ),
       )
     }
+    case 'ContextualRecordLiteralExpression':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Dot'), prefix, preserveBlank),
+        printDelimited(
+          context,
+          tokenOf(node, 'LeftBrace'),
+          directNodes(node),
+          commaTokens(node),
+          tokenOf(node, 'RightBrace'),
+          FormatDocument.empty,
+        ),
+      )
+    case 'TupleLiteralExpression':
+      return printDelimited(
+        context,
+        tokenOf(node, 'LeftParenthesis'),
+        directNodes(node),
+        commaTokens(node),
+        tokenOf(node, 'RightParenthesis'),
+        prefix,
+        directNodes(node).length === 1,
+      )
     case 'ArrayLiteralExpression':
       return printDelimited(
         context,
@@ -1573,6 +1638,17 @@ const printNode = (
         ),
         printToken(context, tokenOf(node, 'Dot')),
         printToken(context, tokenOf(node, 'Identifier')),
+      )
+    case 'OrdinalProjectionExpression':
+      return FormatDocument.concat(
+        printNode(
+          context,
+          directNodes(node)[0] ?? nodeOf(node, 'IdentifierExpression'),
+          prefix,
+          preserveBlank,
+        ),
+        printToken(context, tokenOf(node, 'Dot')),
+        printToken(context, tokenOf(node, 'DecimalInteger')),
       )
     case 'IndexProjectionExpression':
       return FormatDocument.concat(

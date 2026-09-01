@@ -289,6 +289,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     ])
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
+      './AggregateIdentity',
       './Analysis',
       './AutoImport',
       './Backend',
@@ -775,6 +776,7 @@ console.log(
     expect(inspectCompiler()).toBe(inspected)
     const api = JSON.parse(inspected)
     expect(api.root).toEqual([
+      'AggregateIdentity',
       'Analysis',
       'AutoImport',
       'Backend',

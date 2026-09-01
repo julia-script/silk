@@ -605,6 +605,107 @@ memory cannot request Copy merely because its physical representation contains a
 
 **Evidence:** [owned value classification](ownership-and-borrowing.md#own-001--every-value-type-is-either-copy-or-affine).
 
+## Tuples and contextual aggregate literals
+
+### TUPLE-001 — Named tuples are nominal positional structs
+
+**Status:** Confirmed
+
+`tuple Name(T0, T1)` declares a nominal aggregate whose members are positions rather than field
+labels. Construction uses `Name(v0, v1)`, and projection uses `.0`, `.1`, and so on. Generic tuple
+parameters follow the same substitution and inference rules as generic structs.
+
+```silk
+tuple Point(i32, i32)
+tuple Box<T>(T)
+
+fn origin() -> Point {
+  return Point(0, 0)
+}
+
+fn first(box: Box<i32>) -> i32 {
+  return box.0
+}
+```
+
+Tuple positions do not create `_0`-style source fields. Consequently `Point {_0: 0, _1: 0}` is
+invalid, labeled tuples are not a separate language form, and positional projection cannot select
+a same-spelled record field.
+
+### TUPLE-002 — Parenthesized commas distinguish tuples from grouping and unit
+
+**Status:** Confirmed
+
+`(first, second)` is a tuple literal, `(only,)` is a one-element tuple literal, `(value)` is a
+grouped expression, and `()` is unit. When an independently known expected type is a named tuple,
+the literal constructs that type. Otherwise the literal occurrence creates one anonymous nominal
+positional aggregate.
+
+```silk
+tuple Point(i32, i32)
+
+fn make() -> Point {
+  let point: Point = (10, 20)
+  return point
+}
+
+fn age() -> i32 {
+  let args = ("Julia", 32)
+  return args.1
+}
+```
+
+Elements evaluate from left to right. The runtime representation and ownership behavior are the
+ordinary nominal-struct rules; there is no tuple-specific runtime category.
+
+### RECORD-001 — `.{ ... }` uses only immediate expected struct context
+
+**Status:** Confirmed
+
+A targetless record literal constructs a named struct when its position already has that exact
+expected struct type. Declared bindings, declared returns, known call parameters, aggregate fields,
+and assignment destinations may provide that context. Field authority, visibility, completeness,
+generic substitution, source evaluation order, and canonical field order remain the rules of
+STRUCT-002.
+
+```silk
+struct Person {
+  name: string
+  age: i32
+}
+
+fn age(person: Person) -> i32 {
+  return person.age
+}
+
+fn juliaAge() -> i32 {
+  return age(.{name: "Julia", age: 32})
+}
+```
+
+The compiler does not search visible declarations by field shape, and a later use never
+retroactively supplies context. If no named struct expectation is independently known, the literal
+occurrence creates one anonymous nominal record instead.
+
+### RECORD-002 — Anonymous aggregates are occurrence-nominal and affine
+
+**Status:** Confirmed
+
+Each uncontextualized tuple or record literal is finalized once with an identity derived from its
+module, source occurrence, and aggregate kind. That exact type may flow through a local binding,
+borrow, projection, or generic argument, but it has no source name and cannot be imported or
+exported. Separate same-shaped occurrences are incompatible, do not compare structurally, and do
+not acquire a common match-result type. An explicit named aggregate context may instead make every
+branch construct the same declared type.
+
+Anonymous aggregates follow ordinary struct ownership. Even when every member is Copy, an
+anonymous aggregate remains affine because no Copy conformance was declared for its hidden nominal
+type. Whole-value moves transfer its one cleanup obligation; borrows and partial-move rejection are
+the ordinary struct rules.
+
+**Evidence:** [tuple and contextual record specification](../../../../openspec/changes/add-tuples-and-contextual-record-literals/specs/tuple-and-contextual-record-literals/spec.md),
+[aggregate value tests](../../../../packages/compiler/test/StructValues.test.ts).
+
 ## Nominal union values
 
 ### NUNION-001 — A `union` declaration creates one nominal tagged sum

@@ -42,6 +42,7 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
   InvalidStaticLiteral: { name: 'invalid', tags: [tags.invalid] },
   PubKeyword: keyword,
   StructKeyword: keyword,
+  TupleKeyword: keyword,
   EnumKeyword: keyword,
   UnionKeyword: keyword,
   ServiceKeyword: keyword,

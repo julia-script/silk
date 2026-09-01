@@ -34,6 +34,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./AggregateIdentity": {
+      "types": "./dist/AggregateIdentity.d.ts",
+      "import": "./dist/AggregateIdentity.js"
+    },
     "./Analysis": {
       "types": "./dist/Analysis.d.ts",
       "import": "./dist/Analysis.js"

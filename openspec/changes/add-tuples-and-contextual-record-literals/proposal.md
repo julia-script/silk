@@ -49,6 +49,9 @@ future static reflection and formatting work a stable aggregate model to build o
   keys and runtime aggregate reachability.
 - `bootstrap-ownership`: Applies ordinary whole-struct moves, Copy evidence, and cleanup to every
   named or anonymous aggregate introduced by this syntax.
+- `bootstrap-exhaustive-matching`: Excludes distinct occurrence-generated anonymous aggregates
+  from the ordinary nominal match-result union rule unless an enclosing named context resolves
+  every arm to that same nominal type.
 
 ## Impact
 

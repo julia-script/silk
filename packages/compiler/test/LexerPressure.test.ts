@@ -32,6 +32,7 @@ const tokenKinds = [
   'ByteStringLiteral',
   'PubKeyword',
   'StructKeyword',
+  'TupleKeyword',
   'EffectKeyword',
   'FnKeyword',
   'RunKeyword',
@@ -116,6 +117,7 @@ const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
   ByteStringLiteral: 8,
   PubKeyword: 9,
   StructKeyword: 10,
+  TupleKeyword: 81,
   EffectKeyword: 11,
   FnKeyword: 12,
   RunKeyword: 13,
@@ -318,7 +320,7 @@ const corpus = [
   Object.freeze({
     id: 'keywords',
     input:
-      'pub struct enum union service interface role effect fn run fail drop unsafe impl for return import as let mut once move match if else while break continue true false const name _x2',
+      'pub struct tuple enum union service interface role effect fn run fail drop unsafe impl for return import as let mut once move match if else while break continue true false const name _x2',
   }),
   Object.freeze({ id: 'numbers', input: '0 42 1.25 2e3 3E+4 4e- 5..6' }),
   Object.freeze({ id: 'durations', input: '1h30m30s 1h60m' }),

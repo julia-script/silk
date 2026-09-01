@@ -20,7 +20,8 @@ import {
   parseProjectionChain,
 } from './Expression.js'
 import * as ExpressionNesting from './ExpressionNesting.js'
-import { expressionFollowing, expressionStarts } from './Grammar.js'
+import { expressionFollowing, expressionStarts, typeStarts } from './Grammar.js'
+import { parseType } from './Type.js'
 
 export const parseReturnStatement = (initial: State): NodeResult => {
   const keyword = expect(initial, 'ReturnKeyword', [...expressionStarts, 'RightBrace'])
@@ -103,12 +104,21 @@ export const parseBindingStatement = (initial: State): NodeResult => {
       ? expect(keyword.state, 'MutKeyword', ['Identifier', 'Equals', 'RightBrace'])
       : Object.freeze({ state: keyword.state, elements: Object.freeze([]) })
   const name = expect(mut.state, 'Identifier', [
+    'Colon',
     'Equals',
     'LetKeyword',
     'ReturnKeyword',
     'RightBrace',
   ])
-  const equals = expect(name.state, 'Equals', [
+  const annotation =
+    nextSignificantKind(name.state) === 'Colon'
+      ? (() => {
+          const colon = expect(name.state, 'Colon', [...typeStarts, 'Equals'])
+          const type = parseType(colon.state, ['Equals'])
+          return Object.freeze({ state: type.state, elements: [...colon.elements, type.node] })
+        })()
+      : Object.freeze({ state: name.state, elements: Object.freeze<SyntaxTree.Element[]>([]) })
+  const equals = expect(annotation.state, 'Equals', [
     ...expressionStarts,
     'LetKeyword',
     'ReturnKeyword',
@@ -121,6 +131,7 @@ export const parseBindingStatement = (initial: State): NodeResult => {
       ...keyword.elements,
       ...mut.elements,
       ...name.elements,
+      ...annotation.elements,
       ...equals.elements,
       expression.node,
     ]),
@@ -131,6 +142,7 @@ export const startsPatternBindingStatement = (initial: State): boolean => {
   if (peek(initial, 1) === 'MutKeyword') return false
   if (peek(initial, 1) === 'Equals') return false
   if (peek(initial, 1) !== 'Identifier') return true
+  if (peek(initial, 2) === 'Colon') return false
   const keyword = expect(initial, 'LetKeyword', ['Identifier', 'Equals'])
   return isUniversalPatternStart(keyword.state) || peek(initial, 2) !== 'Equals'
 }
@@ -298,6 +310,7 @@ export const endsBlock = (state: State): boolean => {
     kind === 'PubKeyword' ||
     kind === 'ConstKeyword' ||
     kind === 'StructKeyword' ||
+    kind === 'TupleKeyword' ||
     kind === 'EnumKeyword' ||
     kind === 'UnionKeyword' ||
     kind === 'FnKeyword' ||
@@ -441,6 +454,7 @@ export function parseBlock(
     'ElseKeyword',
     'PubKeyword',
     'StructKeyword',
+    'TupleKeyword',
     'EnumKeyword',
     'UnionKeyword',
     'FnKeyword',

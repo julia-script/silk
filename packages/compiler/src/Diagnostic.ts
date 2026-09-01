@@ -351,6 +351,18 @@ export const invalidNominalUnionConstructionCode = 'SEM0169' as const
 /** Stable code for a duration literal whose exact nanosecond total exceeds `u64`. */
 export const durationOutOfRangeCode = 'SEM0170' as const
 
+/** Stable code for positional construction with the wrong number of tuple elements. */
+export const tupleArityMismatchCode = 'SEM0171' as const
+
+/** Stable code for using tuple syntax with a named struct or record syntax with a tuple. */
+export const contextualAggregateKindMismatchCode = 'SEM0172' as const
+
+/** Stable code for attempting to join distinct anonymous aggregate occurrences. */
+export const anonymousAggregateJoinMismatchCode = 'SEM0173' as const
+
+/** Stable code for attempting named-field construction of a positional aggregate. */
+export const positionalFieldConstructionCode = 'SEM0174' as const
+
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
 export const partialMoveCode = 'OWN0002' as const
@@ -562,6 +574,10 @@ export type Code =
   | typeof expectedNominalUnionCode
   | typeof invalidNominalUnionConstructionCode
   | typeof durationOutOfRangeCode
+  | typeof tupleArityMismatchCode
+  | typeof contextualAggregateKindMismatchCode
+  | typeof anonymousAggregateJoinMismatchCode
+  | typeof positionalFieldConstructionCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -653,6 +669,22 @@ export type Reason =
       readonly spelling: string
       readonly maximum: '18446744073709551615'
     }
+  | {
+      readonly _tag: 'TupleArityMismatch'
+      readonly type: string
+      readonly expected: number
+      readonly actual: number
+    }
+  | {
+      readonly _tag: 'ContextualAggregateKindMismatch'
+      readonly expected: 'record' | 'tuple'
+      readonly actual: string
+    }
+  | {
+      readonly _tag: 'AnonymousAggregateJoinMismatch'
+      readonly types: ReadonlyArray<string>
+    }
+  | { readonly _tag: 'PositionalFieldConstruction'; readonly type: string }
   | { readonly _tag: 'UnknownModule'; readonly module: string }
   | { readonly _tag: 'SelfImport'; readonly module: string }
   | { readonly _tag: 'ReservedModuleIdentity'; readonly module: string }
@@ -2426,6 +2458,65 @@ export const durationOutOfRange = (spelling: string, span: SourceSpan.SourceSpan
       spelling,
       maximum: '18446744073709551615',
     }),
+    span,
+  })
+
+export const tupleArityMismatch = (
+  type: string,
+  expected: number,
+  actual: number,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: tupleArityMismatchCode,
+    severity: 'error',
+    message: `${type} expects ${expected} tuple elements but received ${actual}`,
+    reason: Object.freeze({ _tag: 'TupleArityMismatch', type, expected, actual }),
+    span,
+  })
+
+export const contextualAggregateKindMismatch = (
+  expected: 'record' | 'tuple',
+  actual: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: contextualAggregateKindMismatchCode,
+    severity: 'error',
+    message: `A contextual ${expected} literal cannot construct ${actual}`,
+    reason: Object.freeze({ _tag: 'ContextualAggregateKindMismatch', expected, actual }),
+    span,
+  })
+
+export const anonymousAggregateJoinMismatch = (
+  types: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: anonymousAggregateJoinMismatchCode,
+    severity: 'error',
+    message: 'Separate anonymous aggregate occurrences do not acquire a common type',
+    reason: Object.freeze({ _tag: 'AnonymousAggregateJoinMismatch', types }),
+    span,
+  })
+
+export const positionalFieldConstruction = (
+  type: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: positionalFieldConstructionCode,
+    severity: 'error',
+    message: `${type} is positional and cannot be constructed with named fields`,
+    reason: Object.freeze({ _tag: 'PositionalFieldConstruction', type }),
     span,
   })
 
