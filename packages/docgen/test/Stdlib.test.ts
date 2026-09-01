@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as CompilerStdlib from '@silklang/compiler/Stdlib'
 import * as Effect from 'effect/Effect'
 import * as Doctest from '../src/Doctest.js'
+import * as Example from '../src/Example.js'
 import * as Json from '../src/Json.js'
 import * as Report from '../src/Report.js'
 import * as Stdlib from '../src/Stdlib.js'
@@ -88,25 +89,12 @@ it.effect(
     Effect.gen(function* () {
       const documentation = yield* stdlibDocumentation
       const parsed: unknown = JSON.parse(Json.encode(documentation))
-      const live = yield* liveReport
-      const roundTripped = yield* Doctest.run({
-        documentation: parsed,
-        sources: Stdlib.sources,
-      })
-      assert.deepStrictEqual(
-        {
-          collected: roundTripped.collected,
-          passed: roundTripped.passed,
-          skipped: roundTripped.skipped,
-          failed: roundTripped.failed,
-        },
-        {
-          collected: live.collected,
-          passed: live.passed,
-          skipped: live.skipped,
-          failed: live.failed,
-        },
-      )
+      // Compiling an example is a pure function of the collected example, and the live sweep
+      // above already compiled every one — the round trip has to prove only that collection reads
+      // the same examples out of what `silk doc` writes as out of the live value.
+      const roundTripped = Example.collect(parsed)
+      assert.isAbove(roundTripped.length, 0)
+      assert.deepStrictEqual(roundTripped, Example.collect(documentation))
     }),
   180_000,
 )

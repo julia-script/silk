@@ -144,6 +144,8 @@ describe('preset catalog', () => {
     expect(new Set(labels).size).toBe(labels.length)
   })
 
+  // Also the file's wasm32 build gate: this is the only sweep compiling every preset for
+  // wasm32-unknown-unknown, so a preset that cannot build for it fails here.
   it('gives every projected MIR row a unique React key', () => {
     const mirView = viewById('mir')
     expect(mirView).toBeDefined()
@@ -183,11 +185,19 @@ describe('preset catalog', () => {
     expect(presets.some((preset) => preset.label.startsWith('trap · '))).toBe(true)
   })
 
+  // Presets exist to put the compiler in a specific state, including deliberately broken states.
+  // What must never happen is a preset that crashes the driver: a mistranscribed program would
+  // take down whichever pane rendered it. One pass builds every snapshot (so a throw names its
+  // preset) and checks the diagnostic polarity the label advertises.
   it(
-    'keeps fail-prefixed presets as the ones that surface diagnostics',
+    'builds every preset, damaged included, with diagnostics only on fail-prefixed ones',
     () => {
       for (const preset of presets) {
-        const snapshot = snapshotOf(preset)
+        let snapshot: Analysis.Snapshot | undefined
+        expect(() => {
+          snapshot = snapshotOf(preset)
+        }, preset.label).not.toThrow()
+        if (snapshot === undefined) continue
         const hasDiagnostics = Analysis.diagnostics(snapshot).length > 0
         if (preset.label.startsWith('fail · ')) {
           expect(hasDiagnostics, preset.label).toBe(true)
@@ -196,7 +206,7 @@ describe('preset catalog', () => {
         }
       }
     },
-    60_000,
+    120_000,
   )
 
   it('roots every preset at a module it actually defines', () => {
@@ -205,36 +215,22 @@ describe('preset catalog', () => {
     }
   })
 
-  // Presets exist to put the compiler in a specific state, including deliberately broken states.
-  // What must never happen is a preset that crashes the driver: a mistranscribed program would
-  // take down whichever pane rendered it.
-  it(
-    'builds a snapshot for every preset, damaged programs included',
-    () => {
-      for (const preset of presets) {
-        expect(() => snapshotOf(preset), preset.label).not.toThrow()
-      }
-    },
-    60_000,
-  )
-
   // Lowering is target-aware, so a preset that builds for one target is not evidence it builds
-  // for the rest — and the workbench lets any target be selected against any preset.
+  // for the rest — and the workbench lets any target be selected against any preset. Only the two
+  // targets no other test compiles are built here: every preset already builds for
+  // x86_64-unknown-linux-gnu (the compiler default the diagnostics sweep uses) and for
+  // wasm32-unknown-unknown (the MIR React-key sweep), so all four selectable targets stay covered
+  // across the file without any preset compiling twice for the same target.
   it(
     'builds a snapshot for every preset against every selectable target',
     () => {
-      for (const target of [
-        'aarch64-apple-darwin',
-        'x86_64-unknown-linux-gnu',
-        'aarch64-unknown-linux-gnu',
-        'wasm32-unknown-unknown',
-      ]) {
+      for (const target of ['aarch64-apple-darwin', 'aarch64-unknown-linux-gnu']) {
         for (const preset of presets) {
           expect(() => snapshotOf(preset, target), `${preset.label} · ${target}`).not.toThrow()
         }
       }
     },
-    360_000,
+    240_000,
   )
 
   it('keeps the phases the labs shipped presets for', () => {
