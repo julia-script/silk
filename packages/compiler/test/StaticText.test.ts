@@ -271,6 +271,263 @@ it('canonicalizes finite static values without observing construction identity',
   }
 })
 
+it('retains static text provenance without adding it to canonical identity', () => {
+  const bytes = Array.from(encoder.encode('template'))
+  const originOrdinal = (value: StaticValue.Value | undefined): number | undefined =>
+    value?._tag === 'TextValue' && value.origin?._tag === 'ParameterTextOrigin'
+      ? value.origin.ordinal
+      : undefined
+  const left = admitted(
+    StaticValue.admit(
+      {
+        _tag: 'TextValue',
+        bytes,
+        origin: StaticEvaluation.parameterTextOrigin(0, bytes.length),
+      },
+      { pointerBits: 64 },
+    ),
+  )
+  const right = admitted(
+    StaticValue.admit(
+      {
+        _tag: 'TextValue',
+        bytes,
+        origin: StaticEvaluation.parameterTextOrigin(3, bytes.length),
+      },
+      { pointerBits: 64 },
+    ),
+  )
+  assert.strictEqual(StaticValue.equals(left, right), true)
+  assert.strictEqual(StaticValue.key(left), StaticValue.key(right))
+  assert.strictEqual(originOrdinal(left), 0)
+  assert.strictEqual(originOrdinal(right), 3)
+
+  const aggregate = admitted(
+    StaticValue.admit(
+      {
+        _tag: 'AggregateValue',
+        identity: {
+          _tag: 'NominalAggregateIdentity',
+          declaration: {
+            _tag: 'CanonicalDeclarationId',
+            module: 'example.values',
+            name: 'TemplatePart',
+          },
+          typeArguments: [],
+        },
+        fields: [{ ordinal: 0, value: left }],
+      },
+      { pointerBits: 64 },
+    ),
+  )
+  const nested = aggregate._tag === 'AggregateValue' ? aggregate.fields.at(0)?.value : undefined
+  assert.strictEqual(originOrdinal(nested), 0)
+})
+
+it('canonicalizes nominal reflection descriptors and heterogeneous field collections', () => {
+  const owner = {
+    _tag: 'TypeDescriptorValue',
+    owner: Type.nominal('example.reflection', 'Person'),
+    kind: 'Named',
+  }
+  const authorization = {
+    _tag: 'CanonicalDeclarationId',
+    module: 'example.format',
+    name: 'render',
+  }
+  const fields = [
+    {
+      _tag: 'FieldDescriptorValue',
+      owner,
+      declarationOrdinal: 1,
+      member: { _tag: 'LabeledField', label: 'age' },
+      valueType: 'u32',
+      authorization,
+      provenance: { sourceId: 'example/reflection.silk', start: 28, end: 36 },
+    },
+    {
+      _tag: 'FieldDescriptorValue',
+      owner,
+      declarationOrdinal: 0,
+      member: { _tag: 'LabeledField', label: 'name' },
+      valueType: 'string',
+      authorization,
+      provenance: { sourceId: 'example/reflection.silk', start: 12, end: 24 },
+    },
+  ]
+  const collection = admitted(
+    StaticValue.admit({ _tag: 'FieldCollectionValue', owner, fields }, { pointerBits: 64 }),
+  )
+  const equivalent = admitted(
+    StaticValue.admit(
+      { _tag: 'FieldCollectionValue', owner, fields: [...fields].reverse() },
+      { pointerBits: 64 },
+    ),
+  )
+
+  assert.strictEqual(collection._tag, 'FieldCollectionValue')
+  if (collection._tag !== 'FieldCollectionValue') return
+  assert.deepEqual(
+    collection.fields.map((field) => field.declarationOrdinal),
+    [0, 1],
+  )
+  assert.strictEqual(Object.isFrozen(collection), true)
+  assert.strictEqual(Object.isFrozen(collection.owner), true)
+  assert.strictEqual(Object.isFrozen(collection.fields), true)
+  assert.strictEqual(Object.isFrozen(collection.fields.at(0)), true)
+  assert.strictEqual(StaticValue.equals(collection, equivalent), true)
+  assert.strictEqual(
+    StaticValue.presentation(collection),
+    'fields<example.reflection.Person>[field<example.reflection.Person, string>(name@0), field<example.reflection.Person, u32>(age@1)]',
+  )
+  assert.strictEqual(
+    StaticValue.retainedSize(collection),
+    encoder.encode(StaticValue.encode(collection)).byteLength,
+  )
+
+  const distinctOwner = admitted(
+    StaticValue.admit(
+      {
+        _tag: 'TypeDescriptorValue',
+        owner: Type.nominal('example.reflection', 'OtherPerson'),
+        kind: 'Named',
+      },
+      { pointerBits: 64 },
+    ),
+  )
+  assert.strictEqual(StaticValue.equals(collection.owner, distinctOwner), false)
+  assert.strictEqual(
+    StaticValue.admit(
+      { _tag: 'FieldCollectionValue', owner: distinctOwner, fields },
+      { pointerBits: 64 },
+    )._tag,
+    'Rejected',
+  )
+  assert.strictEqual(
+    StaticValue.admit(
+      {
+        _tag: 'TypeDescriptorValue',
+        owner: Object.freeze({ _tag: 'NominalType' }),
+        kind: 'Named',
+      },
+      { pointerBits: 64 },
+    )._tag,
+    'Rejected',
+  )
+  assert.strictEqual(
+    StaticValue.admit(
+      {
+        _tag: 'TypeDescriptorValue',
+        owner: Object.freeze({
+          _tag: 'NominalType',
+          module: 'example.reflection',
+          name: 'MutableArguments',
+          arguments: [],
+        }),
+        kind: 'Named',
+      },
+      { pointerBits: 64 },
+    )._tag,
+    'Rejected',
+  )
+})
+
+it('builds immutable homogeneous static sequences by complete replacement', () => {
+  const empty = StaticValue.emptySequence('i32')
+  const first = admitted(
+    StaticValue.admit({ _tag: 'IntegerValue', type: 'i32', value: 1n }, { pointerBits: 64 }),
+  )
+  const second = admitted(
+    StaticValue.admit({ _tag: 'IntegerValue', type: 'i32', value: 2n }, { pointerBits: 64 }),
+  )
+  const one = StaticValue.appendSequence(empty, 'i32', first)
+  assert.notStrictEqual(one, undefined)
+  if (one === undefined) return
+  const two = StaticValue.appendSequence(one, 'i32', second)
+  assert.notStrictEqual(two, undefined)
+  if (two === undefined) return
+  const combined = StaticValue.concatenateSequences(one, one)
+  assert.notStrictEqual(combined, undefined)
+  if (combined === undefined) return
+
+  assert.strictEqual(StaticValue.sequenceLength(empty), 0)
+  assert.strictEqual(StaticValue.sequenceLength(one), 1)
+  assert.strictEqual(StaticValue.sequenceLength(two), 2)
+  assert.strictEqual(StaticValue.sequenceElement(two, 0), first)
+  assert.strictEqual(StaticValue.sequenceElement(two, 1), second)
+  assert.strictEqual(StaticValue.sequenceElement(two, -1), undefined)
+  assert.strictEqual(StaticValue.sequenceElement(two, 2), undefined)
+  assert.deepEqual(combined.elements, [first, first])
+  assert.strictEqual(Object.isFrozen(empty), true)
+  assert.strictEqual(Object.isFrozen(two.elements), true)
+  assert.deepEqual(empty.elements, [])
+  assert.deepEqual(one.elements, [first])
+  assert.strictEqual(StaticValue.appendSequence(one, 'u32', second), undefined)
+  assert.strictEqual(
+    StaticValue.concatenateSequences(one, StaticValue.emptySequence('u32')),
+    undefined,
+  )
+
+  const pair = admitted(
+    StaticValue.admit(
+      {
+        _tag: 'AggregateValue',
+        identity: {
+          _tag: 'NominalAggregateIdentity',
+          declaration: {
+            _tag: 'CanonicalDeclarationId',
+            module: 'example.sequence',
+            name: 'Pair',
+          },
+          typeArguments: ['builtin:i32'],
+        },
+        fields: [
+          { ordinal: 0, value: { _tag: 'IntegerValue', type: 'i32', value: 1n } },
+          { ordinal: 1, value: { _tag: 'IntegerValue', type: 'i32', value: 2n } },
+        ],
+      },
+      { pointerBits: 64 },
+    ),
+  )
+  const aggregateSequence = StaticValue.appendSequence(
+    StaticValue.emptySequence(Type.nominal('example.sequence', 'Pair', ['i32'])),
+    Type.nominal('example.sequence', 'Pair', ['i32']),
+    pair,
+  )
+  assert.notStrictEqual(aggregateSequence, undefined)
+  if (aggregateSequence === undefined) return
+  assert.strictEqual(StaticValue.sequenceElement(aggregateSequence, 0), pair)
+  assert.strictEqual(
+    StaticValue.equals(
+      aggregateSequence,
+      admitted(StaticValue.admit(aggregateSequence, { pointerBits: 64 })),
+    ),
+    true,
+  )
+
+  const readmitted = admitted(StaticValue.admit(two, { pointerBits: 64 }))
+  assert.strictEqual(StaticValue.equals(two, readmitted), true)
+  assert.strictEqual(StaticValue.presentation(two), 'sequence<i32>[1i32, 2i32]')
+  assert.strictEqual(
+    StaticValue.retainedSize(two),
+    encoder.encode(StaticValue.encode(two)).byteLength,
+  )
+
+  const cyclicElements: Array<unknown> = []
+  const cyclic = {
+    _tag: 'StaticSequenceValue',
+    elementType: 'i32',
+    elements: cyclicElements,
+  }
+  cyclicElements.push(cyclic)
+  const rejectedCycle = StaticValue.admit(cyclic, { pointerBits: 64 })
+  assert.strictEqual(rejectedCycle._tag, 'Rejected')
+  if (rejectedCycle._tag === 'Rejected') {
+    assert.strictEqual(rejectedCycle.reason, 'CyclicValue')
+    assert.deepEqual(rejectedCycle.path, [0])
+  }
+})
+
 it('normalizes float NaNs and rejects resource-bearing or malformed candidates', () => {
   const firstNaN = admitted(
     StaticValue.admit({ _tag: 'FloatValue', type: 'f32', bits: 0x7f80_0001n }, { pointerBits: 64 }),
@@ -677,6 +934,601 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('expands finite static iteration into fresh deterministic runtime scopes', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'static/iteration',
+      encoder.encode(`import silk.reflect as Reflect
+import silk.static_sequence as StaticSequence
+
+struct Pair {
+  pub name: string
+  pub age: i32
+}
+
+fn expanded() -> i32 {
+  let mut count = 0
+  let outer = 10
+  let static values = StaticSequence.append<i32>(
+    StaticSequence.append<i32>(StaticSequence.empty<i32>(), 1),
+    2,
+  )
+  static for outer in values {
+    static if outer == 1 { count = count + 1 } else { count = count + 2 }
+    static for inner in StaticSequence.append<i32>(StaticSequence.empty<i32>(), 0) {
+      count = count + 4
+    }
+  }
+  static for unused in StaticSequence.empty<i32>() {
+    compileError("an empty iteration must not elaborate its body")
+  }
+  static for field in Reflect.fields<Pair>() {
+    count = count + 1
+  }
+  return count + outer
+}
+
+fn returnsFromFirstIteration() -> i32 {
+  static for item in StaticSequence.append<i32>(
+    StaticSequence.append<i32>(StaticSequence.empty<i32>(), 1),
+    2,
+  ) {
+    static if item == 1 { return 7 } else { return 9 }
+  }
+  return 11
+}
+
+pub fn main() -> i32 { return expanded() + returnsFromFirstIteration() }`),
+      Target.x8664UnknownLinuxGnu.id,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 30n)
+    const expandedInstance = Analysis.instancesOf(snapshot).instances.find(
+      (instance) => instance.key.declaration.name === 'expanded',
+    )
+    assert.notStrictEqual(expandedInstance, undefined)
+    assert.isFalse(
+      expandedInstance?.ownership.bindings.some((binding) =>
+        ['inner', 'unused', 'field'].includes(binding.name ?? ''),
+      ) ?? true,
+    )
+    assert.strictEqual(
+      expandedInstance?.ownership.bindings.filter((binding) => binding.name === 'outer').length,
+      1,
+    )
+    const returning = Analysis.instancesOf(snapshot).instances.find(
+      (instance) => instance.key.declaration.name === 'returnsFromFirstIteration',
+    )
+    assert.notStrictEqual(returning, undefined)
+    assert.strictEqual(returning?.function.statements.length, 1)
+
+    const authored = snapshot.results
+      .get('static/iteration')
+      ?.functions.find(
+        (candidate) =>
+          candidate.declaration.name._tag === 'Present' &&
+          candidate.declaration.name.spelling === 'expanded',
+      )
+    assert.deepEqual(
+      authored?.staticIterations.map((iteration) => ({
+        state: iteration.state,
+        scopes: iteration.scopes.length,
+      })),
+      [
+        { state: 'Deferred', scopes: 0 },
+        { state: 'Deferred', scopes: 0 },
+        { state: 'Deferred', scopes: 0 },
+      ],
+    )
+    const declaration = authored?.declaration
+    assert.notStrictEqual(declaration, undefined)
+    if (declaration === undefined || declaration.canonical._tag !== 'Canonical') return
+    const declarationId = declaration.canonical.id
+    assert.strictEqual(snapshot.target._tag, 'Resolved')
+    if (snapshot.target._tag !== 'Resolved') return
+    const coordinator = Residualization.make(
+      snapshot.target.target,
+      snapshot.results,
+      snapshot.resolution,
+      snapshot.index,
+    )
+    const residual = Residualization.residualize(
+      coordinator,
+      Object.freeze({
+        declaration: declarationId,
+        typeArguments: Object.freeze([]),
+        evidence: Object.freeze([]),
+        contractRow: Object.freeze([]),
+        staticArguments: Object.freeze([]),
+      }),
+    )
+    assert.strictEqual(residual._tag, 'ResidualBody')
+    if (residual._tag !== 'ResidualBody') return
+    assert.deepEqual(
+      residual.fact.staticIterations.map((iteration) => ({
+        state: iteration.state,
+        scopes: iteration.scopes.map((scope) => ({
+          ordinal: scope.ordinal,
+          type: Type.encode(
+            scope.binding.inferredType._tag === 'Available'
+              ? scope.binding.inferredType.type
+              : Type.unit,
+          ),
+        })),
+      })),
+      [
+        {
+          state: 'Expanded',
+          scopes: [
+            { ordinal: 0, type: 'i32' },
+            { ordinal: 1, type: 'i32' },
+          ],
+        },
+        { state: 'Expanded', scopes: [] },
+        {
+          state: 'Expanded',
+          scopes: [
+            { ordinal: 0, type: 'Intrinsic.Field<static/iteration.Pair, string>' },
+            { ordinal: 1, type: 'Intrinsic.Field<static/iteration.Pair, i32>' },
+          ],
+        },
+      ],
+    )
+    assert.deepEqual(
+      residual.fact.staticIterations
+        .at(0)
+        ?.scopes.map((scope) => scope.staticIterations.map((iteration) => iteration.scopes.length)),
+      [[1], [1]],
+    )
+    const outerBindings = residual.fact.staticIterations
+      .at(0)
+      ?.scopes.map((scope) => scope.binding.id.ordinal)
+    assert.strictEqual(new Set(outerBindings).size, 2)
+    assert.isFalse(
+      Hir.encode(
+        Object.freeze({
+          _tag: 'HirModule',
+          module: 'static/iteration',
+          functions: Object.freeze([residual.function]),
+        }),
+      ).includes('StaticFor'),
+    )
+  }),
+)
+
+it.effect('rejects a runtime static iterable before elaborating its body', () =>
+  Effect.gen(function* () {
+    const source = `fn invalid(values: [i32; 1]) -> i32 {
+  static for value in values {
+    compileError("the rejected body must stay untouched")
+  }
+  return 42
+}
+
+pub fn main() -> i32 { return invalid([1]) }`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'static/runtime-iteration',
+      encoder.encode(source),
+      Target.x8664UnknownLinuxGnu.id,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0176'],
+    )
+    assert.isFalse(
+      Analysis.diagnostics(snapshot).some((diagnostic) => diagnostic.code === 'SEM0177'),
+    )
+    const declaration = snapshot.results
+      .get('static/runtime-iteration')
+      ?.functions.find(
+        (candidate) =>
+          candidate.declaration.name._tag === 'Present' &&
+          candidate.declaration.name.spelling === 'invalid',
+      )?.declaration
+    assert.notStrictEqual(declaration, undefined)
+    assert.strictEqual(snapshot.target._tag, 'Resolved')
+    if (
+      declaration === undefined ||
+      declaration.canonical._tag !== 'Canonical' ||
+      snapshot.target._tag !== 'Resolved'
+    )
+      return
+    const residual = Residualization.residualize(
+      Residualization.make(
+        snapshot.target.target,
+        snapshot.results,
+        snapshot.resolution,
+        snapshot.index,
+      ),
+      Object.freeze({
+        declaration: declaration.canonical.id,
+        typeArguments: Object.freeze([]),
+        evidence: Object.freeze([]),
+        contractRow: Object.freeze([]),
+        staticArguments: Object.freeze([]),
+      }),
+    )
+    assert.strictEqual(residual._tag, 'ResidualBody')
+    if (residual._tag !== 'ResidualBody') return
+    assert.deepEqual(
+      residual.fact.staticIterations.map((iteration) => ({
+        state: iteration.state,
+        scopes: iteration.scopes.length,
+      })),
+      [{ state: 'Rejected', scopes: 0 }],
+    )
+    assert.strictEqual(residual.function.statements.length, 1)
+  }),
+)
+
+it.effect('rolls back every earlier static iteration when a later element fails', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'static/iteration-rollback',
+      encoder.encode(`import silk.static_sequence as StaticSequence
+
+fn rejected() -> i32 {
+  let mut count = 0
+  let static values = StaticSequence.append<i32>(
+    StaticSequence.append<i32>(StaticSequence.empty<i32>(), 1),
+    2,
+  )
+  static for value in values {
+    static if value == 2 { compileError("later iteration failed") }
+    count = count + 1
+  }
+  return count
+}
+
+pub fn main() -> i32 { return rejected() }`),
+      Target.x8664UnknownLinuxGnu.id,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0177'],
+    )
+    const selectedFailure = Analysis.diagnostics(snapshot).at(0)
+    assert.strictEqual(selectedFailure?.reason?._tag, 'SelectedCompileError')
+    if (selectedFailure?.reason?._tag === 'SelectedCompileError')
+      assert.isTrue(
+        selectedFailure.reason.trace.some((frame) => frame.label === 'static for element 1'),
+      )
+    const declaration = snapshot.results
+      .get('static/iteration-rollback')
+      ?.functions.find(
+        (candidate) =>
+          candidate.declaration.name._tag === 'Present' &&
+          candidate.declaration.name.spelling === 'rejected',
+      )?.declaration
+    assert.notStrictEqual(declaration, undefined)
+    assert.strictEqual(snapshot.target._tag, 'Resolved')
+    if (
+      declaration === undefined ||
+      declaration.canonical._tag !== 'Canonical' ||
+      snapshot.target._tag !== 'Resolved'
+    )
+      return
+    const residual = Residualization.residualize(
+      Residualization.make(
+        snapshot.target.target,
+        snapshot.results,
+        snapshot.resolution,
+        snapshot.index,
+      ),
+      Object.freeze({
+        declaration: declaration.canonical.id,
+        typeArguments: Object.freeze([]),
+        evidence: Object.freeze([]),
+        contractRow: Object.freeze([]),
+        staticArguments: Object.freeze([]),
+      }),
+    )
+    assert.strictEqual(residual._tag, 'ResidualBody')
+    if (residual._tag !== 'ResidualBody') return
+    assert.deepEqual(
+      residual.fact.staticIterations.map((iteration) => ({
+        state: iteration.state,
+        scopes: iteration.scopes.length,
+      })),
+      [{ state: 'Rejected', scopes: 0 }],
+    )
+    assert.isFalse(residual.function.statements.some((statement) => statement._tag === 'Write'))
+    assert.isFalse(
+      Analysis.instancesOf(snapshot).instances.some(
+        (instance) => instance.key.declaration.name === 'rejected',
+      ),
+    )
+  }),
+)
+
+it.effect('charges each static iteration with trace-backed atomic limits', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'static/iteration-limit',
+      encoder.encode(`fn limited(static values: Intrinsic.StaticSequence<i32>) -> i32 {
+  let mut count = 0
+  static for value in values { count = count + 1 }
+  return count
+}
+
+pub fn main() -> i32 { return 0 }`),
+      Target.x8664UnknownLinuxGnu.id,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    const declaration = snapshot.results
+      .get('static/iteration-limit')
+      ?.functions.find(
+        (candidate) =>
+          candidate.declaration.name._tag === 'Present' &&
+          candidate.declaration.name.spelling === 'limited',
+      )?.declaration
+    assert.notStrictEqual(declaration, undefined)
+    assert.strictEqual(snapshot.target._tag, 'Resolved')
+    const empty = StaticValue.emptySequence('i32')
+    const first = StaticValue.appendSequence(empty, 'i32', {
+      _tag: 'IntegerValue',
+      type: 'i32',
+      value: 1n,
+    })
+    const second =
+      first === undefined
+        ? undefined
+        : StaticValue.appendSequence(first, 'i32', {
+            _tag: 'IntegerValue',
+            type: 'i32',
+            value: 2n,
+          })
+    assert.notStrictEqual(second, undefined)
+    if (
+      declaration === undefined ||
+      declaration.canonical._tag !== 'Canonical' ||
+      snapshot.target._tag !== 'Resolved' ||
+      second === undefined
+    )
+      return
+    const residual = Residualization.residualize(
+      Residualization.make(
+        snapshot.target.target,
+        snapshot.results,
+        snapshot.resolution,
+        snapshot.index,
+        { ...StaticEvaluation.defaultLimits, steps: 1 },
+      ),
+      Object.freeze({
+        declaration: declaration.canonical.id,
+        typeArguments: Object.freeze([]),
+        evidence: Object.freeze([]),
+        contractRow: Object.freeze([]),
+        staticArguments: Object.freeze([second]),
+      }),
+    )
+    assert.strictEqual(residual._tag, 'StaticFailure')
+    if (residual._tag !== 'StaticFailure') return
+    assert.strictEqual(residual.failure._tag, 'StepLimit')
+    const iteration = residual.failure.trace.at(-1)
+    assert.strictEqual(iteration?._tag, 'StaticIterationFrame')
+    if (iteration?._tag === 'StaticIterationFrame') assert.strictEqual(iteration.ordinal, 1)
+  }),
+)
+
+it.effect('derives ordered visible descriptors for every concrete aggregate kind', () =>
+  Effect.gen(function* () {
+    const sourceId = 'static/reflection-descriptors'
+    const snapshot = yield* Analysis.ofSourceRealized(
+      sourceId,
+      encoder.encode(`import silk.reflect as Reflect
+
+struct Box<T> { pub value: T hidden: i32 }
+tuple Point(u32, u64)
+
+fn inspect<Owner>(value: Owner) -> i32 {
+  let static ownerKind = Reflect.typeKind(Reflect.typeOf<Owner>())
+  static for field in Reflect.fields<Owner>() {
+    static if Reflect.fieldKind(field) == Reflect.labeledFieldKind {
+      let static label = Reflect.fieldLabel(field)
+    } else {
+      let static ordinal = Reflect.fieldOrdinal(field)
+    }
+  }
+  return 1
+}
+
+pub fn main() -> i32 {
+  let named = inspect(Box<string> { value: "Julia", hidden: 32 })
+  let namedTuple = inspect(Point(20, 22))
+  let anonymousTuple = inspect((true, 42))
+  let anonymousRecord = inspect(.{ name: "Julia", age: 32 })
+  return named + namedTuple + anonymousTuple + anonymousRecord
+}`),
+      Target.x8664UnknownLinuxGnu.id,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.strictEqual(snapshot.target._tag, 'Resolved')
+    if (snapshot.target._tag !== 'Resolved') return
+    const declaration = snapshot.results
+      .get(sourceId)
+      ?.functions.find(
+        (candidate) =>
+          candidate.declaration.name._tag === 'Present' &&
+          candidate.declaration.name.spelling === 'inspect',
+      )?.declaration
+    assert.notStrictEqual(declaration, undefined)
+    if (declaration === undefined || declaration.canonical._tag !== 'Canonical') return
+    const declarationId = declaration.canonical.id
+    const coordinator = Residualization.make(
+      snapshot.target.target,
+      snapshot.results,
+      snapshot.resolution,
+      snapshot.index,
+    )
+    const descriptors = (owner: Type.Nominal): ReadonlyArray<StaticValue.FieldDescriptorValue> => {
+      const residual = Residualization.residualize(
+        coordinator,
+        Object.freeze({
+          declaration: declarationId,
+          typeArguments: Object.freeze([owner]),
+          evidence: Object.freeze([]),
+          contractRow: Object.freeze([]),
+          staticArguments: Object.freeze([]),
+        }),
+      )
+      assert.strictEqual(residual._tag, 'ResidualBody')
+      if (residual._tag !== 'ResidualBody') return Object.freeze([])
+      const iteration = residual.fact.staticIterations.at(0)
+      assert.strictEqual(iteration?.state, 'Expanded')
+      return Object.freeze(
+        (iteration?.scopes ?? []).flatMap((scope) =>
+          scope.binding.staticValue?._tag === 'FieldDescriptorValue'
+            ? [scope.binding.staticValue]
+            : [],
+        ),
+      )
+    }
+    const encoded = (fields: ReadonlyArray<StaticValue.FieldDescriptorValue>) =>
+      fields.map((field) => ({
+        ownerKind: field.owner.kind,
+        declarationOrdinal: field.declarationOrdinal,
+        member:
+          field.member._tag === 'LabeledField' ? field.member.label : `#${field.member.ordinal}`,
+        valueType: Type.encode(field.valueType),
+        authorization: `${field.authorization.module}.${field.authorization.name}`,
+        provenance: field.provenance.sourceId,
+      }))
+
+    assert.deepEqual(encoded(descriptors(Type.nominal(sourceId, 'Box', [Type.string]))), [
+      {
+        ownerKind: 'Named',
+        declarationOrdinal: 0,
+        member: 'value',
+        valueType: 'string',
+        authorization: 'silk/reflect.fields',
+        provenance: sourceId,
+      },
+    ])
+    assert.deepEqual(encoded(descriptors(Type.nominal(sourceId, 'Point'))), [
+      {
+        ownerKind: 'Positional',
+        declarationOrdinal: 0,
+        member: '#0',
+        valueType: 'u32',
+        authorization: 'silk/reflect.fields',
+        provenance: sourceId,
+      },
+      {
+        ownerKind: 'Positional',
+        declarationOrdinal: 1,
+        member: '#1',
+        valueType: 'u64',
+        authorization: 'silk/reflect.fields',
+        provenance: sourceId,
+      },
+    ])
+    const generated = [...snapshot.index.generatedAggregates.values()]
+    const anonymousTuple = generated.find(
+      (aggregate) => aggregate.aggregateKind === 'AnonymousPositional',
+    )
+    const anonymousRecord = generated.find(
+      (aggregate) => aggregate.aggregateKind === 'AnonymousNamed',
+    )
+    assert.strictEqual(anonymousTuple?.canonical._tag, 'Canonical')
+    assert.strictEqual(anonymousRecord?.canonical._tag, 'Canonical')
+    if (
+      anonymousTuple?.canonical._tag !== 'Canonical' ||
+      anonymousRecord?.canonical._tag !== 'Canonical'
+    )
+      return
+    assert.deepEqual(
+      encoded(
+        descriptors(
+          Type.nominal(anonymousTuple.canonical.id.module, anonymousTuple.canonical.id.name),
+        ),
+      ).map(({ ownerKind, declarationOrdinal, member, valueType }) => ({
+        ownerKind,
+        declarationOrdinal,
+        member,
+        valueType,
+      })),
+      [
+        {
+          ownerKind: 'AnonymousPositional',
+          declarationOrdinal: 0,
+          member: '#0',
+          valueType: 'bool',
+        },
+        { ownerKind: 'AnonymousPositional', declarationOrdinal: 1, member: '#1', valueType: 'i32' },
+      ],
+    )
+    assert.deepEqual(
+      encoded(
+        descriptors(
+          Type.nominal(anonymousRecord.canonical.id.module, anonymousRecord.canonical.id.name),
+        ),
+      ).map(({ ownerKind, declarationOrdinal, member, valueType }) => ({
+        ownerKind,
+        declarationOrdinal,
+        member,
+        valueType,
+      })),
+      [
+        { ownerKind: 'AnonymousNamed', declarationOrdinal: 0, member: 'name', valueType: 'string' },
+        { ownerKind: 'AnonymousNamed', declarationOrdinal: 1, member: 'age', valueType: 'i32' },
+      ],
+    )
+  }),
+)
+
+it.effect('rejects phase-only descriptor types from runtime signatures, bindings, and calls', () =>
+  Effect.gen(function* () {
+    const sourceId = 'static/phase-only-types'
+    const program = `import silk.reflect as Reflect
+
+tuple Pair(i32)
+
+fn consume<Value>(value: Value) -> () {}
+fn invalidParameter(value: Intrinsic.Type<Pair>) -> () {}
+fn invalidReturn() -> Intrinsic.Fields<Pair> { return Reflect.fields<Pair>() }
+
+fn exercise() -> () {
+  let static descriptor = Reflect.typeOf<Pair>()
+  let leaked = descriptor
+  consume(descriptor)
+}
+
+pub fn main() -> () { exercise() }`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      sourceId,
+      encoder.encode(program),
+      Target.x8664UnknownLinuxGnu.id,
+    )
+    const violations = Analysis.diagnostics(snapshot).filter(
+      (diagnostic) => diagnostic.code === 'SEM0176',
+    )
+    assert.isTrue(
+      violations.some(
+        (diagnostic) => diagnostic.span.start === program.indexOf('value: Intrinsic'),
+      ),
+    )
+    assert.isTrue(
+      violations.some((diagnostic) => {
+        const position = program.indexOf('Intrinsic.Fields')
+        return diagnostic.span.start <= position && diagnostic.span.end >= position
+      }),
+    )
+    assert.isTrue(
+      violations.some((diagnostic) => {
+        const position = program.indexOf('leaked')
+        return diagnostic.span.start <= position && diagnostic.span.end >= position
+      }),
+    )
+    const callArgument = program.lastIndexOf('descriptor)')
+    assert.isTrue(violations.some((diagnostic) => diagnostic.span.start === callArgument))
+  }),
+)
+
 it.effect('caches real residual applications and enforces their growth budget', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -696,7 +1548,7 @@ pub fn main() -> i32 { return choose(true, 42) }`),
     if (selected === undefined) throw new Error('expected selected residual instance')
     const application: Residualization.ApplicationKey = Object.freeze({
       declaration: selected.key.declaration,
-      typeArguments: selected.key.typeArguments.map(Type.genericArgumentKey),
+      typeArguments: selected.key.typeArguments,
       evidence: selected.key.evidence,
       contractRow: selected.key.contractRow,
       staticArguments: selected.key.staticArguments,
@@ -812,15 +1664,17 @@ it.effect('constructs and embeds a recursively pure static aggregate', () =>
 
 static fn pair() -> Pair { return Pair { left: 20, right: 22 } }
 
+static fn right(value: Pair) -> i32 { return value.right }
+
 fn sum(value: Pair) -> i32 { return value.left + value.right }
 
-pub fn main() -> i32 { return sum(pair()) }`),
+pub fn main() -> i32 { return sum(pair()) + right(pair()) }`),
       Target.x8664UnknownLinuxGnu.id,
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 64n)
   }),
 )
 
@@ -904,7 +1758,7 @@ pub fn main() -> i32 { return guarded(false) }`
         encoder.encode(selectedFailure),
         Target.x8664UnknownLinuxGnu.id,
       )
-      const compileErrorStart = selectedFailure.indexOf('compileError')
+      const messageStart = selectedFailure.indexOf('"guard disabled"') + 1
       assert.deepEqual(
         Analysis.diagnostics(failed).map((diagnostic) => ({
           code: diagnostic.code,
@@ -916,8 +1770,8 @@ pub fn main() -> i32 { return guarded(false) }`
           {
             code: 'SEM0177',
             sourceId: 'static/selected-failure',
-            start: compileErrorStart - 1,
-            end: compileErrorStart + 'compileError("guard disabled")'.length,
+            start: messageStart,
+            end: messageStart + 'guard disabled'.length,
           },
         ],
       )
@@ -1128,6 +1982,62 @@ pub fn main() -> i32 { static if inspect() { return 42 } else { return 0 } }`,
   }),
 )
 
+it.effect('anchors compileError to a nested static-text slice of a non-literal parameter', () =>
+  Effect.gen(function* () {
+    const sourceId = 'static/compile-error-slice'
+    const program = `import silk.static_text { slice }
+
+static fn inner(value: string) -> string { return slice(value, 1, 4) }
+static fn outer(value: string) -> string { return slice(inner(value), 0, 2) }
+
+fn reject(static template: string) -> i32 { compileError(outer(template)) }
+
+pub fn main() -> i32 { return reject("aéz") }`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      sourceId,
+      encoder.encode(program),
+      Target.x8664UnknownLinuxGnu.id,
+    )
+    const diagnostic = Analysis.diagnostics(snapshot).at(0)
+    assert.strictEqual(diagnostic?.code, 'SEM0177')
+    const literalCharacterStart = program.lastIndexOf('"aéz"')
+    const prefixBytes = encoder.encode(program.slice(0, literalCharacterStart)).length
+    assert.strictEqual(diagnostic?.span.sourceId, sourceId)
+    assert.strictEqual(diagnostic?.span.start, prefixBytes + 2)
+    assert.strictEqual(diagnostic?.span.end, prefixBytes + 4)
+  }),
+)
+
+it.effect(
+  'chooses caller provenance deterministically without changing specialization identity',
+  () =>
+    Effect.gen(function* () {
+      const sourceId = 'static/compile-error-shared-specialization'
+      const program = `import silk.static_text { slice }
+
+fn reject(static template: string) -> i32 { compileError(slice(template, 1, 3)) }
+
+pub fn main() -> i32 {
+  let first = reject("aéz")
+  return reject("aéz")
+}`
+      const snapshot = yield* Analysis.ofSourceRealized(
+        sourceId,
+        encoder.encode(program),
+        Target.x8664UnknownLinuxGnu.id,
+      )
+      const diagnostics = Analysis.diagnostics(snapshot).filter(
+        (diagnostic) => diagnostic.code === 'SEM0177',
+      )
+      assert.strictEqual(diagnostics.length, 1)
+      const firstLiteralStart = program.indexOf('"aéz"')
+      const prefixBytes = encoder.encode(program.slice(0, firstLiteralStart)).length
+      assert.strictEqual(diagnostics.at(0)?.span.sourceId, sourceId)
+      assert.strictEqual(diagnostics.at(0)?.span.start, prefixBytes + 2)
+      assert.strictEqual(diagnostics.at(0)?.span.end, prefixBytes + 4)
+    }),
+)
+
 it.effect('retains ownership evidence for an unavailable selected residual specialization', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -1189,6 +2099,17 @@ it('decodes UTF-8 and exact bytes atomically', () => {
   assert.strictEqual(text._tag, 'Decoded')
   if (text._tag === 'Decoded') {
     assert.deepEqual(text.data.bytes, Array.from(encoder.encode('hé\n🙂')))
+    assert.deepEqual(text.data.sourceRanges, [
+      { start: 1, end: 2 },
+      { start: 2, end: 3 },
+      { start: 3, end: 4 },
+      { start: 4, end: 6 },
+      { start: 6, end: 15 },
+      { start: 6, end: 15 },
+      { start: 6, end: 15 },
+      { start: 6, end: 15 },
+    ])
+    assert.deepEqual(text.data.contentRange, { start: 1, end: 15 })
     assert.strictEqual(text.data.utf8, true)
   }
   const byteSpelling = 'b"\\x00\\xff"'
@@ -1201,6 +2122,11 @@ it('decodes UTF-8 and exact bytes atomically', () => {
         id: 'bytes:00ff',
         kind: 'Bytes',
         bytes: [0, 255],
+        sourceRanges: [
+          { start: 2, end: 6 },
+          { start: 6, end: 10 },
+        ],
+        contentRange: { start: 2, end: 10 },
         utf8: false,
       },
     },
@@ -1212,6 +2138,36 @@ it('decodes UTF-8 and exact bytes atomically', () => {
   assert.strictEqual(
     StaticText.decode(Array.from(encoder.encode('"\\q"')), formOf('"\\q"'))._tag,
     'Invalid',
+  )
+})
+
+it('composes decoded static-text ranges through source and parameter slices', () => {
+  const spelling = '"hé\\n\\u{1f642}"'
+  const decoded = StaticText.decode(Array.from(encoder.encode(spelling)), formOf(spelling))
+  assert.strictEqual(decoded._tag, 'Decoded')
+  if (decoded._tag !== 'Decoded') return
+  const token = SourceSpan.fromOffsets('static/origin', 100, 100 + encoder.encode(spelling).length)
+  if (token === undefined) throw new Error('expected source text span')
+  const origin = StaticEvaluation.sourceTextOrigin(token, decoded.data)
+  const newline = StaticEvaluation.sliceTextOrigin(origin, 3, 4)
+  if (newline === undefined) throw new Error('expected newline origin')
+  const newlineSpan = StaticEvaluation.textOriginSpan(newline)
+  assert.strictEqual(newlineSpan?.sourceId, 'static/origin')
+  assert.strictEqual(newlineSpan?.start, 104)
+  assert.strictEqual(newlineSpan?.end, 106)
+  const emoji = StaticEvaluation.sliceTextOrigin(origin, 4, 8)
+  if (emoji === undefined) throw new Error('expected emoji origin')
+  const emojiSpan = StaticEvaluation.textOriginSpan(emoji)
+  assert.strictEqual(emojiSpan?.sourceId, 'static/origin')
+  assert.strictEqual(emojiSpan?.start, 106)
+  assert.strictEqual(emojiSpan?.end, 115)
+  assert.deepEqual(
+    StaticEvaluation.sliceTextOrigin(
+      StaticEvaluation.parameterTextOrigin(0, decoded.data.bytes.length),
+      3,
+      8,
+    ),
+    { _tag: 'ParameterTextOrigin', ordinal: 0, start: 3, end: 8 },
   )
 })
 

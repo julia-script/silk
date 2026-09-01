@@ -206,7 +206,7 @@ it('requires normalized target metadata in every sealed inventory entry', () => 
     Intrinsic.inventory().every((entry) => {
       let expected: ReadonlyArray<Intrinsic.ExecutionTarget> = Intrinsic.executionTargets
       if (entry.operation.startsWith('Intrinsic.os')) expected = ['Evaluator', 'LLVM']
-      if (entry.phase === 'StaticOnly') expected = []
+      if (entry.phase !== 'Runtime') expected = []
       return JSON.stringify(entry.targets) === JSON.stringify(expected)
     }),
   )

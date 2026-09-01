@@ -48,6 +48,7 @@ import {
 import * as RepresentationField from './RepresentationField.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as StaticValue from './StaticValue.js'
 import type {
   SuspensionBorrowIdentity,
   SuspensionPointId,
@@ -5502,21 +5503,29 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         }
         if (operation._tag === 'RunEffect') {
           const target = self.functions.find((candidate) =>
-            matchesInstance(candidate, operation.target, operation.typeArguments),
+            matchesInstance(
+              candidate,
+              operation.target,
+              operation.typeArguments,
+              operation.staticArguments,
+            ),
           )
-          if (
-            target === undefined ||
-            target.result._tag !== 'EffectOutcome' ||
-            !SilkType.equals(target.result.type, operation.outcomeType.type) ||
-            !runPropagationValid(self.layout, fn, operation)
-          )
+          let detail: string | undefined
+          if (target === undefined) detail = 'run target specialization is missing'
+          else if (target.result._tag !== 'EffectOutcome')
+            detail = 'run target does not return an Effect outcome'
+          else if (!SilkType.equals(target.result.type, operation.outcomeType.type))
+            detail = 'run target outcome disagrees with the operation outcome'
+          else if (!runPropagationValid(self.layout, fn, operation))
+            detail = 'run propagation does not preserve canonical outcome contracts'
+          if (detail !== undefined)
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
                 rule: 'InvalidEffectOperation',
                 function: fn.id,
                 region: region.id,
-                detail: 'run propagation does not preserve canonical outcome contracts',
+                detail,
               }),
             )
         }
@@ -5525,7 +5534,12 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           const outcome = fn.localTypes.at(operation.outcome.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const runner = self.functions.find((candidate) =>
-            matchesInstance(candidate, operation.runner, operation.runnerTypeArguments),
+            matchesInstance(
+              candidate,
+              operation.runner,
+              operation.runnerTypeArguments,
+              operation.runnerStaticArguments,
+            ),
           )
           const suspensionRegion = fn.suspension?.regions.find(
             (candidate) =>
@@ -5573,15 +5587,20 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                   const base = operation.runnerBase
                   const selectedBase = base?.declaration ?? operation.runner
                   const selectedArguments = base?.typeArguments ?? operation.runnerTypeArguments
+                  const selectedStaticArguments =
+                    base?.staticArguments ?? operation.runnerStaticArguments ?? Object.freeze([])
                   const expectedBase =
                     stored?.realization.runner ??
                     Hir.effectRunnerId(
                       effectValue.environment.instance.declaration,
                       effectValue.site,
                     )
+                  const expectedRunnerInstance =
+                    stored?.realization.runnerInstance ?? effectValue.environment.instance
                   const expectedBaseArguments =
                     stored?.realization.runnerArguments ??
                     effectValue.environment.instance.typeArguments
+                  const expectedStaticArguments = expectedRunnerInstance.staticArguments
                   const baseMatches =
                     selectedBase.module === expectedBase.module &&
                     selectedBase.name === expectedBase.name &&
@@ -5591,6 +5610,11 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                       return (
                         expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
                       )
+                    }) &&
+                    selectedStaticArguments.length === expectedStaticArguments.length &&
+                    selectedStaticArguments.every((argument, ordinal) => {
+                      const expected = expectedStaticArguments.at(ordinal)
+                      return expected !== undefined && StaticValue.equals(argument, expected)
                     })
                   const expectedRequirements =
                     stored?.realization.rows.requirements ??
@@ -5796,21 +5820,14 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           ]
           const runner = self.functions.find(
             (candidate) =>
-              matchesInstance(candidate, operation.runner, operation.runnerTypeArguments) &&
+              matchesInstance(
+                candidate,
+                operation.runner,
+                operation.runnerTypeArguments,
+                operation.runnerStaticArguments,
+              ) &&
               candidate.result._tag === 'EffectOutcome' &&
-              SilkType.equals(candidate.result.type, operation.outcomeType.type) &&
-              candidate.parameterCount === inputs.length &&
-              inputs.every((input, ordinal) => {
-                const actual = fn.localTypes.at(input.ordinal)
-                const expected = candidate.localTypes.at(ordinal)
-                return (
-                  actual !== undefined &&
-                  expected !== undefined &&
-                  TypeCompatibility.isCompatible(
-                    TypeCompatibility.check(semanticType(actual), semanticType(expected)),
-                  )
-                )
-              }),
+              SilkType.equals(candidate.result.type, operation.outcomeType.type),
           )
           const parametersValid =
             runner !== undefined &&
@@ -5853,7 +5870,15 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                   runnerResultValid ? undefined : 'runner',
                   outcomeValid ? undefined : 'outcome',
                   destinationValid ? undefined : 'destination',
-                  parametersValid ? undefined : 'parameters',
+                  parametersValid
+                    ? undefined
+                    : `parameters (${inputs
+                        .map((input, ordinal) => {
+                          const actual = fn.localTypes.at(input.ordinal)
+                          const expected = runner?.localTypes.at(ordinal)
+                          return `${actual === undefined ? '<missing>' : SilkType.encode(semanticType(actual))} -> ${expected === undefined ? '<missing>' : SilkType.encode(semanticType(expected))}`
+                        })
+                        .join(', ')})`,
                   propagationValid ? undefined : 'propagation',
                 ]
                   .filter((part): part is string => part !== undefined)

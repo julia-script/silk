@@ -292,6 +292,12 @@
     "namespace": "RawBuffer"
   },
   {
+    "module": "silk/reflect",
+    "path": "silk/reflect.silk",
+    "layer": "portable",
+    "namespace": "Reflect"
+  },
+  {
     "module": "silk/result",
     "path": "silk/result.silk",
     "layer": "portable",
@@ -322,6 +328,12 @@
     "layer": "portable",
     "namespace": "StandardInput",
     "aliases": ["EndOfInput", "Filled", "ReadOutcome", "StreamReadError"]
+  },
+  {
+    "module": "silk/static_sequence",
+    "path": "silk/static_sequence.silk",
+    "layer": "portable",
+    "namespace": "StaticSequence"
   },
   {
     "module": "silk/static_text",

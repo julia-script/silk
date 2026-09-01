@@ -629,6 +629,7 @@ export const seededSpecialization = (
   sites: ReadonlyArray<SpecializationSite>,
   span: SourceSpan.SourceSpan,
   deferred: ReadonlySet<string> = new Set(),
+  enclosingSubstitution: Type.Substitution = new Map(),
 ): SeededSpecialization => {
   const written = new Map<string, TypeArgumentFact>()
   const seeded = new Map<string, Type.GenericArgument>()
@@ -637,7 +638,11 @@ export const seededSpecialization = (
     const parameter = declared.at(fact.ordinal)
     const writtenType = fact.type
     if (parameter === undefined || writtenType === undefined) continue
-    const argument = genericArgumentOfTypeArgument(parameter, fact)
+    const rawArgument = genericArgumentOfTypeArgument(parameter, fact)
+    const argument =
+      rawArgument === undefined
+        ? undefined
+        : Type.substituteGenericArgument(rawArgument, enclosingSubstitution)
     if (argument === undefined) {
       conflicts.push(
         Object.freeze({
@@ -731,6 +736,7 @@ export const commitSpecialization = (
 export const contractSpecializationSites = (
   arguments_: ReadonlyArray<ArgumentFact>,
   contract: CallableContract.CallableContract,
+  enclosingSubstitution: Type.Substitution = new Map(),
 ): ReadonlyArray<SpecializationSite> =>
   Object.freeze(
     arguments_.flatMap((argument, ordinal): ReadonlyArray<SpecializationSite> => {
@@ -740,7 +746,7 @@ export const contractSpecializationSites = (
             Object.freeze({
               ordinal,
               pattern: parameter.type,
-              actual: argument.type.type,
+              actual: Type.substitute(argument.type.type, enclosingSubstitution),
               expression: argument.expression,
             }),
           ]
@@ -1048,7 +1054,11 @@ export const analyzeCallContract = (
       }),
       diagnostics: Object.freeze([]),
     })
-  const sites = contractSpecializationSites(argumentsList, contract)
+  const sites = contractSpecializationSites(
+    argumentsList,
+    contract,
+    resolution?.staticContext?.typeSubstitution,
+  )
   const implicitDecay = sites.find(
     (site) => Type.isFixedArray(site.actual) && Type.isSlice(site.pattern),
   )
@@ -1127,6 +1137,7 @@ export const analyzeCallContract = (
       sites,
       call.span,
       constraintDeferred,
+      resolution?.staticContext?.typeSubstitution,
     )
     const conflict = seeded.conflicts.at(0)
     if (conflict !== undefined) {

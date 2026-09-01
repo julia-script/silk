@@ -4,12 +4,13 @@ import type * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import { analyzeExpression } from './ExpressionAnalysis.js'
 import type * as Hir from './Hir.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as NameResolution from './NameResolution.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as SourceSpan from './SourceSpan.js'
 import { analyzeFunctionBody } from './StatementAnalysis.js'
 import * as StaticEvaluation from './StaticEvaluation.js'
-import type * as StaticValue from './StaticValue.js'
+import * as StaticValue from './StaticValue.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
@@ -17,10 +18,12 @@ import * as Type from './Type.js'
 /** The specialization fields needed before an executable instance is admitted. */
 export interface ApplicationKey {
   readonly declaration: DeclarationFacts.CanonicalId
-  readonly typeArguments: ReadonlyArray<string>
+  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
   readonly evidence: ReadonlyArray<string>
   readonly contractRow: ReadonlyArray<string>
   readonly staticArguments: ReadonlyArray<StaticValue.Value>
+  /** Caller-authored metadata aligned with static arguments; never part of specialization identity. */
+  readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
 }
 
 export interface ResidualBody {
@@ -77,6 +80,103 @@ export const make = (
       staticResultOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
     },
   })
+
+const reflectAggregate = (
+  self: Coordinator,
+  authorization: DeclarationFacts.DeclarationFact,
+  owner: Type.Type,
+  kind: 'Type' | 'Fields',
+  span: SourceSpan.SourceSpan,
+  trace: StaticEvaluation.Trace,
+): StaticEvaluation.Outcome<StaticValue.Value> => {
+  if (!Type.isNominal(owner) || authorization.canonical._tag !== 'Canonical')
+    return StaticEvaluation.failed(
+      StaticEvaluation.phaseViolation(
+        'StaticEvaluation.reflect',
+        'reflection requires one concrete nominal owner and canonical authorization',
+        span,
+        trace,
+      ),
+    )
+  const declaration = DeclarationFacts.byCanonical(self[stateSymbol].index, {
+    _tag: 'CanonicalDeclarationId',
+    module: owner.module,
+    name: owner.name,
+  })
+  if (declaration?._tag !== 'StructDeclaration' || declaration.canonical._tag !== 'Canonical')
+    return StaticEvaluation.failed(
+      StaticEvaluation.phaseViolation(
+        'StaticEvaluation.reflect',
+        `${Type.encode(owner)} is not a concrete aggregate`,
+        span,
+        trace,
+      ),
+    )
+  const authorizationId = authorization.canonical.id
+  const declarationId = declaration.canonical.id
+  const descriptor: StaticValue.TypeDescriptorValue = Object.freeze({
+    _tag: 'TypeDescriptorValue',
+    owner,
+    kind: declaration.aggregateKind,
+  })
+  const substitution = TypeInference.substitution(
+    declaration.typeParameters.map((parameter) => parameter.type),
+    owner.arguments,
+  )
+  if (substitution === undefined)
+    return StaticEvaluation.failed(
+      StaticEvaluation.phaseViolation(
+        'StaticEvaluation.reflect',
+        `${Type.encode(owner)} does not completely specialize its aggregate declaration`,
+        span,
+        trace,
+      ),
+    )
+  const candidate: StaticValue.Value =
+    kind === 'Type'
+      ? descriptor
+      : Object.freeze({
+          _tag: 'FieldCollectionValue',
+          owner: descriptor,
+          fields: Object.freeze(
+            declaration.fields.flatMap((field): ReadonlyArray<StaticValue.FieldDescriptorValue> => {
+              if (
+                (field.visibility === 'Private' &&
+                  authorizationId.module !== declarationId.module) ||
+                field.declaredType._tag !== 'Resolved'
+              )
+                return []
+              const member: StaticValue.ReflectedMember =
+                field.member._tag === 'LabeledAggregateMember'
+                  ? Object.freeze({ _tag: 'LabeledField', label: field.member.label })
+                  : Object.freeze({ _tag: 'PositionalField', ordinal: field.member.ordinal })
+              return [
+                Object.freeze({
+                  _tag: 'FieldDescriptorValue',
+                  owner: descriptor,
+                  declarationOrdinal: field.id.ordinal,
+                  member,
+                  valueType: Type.substitute(field.declaredType.type, substitution),
+                  authorization: authorizationId,
+                  provenance: Object.freeze({
+                    sourceId: field.syntax.span.sourceId,
+                    start: field.syntax.span.start,
+                    end: field.syntax.span.end,
+                  }),
+                }),
+              ]
+            }),
+          ),
+        })
+  const admission = StaticValue.admit(candidate, {
+    pointerBits: self[stateSymbol].environment.pointerBits,
+  })
+  return admission._tag === 'Admitted'
+    ? StaticEvaluation.complete(admission.value)
+    : StaticEvaluation.failed(
+        StaticEvaluation.phaseViolation('StaticEvaluation.reflect', admission.detail, span, trace),
+      )
+}
 
 const declarationOf = (
   self: Coordinator,
@@ -163,6 +263,8 @@ const bindStaticParameters = (
   declaration: DeclarationFacts.DeclarationFact,
   arguments_: ReadonlyArray<StaticValue.Value>,
   argumentSpans: ReadonlyArray<SourceSpan.SourceSpan | undefined> = Object.freeze([]),
+  argumentOrigins: ReadonlyArray<StaticEvaluation.TextOrigin | undefined> = Object.freeze([]),
+  originScope?: string,
 ):
   | {
       readonly values: Map<string, StaticValue.Value>
@@ -187,13 +289,19 @@ const bindStaticParameters = (
     }),
   )
   const valueOrigins = new Map(
-    parameters.map(
-      (parameter, ordinal) =>
-        [
-          StaticEvaluation.localValueKey(parameter),
-          StaticEvaluation.parameterTextOrigin(ordinal),
-        ] as const,
-    ),
+    parameters.map((parameter, ordinal) => {
+      const value = arguments_.at(ordinal)
+      const origin = argumentOrigins.at(ordinal)
+      return [
+        StaticEvaluation.localValueKey(parameter),
+        origin ??
+          StaticEvaluation.parameterTextOrigin(
+            ordinal,
+            value?._tag === 'TextValue' ? value.bytes.length : 0,
+            originScope,
+          ),
+      ] as const
+    }),
   )
   return Object.freeze({ values, valueSpans, valueOrigins })
 }
@@ -201,8 +309,48 @@ const bindStaticParameters = (
 const resolveTextOrigin = (
   origin: StaticEvaluation.TextOrigin | undefined,
   arguments_: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>,
-): StaticEvaluation.TextOrigin | undefined =>
-  origin?._tag === 'ParameterTextOrigin' ? arguments_.at(origin.ordinal) : origin
+  scope: string,
+): StaticEvaluation.TextOrigin | undefined => {
+  if (origin?._tag !== 'ParameterTextOrigin') return origin
+  if (origin.scope !== undefined && origin.scope !== scope) return origin
+  const argument = arguments_.at(origin.ordinal)
+  return argument === undefined
+    ? undefined
+    : StaticEvaluation.sliceTextOrigin(argument, origin.start, origin.end)
+}
+
+const resolveValueOrigins = (
+  value: StaticValue.Value,
+  arguments_: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>,
+  scope: string,
+): StaticValue.Value => {
+  if (value._tag === 'TextValue') {
+    const origin = resolveTextOrigin(value.origin, arguments_, scope)
+    return origin === value.origin
+      ? value
+      : Object.freeze({ ...value, ...(origin === undefined ? {} : { origin }) })
+  }
+  if (value._tag === 'AggregateValue')
+    return Object.freeze({
+      ...value,
+      fields: Object.freeze(
+        value.fields.map((field) =>
+          Object.freeze({
+            ...field,
+            value: resolveValueOrigins(field.value, arguments_, scope),
+          }),
+        ),
+      ),
+    })
+  if (value._tag === 'StaticSequenceValue')
+    return Object.freeze({
+      ...value,
+      elements: Object.freeze(
+        value.elements.map((element) => resolveValueOrigins(element, arguments_, scope)),
+      ),
+    })
+  return value
+}
 
 const resolveTextSpan = (
   origin: StaticEvaluation.TextOrigin | undefined,
@@ -233,20 +381,31 @@ const evaluateStaticFunction = (
     })
   const application: StaticEvaluation.Application = Object.freeze({
     declaration: declaration.canonical.id,
-    typeArguments: identity.typeArguments,
+    typeArguments: Object.freeze(identity.typeArguments.map(Type.genericArgumentKey)),
     evidence: identity.evidence,
     contractRow: identity.contractRow,
     staticArguments: arguments_,
     span,
   })
+  const originScope = StaticEvaluation.applicationKey(self[stateSymbol].environment, application)
   const result = StaticEvaluation.evaluateApplicationFrom(
     self[stateSymbol].evaluator,
     application,
     parentTrace,
     (evaluation) => {
       const input = moduleInput(self, declaration)
-      const bindings = bindStaticParameters(declaration, arguments_, argumentSpans)
-      if (input === undefined || bindings === undefined)
+      const bindings = bindStaticParameters(
+        declaration,
+        arguments_,
+        argumentSpans,
+        Object.freeze([]),
+        originScope,
+      )
+      const typeSubstitution = TypeInference.substitution(
+        declaration.typeParameters.map((parameter) => parameter.type),
+        identity.typeArguments,
+      )
+      if (input === undefined || bindings === undefined || typeSubstitution === undefined)
         return StaticEvaluation.failed(
           StaticEvaluation.phaseViolation(
             'StaticEvaluation.call',
@@ -276,6 +435,7 @@ const evaluateStaticFunction = (
         )
       const staticContext = {
         environment: self[stateSymbol].environment,
+        typeSubstitution,
         values: bindings.values,
         valueSpans: bindings.valueSpans,
         valueOrigins: bindings.valueOrigins,
@@ -285,6 +445,13 @@ const evaluateStaticFunction = (
         returnedTextOrigin: { value: undefined },
         trace: evaluation.trace,
         call,
+        chargeStaticIteration: (trace: StaticEvaluation.Trace) => evaluation.stepAt(trace),
+        reflect: (
+          owner: Type.Type,
+          kind: 'Type' | 'Fields',
+          reflectSpan: SourceSpan.SourceSpan,
+          trace: StaticEvaluation.Trace,
+        ) => reflectAggregate(self, declaration, owner, kind, reflectSpan, trace),
         constant: (
           constant: DeclarationFacts.ConstantFact,
           constantSpan: SourceSpan.SourceSpan,
@@ -309,9 +476,11 @@ const evaluateStaticFunction = (
             nestedStaticFailure = expression.staticFailure
         },
       })
-      if (nestedStaticFailure !== undefined) return StaticEvaluation.failed(nestedStaticFailure)
+      if (nestedStaticFailure !== undefined) {
+        return StaticEvaluation.failed(nestedStaticFailure)
+      }
       const firstError = analyzed.diagnostics.find((diagnostic) => diagnostic.severity === 'error')
-      if (firstError !== undefined)
+      if (firstError !== undefined) {
         return StaticEvaluation.failed(
           StaticEvaluation.phaseViolation(
             'StaticEvaluation.call',
@@ -320,6 +489,7 @@ const evaluateStaticFunction = (
             evaluation.trace,
           ),
         )
+      }
       const value = StaticEvaluation.evaluateStatements(analyzed.fact.statements, {
         ...staticContext,
         step: () => evaluation.step(),
@@ -336,13 +506,26 @@ const evaluateStaticFunction = (
       return value
     },
   )
-  if (result._tag === 'Failed')
-    return Object.freeze({ outcome: StaticEvaluation.failed(result.failure) })
+  if (result._tag === 'Failed') {
+    if (result.failure._tag !== 'CompileError')
+      return Object.freeze({ outcome: StaticEvaluation.failed(result.failure) })
+    const origin = resolveTextOrigin(result.failure.origin, argumentOrigins, originScope)
+    const failure = Object.freeze({
+      ...result.failure,
+      span:
+        (origin === undefined ? undefined : StaticEvaluation.textOriginSpan(origin)) ??
+        result.failure.span,
+      ...(origin === undefined ? {} : { origin }),
+    })
+    return Object.freeze({ outcome: StaticEvaluation.failed(failure) })
+  }
   const cachedOrigin = self[stateSymbol].staticResultOrigins.get(result.key)
-  const textOrigin = resolveTextOrigin(cachedOrigin, argumentOrigins)
+  const textOrigin = resolveTextOrigin(cachedOrigin, argumentOrigins, originScope)
   const textSpan = resolveTextSpan(cachedOrigin, argumentSpans)
   return Object.freeze({
-    outcome: StaticEvaluation.complete(result.value),
+    outcome: StaticEvaluation.complete(
+      resolveValueOrigins(result.value, argumentOrigins, originScope),
+    ),
     ...(textSpan === undefined ? {} : { textSpan }),
     ...(textOrigin === undefined ? {} : { textOrigin }),
   })
@@ -427,6 +610,12 @@ function evaluateConstantValue(
         expressionOrigins: new Map<Elaboration.ExpressionFact, StaticEvaluation.TextOrigin>(),
         trace: evaluation.trace,
         call,
+        reflect: (
+          owner: Type.Type,
+          kind: 'Type' | 'Fields',
+          reflectSpan: SourceSpan.SourceSpan,
+          trace: StaticEvaluation.Trace,
+        ) => reflectAggregate(self, constantHost(declaration), owner, kind, reflectSpan, trace),
         constant,
       })
       const analyzed = analyzeExpression(
@@ -502,7 +691,8 @@ export const requiresSelection = (self: Coordinator, key: ApplicationKey): boole
   if (
     key.staticArguments.length > 0 ||
     declaration.parameters.some((parameter) => parameter.phase === 'Static') ||
-    containsSyntaxKind(declaration.syntax, 'StaticConditionalStatement')
+    containsSyntaxKind(declaration.syntax, 'StaticConditionalStatement') ||
+    containsSyntaxKind(declaration.syntax, 'StaticForStatement')
   )
     return true
   if (fact === undefined) return false
@@ -534,7 +724,14 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
   const declaration = declarationOf(self, key.declaration)
   const input = declaration === undefined ? undefined : moduleInput(self, declaration)
   const bindings =
-    declaration === undefined ? undefined : bindStaticParameters(declaration, key.staticArguments)
+    declaration === undefined
+      ? undefined
+      : bindStaticParameters(
+          declaration,
+          key.staticArguments,
+          Object.freeze([]),
+          key.staticArgumentOrigins,
+        )
   if (declaration === undefined || input === undefined || bindings === undefined) {
     const fallbackSource = self[stateSymbol].results.get(key.declaration.module)?.syntax.source
     const span =
@@ -574,7 +771,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
   }
   const application: StaticEvaluation.Application = Object.freeze({
     declaration: key.declaration,
-    typeArguments: key.typeArguments,
+    typeArguments: Object.freeze(key.typeArguments.map(Type.genericArgumentKey)),
     evidence: key.evidence,
     contractRow: key.contractRow,
     staticArguments: key.staticArguments,
@@ -584,6 +781,19 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
     self[stateSymbol].residuals,
     application,
     (evaluation) => {
+      const typeSubstitution = TypeInference.substitution(
+        declaration.typeParameters.map((parameter) => parameter.type),
+        key.typeArguments,
+      )
+      if (typeSubstitution === undefined)
+        return StaticEvaluation.failed(
+          StaticEvaluation.phaseViolation(
+            'Residualization.residualize',
+            'runtime application does not completely specialize its declaration',
+            declaration.syntax.span,
+            evaluation.trace,
+          ),
+        )
       const call: StaticEvaluation.FactEvaluationContext['call'] = (
         callee,
         arguments_,
@@ -608,6 +818,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         span,
         trace,
       ) => evaluateConstantValue(self, declaration, span, trace)
+      const chargedStaticIterationNodes = { value: 0 }
       const analyzed = analyzeFunctionBody(
         input.result.syntax.source,
         declaration,
@@ -615,6 +826,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         Object.freeze({ scope: input.scope, index: self[stateSymbol].index }),
         Object.freeze({
           environment: self[stateSymbol].environment,
+          typeSubstitution,
           values: bindings.values,
           valueSpans: bindings.valueSpans,
           valueOrigins: bindings.valueOrigins,
@@ -622,6 +834,17 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           expressionOrigins: new Map<Elaboration.ExpressionFact, StaticEvaluation.TextOrigin>(),
           trace: evaluation.trace,
           call,
+          chargeStaticIteration: (trace: StaticEvaluation.Trace, residualNodes: number) => {
+            const stepFailure = evaluation.stepAt(trace)
+            return stepFailure ?? evaluation.growResidualAt(trace, residualNodes)
+          },
+          chargedStaticIterationNodes,
+          reflect: (
+            owner: Type.Type,
+            kind: 'Type' | 'Fields',
+            reflectSpan: SourceSpan.SourceSpan,
+            trace: StaticEvaluation.Trace,
+          ) => reflectAggregate(self, declaration, owner, kind, reflectSpan, trace),
           constant,
         }),
       )
@@ -634,7 +857,10 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           nodes += 1
         },
       })
-      const growthFailure = evaluation.growResidual(Math.max(1, nodes))
+      const remainingNodes = Math.max(0, nodes - chargedStaticIterationNodes.value)
+      const growthFailure = evaluation.growResidual(
+        chargedStaticIterationNodes.value === 0 ? Math.max(1, remainingNodes) : remainingNodes,
+      )
       if (growthFailure !== undefined) return StaticEvaluation.failed(growthFailure)
       return StaticEvaluation.complete(
         Object.freeze({

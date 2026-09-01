@@ -669,15 +669,22 @@ export function lowerExpressionInner(
       return Object.freeze({ result: destination })
     }
     case 'EffectConstruct': {
-      const call = fn.call(expression.span)
-      const typeArguments =
-        call?.target.typeArguments ??
-        expression.typeArguments.map((argument) => fn.semanticArgument(argument))
+      const authoredTypeArguments = expression.typeArguments.map((argument) =>
+        fn.semanticArgument(argument),
+      )
+      const call = fn.call(
+        expression.span,
+        undefined,
+        authoredTypeArguments,
+        expression.staticArguments,
+      )
+      const typeArguments = call?.target.typeArguments ?? authoredTypeArguments
+      const staticArguments = call?.target.staticArguments ?? expression.staticArguments
       const resultType =
         (call?.resultEffect === undefined
           ? undefined
           : effectValueByIdentity(fn.layout, call.resultEffect)) ??
-        fn.effectResults.get(instanceText(expression.target, typeArguments))
+        fn.effectResults.get(instanceText(expression.target, typeArguments, staticArguments))
       if (resultType === undefined) return undefined
       const arguments_: Array<Mir.LocalId> = []
       for (const argument of expression.arguments) {
@@ -692,6 +699,7 @@ export function lowerExpressionInner(
           destination,
           target: expression.target,
           typeArguments: Object.freeze(typeArguments),
+          ...(staticArguments.length === 0 ? {} : { staticArguments }),
           arguments: Object.freeze(arguments_),
           type: resultType,
           provenance: authored(expression.span),
@@ -862,6 +870,9 @@ export function lowerExpressionInner(
               effectValueType.environment.instance.declaration,
               effectValueType.site,
             )
+          const runnerInstance =
+            effectValueType.storage?.realization.runnerInstance ??
+            effectValueType.environment.instance
           const baseRunnerTypeArguments =
             effectValueType.storage?.realization.runnerArguments ??
             effectValueType.environment.instance.typeArguments
@@ -873,12 +884,20 @@ export function lowerExpressionInner(
               effect: loweredSubject.result,
               runner: providedRunner ?? baseRunner,
               runnerTypeArguments: baseRunnerTypeArguments,
+              ...(runnerInstance.staticArguments.length === 0
+                ? {}
+                : {
+                    runnerStaticArguments: runnerInstance.staticArguments,
+                  }),
               ...(providedRunner === undefined
                 ? {}
                 : {
                     runnerBase: Object.freeze({
                       declaration: baseRunner,
                       typeArguments: baseRunnerTypeArguments,
+                      ...(runnerInstance.staticArguments.length === 0
+                        ? {}
+                        : { staticArguments: runnerInstance.staticArguments }),
                     }),
                   }),
               providers: providerBindings(provided),
@@ -1311,6 +1330,9 @@ export function lowerExpressionInner(
               typeArguments: Object.freeze(
                 recipe.typeArguments.map((argument) => fn.semanticArgument(argument)),
               ),
+              ...(recipe.staticArguments.length === 0
+                ? {}
+                : { staticArguments: recipe.staticArguments }),
               arguments: Object.freeze(arguments_),
               outcomeType,
               propagationType,
@@ -1334,6 +1356,9 @@ export function lowerExpressionInner(
             typeArguments: Object.freeze(
               recipe.typeArguments.map((argument) => fn.semanticArgument(argument)),
             ),
+            ...(recipe.staticArguments.length === 0
+              ? {}
+              : { staticArguments: recipe.staticArguments }),
             arguments: Object.freeze(arguments_),
             type: outcomeType,
             provenance: authored(expression.span),
@@ -1959,11 +1984,16 @@ export function lowerExpressionInner(
         if (lowered === undefined) return undefined
         argumentLocals.push(lowered.result)
       }
-      const call = fn.call(expression.span)
-      const typeArguments = Object.freeze(
-        call?.target.typeArguments ??
-          expression.typeArguments.map((argument) => fn.semanticArgument(argument)),
+      const authoredTypeArguments = expression.typeArguments.map((argument) =>
+        fn.semanticArgument(argument),
       )
+      const call = fn.call(
+        expression.span,
+        undefined,
+        authoredTypeArguments,
+        expression.staticArguments,
+      )
+      const typeArguments = Object.freeze(call?.target.typeArguments ?? authoredTypeArguments)
       const staticArguments = call?.target.staticArguments ?? expression.staticArguments
       const type =
         (call?.resultEffect === undefined

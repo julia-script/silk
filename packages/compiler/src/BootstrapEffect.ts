@@ -56,6 +56,7 @@ type RunnableOperation = Extract<
 export interface Execution {
   readonly runner: DeclarationFacts.CanonicalId
   readonly runnerTypeArguments: ReadonlyArray<Type.GenericArgument>
+  readonly runnerStaticArguments?: ReadonlyArray<StaticValue.Value>
   readonly arguments: ReadonlyArray<Value>
   readonly composite?: {
     readonly alternative: Extract<
@@ -94,6 +95,9 @@ export const prepareExecution = (
     return Object.freeze({
       runner: operation.runner,
       runnerTypeArguments: operation.runnerTypeArguments,
+      ...(operation.runnerStaticArguments === undefined
+        ? {}
+        : { runnerStaticArguments: operation.runnerStaticArguments }),
       arguments: Object.freeze([
         ...effect.captures,
         ...operation.arguments.map((argument) => read(argument).value),
@@ -103,6 +107,9 @@ export const prepareExecution = (
   return Object.freeze({
     runner: operation.runner,
     runnerTypeArguments: operation.runnerTypeArguments,
+    ...(operation.runnerStaticArguments === undefined
+      ? {}
+      : { runnerStaticArguments: operation.runnerStaticArguments }),
     arguments: Object.freeze([
       ...operation.captures.map((capture) => read(capture.source).value),
       ...operation.arguments.map((argument) => read(argument).value),
@@ -446,7 +453,12 @@ export function* execute(
       })
     }
     case 'RunEffect': {
-      const target = functionFor(program, operation.target, operation.typeArguments)
+      const target = functionFor(
+        program,
+        operation.target,
+        operation.typeArguments,
+        operation.staticArguments,
+      )
       if (target === undefined)
         return blockedStep({
           _tag: 'MissingFunction',
@@ -545,7 +557,12 @@ export function* execute(
     case 'RunEffectValue':
     case 'RunStaticEffect': {
       const execution = prepareExecution(operation, read)
-      const target = functionFor(program, execution.runner, execution.runnerTypeArguments)
+      const target = functionFor(
+        program,
+        execution.runner,
+        execution.runnerTypeArguments,
+        execution.runnerStaticArguments,
+      )
       if (target === undefined)
         return blockedStep({
           _tag: 'MissingFunction',

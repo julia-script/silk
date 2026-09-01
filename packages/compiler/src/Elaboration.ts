@@ -68,6 +68,24 @@ export interface BindingDeclarationFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** One independently elaborated lexical scope produced by a selected static iteration. */
+export interface StaticIterationScopeFact {
+  readonly _tag: 'StaticIterationScope'
+  readonly ordinal: number
+  readonly binding: BindingDeclarationFact
+  readonly statements: ReadonlyArray<StatementFact>
+  readonly staticIterations: ReadonlyArray<StaticIterationFact>
+}
+
+/** The authored static iteration plus its target-selected semantic expansion. */
+export interface StaticIterationFact {
+  readonly _tag: 'StaticIteration'
+  readonly iterable: ExpressionFact
+  readonly state: 'Deferred' | 'Rejected' | 'Expanded'
+  readonly scopes: ReadonlyArray<StaticIterationScopeFact>
+  readonly syntax: SyntaxTree.Node
+}
+
 /** A bare identifier resolved against enclosing parameters and preceding bindings. */
 export type ParameterReferenceFact =
   | {
@@ -623,6 +641,8 @@ export type ProjectionState =
 export interface FieldProjectionExpressionFact {
   readonly _tag: 'FieldProjection'
   readonly subject: ExpressionFact
+  /** Exact compile-time projection retained for residual literal materialization. */
+  readonly staticValue?: StaticValue.Value
   readonly nominal?: Type.Nominal
   readonly borrowAccess?: Type.BorrowAccess
   readonly fieldName: string | undefined
@@ -1021,6 +1041,8 @@ export type ExpressionFact =
       readonly staticArguments?: ReadonlyArray<{
         readonly parameter: ParameterFact
         readonly value: StaticValue.Value
+        /** Caller-authored provenance retained outside canonical specialization identity. */
+        readonly textOrigin?: StaticEvaluation.TextOrigin
       }>
       /** Complete compile-time result when this call targets a `static fn`. */
       readonly staticValue?: StaticValue.Value
@@ -1047,6 +1069,10 @@ export const returnedBorrowArgument = (self: ExpressionFact): ArgumentFact | und
   if (self._tag !== 'Call') return undefined
   if (self.reference._tag === 'ResolvedBuiltin') {
     const ordinal = self.reference.returnedBorrowParameter
+    return ordinal === undefined ? undefined : self.arguments.at(ordinal)
+  }
+  if (self.reference._tag === 'ResolvedIntrinsicContract') {
+    const ordinal = self.reference.intrinsic.returnedBorrowParameter
     return ordinal === undefined ? undefined : self.arguments.at(ordinal)
   }
   if (self.reference._tag !== 'Resolved') return undefined
@@ -1304,6 +1330,8 @@ export interface FunctionFact {
   readonly returnCompatibility: ReturnCompatibility
   readonly returnedBorrow?: DeclarationFacts.ReturnedBorrowFact
   readonly generatedAggregates: ReadonlyArray<DeclarationFacts.StructFact>
+  /** Static-only authored loops and their independently elaborated target-selected scopes. */
+  readonly staticIterations: ReadonlyArray<StaticIterationFact>
 }
 
 /** Stable identity of one parent-linked lexical scope in an elaborated function. */

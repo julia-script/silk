@@ -11,7 +11,7 @@ import * as TypeInference from './internal/TypeInference.js'
 import * as LiteralForm from './LiteralForm.js'
 import * as Scalar from './Scalar.js'
 import * as SourceFile from './SourceFile.js'
-import type * as SourceSpan from './SourceSpan.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as StaticText from './StaticText.js'
 import * as StaticValue from './StaticValue.js'
 import * as SyntaxTree from './SyntaxTree.js'
@@ -95,7 +95,11 @@ export interface Application {
 }
 
 /** One source-level frame retained without a host stack or evaluator identity. */
-export type TraceFrame = ApplicationFrame | SelectedArmFrame | StaticTextFrame
+export type TraceFrame =
+  | ApplicationFrame
+  | SelectedArmFrame
+  | StaticIterationFrame
+  | StaticTextFrame
 
 export interface ApplicationFrame {
   readonly _tag: 'StaticApplicationFrame'
@@ -111,6 +115,13 @@ export interface SelectedArmFrame {
   readonly span: SourceSpan.SourceSpan
 }
 
+export interface StaticIterationFrame {
+  readonly _tag: 'StaticIterationFrame'
+  readonly ordinal: number
+  readonly value: string
+  readonly span: SourceSpan.SourceSpan
+}
+
 export interface StaticTextFrame {
   readonly _tag: 'StaticTextFrame'
   readonly literal: SourceSpan.SourceSpan
@@ -120,29 +131,118 @@ export interface StaticTextFrame {
 export type Trace = ReadonlyArray<TraceFrame>
 
 /** Source-independent provenance for one static text result. */
-export type TextOrigin = SourceTextOrigin | ParameterTextOrigin
+export type TextOrigin = StaticValue.TextOrigin
+export type SourceTextOrigin = StaticValue.SourceTextOrigin
+export type ParameterTextOrigin = StaticValue.ParameterTextOrigin
 
-export interface SourceTextOrigin {
-  readonly _tag: 'SourceTextOrigin'
-  readonly span: SourceSpan.SourceSpan
+const sourcePoint = (span: SourceSpan.SourceSpan, offset: number): SourceSpan.SourceSpan =>
+  SourceSpan.fromOffsets(span.sourceId, offset, offset) ?? span
+
+/** Creates provenance for one decoded source text value. */
+export const sourceTextOrigin = (
+  span: SourceSpan.SourceSpan,
+  data?: StaticText.Data,
+): TextOrigin => {
+  const byteSpans = Object.freeze(
+    (data?.sourceRanges ?? []).flatMap((range) => {
+      const mapped = SourceSpan.fromOffsets(
+        span.sourceId,
+        span.start + range.start,
+        span.start + range.end,
+      )
+      return mapped === undefined ? [] : [mapped]
+    }),
+  )
+  const contentStart = span.start + (data?.contentRange?.start ?? 0)
+  return Object.freeze({
+    _tag: 'SourceTextOrigin',
+    span,
+    byteSpans,
+    boundary: sourcePoint(span, contentStart),
+  })
 }
 
-export interface ParameterTextOrigin {
-  readonly _tag: 'ParameterTextOrigin'
-  readonly ordinal: number
+/** Creates relative provenance for a complete static text parameter. */
+export const parameterTextOrigin = (
+  ordinal: number,
+  byteLength: number,
+  scope?: string,
+): TextOrigin => {
+  if (!Number.isSafeInteger(byteLength) || byteLength < 0)
+    throw new RangeError('Static text parameter lengths must be non-negative safe integers')
+  return Object.freeze({
+    _tag: 'ParameterTextOrigin',
+    ...(scope === undefined ? {} : { scope }),
+    ordinal,
+    start: 0,
+    end: byteLength,
+  })
 }
 
-export const sourceTextOrigin = (span: SourceSpan.SourceSpan): TextOrigin =>
-  Object.freeze({ _tag: 'SourceTextOrigin', span })
+const sourceBoundaryAt = (origin: SourceTextOrigin, offset: number): SourceSpan.SourceSpan => {
+  const next = origin.byteSpans.at(offset)
+  if (next !== undefined) return sourcePoint(origin.span, next.start)
+  const previous = origin.byteSpans.at(offset - 1)
+  return previous === undefined ? origin.boundary : sourcePoint(origin.span, previous.end)
+}
 
-export const parameterTextOrigin = (ordinal: number): TextOrigin =>
-  Object.freeze({ _tag: 'ParameterTextOrigin', ordinal })
+/** Composes one half-open byte slice into existing text provenance. */
+export const sliceTextOrigin = (
+  origin: TextOrigin,
+  start: number,
+  end: number,
+): TextOrigin | undefined => {
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end)
+    return undefined
+  if (origin._tag === 'ParameterTextOrigin') {
+    if (end > origin.end - origin.start) return undefined
+    return Object.freeze({
+      _tag: 'ParameterTextOrigin',
+      ...(origin.scope === undefined ? {} : { scope: origin.scope }),
+      ordinal: origin.ordinal,
+      start: origin.start + start,
+      end: origin.start + end,
+    })
+  }
+  if (end > origin.byteSpans.length) return undefined
+  return Object.freeze({
+    _tag: 'SourceTextOrigin',
+    span: origin.span,
+    byteSpans: Object.freeze(origin.byteSpans.slice(start, end)),
+    boundary: sourceBoundaryAt(origin, start),
+  })
+}
+
+/** Resolves the most precise authored span represented by static text provenance. */
+export const textOriginSpan = (origin: TextOrigin): SourceSpan.SourceSpan | undefined => {
+  if (origin._tag === 'ParameterTextOrigin') return undefined
+  const first = origin.byteSpans.at(0)
+  const last = origin.byteSpans.at(-1)
+  if (first === undefined || last === undefined) return origin.boundary
+  return SourceSpan.fromOffsets(origin.span.sourceId, first.start, last.end)
+}
 
 /** Retains one selected static arm in the logical trace. */
 export const selectedArmFrame = (
   selected: SelectedArmFrame['selected'],
   span: SourceSpan.SourceSpan,
 ): SelectedArmFrame => Object.freeze({ _tag: 'SelectedStaticArmFrame', selected, span })
+
+/** Retains one canonical element selected by an authored static iteration. */
+export const staticIterationFrame = (
+  ordinal: number,
+  value: StaticValue.Value,
+  span: SourceSpan.SourceSpan,
+): StaticIterationFrame => {
+  if (!Number.isSafeInteger(ordinal) || ordinal < 0)
+    throw new RangeError('Static iteration ordinals must be non-negative safe integers')
+  return Object.freeze({
+    _tag: 'StaticIterationFrame',
+    ordinal,
+    value: StaticValue.presentation(value),
+    span,
+  })
+}
 
 /** Retains one validated byte position in a source static-text literal. */
 export const staticTextFrame = (
@@ -166,6 +266,8 @@ interface FailureBase {
 export interface CompileError extends FailureBase {
   readonly _tag: 'CompileError'
   readonly message: string
+  /** Text provenance retained relative to static parameters until the call boundary. */
+  readonly origin?: TextOrigin
 }
 
 export interface PhaseViolation extends FailureBase {
@@ -231,6 +333,15 @@ const diagnosticTrace = (trace: Trace): ReadonlyArray<Diagnostic.StaticTraceFram
             span: frame.span,
           }),
         ]
+      if (frame._tag === 'StaticIterationFrame')
+        return [
+          Object.freeze({
+            kind: 'SelectedArm',
+            label: `static for element ${frame.ordinal}`,
+            arguments: Object.freeze([frame.value]),
+            span: frame.span,
+          }),
+        ]
       return [
         Object.freeze({
           kind: 'SelectedArm',
@@ -270,7 +381,15 @@ export const compileError = (
   message: string,
   span: SourceSpan.SourceSpan,
   trace: Trace,
-): CompileError => Object.freeze({ _tag: 'CompileError', message, span, trace: frozenTrace(trace) })
+  origin?: TextOrigin,
+): CompileError =>
+  Object.freeze({
+    _tag: 'CompileError',
+    message,
+    span,
+    trace: frozenTrace(trace),
+    ...(origin === undefined ? {} : { origin }),
+  })
 
 /** Creates one rejected crossing from static work into an unavailable phase. */
 export const phaseViolation = (
@@ -540,9 +659,17 @@ export const evaluatePrimitive = (
       )
     if (
       (left._tag === 'BooleanValue' && right._tag === 'BooleanValue') ||
+      (left._tag === 'CharacterValue' && right._tag === 'CharacterValue') ||
       (left._tag === 'IntegerValue' && right._tag === 'IntegerValue')
     ) {
       const equal = left.value === right.value
+      return complete(StaticValue.boolean(operation === 'Equals' ? equal : !equal))
+    }
+    if (
+      (left._tag === 'UnitValue' && right._tag === 'UnitValue') ||
+      (left._tag === 'TextValue' && right._tag === 'TextValue')
+    ) {
+      const equal = StaticValue.equals(left, right)
       return complete(StaticValue.boolean(operation === 'Equals' ? equal : !equal))
     }
     if (left._tag === 'FloatValue' && right._tag === 'FloatValue') {
@@ -846,7 +973,13 @@ export const staticTextSlice = (
     )
   return admittedValue(
     environment,
-    { _tag: 'TextValue', bytes: text.bytes.slice(Number(start), Number(end)) },
+    {
+      _tag: 'TextValue',
+      bytes: text.bytes.slice(Number(start), Number(end)),
+      ...(text.origin === undefined
+        ? {}
+        : { origin: sliceTextOrigin(text.origin, Number(start), Number(end)) }),
+    },
     'StaticEvaluation.inspectStaticText',
     literal,
     appendTrace(trace, staticTextFrame(literal, Number(start))),
@@ -912,6 +1045,8 @@ export const localValueKey = (
 
 export interface FactEvaluationContext {
   readonly environment: TargetEnvironment
+  /** Concrete declaration arguments retained while interpreting a generic static body. */
+  readonly typeSubstitution?: Type.Substitution
   readonly values: ReadonlyMap<string, StaticValue.Value>
   /** Source provenance retained separately from canonical value identity. */
   readonly valueSpans: ReadonlyMap<string, SourceSpan.SourceSpan>
@@ -923,6 +1058,12 @@ export interface FactEvaluationContext {
   readonly returnedTextSpan?: { value: SourceSpan.SourceSpan | undefined }
   readonly returnedTextOrigin?: { value: TextOrigin | undefined }
   readonly trace: Trace
+  readonly reflect: (
+    owner: Type.Type,
+    kind: 'Type' | 'Fields',
+    span: SourceSpan.SourceSpan,
+    trace: Trace,
+  ) => Outcome<StaticValue.Value>
   readonly call: (
     declaration: DeclarationFacts.DeclarationFact,
     arguments_: ReadonlyArray<StaticValue.Value>,
@@ -931,7 +1072,7 @@ export interface FactEvaluationContext {
     span: SourceSpan.SourceSpan,
     trace: Trace,
     identity: {
-      readonly typeArguments: ReadonlyArray<string>
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly evidence: ReadonlyArray<string>
       readonly contractRow: ReadonlyArray<string>
     },
@@ -1013,6 +1154,31 @@ const evaluateArguments = (
   return complete(Object.freeze(values))
 }
 
+const intrinsicTypeArgument = (
+  fact: Extract<Elaboration.ExpressionFact, { readonly _tag: 'Call' }>,
+  ordinal: number,
+  substitution: Type.Substitution = new Map(),
+): Type.Type | undefined => {
+  if (fact.contract._tag !== 'Compatible') return undefined
+  const argument = fact.contract.typeArguments.at(ordinal)
+  if (argument === undefined) return undefined
+  const specialized = Type.substituteGenericArgument(argument, substitution)
+  return Type.isTypeArgument(specialized) ? specialized : undefined
+}
+
+const reflectedAggregateKindCode = (kind: StaticValue.AggregateKind): bigint => {
+  switch (kind) {
+    case 'Named':
+      return 0n
+    case 'Positional':
+      return 1n
+    case 'AnonymousNamed':
+      return 2n
+    case 'AnonymousPositional':
+      return 3n
+  }
+}
+
 const staticTextSpan = (
   fact: Elaboration.ExpressionFact,
   context: FactEvaluationContext,
@@ -1041,14 +1207,21 @@ const staticTextSpan = (
   return undefined
 }
 
-const staticTextOrigin = (
+/** Resolves static-text provenance for one analyzed expression without changing value identity. */
+export interface TextOriginContext {
+  readonly valueOrigins: ReadonlyMap<string, TextOrigin>
+  readonly expressionOrigins: ReadonlyMap<Elaboration.ExpressionFact, TextOrigin>
+}
+
+export const staticTextOrigin = (
   fact: Elaboration.ExpressionFact,
-  context: FactEvaluationContext,
+  context: TextOriginContext,
 ): TextOrigin | undefined => {
   const evaluated = context.expressionOrigins.get(fact)
   if (evaluated !== undefined) return evaluated
   if (fact._tag === 'Call' && fact.staticTextOrigin !== undefined) return fact.staticTextOrigin
-  if (fact._tag === 'StaticText') return sourceTextOrigin(fact.token?.span ?? fact.syntax.span)
+  if (fact._tag === 'StaticText')
+    return sourceTextOrigin(fact.token?.span ?? fact.syntax.span, fact.data)
   if (fact._tag === 'Grouped') return staticTextOrigin(fact.expression, context)
   if (fact._tag === 'Move') return staticTextOrigin(fact.subject, context)
   if (fact._tag === 'Identifier') {
@@ -1128,7 +1301,11 @@ export const evaluateFact = (
         ? unavailableFact(fact, context, 'static text value is unavailable')
         : admittedValue(
             context.environment,
-            { _tag: 'TextValue', bytes: fact.data.bytes },
+            {
+              _tag: 'TextValue',
+              bytes: fact.data.bytes,
+              origin: sourceTextOrigin(fact.token?.span ?? fact.syntax.span, fact.data),
+            },
             'StaticEvaluation.evaluateFact',
             fact.syntax.span,
             context.trace,
@@ -1253,6 +1430,19 @@ export const evaluateFact = (
         context.trace,
       )
     }
+    case 'FieldProjection': {
+      if (fact.state._tag !== 'Resolved')
+        return unavailableFact(fact, context, 'projected static field is unavailable')
+      const subject = evaluateFact(fact.subject, context)
+      if (subject._tag === 'Failed') return subject
+      if (subject.value._tag !== 'AggregateValue')
+        return unavailableFact(fact, context, 'field projection depends on runtime storage')
+      const ordinal = fact.state.field.id.ordinal
+      const field = subject.value.fields.find((candidate) => candidate.ordinal === ordinal)
+      return field === undefined
+        ? unavailableFact(fact, context, 'projected static field has no admitted value')
+        : complete(field.value)
+    }
     case 'Identifier': {
       const reference = fact.reference
       let value: StaticValue.Value | undefined
@@ -1260,8 +1450,11 @@ export const evaluateFact = (
         value = context.values.get(localValueKey(reference.parameter))
       else if (reference._tag === 'ResolvedBinding')
         value = context.values.get(localValueKey(reference.binding))
-      return value === undefined
-        ? unavailableFact(fact, context, 'identifier depends on runtime storage')
+      if (value === undefined)
+        return unavailableFact(fact, context, 'identifier depends on runtime storage')
+      const origin = staticTextOrigin(fact, context)
+      return value._tag === 'TextValue' && origin !== undefined
+        ? complete(Object.freeze({ ...value, origin }))
         : complete(value)
     }
     case 'EnumMember': {
@@ -1344,6 +1537,156 @@ export const evaluateFact = (
         const operation = fact.reference.intrinsic.id.name
         if (operation === 'targetProfile')
           return targetProfile(context.environment, fact.syntax.span, context.trace)
+        const typeArgument = intrinsicTypeArgument(fact, 0, context.typeSubstitution)
+        if (operation === 'reflectType' || operation === 'reflectFields') {
+          if (typeArgument === undefined)
+            return unavailableFact(fact, context, `${operation} requires one concrete owner type`)
+          return context.reflect(
+            typeArgument,
+            operation === 'reflectType' ? 'Type' : 'Fields',
+            fact.syntax.span,
+            context.trace,
+          )
+        }
+        if (operation === 'reflectTypeKind') {
+          const descriptor = arguments_.value.at(0)
+          if (descriptor?._tag !== 'TypeDescriptorValue')
+            return unavailableFact(fact, context, `${operation} requires one type descriptor`)
+          return admittedValue(
+            context.environment,
+            {
+              _tag: 'IntegerValue',
+              type: 'u8',
+              value: reflectedAggregateKindCode(descriptor.kind),
+            },
+            'StaticEvaluation.reflectTypeKind',
+            fact.syntax.span,
+            context.trace,
+          )
+        }
+        if (operation.startsWith('reflectField')) {
+          const descriptor = arguments_.value.at(0)
+          if (descriptor?._tag !== 'FieldDescriptorValue')
+            return unavailableFact(fact, context, `${operation} requires one field descriptor`)
+          if (operation === 'reflectFieldKind')
+            return admittedValue(
+              context.environment,
+              {
+                _tag: 'IntegerValue',
+                type: 'u8',
+                value: descriptor.member._tag === 'LabeledField' ? 0n : 1n,
+              },
+              'StaticEvaluation.reflectFieldKind',
+              fact.syntax.span,
+              context.trace,
+            )
+          if (operation === 'reflectFieldLabel')
+            return descriptor.member._tag === 'LabeledField'
+              ? admittedValue(
+                  context.environment,
+                  {
+                    _tag: 'TextValue',
+                    bytes: Array.from(new TextEncoder().encode(descriptor.member.label)),
+                  },
+                  'StaticEvaluation.reflectFieldLabel',
+                  fact.syntax.span,
+                  context.trace,
+                )
+              : unavailableFact(fact, context, `${operation} cannot read a positional field`)
+          if (operation === 'reflectFieldOrdinal')
+            return descriptor.member._tag === 'PositionalField'
+              ? admittedValue(
+                  context.environment,
+                  {
+                    _tag: 'IntegerValue',
+                    type: 'usize',
+                    value: BigInt(descriptor.member.ordinal),
+                  },
+                  'StaticEvaluation.reflectFieldOrdinal',
+                  fact.syntax.span,
+                  context.trace,
+                )
+              : unavailableFact(fact, context, `${operation} cannot read a labeled field`)
+          return unavailableFact(fact, context, `${operation} is not admitted reflection metadata`)
+        }
+        if (operation === 'staticSequenceEmpty') {
+          if (typeArgument === undefined)
+            return unavailableFact(fact, context, `${operation} requires one concrete element type`)
+          return admittedValue(
+            context.environment,
+            StaticValue.emptySequence(typeArgument),
+            'StaticEvaluation.staticSequenceEmpty',
+            fact.syntax.span,
+            context.trace,
+          )
+        }
+        if (operation.startsWith('staticSequence')) {
+          if (typeArgument === undefined)
+            return unavailableFact(fact, context, `${operation} requires one concrete element type`)
+          const sequence = arguments_.value.at(0)
+          if (sequence?._tag !== 'StaticSequenceValue')
+            return unavailableFact(fact, context, `${operation} requires one static sequence`)
+          if (operation === 'staticSequenceLength')
+            return admittedValue(
+              context.environment,
+              {
+                _tag: 'IntegerValue',
+                type: 'usize',
+                value: BigInt(StaticValue.sequenceLength(sequence)),
+              },
+              'StaticEvaluation.staticSequenceLength',
+              fact.syntax.span,
+              context.trace,
+            )
+          if (operation === 'staticSequenceAppend') {
+            const value = arguments_.value.at(1)
+            if (value === undefined)
+              return unavailableFact(fact, context, `${operation} requires one static value`)
+            const appended = StaticValue.appendSequence(sequence, typeArgument, value)
+            return appended === undefined
+              ? unavailableFact(fact, context, `${operation} element type does not match`)
+              : admittedValue(
+                  context.environment,
+                  appended,
+                  'StaticEvaluation.staticSequenceAppend',
+                  fact.syntax.span,
+                  context.trace,
+                )
+          }
+          if (operation === 'staticSequenceConcat') {
+            const right = arguments_.value.at(1)
+            if (right?._tag !== 'StaticSequenceValue')
+              return unavailableFact(fact, context, `${operation} requires two static sequences`)
+            const concatenated = StaticValue.concatenateSequences(sequence, right)
+            return concatenated === undefined
+              ? unavailableFact(fact, context, `${operation} element types do not match`)
+              : admittedValue(
+                  context.environment,
+                  concatenated,
+                  'StaticEvaluation.staticSequenceConcat',
+                  fact.syntax.span,
+                  context.trace,
+                )
+          }
+          if (operation === 'staticSequenceAt') {
+            const index = arguments_.value.at(1)
+            if (
+              index?._tag !== 'IntegerValue' ||
+              index.value < 0n ||
+              index.value > BigInt(Number.MAX_SAFE_INTEGER)
+            )
+              return unavailableFact(fact, context, `${operation} requires one static index`)
+            const element = StaticValue.sequenceElement(sequence, Number(index.value))
+            return element === undefined
+              ? unavailableFact(fact, context, `${operation} index is out of bounds`)
+              : complete(element)
+          }
+          return unavailableFact(
+            fact,
+            context,
+            `${operation} is not an admitted sequence operation`,
+          )
+        }
         const text = arguments_.value.at(0)
         const argument = fact.arguments.at(0)
         const literal =
@@ -1371,8 +1714,16 @@ export const evaluateFact = (
           if (sliced._tag === 'Complete') {
             const origin =
               argument === undefined ? undefined : staticTextOrigin(argument.expression, context)
-            if (origin !== undefined) context.expressionOrigins.set(fact, origin)
+            const slicedOrigin =
+              origin === undefined
+                ? undefined
+                : sliceTextOrigin(origin, Number(first.value), Number(second.value))
+            if (slicedOrigin !== undefined) {
+              context.expressionOrigins.set(fact, slicedOrigin)
+            }
             context.expressionSpans.set(fact, literal)
+            if (slicedOrigin !== undefined && sliced.value._tag === 'TextValue')
+              return complete(Object.freeze({ ...sliced.value, origin: slicedOrigin }))
           }
           return sliced
         }
@@ -1385,14 +1736,22 @@ export const evaluateFact = (
             fact.arguments.map((argument) => staticTextSpan(argument.expression, context)),
           ),
           Object.freeze(
-            fact.arguments.map((argument) => staticTextOrigin(argument.expression, context)),
+            fact.arguments.map((argument, ordinal) => {
+              const value = arguments_.value.at(ordinal)
+              return (
+                staticTextOrigin(argument.expression, context) ??
+                (value?._tag === 'TextValue' ? value.origin : undefined)
+              )
+            }),
           ),
           fact.syntax.span,
           context.trace,
           Object.freeze({
             typeArguments: Object.freeze(
               fact.contract._tag === 'Compatible'
-                ? fact.contract.typeArguments.map(Type.genericArgumentKey)
+                ? fact.contract.typeArguments.map((argument) =>
+                    Type.substituteGenericArgument(argument, context.typeSubstitution ?? new Map()),
+                  )
                 : [],
             ),
             evidence: Object.freeze(
@@ -1414,11 +1773,13 @@ export const evaluateFact = (
       if (message._tag === 'Failed') return message
       if (message.value._tag !== 'TextValue')
         return unavailableFact(fact, context, 'compileError message must be static text')
+      const origin = staticTextOrigin(fact.message, context) ?? message.value.origin
       return failed(
         compileError(
           new TextDecoder().decode(Uint8Array.from(message.value.bytes)),
-          fact.syntax.span,
+          (origin === undefined ? undefined : textOriginSpan(origin)) ?? fact.syntax.span,
           context.trace,
+          origin,
         ),
       )
     }
@@ -1764,8 +2125,10 @@ export interface EvaluationContext<A> {
   readonly trace: Trace
   readonly budget: () => Budget
   readonly step: (amount?: number) => StaticFailure | undefined
+  readonly stepAt: (trace: Trace, amount?: number) => StaticFailure | undefined
   readonly retain: (value: StaticValue.Value) => StaticFailure | undefined
   readonly growResidual: (nodes?: number) => StaticFailure | undefined
+  readonly growResidualAt: (trace: Trace, nodes?: number) => StaticFailure | undefined
   readonly withTrace: (...frames: ReadonlyArray<TraceFrame>) => EvaluationContext<A>
   readonly evaluate: (
     application: Application,
@@ -1826,6 +2189,7 @@ const contextOf = <A>(
     trace,
     budget: () => budget(self),
     step: (amount = 1) => charge(self, 'steps', amount, 'StepLimit', trace),
+    stepAt: (at: Trace, amount = 1) => charge(self, 'steps', amount, 'StepLimit', at),
     retain: (value: StaticValue.Value) =>
       charge(
         self,
@@ -1835,6 +2199,8 @@ const contextOf = <A>(
         trace,
       ),
     growResidual: (nodes = 1) => charge(self, 'residualNodes', nodes, 'ResidualGrowthLimit', trace),
+    growResidualAt: (at: Trace, nodes = 1) =>
+      charge(self, 'residualNodes', nodes, 'ResidualGrowthLimit', at),
     withTrace: (...frames: ReadonlyArray<TraceFrame>) =>
       contextOf(self, application, appendTrace(trace, ...frames)),
     evaluate: (nested: Application, callback: EvaluationCallback<A>) =>

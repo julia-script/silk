@@ -397,7 +397,7 @@ it.effect(
       }
       const catalog = Intrinsic.all().flatMap((actor) =>
         actor.operations.flatMap((operation) =>
-          operation.rule._tag === 'EnumValueRule' || operation.rule._tag === 'StaticOnlyRule'
+          operation.rule._tag === 'EnumValueRule' || operation.phase !== 'Runtime'
             ? []
             : [key(actor.spelling, operation.spelling)],
         ),
@@ -413,7 +413,11 @@ it.effect('keeps every intrinsic identifiable and presentable in rejected calls'
   Effect.gen(function* () {
     for (const actor of Intrinsic.all())
       for (const operation of actor.operations) {
-        if (operation.rule._tag === 'EnumValueRule' || operation.rule._tag === 'StaticOnlyRule')
+        if (
+          operation.rule._tag === 'EnumValueRule' ||
+          operation.rule._tag === 'StaticOnlyRule' ||
+          operation.rule._tag === 'MixedFieldProjectionRule'
+        )
           continue
         const arguments_ = operation.parameters.length === 0 ? '0' : ''
         const source =
@@ -644,6 +648,73 @@ it('classifies targetProfile as a static-only u8 intrinsic with no runtime ident
     phase: 'StaticOnly',
     admission: 'Language',
     consumer: 'silk/target.profile',
+    targets: [],
+  })
+})
+
+it('keeps reflection metadata and static sequences sealed to static evaluation', () => {
+  const operations = [
+    ['reflectType', 1],
+    ['reflectFields', 1],
+    ['reflectTypeKind', 1],
+    ['reflectFieldKind', 2],
+    ['reflectFieldLabel', 2],
+    ['reflectFieldOrdinal', 2],
+    ['staticSequenceEmpty', 1],
+    ['staticSequenceAppend', 1],
+    ['staticSequenceConcat', 1],
+    ['staticSequenceLength', 1],
+    ['staticSequenceAt', 1],
+  ] as const
+  for (const [name, arity] of operations) {
+    const operation = Intrinsic.findOperation('Intrinsic', name)
+    assert.isDefined(operation)
+    if (operation === undefined) continue
+    assert.strictEqual(operation.phase, 'StaticOnly')
+    assert.strictEqual(operation.rule._tag, 'StaticOnlyRule')
+    assert.strictEqual(operation.typeParameters.length, arity)
+    assert.deepEqual(operation.targets, [])
+  }
+  for (const [name, arity] of [
+    ['Intrinsic.Type', 1],
+    ['Intrinsic.Fields', 1],
+    ['Intrinsic.Field', 2],
+    ['Intrinsic.StaticSequence', 1],
+  ] as const) {
+    const nominal = Type.intrinsicNominals.get(name)
+    assert.isDefined(nominal)
+    if (nominal === undefined) continue
+    assert.strictEqual(Type.intrinsicNominalArity(nominal), arity)
+    assert.isFalse(Type.runtimeAvailable(nominal))
+  }
+})
+
+it('models borrowField as one mixed shared lane plus one consumed static lane', () => {
+  const operation = Intrinsic.findOperation('Intrinsic', 'borrowField')
+  assert.isDefined(operation)
+  if (operation === undefined) return
+  assert.strictEqual(operation.phase, 'Mixed')
+  assert.strictEqual(operation.rule._tag, 'MixedFieldProjectionRule')
+  assert.deepEqual(operation.parameters, [
+    { name: 'owner', type: '&Owner' },
+    { name: 'field', type: 'Field<Owner, Value>', phase: 'Static' },
+  ])
+  assert.strictEqual(operation.returnedBorrowParameter, 0)
+  assert.strictEqual(
+    Intrinsic.signature(operation),
+    'fn Intrinsic.borrowField<Owner, Value>(owner: &Owner, static field: Field<Owner, Value>) -> &Value',
+  )
+  const entry = Intrinsic.inventory().find(
+    (candidate) => candidate.operation === 'Intrinsic.borrowField',
+  )
+  assert.deepEqual(entry, {
+    operation: 'Intrinsic.borrowField',
+    signature:
+      'fn Intrinsic.borrowField<Owner, Value>(owner: &Owner, static field: Field<Owner, Value>) -> &Value',
+    unsafe: false,
+    phase: 'Mixed',
+    admission: 'Language',
+    consumer: 'silk/reflect.borrowField',
     targets: [],
   })
 })

@@ -6,6 +6,7 @@ import {
   consumeTrivia,
   currentToken,
   expect,
+  missingToken,
   nextSignificantKind,
   peek,
   syntaxNode,
@@ -13,6 +14,7 @@ import {
 import * as SyntaxTree from '../SyntaxTree.js'
 import type * as Token from '../Token.js'
 import {
+  hasContextualSpelling,
   isUniversalPatternStart,
   parseExpression,
   parseIdentifierExpression,
@@ -281,6 +283,85 @@ export const parseStaticConditionalStatement = (initial: State): NodeResult => {
   })
 }
 
+const missingExpected = (initial: State, expected: Token.TokenKind): ElementsResult => {
+  const leading = consumeTrivia(initial)
+  const missing = missingToken(leading.state, expected)
+  return Object.freeze({
+    state: addDiagnostic(leading.state, Diagnostic.missingToken(expected, missing.span)),
+    elements: Object.freeze([...leading.elements, missing]),
+  })
+}
+
+const staticForBodyBoundary: ReadonlyArray<Token.TokenKind> = Object.freeze([
+  'LetKeyword',
+  'StaticKeyword',
+  'IfKeyword',
+  'WhileKeyword',
+  'BreakKeyword',
+  'ContinueKeyword',
+  'ReturnKeyword',
+  'FailKeyword',
+  'DropKeyword',
+  'UnsafeKeyword',
+  ...expressionStarts,
+  'RightBrace',
+  'ElseKeyword',
+  'PubKeyword',
+  'ConstKeyword',
+  'StructKeyword',
+  'TupleKeyword',
+  'EnumKeyword',
+  'UnionKeyword',
+  'ServiceKeyword',
+  'InterfaceKeyword',
+  'RoleKeyword',
+  'FnKeyword',
+  'EffectKeyword',
+  'ImportKeyword',
+  'ImplKeyword',
+  'EndOfFile',
+])
+
+const parseStaticForBody = (initial: State): NodeResult => {
+  if (nextSignificantKind(initial) === 'LeftBrace') return parseBlock(initial, false)
+
+  const leftBrace = expect(initial, 'LeftBrace', staticForBodyBoundary)
+  const rightBrace = expect(leftBrace.state, 'RightBrace', staticForBodyBoundary)
+  return Object.freeze({
+    state: rightBrace.state,
+    node: syntaxNode(rightBrace.state, 'Block', [...leftBrace.elements, ...rightBrace.elements]),
+  })
+}
+
+export const parseStaticForStatement = (initial: State): NodeResult => {
+  const staticKeyword = expect(initial, 'StaticKeyword', ['ForKeyword', 'Identifier'])
+  const forKeyword = expect(staticKeyword.state, 'ForKeyword', [
+    'Identifier',
+    ...expressionStarts,
+    'LeftBrace',
+    'RightBrace',
+  ])
+  const binding = hasContextualSpelling(forKeyword.state, 'in')
+    ? missingExpected(forKeyword.state, 'Identifier')
+    : expect(forKeyword.state, 'Identifier', [...expressionStarts, 'LeftBrace', 'RightBrace'])
+  const inKeyword = hasContextualSpelling(binding.state, 'in')
+    ? expect(binding.state, 'Identifier', [...expressionStarts, 'LeftBrace', 'RightBrace'])
+    : missingExpected(binding.state, 'Identifier')
+  const iterable = parseExpression(inKeyword.state, 0, 'Identifier', false, ExpressionNesting.root)
+  const body = parseStaticForBody(iterable.state)
+  return Object.freeze({
+    state: body.state,
+    node: syntaxNode(body.state, 'StaticForStatement', [
+      ...staticKeyword.elements,
+      ...forKeyword.elements,
+      ...binding.elements,
+      ...inKeyword.elements,
+      iterable.node,
+      body.node,
+    ]),
+  })
+}
+
 export function parseWhileStatement(initial: State): NodeResult {
   const keyword = expect(initial, 'WhileKeyword', [...expressionStarts, 'LeftBrace', 'RightBrace'])
   const condition = parseExpression(keyword.state, 0, 'Identifier', false, ExpressionNesting.root)
@@ -325,6 +406,7 @@ export const startsBlockStatement = (state: State): boolean => {
     kind === 'DropKeyword' ||
     kind === 'UnsafeKeyword' ||
     (kind === 'StaticKeyword' && peek(state, 1) === 'IfKeyword') ||
+    (kind === 'StaticKeyword' && peek(state, 1) === 'ForKeyword') ||
     kind === 'IfKeyword' ||
     kind === 'WhileKeyword' ||
     kind === 'BreakKeyword' ||
@@ -378,6 +460,7 @@ export const parseErrorStatement = (initial: State): NodeResult => {
         '`return`',
         '`if`',
         '`static if`',
+        '`static for`',
         '`while`',
         '`fail`',
         '`drop`',
@@ -428,6 +511,7 @@ const parseBlockChild = (state: State): NodeResult => {
       return parseConditionalStatement(state)
     case 'StaticKeyword':
       if (peek(state, 1) === 'IfKeyword') return parseStaticConditionalStatement(state)
+      if (peek(state, 1) === 'ForKeyword') return parseStaticForStatement(state)
       return parseErrorStatement(state)
     case 'WhileKeyword':
       return parseWhileStatement(state)

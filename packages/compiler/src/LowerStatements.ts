@@ -362,7 +362,16 @@ export const lowerSequence = (
     const forwardedResultEffect =
       forwardedRequirement === undefined
         ? undefined
-        : fn.call(statement.initializer.span)?.resultEffect
+        : fn.call(
+            statement.initializer.span,
+            undefined,
+            statement.initializer._tag === 'EffectConstruct'
+              ? statement.initializer.typeArguments.map((argument) => fn.semanticArgument(argument))
+              : undefined,
+            statement.initializer._tag === 'EffectConstruct'
+              ? statement.initializer.staticArguments
+              : undefined,
+          )?.resultEffect
     const protectedRecipe =
       forwardedRequirement === undefined
         ? undefined
@@ -377,11 +386,22 @@ export const lowerSequence = (
       forwardedRequirementNeedsRecipe ||
       statement.initializer._tag === 'ServiceEffectConstruct' ||
       (statement.initializer._tag === 'EffectConstruct' &&
-        fn.call(statement.initializer.span)?.resultEffect === undefined &&
+        fn.call(
+          statement.initializer.span,
+          undefined,
+          statement.initializer.typeArguments.map((argument) => fn.semanticArgument(argument)),
+          statement.initializer.staticArguments,
+        )?.resultEffect === undefined &&
         fn.effectResults.get(
           instanceText(
             statement.initializer.target,
             statement.initializer.typeArguments.map((argument) => fn.semanticArgument(argument)),
+            fn.call(
+              statement.initializer.span,
+              undefined,
+              statement.initializer.typeArguments.map((argument) => fn.semanticArgument(argument)),
+              statement.initializer.staticArguments,
+            )?.target.staticArguments ?? statement.initializer.staticArguments,
           ),
         ) === undefined) ||
       statement.initializer._tag === 'EffectBindRequirement' ||

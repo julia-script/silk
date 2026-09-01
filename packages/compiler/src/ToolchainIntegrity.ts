@@ -273,7 +273,7 @@ const installedComponents = (): ReadonlyArray<Component> => {
         ],
   )
   const runtime = Intrinsic.inventory().flatMap<Component>((entry) =>
-    entry.phase === 'StaticOnly'
+    entry.phase !== 'Runtime'
       ? []
       : entry.targets.map((target) =>
           Object.freeze({

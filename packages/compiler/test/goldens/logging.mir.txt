@@ -154,7 +154,7 @@ static-data text:696e666f20616c696173 bytes=696e666f20616c696173 align=1 address
 static-data text:7365636f6e640a6c696e65 bytes=7365636f6e640a6c696e65 align=1 address=i64 length=usize:i64
 static-data text:7472616365 bytes=7472616365 align=1 address=i64 length=usize:i64
 static-data text:7761726e696e67 bytes=7761726e696e67 align=1 address=i64 length=usize:i64
-usize-literal 20 bits=64 available [17696, 17698)
+usize-literal 20 bits=64 available [27348, 27350)
 usize-literal 0 bits=64 available [2180, 2181)
 usize-literal 0 bits=64 available [2396, 2397)
 usize-literal 1 bits=64 available [2500, 2501)

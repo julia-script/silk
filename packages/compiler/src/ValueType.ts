@@ -13,6 +13,7 @@ import type {} from './LowerExpression.js'
 import type * as Mir from './Mir.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as Specialization from './Specialization.js'
+import type * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
 
 export interface GeneratedBlockEffectRunner {
@@ -71,7 +72,8 @@ export type GeneratedEffectRunner =
 export const instanceText = (
   declaration: { readonly module: string; readonly name: string },
   typeArguments: ReadonlyArray<Type.GenericArgument>,
-): string => Specialization.key({ declaration, typeArguments })
+  staticArguments: ReadonlyArray<StaticValue.Value> = Object.freeze([]),
+): string => Specialization.key({ declaration, typeArguments, staticArguments })
 
 export const effectEntryAdapterId = (module: string): DeclarationFacts.CanonicalId =>
   Object.freeze({
@@ -88,7 +90,7 @@ export const unitEntryAdapterId = (module: string): DeclarationFacts.CanonicalId
   })
 
 export const baseRunnerKey = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): string =>
-  `${instanceText(owner.declaration, owner.typeArguments)}\u0000${Hir.executableSiteKey(site)}`
+  `${instanceText(owner.declaration, owner.typeArguments, owner.staticArguments)}\u0000${Hir.executableSiteKey(site)}`
 
 export const witnessKey = (witness: DeclarationFacts.ConformanceWitness): string =>
   witness._tag === 'SourceConformanceWitness'
@@ -103,11 +105,17 @@ export const witnessKey = (witness: DeclarationFacts.ConformanceWitness): string
 export const providedContractEntry = (requirement: Omit<ProvidedRequirement, 'local'>): string =>
   `provided:${Type.key(requirement.capability)}@${requirement.role}:${requirement.requirementAccess}:${requirement.access}:${Type.key(requirement.providerType)}:${requirement.witness._tag}`
 
+const effectRunnerKey = (type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>): string =>
+  baseRunnerKey(
+    type.storage?.realization.runnerInstance ?? type.environment.instance,
+    type.storage?.realization.site ?? type.site,
+  )
+
 export const providedRunnerKey = (
   type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>,
   requirements: ReadonlyArray<ProvidedRequirement>,
 ): string =>
-  `${baseRunnerKey(type.environment.instance, type.site)}\u0000${requirements
+  `${effectRunnerKey(type)}\u0000${requirements
     .map(
       (requirement) =>
         `${Type.key(requirement.capability)}@${requirement.role}:${requirement.access}:${Type.key(requirement.providerType)}:${witnessKey(requirement.witness)}`,
@@ -122,8 +130,7 @@ export const effectValueType = (
   const environment = layout.effectEnvironments.find(
     (candidate) =>
       candidate._tag === 'EffectEnvironment' &&
-      instanceText(candidate.instance.declaration, candidate.instance.typeArguments) ===
-        instanceText(instance.declaration, instance.typeArguments) &&
+      Instances.keyText(candidate.instance) === Instances.keyText(instance) &&
       Hir.sameExecutableSite(candidate.site, block.site),
   )
   if (environment?._tag !== 'EffectEnvironment') return undefined
@@ -143,8 +150,7 @@ export const effectValueAtSite = (
   const environment = layout.effectEnvironments.find(
     (candidate) =>
       candidate._tag === 'EffectEnvironment' &&
-      instanceText(candidate.instance.declaration, candidate.instance.typeArguments) ===
-        instanceText(instance.declaration, instance.typeArguments) &&
+      Instances.keyText(candidate.instance) === Instances.keyText(instance) &&
       Hir.sameExecutableSite(candidate.site, site),
   )
   return environment?._tag !== 'EffectEnvironment'
@@ -466,7 +472,7 @@ export const ensureProvidedRunner = (
   const key = providedRunnerKey(type, requirements)
   const existing = fn.generatedRunners.find((candidate) => candidate.specializationKey === key)
   if (existing !== undefined) return existing.id
-  const baseKey = baseRunnerKey(type.environment.instance, type.site)
+  const baseKey = effectRunnerKey(type)
   const base = fn.generatedRunners.find((candidate) => candidate.specializationKey === baseKey)
   if (base === undefined) return undefined
   const id: DeclarationFacts.CanonicalId = Object.freeze({
@@ -535,8 +541,7 @@ export const callableValueType = (
       candidate,
     ): candidate is Extract<Layout.CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> =>
       candidate._tag === 'CallableEnvironment' &&
-      instanceText(candidate.callable.owner.declaration, candidate.callable.owner.typeArguments) ===
-        instanceText(fn.owner.key.declaration, fn.owner.key.typeArguments) &&
+      Instances.keyText(candidate.callable.owner) === Instances.keyText(fn.owner.key) &&
       sameSite(candidate.callable.site, section.site) &&
       (!Type.isRuntimeConcrete(expected) || Type.equals(candidate.callable.type, expected)),
   )

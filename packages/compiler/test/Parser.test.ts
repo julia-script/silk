@@ -3423,6 +3423,122 @@ pub static fn render(static template: string, value: string) -> () {
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
 
+it('parses static iteration losslessly with contextual in and complete spans', () => {
+  const source = `fn render() -> () {
+  static // phase boundary
+  for field // current descriptor
+  in Reflect.fields<Args>() {
+    display(field)
+  }
+}`
+  const result = parseText('memory/static-for', source)
+  const iteration = descendants(result.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'StaticForStatement',
+  )
+  assert.notStrictEqual(iteration, undefined)
+  if (iteration === undefined) return
+
+  const directTokens = iteration.children.filter(SyntaxTree.isToken)
+  const identifiers = directTokens.filter((token) => token.kind === 'Identifier')
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.deepEqual(
+    directTokens
+      .filter(
+        (token) =>
+          token.kind !== 'Whitespace' &&
+          token.kind !== 'LineComment' &&
+          token.kind !== 'DocComment' &&
+          token.kind !== 'ModuleDocComment',
+      )
+      .map((token) => token.kind),
+    ['StaticKeyword', 'ForKeyword', 'Identifier', 'Identifier'],
+  )
+  assert.deepEqual(
+    identifiers.map((token) =>
+      Array.from(Option.getOrThrow(SourceFile.slice(result.source, token.span)), (byte) =>
+        String.fromCharCode(byte),
+      ).join(''),
+    ),
+    ['field', 'in'],
+  )
+  assert.deepEqual(
+    iteration.children.filter(SyntaxTree.isNode).map((node) => node.kind),
+    ['CallExpression', 'Block'],
+  )
+  const staticOffset = source.indexOf('static')
+  const forOffset = source.indexOf('for', staticOffset)
+  const staticSpan = SyntaxTree.directToken(iteration, 'StaticKeyword')?.span
+  const forSpan = SyntaxTree.directToken(iteration, 'ForKeyword')?.span
+  assert.strictEqual(staticSpan?.sourceId, result.source.id)
+  assert.strictEqual(staticSpan?.start, staticOffset)
+  assert.strictEqual(staticSpan?.end, staticOffset + 'static'.length)
+  assert.strictEqual(forSpan?.sourceId, result.source.id)
+  assert.strictEqual(forSpan?.start, forOffset)
+  assert.strictEqual(forSpan?.end, forOffset + 'for'.length)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('recovers damaged static iterations without consuming following statements', () => {
+  const fixtures = [
+    'static for in fields { display(1) }',
+    'static for field fields { display(field) }',
+    'static for field in { display(field) }',
+    'static for field in fields',
+  ]
+
+  for (const [ordinal, damaged] of fixtures.entries()) {
+    const source = `fn broken() -> i32 {
+  ${damaged}
+  return 7
+}`
+    const result = parseText(`memory/static-for-recovery-${ordinal}`, source)
+    const declaration = directFunctionDeclarations(result.root).at(0) ?? result.root
+    const body = SyntaxTree.directNode(declaration, 'Block') ?? declaration
+    const statements = body.children.filter(SyntaxTree.isNode)
+    const iteration = statements.find((statement) => statement.kind === 'StaticForStatement')
+    const following = statements.find((statement) => statement.kind === 'ReturnStatement')
+
+    assert.isTrue(result.parserDiagnostics.length > 0, `fixture ${ordinal}`)
+    assert.notStrictEqual(iteration, undefined, `fixture ${ordinal}`)
+    assert.notStrictEqual(following, undefined, `fixture ${ordinal}`)
+    assert.isTrue(missingLeaves(iteration ?? result.root).length > 0, `fixture ${ordinal}`)
+    if (ordinal === 3) {
+      assert.deepEqual(
+        missingLeaves(iteration ?? result.root).map((missing) => missing.expected),
+        ['LeftBrace', 'RightBrace'],
+      )
+    }
+    assert.deepEqual(missingLeaves(following ?? result.root), [], `fixture ${ordinal}`)
+    assertOriginalTokenTraversal(result)
+    assert.deepEqual(reconstructedBytes(result), ascii(source), `fixture ${ordinal}`)
+  }
+})
+
+it('bounds a missing static-iteration closing brace before the following declaration', () => {
+  const source = `fn broken() -> () {
+  static for field in fields {
+    display(field)
+fn kept() -> i32 { return 1 }`
+  const result = parseText('memory/static-for-missing-close', source)
+  const declarations = directFunctionDeclarations(result.root)
+  const kept = declarations.at(-1)
+  const iteration = descendants(declarations.at(0) ?? result.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'StaticForStatement',
+  )
+
+  assert.isTrue(result.parserDiagnostics.length > 0)
+  assert.strictEqual(declarations.length, 2)
+  assert.isTrue(
+    missingLeaves(iteration ?? result.root).some((missing) => missing.expected === 'RightBrace'),
+  )
+  assert.deepEqual(missingLeaves(kept ?? result.root), [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('rejects unsupported static modifier combinations and compileError arities', () => {
   const fixtures = [
     'static unsafe fn bad() -> () {}',
@@ -3446,28 +3562,40 @@ it('rejects unsupported static modifier combinations and compileError arities', 
   }
 })
 
-it('keeps rejected top-level static conditionals bounded before following declarations', () => {
-  const source = `static if true {
+it('keeps rejected top-level static control bounded before following declarations', () => {
+  const fixtures = [
+    `static if true {
   fn hidden() -> () {}
-}
-fn kept() -> i32 { return 1 }`
-  const result = parseText('memory/static-declaration-rejection', source)
-  const declarations = directFunctionDeclarations(result.root)
-  const rootErrors = result.root.children.filter(
-    (element): element is SyntaxTree.Node => SyntaxTree.isNode(element) && element.kind === 'Error',
-  )
+}`,
+    `static for field in fields {
+  use(field)
+}`,
+  ]
 
-  assert.isTrue(result.parserDiagnostics.length > 0)
-  assert.strictEqual(rootErrors.length, 1)
-  assert.strictEqual(declarations.length, 1)
-  assert.deepEqual(missingLeaves(declarations.at(0) ?? result.root), [])
-  assert.isFalse(
-    descendants(result.root).some(
-      (element) => SyntaxTree.isNode(element) && element.kind === 'StaticConditionalStatement',
-    ),
-  )
-  assertOriginalTokenTraversal(result)
-  assert.deepEqual(reconstructedBytes(result), ascii(source))
+  for (const [ordinal, rejected] of fixtures.entries()) {
+    const source = `${rejected}
+fn kept() -> i32 { return 1 }`
+    const result = parseText(`memory/static-declaration-rejection-${ordinal}`, source)
+    const declarations = directFunctionDeclarations(result.root)
+    const rootErrors = result.root.children.filter(
+      (element): element is SyntaxTree.Node =>
+        SyntaxTree.isNode(element) && element.kind === 'Error',
+    )
+
+    assert.isTrue(result.parserDiagnostics.length > 0)
+    assert.strictEqual(rootErrors.length, 1)
+    assert.strictEqual(declarations.length, 1)
+    assert.deepEqual(missingLeaves(declarations.at(0) ?? result.root), [])
+    assert.isFalse(
+      descendants(result.root).some(
+        (element) =>
+          SyntaxTree.isNode(element) &&
+          (element.kind === 'StaticConditionalStatement' || element.kind === 'StaticForStatement'),
+      ),
+    )
+    assertOriginalTokenTraversal(result)
+    assert.deepEqual(reconstructedBytes(result), ascii(source))
+  }
 })
 
 it('keeps compileError dedicated and non-shadowable in value declarations', () => {

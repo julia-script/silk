@@ -30,6 +30,7 @@ import type {
   ExpressionFact,
   ExpressionResult,
   ExpressionTypeFact,
+  FieldProjectionExpressionFact,
   FloatingExpressionFact,
   FunctionFact,
   IdentifierExpressionFact,
@@ -50,6 +51,7 @@ import type {
   ReferentProjectionState,
   SemanticType,
   StatementFact,
+  StaticIterationFact,
   StructInitializerFact,
   StructInitializerState,
   StructTargetFact,
@@ -3802,18 +3804,27 @@ export const analyzeProjection = (
   }
   const typeFact = type === undefined ? unavailableExpressionType : availableExpressionType(type)
   const projectionAccess = borrowAccess ?? reference?.access
+  const projection: FieldProjectionExpressionFact = Object.freeze({
+    _tag: 'FieldProjection',
+    subject: subject.fact,
+    ...(nominal === undefined ? {} : { nominal }),
+    ...(projectionAccess === undefined ? {} : { borrowAccess: projectionAccess }),
+    fieldName,
+    ...(fieldToken === undefined ? {} : { fieldToken }),
+    state,
+    type: typeFact,
+    syntax: node,
+  })
+  const evaluated =
+    resolution.staticContext === undefined
+      ? undefined
+      : StaticEvaluation.evaluateFact(projection, resolution.staticContext)
+  const fact: FieldProjectionExpressionFact =
+    evaluated?._tag === 'Complete'
+      ? Object.freeze({ ...projection, staticValue: evaluated.value })
+      : projection
   return Object.freeze({
-    fact: Object.freeze({
-      _tag: 'FieldProjection',
-      subject: subject.fact,
-      ...(nominal === undefined ? {} : { nominal }),
-      ...(projectionAccess === undefined ? {} : { borrowAccess: projectionAccess }),
-      fieldName,
-      ...(fieldToken === undefined ? {} : { fieldToken }),
-      state,
-      type: typeFact,
-      syntax: node,
-    }),
+    fact,
     diagnostics: Object.freeze(diagnostics),
     type,
   })
@@ -4067,7 +4078,11 @@ export const intrinsicContractReference = (
   operation: Intrinsic.Operation,
   operationToken: Token.Token,
 ): Extract<CallReferenceFact, { readonly _tag: 'ResolvedIntrinsicContract' }> => {
-  if (operation.rule._tag !== 'ContractRule' && operation.rule._tag !== 'StaticOnlyRule')
+  if (
+    operation.rule._tag !== 'ContractRule' &&
+    operation.rule._tag !== 'StaticOnlyRule' &&
+    operation.rule._tag !== 'MixedFieldProjectionRule'
+  )
     throw new RangeError('intrinsic contract reference requires a contract operation')
   const contract =
     operation.rule.contract.unsafe === operation.unsafe
@@ -4163,6 +4178,321 @@ export const sectionIntrinsicReference = (
   })
 }
 
+const isDeferredStaticExpression = (expression: ExpressionFact): boolean => {
+  if (expression._tag === 'Grouped') return isDeferredStaticExpression(expression.expression)
+  if (expression._tag === 'Move') return isDeferredStaticExpression(expression.subject)
+  if (expression._tag === 'Constant') return true
+  if (expression._tag === 'Identifier') {
+    if (expression.reference._tag === 'Resolved')
+      return expression.reference.parameter.phase === 'Static'
+    if (expression.reference._tag === 'ResolvedBinding')
+      return expression.reference.binding.phase === 'Static'
+    return false
+  }
+  if (expression._tag !== 'Call') return false
+  if (expression.staticValue !== undefined) return true
+  if (expression.reference._tag === 'Resolved')
+    return expression.reference.declaration.phase === 'Static'
+  return (
+    expression.reference._tag === 'ResolvedIntrinsicContract' &&
+    expression.reference.intrinsic.phase === 'StaticOnly'
+  )
+}
+
+const reflectedFieldName = (descriptor: StaticValue.FieldDescriptorValue): string =>
+  descriptor.member._tag === 'LabeledField'
+    ? descriptor.member.label
+    : `${descriptor.member.ordinal}`
+
+const sameReflectedMember = (
+  descriptor: StaticValue.FieldDescriptorValue,
+  field: DeclarationFacts.FieldFact,
+): boolean =>
+  descriptor.member._tag === 'LabeledField'
+    ? field.member._tag === 'LabeledAggregateMember' &&
+      field.member.label === descriptor.member.label
+    : field.member._tag === 'OrdinalAggregateMember' &&
+      field.member.ordinal === descriptor.member.ordinal
+
+const appendFieldBorrowRoot = (
+  root: BorrowRootFact,
+  field: DeclarationFacts.FieldFact,
+  span: SourceSpan.SourceSpan,
+): BorrowRootFact =>
+  Object.freeze({
+    ...root,
+    path: Object.freeze([
+      ...root.path,
+      Object.freeze({ _tag: 'Field' as const, field: field.id, span }),
+    ]),
+  })
+
+const mixedFieldProjection = (
+  call: SyntaxTree.Node,
+  operation: Intrinsic.Operation,
+  reference: Extract<CallReferenceFact, { readonly _tag: 'ResolvedIntrinsicContract' }>,
+  argumentsResult: ArgumentsResult,
+  typeArguments: CallTypeArgumentsResult,
+  analyzed: ReturnType<typeof analyzeCallContract>,
+  resolution: ResolutionContext,
+  caller: DeclarationFact,
+): ExpressionResult => {
+  if (operation.rule._tag !== 'MixedFieldProjectionRule')
+    throw new RangeError('mixed field projection requires its sealed intrinsic rule')
+  const commonDiagnostics = [
+    ...argumentsResult.diagnostics,
+    ...typeArguments.diagnostics,
+    ...analyzed.diagnostics,
+  ]
+  const substitution =
+    analyzed.fact._tag === 'Compatible'
+      ? analyzed.fact.substitution
+      : new Map<string, Type.GenericArgument>()
+  const result = Type.substitute(operation.rule.contract.result, substitution)
+  const ownerArgument = argumentsResult.facts.at(operation.rule.runtimeOwnerParameter)
+  const descriptorArgument = argumentsResult.facts.at(operation.rule.staticDescriptorParameter)
+  const ownerType = ownerArgument?.type._tag === 'Available' ? ownerArgument.type.type : undefined
+  const ownerParameter = operation.rule.contract.parameters.at(operation.rule.runtimeOwnerParameter)
+  const requiredOwnerType =
+    ownerParameter === undefined ? undefined : Type.substitute(ownerParameter.type, substitution)
+  const sharedOwnerAvailable =
+    ownerType !== undefined && Type.isReference(ownerType) && ownerType.access === 'Shared'
+  const baseAvailable =
+    analyzed.fact._tag === 'Compatible' &&
+    ownerArgument !== undefined &&
+    descriptorArgument !== undefined &&
+    sharedOwnerAvailable &&
+    Type.isReference(result) &&
+    result.access === 'Shared'
+  const callFact = (type: ExpressionTypeFact): ExpressionFact =>
+    Object.freeze({
+      _tag: 'Call',
+      reference,
+      path: referencePath(call),
+      typeArguments: typeArguments.facts,
+      arguments: argumentsResult.facts,
+      mappings: analyzed.mappings,
+      contract: analyzed.fact,
+      type,
+      syntax: call,
+    })
+  if (caller.phase === 'Static') {
+    const diagnostic = Diagnostic.staticPhaseViolation(
+      'Intrinsic.borrowField',
+      resolution.staticContext?.environment.target ?? 'unselected-target',
+      Object.freeze([]),
+      call.span,
+    )
+    return Object.freeze({
+      fact: callFact(unavailableExpressionType),
+      diagnostics: Object.freeze([...commonDiagnostics, diagnostic]),
+      type: undefined,
+    })
+  }
+  if (
+    analyzed.fact._tag === 'Compatible' &&
+    ownerArgument !== undefined &&
+    descriptorArgument !== undefined &&
+    !sharedOwnerAvailable
+  ) {
+    const diagnostic = Diagnostic.argumentTypeMismatch(
+      requiredOwnerType === undefined ? '&Owner' : Type.display(requiredOwnerType),
+      ownerType === undefined ? '<unavailable>' : Type.display(ownerType),
+      ownerArgument.syntax.span,
+    )
+    return Object.freeze({
+      fact: callFact(unavailableExpressionType),
+      diagnostics: Object.freeze([...commonDiagnostics, diagnostic]),
+      type: undefined,
+    })
+  }
+  if (!baseAvailable || ownerArgument === undefined || descriptorArgument === undefined) {
+    return Object.freeze({
+      fact: callFact(unavailableExpressionType),
+      diagnostics: Object.freeze(commonDiagnostics),
+      type: undefined,
+    })
+  }
+  if (resolution.staticContext === undefined) {
+    const deferred = isDeferredStaticExpression(descriptorArgument.expression)
+    const diagnostic = deferred
+      ? undefined
+      : Diagnostic.staticPhaseViolation(
+          'Intrinsic.borrowField descriptor',
+          'unselected-target',
+          Object.freeze([]),
+          descriptorArgument.syntax.span,
+        )
+    const type =
+      diagnostic === undefined ? availableExpressionType(result) : unavailableExpressionType
+    return Object.freeze({
+      fact: callFact(type),
+      diagnostics: Object.freeze([
+        ...commonDiagnostics,
+        ...(diagnostic === undefined ? [] : [diagnostic]),
+      ]),
+      type: type._tag === 'Available' ? type.type : undefined,
+    })
+  }
+  const evaluated = StaticEvaluation.evaluateFact(
+    descriptorArgument.expression,
+    resolution.staticContext,
+  )
+  if (evaluated._tag === 'Failed' || evaluated.value._tag !== 'FieldDescriptorValue') {
+    const diagnostic =
+      evaluated._tag === 'Failed'
+        ? StaticEvaluation.diagnostic(
+            evaluated.failure,
+            resolution.staticContext.environment.target,
+          )
+        : Diagnostic.staticPhaseViolation(
+            'Intrinsic.borrowField descriptor',
+            resolution.staticContext.environment.target,
+            Object.freeze([]),
+            descriptorArgument.syntax.span,
+          )
+    return Object.freeze({
+      fact: callFact(unavailableExpressionType),
+      diagnostics: Object.freeze([...commonDiagnostics, diagnostic]),
+      type: undefined,
+    })
+  }
+  const descriptor = evaluated.value
+  const ownerBinder = operation.rule.contract.binders.at(0)
+  const valueBinder = operation.rule.contract.binders.at(1)
+  const expectedOwner =
+    ownerBinder === undefined ? undefined : substitution.get(Type.key(ownerBinder))
+  const expectedValue =
+    valueBinder === undefined ? undefined : substitution.get(Type.key(valueBinder))
+  if (
+    expectedOwner === undefined ||
+    !Type.isTypeArgument(expectedOwner) ||
+    expectedValue === undefined ||
+    !Type.isTypeArgument(expectedValue) ||
+    !Type.equals(expectedOwner, descriptor.owner.owner) ||
+    !Type.equals(expectedValue, descriptor.valueType)
+  ) {
+    const diagnostic = Diagnostic.argumentTypeMismatch(
+      expectedOwner !== undefined &&
+        Type.isTypeArgument(expectedOwner) &&
+        expectedValue !== undefined &&
+        Type.isTypeArgument(expectedValue)
+        ? Type.display(Type.fieldDescriptor(expectedOwner, expectedValue))
+        : 'Field<Owner, Value>',
+      Type.display(StaticValue.fieldDescriptorType(descriptor)),
+      descriptorArgument.syntax.span,
+    )
+    return Object.freeze({
+      fact: callFact(unavailableExpressionType),
+      diagnostics: Object.freeze([...commonDiagnostics, diagnostic]),
+      type: undefined,
+    })
+  }
+  const owner = descriptor.owner.owner
+  const aggregate = Type.isNominal(owner) ? aggregateByNominal(resolution, owner) : undefined
+  const field = aggregate?.fields.find(
+    (candidate) => candidate.id.ordinal === descriptor.declarationOrdinal,
+  )
+  const name = reflectedFieldName(descriptor)
+  if (
+    aggregate === undefined ||
+    field === undefined ||
+    aggregate.aggregateKind !== descriptor.owner.kind ||
+    !sameReflectedMember(descriptor, field) ||
+    field.declaredType._tag !== 'Resolved'
+  ) {
+    const diagnostic = Diagnostic.unknownProjectedField(
+      Type.display(owner),
+      name,
+      descriptorArgument.syntax.span,
+    )
+    return Object.freeze({
+      fact: callFact(unavailableExpressionType),
+      diagnostics: Object.freeze([...commonDiagnostics, diagnostic]),
+      type: undefined,
+    })
+  }
+  const aggregateSubstitution =
+    TypeInference.substitution(
+      aggregate.typeParameters.map((parameter) => parameter.type),
+      owner.arguments,
+    ) ?? new Map<string, Type.GenericArgument>()
+  const declaredValue = Type.substitute(field.declaredType.type, aggregateSubstitution)
+  const authorization = DeclarationFacts.byCanonical(resolution.index, descriptor.authorization)
+  const aggregateIdentity =
+    aggregate.canonical._tag === 'Canonical' ? aggregate.canonical.id : undefined
+  const authorized =
+    authorization?.canonical._tag === 'Canonical' &&
+    aggregateIdentity !== undefined &&
+    (field.visibility !== 'Private' || descriptor.authorization.module === aggregateIdentity.module)
+  if (!authorized) {
+    const diagnostic = Diagnostic.inaccessibleProjectedField(
+      Type.display(owner),
+      name,
+      descriptorArgument.syntax.span,
+    )
+    return Object.freeze({
+      fact: callFact(unavailableExpressionType),
+      diagnostics: Object.freeze([...commonDiagnostics, diagnostic]),
+      type: undefined,
+    })
+  }
+  if (!Type.equals(declaredValue, descriptor.valueType)) {
+    const diagnostic = Diagnostic.argumentTypeMismatch(
+      Type.display(Type.fieldDescriptor(owner, declaredValue)),
+      Type.display(StaticValue.fieldDescriptorType(descriptor)),
+      descriptorArgument.syntax.span,
+    )
+    return Object.freeze({
+      fact: callFact(unavailableExpressionType),
+      diagnostics: Object.freeze([...commonDiagnostics, diagnostic]),
+      type: undefined,
+    })
+  }
+  const projection: FieldProjectionExpressionFact = Object.freeze({
+    _tag: 'FieldProjection',
+    subject: ownerArgument.expression,
+    nominal: owner,
+    borrowAccess: 'Shared',
+    fieldName: name,
+    state: Object.freeze({ _tag: 'Resolved', field }),
+    type: availableExpressionType(descriptor.valueType),
+    syntax: call,
+  })
+  const directRoot = borrowRoot(projection)
+  const borrowedRoot =
+    ownerArgument.expression._tag === 'Borrow' &&
+    ownerArgument.expression.formation._tag !== 'Unavailable'
+      ? appendFieldBorrowRoot(ownerArgument.expression.formation.root, field, call.span)
+      : undefined
+  const root = directRoot ?? borrowedRoot
+  if (root === undefined) {
+    const diagnostic = Diagnostic.invalidBorrowOperand(ownerArgument.syntax.span)
+    return Object.freeze({
+      fact: callFact(unavailableExpressionType),
+      diagnostics: Object.freeze([...commonDiagnostics, diagnostic]),
+      type: undefined,
+    })
+  }
+  const type = Type.reference('Shared', descriptor.valueType)
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'Borrow',
+      access: 'Shared',
+      subject: projection,
+      formation: Object.freeze({
+        _tag: 'ValueBorrow',
+        root,
+        source: descriptor.valueType,
+      }),
+      type: availableExpressionType(type),
+      syntax: call,
+    }),
+    diagnostics: Object.freeze(commonDiagnostics),
+    type,
+  })
+}
+
 export const finishIntrinsicContractCall = (
   source: SourceFile.SourceFile,
   call: SyntaxTree.Node,
@@ -4173,7 +4503,11 @@ export const finishIntrinsicContractCall = (
   resolution: ResolutionContext,
   caller: DeclarationFact,
 ): ExpressionResult => {
-  if (operation.rule._tag !== 'ContractRule' && operation.rule._tag !== 'StaticOnlyRule')
+  if (
+    operation.rule._tag !== 'ContractRule' &&
+    operation.rule._tag !== 'StaticOnlyRule' &&
+    operation.rule._tag !== 'MixedFieldProjectionRule'
+  )
     throw new RangeError('intrinsic contract finisher received a non-contract operation')
   const reference = intrinsicContractReference(operation, operationToken)
   const analyzed = analyzeCallContract(
@@ -4195,6 +4529,17 @@ export const finishIntrinsicContractCall = (
     analyzed.fact._tag === 'Compatible'
       ? analyzed.fact.substitution
       : new Map<string, Type.GenericArgument>()
+  if (operation.rule._tag === 'MixedFieldProjectionRule')
+    return mixedFieldProjection(
+      call,
+      operation,
+      reference,
+      argumentsResult,
+      typeArguments,
+      analyzed,
+      resolution,
+      caller,
+    )
   if (operation.rule._tag === 'StaticOnlyRule') {
     const phaseDiagnostic =
       caller.phase === 'Static' || resolution.staticContext !== undefined
@@ -4386,7 +4731,9 @@ export function analyzeBuiltinCall(
   const actor = Intrinsic.findActor(actorSpelling)
   const operation = Intrinsic.findOperation(actorSpelling, operationSpelling)
   if (
-    (operation?.rule._tag === 'ContractRule' || operation?.rule._tag === 'StaticOnlyRule') &&
+    (operation?.rule._tag === 'ContractRule' ||
+      operation?.rule._tag === 'StaticOnlyRule' ||
+      operation?.rule._tag === 'MixedFieldProjectionRule') &&
     isSectionArity(operation.rule.contract.parameters.length, argumentsResult.facts.length)
   )
     return finishCallableSection(
@@ -4397,7 +4744,11 @@ export function analyzeBuiltinCall(
       resolution,
       caller,
     )
-  if (operation?.rule._tag === 'ContractRule' || operation?.rule._tag === 'StaticOnlyRule')
+  if (
+    operation?.rule._tag === 'ContractRule' ||
+    operation?.rule._tag === 'StaticOnlyRule' ||
+    operation?.rule._tag === 'MixedFieldProjectionRule'
+  )
     return finishIntrinsicContractCall(
       source,
       call,
@@ -6503,6 +6854,7 @@ export const effectCaptureFacts = (
     copy: boolean,
   ): void => {
     if (reference === undefined) return
+    if (reference.phase === 'Static') return
     if (reference._tag === 'BindingFact' && reference.id.ordinal >= firstLocalBinding) return
     const key = `${reference._tag}:${reference.id.ordinal}`
     const access = requested === 'Shared' && copy ? 'Copy' : requested
@@ -6546,8 +6898,10 @@ export const effectCaptureFacts = (
         expression(fact.subject, fact.access === 'Exclusive' ? 'Exclusive' : 'Shared')
         return
       case 'Grouped':
+        expression(fact.expression, requested)
+        return
       case 'FieldProjection':
-        expression(fact._tag === 'Grouped' ? fact.expression : fact.subject, requested)
+        if (fact.staticValue === undefined) expression(fact.subject, requested)
         return
       case 'IndexProjection':
         expression(fact.subject, requested)
@@ -6780,6 +7134,7 @@ export function analyzeExpression(
       diagnostics: [],
       regions: [],
       loops: [],
+      staticIterations: [],
       resolution: Object.freeze({
         ...resolution,
         writtenCallableBindings: effectCallableWrites,
@@ -7800,8 +8155,32 @@ export const finishDeclarationCall = (
     node,
     resolution,
   )
+  const phaseDiagnostics =
+    reference._tag !== 'Resolved'
+      ? Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([])
+      : Object.freeze(
+          reference.declaration.parameters.flatMap((parameter) => {
+            if (parameter.phase !== 'Runtime') return []
+            const argument = argumentsResult.facts.at(parameter.id.ordinal)
+            return argument?.type._tag === 'Available' &&
+              Type.containsStaticPhaseOnly(argument.type.type)
+              ? [
+                  Diagnostic.staticPhaseViolation(
+                    'runtime call argument with a phase-only type',
+                    resolution.staticContext?.environment.target ?? 'unselected-target',
+                    Object.freeze([]),
+                    argument.syntax.span,
+                  ),
+                ]
+              : []
+          }),
+        )
   const staticArguments = (() => {
-    if (reference._tag !== 'Resolved' || resolution.staticContext === undefined)
+    if (
+      reference._tag !== 'Resolved' ||
+      resolution.staticContext === undefined ||
+      resolution.deferStaticCalls === true
+    )
       return Object.freeze({
         values: Object.freeze<
           ReadonlyArray<{ readonly parameter: ParameterFact; readonly value: StaticValue.Value }>
@@ -7817,7 +8196,16 @@ export const finishDeclarationCall = (
       if (argument === undefined) continue
       const evaluated = StaticEvaluation.evaluateFact(argument.expression, resolution.staticContext)
       if (evaluated._tag === 'Complete') {
-        values.push(Object.freeze({ parameter, value: evaluated.value }))
+        const textOrigin =
+          StaticEvaluation.staticTextOrigin(argument.expression, resolution.staticContext) ??
+          (evaluated.value._tag === 'TextValue' ? evaluated.value.origin : undefined)
+        values.push(
+          Object.freeze({
+            parameter,
+            value: evaluated.value,
+            ...(textOrigin === undefined ? {} : { textOrigin }),
+          }),
+        )
       } else {
         diagnostics.push(
           StaticEvaluation.diagnostic(
@@ -7886,6 +8274,7 @@ export const finishDeclarationCall = (
     reference._tag === 'Resolved' &&
     reference.declaration.phase === 'Static' &&
     staticContext !== undefined &&
+    resolution.deferStaticCalls !== true &&
     expressionType._tag === 'Available'
       ? StaticEvaluation.evaluateFact(fact, staticContext)
       : undefined
@@ -7913,6 +8302,7 @@ export const finishDeclarationCall = (
       ...callTypeArguments.diagnostics,
       ...callContract.diagnostics,
       ...constraintDiagnostics,
+      ...phaseDiagnostics,
       ...staticArguments.diagnostics,
       ...staticDiagnostics,
       ...(unsafeDiagnostic === undefined ? [] : [unsafeDiagnostic]),
@@ -8043,6 +8433,7 @@ export const scopeSpanFor = (
 
 export interface StaticAnalysisContext {
   readonly environment: StaticEvaluation.TargetEnvironment
+  readonly typeSubstitution?: Type.Substitution
   readonly values: Map<string, StaticValue.Value>
   readonly valueSpans: Map<string, SourceSpan.SourceSpan>
   readonly valueOrigins: Map<string, StaticEvaluation.TextOrigin>
@@ -8051,7 +8442,15 @@ export interface StaticAnalysisContext {
   readonly returnedTextSpan?: { value: SourceSpan.SourceSpan | undefined }
   readonly trace: StaticEvaluation.Trace
   readonly call: StaticEvaluation.FactEvaluationContext['call']
+  readonly reflect: StaticEvaluation.FactEvaluationContext['reflect']
   readonly constant?: NonNullable<StaticEvaluation.FactEvaluationContext['constant']>
+  /** Charges one fully analyzed iteration before any of its residual facts are published. */
+  readonly chargeStaticIteration?: (
+    trace: StaticEvaluation.Trace,
+    residualNodes: number,
+  ) => StaticEvaluation.StaticFailure | undefined
+  /** Residual nodes already charged incrementally by successful static iterations. */
+  readonly chargedStaticIterationNodes?: { value: number }
 }
 
 export interface BodyContext {
@@ -8062,11 +8461,13 @@ export interface BodyContext {
   readonly diagnostics: Array<Diagnostic.Diagnostic>
   readonly regions: Array<Hir.RegionId>
   readonly loops: Array<Hir.LoopId>
+  readonly staticIterations: Array<StaticIterationFact>
   readonly resolution: ResolutionContext
   readonly nextBindingOrdinal: { value: number }
   readonly regionBase?: number
   readonly effectBlock?: true
   readonly staticContext?: StaticAnalysisContext
+  readonly returnType?: Type.Type
 }
 
 export interface ResolutionContext {
@@ -8084,6 +8485,8 @@ export interface ResolutionContext {
   /** Mutable callable bindings whose authored initializer is no longer their exact runtime value. */
   readonly writtenCallableBindings?: Set<number>
   readonly staticContext?: StaticAnalysisContext
+  /** Static calls under ordinary control in a static function execute only after branch selection. */
+  readonly deferStaticCalls?: true
 }
 
 const aggregateKey = (nominal: Type.Nominal): string => `${nominal.module}:${nominal.name}`

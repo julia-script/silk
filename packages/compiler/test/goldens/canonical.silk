@@ -43,6 +43,9 @@ pub role Clock
 
 static fn staticHelper(static value: i32) -> i32 {
   let static retained = value
+  static for field in fields {
+    inspect(field)
+  }
   static if true {
     return compileError(retained)
   } else {

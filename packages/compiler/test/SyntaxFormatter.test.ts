@@ -93,6 +93,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'CallTypeArgumentList',
   'ConditionalStatement',
   'StaticConditionalStatement',
+  'StaticForStatement',
   'PatternConditionalStatement',
   'ContinueStatement',
   'ConstantDeclaration',
@@ -135,6 +136,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'PipelineExpression',
   'CallableType',
   'ExactRepresentationType',
+  'ExpressionStatement',
   'PrefixExpression',
   'ReferenceType',
   'Requirement',
@@ -189,13 +191,14 @@ it.effect('formats static syntax canonically and idempotently', () =>
     const first = yield* SyntaxFormatter.format(
       parse(
         'memory://static-format.silk',
-        'pub static fn render(static template:string,value:string)->(){let static parsed=template static if true{compileError(parsed)}else{compileError("fallback")}}',
+        'pub static fn render(static template:string,value:string)->(){let static parsed=template static for part in parts{emit(part)} static if true{compileError(parsed)}else{compileError("fallback")}}',
       ),
     )
     const text = formattedText(first)
     assert.include(text, 'pub static fn render')
     assert.include(text, 'static template: string')
     assert.include(text, 'let static parsed = template')
+    assert.include(text, 'static for part in parts {')
     assert.include(text, 'static if true {')
     assert.include(text, 'compileError(parsed)')
     const second = yield* SyntaxFormatter.format(parse('memory://static-format-2.silk', text))
@@ -1111,6 +1114,7 @@ pub union Maybe<T> { None, Some { pub value: T } }
 pub role Clock
 static fn staticHelper(static value: i32) -> i32 {
   let static retained = value
+  static for field in fields { inspect(field) }
   static if true { return compileError(retained) } else { return retained }
 }
 fn helper(value: i32, other: i32) -> i32 {

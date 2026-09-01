@@ -575,7 +575,11 @@ export const resolveType = (
       (second?.spelling === 'SharedCore' ||
         second?.spelling === 'Execution' ||
         second?.spelling === 'Wake' ||
-        second?.spelling === 'StorageFailure') &&
+        second?.spelling === 'StorageFailure' ||
+        second?.spelling === 'Type' ||
+        second?.spelling === 'Fields' ||
+        second?.spelling === 'Field' ||
+        second?.spelling === 'StaticSequence') &&
       path.segments.length === 2
     ) {
       const intrinsicType = Type.intrinsicNominals.get(`Intrinsic.${second.spelling}`)

@@ -18,7 +18,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/f64`](./f64.md) | `f64` | 50 | IEEE binary64 values and Silk's default floating-point arithmetic. |
 | [`silk/fiber`](./fiber.md) | `Fiber` | 16 | Affine Fiber handles, typed outcomes, and one-observer completion. |
 | [`silk/filesystem`](./filesystem.md) | `FileSystem` | 58 | Portable normalized paths, whole-file operations, directory traversal, and explicit temp scopes. |
-| [`silk/format`](./format.md) | `Format` | 43 | Writer-backed presentation and complete decimal parsing. |
+| [`silk/format`](./format.md) | `Format` | 44 | Writer-backed value presentation, statically validated templates, and complete decimal parsing. |
 | [`silk/hash`](./hash.md) | `HashKey` | 8 | Deterministic seeded hashing contracts for hash maps, hash sets, and user-defined key types. |
 | [`silk/hash_map`](./hash-map.md) | `HashMap` | 16 | Owned key-value storage with deterministic seeded hashing and open-addressed lookup. |
 | [`silk/hash_set`](./hash-set.md) | `HashSet` | 13 | Owned unique elements with deterministic seeded hashing and open-addressed membership lookup. |
@@ -47,11 +47,13 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/os_system_clock`](./os-system-clock.md) | `OsSystemClock` | 2 | Native Unix-epoch clock provider for SystemClock. |
 | [`silk/random`](./random.md) | `Random` | 5 | Provider-replaceable cryptographically secure random bytes and derived values. |
 | [`silk/raw_buffer`](./raw-buffer.md) | `RawBuffer` | 9 | Low-level typed views over owned allocations for implementing collections and storage actors. |
+| [`silk/reflect`](./reflect.md) | `Reflect` | 13 | Finite aggregate metadata available only during static evaluation. |
 | [`silk/result`](./result.md) | `Result` | 7 | Completed success-or-failure values that can be inspected and transformed as ordinary data. |
 | [`silk/scheduler`](./scheduler.md) | `Scheduler` | 17 | Provider protocol for preparing and atomically publishing child Fibers. |
 | [`silk/shared`](./shared.md) | `Shared` | 5 | Explicitly allocated, single-threaded shared ownership with callback-scoped access. |
 | [`silk/slot`](./slot.md) | `Slot` | 5 | Explicit initialization-state transitions for one slot selected from raw storage. |
 | [`silk/standard_input`](./standard-input.md) | `StandardInput` | 11 | Portable blocking reads of raw standard-input bytes through an explicit provider. |
+| [`silk/static_sequence`](./static-sequence.md) | `StaticSequence` | 5 | Immutable homogeneous sequences available only during static evaluation. |
 | [`silk/static_text`](./static-text.md) | `StaticText` | 3 | Deterministic byte inspection for text available during static evaluation. |
 | [`silk/string`](./string.md) | `String` | 22 | Valid UTF-8 text, including owned storage, byte validation, and scalar-by-scalar traversal. |
 | [`silk/system_clock`](./system-clock.md) | `SystemClock` | 7 | Provider-replaceable Unix-epoch time with canonical split-second instants. |

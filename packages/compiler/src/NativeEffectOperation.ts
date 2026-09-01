@@ -193,7 +193,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     }
     case 'RunEffect': {
       const target = declared.find((candidate) =>
-        Mir.matchesInstance(candidate.fn, operation.target, operation.typeArguments),
+        Mir.matchesInstance(
+          candidate.fn,
+          operation.target,
+          operation.typeArguments,
+          operation.staticArguments,
+        ),
       )
       if (target === undefined)
         throw new RangeError('Backend cannot resolve propagated effect target')
@@ -609,7 +614,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           : undefined
       const target = declared.find(
         (candidate) =>
-          Mir.matchesInstance(candidate.fn, operation.runner, operation.runnerTypeArguments) &&
+          Mir.matchesInstance(
+            candidate.fn,
+            operation.runner,
+            operation.runnerTypeArguments,
+            operation.runnerStaticArguments,
+          ) &&
           (operation._tag !== 'RunStaticEffect' ||
             (logicalInputs !== undefined &&
               candidate.fn.result._tag === 'EffectOutcome' &&

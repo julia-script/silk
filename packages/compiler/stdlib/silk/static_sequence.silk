@@ -1,0 +1,40 @@
+//! Immutable homogeneous sequences available only during static evaluation.
+//!
+//! # Details
+//!
+//! Every operation returns a complete canonical value. Sequences expose no allocator, capacity,
+//! address, mutable alias, destructor, or runtime layout.
+
+/// Returns the empty sequence for `Element`.
+pub static fn empty<Element>() -> Intrinsic.StaticSequence<Element> {
+  return Intrinsic.staticSequenceEmpty<Element>()
+}
+
+/// Returns `self` followed by `value` without changing `self`.
+pub static fn append<Element>(
+  self: Intrinsic.StaticSequence<Element>,
+  value: Element
+) -> Intrinsic.StaticSequence<Element> {
+  return Intrinsic.staticSequenceAppend<Element>(move self, move value)
+}
+
+/// Returns every element of `left` followed by every element of `right`.
+pub static fn concat<Element>(
+  left: Intrinsic.StaticSequence<Element>,
+  right: Intrinsic.StaticSequence<Element>
+) -> Intrinsic.StaticSequence<Element> {
+  return Intrinsic.staticSequenceConcat<Element>(move left, move right)
+}
+
+/// Returns the finite sequence length.
+pub static fn length<Element>(self: Intrinsic.StaticSequence<Element>) -> usize {
+  return Intrinsic.staticSequenceLength<Element>(move self)
+}
+
+/// Returns the element at `index`, or reports a static phase violation when out of bounds.
+pub static fn at<Element>(
+  self: Intrinsic.StaticSequence<Element>,
+  index: usize
+) -> Element {
+  return Intrinsic.staticSequenceAt<Element>(move self, index)
+}
