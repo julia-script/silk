@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as BootstrapOsIntrinsics from '../src/BootstrapOsIntrinsics.js'
 import * as InspectorFlowModel from '../src/InspectorFlowModel.js'
@@ -88,7 +89,7 @@ it.effect('fills through only an explicitly injected evaluator host', () =>
         .map((event) => [event.operation.name, event.outcome, event.byteLength]),
       [['osRandomFill', 'Completed', 3]],
     )
-    const serializedTrace = JSON.stringify(outcome.trace, (_key, value) =>
+    const serializedTrace = Json.stringify(outcome.trace, (_key, value) =>
       typeof value === 'bigint' ? value.toString() : value,
     )
     assert.notInclude(serializedTrace, '"bytes"')
@@ -219,7 +220,7 @@ it.effect('redacts returned and thrown host payloads to closed failure categorie
       const presented = InspectorProjectBackend.evaluationRows(outcome)
       const flow = InspectorFlowModel.projectDataFlow(Analysis.rootAnalysis(self), outcome)
       assert.notInclude(
-        JSON.stringify({ outcome, presented, flow }, (_key, value) =>
+        Json.stringify({ outcome, presented, flow }, (_key, value) =>
           typeof value === 'bigint' ? value.toString() : value,
         ),
         canary,

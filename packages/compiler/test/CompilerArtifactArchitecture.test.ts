@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -47,7 +48,7 @@ it.effect(
       visit(snapshot, 'snapshot', violations)
       assert.deepEqual(violations, [])
       assert.notInclude(
-        JSON.stringify(snapshot, (_key, value) =>
+        Json.stringify(snapshot, (_key, value) =>
           typeof value === 'bigint' ? value.toString() : value,
         ),
         'Arena',

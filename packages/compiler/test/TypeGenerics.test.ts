@@ -596,7 +596,7 @@ it.effect('infers and explicitly selects finite concrete instances before MIR', 
     assert.strictEqual(snapshot.mir.value.functions.length, 3)
     assert.notInclude(MirEncoding.encode(snapshot.mir.value), 'TypeParameter')
     const outcome = BootstrapEvaluation.evaluate(snapshot.instances, snapshot.mir.value)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome))
     if (outcome._tag === 'Completed') {
       assert.strictEqual(outcome.result.value, 42n)
       assert.deepEqual(
@@ -631,7 +631,7 @@ pub fn main() -> i32 { return pair<i32>(42, true) }`),
       ],
     )
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
@@ -691,7 +691,7 @@ pub fn main() -> i32 { return accept<Left | Right>(Left { value: 0 }, true) }`),
 
     assert.deepEqual(snapshot.diagnostics, [])
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
@@ -722,7 +722,7 @@ pub fn main() -> i32 { return pair<bool>(1, true) }`
     )
 
     const diagnostic = snapshot.diagnostics.at(0)
-    assert.strictEqual(snapshot.diagnostics.length, 1, JSON.stringify(snapshot.diagnostics))
+    assert.strictEqual(snapshot.diagnostics.length, 1, Json.stringify(snapshot.diagnostics))
     assert.strictEqual(diagnostic?.code, 'SEM0100')
     assert.strictEqual(
       diagnostic?.message,
@@ -1052,7 +1052,7 @@ pub fn main() -> i32 { return take(Box<i32> { value: 42 }) }`),
       )
       assert.deepEqual(snapshot.diagnostics, [])
       const outcome = Analysis.evaluate(snapshot)
-      assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer))
+      assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome))
       if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
     }),
 )

@@ -4,6 +4,7 @@ import * as Cause from 'effect/Cause'
 import * as Config from 'effect/Config'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as FileSystem from 'effect/FileSystem'
 import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
@@ -111,7 +112,7 @@ const lowerSource = Effect.fnUntraced(function* (
   assert.deepEqual(
     diagnostics,
     [],
-    JSON.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
+    Json.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
   )
   const catalog = Layout.catalog(target, snapshot.index, snapshot.instances)
   const layout = Layout.plan(catalog, snapshot.instances, snapshot.index)

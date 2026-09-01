@@ -311,7 +311,7 @@ it.effect('passes, returns, stores, captures, and specializes closed Effect valu
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      `${JSON.stringify(evaluated, Json.bigIntReplacer)}\n${MirEncoding.encode(Analysis.loweredMir(logical))}`,
+      `${Json.stringify(evaluated)}\n${MirEncoding.encode(Analysis.loweredMir(logical))}`,
     )
     assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
     const native = yield* Analysis.codegen(logical, { mode: 'release' })
@@ -339,7 +339,7 @@ it.effect('preserves exclusive and take-once Effect access across ordinary calls
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        `${name}: ${JSON.stringify(evaluated, Json.bigIntReplacer)}\n${MirEncoding.encode(Analysis.loweredMir(snapshot))}`,
+        `${name}: ${Json.stringify(evaluated)}\n${MirEncoding.encode(Analysis.loweredMir(snapshot))}`,
       )
       assert.strictEqual(
         evaluated._tag === 'Completed' ? evaluated.result.value : undefined,
@@ -390,7 +390,7 @@ it.effect('provides an existing borrowed capability across evaluator and Wasm', 
     assert.deepEqual(Analysis.diagnostics(logical), [])
     assert.deepEqual(Analysis.diagnostics(wasm), [])
     const evaluated = Analysis.evaluate(logical)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
@@ -421,11 +421,7 @@ it.effect(
           : undefined
       assert.strictEqual(oom?.lanes.length, 0)
       const evaluated = Analysis.evaluate(logical)
-      assert.strictEqual(
-        evaluated._tag,
-        'Completed',
-        JSON.stringify(evaluated, Json.bigIntReplacer),
-      )
+      assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
       assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
       const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
@@ -508,7 +504,7 @@ it.effect('keeps grouped, reverse, data-first, and stored pipelines equivalent',
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        `${sample.name}: ${JSON.stringify(evaluated, Json.bigIntReplacer)}`,
+        `${sample.name}: ${Json.stringify(evaluated)}`,
       )
       assert.strictEqual(
         evaluated._tag === 'Completed' ? evaluated.result.value : undefined,
@@ -533,11 +529,7 @@ it.effect('composes flatMap and tap with mapping and provision', () =>
       assert.deepEqual(Analysis.diagnostics(snapshot), [], name)
       assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [], name)
       const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(
-        evaluated._tag,
-        'Completed',
-        `${name}: ${JSON.stringify(evaluated, Json.bigIntReplacer)}`,
-      )
+      assert.strictEqual(evaluated._tag, 'Completed', `${name}: ${Json.stringify(evaluated)}`)
       if (evaluated._tag !== 'Completed') continue
       assert.strictEqual(evaluated.result.value, 42n, name)
       assert.isAtLeast(
@@ -564,11 +556,7 @@ it.effect('continues transforming recovered and retried effects', () =>
       assert.deepEqual(Analysis.diagnostics(snapshot), [], name)
       assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [], name)
       const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(
-        evaluated._tag,
-        'Completed',
-        `${name}: ${JSON.stringify(evaluated, Json.bigIntReplacer)}`,
-      )
+      assert.strictEqual(evaluated._tag, 'Completed', `${name}: ${Json.stringify(evaluated)}`)
       assert.strictEqual(
         evaluated._tag === 'Completed' ? evaluated.result.value : undefined,
         42n,
@@ -739,11 +727,7 @@ it.effect('flattens one nested Effect layer across evaluator, LLVM, and Wasm', (
       assert.deepEqual(MirVerification.verify(Analysis.loweredMir(wasm)), [], name)
 
       const logical = Analysis.evaluate(native)
-      assert.strictEqual(
-        logical._tag,
-        'Completed',
-        `${name}: ${JSON.stringify(logical, Json.bigIntReplacer)}`,
-      )
+      assert.strictEqual(logical._tag, 'Completed', `${name}: ${Json.stringify(logical)}`)
       assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42n, name)
       const llvm = yield* Analysis.codegen(native, { mode: 'release' })
       assert.include(llvm.ir, 'define', name)

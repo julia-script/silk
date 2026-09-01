@@ -102,7 +102,7 @@ it.effect('maps an ordinary unit entry to status zero on every engine', () =>
     )
     assert.deepEqual(Analysis.diagnostics(logical), [])
     const evaluated = Analysis.evaluate(logical)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 0n)
 
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
@@ -146,7 +146,7 @@ pub effect fn main() -> () {
     assert.strictEqual(program.entry._tag, 'EffectEntry')
     assert.deepEqual(MirVerification.verify(program), [])
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome))
   }),
 )
 
@@ -209,7 +209,7 @@ it.effect('composes capability provision and mapping in an effect entry', () =>
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome))
   }),
 )
 
@@ -302,7 +302,7 @@ it.effect('executes Evaluate effects in order and halts on failure across every 
       assert.strictEqual(
         evaluated._tag,
         expected === 0 ? 'Completed' : 'UnhandledFailure',
-        JSON.stringify(evaluated, Json.bigIntReplacer),
+        Json.stringify(evaluated),
       )
       if (name === 'evaluate-failure') {
         assert.strictEqual(

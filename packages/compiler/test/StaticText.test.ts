@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as FloatingPoint from '../src/FloatingPoint.js'
 import * as Hir from '../src/Hir.js'
@@ -2288,7 +2289,7 @@ it.effect('keeps static bytes, reuse, lengths, and backend placement in parity',
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      JSON.stringify(
+      Json.stringify(
         {
           evaluated,
           staticData: native.layout._tag === 'Available' ? native.layout.value.staticData : [],

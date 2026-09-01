@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as CoroutineFrame from '../src/CoroutineFrame.js'
@@ -29,7 +30,7 @@ const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
   assert.deepEqual(
     diagnostics,
     [],
-    JSON.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
+    Json.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
   )
   const catalog = Layout.catalog(Target.wasm32UnknownUnknown, snapshot.index, snapshot.instances)
   const layout = Layout.plan(catalog, snapshot.instances, snapshot.index)

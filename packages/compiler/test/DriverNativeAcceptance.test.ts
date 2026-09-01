@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -118,7 +119,7 @@ it.each(shardedCorpus)(
         outcome._tag,
         'Compiled',
         outcome._tag === 'BackendFailed'
-          ? `${program.name}: ${outcome.error.message}\n${JSON.stringify(outcome.error.reason)}`
+          ? `${program.name}: ${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
           : program.name,
       )
       if (outcome._tag !== 'Compiled') return
@@ -193,7 +194,7 @@ pub fn main() -> i32 {
         outcome._tag,
         'Compiled',
         outcome._tag === 'BackendFailed'
-          ? `${outcome.error.message}\n${JSON.stringify(outcome.error.reason)}`
+          ? `${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
           : outcome._tag,
       )
       if (outcome._tag !== 'Compiled') return

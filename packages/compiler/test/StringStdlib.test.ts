@@ -49,16 +49,13 @@ it.effect('validates complete UTF-8 and reports the first invalid byte offset', 
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      JSON.stringify(
-        {
-          evaluated,
-          functions:
-            mir._tag === 'Available'
-              ? mir.value.functions.map((fn) => `${fn.id.module}.${fn.id.name}`)
-              : [],
-        },
-        Json.bigIntReplacer,
-      ),
+      Json.stringify({
+        evaluated,
+        functions:
+          mir._tag === 'Available'
+            ? mir.value.functions.map((fn) => `${fn.id.module}.${fn.id.name}`)
+            : [],
+      }),
     )
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 522n)
@@ -86,7 +83,7 @@ pub fn main() -> i32 { return toI32(byteLength(unsafe fromUtf8Unchecked(b"silk")
     )
     assert.deepEqual(diagnosticSummary(acknowledged), [])
     const evaluated = Analysis.evaluate(acknowledged)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 4n)
   }),
 )
@@ -128,16 +125,13 @@ it.effect('copies, appends, views, and drops owned String through ordinary Bytes
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      JSON.stringify(
-        {
-          evaluated,
-          functions:
-            mir._tag === 'Available'
-              ? mir.value.functions.map((fn) => `${fn.id.module}.${fn.id.name}`)
-              : [],
-        },
-        Json.bigIntReplacer,
-      ),
+      Json.stringify({
+        evaluated,
+        functions:
+          mir._tag === 'Available'
+            ? mir.value.functions.map((fn) => `${fn.id.module}.${fn.id.name}`)
+            : [],
+      }),
     )
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
@@ -193,7 +187,7 @@ it.effect('rolls append back when growth cannot allocate', () =>
     )
     assert.deepEqual(diagnosticSummary(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
   }),
@@ -245,7 +239,7 @@ it.effect('traverses mixed-width Unicode scalars with explicit byte offsets', ()
     const snapshot = yield* Analysis.ofSourceRealized('string-stdlib/scalars', ascii(scalars))
     assert.deepEqual(diagnosticSummary(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 74_967n)
   }),

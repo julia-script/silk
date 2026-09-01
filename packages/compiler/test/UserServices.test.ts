@@ -41,7 +41,7 @@ it.effect('dispatches a shared source service through its complete witness', () 
   Effect.gen(function* () {
     const { self, outcome } = yield* evaluate(sharedSource)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
 
     const hir = Projections.hirOf(self, 'user-services/main')
@@ -109,7 +109,7 @@ pub fn main() -> i32 {
         [],
       )
       const outcome = Analysis.evaluate(self)
-      assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+      assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
       if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
 
       const instances = Analysis.instancesOf(self).instances
@@ -219,7 +219,7 @@ pub fn main() -> i32 {
   return run Effect.provideMut(twice(), &mut cell)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 43n)
   }),
 )
@@ -396,7 +396,7 @@ it.effect(
     Effect.gen(function* () {
       const { self, outcome } = yield* evaluate(randomServiceSource)
       assert.deepEqual(Analysis.diagnostics(self), [])
-      assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+      assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
       if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
 
       const randomHir = Projections.hirOf(self, 'silk/insecure_random')
@@ -515,7 +515,7 @@ it.effect('derives secure random values and initializes one stable shared insecu
   Effect.gen(function* () {
     const { self, outcome } = yield* evaluate(randomCapabilitiesSource)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
     const randomHir = Projections.hirOf(self, 'silk/random')
     assert.include(
@@ -638,11 +638,7 @@ pub fn main() -> i32 {
         assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
 
         const outcome = Analysis.evaluate(self)
-        assert.strictEqual(
-          outcome._tag,
-          'Completed',
-          JSON.stringify(outcome, Json.bigIntReplacer, 2),
-        )
+        assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
         if (outcome._tag === 'Completed')
           assert.strictEqual(outcome.result.value, BigInt(provider.expected))
 
@@ -679,7 +675,7 @@ pub fn main() -> i32 {
     const self = yield* snapshot(source, 'wasm32-unknown-unknown')
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 43n)
 
     const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
@@ -712,7 +708,7 @@ it.effect('retains an affine owned provider while a pre-read scalar suspends and
     assert.strictEqual(
       outcome._tag,
       'Completed',
-      outcome._tag === 'Blocked' ? JSON.stringify(outcome.reason) : outcome._tag,
+      outcome._tag === 'Blocked' ? Json.stringify(outcome.reason) : outcome._tag,
     )
     if (outcome._tag === 'Completed') {
       assert.strictEqual(outcome.result.value, 42n)
@@ -746,7 +742,7 @@ it.effect('releases an affine owned provider after a pre-read scalar suspends an
     assert.strictEqual(
       outcome._tag,
       'Completed',
-      outcome._tag === 'Blocked' ? JSON.stringify(outcome.reason) : outcome._tag,
+      outcome._tag === 'Blocked' ? Json.stringify(outcome.reason) : outcome._tag,
     )
     if (outcome._tag === 'Completed') {
       assert.strictEqual(outcome.result.value, 7n)
@@ -797,7 +793,7 @@ pub fn main() -> i32 {
     )
     assert.strictEqual(main?.suspension?.classification ?? 'Synchronous', 'Synchronous')
     const outcome = Analysis.evaluate(self)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
@@ -903,7 +899,7 @@ pub fn main() -> i32 {
   return run selected
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
@@ -929,7 +925,7 @@ pub fn main() -> i32 {
   return run Effect.provide(nested(&inner), &outer)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
@@ -956,7 +952,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
     const outcome = Analysis.evaluate(self)
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
@@ -1025,7 +1021,7 @@ pub fn main() -> i32 {
   return observed + provider.value
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 43n)
   }),
 )

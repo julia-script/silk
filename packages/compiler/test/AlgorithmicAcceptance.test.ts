@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import type * as NativeToolchain from '../src/NativeToolchain.js'
@@ -165,7 +166,7 @@ it.effect('keeps logical native and WebAssembly execution in parity', () =>
       const reason =
         native.error.reason._tag === 'WrappedFailure'
           ? native.error.reason.cause
-          : JSON.stringify(native.error.reason)
+          : Json.stringify(native.error.reason)
       nativeFailure = `${native.error.message}: ${String(reason)}`
     }
     assert.strictEqual(native._tag, 'Compiled', nativeFailure)

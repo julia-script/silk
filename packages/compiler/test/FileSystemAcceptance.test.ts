@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as MirVerification from '../src/MirVerification.js'
 
@@ -298,7 +299,7 @@ pub fn main() -> i32 {
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      JSON.stringify({
+      Json.stringify({
         reason: evaluated._tag === 'Blocked' ? evaluated.reason : evaluated._tag,
         ensureDirectoryFunctions: mir.functions
           .map((fn) => fn.id.name)
@@ -367,7 +368,7 @@ pub fn main() -> i32 {
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      JSON.stringify(evaluated._tag === 'Blocked' ? evaluated.reason : evaluated._tag),
+      Json.stringify(evaluated._tag === 'Blocked' ? evaluated.reason : evaluated._tag),
     )
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
@@ -503,7 +504,7 @@ it.effect(
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        JSON.stringify({
+        Json.stringify({
           reason: evaluated._tag === 'Blocked' ? evaluated.reason : evaluated._tag,
           ensureDirectoryFunctions: mir.functions
             .map((fn) => fn.id.name)

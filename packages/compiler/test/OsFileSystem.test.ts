@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
 import type * as OsFileSystemHost from '../src/OsFileSystemHost.js'
@@ -756,14 +757,14 @@ pub fn main() -> i32 {
       assert.strictEqual(
         compiled._tag,
         'Compiled',
-        JSON.stringify(compiled._tag === 'BackendFailed' ? compiled.error : compiled),
+        Json.stringify(compiled._tag === 'BackendFailed' ? compiled.error : compiled),
       )
       if (compiled._tag !== 'Compiled') return
       const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
       assert.strictEqual(
         run.status,
         42,
-        JSON.stringify({ signal: run.signal, stderr: run.stderr, stdout: run.stdout }),
+        Json.stringify({ signal: run.signal, stderr: run.stderr, stdout: run.stdout }),
       )
       assert.strictEqual(readFileSync(outsideMarker, 'utf8'), 'untouched')
     }),

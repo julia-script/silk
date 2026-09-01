@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import type * as Elaboration from '../src/Elaboration.js'
 import * as Hir from '../src/Hir.js'
@@ -260,7 +261,7 @@ pub fn main() -> i32 { return sum(&[40, 2]) }`
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      JSON.stringify(evaluated, (_, value) =>
+      Json.stringify(evaluated, (_, value) =>
         typeof value === 'bigint' ? value.toString() : value,
       ),
     )
@@ -365,7 +366,7 @@ it.effect('executes a lexical shared slice binding on the evaluator and Wasm', (
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      `${JSON.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? value.toString() : value))}\n${Hir.encode(Analysis.rootAnalysis(snapshot).hir)}`,
+      `${Json.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? value.toString() : value))}\n${Hir.encode(Analysis.rootAnalysis(snapshot).hir)}`,
     )
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)

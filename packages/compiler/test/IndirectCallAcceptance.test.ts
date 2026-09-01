@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import type * as Mir from '../src/Mir.js'
 
@@ -80,7 +81,7 @@ it.effect('calls through a function-typed parameter and agrees on the evaluator 
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        `${name}: ${JSON.stringify(evaluated, (_, value) =>
+        `${name}: ${Json.stringify(evaluated, (_, value) =>
           typeof value === 'bigint' ? value.toString() : value,
         )}`,
       )

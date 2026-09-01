@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -367,7 +368,7 @@ it.effect(
         assert.strictEqual(
           outcome._tag,
           'Completed',
-          `${entry.id}: ${JSON.stringify(outcome, (_, value) =>
+          `${entry.id}: ${Json.stringify(outcome, (_, value) =>
             typeof value === 'bigint' ? `${value}n` : value,
           )}`,
         )
@@ -454,7 +455,7 @@ for (const representative of [corpus[1], corpus[3]]) {
         assert.strictEqual(
           run.status,
           0,
-          JSON.stringify({ stderr: run.stderr, signal: run.signal, error: run.error?.message }),
+          Json.stringify({ stderr: run.stderr, signal: run.signal, error: run.error?.message }),
         )
         assert.strictEqual(run.stderr, '')
       }),

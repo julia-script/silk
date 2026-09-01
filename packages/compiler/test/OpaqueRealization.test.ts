@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -327,7 +328,7 @@ pub fn inner<T>(value: T) -> some<F: once fn(i32) -> T> F { return keep<T>(move 
     assert.strictEqual(
       outcome._tag,
       'Completed',
-      outcome._tag === 'Blocked' ? JSON.stringify(outcome.reason) : outcome._tag,
+      outcome._tag === 'Blocked' ? Json.stringify(outcome.reason) : outcome._tag,
     )
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),

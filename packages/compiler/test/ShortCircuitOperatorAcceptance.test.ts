@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as Lexer from '../src/Lexer.js'
@@ -140,7 +141,7 @@ it.effect(
         assert.strictEqual(
           evaluated._tag,
           'Completed',
-          `${name}: ${JSON.stringify(evaluated, (_, value) =>
+          `${name}: ${Json.stringify(evaluated, (_, value) =>
             typeof value === 'bigint' ? value.toString() : value,
           )}`,
         )

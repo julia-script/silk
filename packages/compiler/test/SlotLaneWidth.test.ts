@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -87,7 +88,7 @@ for (const entry of cases) {
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        JSON.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? `${value}n` : value)),
+        Json.stringify(evaluated, (_, value) => (typeof value === 'bigint' ? `${value}n` : value)),
       )
       if (evaluated._tag !== 'Completed') return
       assert.strictEqual(evaluated.result.value, BigInt(entry.expected))

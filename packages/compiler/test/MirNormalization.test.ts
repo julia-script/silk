@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
@@ -338,7 +339,7 @@ pub fn main() -> i32 {
       Analysis.effectNormalizationOf(reused).some(
         (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'EffectEscapes',
       ),
-      JSON.stringify(Analysis.effectNormalizationOf(reused)),
+      Json.stringify(Analysis.effectNormalizationOf(reused)),
     )
     assert.isFalse(
       mainOperations(Analysis.loweredMir(complex)).some(

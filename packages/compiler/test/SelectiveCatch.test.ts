@@ -306,7 +306,7 @@ effect fn selective(flag: bool) -> i32 ! B {
 pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
     assert.deepEqual(codes(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11n)
   }),
 )
@@ -328,7 +328,7 @@ effect fn selective(flag: bool) -> i32 ! B {
     pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
     assert.deepEqual(codes(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11n)
   }),
 )
@@ -388,7 +388,7 @@ pub fn main() -> i32 {
       )
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11n)
 
     const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
@@ -446,7 +446,7 @@ pub fn main() -> i32 { return (run completedLeft()) + (run completedRight()) }
 `)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 22n)
   }),
 )
@@ -487,7 +487,7 @@ pub fn main() -> i32 { return (run completed(true)) + (run completed(false)) }
       .map((fn) => `${fn.id.module}.${fn.id.name}`)
     assert.strictEqual(new Set(runnerKeys).size, runnerKeys.length)
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 34n)
   }),
 )
@@ -643,7 +643,7 @@ effect fn recovered(flag: bool) -> i32 {
 pub fn main() -> i32 { return run recovered(true) }`)
     assert.deepEqual(codes(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 0n)
   }),
 )
@@ -661,7 +661,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(codes(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 0n)
   }),
 )
@@ -674,7 +674,7 @@ effect fn recoverText(error: string) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(failText(), recoverText) }`)
     assert.deepEqual(codes(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
   }),
 )
@@ -733,7 +733,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 11n)
   }),
 )
@@ -786,11 +786,7 @@ pub fn main() -> i32 {
         assert.deepEqual(Analysis.diagnostics(self), [])
         assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
         const evaluated = Analysis.evaluate(self)
-        assert.strictEqual(
-          evaluated._tag,
-          'Completed',
-          JSON.stringify(evaluated, Json.bigIntReplacer),
-        )
+        assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
         if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 156n)
 
         const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
@@ -1220,7 +1216,7 @@ it.effect('requires failure-path loan endings on every MIR run form', () =>
     }
 
     const evaluated = Analysis.evaluate(raw)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 5n)
     const wasm = yield* Analysis.codegenWasm(raw, { mode: 'release' })
     assert.strictEqual(
@@ -1351,11 +1347,7 @@ for (const [label, catch_] of [
           failureRuns.every((operation) => (operation.failureLoanEnds?.length ?? 0) > 0),
         )
         const evaluated = Analysis.evaluate(snapshot)
-        assert.strictEqual(
-          evaluated._tag,
-          'Completed',
-          JSON.stringify(evaluated, Json.bigIntReplacer),
-        )
+        assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
         if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 44n)
         const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
         assert.strictEqual(
@@ -1380,11 +1372,7 @@ for (const [label, catch_] of [
         assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
 
         const evaluated = Analysis.evaluate(self)
-        assert.strictEqual(
-          evaluated._tag,
-          'Completed',
-          JSON.stringify(evaluated, Json.bigIntReplacer),
-        )
+        assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
         if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 84n)
 
         const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
@@ -1680,7 +1668,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 23n)
   }),
 )
@@ -1699,11 +1687,7 @@ it.effect(
         1,
       )
       const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(
-        evaluated._tag,
-        'Completed',
-        JSON.stringify(evaluated, Json.bigIntReplacer),
-      )
+      assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
       if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
 
       const propagation =
@@ -1896,7 +1880,7 @@ it.effect('repacks heterogeneous failure payload carriers without changing membe
       'expected a propagated run boundary',
     )
     const evaluated = BootstrapEvaluation.evaluate(snapshot.instances, packedModule)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
     const artifact = yield* Backend.emit(WasmBackend.WasmBackend, packedModule, {
       mode: 'release',
@@ -1919,11 +1903,7 @@ it.effect(
       assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
 
       const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(
-        evaluated._tag,
-        'Completed',
-        JSON.stringify(evaluated, Json.bigIntReplacer),
-      )
+      assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
       if (evaluated._tag !== 'Completed') return
       assert.strictEqual(evaluated.result.value, 42n)
       assert.deepEqual(
@@ -1950,7 +1930,7 @@ it.effect('releases a reified owned residual directly from a floating union carr
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
 
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
     assert.deepEqual(
@@ -2157,7 +2137,7 @@ pub fn main() -> i32 { return run Effect.catchAll(selected(1), recoverAll) }`,
       )
     }
     const evaluated = BootstrapEvaluation.evaluate(snapshot.instances, mutated)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    assert.strictEqual(evaluated._tag, 'Completed', Json.stringify(evaluated))
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 22n)
     const artifact = yield* Backend.emit(WasmBackend.WasmBackend, mutated, { mode: 'release' })
     assert.strictEqual(artifact._tag, 'WebAssemblyModuleArtifact')

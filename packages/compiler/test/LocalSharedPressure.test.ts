@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import type * as Backend from '../src/Backend.js'
 import * as ExecutionAffinity from '../src/ExecutionAffinity.js'
@@ -173,7 +174,7 @@ const completed = (snapshot: Analysis.Snapshot) => {
   assert.strictEqual(
     outcome._tag,
     'Completed',
-    JSON.stringify(outcome, (_, value) => (typeof value === 'bigint' ? `${value}n` : value)),
+    Json.stringify(outcome, (_, value) => (typeof value === 'bigint' ? `${value}n` : value)),
   )
   return outcome._tag === 'Completed' ? outcome : unreachable('expected completed evaluation')
 }
@@ -306,7 +307,7 @@ const mirStructureFingerprint = (mir: Mir.Module) =>
       result: normalizeSpelling(Type.encode(Mir.semanticType(fn.result))),
       operations: MirVerification.operations(fn).map((operation) => operation._tag),
     }))
-    .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+    .sort((left, right) => Json.stringify(left).localeCompare(Json.stringify(right)))
 
 it.effect('proves the ordinary and renamed local-shared pressure witnesses', () =>
   Effect.gen(function* () {
@@ -323,7 +324,7 @@ it.effect('proves the ordinary and renamed local-shared pressure witnesses', () 
       assert.deepEqual(
         diagnostics.map((diagnostic) => diagnostic.code),
         [],
-        JSON.stringify(diagnostics),
+        Json.stringify(diagnostics),
       )
       assert.deepEqual(MirVerification.verify(mir), [])
       assert.strictEqual(completed(snapshot).result.value, 42n)
@@ -421,7 +422,7 @@ it.effect('recovers deterministically at every exercised construction quota', ()
       assert.deepEqual(
         Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
         [],
-        JSON.stringify(Analysis.diagnostics(snapshot)),
+        Json.stringify(Analysis.diagnostics(snapshot)),
       )
       assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
       const first = completed(snapshot)
@@ -483,7 +484,7 @@ it.effect('lets one ordinary owner choose first activation across exact body rep
     assert.strictEqual(
       allocationEvents.filter((event) => event._tag === 'AllocationAcquire').length,
       allocationEvents.filter((event) => event._tag === 'AllocationRelease').length,
-      JSON.stringify(allocationEvents),
+      Json.stringify(allocationEvents),
     )
     assert.strictEqual((yield* runWasm(snapshot)).result, 21)
   }),
@@ -498,7 +499,7 @@ it.effect('reuses the Execution and Wake lifecycle from a bounded alternate owne
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
       [],
-      JSON.stringify(Analysis.diagnostics(snapshot)),
+      Json.stringify(Analysis.diagnostics(snapshot)),
     )
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     const evaluated = completed(snapshot)
@@ -540,7 +541,7 @@ it.effect('reuses the Execution and Wake lifecycle from a bounded alternate owne
     assert.strictEqual(
       allocationEvents.filter((event) => event._tag === 'AllocationAcquire').length,
       allocationEvents.filter((event) => event._tag === 'AllocationRelease').length,
-      JSON.stringify(allocationEvents),
+      Json.stringify(allocationEvents),
     )
     assert.strictEqual((yield* runWasm(snapshot)).result, 123)
   }),
@@ -586,7 +587,7 @@ it.effect('suppresses a retained Wake after post-suspension Dormant destruction'
     assert.strictEqual(
       allocationEvents.filter((event) => event._tag === 'AllocationAcquire').length,
       allocationEvents.filter((event) => event._tag === 'AllocationRelease').length,
-      JSON.stringify(allocationEvents),
+      Json.stringify(allocationEvents),
     )
     assert.strictEqual((yield* runWasm(snapshot)).result, 1111)
   }),
@@ -598,7 +599,7 @@ it.effect('drives a fallibly prepared same-thread timer and cancels before readi
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
       [],
-      JSON.stringify(Analysis.diagnostics(snapshot)),
+      Json.stringify(Analysis.diagnostics(snapshot)),
     )
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     const evaluated = completed(snapshot)
@@ -657,7 +658,7 @@ it.effect('drives a fallibly prepared same-thread timer and cancels before readi
     assert.strictEqual(
       allocationEvents.filter((event) => event._tag === 'AllocationAcquire').length,
       allocationEvents.filter((event) => event._tag === 'AllocationRelease').length,
-      JSON.stringify(allocationEvents),
+      Json.stringify(allocationEvents),
     )
     assert.strictEqual((yield* runWasm(snapshot)).result, 42)
   }),
@@ -672,7 +673,7 @@ it.effect('publishes one task identity without scanning and consumes a stale rea
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
       [],
-      JSON.stringify(Analysis.diagnostics(snapshot)),
+      Json.stringify(Analysis.diagnostics(snapshot)),
     )
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     const evaluated = completed(snapshot)
@@ -723,7 +724,7 @@ pub fn main() -> () {
     assert.deepEqual(
       diagnostics.map((diagnostic) => diagnostic.code),
       ['SEM0139'],
-      JSON.stringify(diagnostics),
+      Json.stringify(diagnostics),
     )
     const diagnostic = diagnostics.at(0)
     assert.strictEqual(diagnostic?.reason._tag, 'UnsatisfiedExecutableProperty')
@@ -792,7 +793,7 @@ it.effect(
         assert.deepEqual(
           Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
           [],
-          `${name}: ${JSON.stringify(Analysis.diagnostics(snapshot))}`,
+          `${name}: ${Json.stringify(Analysis.diagnostics(snapshot))}`,
         )
         assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [], name)
         assert.strictEqual(completed(snapshot).result.value, 42n, name)
@@ -1007,7 +1008,7 @@ const verifyActorNeutralFixture = Effect.fnUntraced(function* (
     assert.deepEqual(
       diagnostics.map((diagnostic) => diagnostic.code),
       [],
-      `${fixture.name}: ${JSON.stringify(diagnostics)}`,
+      `${fixture.name}: ${Json.stringify(diagnostics)}`,
     )
     assert.deepEqual(MirVerification.verify(mir), [])
     assert.strictEqual(completed(snapshot).result.value, fixture.result)

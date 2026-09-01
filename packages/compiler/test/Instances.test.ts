@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as Instances from '../src/Instances.js'
 import * as Match from '../src/Match.js'
@@ -687,7 +688,7 @@ pub fn main() -> i32 {
     assert.strictEqual(
       outcome._tag,
       'Completed',
-      JSON.stringify(
+      Json.stringify(
         outcome,
         (_, value) => (typeof value === 'bigint' ? value.toString() : value),
         2,

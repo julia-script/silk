@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as ExecutionAffinity from '../src/ExecutionAffinity.js'
 import * as Intrinsic from '../src/Intrinsic.js'
@@ -526,7 +527,7 @@ it.effect(
       assert.strictEqual(
         diagnostics.length,
         15,
-        JSON.stringify(
+        Json.stringify(
           Analysis.diagnostics(snapshot).map((diagnostic) => ({
             code: diagnostic.code,
             reason: diagnostic.reason._tag,
