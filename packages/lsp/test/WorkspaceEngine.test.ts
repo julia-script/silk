@@ -786,7 +786,10 @@ it.effect('invalidates only the project containing a changed dependency path', (
     yield* TestClock.adjust(10)
     yield* nextEvent(engine, 'Committed')
     yield* nextEvent(engine, 'Committed')
-    assert.deepEqual([...analyses.values()].sort(), [1, 1])
+    assert.deepEqual(
+      [...analyses.values()].sort((left, right) => left - right),
+      [1, 1],
+    )
 
     assert.isTrue(
       Result.isSuccess(engine.accept(SourceEvent.invalidate(['/workspace-a/Dependency.silk']))),
@@ -807,10 +810,9 @@ it.effect('settles pending discovery and analysis during bounded shutdown', () =
   Effect.gen(function* () {
     const discoveryStarted = yield* Deferred.make<void>()
     const engine = yield* WorkspaceEngine.make({
-      discover: Effect.fnUntraced(function* (entry) {
+      discover: Effect.fnUntraced(function* (_entry) {
         yield* Deferred.succeed(discoveryStarted, undefined)
-        yield* Effect.never
-        return document(entry)
+        return yield* Effect.never
       }),
       workerFactory: factory(),
       policy: { debounce: 10, retirementDeadline: 10, queryDeadline: 100 },

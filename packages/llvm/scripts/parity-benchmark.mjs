@@ -34,7 +34,11 @@ const measure = async (name, workload) => {
 }
 
 const makeFunction = Effect.fn('ParityBenchmark.makeFunction')(
-  function* (builder, name, instructionCount) {
+  function* (
+    /** @type {Builder.Builder} */ builder,
+    /** @type {string} */ name,
+    /** @type {number} */ instructionCount,
+  ) {
     const i32 = yield* Type.integer(builder, 32)
     const signature = yield* Type.functionType(builder, i32, [])
     const fn = yield* FunctionActor.declare(builder, name, signature)

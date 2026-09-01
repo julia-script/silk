@@ -37,18 +37,20 @@ const collectText = Stream.runFold(
   (text, chunk) => text + chunk,
 )
 
-const runProcess = Effect.fnUntraced(function* (command, args) {
-  const process = yield* ChildProcess.make(command, args, { stdin: 'ignore' })
-  const [exitCode, stdout, stderr] = yield* Effect.all(
-    [
-      process.exitCode,
-      process.stdout.pipe(Stream.decodeText(), collectText),
-      process.stderr.pipe(Stream.decodeText(), collectText),
-    ],
-    { concurrency: 'unbounded' },
-  )
-  return Object.freeze({ exitCode, stdout, stderr })
-})
+const runProcess = Effect.fnUntraced(
+  function* (/** @type {string} */ command, /** @type {ReadonlyArray<string>} */ args) {
+    const process = yield* ChildProcess.make(command, args, { stdin: 'ignore' })
+    const [exitCode, stdout, stderr] = yield* Effect.all(
+      [
+        process.exitCode,
+        process.stdout.pipe(Stream.decodeText(), collectText),
+        process.stderr.pipe(Stream.decodeText(), collectText),
+      ],
+      { concurrency: 'unbounded' },
+    )
+    return Object.freeze({ exitCode, stdout, stderr })
+  },
+)
 
 const clang = Effect.fnUntraced(function* () {
   const configured = yield* Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(''))
@@ -59,26 +61,28 @@ const clang = Effect.fnUntraced(function* () {
   return 'clang'
 })
 
-const hash = Effect.fnUntraced(function* (value) {
+const hash = Effect.fnUntraced(function* (/** @type {Uint8Array} */ value) {
   return yield* Effect.try(() => createHash('sha256').update(value).digest('hex'))
 })
 
-const layoutHash = Effect.fnUntraced(function* (snapshot) {
+const layoutHash = Effect.fnUntraced(function* (/** @type {Analysis.Snapshot} */ snapshot) {
   const layout = Analysis.layoutOf(snapshot)
   return layout._tag === 'Available'
     ? yield* hash(LayoutEncode.encode(layout.value))
     : layout.error.message
 })
 
-const runWasm = Effect.fnUntraced(function* (artifact) {
-  return yield* Effect.try(() => {
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
-    const main = instance.exports.silk_main
-    if (typeof main !== 'function') return 'missing'
-    const result = main()
-    return typeof result === 'number' ? result : 'invalid'
-  })
-})
+const runWasm = Effect.fnUntraced(
+  function* (/** @type {import('../../dist/Backend.js').WebAssemblyModuleArtifact} */ artifact) {
+    return yield* Effect.try(() => {
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+      const main = instance.exports.silk_main
+      if (typeof main !== 'function') return 'missing'
+      const result = main()
+      return typeof result === 'number' ? result : 'invalid'
+    })
+  },
+)
 
 const program = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem

@@ -14,7 +14,7 @@ import * as Result from 'effect/Result'
 
 const check = process.argv.includes('--check')
 
-const sourceFiles = Effect.fnUntraced(function* (directory) {
+const sourceFiles = Effect.fnUntraced(function* (/** @type {string} */ directory) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   return (yield* fileSystem.readDirectory(directory, { recursive: true }))
@@ -23,14 +23,16 @@ const sourceFiles = Effect.fnUntraced(function* (directory) {
     .sort()
 })
 
-const inventory = Effect.fnUntraced(function* (syntax) {
-  const result = []
-  for (const block of DocBlock.all(syntax)) {
-    const fences = yield* CodeFence.all(syntax.source, block)
-    result.push({ block, fences })
-  }
-  return result
-})
+const inventory = Effect.fnUntraced(
+  function* (/** @type {import('@silklang/compiler/SyntaxFile').SyntaxFile} */ syntax) {
+    const result = []
+    for (const block of DocBlock.all(syntax)) {
+      const fences = yield* CodeFence.all(syntax.source, block)
+      result.push({ block, fences })
+    }
+    return result
+  },
+)
 
 const join = (parts) => {
   const size = parts.reduce((total, part) => total + part.length, 0)
@@ -50,7 +52,7 @@ const applyEdits = (bytes, edits) => {
   return output
 }
 
-const formatEmbeddedDocumentation = Effect.fnUntraced(function* (file) {
+const formatEmbeddedDocumentation = Effect.fnUntraced(function* (/** @type {string} */ file) {
   const fileSystem = yield* FileSystem.FileSystem
   const bytes = yield* fileSystem.readFile(file)
   const syntax = Parser.parse(Lexer.lex(SourceFile.make(file, bytes)))
