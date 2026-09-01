@@ -768,6 +768,12 @@ export const catalog = (
       return type === undefined ? [] : [Object.freeze({ struct, type })]
     })
     .sort((left, right) => Type.compare(left.type, right.type))
+  const generatedDeclarations = [...index.generatedAggregates.values()]
+    .flatMap((struct) => {
+      const type = nominalOf(struct)
+      return type === undefined ? [] : [Object.freeze({ struct, type })]
+    })
+    .sort((left, right) => Type.compare(left.type, right.type))
   const enumDeclarations = index.modules
     .flatMap((module) => module.enums)
     .flatMap((enum_) => {
@@ -783,7 +789,7 @@ export const catalog = (
     })
     .sort((left, right) => Type.compare(left.type, right.type))
   const byType = new Map(
-    declarations.map((declaration) => [
+    [...declarations, ...generatedDeclarations].map((declaration) => [
       `${declaration.type.module}\u0000${declaration.type.name}`,
       declaration,
     ]),
@@ -1451,7 +1457,10 @@ export const catalog = (
     let fieldsCopy = true
     let failure: UnavailableEntry | undefined
     for (const field of declaration.struct.fields) {
-      if (field.state._tag !== 'Unique' || field.name._tag !== 'Present') {
+      if (
+        field.state._tag !== 'Unique' ||
+        (field.name._tag !== 'Present' && field.member._tag !== 'OrdinalAggregateMember')
+      ) {
         failure = unavailable(
           type,
           dependencies,
@@ -1495,12 +1504,15 @@ export const catalog = (
         break
       }
       fieldsCopy = fieldsCopy && fieldLayout.copy
+      let fieldName = ''
+      if (field.name._tag === 'Present') fieldName = field.name.spelling
+      else if (field.member._tag === 'OrdinalAggregateMember') fieldName = `${field.member.ordinal}`
       inputs.push(
         Object.freeze({
           value: Object.freeze({
             _tag: 'LayoutField' as const,
             id: field.id,
-            name: field.name.spelling,
+            name: fieldName,
             type: fieldType,
           }),
           size: fieldLayout.size,

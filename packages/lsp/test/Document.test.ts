@@ -571,6 +571,64 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('keeps anonymous record identities local while serving editor structure', () =>
+  Effect.gen(function* () {
+    const source = `pub fn main() -> i32 {
+  let args = .{ name: 1, age: 41 }
+  return args.age
+}`
+    const { document, snapshot } = yield* open(source)
+    assert.deepEqual(
+      Document.diagnostics(document, snapshot, () => undefined),
+      [],
+    )
+
+    const argsUse = positionOf(source, 'args', 1)
+    const hover = Document.hover(document, snapshot, argsUse)
+    const hoverText =
+      typeof hover?.contents === 'object' && 'value' in hover.contents ? hover.contents.value : ''
+    assert.include(hoverText, 'anonymous record')
+    assert.notInclude(hoverText, '@Anonymous')
+
+    const completionSource = `pub fn main() -> i32 {
+  let args = .{ name: 1, age: 41 }
+  return args.
+}`
+    const completionDocument = yield* open(completionSource)
+    const completion = Document.completion(
+      completionDocument.document,
+      completionDocument.snapshot,
+      positionAt(completionSource, completionSource.indexOf('args.') + 'args.'.length),
+    )
+    assert.include(
+      completion.items.map((item) => item.label),
+      'age',
+    )
+    const ageUse = positionOf(source, 'age', 1)
+    assert.deepEqual(
+      Document.definition(document, snapshot, ageUse, () => undefined)?.targetSelectionRange.start,
+      positionOf(source, 'age'),
+    )
+  }),
+)
+
+it.effect('presents named positional aggregates as tuples', () =>
+  Effect.gen(function* () {
+    const source = `tuple Point(i32)
+pub fn main() -> i32 { let point = Point(42) return point.0 }`
+    const { document, snapshot } = yield* open(source)
+    assert.deepEqual(
+      Document.diagnostics(document, snapshot, () => undefined),
+      [],
+    )
+    const hover = Document.hover(document, snapshot, positionOf(source, 'Point', 1))
+    assert.include(
+      typeof hover?.contents === 'object' && 'value' in hover.contents ? hover.contents.value : '',
+      'tuple Point',
+    )
+  }),
+)
+
 it.effect('uses semantic qualifier lookup and lets a local shadow an intrinsic actor', () =>
   Effect.gen(function* () {
     const source = `struct Pair { left: i32 }

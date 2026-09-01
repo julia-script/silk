@@ -2,7 +2,7 @@ import * as Effect from 'effect/Effect'
 import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationCompletion from './DeclarationCompletion.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as IncrementalReuse from './IncrementalReuse.js'
@@ -160,7 +160,7 @@ const analyzeSemantics = Effect.fnUntraced(function* (
     readonly results: ReadonlyMap<string, Elaboration.Result>
     readonly opaqueRealizations?: OpaqueRealization.Catalog
   },
-): Effect.fn.Return<Omit<FrontendFacts, keyof HeaderFacts | 'report'>> {
+): Effect.fn.Return<Omit<FrontendFacts, 'resolution' | 'surfaces' | 'report'>> {
   const retained =
     reuse === undefined
       ? new Map<string, ModuleSemantics.ModuleSemantics>()
@@ -185,6 +185,21 @@ const analyzeSemantics = Effect.fnUntraced(function* (
         }),
     },
   )
+  const generatedAggregates = new Map<string, DeclarationFacts.StructFact>()
+  for (const result of results.values())
+    for (const aggregate of result.generatedAggregates) {
+      if (aggregate.canonical._tag !== 'Canonical') continue
+      generatedAggregates.set(
+        `${aggregate.canonical.id.module}:${aggregate.canonical.id.name}`,
+        aggregate,
+      )
+    }
+  const index = DeclarationIndex.make(
+    headers.index.stage,
+    headers.index.modules,
+    headers.index.diagnostics,
+    generatedAggregates,
+  )
   const ownership = yield* PhaseReport.measureEffectInto(
     report,
     'ownership',
@@ -198,7 +213,7 @@ const analyzeSemantics = Effect.fnUntraced(function* (
         ownership.set(
           name,
           retained.get(name)?.ownership ??
-            Ownership.checkModule(result, headers.index, localSharedAccessBoundaries),
+            Ownership.checkModule(result, index, localSharedAccessBoundaries),
         )
         ordinal += 1
       }
@@ -252,6 +267,7 @@ const analyzeSemantics = Effect.fnUntraced(function* (
   )
   return OpaqueRealization.withCatalog(
     Object.freeze({
+      index,
       semantics,
       results,
       ownership,

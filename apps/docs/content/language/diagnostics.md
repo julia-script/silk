@@ -16,11 +16,11 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | `LEX` | Lexical | 12 |
 | `PAR` | Parser | 5 |
 | `MOD` | Module | 3 |
-| `SEM` | Semantic | 163 |
+| `SEM` | Semantic | 167 |
 | `OWN` | Ownership | 16 |
 | `LAY` | Layout | 1 |
 
-There are 200 codes in total.
+There are 204 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -224,6 +224,10 @@ There are 200 codes in total.
 | `SEM0169` | Stable code for construction through an incomplete nominal union declaration. | `Cannot construct invalid nominal union <unionName>` |
 | `SEM0170` | Stable code for a duration literal whose exact nanosecond total exceeds `u64`. | `Duration literal exceeds the u64 nanosecond range` |
 | `SEM0171` | Stable code for postfix referent projection whose subject is not a reference. | `Cannot project a referent from <actual>; the subject must be a reference` |
+| `SEM0172` | Stable code for positional construction with the wrong number of tuple elements. | `<type> expects <expected> tuple elements but received <actual>` |
+| `SEM0173` | Stable code for using tuple syntax with a named struct or record syntax with a tuple. | `A contextual <expected> literal cannot construct <actual>` |
+| `SEM0174` | Stable code for attempting to join distinct anonymous aggregate occurrences. | `Separate anonymous aggregate occurrences do not acquire a common type` |
+| `SEM0175` | Stable code for attempting named-field construction of a positional aggregate. | `<type> is positional and cannot be constructed with named fields` |
 
 ## Ownership (`OWN`)
 

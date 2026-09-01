@@ -1,3 +1,4 @@
+export * as AggregateIdentity from './AggregateIdentity.js'
 export * as Analysis from './Analysis.js'
 export * as AutoImport from './AutoImport.js'
 export * as Backend from './Backend.js'

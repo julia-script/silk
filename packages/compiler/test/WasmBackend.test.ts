@@ -351,6 +351,15 @@ it.effect('agrees with the interpreter on partially annotated generic calls', ()
   }),
 )
 
+it.effect('erases tuple and contextual-record sugar before WebAssembly emission', () =>
+  Effect.gen(function* () {
+    const program = corpus.find((candidate) => candidate.name === 'tuple-record-aggregates')
+    assert.notStrictEqual(program, undefined)
+    if (program === undefined) return
+    assert.strictEqual(yield* run(program.source), yield* interpret(program.source), program.name)
+  }),
+)
+
 it.effect('rejects a structural MIR cycle before structured emission', () =>
   Effect.gen(function* () {
     const snapshot = yield* snapshotOf('pub fn main() -> i32 { return 42 }')
