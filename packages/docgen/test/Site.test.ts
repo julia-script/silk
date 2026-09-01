@@ -133,7 +133,7 @@ it.effect(
       const decoded = Model.decode(parsed)
       if (decoded._tag !== 'Decoded') return assert.fail('expected documentation JSON')
       const first = Site.render(decoded.documentation)
-      const roundTripped = Model.decode(Json.decodeSync(Json.encodeValue(decoded.documentation)))
+      const roundTripped = Model.decode(Json.decodeSync(Json.encodeValue(parsed)))
       if (roundTripped._tag !== 'Decoded') return assert.fail('expected documentation JSON')
       const second = Site.render(roundTripped.documentation)
       assert.deepStrictEqual(
