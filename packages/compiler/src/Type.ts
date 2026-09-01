@@ -1367,7 +1367,19 @@ const callableIdentityKey = (self: CallableIdentityArgument): string =>
     self.environment === undefined ? '' : callableEnvironmentKey(self.environment),
   ].join('')
 
+const genericArgumentKeyCache = new WeakMap<Exclude<GenericArgument, string>, string>()
+
 export const genericArgumentKey = (self: GenericArgument): string => {
+  if (typeof self === 'string') return computeGenericArgumentKey(self)
+  let cached = genericArgumentKeyCache.get(self)
+  if (cached === undefined) {
+    cached = computeGenericArgumentKey(self)
+    genericArgumentKeyCache.set(self, cached)
+  }
+  return cached
+}
+
+const computeGenericArgumentKey = (self: GenericArgument): string => {
   if (isUnavailableGenericArgument(self)) return `unavailable:${self.expectedKind}:${self.reason}`
   if (isRepresentationParameterArgument(self))
     return `representation-parameter:${key(self.parameter)}`

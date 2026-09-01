@@ -362,10 +362,18 @@ const keyOf = (
     })
   })()
 
-export const keyText = (key: InstanceKey): string =>
-  `${key.declaration.module}\u0000${key.declaration.name}\u0000${key.typeArguments
-    .map(Type.genericArgumentKey)
-    .join('\u0000')}\u0002${key.contractRow.join('\u0000')}`
+const keyTextCache = new WeakMap<InstanceKey, string>()
+
+export const keyText = (key: InstanceKey): string => {
+  let cached = keyTextCache.get(key)
+  if (cached === undefined) {
+    cached = `${key.declaration.module}\u0000${key.declaration.name}\u0000${key.typeArguments
+      .map(Type.genericArgumentKey)
+      .join('\u0000')}\u0002${key.contractRow.join('\u0000')}`
+    keyTextCache.set(key, cached)
+  }
+  return cached
+}
 
 const concreteConstraintEvidence = (
   wanted: Constraint.Constraint,

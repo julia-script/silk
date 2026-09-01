@@ -57,10 +57,13 @@ const pathTo = (
   roots: ReadonlySet<string>,
 ): ReadonlyArray<string> | undefined => {
   if (roots.has(origin)) return Object.freeze([origin])
+  // FIFO traversal with sorted neighbor expansion dequeues paths in exactly
+  // (length, lexicographic) order: equal-length paths inherit their parents' order, and a parent
+  // ordered before another parent orders every child before the other's children.
   const pending: Array<ReadonlyArray<string>> = [Object.freeze([origin])]
   const visited = new Set([origin])
-  while (pending.length > 0) {
-    const path = pending.shift()
+  for (let cursor = 0; cursor < pending.length; cursor += 1) {
+    const path = pending[cursor]
     const tail = path?.at(-1)
     if (path === undefined || tail === undefined) continue
     const targets = [...(graph.dependencies.get(tail) ?? [])].sort(compareText)
@@ -71,7 +74,6 @@ const pathTo = (
       if (roots.has(target)) return next
       pending.push(next)
     }
-    pending.sort(comparePath)
   }
   return undefined
 }

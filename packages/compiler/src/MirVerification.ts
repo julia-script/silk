@@ -2195,34 +2195,49 @@ const originReachableSuspensionFunctions = (self: Module): ReadonlySet<string> =
       )
       .map((fn) => instanceText(fn.instance)),
   )
+  const byDeclaration = new Map<string, Array<MirFunction>>()
+  for (const fn of self.functions) {
+    const declarationKey = `${fn.id.module}\u0000${fn.id.name}`
+    const bucket = byDeclaration.get(declarationKey)
+    if (bucket === undefined) byDeclaration.set(declarationKey, [fn])
+    else bucket.push(fn)
+  }
+  const pending = self.functions
+    .filter((fn) => !reachable.has(instanceText(fn.instance)))
+    .map((fn) => ({
+      key: instanceText(fn.instance),
+      targets: [
+        ...operations(fn).flatMap(suspensionCallTargets),
+        ...(fn.suspension?.regions ?? []).flatMap((region) =>
+          region._tag === 'RunSuspendableEffectRegion' && region.runner.declaration !== undefined
+            ? [
+                {
+                  declaration: region.runner.declaration,
+                  typeArguments: region.runner.typeArguments,
+                },
+              ]
+            : [],
+        ),
+      ],
+    }))
   let changed = true
   while (changed) {
     changed = false
-    for (const fn of self.functions) {
-      const key = instanceText(fn.instance)
-      if (reachable.has(key)) continue
-      const finalSuspensionTargets = (fn.suspension?.regions ?? []).flatMap((region) =>
-        region._tag === 'RunSuspendableEffectRegion' && region.runner.declaration !== undefined
-          ? [
-              Object.freeze({
-                declaration: region.runner.declaration,
-                typeArguments: region.runner.typeArguments,
-              }),
-            ]
-          : [],
-      )
-      const reachesOrigin = [
-        ...operations(fn).flatMap(suspensionCallTargets),
-        ...finalSuspensionTargets,
-      ].some((target) =>
-        self.functions.some(
+    for (let index = pending.length - 1; index >= 0; index -= 1) {
+      const entry = pending[index]
+      if (entry === undefined) continue
+      const reachesOrigin = entry.targets.some((target) =>
+        (
+          byDeclaration.get(`${target.declaration.module}\u0000${target.declaration.name}`) ?? []
+        ).some(
           (candidate) =>
             reachable.has(instanceText(candidate.instance)) &&
             matchesInstance(candidate, target.declaration, target.typeArguments),
         ),
       )
       if (reachesOrigin) {
-        reachable.add(key)
+        reachable.add(entry.key)
+        pending.splice(index, 1)
         changed = true
       }
     }
@@ -2428,7 +2443,23 @@ const runPropagationValid = (
   )
 }
 
+const verifyCache = new WeakMap<Module, ReadonlyArray<Violation>>()
+
+/**
+ * Verification is pure over an immutable Module, and the same module is routinely verified more
+ * than once (tests assert emptiness, then evaluation re-verifies before executing), so the result
+ * is cached per module identity.
+ */
 export const verify = (self: Module): ReadonlyArray<Violation> => {
+  let cached = verifyCache.get(self)
+  if (cached === undefined) {
+    cached = computeVerify(self)
+    verifyCache.set(self, cached)
+  }
+  return cached
+}
+
+const computeVerify = (self: Module): ReadonlyArray<Violation> => {
   const violations: Array<Violation> = LayoutVerify.verify(self.layout).map((violation) =>
     Object.freeze({
       _tag: 'Violation' as const,
