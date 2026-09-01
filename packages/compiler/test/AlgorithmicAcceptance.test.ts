@@ -49,9 +49,9 @@ it.effect('accepts the compiler-shaped fold through every compiler phase', () =>
     const self = yield* snapshot('aarch64-apple-darwin')
 
     assert.deepEqual(Analysis.diagnostics(self), [])
-    // `usize` renders and reads decimal text, so naming it reaches the formatting stack and the
-    // owned text it produces. The closure is an analysis fact: this program's emitted artifact is
-    // unchanged, because codegen emits only what the entry point reaches.
+    // `usize` renders and reads decimal text, so naming it reaches the formatting, writer, Effect,
+    // and standard-service stack. Module discovery remains distinct from executable reachability:
+    // codegen emits only declarations reached from the entry point.
     assert.deepEqual(
       Analysis.modules(self).map((module) => module.name),
       [
@@ -62,6 +62,7 @@ it.effect('accepts the compiler-shaped fold through every compiler phase', () =>
         'silk/bool',
         'silk/bytes',
         'silk/char',
+        'silk/effect',
         'silk/f32',
         'silk/f64',
         'silk/format',
@@ -71,18 +72,22 @@ it.effect('accepts the compiler-shaped fold through every compiler phase', () =>
         'silk/i8',
         'silk/isize',
         'silk/layout',
+        'silk/logger',
+        'silk/monotonic_clock',
         'silk/option',
         'silk/order',
         'silk/raw_buffer',
         'silk/result',
         'silk/slot',
         'silk/string',
+        'silk/system_clock',
         'silk/u16',
         'silk/u32',
         'silk/u64',
         'silk/u8',
         'silk/usize',
         'silk/vector',
+        'silk/writer',
       ],
     )
     for (const name of moduleNames) {

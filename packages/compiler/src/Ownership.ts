@@ -82,6 +82,7 @@ export interface LoanFact {
     | 'FixedArrayBorrow'
     | 'SliceReborrow'
     | 'ValueBorrow'
+    | 'ValueReborrow'
     | 'EffectCapture'
     | 'CallableCapture'
     | 'ReturnedCallableCapture'
@@ -824,6 +825,16 @@ const checkExpression = (
       }
       return
     }
+    case 'ReferentPlace': {
+      checkExpression(state, live, expression.subject, false, guard, escaping)
+      if (
+        consuming &&
+        categoryOf(state.index, expression.type, state.copyAssumptions)._tag === 'MoveOnly'
+      ) {
+        state.diagnostics.push(Diagnostic.borrowedMove(expression.span))
+      }
+      return
+    }
     case 'IndexPlace': {
       checkExpression(state, live, expression.subject, false, guard, escaping)
       checkExpression(state, live, expression.index, false, guard, escaping)
@@ -1330,7 +1341,11 @@ const borrowedPlaceAccess = (
   expression: Elaboration.ExpressionFact,
 ): Type.BorrowAccess | undefined => {
   if (expression._tag === 'Grouped') return borrowedPlaceAccess(expression.expression)
-  if (expression._tag === 'IndexProjection' || expression._tag === 'FieldProjection') {
+  if (
+    expression._tag === 'IndexProjection' ||
+    expression._tag === 'ReferentProjection' ||
+    expression._tag === 'FieldProjection'
+  ) {
     return expression.borrowAccess
   }
   return undefined
@@ -1448,6 +1463,9 @@ const analyzeLoans = (
         return
       }
       case 'Move':
+        scanRunEnds(expression.subject, region)
+        return
+      case 'ReferentProjection':
         scanRunEnds(expression.subject, region)
         return
       case 'Grouped':
@@ -1831,6 +1849,7 @@ const analyzeLoans = (
         let origin: LoanFact['origin'] = 'ValueBorrow'
         if (expression.formation._tag === 'FixedArrayBorrow') origin = 'FixedArrayBorrow'
         else if (expression.formation._tag === 'SliceReborrow') origin = 'SliceReborrow'
+        else if (expression.formation._tag === 'ValueReborrow') origin = 'ValueReborrow'
         loans.push(
           Object.freeze({
             _tag: 'Loan',
@@ -1844,7 +1863,9 @@ const analyzeLoans = (
             access: expression.access,
             origin,
             suspendsParent:
-              expression.formation._tag === 'SliceReborrow' && expression.formation.suspendsParent,
+              (expression.formation._tag === 'SliceReborrow' ||
+                expression.formation._tag === 'ValueReborrow') &&
+              expression.formation.suspendsParent,
             startRegion: region,
             endRegion: delayedEnd?.region ?? region,
             startSpan: expression.syntax.span,
@@ -2070,7 +2091,8 @@ const analyzeLoans = (
                 root,
                 access: candidate.access,
                 origin: returned ? 'ReturnedView' : candidate.formation._tag,
-                ...(candidate.formation._tag === 'SliceReborrow'
+                ...(candidate.formation._tag === 'SliceReborrow' ||
+                candidate.formation._tag === 'ValueReborrow'
                   ? { parent: root, suspendsParent: candidate.formation.suspendsParent }
                   : { suspendsParent: false }),
                 startRegion: region,
@@ -2159,7 +2181,8 @@ const analyzeLoans = (
             root,
             access: candidate.access,
             origin: returnedOrdinal === argumentOrdinal ? 'ReturnedView' : candidate.formation._tag,
-            ...(candidate.formation._tag === 'SliceReborrow'
+            ...(candidate.formation._tag === 'SliceReborrow' ||
+            candidate.formation._tag === 'ValueReborrow'
               ? { parent: root, suspendsParent: candidate.formation.suspendsParent }
               : { suspendsParent: false }),
             startRegion: region,

@@ -492,8 +492,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       }
       const sourceSemantic = Mir.semanticType(sourceType)
       if (SilkType.isReference(sourceSemantic)) {
-        // The place lives on the referenced target: static field offsets off the
-        // borrow's address, one load per lane of the projected value.
+        // Resolve the selected value to one checked address, then load each calling lane.
         const address = NativeStorage.readLocal(nativeStorage, operation.root).at(0)
         if (address === undefined) throw new RangeError('LLVM reference read lost its address')
         const base = yield* FunctionBody.cast(
@@ -503,19 +502,112 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           pointer,
           `reference_read${operation.destination.ordinal}_base`,
         )
-        const staticSelectors: Array<Layout.Selector> = []
-        for (const candidate of operation.selectors) {
-          if (candidate._tag !== 'FieldSelector')
-            throw new RangeError('LLVM reference place supports only field selectors')
-          staticSelectors.push(candidate.field)
+        let selected: SilkType.Type = sourceSemantic.target
+        let staticOffset = 0
+        let dynamicOffset: Value.Input | undefined
+        let runtimeOrdinal = 0
+        for (const selector of operation.selectors) {
+          const selectedLayout = Layout.entry(program.layout, selected)
+          if (selector._tag === 'FieldSelector') {
+            if (selectedLayout?.representation._tag !== 'Aggregate')
+              throw new RangeError('LLVM reference read field lost its aggregate layout')
+            const field = selectedLayout.representation.fields.find((candidate) =>
+              DeclarationFacts.sameFieldId(candidate.id, selector.field),
+            )
+            if (field === undefined)
+              throw new RangeError('LLVM reference read lost its field layout')
+            staticOffset += field.offset
+            selected = field.type
+            continue
+          }
+          if (
+            selector._tag !== 'ElementSelector' ||
+            selectedLayout?.representation._tag !== 'Repeated'
+          )
+            throw new RangeError('LLVM reference read element lost its repeated layout')
+          if (selector.index._tag === 'Proven') {
+            staticOffset += selector.index.value * selectedLayout.representation.stride
+          } else {
+            const index = NativeStorage.readScalar(nativeStorage, selector.index.local)
+            const length = yield* Constant.integerUnsigned(
+              builder,
+              usizeType ?? i32,
+              BigInt(selector.length),
+            )
+            if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
+            const inBounds = yield* FunctionBody.integerCompare(
+              body,
+              'ult',
+              index,
+              length,
+              `reference_read${checkOrdinal}_${runtimeOrdinal}_in_bounds`,
+            )
+            yield* NativeDebug.locate(
+              debug,
+              selector.provenance.span,
+              yield* Value.instruction(body, inBounds),
+            )
+            const continuation = yield* LlvmBlock.make(
+              body,
+              `reference_read${checkOrdinal}_${runtimeOrdinal}_ok`,
+            )
+            yield* FunctionBody.conditionalBranch(body, inBounds, continuation, trapBlock)
+            yield* LlvmBlock.setInsertionPoint(body, continuation)
+            const scaled = yield* FunctionBody.binary(
+              body,
+              'mul',
+              index,
+              yield* Constant.integerUnsigned(
+                builder,
+                usizeType ?? i32,
+                BigInt(selectedLayout.representation.stride),
+              ),
+              `reference_read${operation.destination.ordinal}_${runtimeOrdinal}_scaled`,
+            )
+            dynamicOffset =
+              dynamicOffset === undefined
+                ? scaled
+                : yield* FunctionBody.binary(
+                    body,
+                    'add',
+                    dynamicOffset,
+                    scaled,
+                    `reference_read${operation.destination.ordinal}_${runtimeOrdinal}_offset`,
+                  )
+            runtimeOrdinal += 1
+          }
+          selected = selectedLayout.representation.element
         }
-        const target = sourceSemantic.target
+        if (staticOffset !== 0) {
+          const constant = yield* Constant.integerUnsigned(
+            builder,
+            usizeType ?? i32,
+            BigInt(staticOffset),
+          )
+          dynamicOffset =
+            dynamicOffset === undefined
+              ? constant
+              : yield* FunctionBody.binary(
+                  body,
+                  'add',
+                  dynamicOffset,
+                  constant,
+                  `reference_read${operation.destination.ordinal}_static_offset`,
+                )
+        }
+        const projected =
+          dynamicOffset === undefined
+            ? base
+            : yield* NativeLanePointer.lanePointer(
+                lanePointers,
+                body,
+                base,
+                dynamicOffset,
+                `reference_read${operation.destination.ordinal}_projected`,
+              )
         const values: Array<Value.Input> = []
         for (const [ordinal, lane] of NativeType.lanesFor(types, operation.type).entries()) {
-          const offset = LayoutVerify.laneOffset(program.layout, target, [
-            ...staticSelectors,
-            ...lane.path,
-          ])
+          const offset = LayoutVerify.laneOffset(program.layout, selected, lane.path)
           if (offset === undefined) throw new RangeError('LLVM reference read lost a lane offset')
           values.push(
             yield* FunctionBody.load(
@@ -524,7 +616,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               yield* NativeLanePointer.lanePointer(
                 lanePointers,
                 body,
-                base,
+                projected,
                 offset,
                 `reference_read${operation.destination.ordinal}_${ordinal}_ptr`,
               ),
@@ -533,6 +625,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           )
         }
         nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(values))
+        if (runtimeOrdinal > 0) checkOrdinal += 1
         break
       }
       if (SilkType.isSlice(sourceSemantic)) {
@@ -839,7 +932,9 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     }
     case 'WritePlace': {
       if (operation.rootType._tag === 'Reference') {
-        // Writing through the borrow stores each value lane at its target offset.
+        if (operation.rootType.type.access !== 'Exclusive')
+          throw new RangeError('LLVM reference write requires exclusive access')
+        // Resolve the selected value address once, then store each calling lane.
         const address = NativeStorage.readLocal(nativeStorage, operation.root).at(0)
         if (address === undefined) throw new RangeError('LLVM reference write lost its address')
         const base = yield* FunctionBody.cast(
@@ -849,20 +944,88 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           pointer,
           `reference_write${operation.source.ordinal}_base`,
         )
-        const staticSelectors: Array<Layout.Selector> = []
-        for (const candidate of operation.selectors) {
-          if (candidate._tag !== 'FieldSelector')
-            throw new RangeError('LLVM reference place supports only field selectors')
-          staticSelectors.push(candidate.field)
+        let selected: SilkType.Type = operation.rootType.type.target
+        let staticOffset = 0
+        let dynamicOffset: Value.Input | undefined
+        let runtimeOrdinal = 0
+        for (const selector of operation.selectors) {
+          const selectedLayout = Layout.entry(program.layout, selected)
+          if (selector._tag === 'FieldSelector') {
+            if (selectedLayout?.representation._tag !== 'Aggregate')
+              throw new RangeError('LLVM reference write field lost its aggregate layout')
+            const field = selectedLayout.representation.fields.find((candidate) =>
+              DeclarationFacts.sameFieldId(candidate.id, selector.field),
+            )
+            if (field === undefined)
+              throw new RangeError('LLVM reference write lost its field layout')
+            staticOffset += field.offset
+            selected = field.type
+            continue
+          }
+          if (
+            selector._tag !== 'ElementSelector' ||
+            selectedLayout?.representation._tag !== 'Repeated'
+          )
+            throw new RangeError('LLVM reference write element lost its repeated layout')
+          if (selector.index._tag === 'Proven') {
+            staticOffset += selector.index.value * selectedLayout.representation.stride
+          } else {
+            const scaled = yield* FunctionBody.binary(
+              body,
+              'mul',
+              NativeStorage.readScalar(nativeStorage, selector.index.local),
+              yield* Constant.integerUnsigned(
+                builder,
+                usizeType ?? i32,
+                BigInt(selectedLayout.representation.stride),
+              ),
+              `reference_write${operation.source.ordinal}_${runtimeOrdinal}_scaled`,
+            )
+            dynamicOffset =
+              dynamicOffset === undefined
+                ? scaled
+                : yield* FunctionBody.binary(
+                    body,
+                    'add',
+                    dynamicOffset,
+                    scaled,
+                    `reference_write${operation.source.ordinal}_${runtimeOrdinal}_offset`,
+                  )
+            runtimeOrdinal += 1
+          }
+          selected = selectedLayout.representation.element
         }
-        const target = operation.rootType.type.target
+        if (staticOffset !== 0) {
+          const constant = yield* Constant.integerUnsigned(
+            builder,
+            usizeType ?? i32,
+            BigInt(staticOffset),
+          )
+          dynamicOffset =
+            dynamicOffset === undefined
+              ? constant
+              : yield* FunctionBody.binary(
+                  body,
+                  'add',
+                  dynamicOffset,
+                  constant,
+                  `reference_write${operation.source.ordinal}_static_offset`,
+                )
+        }
+        const projected =
+          dynamicOffset === undefined
+            ? base
+            : yield* NativeLanePointer.lanePointer(
+                lanePointers,
+                body,
+                base,
+                dynamicOffset,
+                `reference_write${operation.source.ordinal}_projected`,
+              )
         const values = NativeStorage.readLocal(nativeStorage, operation.source)
         for (const [ordinal, lane] of NativeType.lanesFor(types, operation.type).entries()) {
           const value = values.at(ordinal)
-          const offset = LayoutVerify.laneOffset(program.layout, target, [
-            ...staticSelectors,
-            ...lane.path,
-          ])
+          const offset = LayoutVerify.laneOffset(program.layout, selected, lane.path)
           if (value === undefined || offset === undefined)
             throw new RangeError('LLVM reference write lost a lane offset')
           yield* FunctionBody.store(
@@ -871,7 +1034,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             yield* NativeLanePointer.lanePointer(
               lanePointers,
               body,
-              base,
+              projected,
               offset,
               `reference_write${operation.source.ordinal}_${ordinal}_ptr`,
             ),

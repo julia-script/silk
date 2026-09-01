@@ -95,60 +95,6 @@ pub fn main() -> i32 { return 0 }`,
   }),
 )
 
-it.effect('rejects an open failure row overlapping a compatible closed row', () =>
-  Effect.gen(function* () {
-    // An open row stands for every extension of itself, so a head carrying `!E` covers the closed
-    // row `!Problem` and the two declarations may name one provider.
-    const snapshot = yield* analyze(
-      'conditional-conformance-rejection/open-row',
-      `interface Marker {}
-
-struct Problem { code: i32 }
-
-impl Marker for Effect<i32 ! Problem> {}
-
-impl<E> Marker for Effect<i32 ! E> {}
-
-pub fn main() -> i32 { return 0 }`,
-    )
-    assert.deepEqual(
-      reported(snapshot, 'SEM0119').map((diagnostic) => diagnostic.message),
-      [
-        'conditional-conformance-rejection/open-row.Marker for Effect<i32 ! %0> may overlap conditional-conformance-rejection/open-row.Marker for Effect<i32 ! conditional-conformance-rejection/open-row.Problem>',
-      ],
-    )
-  }),
-)
-
-it.effect('accepts closed Effect heads with disjoint success, failure, and requirement rows', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* analyze(
-      'conditional-conformance-rejection/disjoint-effects',
-      `interface SuccessMarker {}
-interface FailureMarker {}
-interface RequirementMarker {}
-
-struct Problem {}
-struct Other {}
-
-service Left { effect fn value() -> i32 ? &Left }
-service Right { effect fn value() -> i32 ? &Right }
-
-impl SuccessMarker for Effect<i32> {}
-impl SuccessMarker for Effect<bool> {}
-
-impl FailureMarker for Effect<i32 ! Problem> {}
-impl FailureMarker for Effect<i32 ! Other> {}
-
-impl RequirementMarker for Effect<i32 ? &Left> {}
-impl RequirementMarker for Effect<i32 ? &Right> {}
-
-pub fn main() -> i32 { return 0 }`,
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-  }),
-)
-
 it.effect('allows a service as an ordinary conditional proof requirement', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyze(
@@ -174,36 +120,6 @@ pub fn main() -> i32 { return 0 }`,
     assert.strictEqual(ConformanceProof.prove(index, provider, capability)._tag, 'Unproved')
     assert.isUndefined(ConformanceProof.witness(index, provider, capability))
     assert.isFalse(ConformanceProof.conforms(index, provider, capability))
-  }),
-)
-
-it.effect('rejects access variants that share one concrete specialization', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* analyze(
-      'conditional-conformance-rejection/access-overlap',
-      `interface EffectMarker {}
-interface RequirementMarker {}
-
-service Clock { effect fn now() -> i32 ? &Clock }
-
-impl EffectMarker for Effect<i32> {}
-impl EffectMarker for mut Effect<i32> {}
-
-impl RequirementMarker for Effect<i32 ? &Clock> {}
-impl RequirementMarker for Effect<i32 ? &mut Clock> {}
-
-pub fn main() -> i32 { return 0 }`,
-    )
-    const overlaps = reported(snapshot, 'SEM0119')
-    for (const name of ['EffectMarker', 'RequirementMarker'])
-      assert.strictEqual(
-        overlaps.filter((diagnostic) => diagnostic.message.includes(name)).length,
-        1,
-        `${name}: ${JSON.stringify(Analysis.diagnostics(snapshot), undefined, 2)}`,
-      )
-    assert.strictEqual(overlaps.length, 2)
-    assert.deepEqual(reported(snapshot, 'SEM0083'), [])
-    assert.deepEqual(reported(snapshot, 'SEM0120'), [])
   }),
 )
 

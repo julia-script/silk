@@ -594,8 +594,9 @@ describe('preset catalog', () => {
     const native = snapshotOf(acceptancePreset, 'aarch64-apple-darwin')
     const wasm = snapshotOf(acceptancePreset, 'wasm32-unknown-unknown')
     expect(Analysis.diagnostics(native)).toEqual([])
-    // `usize` renders and reads decimal text, so naming it reaches the formatting stack and the
-    // owned text it produces. The closure is an analysis fact, not an artifact cost.
+    // `usize` renders and reads decimal text, so naming it reaches the Writer-backed formatting
+    // stack, its runtime services, and the owned text it produces. The closure is an analysis
+    // fact, not an artifact cost.
     expect(Analysis.modules(native).map((module) => module.name)).toEqual([
       'app/Main',
       'compiler/Coverage',
@@ -604,6 +605,7 @@ describe('preset catalog', () => {
       'silk/bool',
       'silk/bytes',
       'silk/char',
+      'silk/effect',
       'silk/f32',
       'silk/f64',
       'silk/format',
@@ -613,18 +615,22 @@ describe('preset catalog', () => {
       'silk/i8',
       'silk/isize',
       'silk/layout',
+      'silk/logger',
+      'silk/monotonic_clock',
       'silk/option',
       'silk/order',
       'silk/raw_buffer',
       'silk/result',
       'silk/slot',
       'silk/string',
+      'silk/system_clock',
       'silk/u16',
       'silk/u32',
       'silk/u64',
       'silk/u8',
       'silk/usize',
       'silk/vector',
+      'silk/writer',
     ])
     for (const name of Object.keys(acceptancePreset.modules)) {
       expect(Analysis.moduleAnalysis(native, name)?.hir, name).toBeDefined()

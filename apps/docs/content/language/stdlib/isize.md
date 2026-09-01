@@ -16,7 +16,9 @@ for files, protocols, persistent data, or any value that must mean the same thin
 conversions, division by zero, and invalid shift counts trap. `checked*` returns [`Option`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e),
 `wrapping*` uses arithmetic modulo the target width, and `saturating*` clamps at the target bound.
 
-Decimal [`parse`](#declaration-73696c6b2f6973697a653a3a7061727365) and [`toText`](#declaration-73696c6b2f6973697a653a3a746f54657874) use the selected target range; formatting allocates owned text.
+Decimal [`parse`](#declaration-73696c6b2f6973697a653a3a7061727365) uses the selected range. Use [`Format`](./format.md#declaration-73696c6b2f666f726d61743a3a466f726d6174) with `Format.display` for defaults or
+`Format.displayWith` for explicit options. Both operations stream through a mutable `Writer`
+without `Allocator`.
 
 ## Gotchas
 
@@ -41,7 +43,7 @@ pub fn main() -> i32 {
 
 Import as `isize` with `import silk.isize`.
 
-Public declarations: 60.
+Public declarations: 59.
 
 <a id="declaration-73696c6b2f6973697a653a3a4d4158"></a>
 
@@ -671,17 +673,6 @@ pub fn greaterOrEqual(left: isize, right: isize) -> bool
 ```
 
 Returns `true` when `left` is greater than or equal to `right`.
-
-<a id="declaration-73696c6b2f6973697a653a3a746f54657874"></a>
-
-## `toText`
-
-```silk
-pub effect fn toText(value: isize) -> String ! OutOfMemoryError ? &mut Allocator
-```
-
-Renders the value as base-10 text in new owned storage. Allocation uses the required
-`Allocator` and can fail with `OutOfMemoryError`.
 
 <a id="declaration-73696c6b2f6973697a653a3a7061727365"></a>
 

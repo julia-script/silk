@@ -93,7 +93,8 @@ it.effect('dispatches complete ordered messages through an ordinary source Logge
     const hir = Projections.hirOf(self, 'silk/effect')
     assert.include(hir === undefined ? '' : Hir.encode(hir), 'service-call silk/logger.Logger.log')
     const lowered = Analysis.loweredMir(self)
-    assert.strictEqual(MirEncoding.encode(lowered), golden('logging.mir.txt'))
+    const encodedMir = MirEncoding.encode(lowered)
+    assert.strictEqual(encodedMir, golden('logging.mir.txt'))
     assert.isFalse(
       lowered.functions
         .flatMap(MirVerification.operations)

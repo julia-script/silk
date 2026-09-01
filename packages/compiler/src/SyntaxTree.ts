@@ -103,6 +103,7 @@ export type NodeKind =
   | 'StructFieldInitializer'
   | 'FieldProjectionExpression'
   | 'OrdinalProjectionExpression'
+  | 'ReferentProjectionExpression'
   | 'IndexProjectionExpression'
   | 'CallExpression'
   | 'CallTypeArgumentList'

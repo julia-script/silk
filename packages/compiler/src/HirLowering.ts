@@ -78,11 +78,15 @@ export const hirPatternSelection = (selection: PatternSelectionFact): Hir.Patter
   ) {
     member = Match.structuralMember(selection.pattern.member)
   }
+  const subject = hirExpression(selection.subject)
   return Object.freeze({
     id: selection.id,
     arm: selection.arm,
     access: selection.access,
-    subject: hirExpression(selection.subject),
+    subject:
+      selection.access === 'Move' && (subject._tag === 'Project' || subject._tag === 'IndexPlace')
+        ? Object.freeze({ ...subject, access: 'ConsumeRequested' as const })
+        : subject,
     members: selection.members,
     ...(member === undefined ? {} : { member }),
     universal: selection.pattern._tag === 'UniversalPattern',
@@ -640,7 +644,12 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     })
   }
   if (fact._tag === 'Match') {
-    const scrutinee = hirExpression(fact.scrutinee)
+    const loweredScrutinee = hirExpression(fact.scrutinee)
+    const scrutinee =
+      fact.access === 'Move' &&
+      (loweredScrutinee._tag === 'Project' || loweredScrutinee._tag === 'IndexPlace')
+        ? Object.freeze({ ...loweredScrutinee, access: 'ConsumeRequested' as const })
+        : loweredScrutinee
     if (scrutinee._tag === 'Unavailable' || fact.type._tag !== 'Available') {
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
     }
@@ -900,6 +909,31 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       span: fact.syntax.span,
     })
   }
+  if (fact._tag === 'ReferentProjection') {
+    if (
+      fact.state._tag !== 'Resolved' ||
+      fact.reference === undefined ||
+      fact.borrowAccess === undefined ||
+      fact.type._tag !== 'Available'
+    ) {
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: fact.syntax.span,
+        ...(fact.state._tag === 'Unavailable' && fact.state.cause !== undefined
+          ? { cause: fact.state.cause }
+          : {}),
+      })
+    }
+    return Object.freeze({
+      _tag: 'ReferentPlace',
+      subject: hirExpression(fact.subject),
+      reference: fact.reference,
+      access: 'CopyRead',
+      borrowAccess: fact.borrowAccess,
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
   if (fact._tag === 'Borrow') {
     if (
       borrow === undefined ||
@@ -978,19 +1012,25 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
         }),
       )
     }
-    if (fact.formation._tag === 'ValueBorrow' && Type.isReference(fact.type.type)) {
+    if (
+      (fact.formation._tag === 'ValueBorrow' || fact.formation._tag === 'ValueReborrow') &&
+      Type.isReference(fact.type.type)
+    ) {
       return Object.freeze({
         _tag: 'ValueBorrow',
         borrow,
         root,
         selectors: Object.freeze(selectors),
-        source: fact.formation.source,
+        source:
+          fact.formation._tag === 'ValueBorrow' ? fact.formation.source : fact.formation.parent,
         access: fact.access,
+        reborrow: fact.formation._tag === 'ValueReborrow',
+        suspendsParent: fact.formation._tag === 'ValueReborrow' && fact.formation.suspendsParent,
         type: fact.type.type,
         span: fact.syntax.span,
       })
     }
-    if (fact.formation._tag === 'ValueBorrow')
+    if (fact.formation._tag === 'ValueBorrow' || fact.formation._tag === 'ValueReborrow')
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
     if (!Type.isSlice(fact.type.type))
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
@@ -1523,8 +1563,7 @@ export const hirBorrowedWritePlace = (
       if (
         !walk(current.subject) ||
         current.state._tag !== 'Resolved' ||
-        current.type._tag !== 'Available' ||
-        current.borrowAccess !== 'Exclusive'
+        current.type._tag !== 'Available'
       ) {
         return false
       }
@@ -1538,23 +1577,46 @@ export const hirBorrowedWritePlace = (
       )
       return true
     }
+    if (current._tag === 'ReferentProjection') {
+      return (
+        walk(current.subject) &&
+        current.state._tag === 'Resolved' &&
+        current.borrowAccess === 'Exclusive' &&
+        current.type._tag === 'Available'
+      )
+    }
     if (current._tag === 'IndexProjection') {
+      if (!walk(current.subject) || current.type._tag !== 'Available') return false
+      const index = hirExpression(current.index)
+      if (index._tag === 'Unavailable') return false
       if (
-        !walk(current.subject) ||
-        current.slice === undefined ||
-        current.slice.access !== 'Exclusive' ||
-        current.type._tag !== 'Available' ||
-        current.bounds._tag !== 'RuntimeSlice'
+        current.slice !== undefined &&
+        current.slice.access === 'Exclusive' &&
+        current.bounds._tag === 'RuntimeSlice'
+      ) {
+        selectors.push(
+          Object.freeze({
+            _tag: 'SliceIndex',
+            index,
+            slice: current.slice,
+            type: current.type.type,
+            span: current.syntax.span,
+          }),
+        )
+        return true
+      }
+      if (
+        current.array === undefined ||
+        (current.bounds._tag !== 'Proven' && current.bounds._tag !== 'Runtime')
       ) {
         return false
       }
-      const index = hirExpression(current.index)
-      if (index._tag === 'Unavailable') return false
       selectors.push(
         Object.freeze({
-          _tag: 'SliceIndex',
+          _tag: 'Index',
           index,
-          slice: current.slice,
+          array: current.array,
+          bounds: current.bounds,
           type: current.type.type,
           span: current.syntax.span,
         }),
@@ -1627,6 +1689,7 @@ export const directExpressionChildren = (
     case 'Move':
     case 'Borrow':
     case 'FieldProjection':
+    case 'ReferentProjection':
     case 'Run':
       return Object.freeze([expression.subject])
     case 'PlaceReplace':

@@ -107,6 +107,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'UnionVariantExpression',
   'UnionVariantPattern',
   'FieldProjectionExpression',
+  'ReferentProjectionExpression',
   'FailStatement',
   'FailureRow',
   'FixedArrayType',
@@ -1063,6 +1064,7 @@ fn destructure(pair: Pair, event: Token | End) -> i32 {
 fn scan(values: &[i32], output: &mut [i32]) -> i32 {
   return helper(usize.toI32(values.length), output[0])
 }
+fn readReferent(value: &i32) -> i32 { return value.* }
 fn callbacks(shared: fn(i32, bool) -> i32, exclusive: mut fn(i32) -> bool, consuming: once fn() -> i32) -> i32 {
   return shared(1, true)
 }

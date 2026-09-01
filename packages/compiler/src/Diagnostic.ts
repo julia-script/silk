@@ -350,18 +350,20 @@ export const invalidNominalUnionConstructionCode = 'SEM0169' as const
 
 /** Stable code for a duration literal whose exact nanosecond total exceeds `u64`. */
 export const durationOutOfRangeCode = 'SEM0170' as const
+/** Stable code for postfix referent projection whose subject is not a reference. */
+export const invalidReferentProjectionCode = 'SEM0171' as const
 
 /** Stable code for positional construction with the wrong number of tuple elements. */
-export const tupleArityMismatchCode = 'SEM0171' as const
+export const tupleArityMismatchCode = 'SEM0172' as const
 
 /** Stable code for using tuple syntax with a named struct or record syntax with a tuple. */
-export const contextualAggregateKindMismatchCode = 'SEM0172' as const
+export const contextualAggregateKindMismatchCode = 'SEM0173' as const
 
 /** Stable code for attempting to join distinct anonymous aggregate occurrences. */
-export const anonymousAggregateJoinMismatchCode = 'SEM0173' as const
+export const anonymousAggregateJoinMismatchCode = 'SEM0174' as const
 
 /** Stable code for attempting named-field construction of a positional aggregate. */
-export const positionalFieldConstructionCode = 'SEM0174' as const
+export const positionalFieldConstructionCode = 'SEM0175' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -574,6 +576,7 @@ export type Code =
   | typeof expectedNominalUnionCode
   | typeof invalidNominalUnionConstructionCode
   | typeof durationOutOfRangeCode
+  | typeof invalidReferentProjectionCode
   | typeof tupleArityMismatchCode
   | typeof contextualAggregateKindMismatchCode
   | typeof anonymousAggregateJoinMismatchCode
@@ -1010,6 +1013,7 @@ export type Reason =
       readonly actual: string
     }
   | { readonly _tag: 'ProjectionOnNonStruct'; readonly actual: string }
+  | { readonly _tag: 'InvalidReferentProjection'; readonly actual: string }
   | { readonly _tag: 'UnknownProjectedField'; readonly type: string; readonly field: string }
   | { readonly _tag: 'InaccessibleProjectedField'; readonly type: string; readonly field: string }
   | { readonly _tag: 'EmptyArrayNeedsContext' }
@@ -2304,6 +2308,20 @@ export const projectionOnNonStruct = (actual: string, span: SourceSpan.SourceSpa
     severity: 'error',
     message: `Cannot project a field from ${actual}`,
     reason: Object.freeze({ _tag: 'ProjectionOnNonStruct', actual }),
+    span,
+  })
+
+export const invalidReferentProjection = (
+  actual: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidReferentProjectionCode,
+    severity: 'error',
+    message: `Cannot project a referent from ${actual}; the subject must be a reference`,
+    reason: Object.freeze({ _tag: 'InvalidReferentProjection', actual }),
     span,
   })
 

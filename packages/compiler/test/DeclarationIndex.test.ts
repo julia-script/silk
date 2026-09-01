@@ -557,6 +557,77 @@ impl Logger for Console { log: Console.log }`,
   }),
 )
 
+it.effect('rejects an inline scalar witness that adds a failure', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `pub struct Problem {}
+pub struct Extra {}
+pub interface Present {
+  effect fn present(value: &Self) -> i32 ! Problem
+}
+impl Present for i32 {
+  effect fn present(value: &Self) -> i32 ! Problem | Extra { return 42 }
+}`,
+      ],
+    ])
+
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => ({
+        code: diagnostic.code,
+        message: diagnostic.message,
+      })),
+      [
+        {
+          code: 'SEM0083',
+          message:
+            'Invalid conformance: i32.impl@0.present is incompatible with Present.present: witness adds failure root.Extra',
+        },
+      ],
+    )
+  }),
+)
+
+it.effect('keeps inline, nominal mapped, and intrinsic interface witnesses distinct', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `interface Present { fn present(value: &Self) -> i32 }
+struct Box {}
+fn presentBox(value: &Box) -> i32 { return 1 }
+impl Present for Box { present: Box.presentBox }
+impl Present for i32 {
+  fn present(value: &Self) -> i32 { return 2 }
+}
+
+interface Combined { operator + fn add(left: Self, right: Self) -> Self }
+impl Combined for i32 { add: Intrinsic.i32WrappingAdd }`,
+      ],
+    ])
+    const present = Type.nominal('root', 'Present')
+    const combined = Type.nominal('root', 'Combined')
+    const box = Type.nominal('root', 'Box')
+
+    const inline = ConformanceProof.interfaceWitnessImplementation(index, 'i32', present, 'present')
+    const mapped = ConformanceProof.interfaceWitnessImplementation(index, box, present, 'present')
+    const intrinsic = ConformanceProof.interfaceOperationIntrinsic(index, 'i32', combined, 'add')
+
+    assert.deepEqual(index.diagnostics, [])
+    assert.strictEqual(inline?.module, 'root')
+    assert.match(inline?.name ?? '', /^impl@\d+\.present$/)
+    assert.strictEqual(mapped?.name, 'presentBox')
+    assert.isUndefined(
+      ConformanceProof.interfaceOperationIntrinsic(index, 'i32', present, 'present'),
+    )
+    assert.isUndefined(
+      ConformanceProof.interfaceWitnessImplementation(index, 'i32', combined, 'add'),
+    )
+    assert.strictEqual(intrinsic?.id.name, 'i32WrappingAdd')
+  }),
+)
+
 it.effect('marks later duplicates as caused duplicates of the first occurrence', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
@@ -1366,6 +1437,30 @@ impl Drop for State { fn drop(self: &mut State) -> () { return () } }`,
       index.modules.at(0)?.conformances.map((conformance) => conformance.validity._tag),
       ['InvalidConformance', 'InvalidConformance'],
     )
+  }),
+)
+
+it.effect('rejects source Copy implementations for reference and structural providers', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('reference-copy', [
+      [
+        'reference-copy',
+        `impl Copy for &u32 {}
+impl Copy for &mut u32 {}
+impl Copy for u32 {}`,
+      ],
+    ])
+
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0083', 'SEM0083', 'SEM0083'],
+    )
+    assert.deepEqual(
+      index.modules.at(0)?.conformances.map((conformance) => conformance.validity._tag),
+      ['InvalidConformance', 'InvalidConformance', 'InvalidConformance'],
+    )
+    assert.strictEqual(ConformanceProof.copyType(index, Type.reference('Shared', 'u32')), true)
+    assert.strictEqual(ConformanceProof.copyType(index, Type.reference('Exclusive', 'u32')), false)
   }),
 )
 

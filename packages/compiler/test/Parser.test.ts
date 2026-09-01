@@ -2232,6 +2232,45 @@ it('recovers a missing operation name after the dot', () => {
   assertOriginalTokenTraversal(result)
 })
 
+it('parses referent projection as a postfix projection distinct from multiplication', () => {
+  const result = parseText(
+    'fixture://referent-projection.silk',
+    'pub fn read(value: &u32) -> u32 { return value.* }\npub fn multiply(left: u32, right: u32) -> u32 { return left * right }',
+  )
+  const [read, multiply] = directFunctionDeclarations(result.root)
+  const readBlock = read === undefined ? undefined : SyntaxTree.directNode(read, 'Block')
+  const readReturn =
+    readBlock === undefined ? undefined : SyntaxTree.directNode(readBlock, 'ReturnStatement')
+  const referent =
+    readReturn === undefined
+      ? undefined
+      : SyntaxTree.directNode(readReturn, 'ReferentProjectionExpression')
+  const multiplyBlock =
+    multiply === undefined ? undefined : SyntaxTree.directNode(multiply, 'Block')
+  const multiplyReturn =
+    multiplyBlock === undefined
+      ? undefined
+      : SyntaxTree.directNode(multiplyBlock, 'ReturnStatement')
+
+  assert.notStrictEqual(referent, undefined)
+  assert.notStrictEqual(
+    referent === undefined ? undefined : SyntaxTree.directToken(referent, 'Dot'),
+    undefined,
+  )
+  assert.notStrictEqual(
+    referent === undefined ? undefined : SyntaxTree.directToken(referent, 'Star'),
+    undefined,
+  )
+  assert.notStrictEqual(
+    multiplyReturn === undefined
+      ? undefined
+      : SyntaxTree.directNode(multiplyReturn, 'InfixExpression'),
+    undefined,
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+})
+
 it('recovers a dangling minus before the closing brace', () => {
   const result = parseText('fixture://dangling-minus.silk', 'pub fn main() -> i32 { return - }')
 

@@ -14,6 +14,7 @@ import { recoveredDirectWrite } from './support/recoveredProvidedWrite.js'
 import * as Driver from './support/TestDriver.js'
 
 const encoder = new TextEncoder()
+const decoder = new TextDecoder()
 const outputRoot = mkdtempSync(join(tmpdir(), 'silk-standard-streams-'))
 afterAll(() => rmSync(outputRoot, { recursive: true, force: true }))
 
@@ -85,6 +86,107 @@ it.effect('records complete ordered writes and typed provider failure determinis
     assert.strictEqual(failed._tag, 'UnhandledFailure')
     if (failed._tag === 'UnhandledFailure') assert.include(failed.identity, 'WriterError')
     assert.strictEqual(failing.events().length, 1)
+  }),
+)
+
+const formatterSource = `import silk.effect as Effect
+import silk.format as Format
+import silk.format { Alignment, Display, FormatOptions, Formatter, Sign }
+import silk.option as Option
+import silk.usize as usize
+import silk.writer as Writer
+import silk.writer { WriterError }
+
+struct Badge {}
+
+effect fn badgeDisplay(
+  self: &Badge,
+  formatter: &mut Formatter
+) -> () ! WriterError ? &mut Writer.Writer {
+  run Format.writeLeadingPadding(&mut formatter, usize.ONE)
+  if Format.color(&formatter) { run Format.write(&mut formatter, b"\\x1b[31m") }
+  run Format.write(&mut formatter, b"X")
+  if Format.color(&formatter) { run Format.write(&mut formatter, b"\\x1b[0m") }
+  return run Format.writeTrailingPadding(&mut formatter, usize.ONE)
+}
+
+impl Display for Badge { display: Badge.badgeDisplay }
+
+fn options(color: bool) -> FormatOptions {
+  return FormatOptions {
+    width: Option.some<usize>(5),
+    alignment: Alignment.Center,
+    fill: '.',
+    sign: Sign.NegativeOnly,
+    alternate: false,
+    zeroPad: false,
+    precision: Option.none<usize>(),
+    color: color,
+  }
+}
+
+effect fn render(color: bool) -> () ! WriterError ? &mut Writer.Writer {
+  let badge = Badge {}
+  return run Format.displayWith(&badge, options(color))
+}
+
+pub effect fn main() -> () ! WriterError {
+  let mut stdout = Writer.stdoutWriterProvider()
+  run render(false) |> Effect.provideMut<Writer.Writer>(&mut stdout)
+  let mut stderr = Writer.stderrWriterProvider()
+  run render(false) |> Effect.provideMut<Writer.Writer>(&mut stderr)
+  return run render(true) |> Effect.provideMut<Writer.Writer>(&mut stderr)
+}`
+
+it.effect('lets a nominal Display pad visible content across distinct Writer providers', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'standard-streams/formatter',
+      encoder.encode(formatterSource),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+
+    const memory = StandardStreams.memory()
+    const completed = Analysis.evaluate(self, { standardStreams: memory.provider })
+    assert.strictEqual(completed._tag, 'Completed')
+    const events = memory.events()
+    const stdoutRequests = events.slice(0, 3).map((event) => event.bytes)
+    const stderrRequests = events.slice(3, 6).map((event) => event.bytes)
+    assert.deepEqual(stdoutRequests, stderrRequests)
+    assert.deepEqual(
+      events.slice(0, 6).map((event) => event.destination),
+      ['Stdout', 'Stdout', 'Stdout', 'Stderr', 'Stderr', 'Stderr'],
+    )
+    assert.strictEqual(decoder.decode(Uint8Array.from(stdoutRequests.flat())), '..X..')
+    assert.strictEqual(
+      decoder.decode(Uint8Array.from(events.slice(6).flatMap((event) => event.bytes))),
+      '..\x1b[31mX\x1b[0m..',
+    )
+
+    const failing = StandardStreams.memory({ failAt: 4 })
+    const failed = Analysis.evaluate(self, { standardStreams: failing.provider })
+    assert.strictEqual(failed._tag, 'UnhandledFailure')
+    if (failed._tag === 'UnhandledFailure') assert.include(failed.identity, 'WriterError')
+    assert.deepEqual(
+      failing
+        .events()
+        .map((event) => [event.destination, decoder.decode(Uint8Array.from(event.bytes))]),
+      [
+        ['Stdout', '..'],
+        ['Stdout', 'X'],
+        ['Stdout', '..'],
+        ['Stderr', '..'],
+      ],
+    )
+    const failedWrite = failed.trace.find(
+      (event) => event._tag === 'HostWrite' && event.outcome === 'WriteFailure',
+    )
+    assert.isDefined(failedWrite)
+    if (failedWrite?._tag === 'HostWrite') {
+      assert.strictEqual(failedWrite.destination, 'Stderr')
+      assert.strictEqual(decoder.decode(Uint8Array.from(failedWrite.bytes)), 'X')
+    }
   }),
 )
 

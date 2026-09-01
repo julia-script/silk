@@ -835,6 +835,18 @@ export const fieldProjectionsOf = (
     ),
   )
 
+/** Returns every canonical or explicitly unavailable postfix referent-projection step. */
+export const referentProjectionsOf = (
+  self: FrontendSnapshot,
+  module: string,
+): ReadonlyArray<Elaboration.ReferentProjectionExpressionFact> =>
+  Object.freeze(
+    expressionsOf(self, module).filter(
+      (expression): expression is Elaboration.ReferentProjectionExpressionFact =>
+        expression._tag === 'ReferentProjection',
+    ),
+  )
+
 /** Returns every retained array literal with its ordered elements and completeness state. */
 export const arrayLiteralsOf = (
   self: FrontendSnapshot,

@@ -765,7 +765,9 @@ it.effect(
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
       assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
     }),
-  { timeout: 120_000 },
+  // This fixture can exceed two minutes while the Linux compiler shard is under contention;
+  // focused runs remain substantially faster.
+  { timeout: 300_000 },
 )
 
 it.effect(

@@ -272,7 +272,7 @@ fn choose(value: Choice) -> i32 {
     )
     assert.include(
       Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
-      'SEM0173',
+      'SEM0174',
     )
 
     const accepted = yield* Analysis.ofSourceRealized(
@@ -308,11 +308,11 @@ fn wrongTuple() -> Person { return (1,) }
 fn duplicateAnonymous() -> i32 { let value = .{ age: 1, age: 2 } return 0 }`),
     )
     const diagnostics = Analysis.diagnostics(self).filter((diagnostic) =>
-      ['SEM0171', 'SEM0172', 'SEM0174'].includes(diagnostic.code),
+      ['SEM0172', 'SEM0173', 'SEM0175'].includes(diagnostic.code),
     )
     assert.deepEqual(
       diagnostics.map((diagnostic) => diagnostic.code),
-      ['SEM0171', 'SEM0174', 'SEM0172', 'SEM0172'],
+      ['SEM0172', 'SEM0175', 'SEM0173', 'SEM0173'],
     )
     assert.deepEqual(
       diagnostics.map((diagnostic) => diagnostic.reason._tag),

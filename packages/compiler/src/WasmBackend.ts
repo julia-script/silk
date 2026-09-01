@@ -5416,24 +5416,80 @@ const emitReadPlaceOperation = (
   const rootType = layout.types.at(operation.root.ordinal)
   const rootSemantic = rootType === undefined ? undefined : Mir.semanticType(rootType)
   if (rootSemantic !== undefined && SilkType.isReference(rootSemantic)) {
-    // The place lives on the referenced target: static field offsets off the address.
+    // The place lives on the referenced target. Resolve its selectors to one checked address,
+    // then load each calling lane relative to the selected value.
     const address = scalar(operation.root)
-    const target = rootSemantic.target
-    const staticSelectors: Array<LayoutPlan.Selector> = []
-    for (const candidate of operation.selectors) {
-      if (candidate._tag !== 'FieldSelector')
-        throw new RangeError('Wasm reference place supports only field selectors')
-      staticSelectors.push(candidate.field)
+    let selected: SilkType.Type = rootSemantic.target
+    let staticOffset = 0
+    const dynamicOffsets: Array<{
+      readonly local: Mir.LocalId
+      readonly stride: number
+      readonly length: number
+    }> = []
+    for (const selector of operation.selectors) {
+      const selectedLayout = LayoutPlan.entry(plan, selected)
+      if (selector._tag === 'FieldSelector') {
+        if (selectedLayout?.representation._tag !== 'Aggregate')
+          throw new RangeError('Wasm reference read field lost its aggregate layout')
+        const field = selectedLayout.representation.fields.find((candidate) =>
+          DeclarationFacts.sameFieldId(candidate.id, selector.field),
+        )
+        if (field === undefined) throw new RangeError('Wasm reference read lost its field layout')
+        staticOffset += field.offset
+        selected = field.type
+        continue
+      }
+      if (
+        selector._tag !== 'ElementSelector' ||
+        selectedLayout?.representation._tag !== 'Repeated'
+      ) {
+        throw new RangeError('Wasm reference read element lost its repeated layout')
+      }
+      if (selector.index._tag === 'Proven') {
+        staticOffset += selector.index.value * selectedLayout.representation.stride
+      } else {
+        dynamicOffsets.push(
+          Object.freeze({
+            local: selector.index.local,
+            stride: selectedLayout.representation.stride,
+            length: selector.length,
+          }),
+        )
+      }
+      selected = selectedLayout.representation.element
     }
+    const instructions: Array<Instr.Instr> = []
+    for (const offset of dynamicOffsets) {
+      instructions.push(
+        Instr.localGet(scalar(offset.local)),
+        Instr.i32Const(offset.length),
+        Instr.op('i32.lt_u'),
+        Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+      )
+    }
+    instructions.push(
+      Instr.localGet(address),
+      ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
+    )
+    for (const offset of dynamicOffsets) {
+      instructions.push(
+        Instr.localGet(scalar(offset.local)),
+        Instr.i32Const(offset.stride),
+        Instr.op('i32.mul'),
+        Instr.op('i32.add'),
+      )
+    }
+    instructions.push(Instr.localSet(layout.scratch))
     const destinationSlots = slots(operation.destination)
     const destinationLanes = layout.lanes.at(operation.destination.ordinal) ?? []
-    return destinationLanes.flatMap((lane, ordinal) => {
+    for (const [ordinal, lane] of destinationLanes.entries()) {
       const destination = destinationSlots.at(ordinal)
-      const offset = LayoutVerify.laneOffset(plan, target, [...staticSelectors, ...lane.path])
+      const offset = LayoutVerify.laneOffset(plan, selected, lane.path)
       if (destination === undefined || offset === undefined)
         throw new RangeError('Wasm reference read lost a lane offset')
-      return [...loadAt(address, offset, lane), Instr.localSet(destination)]
-    })
+      instructions.push(...loadAt(layout.scratch, offset, lane), Instr.localSet(destination))
+    }
+    return instructions
   }
   if (rootSemantic !== undefined && SilkType.isSlice(rootSemantic)) {
     if (memory === undefined) throw new RangeError('Wasm slice read has no private memory')
@@ -5607,24 +5663,67 @@ const emitWritePlaceOperation = (
   const { layout, plan, memory, slots, scalar, copy, storeAt, flushBorrowRoot } = state
 
   if (operation.rootType._tag === 'Reference') {
-    // Writing through the borrow stores each value lane at its offset on the target.
+    if (operation.rootType.type.access !== 'Exclusive')
+      throw new RangeError('Wasm reference write requires exclusive access')
+    // Writing through the borrow resolves the selected value address once, then stores its lanes.
     const address = scalar(operation.root)
-    const target = operation.rootType.type.target
-    const staticSelectors: Array<LayoutPlan.Selector> = []
-    for (const candidate of operation.selectors) {
-      if (candidate._tag !== 'FieldSelector')
-        throw new RangeError('Wasm reference place supports only field selectors')
-      staticSelectors.push(candidate.field)
+    let selected: SilkType.Type = operation.rootType.type.target
+    let staticOffset = 0
+    const dynamicOffsets: Array<{ readonly local: Mir.LocalId; readonly stride: number }> = []
+    for (const selector of operation.selectors) {
+      const selectedLayout = LayoutPlan.entry(plan, selected)
+      if (selector._tag === 'FieldSelector') {
+        if (selectedLayout?.representation._tag !== 'Aggregate')
+          throw new RangeError('Wasm reference write field lost its aggregate layout')
+        const field = selectedLayout.representation.fields.find((candidate) =>
+          DeclarationFacts.sameFieldId(candidate.id, selector.field),
+        )
+        if (field === undefined) throw new RangeError('Wasm reference write lost its field layout')
+        staticOffset += field.offset
+        selected = field.type
+        continue
+      }
+      if (
+        selector._tag !== 'ElementSelector' ||
+        selectedLayout?.representation._tag !== 'Repeated'
+      ) {
+        throw new RangeError('Wasm reference write element lost its repeated layout')
+      }
+      if (selector.index._tag === 'Proven') {
+        staticOffset += selector.index.value * selectedLayout.representation.stride
+      } else {
+        dynamicOffsets.push(
+          Object.freeze({
+            local: selector.index.local,
+            stride: selectedLayout.representation.stride,
+          }),
+        )
+      }
+      selected = selectedLayout.representation.element
     }
+    const instructions: Array<Instr.Instr> = [
+      Instr.localGet(address),
+      ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
+    ]
+    for (const offset of dynamicOffsets) {
+      instructions.push(
+        Instr.localGet(scalar(offset.local)),
+        Instr.i32Const(offset.stride),
+        Instr.op('i32.mul'),
+        Instr.op('i32.add'),
+      )
+    }
+    instructions.push(Instr.localSet(layout.scratch))
     const sourceSlots = slots(operation.source)
     const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
-    return sourceLanes.flatMap((lane, ordinal) => {
+    for (const [ordinal, lane] of sourceLanes.entries()) {
       const value = sourceSlots.at(ordinal)
-      const offset = LayoutVerify.laneOffset(plan, target, [...staticSelectors, ...lane.path])
+      const offset = LayoutVerify.laneOffset(plan, selected, lane.path)
       if (value === undefined || offset === undefined)
         throw new RangeError('Wasm reference write lost a lane offset')
-      return storeAt(address, value, offset, lane)
-    })
+      instructions.push(...storeAt(layout.scratch, value, offset, lane))
+    }
+    return instructions
   }
   if (operation.rootType._tag === 'Slice') {
     if (memory === undefined) throw new RangeError('Wasm slice write has no private memory')

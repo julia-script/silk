@@ -1585,9 +1585,22 @@ export function parseProjectionChain(initial: NodeResult, depth: number): NodeRe
     if (nextSignificantKind(result.state) === 'Dot') {
       const dot = expect(result.state, 'Dot', [
         'Identifier',
+        'Star',
         'DecimalInteger',
         ...expressionFollowing,
       ])
+      if (nextSignificantKind(dot.state) === 'Star') {
+        const star = expect(dot.state, 'Star', expressionFollowing)
+        result = Object.freeze({
+          state: star.state,
+          node: syntaxNode(star.state, 'ReferentProjectionExpression', [
+            result.node,
+            ...dot.elements,
+            ...star.elements,
+          ]),
+        })
+        continue
+      }
       if (nextSignificantKind(dot.state) === 'DecimalInteger') {
         const ordinal = expect(dot.state, 'DecimalInteger', expressionFollowing)
         result = Object.freeze({

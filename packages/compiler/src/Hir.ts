@@ -355,7 +355,7 @@ export type BorrowedWriteSelector =
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
-  | Extract<WriteSelector, { readonly _tag: 'Field' }>
+  | Extract<WriteSelector, { readonly _tag: 'Field' | 'Index' }>
 
 export interface BorrowedWritePlace {
   readonly _tag: 'BorrowedWritePlace'
@@ -597,6 +597,16 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      /** One explicit place rooted at the target of a reference value. */
+      readonly _tag: 'ReferentPlace'
+      readonly subject: Expression
+      readonly reference: Type.Reference
+      readonly access: 'CopyRead'
+      readonly borrowAccess: Type.BorrowAccess
+      readonly type: DeclarationFacts.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'IndexPlace'
       readonly subject: Expression
       readonly index: Expression
@@ -625,6 +635,8 @@ export type Expression =
       readonly selectors: ReadonlyArray<BorrowSelector>
       readonly source: Type.Type
       readonly access: Type.BorrowAccess
+      readonly reborrow: boolean
+      readonly suspendsParent: boolean
       readonly type: Type.Reference
       readonly span: SourceSpan.SourceSpan
     }
@@ -1008,6 +1020,7 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
     switch (expression._tag) {
       case 'Move':
       case 'Project':
+      case 'ReferentPlace':
       case 'UnionConvert':
         return [expression._tag === 'UnionConvert' ? expression.source : expression.subject]
       case 'RuntimeStringView':
@@ -1090,6 +1103,7 @@ export const firstUnavailable = (
         return expression
       case 'Move':
       case 'Project':
+      case 'ReferentPlace':
         return walk(expression.subject)
       case 'RuntimeStringView':
         return walk(expression.source)
@@ -1241,9 +1255,19 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
       }
     }
     if (expression._tag === 'ValueBorrow') {
+      const sourceTarget =
+        expression.reborrow && Type.isReference(expression.source)
+          ? expression.source.target
+          : expression.source
       if (
-        !Type.equals(expression.type, Type.reference(expression.access, expression.source)) ||
-        expression.type.access !== expression.access
+        !Type.equals(expression.type, Type.reference(expression.access, sourceTarget)) ||
+        expression.type.access !== expression.access ||
+        expression.reborrow !== Type.isReference(expression.source) ||
+        expression.suspendsParent !==
+          (Type.isReference(expression.source) && expression.source.access === 'Exclusive') ||
+        (Type.isReference(expression.source) &&
+          expression.source.access === 'Shared' &&
+          expression.access === 'Exclusive')
       ) {
         issues.push(Object.freeze({ _tag: 'InvalidValueBorrow', span: expression.span }))
       }
@@ -1331,6 +1355,21 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         issues.push(Object.freeze({ _tag: 'InvalidSliceOperation', span: expression.span }))
       }
     }
+    if (expression._tag === 'ReferentPlace') {
+      const subjectType =
+        'type' in expression.subject && typeof expression.subject.type === 'object'
+          ? expression.subject.type
+          : undefined
+      if (
+        subjectType === undefined ||
+        !Type.isReference(subjectType) ||
+        !Type.equals(subjectType, expression.reference) ||
+        expression.borrowAccess !== expression.reference.access ||
+        !Type.equals(expression.type, expression.reference.target)
+      ) {
+        issues.push(Object.freeze({ _tag: 'InvalidSliceOperation', span: expression.span }))
+      }
+    }
     if (expression._tag === 'Project' && expression.borrowAccess !== undefined) {
       const subjectType =
         'type' in expression.subject && typeof expression.subject.type === 'object'
@@ -1361,9 +1400,8 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
             candidate,
           ): candidate is Extract<Expression, { readonly _tag: 'SliceBorrow' | 'ValueBorrow' }> =>
             (candidate._tag === 'SliceBorrow' || candidate._tag === 'ValueBorrow') &&
-            ((expression._tag !== 'Call' && expression._tag !== 'CallableApply') ||
-              (candidate.borrow.callSpan.start === expression.span.start &&
-                candidate.borrow.callSpan.end === expression.span.end)),
+            candidate.borrow.callSpan.start === expression.span.start &&
+            candidate.borrow.callSpan.end === expression.span.end,
         )
         .map((candidate) => borrowText(candidate.borrow))
       const authoredEnds = [
@@ -1373,9 +1411,8 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
       const ends = authoredEnds
         .filter(
           (borrow) =>
-            (expression._tag !== 'Call' && expression._tag !== 'CallableApply') ||
-            (borrow.callSpan.start === expression.span.start &&
-              borrow.callSpan.end === expression.span.end),
+            borrow.callSpan.start === expression.span.start &&
+            borrow.callSpan.end === expression.span.end,
         )
         .map(borrowText)
       if (
@@ -1444,8 +1481,9 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
           const [first, ...rest] = statement.place.selectors
           const wellFormed = Type.isReference(statement.place.slice)
             ? statement.place.slice.access === 'Exclusive' &&
-              statement.place.selectors.length > 0 &&
-              statement.place.selectors.every((selector) => selector._tag === 'Field')
+              statement.place.selectors.every(
+                (selector) => selector._tag === 'Field' || selector._tag === 'Index',
+              )
             : statement.place.slice.access === 'Exclusive' &&
               first?._tag === 'SliceIndex' &&
               Type.equals(first.slice, statement.place.slice) &&
@@ -1706,6 +1744,11 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         `${indent}project ${expression.access} ${Type.encode(expression.nominal)}.#${expression.field.ordinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.subject, depth + 1),
       ].join('\n')
+    case 'ReferentPlace':
+      return [
+        `${indent}referent ${expression.access} ${expression.borrowAccess.toLowerCase()} source=${Type.encode(expression.reference)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        encodeExpression(expression.subject, depth + 1),
+      ].join('\n')
     case 'IndexPlace':
       return [
         `${indent}index ${expression.access} ${Type.encode(expression.array)} bounds=${
@@ -1719,7 +1762,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
     case 'SliceBorrow':
       return `${indent}${expression.reborrow ? 'reborrow-slice' : 'borrow-slice'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
     case 'ValueBorrow':
-      return `${indent}borrow-value l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}${expression.reborrow ? 'reborrow-value' : 'borrow-value'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
     case 'SliceLength':
       return [
         `${indent}slice-length : i32 ${spanText(expression.span)}`,

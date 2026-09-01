@@ -13,6 +13,11 @@ system beside Linear. The lifecycle is:
 3. `silk-work` claims one Todo issue, implements it, and moves verified work to In Review.
 4. `silk-sync` periodically reconciles issue state with the repository and GitHub.
 
+For one direct request that Julia wants implemented immediately, `silk-now` composes demand,
+triage, and work into a single run. It still records each Linear transition, performs the required
+independent triage and implementation review, and finishes with the draft-PR handoff. Immediate
+selection does not bypass triage or change the issue's intrinsic priority.
+
 There is no separate observe or apply phase. Explicit invocation of a mutating skill authorizes
 its scoped Linear writes. It does not authorize unrelated repository, GitHub, or Linear changes.
 

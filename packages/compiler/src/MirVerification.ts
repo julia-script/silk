@@ -895,6 +895,31 @@ const selectorLocals = (selectors: ReadonlyArray<PlaceSelector>): ReadonlyArray<
     return []
   })
 
+const samePlaceSelector = (left: PlaceSelector, right: PlaceSelector): boolean => {
+  if (left._tag !== right._tag) return false
+  if (left._tag === 'FieldSelector' && right._tag === 'FieldSelector')
+    return DeclarationFacts.sameFieldId(left.field, right.field)
+  if (left._tag === 'SliceElementSelector' && right._tag === 'SliceElementSelector')
+    return left.index.ordinal === right.index.ordinal && left.access === right.access
+  if (left._tag !== 'ElementSelector' || right._tag !== 'ElementSelector') return false
+  if (left.length !== right.length || left.index._tag !== right.index._tag) return false
+  return left.index._tag === 'Proven' && right.index._tag === 'Proven'
+    ? left.index.value === right.index.value
+    : left.index._tag === 'Runtime' &&
+        right.index._tag === 'Runtime' &&
+        left.index.local.ordinal === right.index.local.ordinal
+}
+
+const samePlaceSelectors = (
+  left: ReadonlyArray<PlaceSelector>,
+  right: ReadonlyArray<PlaceSelector>,
+): boolean =>
+  left.length === right.length &&
+  left.every((selector, ordinal) => {
+    const candidate = right.at(ordinal)
+    return candidate !== undefined && samePlaceSelector(selector, candidate)
+  })
+
 const placeType = (
   fn: MirFunction,
   layout: Layout.Plan,
@@ -4962,16 +4987,34 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           }
         }
         if (operation._tag === 'ReadPlace' || operation._tag === 'CheckPlace') {
-          const selected = placeType(
-            fn,
-            self.layout,
-            operation.root,
-            operation.selectors,
-            operation._tag === 'ReadPlace',
-          )
+          const selected = placeType(fn, self.layout, operation.root, operation.selectors, true)
+          const root = fn.localTypes.at(operation.root.ordinal)
+          const rootSemantic = root === undefined ? undefined : semanticType(root)
+          const referenceAccess =
+            rootSemantic !== undefined && SilkType.isReference(rootSemantic)
+              ? rootSemantic.access
+              : undefined
           const sliceSelector = operation.selectors.find(
             (selector) => selector._tag === 'SliceElementSelector',
           )
+          const borrowedAccesses = [
+            ...(referenceAccess === undefined ? [] : [referenceAccess]),
+            ...operation.selectors.flatMap((selector) =>
+              selector._tag === 'SliceElementSelector' ? [selector.access] : [],
+            ),
+          ]
+          const pairedReplacement =
+            operation._tag === 'ReadPlace' && operation.consume === true
+              ? operations.at(index + 1)
+              : undefined
+          const consumingReadValid =
+            operation._tag !== 'ReadPlace' ||
+            operation.consume !== true ||
+            borrowedAccesses.length === 0 ||
+            (borrowedAccesses.every((access) => access === 'Exclusive') &&
+              pairedReplacement?._tag === 'WritePlace' &&
+              pairedReplacement.root.ordinal === operation.root.ordinal &&
+              samePlaceSelectors(pairedReplacement.selectors, operation.selectors))
           const sharedMatchProjection =
             operation._tag === 'ReadPlace' &&
             operation.consume !== true &&
@@ -5041,6 +5084,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           if (
             selected === undefined ||
             !SilkType.equals(selected, semanticType(operation.type)) ||
+            !consumingReadValid ||
             (operation._tag === 'ReadPlace' &&
               !isCopy(self.layout, selected) &&
               operation.consume !== true &&
@@ -5058,15 +5102,18 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                     : 'InvalidSliceOperation',
                 function: fn.id,
                 region: region.id,
-                detail: `${operation._tag} does not match its root, selectors, or type`,
+                detail: !consumingReadValid
+                  ? 'consuming borrowed ReadPlace is not followed by a same-place replacement through exclusive access'
+                  : `${operation._tag} does not match its root, selectors, or type`,
               }),
             )
           }
         }
         if (operation._tag === 'WritePlace') {
-          const selected = placeType(fn, self.layout, operation.root, operation.selectors)
+          const selected = placeType(fn, self.layout, operation.root, operation.selectors, true)
           const source = fn.localTypes.at(operation.source.ordinal)
           const root = fn.localTypes.at(operation.root.ordinal)
+          const rootSemantic = root === undefined ? undefined : semanticType(root)
           const sliceSelector = operation.selectors.find(
             (selector) => selector._tag === 'SliceElementSelector',
           )
@@ -5076,7 +5123,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               (candidate) =>
                 candidate._tag === 'CheckPlace' &&
                 candidate.root.ordinal === operation.root.ordinal &&
-                candidate.selectors === operation.selectors,
+                samePlaceSelectors(candidate.selectors, operation.selectors),
             )
           if (
             selected === undefined ||
@@ -5086,6 +5133,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !SilkType.equals(selected, semanticType(operation.type)) ||
             !SilkType.equals(semanticType(source), selected) ||
             !SilkType.equals(semanticType(root), semanticType(operation.rootType)) ||
+            (rootSemantic !== undefined &&
+              SilkType.isReference(rootSemantic) &&
+              rootSemantic.access !== 'Exclusive') ||
             (sliceSelector !== undefined && sliceSelector.access !== 'Exclusive')
           ) {
             violations.push(

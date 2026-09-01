@@ -4,10 +4,11 @@ target aarch64-apple-darwin kind=Native pointer=8/8 endian=little
 layout i32 size=4 align=4 repr=signed-i32
 callable-environment golden/operator.main@callable:declaration:golden/operator:main:site:0 mode=shared size=4 align=4 fields=capture0->p1:copy:value@0 view=code@0,env@8,size=16
 calling i32 lanes=1 i32[]
-usize-literal 18446744073709551615 bits=64 available [2045, 2053)
-usize-literal 0 bits=64 available [2147, 2148)
-usize-literal 0 bits=64 available [2363, 2364)
-usize-literal 1 bits=64 available [2467, 2468)
+usize-literal 20 bits=64 available [17696, 17698)
+usize-literal 18446744073709551615 bits=64 available [2049, 2057)
+usize-literal 0 bits=64 available [2151, 2152)
+usize-literal 0 bits=64 available [2367, 2368)
+usize-literal 1 bits=64 available [2471, 2472)
 fn golden/operator.main params=0 locals=7 -> i32 entry=r0
   r0 operation:
     %0 = literal 2 : i32 [52, 54)
@@ -20,5 +21,5 @@ fn golden/operator.main params=0 locals=7 -> i32 entry=r0
     return %6 [52, 76)
 fn silk/i32.add params=2 locals=3 -> i32 entry=r0
   r0 operation:
-    %2 = add %0, %1 : i32 [8020, 8050)
-    return %2 [8020, 8050)
+    %2 = add %0, %1 : i32 [8013, 8043)
+    return %2 [8013, 8043)

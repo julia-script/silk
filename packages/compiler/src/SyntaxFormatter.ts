@@ -1650,6 +1650,17 @@ const printNode = (
         printToken(context, tokenOf(node, 'Dot')),
         printToken(context, tokenOf(node, 'DecimalInteger')),
       )
+    case 'ReferentProjectionExpression':
+      return FormatDocument.concat(
+        printNode(
+          context,
+          directNodes(node)[0] ?? nodeOf(node, 'IdentifierExpression'),
+          prefix,
+          preserveBlank,
+        ),
+        printToken(context, tokenOf(node, 'Dot')),
+        printToken(context, tokenOf(node, 'Star')),
+      )
     case 'IndexProjectionExpression':
       return FormatDocument.concat(
         printNode(
