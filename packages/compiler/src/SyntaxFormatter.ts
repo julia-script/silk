@@ -1408,6 +1408,21 @@ const printNode = (
             ]),
       )
     }
+    case 'StaticForStatement': {
+      const nodes = directNodes(node)
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'StaticKeyword'), prefix, preserveBlank),
+        printToken(context, tokenOf(node, 'ForKeyword'), FormatDocument.text(' ')),
+        printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+        printToken(context, tokenOf(node, 'Identifier', 1), FormatDocument.text(' ')),
+        printNode(
+          context,
+          nodes[0] ?? nodeOf(node, 'IdentifierExpression'),
+          FormatDocument.text(' '),
+        ),
+        printNode(context, nodes[1] ?? nodeOf(node, 'Block'), FormatDocument.text(' ')),
+      )
+    }
     case 'PatternConditionalStatement': {
       const nodes = directNodes(node)
       const elseKeyword = directTokens(node).find((token) => token.kind === 'ElseKeyword')

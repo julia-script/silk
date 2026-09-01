@@ -11,6 +11,7 @@ import type * as Mir from './Mir.js'
 import type * as OpaqueRealization from './OpaqueRealization.js'
 import type * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
 import type { GeneratedEffectRunner } from './ValueType.js'
 import {
@@ -49,6 +50,7 @@ export class FunctionLowering {
   private operations: Array<Mir.Operation> = []
   private syntheticBorrowOrdinal = 0
   private replayBorrowSubstitution: Map<string, Hir.BorrowId> | undefined
+  private readonly directBorrowSubstitution = new Map<string, Hir.BorrowId>()
 
   constructor(
     readonly layout: Layout.Plan,
@@ -105,8 +107,16 @@ export class FunctionLowering {
   }
 
   beginRecipeBorrow(authored: Hir.BorrowId): Hir.BorrowId {
-    if (this.replayBorrowSubstitution === undefined) return authored
     const key = borrowKey(authored)
+    if (this.replayBorrowSubstitution === undefined) {
+      const realized = this.realizedRecipeBorrows.has(key)
+        ? this.freshSyntheticBorrow(authored.callSpan)
+        : authored
+      this.issuedBorrowKeys.add(borrowKey(realized))
+      this.realizedRecipeBorrows.add(key)
+      this.directBorrowSubstitution.set(key, realized)
+      return realized
+    }
     const existing = this.replayBorrowSubstitution.get(key)
     if (existing !== undefined) return existing
     const realized = this.realizedRecipeBorrows.has(key)
@@ -119,7 +129,10 @@ export class FunctionLowering {
   }
 
   recipeBorrow(authored: Hir.BorrowId): Hir.BorrowId {
-    return this.replayBorrowSubstitution?.get(borrowKey(authored)) ?? authored
+    const key = borrowKey(authored)
+    return (
+      this.replayBorrowSubstitution?.get(key) ?? this.directBorrowSubstitution.get(key) ?? authored
+    )
   }
 
   publish(region: Mir.Region): void {
@@ -198,6 +211,8 @@ export class FunctionLowering {
   call(
     span: SourceSpan.SourceSpan,
     implementation?: DeclarationFacts.CanonicalId,
+    typeArguments?: ReadonlyArray<Type.GenericArgument>,
+    staticArguments?: ReadonlyArray<StaticValue.Value>,
   ): Instances.CallInstance | undefined {
     const exact = this.calls.filter(
       (call) =>
@@ -214,6 +229,33 @@ export class FunctionLowering {
               call.target.declaration.module === implementation.module &&
               call.target.declaration.name === implementation.name,
           )
-    return selected.length === 1 ? selected.at(0) : undefined
+    const expected = typeArguments?.filter((argument) => !Type.isHiddenExecutableArgument(argument))
+    const specialized =
+      expected === undefined
+        ? selected
+        : selected.filter((call) => {
+            const actual = call.target.typeArguments.filter(
+              (argument) => !Type.isHiddenExecutableArgument(argument),
+            )
+            return (
+              actual.length === expected.length &&
+              actual.every((argument, ordinal) => {
+                const wanted = expected.at(ordinal)
+                return wanted !== undefined && Type.equalsGenericArgument(argument, wanted)
+              })
+            )
+          })
+    const staticallySpecialized =
+      staticArguments === undefined || staticArguments.length === 0
+        ? specialized
+        : specialized.filter(
+            (call) =>
+              call.target.staticArguments.length === staticArguments.length &&
+              call.target.staticArguments.every((argument, ordinal) => {
+                const wanted = staticArguments.at(ordinal)
+                return wanted !== undefined && StaticValue.equals(argument, wanted)
+              }),
+          )
+    return staticallySpecialized.length === 1 ? staticallySpecialized.at(0) : undefined
   }
 }

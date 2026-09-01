@@ -168,6 +168,8 @@ export const lowerRunEffectValue = (
   const baseRunner =
     effectType.storage?.realization.runner ??
     Hir.effectRunnerId(effectType.environment.instance.declaration, effectType.site)
+  const runnerInstance =
+    effectType.storage?.realization.runnerInstance ?? effectType.environment.instance
   const baseRunnerTypeArguments =
     effectType.storage?.realization.runnerArguments ?? effectType.environment.instance.typeArguments
   const failureEnds = propagationLoanEnds(fn, span)
@@ -180,12 +182,18 @@ export const lowerRunEffectValue = (
       effect,
       runner: providedRunner ?? baseRunner,
       runnerTypeArguments: baseRunnerTypeArguments,
+      ...(runnerInstance.staticArguments.length === 0
+        ? {}
+        : { runnerStaticArguments: runnerInstance.staticArguments }),
       ...(providedRunner === undefined
         ? {}
         : {
             runnerBase: Object.freeze({
               declaration: baseRunner,
               typeArguments: baseRunnerTypeArguments,
+              ...(runnerInstance.staticArguments.length === 0
+                ? {}
+                : { staticArguments: runnerInstance.staticArguments }),
             }),
           }),
       providers: providerBindings(provided),

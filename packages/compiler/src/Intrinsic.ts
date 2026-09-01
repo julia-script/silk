@@ -28,6 +28,8 @@ export interface TypeParameter {
 export interface ValueParameter {
   readonly name: string
   readonly type: string
+  /** A compiler-consumed lane is explicit and never enters an ordinary runtime calling shape. */
+  readonly phase?: 'Static'
 }
 
 /** Structural reason one source-callable primitive remains compiler-owned. */
@@ -43,7 +45,7 @@ export type AdmissionCategory =
 export type ExecutionTarget = 'Evaluator' | 'LLVM' | 'Wasm'
 
 /** Whether an intrinsic executes during static evaluation or in the residual runtime program. */
-export type Phase = 'Runtime' | 'StaticOnly'
+export type Phase = 'Runtime' | 'StaticOnly' | 'Mixed'
 
 /** Canonical deterministic order for intrinsic execution targets. */
 export const executionTargets: ReadonlyArray<ExecutionTarget> = Object.freeze([
@@ -77,6 +79,13 @@ export type Rule =
   | {
       readonly _tag: 'StaticOnlyRule'
       readonly contract: CallableContract.CallableContract
+    }
+  | {
+      /** One shared owner lane plus one descriptor lane consumed while residualizing. */
+      readonly _tag: 'MixedFieldProjectionRule'
+      readonly contract: CallableContract.CallableContract
+      readonly runtimeOwnerParameter: 0
+      readonly staticDescriptorParameter: 1
     }
   | {
       /** Result and parameter types are derived from the owning canonical enum declaration. */
@@ -125,6 +134,9 @@ const operationId = (actor: string, name: string): OperationId =>
 const typeParameter = (name: string): TypeParameter => Object.freeze({ name })
 
 const valueParameter = (name: string, type: string): ValueParameter => Object.freeze({ name, type })
+
+const staticValueParameter = (name: string, type: string): ValueParameter =>
+  Object.freeze({ name, type, phase: 'Static' })
 
 const upperInitial = (value: string): string =>
   `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`
@@ -854,6 +866,13 @@ const staticTextOperations = Object.freeze([
     'u8',
   ),
   staticTextOperation(
+    'staticTextConcat',
+    Object.freeze([valueParameter('left', 'string'), valueParameter('right', 'string')]),
+    Object.freeze([Type.string, Type.string]),
+    'string',
+    Type.string,
+  ),
+  staticTextOperation(
     'staticTextSlice',
     Object.freeze([
       valueParameter('value', 'string'),
@@ -864,6 +883,204 @@ const staticTextOperations = Object.freeze([
     'string',
     Type.string,
   ),
+])
+
+const staticGenericOperation = (input: {
+  readonly name: string
+  readonly typeParameters: ReadonlyArray<Type.Parameter>
+  readonly parameters: ReadonlyArray<ValueParameter>
+  readonly semanticParameters: ReadonlyArray<Type.Type>
+  readonly result: string
+  readonly semanticResult: Type.Type
+  readonly consumer: string
+}): Operation =>
+  Object.freeze({
+    _tag: 'IntrinsicOperation',
+    id: operationId('Intrinsic', input.name),
+    spelling: input.name,
+    typeParameters: Object.freeze(
+      input.typeParameters.map((parameter) => typeParameter(parameter.name)),
+    ),
+    parameters: input.parameters,
+    result: input.result,
+    unsafe: false,
+    phase: 'StaticOnly',
+    admission: 'Language',
+    consumer: input.consumer,
+    targets: Object.freeze([]),
+    rule: Object.freeze({
+      _tag: 'StaticOnlyRule',
+      contract: CallableContract.make({
+        functionKind: 'Function',
+        binders: input.typeParameters,
+        parameters: input.semanticParameters.map((type) =>
+          Object.freeze({ type, mode: 'Value' as const }),
+        ),
+        result: input.semanticResult,
+      }),
+    }),
+  })
+
+const reflectionOwner = Type.parameter({ module: 'Intrinsic', name: 'reflect' }, 0, 'Owner')
+const reflectionValue = Type.parameter({ module: 'Intrinsic', name: 'reflect' }, 1, 'Value')
+const projectionOwner = Type.parameter({ module: 'Intrinsic', name: 'borrowField' }, 0, 'Owner')
+const projectionValue = Type.parameter({ module: 'Intrinsic', name: 'borrowField' }, 1, 'Value')
+const sequenceElement = Type.parameter(
+  { module: 'Intrinsic', name: 'staticSequence' },
+  0,
+  'Element',
+)
+
+const reflectionOperations = Object.freeze([
+  staticGenericOperation({
+    name: 'reflectType',
+    typeParameters: Object.freeze([reflectionOwner]),
+    parameters: Object.freeze([]),
+    semanticParameters: Object.freeze([]),
+    result: 'Type<Owner>',
+    semanticResult: Type.typeDescriptor(reflectionOwner),
+    consumer: 'silk/reflect.type',
+  }),
+  staticGenericOperation({
+    name: 'reflectFields',
+    typeParameters: Object.freeze([reflectionOwner]),
+    parameters: Object.freeze([]),
+    semanticParameters: Object.freeze([]),
+    result: 'Fields<Owner>',
+    semanticResult: Type.fieldsDescriptor(reflectionOwner),
+    consumer: 'silk/reflect.fields',
+  }),
+  staticGenericOperation({
+    name: 'reflectTypeKind',
+    typeParameters: Object.freeze([reflectionOwner]),
+    parameters: Object.freeze([valueParameter('descriptor', 'Type<Owner>')]),
+    semanticParameters: Object.freeze([Type.typeDescriptor(reflectionOwner)]),
+    result: 'u8',
+    semanticResult: 'u8',
+    consumer: 'silk/reflect.typeKind',
+  }),
+  staticGenericOperation({
+    name: 'reflectFieldKind',
+    typeParameters: Object.freeze([reflectionOwner, reflectionValue]),
+    parameters: Object.freeze([valueParameter('field', 'Field<Owner, Value>')]),
+    semanticParameters: Object.freeze([Type.fieldDescriptor(reflectionOwner, reflectionValue)]),
+    result: 'u8',
+    semanticResult: 'u8',
+    consumer: 'silk/reflect.fieldKind',
+  }),
+  staticGenericOperation({
+    name: 'reflectFieldLabel',
+    typeParameters: Object.freeze([reflectionOwner, reflectionValue]),
+    parameters: Object.freeze([valueParameter('field', 'Field<Owner, Value>')]),
+    semanticParameters: Object.freeze([Type.fieldDescriptor(reflectionOwner, reflectionValue)]),
+    result: 'string',
+    semanticResult: Type.string,
+    consumer: 'silk/reflect.fieldLabel',
+  }),
+  staticGenericOperation({
+    name: 'reflectFieldOrdinal',
+    typeParameters: Object.freeze([reflectionOwner, reflectionValue]),
+    parameters: Object.freeze([valueParameter('field', 'Field<Owner, Value>')]),
+    semanticParameters: Object.freeze([Type.fieldDescriptor(reflectionOwner, reflectionValue)]),
+    result: 'usize',
+    semanticResult: 'usize',
+    consumer: 'silk/reflect.fieldOrdinal',
+  }),
+])
+
+const borrowFieldOperation: Operation = Object.freeze({
+  _tag: 'IntrinsicOperation',
+  id: operationId('Intrinsic', 'borrowField'),
+  spelling: 'borrowField',
+  typeParameters: Object.freeze([typeParameter('Owner'), typeParameter('Value')]),
+  parameters: Object.freeze([
+    valueParameter('owner', '&Owner'),
+    staticValueParameter('field', 'Field<Owner, Value>'),
+  ]),
+  result: '&Value',
+  unsafe: false,
+  phase: 'Mixed',
+  admission: 'Language',
+  consumer: 'silk/reflect.borrowField',
+  targets: Object.freeze([]),
+  returnedBorrowParameter: 0,
+  rule: Object.freeze({
+    _tag: 'MixedFieldProjectionRule',
+    contract: CallableContract.make({
+      functionKind: 'Function',
+      binders: Object.freeze([projectionOwner, projectionValue]),
+      parameters: Object.freeze([
+        Object.freeze({ type: Type.reference('Shared', projectionOwner), mode: 'Value' }),
+        Object.freeze({
+          type: Type.fieldDescriptor(projectionOwner, projectionValue),
+          mode: 'Value',
+        }),
+      ]),
+      result: Type.reference('Shared', projectionValue),
+    }),
+    runtimeOwnerParameter: 0,
+    staticDescriptorParameter: 1,
+  }),
+})
+
+const staticSequenceOperations = Object.freeze([
+  staticGenericOperation({
+    name: 'staticSequenceEmpty',
+    typeParameters: Object.freeze([sequenceElement]),
+    parameters: Object.freeze([]),
+    semanticParameters: Object.freeze([]),
+    result: 'StaticSequence<Element>',
+    semanticResult: Type.staticSequence(sequenceElement),
+    consumer: 'silk/static_sequence.empty',
+  }),
+  staticGenericOperation({
+    name: 'staticSequenceAppend',
+    typeParameters: Object.freeze([sequenceElement]),
+    parameters: Object.freeze([
+      valueParameter('self', 'StaticSequence<Element>'),
+      valueParameter('value', 'Element'),
+    ]),
+    semanticParameters: Object.freeze([Type.staticSequence(sequenceElement), sequenceElement]),
+    result: 'StaticSequence<Element>',
+    semanticResult: Type.staticSequence(sequenceElement),
+    consumer: 'silk/static_sequence.append',
+  }),
+  staticGenericOperation({
+    name: 'staticSequenceConcat',
+    typeParameters: Object.freeze([sequenceElement]),
+    parameters: Object.freeze([
+      valueParameter('left', 'StaticSequence<Element>'),
+      valueParameter('right', 'StaticSequence<Element>'),
+    ]),
+    semanticParameters: Object.freeze([
+      Type.staticSequence(sequenceElement),
+      Type.staticSequence(sequenceElement),
+    ]),
+    result: 'StaticSequence<Element>',
+    semanticResult: Type.staticSequence(sequenceElement),
+    consumer: 'silk/static_sequence.concat',
+  }),
+  staticGenericOperation({
+    name: 'staticSequenceLength',
+    typeParameters: Object.freeze([sequenceElement]),
+    parameters: Object.freeze([valueParameter('self', 'StaticSequence<Element>')]),
+    semanticParameters: Object.freeze([Type.staticSequence(sequenceElement)]),
+    result: 'usize',
+    semanticResult: 'usize',
+    consumer: 'silk/static_sequence.length',
+  }),
+  staticGenericOperation({
+    name: 'staticSequenceAt',
+    typeParameters: Object.freeze([sequenceElement]),
+    parameters: Object.freeze([
+      valueParameter('self', 'StaticSequence<Element>'),
+      valueParameter('index', 'usize'),
+    ]),
+    semanticParameters: Object.freeze([Type.staticSequence(sequenceElement), 'usize']),
+    result: 'Element',
+    semanticResult: sequenceElement,
+    consumer: 'silk/static_sequence.at',
+  }),
 ])
 
 const enumValueOperation: Operation = Object.freeze({
@@ -1781,6 +1998,9 @@ const intrinsicOperations = Object.freeze([
   ]),
   targetProfileOperation,
   ...staticTextOperations,
+  ...reflectionOperations,
+  borrowFieldOperation,
+  ...staticSequenceOperations,
   enumValueOperation,
   replaceOperation,
 ])
@@ -1861,8 +2081,22 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
         throw new RangeError(`Intrinsic ${operation.spelling} is missing admission metadata`)
       if (operation.phase === 'Runtime' && operation.targets.length === 0)
         throw new RangeError(`Runtime intrinsic ${operation.spelling} has no execution target`)
-      if (operation.phase === 'StaticOnly' && operation.targets.length !== 0)
-        throw new RangeError(`Static-only intrinsic ${operation.spelling} has a runtime target`)
+      if (operation.phase !== 'Runtime' && operation.targets.length !== 0)
+        throw new RangeError(`Non-runtime intrinsic ${operation.spelling} has a runtime target`)
+      const staticParameters = operation.parameters.flatMap((parameter, ordinal) =>
+        parameter.phase === 'Static' ? [ordinal] : [],
+      )
+      if (operation.phase === 'Mixed') {
+        if (
+          operation.rule._tag !== 'MixedFieldProjectionRule' ||
+          staticParameters.length !== 1 ||
+          staticParameters.at(0) !== operation.rule.staticDescriptorParameter ||
+          operation.parameters.at(operation.rule.runtimeOwnerParameter)?.phase === 'Static'
+        )
+          throw new RangeError(`Mixed intrinsic ${operation.spelling} has an invalid calling shape`)
+      } else if (staticParameters.length !== 0) {
+        throw new RangeError(`Whole-phase intrinsic ${operation.spelling} declares a static lane`)
+      }
       const normalizedTargets = normalizeExecutionTargets(operation.targets)
       if (
         normalizedTargets.length !== operation.targets.length ||
@@ -1881,6 +2115,7 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
           identity = operation.rule._tag
           break
         case 'StaticOnlyRule':
+        case 'MixedFieldProjectionRule':
           identity = undefined
           break
         default:
@@ -1909,7 +2144,10 @@ export const signature = (self: Operation): string => {
       ? ''
       : `<${self.typeParameters.map((parameter) => parameter.name).join(', ')}>`
   const parameters = self.parameters
-    .map((parameter) => `${parameter.name}: ${parameter.type}`)
+    .map(
+      (parameter) =>
+        `${parameter.phase === 'Static' ? 'static ' : ''}${parameter.name}: ${parameter.type}`,
+    )
     .join(', ')
   return `${self.unsafe ? 'unsafe ' : ''}fn ${self.id.actor}.${self.spelling}${typeParameters}(${parameters}) -> ${self.result}`
 }

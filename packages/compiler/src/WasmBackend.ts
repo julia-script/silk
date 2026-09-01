@@ -6158,7 +6158,7 @@ const emitRunEffectOperation = (
     ...operation.arguments.flatMap((argument) =>
       slots(argument).map((slot) => Instr.localGet(slot)),
     ),
-    Instr.call(resolve(operation.target, operation.typeArguments)),
+    Instr.call(resolve(operation.target, operation.typeArguments, operation.staticArguments)),
     ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
     ...reloadReachableRoots(operation.arguments),
   ]
@@ -6211,7 +6211,9 @@ const emitRunEffectValueOrRunStaticEffectOperation = (
     ...operation.arguments.flatMap((argument) =>
       slots(argument).map((slot) => Instr.localGet(slot)),
     ),
-    Instr.call(resolve(operation.runner, operation.runnerTypeArguments)),
+    Instr.call(
+      resolve(operation.runner, operation.runnerTypeArguments, operation.runnerStaticArguments),
+    ),
     ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
     ...reloadReachableRoots(
       operation._tag === 'RunEffectValue'

@@ -141,6 +141,8 @@ export interface CallInstance {
   readonly owner: InstanceKey
   readonly span: Hir.Expression['span']
   readonly target: InstanceKey
+  /** Caller-authored metadata aligned with target static arguments, outside instance identity. */
+  readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
   readonly resultEffect?: string
 }
 
@@ -1045,6 +1047,7 @@ export const discover = (
   }
   interface WorkItem {
     readonly key: InstanceKey
+    readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
     readonly ancestors: ReadonlyMap<string, Ancestor>
     readonly cleanupReachable: boolean
   }
@@ -1140,10 +1143,13 @@ export const discover = (
       if (template === undefined) continue
       const application = Object.freeze({
         declaration: key.declaration,
-        typeArguments: key.typeArguments.map(Type.genericArgumentKey),
+        typeArguments: key.typeArguments,
         evidence: key.evidence,
         contractRow: key.contractRow,
         staticArguments: key.staticArguments,
+        ...(item.staticArgumentOrigins === undefined
+          ? {}
+          : { staticArgumentOrigins: item.staticArgumentOrigins }),
       })
       const residual = Residualization.residualize(residualization, application)
       if (residual._tag === 'StaticFailure') {
@@ -1154,12 +1160,19 @@ export const discover = (
         )
         continue
       }
-      for (const diagnostic of residual.diagnostics)
+      const selectedCompileError = residual.diagnostics.findIndex(
+        (diagnostic) => diagnostic.code === Diagnostic.selectedCompileErrorCode,
+      )
+      const residualDiagnostics =
+        selectedCompileError < 0
+          ? residual.diagnostics
+          : residual.diagnostics.slice(0, selectedCompileError + 1)
+      for (const diagnostic of residualDiagnostics)
         residualizationDiagnostics.set(
           `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
           diagnostic,
         )
-      const residualError = residual.diagnostics.find(
+      const residualError = residualDiagnostics.find(
         (diagnostic) => diagnostic.severity === 'error',
       )
       if (residualError !== undefined) {
@@ -1246,6 +1259,9 @@ export const discover = (
           typeArguments: call.target.typeArguments,
           evidence: call.target.evidence,
           staticArguments: call.target.staticArguments,
+          ...(call.staticArgumentOrigins === undefined
+            ? {}
+            : { staticArgumentOrigins: call.staticArgumentOrigins }),
         })),
         ...forwardedRequirementCallTargets(directCalls, results, index),
         ...callableTargets,
@@ -1275,6 +1291,9 @@ export const discover = (
               ...(call.staticArguments === undefined
                 ? {}
                 : { staticArguments: call.staticArguments }),
+              ...(call.staticArgumentOrigins === undefined
+                ? {}
+                : { staticArgumentOrigins: call.staticArgumentOrigins }),
             }),
           )
           continue
@@ -1293,6 +1312,9 @@ export const discover = (
               ...(call.staticArguments === undefined
                 ? {}
                 : { staticArguments: call.staticArguments }),
+              ...(call.staticArgumentOrigins === undefined
+                ? {}
+                : { staticArgumentOrigins: call.staticArgumentOrigins }),
             }),
           )
       }
@@ -1354,6 +1376,9 @@ export const discover = (
         pending.push(
           Object.freeze({
             key: targetKey,
+            ...(call.staticArgumentOrigins === undefined
+              ? {}
+              : { staticArgumentOrigins: call.staticArgumentOrigins }),
             ancestors: new Map(item.ancestors).set(
               declarationText(targetKey),
               Object.freeze({

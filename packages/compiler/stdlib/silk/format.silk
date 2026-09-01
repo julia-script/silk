@@ -1,17 +1,21 @@
-//! Writer-backed presentation and complete decimal parsing.
+//! Writer-backed value presentation, statically validated templates, and complete decimal parsing.
 //!
 //! # When to use
-//! Use [`display`] for a value's default human-readable presentation and [`displayWith`] when a
-//! caller needs explicit width, alignment, fill, sign, precision, or color permission. Integer
-//! `parse` operations remain the allocation-free inverse of their default presentation.
+//!
+//! Use [`display`] for one value. Use [`format`] for a static template and a borrowed argument
+//! pack. Use [`displayWith`] when presentation needs explicit options. Integer `parse` operations
+//! are the allocation-free inverse of their default presentation.
 //!
 //! # Details
+//!
 //! A [`Formatter`] carries presentation policy while the ambient [`Writer`] owns byte transport.
 //! Formatter and the shipped integer presentations do not allocate an intermediate `String`.
 //! Width counts Unicode scalars rather than UTF-8 bytes or terminal cells. A Writer failure
-//! preserves any prefix already accepted by the provider. Formatter does not roll output back.
+//! preserves any prefix that the provider accepted. Formatter does not roll output back.
+//! Template parsing, field selection, and `Display` selection occur during compilation.
 //!
 //! # Examples
+//!
 //! ## Display with defaults and explicit options
 //!
 //! This program writes `42..+42` to standard output and returns zero.
@@ -65,7 +69,10 @@ import silk.i64 as i64
 import silk.i8 as i8
 import silk.isize as isize
 import silk.option { Option, none }
+import silk.reflect as Reflect
 import silk.result { Result, failResult, succeed }
+import silk.static_sequence as StaticSequence
+import silk.static_text as StaticText
 import silk.string { utf8Bytes as stringUtf8Bytes }
 import silk.u16 as u16
 import silk.u32 as u32
@@ -82,6 +89,244 @@ import silk.writer { Writer, WriterError }
 /// `import silk.format { Format }` names the module scope, so parsing and rendering operations
 /// resolve through `Format`.
 pub struct Format {}
+
+enum PartMode {
+  Literal,
+  Positional,
+  Named
+}
+
+// One deliberately flat homogeneous parser value. It exists only during static evaluation: text
+// is the literal content or named field label, source is the complete authored range used by
+// compileError, and ordinal is meaningful only for positional placeholders.
+struct Part {
+  mode: PartMode
+  text: string
+  source: string
+  ordinal: usize
+}
+
+struct TemplatePlan {
+  parts: Intrinsic.StaticSequence<Part>
+  mode: PartMode
+}
+
+static fn identifierStart(byte: u8) -> bool {
+  return byte == 95 || (65 <= byte && byte <= 90) || (97 <= byte && byte <= 122)
+}
+
+static fn identifierContinue(byte: u8) -> bool {
+  return identifierStart(byte) || (48 <= byte && byte <= 57)
+}
+
+static fn appendPart(
+  parts: Intrinsic.StaticSequence<Part>,
+  mode: PartMode,
+  text: string,
+  source: string,
+  ordinal: usize
+) -> Intrinsic.StaticSequence<Part> {
+  return StaticSequence.append<Part>(
+    move parts,
+    Part {
+      mode: move mode,
+      text: text,
+      source: source,
+      ordinal: ordinal
+    }
+  )
+}
+
+static fn malformed(template: string, start: usize, end: usize) -> never {
+  compileError(StaticText.slice(template, start, end))
+}
+
+static fn parseTemplate(template: string) -> TemplatePlan {
+  let mut parts = StaticSequence.empty<Part>()
+  let length = StaticText.byteLength(template)
+  let mut index = usize.ZERO
+  let mut literalStart = usize.ZERO
+  let mut positionalCount = usize.ZERO
+  let mut mode = PartMode.Literal
+
+  while index < length {
+    let byte = StaticText.byteAt(template, index)
+    if byte == 123 {
+      let next = index + usize.ONE
+      if next < length && StaticText.byteAt(template, next) == 123 {
+        if literalStart < index {
+          let literal = StaticText.slice(template, literalStart, index)
+          parts = appendPart(move parts, PartMode.Literal, literal, literal, usize.ZERO)
+        }
+        let brace = StaticText.slice(template, index, next)
+        parts = appendPart(move parts, PartMode.Literal, brace, brace, usize.ZERO)
+        index = next + usize.ONE
+        literalStart = index
+      } else {
+        if literalStart < index {
+          let literal = StaticText.slice(template, literalStart, index)
+          parts = appendPart(move parts, PartMode.Literal, literal, literal, usize.ZERO)
+        }
+        let placeholderStart = index
+        let nameStart = next
+        index = nameStart
+        while index < length && StaticText.byteAt(template, index) != 125 {
+          index = index + usize.ONE
+        }
+        if length <= index { return malformed(template, placeholderStart, length) }
+        let placeholderEnd = index + usize.ONE
+        let source = StaticText.slice(template, placeholderStart, placeholderEnd)
+        if nameStart == index {
+          if mode == PartMode.Named { compileError(source) }
+          mode = PartMode.Positional
+          parts = appendPart(
+            move parts,
+            PartMode.Positional,
+            StaticText.slice(template, nameStart, index),
+            source,
+            positionalCount
+          )
+          positionalCount = positionalCount + usize.ONE
+        } else {
+          if mode == PartMode.Positional { compileError(source) }
+          let mut nameIndex = nameStart
+          if !identifierStart(StaticText.byteAt(template, nameIndex)) { compileError(source) }
+          nameIndex = nameIndex + usize.ONE
+          while nameIndex < index {
+            if !identifierContinue(StaticText.byteAt(template, nameIndex)) {
+              compileError(source)
+            }
+            nameIndex = nameIndex + usize.ONE
+          }
+          mode = PartMode.Named
+          parts = appendPart(
+            move parts,
+            PartMode.Named,
+            StaticText.slice(template, nameStart, index),
+            source,
+            usize.ZERO
+          )
+        }
+        index = placeholderEnd
+        literalStart = index
+      }
+    } else {
+      if byte == 125 {
+        let next = index + usize.ONE
+        if next < length && StaticText.byteAt(template, next) == 125 {
+          if literalStart < index {
+            let literal = StaticText.slice(template, literalStart, index)
+            parts = appendPart(move parts, PartMode.Literal, literal, literal, usize.ZERO)
+          }
+          let brace = StaticText.slice(template, index, next)
+          parts = appendPart(move parts, PartMode.Literal, brace, brace, usize.ZERO)
+          index = next + usize.ONE
+          literalStart = index
+        } else {
+          return malformed(template, index, next)
+        }
+      } else {
+        index = index + usize.ONE
+      }
+    }
+  }
+
+  if literalStart < length {
+    let literal = StaticText.slice(template, literalStart, length)
+    parts = appendPart(move parts, PartMode.Literal, literal, literal, usize.ZERO)
+  }
+  return TemplatePlan { parts: move parts, mode: move mode }
+}
+
+static fn hasPositionalField<Args>(ordinal: usize) -> bool {
+  let mut found = false
+  static for field in Reflect.fields<Args>() {
+    static if Reflect.fieldKind(field) == Reflect.positionalFieldKind {
+      static if Reflect.fieldOrdinal(field) == ordinal { found = true }
+    }
+  }
+  return found
+}
+
+static fn hasPositionalPart(
+  parts: Intrinsic.StaticSequence<Part>,
+  ordinal: usize
+) -> bool {
+  let mut found = false
+  static for part in parts {
+    static if part.mode == PartMode.Positional {
+      static if part.ordinal == ordinal { found = true }
+    }
+  }
+  return found
+}
+
+static fn visibleNamedFields<Args>() -> string {
+  let mut labels = ""
+  let mut first = true
+  static for field in Reflect.fields<Args>() {
+    static if Reflect.fieldKind(field) == Reflect.labeledFieldKind {
+      if !first { labels = StaticText.concat(labels, ", ") }
+      labels = StaticText.concat(labels, Reflect.fieldLabel(field))
+      first = false
+    }
+  }
+  if first { return "<none>" }
+  return labels
+}
+
+static fn validatedTemplate<Args>(
+  template: string
+) -> Intrinsic.StaticSequence<Part> {
+  let plan = parseTemplate(template)
+  let parts = plan.parts
+  let descriptor = Reflect.typeOf<Args>()
+  let kind = Reflect.typeKind<Args>(descriptor)
+
+  static for part in parts {
+    static if part.mode == PartMode.Positional {
+      if !hasPositionalField<Args>(part.ordinal) { compileError(template) }
+    }
+    static if part.mode == PartMode.Named {
+      let mut found = false
+      static for field in Reflect.fields<Args>() {
+        static if Reflect.fieldKind(field) == Reflect.labeledFieldKind {
+          static if Reflect.fieldLabel(field) == part.text { found = true }
+        }
+      }
+      if !found {
+        compileError(
+          StaticText.concat(
+            part.source,
+            StaticText.concat(
+              "; available visible fields: ",
+              visibleNamedFields<Args>()
+            )
+          )
+        )
+      }
+    }
+  }
+
+  static if plan.mode == PartMode.Positional {
+    if kind != Reflect.positionalKind && kind != Reflect.anonymousPositionalKind {
+      compileError(template)
+    }
+    static for field in Reflect.fields<Args>() {
+      static if Reflect.fieldKind(field) == Reflect.positionalFieldKind {
+        static if !hasPositionalPart(parts, Reflect.fieldOrdinal(field)) {
+          compileError(template)
+        }
+      }
+    }
+  }
+  static if plan.mode == PartMode.Named {
+    if kind != Reflect.namedKind && kind != Reflect.anonymousNamedKind {
+      compileError(template)
+    }
+  }
+  return move parts
+}
 
 /// Alignment of content within a requested minimum width.
 pub enum Alignment {
@@ -473,6 +718,90 @@ pub effect fn displayWith<T: Display>(
   return run Display.display(&value, &mut formatter)
 }
 
+/// Writes a statically validated template with values from one borrowed tuple or record.
+///
+/// # When to use
+///
+/// Use when the template is static and each replacement value has a `Display` implementation.
+///
+/// # Details
+///
+/// `{}` selects tuple fields in order. `{name}` selects visible record fields. `{{` and `}}`
+/// write literal braces. The operation borrows `args` and does not allocate an intermediate
+/// `String`.
+///
+/// # Gotchas
+///
+/// A template cannot mix positional and named placeholders. A positional template must use every
+/// tuple field one time. Malformed templates and unavailable fields stop compilation. A Writer
+/// failure preserves the prefix that the provider accepted.
+///
+/// # Examples
+///
+/// ## Write a named argument pack
+///
+/// This program writes `Hello, Julia. Age: 31` to standard output.
+///
+/// ```silk
+/// import silk.effect as Effect
+///
+/// import silk.format as Format
+///
+/// import silk.writer as WriterActor
+///
+/// import silk.writer {Writer, WriterError}
+///
+/// effect fn render() -> () ! WriterError ? &mut Writer {
+///   let args = .{name: "Julia", age: 31}
+///   return run Format.format("Hello, {name}. Age: {age}", &args)
+/// }
+///
+/// effect fn writeExample() -> () ! WriterError {
+///   let mut writer = WriterActor.stdoutWriterProvider()
+///   return run render()
+///     |> Effect.provideMut<Writer>(&mut writer)
+/// }
+///
+/// effect fn ignoreWriteFailure(error: WriterError) -> () {
+///   return ()
+/// }
+///
+/// pub fn main() -> i32 {
+///   run Effect.catchAll(writeExample(), ignoreWriteFailure)
+///   return 0
+/// }
+/// ```
+pub effect fn format<Args>(
+  static template: string,
+  args: &Args
+) -> () ! WriterError ? &mut Writer {
+  let mut formatter = makeDefault()
+  static for part in validatedTemplate<Args>(template) {
+    static if part.mode == PartMode.Literal {
+      run writeText(&mut formatter, part.text)
+    } else {
+      static for field in Reflect.fields<Args>() {
+        static if part.mode == PartMode.Positional {
+          static if Reflect.fieldKind(field) == Reflect.positionalFieldKind {
+            static if Reflect.fieldOrdinal(field) == part.ordinal {
+              let value = Intrinsic.borrowField(args, field)
+              run display(value)
+            }
+          }
+        } else {
+          static if Reflect.fieldKind(field) == Reflect.labeledFieldKind {
+            static if Reflect.fieldLabel(field) == part.text {
+              let value = Intrinsic.borrowField(args, field)
+              run display(value)
+            }
+          }
+        }
+      }
+    }
+  }
+  return ()
+}
+
 const ZERO: u64 = 0
 const TEN: u64 = 10
 const DIGIT_CAPACITY: usize = 20
@@ -710,6 +1039,18 @@ impl Display for i64 {
 impl Display for isize {
   effect fn display(self: &Self, formatter: &mut Formatter) -> () ! WriterError ? &mut Writer {
     return run signedDisplay(&mut formatter, isize.toI64(self.*))
+  }
+}
+
+impl Display for string {
+  /// Writes the string's UTF-8 bytes through the ambient mutable Writer.
+  ///
+  /// # Details
+  ///
+  /// This operation borrows the string and does not allocate an intermediate `String`. If Writer
+  /// fails, an accepted prefix remains written and the original `WriterError` is preserved.
+  effect fn display(self: &Self, formatter: &mut Formatter) -> () ! WriterError ? &mut Writer {
+    return run writeText(&mut formatter, self.*)
   }
 }
 

@@ -3,6 +3,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Instances from './Instances.js'
 import * as Mir from './Mir.js'
 import * as ProvisionalMir from './ProvisionalMir.js'
+import type * as StaticValue from './StaticValue.js'
 import type * as SuspensionOwnership from './SuspensionOwnership.js'
 import * as Type from './Type.js'
 
@@ -118,10 +119,18 @@ const runnerOf = (
   } else {
     typeArguments = operation.runnerTypeArguments
   }
+  let staticArguments: ReadonlyArray<StaticValue.Value>
+  if (operation === undefined || operation._tag === 'ExecutionPark')
+    staticArguments = runner.instance?.staticArguments ?? Object.freeze([])
+  else if (operation._tag === 'RunEffect')
+    staticArguments = operation.staticArguments ?? Object.freeze([])
+  else if (operation._tag === 'RunEffectValue')
+    staticArguments = operation.runnerStaticArguments ?? Object.freeze([])
+  else staticArguments = Object.freeze([])
   const exact =
     declaration === undefined
       ? undefined
-      : functions.find((fn) => Mir.matchesInstance(fn, declaration, typeArguments))
+      : functions.find((fn) => Mir.matchesInstance(fn, declaration, typeArguments, staticArguments))
   let instance = exact?.instance
   if (
     instance === undefined &&

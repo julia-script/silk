@@ -65,6 +65,7 @@ export type NodeKind =
   | 'AssignmentStatement'
   | 'ConditionalStatement'
   | 'StaticConditionalStatement'
+  | 'StaticForStatement'
   | 'PatternConditionalStatement'
   | 'WhileStatement'
   | 'BreakStatement'

@@ -20,6 +20,7 @@ import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as SourceSpan from '../src/SourceSpan.js'
+import type * as StaticValue from '../src/StaticValue.js'
 import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
@@ -1185,6 +1186,23 @@ it.effect('rejects residual open MIR and keeps specialization symbols injective'
     assert.notStrictEqual(
       Backend.symbolFor(collision('a/b'), fn.instance),
       Backend.symbolFor(collision('a_b'), fn.instance),
+    )
+    const withStaticArgument = (byte: number): Mir.MirFunction => {
+      const argument: StaticValue.TextValue = Object.freeze({
+        _tag: 'TextValue',
+        bytes: Object.freeze([byte]),
+      })
+      return Object.freeze({
+        ...fn,
+        instance: Object.freeze({
+          ...fn.instance,
+          staticArguments: Object.freeze([argument]),
+        }),
+      })
+    }
+    assert.notStrictEqual(
+      Backend.symbolFor(withStaticArgument(97), fn.instance),
+      Backend.symbolFor(withStaticArgument(98), fn.instance),
     )
   }),
 )

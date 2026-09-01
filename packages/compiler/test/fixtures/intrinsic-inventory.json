@@ -5470,11 +5470,102 @@
       "consumer": "silk/static_text.byteAt"
     },
     {
+      "operation": "Intrinsic.staticTextConcat",
+      "signature": "fn Intrinsic.staticTextConcat(left: string, right: string) -> string",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/static_text.concat"
+    },
+    {
       "operation": "Intrinsic.staticTextSlice",
       "signature": "fn Intrinsic.staticTextSlice(value: string, start: usize, end: usize) -> string",
       "unsafe": false,
       "admission": "Language",
       "consumer": "silk/static_text.slice"
+    },
+    {
+      "operation": "Intrinsic.reflectType",
+      "signature": "fn Intrinsic.reflectType<Owner>() -> Type<Owner>",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/reflect.type"
+    },
+    {
+      "operation": "Intrinsic.reflectFields",
+      "signature": "fn Intrinsic.reflectFields<Owner>() -> Fields<Owner>",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/reflect.fields"
+    },
+    {
+      "operation": "Intrinsic.reflectTypeKind",
+      "signature": "fn Intrinsic.reflectTypeKind<Owner>(descriptor: Type<Owner>) -> u8",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/reflect.typeKind"
+    },
+    {
+      "operation": "Intrinsic.reflectFieldKind",
+      "signature": "fn Intrinsic.reflectFieldKind<Owner, Value>(field: Field<Owner, Value>) -> u8",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/reflect.fieldKind"
+    },
+    {
+      "operation": "Intrinsic.reflectFieldLabel",
+      "signature": "fn Intrinsic.reflectFieldLabel<Owner, Value>(field: Field<Owner, Value>) -> string",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/reflect.fieldLabel"
+    },
+    {
+      "operation": "Intrinsic.reflectFieldOrdinal",
+      "signature": "fn Intrinsic.reflectFieldOrdinal<Owner, Value>(field: Field<Owner, Value>) -> usize",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/reflect.fieldOrdinal"
+    },
+    {
+      "operation": "Intrinsic.borrowField",
+      "signature": "fn Intrinsic.borrowField<Owner, Value>(owner: &Owner, static field: Field<Owner, Value>) -> &Value",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/reflect.borrowField"
+    },
+    {
+      "operation": "Intrinsic.staticSequenceEmpty",
+      "signature": "fn Intrinsic.staticSequenceEmpty<Element>() -> StaticSequence<Element>",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/static_sequence.empty"
+    },
+    {
+      "operation": "Intrinsic.staticSequenceAppend",
+      "signature": "fn Intrinsic.staticSequenceAppend<Element>(self: StaticSequence<Element>, value: Element) -> StaticSequence<Element>",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/static_sequence.append"
+    },
+    {
+      "operation": "Intrinsic.staticSequenceConcat",
+      "signature": "fn Intrinsic.staticSequenceConcat<Element>(left: StaticSequence<Element>, right: StaticSequence<Element>) -> StaticSequence<Element>",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/static_sequence.concat"
+    },
+    {
+      "operation": "Intrinsic.staticSequenceLength",
+      "signature": "fn Intrinsic.staticSequenceLength<Element>(self: StaticSequence<Element>) -> usize",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/static_sequence.length"
+    },
+    {
+      "operation": "Intrinsic.staticSequenceAt",
+      "signature": "fn Intrinsic.staticSequenceAt<Element>(self: StaticSequence<Element>, index: usize) -> Element",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/static_sequence.at"
     },
     {
       "operation": "Intrinsic.enumValue",

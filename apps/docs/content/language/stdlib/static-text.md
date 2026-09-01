@@ -11,7 +11,7 @@ to static functions and produce finite static values.
 
 Import as `StaticText` with `import silk.static_text { StaticText }`.
 
-Public declarations: 3.
+Public declarations: 4.
 
 <a id="declaration-73696c6b2f7374617469635f746578743a3a627974654c656e677468"></a>
 
@@ -32,6 +32,16 @@ pub static fn byteAt(static value: string, static index: usize) -> u8
 ```
 
 Returns one UTF-8 byte at `index`, or reports a static phase violation when out of bounds.
+
+<a id="declaration-73696c6b2f7374617469635f746578743a3a636f6e636174"></a>
+
+## `concat`
+
+```silk
+pub static fn concat(static left: string, static right: string) -> string
+```
+
+Concatenates two static texts and retains `left` as the source anchor for diagnostics.
 
 <a id="declaration-73696c6b2f7374617469635f746578743a3a736c696365"></a>
 

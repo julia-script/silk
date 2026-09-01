@@ -2,8 +2,13 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Hir from '../src/Hir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 import * as Scalar from '../src/Scalar.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import * as StandardStreams from '../src/StandardStreams.js'
+import * as StaticValue from '../src/StaticValue.js'
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -114,6 +119,415 @@ it.effect('streams every integer bound through Display without allocating', () =
       decoder.decode(Uint8Array.from(outputBytes(wasmMemory))),
       `${defaultCases.map((entry) => entry.expected).join('|')}|`,
     )
+  }),
+)
+
+const stringRenderingProgram = `import silk.effect as Effect
+import silk.format as Format
+import silk.writer as WriterActor
+import silk.writer { Writer, WriterError }
+
+effect fn render() -> () ! WriterError ? &mut Writer {
+  run Writer.writeAll(b"prefix:")
+  let value = "Júlia"
+  return run Format.display(&value)
+}
+
+pub effect fn main() -> () ! WriterError {
+  let mut writer = WriterActor.stdoutWriterProvider()
+  return run render() |> Effect.provideMut<Writer>(&mut writer)
+}`
+
+it.effect('streams borrowed strings through Display and preserves the accepted Writer prefix', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'number-text/string-display',
+      ascii(stringRenderingProgram),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    const memory = StandardStreams.memory()
+    const evaluated = Analysis.evaluate(snapshot, { standardStreams: memory.provider })
+    assert.strictEqual(
+      evaluated._tag,
+      'Completed',
+      evaluated._tag === 'Blocked' && evaluated.reason._tag === 'InvalidMir'
+        ? evaluated.reason.violations.map((violation) => violation.detail).join('\n')
+        : evaluated._tag,
+    )
+    assert.strictEqual(decoder.decode(Uint8Array.from(outputBytes(memory))), 'prefix:Júlia')
+    assert.deepEqual(
+      evaluated.trace.filter((event) => event._tag === 'AllocationAcquire'),
+      [],
+    )
+
+    const failing = StandardStreams.memory({ failAt: 1 })
+    const failed = Analysis.evaluate(snapshot, { standardStreams: failing.provider })
+    assert.strictEqual(failed._tag, 'UnhandledFailure')
+    if (failed._tag === 'UnhandledFailure') assert.include(failed.identity, 'WriterError')
+    assert.strictEqual(decoder.decode(Uint8Array.from(outputBytes(failing))), 'prefix:')
+    const failedWrite = failed.trace.find(
+      (event) => event._tag === 'HostWrite' && event.outcome === 'WriteFailure',
+    )
+    assert.isDefined(failedWrite)
+    if (failedWrite?._tag === 'HostWrite') {
+      assert.strictEqual(decoder.decode(Uint8Array.from(failedWrite.bytes)), 'Júlia')
+    }
+  }),
+)
+
+const templateFormattingProgram = `import silk.effect as Effect
+import silk.format as Format
+import silk.writer as WriterActor
+import silk.writer { Writer, WriterError }
+
+struct Person { pub name: string pub age: i32 }
+
+effect fn render() -> () ! WriterError ? &mut Writer {
+  run Format.format("My name is {}, I'm {}|", &("Julia", 31))
+  let args = .{ name: "Júlia", age: 32 }
+  run Format.format(
+    "Hello, {name}; age={age}; again={name}|",
+    &args
+  )
+  run Format.format(
+    "Hello, {name}; age={age}; again={name}|",
+    &args
+  )
+  run Format.format("{{name}}|", &.{ name: "unused" })
+  let person = Person { name: "Maria", age: 28 }
+  return run Format.format("{name}:{age}", &person)
+}
+
+pub effect fn main() -> () ! WriterError {
+  let mut writer = WriterActor.stdoutWriterProvider()
+  return run render() |> Effect.provideMut<Writer>(&mut writer)
+}`
+
+it.effect('classifies static template bytes inside a static helper', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'number-text/template-byte',
+      ascii(`import silk.static_text as StaticText
+import silk.static_sequence as StaticSequence
+import silk.usize as usize
+static fn startsOpen(value: string) -> bool {
+  let parts = StaticSequence.empty<i32>()
+  let length = StaticText.byteLength(value)
+  let mut index = usize.ZERO
+  while index < length {
+    let byte = StaticText.byteAt(value, index)
+    if byte == 123 { return true }
+    index = index + usize.ONE
+  }
+  return false
+}
+pub fn main() -> i32 {
+  static if startsOpen("name") { return 0 } else { return 42 }
+}`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+  }),
+)
+
+it.effect('formats borrowed positional and named aggregate packs without runtime allocation', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'number-text/templates',
+      encoder.encode(templateFormattingProgram),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const memory = StandardStreams.memory()
+    const evaluated = Analysis.evaluate(snapshot, { standardStreams: memory.provider })
+    assert.strictEqual(
+      evaluated._tag,
+      'Completed',
+      evaluated._tag === 'Blocked' && evaluated.reason._tag === 'InvalidMir'
+        ? evaluated.reason.violations.map((violation) => violation.detail).join('\n')
+        : evaluated._tag,
+    )
+    assert.strictEqual(
+      decoder.decode(Uint8Array.from(outputBytes(memory))),
+      "My name is Julia, I'm 31|Hello, Júlia; age=32; again=Júlia|Hello, Júlia; age=32; again=Júlia|{name}|Maria:28",
+    )
+    assert.deepEqual(
+      evaluated.trace.filter((event) => event._tag === 'AllocationAcquire'),
+      [],
+    )
+
+    const formatInstances = Analysis.instancesOf(snapshot).instances.filter(
+      (instance) =>
+        instance.key.declaration.module === 'silk/format' &&
+        instance.key.declaration.name === 'format',
+    )
+    assert.strictEqual(formatInstances.length, 4)
+    assert.strictEqual(
+      new Set(
+        formatInstances.map((instance) =>
+          instance.key.staticArguments.map(StaticValue.presentation).join('|'),
+        ),
+      ).size,
+      4,
+    )
+    assert.isTrue(
+      formatInstances.every(
+        (instance) =>
+          instance.function.contract._tag === 'Contract' &&
+          instance.function.contract.parameters.length === 1 &&
+          instance.key.staticArguments.length === 1,
+      ),
+    )
+    const projectedLoans = formatInstances.flatMap((instance) =>
+      instance.ownership.loans.filter((loan) => loan.root._tag === 'Parameter'),
+    )
+    assert.isAbove(projectedLoans.length, 0)
+    assert.isTrue(projectedLoans.every((loan) => loan.access === 'Shared'))
+    assert.isTrue(
+      formatInstances
+        .flatMap((instance) => instance.ownership.loans)
+        .every((loan) => loan.access !== 'Exclusive' || loan.root._tag === 'Let'),
+    )
+
+    const residualHir = Hir.encode(
+      Object.freeze({
+        _tag: 'HirModule',
+        module: 'silk/format',
+        functions: Object.freeze(formatInstances.map((instance) => instance.function)),
+      }),
+    )
+    assert.include(residualHir, 'borrow-value')
+    assert.include(residualHir, 'shared p1.#0')
+    assert.include(residualHir, 'shared p1.#1')
+    for (const spelling of [
+      'static-for',
+      'Intrinsic.Field',
+      'Intrinsic.Fields',
+      'Intrinsic.StaticSequence',
+      'borrowField',
+      'silk/reflect',
+      'silk/static_sequence',
+      'parseTemplate',
+      'validatedTemplate',
+    ]) {
+      assert.isFalse(residualHir.includes(spelling), `${spelling} reached residual HIR`)
+    }
+
+    const encodedMir = MirEncoding.encode(Analysis.loweredMir(snapshot))
+    assert.include(encodedMir, 'begin-loan')
+    assert.include(encodedMir, ' shared ')
+    for (const spelling of [
+      'Intrinsic.Field',
+      'Intrinsic.Fields',
+      'Intrinsic.StaticSequence',
+      'borrowField',
+      'silk/reflect',
+      'silk/static_sequence',
+      'parseTemplate',
+      'validatedTemplate',
+    ]) {
+      assert.isFalse(encodedMir.includes(spelling), `${spelling} reached MIR`)
+    }
+
+    const failing = StandardStreams.memory({ failAt: 1 })
+    const failed = Analysis.evaluate(snapshot, { standardStreams: failing.provider })
+    assert.strictEqual(failed._tag, 'UnhandledFailure')
+    if (failed._tag === 'UnhandledFailure') assert.include(failed.identity, 'WriterError')
+    assert.strictEqual(decoder.decode(Uint8Array.from(outputBytes(failing))), 'My name is ')
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const wasmMemory = StandardStreams.memory()
+    let instance: WebAssembly.Instance | undefined
+    instance = new WebAssembly.Instance(
+      new WebAssembly.Module(wasm.bytes.slice()),
+      StandardStreams.wasmImports(wasmMemory.provider, () => {
+        const exported = instance?.exports[StandardStreams.wasmMemoryExport]
+        return exported instanceof WebAssembly.Memory ? exported : undefined
+      }),
+    )
+    const main = instance.exports.silk_main
+    if (typeof main !== 'function') throw new Error('template formatting Wasm lost silk_main')
+    main()
+    assert.strictEqual(
+      decoder.decode(Uint8Array.from(outputBytes(wasmMemory))),
+      "My name is Julia, I'm 31|Hello, Júlia; age=32; again=Júlia|Hello, Júlia; age=32; again=Júlia|{name}|Maria:28",
+    )
+  }),
+)
+
+const formattingFailureProgram = (body: string): string => `import silk.effect as Effect
+import silk.format as Format
+import silk.writer as WriterActor
+import silk.writer { Writer, WriterError }
+
+effect fn render() -> () ! WriterError ? &mut Writer {
+${body}
+}
+
+pub effect fn main() -> () ! WriterError {
+  let mut writer = WriterActor.stdoutWriterProvider()
+  return run render() |> Effect.provideMut<Writer>(&mut writer)
+}`
+
+const byteOffset = (source: string, characterOffset: number): number =>
+  encoder.encode(source.slice(0, characterOffset)).length
+
+it.effect('anchors malformed, mixed, arity, and field diagnostics to template bytes', () =>
+  Effect.gen(function* () {
+    const cases = [
+      { name: 'unclosed', body: '  return run Format.format("open {", &(1, 2))', marked: '{' },
+      { name: 'closing', body: '  return run Format.format("close }", &(1, 2))', marked: '}' },
+      {
+        name: 'mixed',
+        body: '  return run Format.format("first={} next={name}", &(1, 2))',
+        marked: '{name}',
+      },
+      {
+        name: 'missing-multibyte',
+        body: '  return run Format.format("Olá {missing}", &.{ name: "Julia" })',
+        marked: '{missing}',
+      },
+    ] as const
+
+    for (const testCase of cases) {
+      const sourceId = `number-text/template-${testCase.name}`
+      const source = formattingFailureProgram(testCase.body)
+      const snapshot = yield* Analysis.ofSourceRealized(
+        sourceId,
+        encoder.encode(source),
+        'wasm32-unknown-unknown',
+      )
+      const diagnostics = Analysis.diagnostics(snapshot)
+      assert.strictEqual(diagnostics.length, 1, testCase.name)
+      const diagnostic = diagnostics.at(0)
+      assert.strictEqual(diagnostic?.code, 'SEM0177', testCase.name)
+      const bodyStart = source.indexOf(testCase.body)
+      const markedCharacterStart = source.indexOf(testCase.marked, bodyStart)
+      assert.strictEqual(diagnostic?.span.sourceId, sourceId)
+      assert.strictEqual(diagnostic?.span.start, byteOffset(source, markedCharacterStart))
+      assert.strictEqual(
+        diagnostic?.span.end,
+        byteOffset(source, markedCharacterStart + testCase.marked.length),
+      )
+      if (testCase.name === 'missing-multibyte')
+        assert.include(diagnostic?.message ?? '', 'available visible fields: name')
+    }
+
+    for (const testCase of [
+      {
+        name: 'arity',
+        template: '{}{}{}',
+        body: '  return run Format.format("{}{}{}", &(1, 2))',
+      },
+      {
+        name: 'aggregate-kind',
+        template: '{}',
+        body: '  return run Format.format("{}", &.{ value: 1 })',
+      },
+    ] as const) {
+      const sourceId = `number-text/template-${testCase.name}`
+      const source = formattingFailureProgram(testCase.body)
+      const snapshot = yield* Analysis.ofSourceRealized(
+        sourceId,
+        encoder.encode(source),
+        'wasm32-unknown-unknown',
+      )
+      const diagnostics = Analysis.diagnostics(snapshot)
+      assert.strictEqual(diagnostics.length, 1, testCase.name)
+      const diagnostic = diagnostics.at(0)
+      assert.strictEqual(diagnostic?.code, 'SEM0177', testCase.name)
+      const templateCharacterStart = source.lastIndexOf(`"${testCase.template}"`) + 1
+      assert.strictEqual(diagnostic?.span.start, byteOffset(source, templateCharacterStart))
+      assert.strictEqual(
+        diagnostic?.span.end,
+        byteOffset(source, templateCharacterStart + testCase.template.length),
+      )
+    }
+  }),
+)
+
+it.effect('keeps unreachable invalid templates unevaluated and missing Display ordinary', () =>
+  Effect.gen(function* () {
+    const unreachable = yield* Analysis.ofSourceRealized(
+      'number-text/template-unreachable',
+      encoder.encode(`import silk.format as Format
+import silk.writer { Writer, WriterError }
+effect fn ignored() -> () ! WriterError ? &mut Writer {
+  return run Format.format("unclosed {", &(1, 2))
+}
+pub fn main() -> i32 { return 42 }`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(unreachable), [])
+
+    const missingDisplaySource = formattingFailureProgram(
+      '  return run Format.format("{enabled}", &.{ enabled: true })',
+    )
+    const missingDisplay = yield* Analysis.ofSourceRealized(
+      'number-text/template-missing-display',
+      encoder.encode(missingDisplaySource),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(missingDisplay).map((diagnostic) => diagnostic.code),
+      ['SEM0083'],
+    )
+  }),
+)
+
+it.effect('does not expose private fields as named formatting candidates', () =>
+  Effect.gen(function* () {
+    const module = 'number-text/template-private-field'
+    const source = `import model.Person as Model
+import silk.effect as Effect
+import silk.format as Format
+import silk.writer as WriterActor
+import silk.writer { Writer, WriterError }
+
+effect fn render() -> () ! WriterError ? &mut Writer {
+  let person = Model.make()
+  return run Format.format("{missing}", &person)
+}
+
+pub effect fn main() -> () ! WriterError {
+  let mut writer = WriterActor.stdoutWriterProvider()
+  return run render() |> Effect.provideMut<Writer>(&mut writer)
+}`
+    const snapshot = yield* Analysis.makeRealized({
+      root: SourceFile.make(module, encoder.encode(source)),
+      target: 'wasm32-unknown-unknown',
+    }).pipe(
+      Effect.provide(
+        SourceResolver.memory(
+          new Map([
+            [
+              'model/Person',
+              encoder.encode(`pub struct Person { pub name: string token: i32 }
+pub fn make() -> Person { return Person { name: "Julia", token: 42 } }`),
+            ],
+          ]),
+        ),
+      ),
+    )
+    const diagnostics = Analysis.diagnostics(snapshot)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0177'],
+    )
+    const placeholderStart = source.indexOf('{missing}')
+    assert.strictEqual(diagnostics.at(0)?.span.sourceId, module)
+    assert.strictEqual(diagnostics.at(0)?.span.start, byteOffset(source, placeholderStart))
+    assert.strictEqual(
+      diagnostics.at(0)?.span.end,
+      byteOffset(source, placeholderStart + '{missing}'.length),
+    )
+    assert.include(diagnostics.at(0)?.message ?? '', 'available visible fields: name')
+    assert.isTrue(diagnostics.every((diagnostic) => !diagnostic.message.includes('token')))
   }),
 )
 
@@ -292,9 +706,15 @@ it('removes allocating integer rendering without a compatibility path', () => {
   }
 })
 
-it('declares one inline Display witness per integer and no allocating renderer', () => {
+it('declares inline Display witnesses without a second string-writing route', () => {
   const source = readFileSync(new URL('../stdlib/silk/format.silk', import.meta.url), 'utf8')
   for (const spelling of integerSpellings) assert.include(source, `impl Display for ${spelling} {`)
+  assert.include(
+    source,
+    `impl Display for string {
+  /// Writes the string's UTF-8 bytes through the ambient mutable Writer.`,
+  )
+  assert.include(source, 'return run writeText(&mut formatter, self.*)')
   assert.notInclude(source, 'unsignedText(')
   assert.notInclude(source, 'signedText(')
   assert.notInclude(source, 'OutOfMemoryError')

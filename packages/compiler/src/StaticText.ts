@@ -7,7 +7,17 @@ export interface Data {
   readonly id: string
   readonly kind: 'Text' | 'Bytes'
   readonly bytes: ReadonlyArray<number>
+  /** Source-token byte ranges for each decoded output byte, in output order. */
+  readonly sourceRanges?: ReadonlyArray<SourceRange>
+  /** The authored literal-content range relative to the complete token. */
+  readonly contentRange?: SourceRange
   readonly utf8: boolean
+}
+
+/** One half-open range relative to the complete literal token. */
+export interface SourceRange {
+  readonly start: number
+  readonly end: number
 }
 
 export type DecodeResult =
@@ -17,7 +27,13 @@ export type DecodeResult =
 const hex = (bytes: ReadonlyArray<number>): string =>
   bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')
 
-const decoded = (kind: Data['kind'], bytes: ReadonlyArray<number>, utf8: boolean): DecodeResult =>
+const decoded = (
+  kind: Data['kind'],
+  bytes: ReadonlyArray<number>,
+  sourceRanges: ReadonlyArray<SourceRange>,
+  contentRange: SourceRange,
+  utf8: boolean,
+): DecodeResult =>
   Object.freeze({
     _tag: 'Decoded',
     data: Object.freeze({
@@ -25,6 +41,10 @@ const decoded = (kind: Data['kind'], bytes: ReadonlyArray<number>, utf8: boolean
       id: `${kind === 'Text' ? 'text' : 'bytes'}:${hex(bytes)}`,
       kind,
       bytes: Object.freeze([...bytes]),
+      sourceRanges: Object.freeze(
+        sourceRanges.map((range) => Object.freeze({ start: range.start, end: range.end })),
+      ),
+      contentRange: Object.freeze({ start: contentRange.start, end: contentRange.end }),
       utf8,
     }),
   })
@@ -51,6 +71,7 @@ export const decode = (
     return invalid('unterminated literal', Math.max(0, token.length - 1))
   const byteString = form.category === 'Bytes'
   const output: Array<number> = []
+  const sourceRanges: Array<SourceRange> = []
   let index = contentStart
   while (index < end) {
     const byte = token[index]
@@ -59,10 +80,14 @@ export const decode = (
         if (token[index + 1] !== 0x0a)
           return invalid('isolated carriage return in multiline literal', index)
         output.push(0x0a)
+        sourceRanges.push(Object.freeze({ start: index, end: index + 2 }))
         index += 2
         continue
       }
-      if (byte !== undefined) output.push(byte)
+      if (byte !== undefined) {
+        output.push(byte)
+        sourceRanges.push(Object.freeze({ start: index, end: index + 1 }))
+      }
       index += 1
       continue
     }
@@ -70,9 +95,13 @@ export const decode = (
     const escaped = Escape.decodeAt(token, index + 1, end, form.delimiter, byteString)
     if (escaped._tag === 'Invalid') return invalid(escaped.detail, escapeOffset)
     output.push(...escaped.bytes)
+    sourceRanges.push(
+      ...escaped.bytes.map(() => Object.freeze({ start: escapeOffset, end: escaped.next })),
+    )
     index = escaped.next
   }
-  if (byteString) return decoded('Bytes', output, false)
+  const contentRange = Object.freeze({ start: contentStart, end })
+  if (byteString) return decoded('Bytes', output, sourceRanges, contentRange, false)
   try {
     new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(output))
   } catch {
@@ -81,7 +110,7 @@ export const decode = (
       contentStart,
     )
   }
-  return decoded('Text', output, true)
+  return decoded('Text', output, sourceRanges, contentRange, true)
 }
 
 /** One Unicode scalar value decoded from one complete character-literal token. */

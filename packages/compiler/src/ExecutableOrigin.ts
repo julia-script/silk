@@ -10,6 +10,7 @@ import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Specialization from './Specialization.js'
+import type * as StaticEvaluation from './StaticEvaluation.js'
 import type * as StaticValue from './StaticValue.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import * as Type from './Type.js'
@@ -37,6 +38,8 @@ export interface CallTarget {
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
   readonly evidence?: ReadonlyArray<string>
   readonly staticArguments?: ReadonlyArray<StaticValue.Value>
+  /** Caller-authored metadata aligned with static arguments and excluded from target identity. */
+  readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
   readonly structuralProvider?: Type.Type
 }
 
@@ -90,9 +93,9 @@ export const reachableIntrinsics = (
           }
           if (operation === undefined) continue
           const intrinsic = Intrinsic.findOperationById(operation)
-          if (intrinsic?.phase === 'StaticOnly')
+          if (intrinsic?.phase !== 'Runtime')
             throw new RangeError(
-              `Runtime HIR retained static-only intrinsic ${Intrinsic.operationText(operation)}`,
+              `Runtime HIR retained non-runtime intrinsic ${Intrinsic.operationText(operation)}`,
             )
           const span = expression.span
           const key = `${Intrinsic.operationText(operation)}\u0000${span.sourceId}\u0000${span.start}\u0000${span.end}`
@@ -404,7 +407,13 @@ export const make = (operations: Operations) => {
             declaration: expression.target,
             typeArguments: expression.typeArguments,
             evidence: expression.evidence.map(Constraint.evidenceKey),
-            ...(expression._tag === 'Call' ? { staticArguments: expression.staticArguments } : {}),
+            ...(expression._tag === 'Call' || expression._tag === 'EffectConstruct'
+              ? { staticArguments: expression.staticArguments }
+              : {}),
+            ...((expression._tag === 'Call' || expression._tag === 'EffectConstruct') &&
+            expression.staticArgumentOrigins !== undefined
+              ? { staticArgumentOrigins: expression.staticArgumentOrigins }
+              : {}),
           }),
           ...nested,
         ]
@@ -1362,7 +1371,7 @@ export const make = (operations: Operations) => {
       target.contract,
       target.declaration.typeParameters.map((parameter) => parameter.type),
       [...typeArguments, ...hiddenArguments],
-      expression._tag === 'Call' ? expression.staticArguments : Object.freeze([]),
+      expression.staticArguments,
       expression.evidence.map(Constraint.evidenceKey),
     )
     context.recordResolvedCall?.(expression, key)
@@ -1651,6 +1660,10 @@ export const make = (operations: Operations) => {
             owner,
             span,
             target,
+            ...((expression._tag === 'Call' || expression._tag === 'EffectConstruct') &&
+            expression.staticArgumentOrigins !== undefined
+              ? { staticArgumentOrigins: expression.staticArgumentOrigins }
+              : {}),
             ...(resultEffect === undefined ? {} : { resultEffect }),
           }),
           ordinal,
@@ -2056,7 +2069,13 @@ export const make = (operations: Operations) => {
             sourceType = undefined
           } else if (source === 'Parameter') {
             if (instance.function.contract._tag === 'Contract') {
-              sourceType = instance.function.contract.parameters.at(sourceOrdinal)
+              const runtimeOrdinal = instance.function.declaration.parameters
+                .filter((parameter) => parameter.phase === 'Runtime')
+                .findIndex((parameter) => parameter.id.ordinal === sourceOrdinal)
+              sourceType =
+                runtimeOrdinal < 0
+                  ? undefined
+                  : instance.function.contract.parameters.at(runtimeOrdinal)
             } else {
               sourceType = undefined
             }

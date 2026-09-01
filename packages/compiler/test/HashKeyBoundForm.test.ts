@@ -106,7 +106,7 @@ impl HashKey for u64 { digest: u64.u64Digest }
 pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(messages(snapshot), [
-      'Invalid conformance: u64.u64Digest is incompatible with HashKey.digest: scalar source witnesses must be declared inline',
+      'Invalid conformance: u64.u64Digest is incompatible with HashKey.digest: scalar and string source witnesses must be declared inline',
     ])
   }),
 )

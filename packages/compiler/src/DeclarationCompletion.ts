@@ -71,9 +71,13 @@ const sourceConformanceOwner = (
   provider: Type.Type,
 ): string | undefined => {
   if (Type.isNominal(provider)) return provider.module
-  if (Type.isBuiltin(provider)) return capability.module
+  if (Type.isBuiltin(provider) || Type.isString(provider)) return capability.module
   return undefined
 }
+
+/** Structural providers whose only coherent source owner is the declaring contract module. */
+const isContractOwnedInlineProvider = (provider: Type.Type): boolean =>
+  Type.isBuiltin(provider) || Type.isString(provider)
 
 export const complete = (
   self: DeclarationIndex.Index,
@@ -728,7 +732,7 @@ export const complete = (
       if (sourceContract !== undefined && conformanceOwner === undefined) {
         diagnostics.push(
           invalidDiagnostic(
-            'interface and service providers must be nominal types or scalar types',
+            'interface and service providers must be nominal types, scalar types, or string',
             conformance.syntax.span,
           ),
         )
@@ -737,7 +741,7 @@ export const complete = (
       if (sourceContract !== undefined && conformanceOwner !== conformance.module) {
         const ownership = Type.isNominal(provider)
           ? "the provider's module"
-          : "the contract's module for scalar providers"
+          : "the contract's module for scalar and string providers"
         diagnostics.push(
           invalidDiagnostic(
             `implementation for ${Type.encode(provider)} must be declared in ${conformanceOwner}, ${ownership}`,
@@ -989,11 +993,11 @@ export const complete = (
             continue
           }
           if (
-            Type.isBuiltin(provider) &&
+            isContractOwnedInlineProvider(provider) &&
             mapping.form === 'Mapped' &&
             (target._tag !== 'TypePath' || target.segments.at(0)?.spelling !== 'Intrinsic')
           ) {
-            rejectIncompatibleMapping('scalar source witnesses must be declared inline')
+            rejectIncompatibleMapping('scalar and string source witnesses must be declared inline')
             continue
           }
           const operation =

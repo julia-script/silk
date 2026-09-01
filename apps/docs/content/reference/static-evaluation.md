@@ -226,13 +226,15 @@ available during compilation:
 | --- | --- | --- |
 | `byteLength(value)` | `usize` | Number of bytes in the UTF-8 encoding |
 | `byteAt(value, index)` | `u8` | Byte at one in-bounds byte index |
+| `concat(left, right)` | `string` | Concatenated static text, retaining `left` as its diagnostic source anchor |
 | `slice(value, start, end)` | `string` | Text in one byte range whose endpoints are UTF-8 scalar boundaries |
 
 ```silk,ignore
-import silk.static_text { byteLength, byteAt, slice }
+import silk.static_text { byteLength, byteAt, concat, slice }
 
 static fn hasAccent(value: string) -> bool {
-  return byteLength(value) == 3 && byteAt(value, 1) == 195 && slice(value, 1, 3) == "é"
+  return byteLength(value) == 3 && byteAt(value, 1) == 195 &&
+    concat(slice(value, 1, 3), "!") == "é!"
 }
 ```
 
@@ -242,14 +244,136 @@ in runtime HIR.
 
 **Boundary:** `byteAt` rejects an out-of-bounds index. `slice` rejects an invalid range and any
 endpoint that splits a UTF-8 scalar encoding. Both failures are phase violations with source text
-provenance rather than runtime traps.
+provenance rather than runtime traps. `concat` is bounded by the ordinary retained-value budget.
 
 **Evidence:** [static text source actor](../../../../packages/compiler/stdlib/silk/static_text.silk),
 [static value requirements](../../../../openspec/changes/add-static-evaluation-core/specs/static-evaluation/spec.md).
 
+## Reflection, static sequences, iteration, and formatting
+
+### STATIC-008 — Reflection exposes finite aggregate metadata only during specialization
+
+**Status:** Confirmed
+
+`silk.reflect` exposes canonical descriptors for one concrete aggregate type and its fields. Named
+tuples and anonymous positional aggregates expose positions; named structs and anonymous records
+expose visible labels. Declaration order, nominal owner identity, generic substitution, aggregate
+kind, and the reflecting declaration's visibility authority are retained.
+
+| Member | Result | Meaning |
+| --- | --- | --- |
+| `typeOf<Owner>()` | `Intrinsic.Type<Owner>` | Descriptor for one concrete aggregate owner |
+| `fields<Owner>()` | `Intrinsic.Fields<Owner>` | Ordered heterogeneous field collection |
+| `typeKind(descriptor)` | `u8` | Stable named/positional aggregate-kind code |
+| `fieldKind(field)` | `u8` | Stable labeled/positional member-kind code |
+| `fieldLabel(field)` | `string` | Label of a labeled field |
+| `fieldOrdinal(field)` | `usize` | Position of a positional field |
+| `borrowField(owner, static field)` | `&Value` | Shared runtime projection authorized by the descriptor |
+
+Descriptors remain nominal: equal field shapes from separate structs do not become assignment-
+compatible or share projection authority. Private fields are absent outside their declaring module
+and their spellings cannot leak through reflection diagnostics.
+
+**Boundary:** `Intrinsic.Type`, `Intrinsic.Fields`, and `Intrinsic.Field` are phase-only nominals
+with no runtime layout, address, ownership, or backend representation. `borrowField` accepts only a
+shared reference to the descriptor's exact owner and consumes its descriptor during specialization.
+It cannot project an owned value, use a descriptor at runtime, or extend the result beyond the
+owner's ordinary borrow lifetime.
+
+**Evidence:** [static reflection requirements](../../../../openspec/changes/add-static-reflection-and-template-formatting/specs/static-reflection/spec.md),
+[reflection source actor](../../../../packages/compiler/stdlib/silk/reflect.silk).
+
+### STATIC-009 — Static sequences are immutable compile-time values
+
+**Status:** Confirmed
+
+`silk.static_sequence` provides `empty`, `append`, `concat`, `length`, and `at` over
+`Intrinsic.StaticSequence<Element>`. Every operation returns a complete canonical value; append and
+concatenation do not mutate the input sequence.
+
+```silk,ignore
+import silk.static_sequence as StaticSequence
+
+static fn values() -> Intrinsic.StaticSequence<i32> {
+  let mut result = StaticSequence.empty<i32>()
+  result = StaticSequence.append<i32>(move result, 20)
+  result = StaticSequence.append<i32>(move result, 22)
+  return move result
+}
+```
+
+**Boundary:** A static sequence has no capacity, allocator, reference, mutable alias, destructor, or
+runtime layout. It cannot appear in a residual signature, binding, call, ownership fact, or backend
+artifact. `at` rejects an out-of-bounds index during static evaluation.
+
+**Evidence:** [static sequence requirements](../../../../openspec/changes/add-static-reflection-and-template-formatting/specs/static-reflection/spec.md),
+[static sequence source actor](../../../../packages/compiler/stdlib/silk/static_sequence.silk).
+
+### STATIC-010 — `static for` generates ordinary runtime work from finite static elements
+
+**Status:** Confirmed
+
+`static for <binding> in <expression> { ... }` is a statement. Its iterable must evaluate to a
+finite static sequence or reflected field collection. The compiler re-elaborates one fresh body
+scope per element in deterministic order. A heterogeneous field collection gives each scope the
+field descriptor's concrete `Field<Owner, Value>` type, so one authored body can select different
+interfaces and generate differently typed runtime operations.
+
+```silk,ignore
+import silk.reflect as Reflect
+
+fn visit<Owner>(owner: &Owner) -> () {
+  static for field in Reflect.fields<Owner>() {
+    let value = Reflect.borrowField(owner, field)
+    inspect(value)
+  }
+}
+```
+
+A zero-element loop contributes no residual statements and does not elaborate its body. If iterable
+evaluation, a later iteration, or a static budget fails, the whole expansion is discarded: earlier
+generated calls, HIR, ownership, cleanup, and instance facts do not survive.
+
+**Boundary:** `static for` is not a runtime loop, expression, declaration container, or unbounded
+generator protocol. Runtime values, Effects, services, unsafe operations, host input, I/O, time,
+randomness, and external access cannot supply its iterable. The residual program contains only the
+ordinary operations produced by successful iterations.
+
+**Evidence:** [static iteration requirements](../../../../openspec/changes/add-static-reflection-and-template-formatting/specs/static-reflection/spec.md),
+[static iteration syntax](../../../../openspec/changes/add-static-reflection-and-template-formatting/specs/bootstrap-syntax/spec.md).
+
+### STATIC-011 — Template formatting validates statically and writes borrowed fields at runtime
+
+**Status:** Confirmed
+
+`silk.format.Format.format<Args>(static template: string, args: &Args)` accepts one static template
+and one ordinary shared reference to a tuple or record argument pack. Positional `{}` placeholders
+consume every tuple position in order. Named `{name}` placeholders select visible record fields;
+they may repeat, and unrelated fields may remain unused. `{{` and `}}` emit literal braces.
+
+```silk,ignore
+run Format.format("My name is {}, I'm {}", &("Julia", 31))
+run Format.format("Hello, {name}", &.{ name: "Julia", age: 31 })
+```
+
+Parsing, aggregate-kind checking, field lookup, and `Display` selection finish during
+specialization. Runtime code retains only ordered Writer text operations, ordinary shared field
+projections, and concrete `Display` calls. The template, parser plan, descriptors, static loops, and
+argument-pack copy are absent. `Display<string>` writes the borrowed string's existing UTF-8 bytes
+through the same Writer path as other presentations and allocates no intermediate String.
+
+**Boundary:** One template cannot mix positional and named placeholders. The initial grammar has no
+format specifiers, dynamic widths, interpolation expressions, nested fields, runtime placeholder
+names, variadic calling convention, or runtime parser. Malformed braces, invalid labels, wrong
+aggregate kinds or arity, unavailable fields, and missing `Display` evidence fail specialization
+before Writer execution is published. An uncalled invalid application remains unevaluated.
+
+**Evidence:** [template formatting requirements](../../../../openspec/changes/add-static-reflection-and-template-formatting/specs/template-formatting/spec.md),
+[Format source actor](../../../../packages/compiler/stdlib/silk/format.silk).
+
 ## Demand, diagnostics, and the runtime boundary
 
-### STATIC-008 — Static evaluation is demand-driven and leaves one runtime program
+### STATIC-012 — Static evaluation is demand-driven and leaves one runtime program
 
 **Status:** Confirmed
 
@@ -275,7 +399,7 @@ residual body. An uncalled failing declaration publishes no static diagnostic.
 [residual instance requirements](../../../../openspec/changes/add-static-evaluation-core/specs/bootstrap-instances/spec.md),
 [residual ownership requirements](../../../../openspec/changes/add-static-evaluation-core/specs/bootstrap-ownership/spec.md).
 
-### STATIC-009 — Static diagnostics are deterministic source traces
+### STATIC-013 — Static diagnostics are deterministic source traces
 
 **Status:** Confirmed
 
@@ -308,7 +432,7 @@ arguments produces the same code, semantic details, related spans, and trace enc
 
 ## Target information
 
-### STATIC-010 — `silk.target` exposes target information only as static source values
+### STATIC-014 — `silk.target` exposes target information only as static source values
 
 **Status:** Confirmed
 

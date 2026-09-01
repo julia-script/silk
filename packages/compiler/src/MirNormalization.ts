@@ -344,6 +344,9 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
             outcome: run.outcome,
             runner: run.runner,
             runnerTypeArguments: run.runnerTypeArguments,
+            ...(run.runnerStaticArguments === undefined
+              ? {}
+              : { runnerStaticArguments: run.runnerStaticArguments }),
             captures: Object.freeze(
               construction.captures.map((capture) =>
                 Object.freeze({

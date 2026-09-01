@@ -180,6 +180,54 @@ pub fn main() -> i32 {
   return run Effect.catchAll(render(), recover)
 }`
 
+/** Static template parsing and reflection erase before the shared engine differential. */
+export const templateFormattingAcceptance = `import silk.effect as Effect
+import silk.format as Format
+import silk.u8 as u8
+import silk.usize as usize
+import silk.writer { Writer, WriterError }
+
+struct Capture { index: usize valid: bool }
+
+effect fn writeAll(self: &mut Capture, bytes: &[u8]) -> () {
+  let expected = [
+    u8.toU8(74), u8.toU8(117), u8.toU8(108), u8.toU8(105),
+    u8.toU8(97), u8.toU8(58), u8.toU8(51), u8.toU8(49)
+  ]
+  let mut offset = usize.ZERO
+  while offset < bytes.length {
+    if 8 <= self.index || bytes[offset] != expected[self.index] { self.valid = false }
+    self.index = self.index + usize.ONE
+    offset = offset + usize.ONE
+  }
+  return ()
+}
+
+effect fn flush(self: &mut Capture) -> () { return () }
+
+impl Writer for Capture {
+  writeAll: Capture.writeAll
+  flush: Capture.flush
+}
+
+effect fn render() -> i32 ! WriterError {
+  let mut capture = Capture { index: usize.ZERO, valid: true }
+  let args = .{ name: "Julia", age: 31 }
+  run Format.format("{name}", &args)
+    |> Effect.provideMut<Writer>(&mut capture)
+  run Format.format(":{age}", &args)
+    |> Effect.provideMut<Writer>(&mut capture)
+  if !capture.valid { return 1 }
+  if capture.index != 8 { return 2 }
+  return 42
+}
+
+effect fn recover(error: WriterError) -> i32 { return 3 }
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(render(), recover)
+}`
+
 /** Explicit referent projection preserves runtime-indexed reads and writes on every engine. */
 export const referenceProjectionAcceptance = `import silk.usize as usize
 
@@ -1150,6 +1198,11 @@ pub fn main() -> i32 {
   {
     name: 'scalar-display',
     source: scalarDisplayAcceptance,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'template-formatting',
+    source: templateFormattingAcceptance,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

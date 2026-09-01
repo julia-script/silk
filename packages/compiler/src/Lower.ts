@@ -265,7 +265,11 @@ export const lowerProgram = (
   const effectResults = new Map<string, ExecutableEffectType>()
   const generatedRunners: Array<GeneratedEffectRunner> = []
   for (const instance of discovery.instances) {
-    const resultKey = instanceText(instance.key.declaration, instance.key.typeArguments)
+    const resultKey = instanceText(
+      instance.key.declaration,
+      instance.key.typeArguments,
+      instance.key.staticArguments,
+    )
     const block = returnedEffectBlock(instance.function)
     const type = block === undefined ? undefined : effectValueType(layout, instance.key, block)
     if (type !== undefined && block !== undefined) {

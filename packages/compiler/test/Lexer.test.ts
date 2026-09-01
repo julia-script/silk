@@ -754,12 +754,23 @@ it('recognizes static forms only as complete keywords', () => {
   const result = Lexer.lex(
     SourceFile.make(
       'memory://static-keywords.silk',
-      ascii('static statically compileError compileErrors'),
+      ascii('static statically compileError compileErrors static for field in fields'),
     ),
   )
   assert.deepEqual(
     result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
-    ['StaticKeyword', 'Identifier', 'CompileErrorKeyword', 'Identifier', 'EndOfFile'],
+    [
+      'StaticKeyword',
+      'Identifier',
+      'CompileErrorKeyword',
+      'Identifier',
+      'StaticKeyword',
+      'ForKeyword',
+      'Identifier',
+      'Identifier',
+      'Identifier',
+      'EndOfFile',
+    ],
   )
 })
 

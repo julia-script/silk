@@ -457,7 +457,43 @@ pub fn main() -> i32 { return 0 }`),
     )
     assert.include(
       messages(self),
-      "Invalid conformance: implementation for i32 must be declared in contracts, the contract's module for scalar providers",
+      "Invalid conformance: implementation for i32 must be declared in contracts, the contract's module for scalar and string providers",
+    )
+  }),
+)
+
+it.effect('keeps a string conformance inline in the source contract module', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`interface Present {
+  fn present(value: &Self) -> i32
+}
+impl Present for string {
+  fn present(value: &Self) -> i32 { return 42 }
+}
+pub fn main() -> i32 { return Present.present<string>("Silk") }`)
+    assert.notInclude(messages(self), 'Invalid conformance')
+  }),
+)
+
+it.effect('rejects a string conformance outside the source contract module', () =>
+  Effect.gen(function* () {
+    const contracts = encoder.encode(`pub interface Present {
+  fn present(value: &Self) -> i32
+}`)
+    const root = SourceFile.make(
+      'consumer',
+      encoder.encode(`import contracts { Present }
+impl Present for string {
+  fn present(value: &Self) -> i32 { return 42 }
+}
+pub fn main() -> i32 { return 0 }`),
+    )
+    const self = yield* Analysis.make({ root }).pipe(
+      Effect.provide(SourceResolver.memory(new Map([['contracts', contracts]]))),
+    )
+    assert.include(
+      messages(self),
+      "Invalid conformance: implementation for string must be declared in contracts, the contract's module for scalar and string providers",
     )
   }),
 )
@@ -473,7 +509,7 @@ impl Present for [i32; 1] {
 pub fn main() -> i32 { return 0 }`)
     assert.include(
       messages(self),
-      'Invalid conformance: interface and service providers must be nominal types or scalar types',
+      'Invalid conformance: interface and service providers must be nominal types, scalar types, or string',
     )
   }),
 )

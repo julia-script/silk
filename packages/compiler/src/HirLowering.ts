@@ -168,6 +168,11 @@ const staticValueExpression = (
             span,
           })
     }
+    case 'TypeDescriptorValue':
+    case 'FieldDescriptorValue':
+    case 'FieldCollectionValue':
+    case 'StaticSequenceValue':
+      return Object.freeze({ _tag: 'Unavailable', span })
   }
 }
 
@@ -364,6 +369,14 @@ export const lowerStatements = (
                     options.resultType,
                     'Return',
                     statement.syntax.span,
+                    statement.expression._tag === 'Borrow' && options.functionId !== undefined
+                      ? Object.freeze({
+                          _tag: 'BorrowId',
+                          function: options.functionId,
+                          callSpan: statement.expression.syntax.span,
+                          ordinal: 0,
+                        })
+                      : undefined,
                   ),
             region: statement.region,
             span: statement.expression.syntax.span,
@@ -943,6 +956,8 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     })
   }
   if (fact._tag === 'FieldProjection') {
+    if (fact.staticValue !== undefined && fact.type._tag === 'Available')
+      return staticValueExpression(fact.staticValue, fact.type.type, fact.syntax.span)
     if (fact.state._tag === 'SliceLength' && fact.type._tag === 'Available') {
       const slice = hirExpression(fact.subject)
       return slice._tag === 'Unavailable'
@@ -1470,6 +1485,11 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     const target = fact.reference.declaration
     const substitution = fact.contract.substitution
     const returnedBorrowOrdinal = returnedBorrowArgument(fact)?.id.ordinal
+    const staticArgumentOrigins = Object.freeze(
+      (fact._tag === 'Call' ? (fact.staticArguments ?? []) : []).map(
+        (argument) => argument.textOrigin,
+      ),
+    )
     const call = {
       target: fact.reference.declaration.canonical.id,
       typeArguments: fact.contract.typeArguments,
@@ -1479,6 +1499,9 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
           (argument) => argument.value,
         ),
       ),
+      ...(staticArgumentOrigins.some((origin) => origin !== undefined)
+        ? { staticArgumentOrigins }
+        : {}),
       arguments: Object.freeze(
         fact.arguments.flatMap((argument, ordinal) => {
           const parameter = target.parameters.at(ordinal)

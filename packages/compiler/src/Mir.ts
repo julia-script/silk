@@ -895,6 +895,7 @@ export type Operation =
       readonly outcome: LocalId
       readonly target: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
+      readonly staticArguments?: ReadonlyArray<StaticValue.Value>
       readonly arguments: ReadonlyArray<LocalId>
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly propagationType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
@@ -917,10 +918,12 @@ export type Operation =
       readonly effect: LocalId
       readonly runner: DeclarationFacts.CanonicalId
       readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
+      readonly runnerStaticArguments?: ReadonlyArray<StaticValue.Value>
       /** Exact unsupplied runner retained when `runner` is a statically provided specialization. */
       readonly runnerBase?: {
         readonly declaration: DeclarationFacts.CanonicalId
         readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
+        readonly staticArguments?: ReadonlyArray<StaticValue.Value>
       }
       /** Ordered compile-time provider selections proving the exact requirement row. */
       readonly providers: ReadonlyArray<{
@@ -977,6 +980,7 @@ export type Operation =
       readonly outcome: LocalId
       readonly runner: DeclarationFacts.CanonicalId
       readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
+      readonly runnerStaticArguments?: ReadonlyArray<StaticValue.Value>
       readonly captures: ReadonlyArray<{
         readonly source: LocalId
         readonly access: 'Copy' | 'Shared'

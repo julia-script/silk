@@ -28,6 +28,10 @@ export interface Nominal {
     | 'Intrinsic.Execution'
     | 'Intrinsic.Wake'
     | 'Intrinsic.StorageFailure'
+    | 'Intrinsic.Type'
+    | 'Intrinsic.Fields'
+    | 'Intrinsic.Field'
+    | 'Intrinsic.StaticSequence'
 }
 
 /** One declaration-owned generic type parameter. Names are provenance, not identity. */
@@ -479,6 +483,42 @@ const sealedStorageFailure = (): Nominal =>
     sealed: 'Intrinsic.StorageFailure',
   })
 
+const sealedTypeDescriptor = (arguments_: ReadonlyArray<GenericArgument>): Nominal =>
+  Object.freeze({
+    _tag: 'NominalType',
+    module: 'Intrinsic',
+    name: 'Type',
+    arguments: Object.freeze(Array.from(arguments_)),
+    sealed: 'Intrinsic.Type',
+  })
+
+const sealedFieldsDescriptor = (arguments_: ReadonlyArray<GenericArgument>): Nominal =>
+  Object.freeze({
+    _tag: 'NominalType',
+    module: 'Intrinsic',
+    name: 'Fields',
+    arguments: Object.freeze(Array.from(arguments_)),
+    sealed: 'Intrinsic.Fields',
+  })
+
+const sealedFieldDescriptor = (arguments_: ReadonlyArray<GenericArgument>): Nominal =>
+  Object.freeze({
+    _tag: 'NominalType',
+    module: 'Intrinsic',
+    name: 'Field',
+    arguments: Object.freeze(Array.from(arguments_)),
+    sealed: 'Intrinsic.Field',
+  })
+
+const sealedStaticSequence = (arguments_: ReadonlyArray<GenericArgument>): Nominal =>
+  Object.freeze({
+    _tag: 'NominalType',
+    module: 'Intrinsic',
+    name: 'StaticSequence',
+    arguments: Object.freeze(Array.from(arguments_)),
+    sealed: 'Intrinsic.StaticSequence',
+  })
+
 /** Replaces one nominal's arguments while preserving compiler-minted sealed provenance. */
 export const specializeNominal = (
   self: Nominal,
@@ -493,6 +533,14 @@ export const specializeNominal = (
       return sealedWake()
     case 'Intrinsic.StorageFailure':
       return sealedStorageFailure()
+    case 'Intrinsic.Type':
+      return sealedTypeDescriptor(arguments_)
+    case 'Intrinsic.Fields':
+      return sealedFieldsDescriptor(arguments_)
+    case 'Intrinsic.Field':
+      return sealedFieldDescriptor(arguments_)
+    case 'Intrinsic.StaticSequence':
+      return sealedStaticSequence(arguments_)
     default:
       return nominal(self.module, self.name, arguments_)
   }
@@ -527,6 +575,15 @@ export const execution = (result: Type): Nominal => sealedExecution([result])
 export const wake: Nominal = sealedWake()
 /** Sealed host-storage refusal carried only by the primitive allocation boundary. */
 export const storageFailure: Nominal = sealedStorageFailure()
+/** Static-only aggregate type metadata with no runtime representation. */
+export const typeDescriptor = (owner: Type): Nominal => sealedTypeDescriptor([owner])
+/** Static-only declaration-ordered field metadata for one aggregate owner. */
+export const fieldsDescriptor = (owner: Type): Nominal => sealedFieldsDescriptor([owner])
+/** Static-only metadata for one concrete field owner and value type. */
+export const fieldDescriptor = (owner: Type, value: Type): Nominal =>
+  sealedFieldDescriptor([owner, value])
+/** Static-only immutable homogeneous sequence metadata. */
+export const staticSequence = (element: Type): Nominal => sealedStaticSequence([element])
 /** Normalizes one or more ordinary failure types to their runtime value union. */
 export const failureValue = (failures: ReadonlyArray<Type>): Type => {
   const only = failures.at(0)
@@ -611,6 +668,38 @@ export const isWake = (
   self.sealed === 'Intrinsic.Wake' &&
   self.arguments.length === 0
 
+/** Tests whether a type is one of the sealed values erased before runtime HIR. */
+export const isStaticPhaseOnly = (self: Type): boolean =>
+  isNominal(self) &&
+  (self.sealed === 'Intrinsic.Type' ||
+    self.sealed === 'Intrinsic.Fields' ||
+    self.sealed === 'Intrinsic.Field' ||
+    self.sealed === 'Intrinsic.StaticSequence')
+
+/** Tests whether any nested semantic value position contains a phase-only intrinsic nominal. */
+export const containsStaticPhaseOnly = (self: Type): boolean => {
+  if (typeof self === 'string' || isParameter(self)) return false
+  if (isStaticPhaseOnly(self)) return true
+  if (isNominal(self))
+    return self.arguments.some(
+      (argument) => isTypeArgument(argument) && containsStaticPhaseOnly(argument),
+    )
+  if (isFixedArray(self) || isSlice(self)) return containsStaticPhaseOnly(self.element)
+  if (isReference(self)) return containsStaticPhaseOnly(self.target)
+  if (isCallable(self))
+    return self.parameters.some(containsStaticPhaseOnly) || containsStaticPhaseOnly(self.result)
+  if (isEffect(self))
+    return (
+      containsStaticPhaseOnly(self.success) ||
+      failureMembers(self).some(containsStaticPhaseOnly) ||
+      requirementMembers(self).some((requirement) =>
+        containsStaticPhaseOnly(requirement.capability),
+      )
+    )
+  if (isRepresented(self)) return containsStaticPhaseOnly(self.contract)
+  return self.members.some(containsStaticPhaseOnly)
+}
+
 export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [allocation.name, allocation],
   [osHandle.name, osHandle],
@@ -622,15 +711,26 @@ export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   ['Intrinsic.Execution', sealedExecution([])],
   ['Intrinsic.Wake', sealedWake()],
   ['Intrinsic.StorageFailure', sealedStorageFailure()],
+  ['Intrinsic.Type', sealedTypeDescriptor([])],
+  ['Intrinsic.Fields', sealedFieldsDescriptor([])],
+  ['Intrinsic.Field', sealedFieldDescriptor([])],
+  ['Intrinsic.StaticSequence', sealedStaticSequence([])],
 ])
 
 /** Returns the compiler-known generic arity of an intrinsic nominal actor. */
-export const intrinsicNominalArity = (self: Nominal): number =>
-  (self.module === 'silk/core' && (self.name === 'RawBuffer' || self.name === 'Slot')) ||
-  self.sealed === 'Intrinsic.SharedCore' ||
-  self.sealed === 'Intrinsic.Execution'
-    ? 1
-    : 0
+export const intrinsicNominalArity = (self: Nominal): number => {
+  if (self.sealed === 'Intrinsic.Field') return 2
+  if (
+    (self.module === 'silk/core' && (self.name === 'RawBuffer' || self.name === 'Slot')) ||
+    self.sealed === 'Intrinsic.SharedCore' ||
+    self.sealed === 'Intrinsic.Execution' ||
+    self.sealed === 'Intrinsic.Type' ||
+    self.sealed === 'Intrinsic.Fields' ||
+    self.sealed === 'Intrinsic.StaticSequence'
+  )
+    return 1
+  return 0
+}
 export const intrinsicNominalOrdinal = (self: Nominal): number =>
   [...intrinsicNominals.values()].findIndex(
     (candidate) =>
@@ -1568,6 +1668,36 @@ export const isRepresented = (self: Type): self is Represented =>
 export const isUnion = (self: Type): self is StructuralUnion =>
   typeof self !== 'string' && self._tag === 'StructuralUnionType'
 
+const semanticTypeTags: ReadonlySet<string> = new Set([
+  'NominalType',
+  'TypeParameter',
+  'FixedArrayType',
+  'SliceType',
+  'ReferenceType',
+  'CallableType',
+  'EffectType',
+  'RepresentedType',
+  'StructuralUnionType',
+])
+
+const hasTypeDiscriminant = (self: unknown): self is Type =>
+  isString(self) ||
+  isBuiltin(self) ||
+  self === 'never' ||
+  (typeof self === 'object' &&
+    self !== null &&
+    '_tag' in self &&
+    typeof self._tag === 'string' &&
+    semanticTypeTags.has(self._tag))
+
+const isDeeplyFrozen = (self: unknown, visited: WeakSet<object>): boolean => {
+  if (typeof self !== 'object' || self === null) return true
+  if (!Object.isFrozen(self)) return false
+  if (visited.has(self)) return true
+  visited.add(self)
+  return Object.values(self).every((value) => isDeeplyFrozen(value, visited))
+}
+
 const keyCache = new WeakMap<Exclude<Type, string>, string>()
 
 /** Returns the canonical deterministic key used for equality and ordering. */
@@ -1579,6 +1709,22 @@ export const key = (self: Type): string => {
     keyCache.set(self, cached)
   }
   return cached
+}
+
+/**
+ * Admits one immutable semantic type from untyped compiler data.
+ *
+ * Object-shaped types must already be canonical frozen values, and complete key traversal must
+ * succeed. This keeps malformed lookalikes from crossing static-value admission.
+ */
+export const fromUnknown = (self: unknown): Type | undefined => {
+  if (!hasTypeDiscriminant(self) || !isDeeplyFrozen(self, new WeakSet())) return undefined
+  try {
+    key(self)
+    return self
+  } catch {
+    return undefined
+  }
 }
 
 /** The canonical identity of one provider's application of an interface. */
@@ -2447,6 +2593,7 @@ const runtimeAvailableEvidence = (evidence: Constraint.ConstraintEvidence): bool
 
 export function runtimeAvailable(self: Type): boolean {
   if (typeof self === 'string' || isParameter(self)) return true
+  if (isStaticPhaseOnly(self)) return false
   if (isNominal(self)) return self.arguments.every(runtimeAvailableGenericArgument)
   if (isFixedArray(self) || isSlice(self)) return runtimeAvailable(self.element)
   if (isReference(self)) return runtimeAvailable(self.target)

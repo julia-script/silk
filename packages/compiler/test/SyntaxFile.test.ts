@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Option from 'effect/Option'
+import * as InspectorProjectSyntax from '../src/InspectorProjectSyntax.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -91,4 +92,25 @@ it('inspects duration tokens and syntax nodes at their source-owned spans', () =
   assert.include(encoded, 'DurationLiteralExpression [25, 35)')
   assert.deepEqual(syntax.lexicalDiagnostics, [])
   assert.deepEqual(syntax.parserDiagnostics, [])
+})
+
+it('encodes and projects static iteration syntax deterministically', () => {
+  const source = `fn render() -> () {
+  static for field in fields {
+    display(field)
+  }
+}`
+  const first = parseBytes('memory://static-for-inspection.silk', ascii(source))
+  const second = parseBytes('memory://static-for-inspection.silk', ascii(source))
+  const encoded = SyntaxFile.encode(first)
+  const rows = InspectorProjectSyntax.treeRows(first, true, '')
+
+  assert.strictEqual(encoded, SyntaxFile.encode(second))
+  assert.include(encoded, 'StaticForStatement')
+  assert.include(encoded, 'token ForKeyword')
+  assert.include(encoded, 'token Identifier')
+  assert.isTrue(rows.some((row) => row.label === 'StaticForStatement' && row.dot === 'node'))
+  assert.isTrue(rows.some((row) => row.label === 'ForKeyword' && row.detail === '"for"'))
+  assert.deepEqual(first.lexicalDiagnostics, [])
+  assert.deepEqual(first.parserDiagnostics, [])
 })

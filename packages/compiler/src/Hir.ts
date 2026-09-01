@@ -7,8 +7,9 @@ import type * as Operator from './Operator.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
+import type * as StaticEvaluation from './StaticEvaluation.js'
 import type * as StaticText from './StaticText.js'
-import type * as StaticValue from './StaticValue.js'
+import * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
@@ -674,6 +675,8 @@ export type Expression =
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
       readonly staticArguments: ReadonlyArray<StaticValue.Value>
+      /** Caller-authored origins aligned with static arguments, excluded from instance identity. */
+      readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
       /** Direct argument loans deliberately retained by a returned lexical view. */
@@ -724,6 +727,9 @@ export type Expression =
       readonly target: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
+      readonly staticArguments: ReadonlyArray<StaticValue.Value>
+      /** Caller-authored origins aligned with static arguments, excluded from instance identity. */
+      readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
       readonly type: Type.Effect
@@ -1581,6 +1587,16 @@ const sliceRootText = (root: SliceRoot): string => {
   }
 }
 
+const borrowSelectorsText = (selectors: ReadonlyArray<BorrowSelector>): string =>
+  selectors
+    .map((selector) => {
+      if (selector._tag === 'Field') return `.#${selector.field.ordinal}`
+      if (selector._tag === 'SliceIndex') return '[runtime/slice]'
+      const index = selector.bounds._tag === 'Proven' ? selector.bounds.index : 'runtime'
+      return `[${index}/${selector.array.length}]`
+    })
+    .join('')
+
 const encodeExpression = (expression: Expression, depth: number): string => {
   const indent = '  '.repeat(depth)
   switch (expression._tag) {
@@ -1757,9 +1773,9 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         encodeExpression(expression.index, depth + 1),
       ].join('\n')
     case 'SliceBorrow':
-      return `${indent}${expression.reborrow ? 'reborrow-slice' : 'borrow-slice'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
+      return `${indent}${expression.reborrow ? 'reborrow-slice' : 'borrow-slice'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)}${borrowSelectorsText(expression.selectors)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
     case 'ValueBorrow':
-      return `${indent}${expression.reborrow ? 'reborrow-value' : 'borrow-value'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
+      return `${indent}${expression.reborrow ? 'reborrow-value' : 'borrow-value'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)}${borrowSelectorsText(expression.selectors)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
     case 'SliceLength':
       return [
         `${indent}slice-length : i32 ${spanText(expression.span)}`,
@@ -1830,7 +1846,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
           expression.typeArguments.length === 0
             ? ''
             : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(', ')}>`
-        }${expression.evidence.length === 0 ? '' : ` evidence=${expression.evidence.map(Constraint.evidenceKey).join(',')}`} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${spanText(expression.span)}`,
+        }${expression.evidence.length === 0 ? '' : ` evidence=${expression.evidence.map(Constraint.evidenceKey).join(',')}`}${expression.staticArguments.length === 0 ? '' : ` static=${expression.staticArguments.map(StaticValue.presentation).join(',')}`} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${spanText(expression.span)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'ServiceEffectConstruct':
