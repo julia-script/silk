@@ -51,7 +51,7 @@ export const defaultAddrSpace: AddrSpace = Object.freeze({ _tag: 'AddrSpace', va
  * @category address spaces
  * @since 0.0.0
  */
-export const make = Effect.fn('AddrSpace.make')(function* (
+export const make = Effect.fnUntraced(function* (
   value: number,
 ): Effect.fn.Return<AddrSpace, LlvmError> {
   if (!Number.isSafeInteger(value) || value < 0 || value > 0xff_ffff) {

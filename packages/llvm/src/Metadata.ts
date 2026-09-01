@@ -265,7 +265,7 @@ const debugNode = Effect.fnUntraced(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const string = Effect.fn('Metadata.string')(function* (
+export const string = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   value: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<Metadata, LlvmError> {
@@ -293,7 +293,7 @@ export const string = Effect.fn('Metadata.string')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const tuple = Effect.fn('Metadata.tuple')(function* (
+export const tuple = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   elements: ReadonlyArray<Optional> = [],
 ): Effect.fn.Return<Metadata, LlvmError> {
@@ -322,7 +322,7 @@ export const tuple = Effect.fn('Metadata.tuple')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const distinctTuple = Effect.fn('Metadata.distinctTuple')(function* (
+export const distinctTuple = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   elements: ReadonlyArray<Optional> = [],
 ): Effect.fn.Return<Metadata, LlvmError> {
@@ -351,7 +351,7 @@ export const distinctTuple = Effect.fn('Metadata.distinctTuple')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const emptyTuple = Effect.fn('Metadata.emptyTuple')(function* (
+export const emptyTuple = Effect.fnUntraced(function* (
   builder: Builder.Builder,
 ): Effect.fn.Return<Metadata, LlvmError> {
   return yield* tuple(builder)
@@ -363,7 +363,7 @@ export const emptyTuple = Effect.fn('Metadata.emptyTuple')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const constant = Effect.fn('Metadata.constant')(function* (
+export const constant = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   value: Constant.Constant,
 ): Effect.fn.Return<Metadata, LlvmError> {
@@ -388,7 +388,7 @@ export const constant = Effect.fn('Metadata.constant')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const local = Effect.fn('Metadata.local')(function* (
+export const local = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   label: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<Optional, LlvmError> {
@@ -427,7 +427,7 @@ export const local = Effect.fn('Metadata.local')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const forward = Effect.fn('Metadata.forward')(function* (
+export const forward = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   category: Category = 'node',
 ): Effect.fn.Return<Optional, LlvmError> {
@@ -450,7 +450,7 @@ export const forward = Effect.fn('Metadata.forward')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const resolveForward = Effect.fn('Metadata.resolveForward')(function* (
+export const resolveForward = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Metadata,
   target: Metadata,
@@ -515,7 +515,7 @@ export const resolveForward = Effect.fn('Metadata.resolveForward')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const file = Effect.fn('Metadata.file')(function* (
+export const file = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   filename?: Metadata,
   directory?: Metadata,
@@ -538,7 +538,7 @@ export const file = Effect.fn('Metadata.file')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const compileUnit = Effect.fn('Metadata.compileUnit')(function* (
+export const compileUnit = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   fileValue: Optional,
   producer?: Metadata,
@@ -571,7 +571,7 @@ export const compileUnit = Effect.fn('Metadata.compileUnit')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const subprogram = Effect.fn('Metadata.subprogram')(function* (
+export const subprogram = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   fileValue: Optional,
   name?: Metadata,
@@ -614,7 +614,7 @@ export const subprogram = Effect.fn('Metadata.subprogram')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const lexicalBlock = Effect.fn('Metadata.lexicalBlock')(function* (
+export const lexicalBlock = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   scope: Optional,
   fileValue: Optional,
@@ -641,7 +641,7 @@ export const lexicalBlock = Effect.fn('Metadata.lexicalBlock')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const location = Effect.fn('Metadata.location')(function* (
+export const location = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   line: number,
   column: number,
@@ -668,7 +668,7 @@ export const location = Effect.fn('Metadata.location')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const basicType = Effect.fn('Metadata.basicType')(function* (
+export const basicType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   encoding: BasicEncoding,
   name: Metadata | undefined,
@@ -701,7 +701,7 @@ export const basicType = Effect.fn('Metadata.basicType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const booleanType = Effect.fn('Metadata.booleanType')(function* (
+export const booleanType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: Metadata | undefined,
   bits: bigint | number,
@@ -714,7 +714,7 @@ export const booleanType = Effect.fn('Metadata.booleanType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const unsignedType = Effect.fn('Metadata.unsignedType')(function* (
+export const unsignedType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: Metadata | undefined,
   bits: bigint | number,
@@ -727,7 +727,7 @@ export const unsignedType = Effect.fn('Metadata.unsignedType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const signedType = Effect.fn('Metadata.signedType')(function* (
+export const signedType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: Metadata | undefined,
   bits: bigint | number,
@@ -740,7 +740,7 @@ export const signedType = Effect.fn('Metadata.signedType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const floatingType = Effect.fn('Metadata.floatingType')(function* (
+export const floatingType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: Metadata | undefined,
   bits: bigint | number,
@@ -754,7 +754,7 @@ export const floatingType = Effect.fn('Metadata.floatingType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const stringType = Effect.fn('Metadata.stringType')(function* (
+export const stringType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   options: StringTypeOptions = {},
 ): Effect.fn.Return<Optional, LlvmError> {
@@ -815,7 +815,7 @@ export const stringType = Effect.fn('Metadata.stringType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const compositeType = Effect.fn('Metadata.compositeType')(function* (
+export const compositeType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   kind: CompositeKind,
   options: CompositeTypeOptions = {},
@@ -876,7 +876,7 @@ export const compositeType = Effect.fn('Metadata.compositeType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const structureType = Effect.fn('Metadata.structureType')(function* (
+export const structureType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   options: CompositeTypeOptions = {},
 ) {
@@ -888,7 +888,7 @@ export const structureType = Effect.fn('Metadata.structureType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const unionType = Effect.fn('Metadata.unionType')(function* (
+export const unionType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   options: CompositeTypeOptions = {},
 ) {
@@ -900,7 +900,7 @@ export const unionType = Effect.fn('Metadata.unionType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const enumerationType = Effect.fn('Metadata.enumerationType')(function* (
+export const enumerationType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   options: CompositeTypeOptions = {},
 ) {
@@ -912,7 +912,7 @@ export const enumerationType = Effect.fn('Metadata.enumerationType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const arrayType = Effect.fn('Metadata.arrayType')(function* (
+export const arrayType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   options: CompositeTypeOptions = {},
 ) {
@@ -924,7 +924,7 @@ export const arrayType = Effect.fn('Metadata.arrayType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const vectorType = Effect.fn('Metadata.vectorType')(function* (
+export const vectorType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   options: CompositeTypeOptions = {},
 ) {
@@ -937,7 +937,7 @@ export const vectorType = Effect.fn('Metadata.vectorType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const derivedType = Effect.fn('Metadata.derivedType')(function* (
+export const derivedType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   kind: DerivedKind,
   options: DerivedTypeOptions = {},
@@ -998,7 +998,7 @@ export const derivedType = Effect.fn('Metadata.derivedType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const pointerType = Effect.fn('Metadata.pointerType')(function* (
+export const pointerType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   options: DerivedTypeOptions = {},
 ) {
@@ -1010,7 +1010,7 @@ export const pointerType = Effect.fn('Metadata.pointerType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const memberType = Effect.fn('Metadata.memberType')(function* (
+export const memberType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   options: DerivedTypeOptions = {},
 ) {
@@ -1022,7 +1022,7 @@ export const memberType = Effect.fn('Metadata.memberType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const typedefType = Effect.fn('Metadata.typedefType')(function* (
+export const typedefType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   options: DerivedTypeOptions = {},
 ) {
@@ -1035,7 +1035,7 @@ export const typedefType = Effect.fn('Metadata.typedefType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const subroutineType = Effect.fn('Metadata.subroutineType')(function* (
+export const subroutineType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   types?: Metadata,
   flags: DIFlags.DIFlags = DIFlags.none,
@@ -1058,7 +1058,7 @@ export const subroutineType = Effect.fn('Metadata.subroutineType')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const enumerator = Effect.fn('Metadata.enumerator')(function* (
+export const enumerator = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: Metadata | undefined,
   value: bigint,
@@ -1093,7 +1093,7 @@ export const enumerator = Effect.fn('Metadata.enumerator')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const subrange = Effect.fn('Metadata.subrange')(function* (
+export const subrange = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   lowerBound?: Metadata,
   count?: Metadata,
@@ -1116,7 +1116,7 @@ export const subrange = Effect.fn('Metadata.subrange')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const expression = Effect.fn('Metadata.expression')(function* (
+export const expression = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   elements: ReadonlyArray<number> = [],
 ): Effect.fn.Return<Optional, LlvmError> {
@@ -1178,7 +1178,7 @@ export const parameter = (
  * @category metadata
  * @since 0.0.0
  */
-export const globalVariable = Effect.fn('Metadata.globalVariable')(function* (
+export const globalVariable = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   options: GlobalVariableOptions = {},
 ): Effect.fn.Return<Optional, LlvmError> {
@@ -1222,7 +1222,7 @@ export const globalVariable = Effect.fn('Metadata.globalVariable')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const globalVariableExpression = Effect.fn('Metadata.globalVariableExpression')(function* (
+export const globalVariableExpression = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   variable?: Metadata,
   expression?: Metadata,
@@ -1257,7 +1257,7 @@ export const globalVariableExpression = Effect.fn('Metadata.globalVariableExpres
  * @category metadata
  * @since 0.0.0
  */
-export const named = Effect.fn('Metadata.named')(function* (
+export const named = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
   operands: ReadonlyArray<Metadata>,
@@ -1300,7 +1300,7 @@ export const named = Effect.fn('Metadata.named')(function* (
  * @category metadata
  * @since 0.0.0
  */
-export const inspect = Effect.fn('Metadata.inspect')(function* (
+export const inspect = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Metadata,
 ): Effect.fn.Return<MetadataDescription.Entry, LlvmError> {

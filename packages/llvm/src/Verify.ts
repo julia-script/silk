@@ -472,7 +472,7 @@ const verifyFunction = (
  * @category verification
  * @since 0.0.0
  */
-export const verify = Effect.fn('Verify.verify')(function* (
+export const verify = Effect.fnUntraced(function* (
   self: Builder.Builder,
 ): Effect.fn.Return<ReadonlyArray<Violation>, LlvmError> {
   const state = yield* BuilderState.snapshot(self, 'Verify.verify')

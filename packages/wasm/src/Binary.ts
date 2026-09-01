@@ -47,7 +47,7 @@ import type { WasmError } from './WasmError.js'
  * @category output
  * @since 0.0.0
  */
-export const encode = Effect.fn('Binary.encode')(function* (
+export const encode = Effect.fnUntraced(function* (
   builder: Builder.Builder,
 ): Effect.fn.Return<Uint8Array, WasmError> {
   const snapshot = yield* ModuleState.snapshot(builder, 'Binary.encode')

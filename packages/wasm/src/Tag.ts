@@ -78,7 +78,7 @@ export const checkTagType = (
  * @category tags
  * @since 0.0.0
  */
-export const make = Effect.fn('Tag.make')(function* (
+export const make = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   type: Type.Type,
   options: Options = {},

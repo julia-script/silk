@@ -110,7 +110,7 @@ const push = (
  * @category element segments
  * @since 0.0.0
  */
-export const active = Effect.fn('Elem.active')(function* (
+export const active = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   table: Table.Table,
   offset: ConstExpr.ConstExpr,
@@ -162,7 +162,7 @@ export const active = Effect.fn('Elem.active')(function* (
  * @category element segments
  * @since 0.0.0
  */
-export const passive = Effect.fn('Elem.passive')(function* (
+export const passive = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   refType: ValType.RefType,
   items: ReadonlyArray<Item>,
@@ -206,7 +206,7 @@ export const passive = Effect.fn('Elem.passive')(function* (
  * @category element segments
  * @since 0.0.0
  */
-export const declarative = Effect.fn('Elem.declarative')(function* (
+export const declarative = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   refType: ValType.RefType,
   items: ReadonlyArray<Item>,

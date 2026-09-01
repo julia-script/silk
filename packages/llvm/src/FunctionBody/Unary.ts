@@ -12,7 +12,7 @@ import { type FastMathInput, type FunctionBody, fastMath } from './_internal.js'
  * @category instructions
  * @since 0.0.0
  */
-export const unary = Effect.fn('FunctionBody.unary')(function* (
+export const unary = Effect.fnUntraced(function* (
   self: FunctionBody,
   kind: 'fneg',
   operand: Value.Input,
@@ -63,7 +63,7 @@ export const unary = Effect.fn('FunctionBody.unary')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const freeze = Effect.fn('FunctionBody.freeze')(function* (
+export const freeze = Effect.fnUntraced(function* (
   self: FunctionBody,
   operand: Value.Input,
   name?: ByteString.ByteString | Uint8Array | string,

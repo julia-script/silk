@@ -29,7 +29,7 @@ export interface Phi extends Handle.Handle<'Phi'> {}
  * @category instructions
  * @since 0.0.0
  */
-export const phi = Effect.fn('FunctionBody.phi')(function* (
+export const phi = Effect.fnUntraced(function* (
   self: FunctionBody,
   type: Type.Type,
   name?: ByteString.ByteString | Uint8Array | string,
@@ -82,7 +82,7 @@ export const phi = Effect.fn('FunctionBody.phi')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const phiValue = Effect.fn('FunctionBody.phiValue')(function* (
+export const phiValue = Effect.fnUntraced(function* (
   self: FunctionBody,
   phiHandle: Phi,
 ): Effect.fn.Return<Value.Value, LlvmError> {
@@ -122,7 +122,7 @@ export const phiValue = Effect.fn('FunctionBody.phiValue')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const addPhiIncoming = Effect.fn('FunctionBody.addPhiIncoming')(function* (
+export const addPhiIncoming = Effect.fnUntraced(function* (
   self: FunctionBody,
   phiHandle: Phi,
   value: Value.Input,
@@ -191,7 +191,7 @@ export const addPhiIncoming = Effect.fn('FunctionBody.addPhiIncoming')(function*
  * @category instructions
  * @since 0.0.0
  */
-export const sealPhi = Effect.fn('FunctionBody.sealPhi')(function* (
+export const sealPhi = Effect.fnUntraced(function* (
   self: FunctionBody,
   phiHandle: Phi,
 ): Effect.fn.Return<Value.Value, LlvmError> {

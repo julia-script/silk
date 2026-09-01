@@ -614,7 +614,7 @@ const commonAttributes = Effect.fnUntraced(function* (
  * @category intrinsics
  * @since 0.0.0
  */
-export const resolve = Effect.fn('Intrinsic.resolve')(function* (
+export const resolve = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   id: Id,
   overloads: ReadonlyArray<Type.Type> = [],
@@ -708,7 +708,7 @@ const memoryCallAttributes = Effect.fnUntraced(function* (
  * @category intrinsics
  * @since 0.0.0
  */
-export const call = Effect.fn('Intrinsic.call')(function* (
+export const call = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   id: Id,
   overloads: ReadonlyArray<Type.Type>,
@@ -727,7 +727,7 @@ export const call = Effect.fn('Intrinsic.call')(function* (
  * @category intrinsics
  * @since 0.0.0
  */
-export const assumeCold = Effect.fn('Intrinsic.assumeCold')(function* (
+export const assumeCold = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
 ): Effect.fn.Return<void, LlvmError> {
   const builder = yield* FunctionBodyActor.builder(body)
@@ -744,7 +744,7 @@ export const assumeCold = Effect.fn('Intrinsic.assumeCold')(function* (
  * @category intrinsics
  * @since 0.0.0
  */
-export const memcpy = Effect.fn('Intrinsic.memcpy')(function* (
+export const memcpy = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   destination: Value.Input,
   source: Value.Input,
@@ -782,7 +782,7 @@ export const memcpy = Effect.fn('Intrinsic.memcpy')(function* (
  * @category intrinsics
  * @since 0.0.0
  */
-export const memmove = Effect.fn('Intrinsic.memmove')(function* (
+export const memmove = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   destination: Value.Input,
   source: Value.Input,
@@ -820,7 +820,7 @@ export const memmove = Effect.fn('Intrinsic.memmove')(function* (
  * @category intrinsics
  * @since 0.0.0
  */
-export const memset = Effect.fn('Intrinsic.memset')(function* (
+export const memset = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   destination: Value.Input,
   byte: Value.Input,

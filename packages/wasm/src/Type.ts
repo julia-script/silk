@@ -351,7 +351,7 @@ const single = (
  * @category types
  * @since 0.0.0
  */
-export const func = Effect.fn('Type.func')(function* (
+export const func = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   params: ReadonlyArray<ValType.ValType>,
   results: ReadonlyArray<ValType.ValType>,
@@ -395,7 +395,7 @@ export const func = Effect.fn('Type.func')(function* (
  * @category types
  * @since 0.0.0
  */
-export const struct = Effect.fn('Type.struct')(function* (
+export const struct = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   fields: ReadonlyArray<Field>,
   options: Options = {},
@@ -420,7 +420,7 @@ export const struct = Effect.fn('Type.struct')(function* (
  * @category types
  * @since 0.0.0
  */
-export const array = Effect.fn('Type.array')(function* (
+export const array = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   field: Field,
   options: Options = {},
@@ -479,7 +479,7 @@ export const array = Effect.fn('Type.array')(function* (
  * @category types
  * @since 0.0.0
  */
-export const rec = Effect.fn('Type.rec')(function* (
+export const rec = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   count: number,
   define: (members: ReadonlyArray<Type>) => ReadonlyArray<Definition>,
@@ -505,7 +505,7 @@ export const rec = Effect.fn('Type.rec')(function* (
  * @category types
  * @since 0.0.0
  */
-export const signature = Effect.fn('Type.signature')(function* (
+export const signature = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   type: Type,
 ): Effect.fn.Return<FuncSignature, WasmError> {

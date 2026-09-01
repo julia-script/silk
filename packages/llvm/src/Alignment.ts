@@ -51,7 +51,7 @@ const isPowerOfTwo = (value: bigint): boolean => value > 0n && (value & (value -
  * @category alignment
  * @since 0.0.0
  */
-export const fromByteUnits = Effect.fn('Alignment.fromByteUnits')(function* (
+export const fromByteUnits = Effect.fnUntraced(function* (
   byteUnits: number | bigint,
 ): Effect.fn.Return<Alignment, LlvmError> {
   const value = yield* Effect.fromResult(
@@ -79,7 +79,7 @@ export const fromByteUnits = Effect.fn('Alignment.fromByteUnits')(function* (
  * @category alignment
  * @since 0.0.0
  */
-export const fromBitUnits = Effect.fn('Alignment.fromBitUnits')(function* (
+export const fromBitUnits = Effect.fnUntraced(function* (
   bitUnits: number,
 ): Effect.fn.Return<Alignment, LlvmError> {
   if (!Number.isSafeInteger(bitUnits) || bitUnits < 8 || bitUnits % 8 !== 0) {

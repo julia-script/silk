@@ -49,7 +49,7 @@ export interface Options {
  * @category memories
  * @since 0.0.0
  */
-export const make = Effect.fn('Memory.make')(function* (
+export const make = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   limits: Limits.Limits,
   options: Options = {},

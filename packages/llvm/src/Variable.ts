@@ -188,7 +188,7 @@ const setGlobalDebugExpressions = (
  * @category variables
  * @since 0.0.0
  */
-export const make = Effect.fn('Variable.make')(function* (
+export const make = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
   valueType: Type.Type,
@@ -248,7 +248,7 @@ export const make = Effect.fn('Variable.make')(function* (
  * @category variables
  * @since 0.0.0
  */
-export const fromGlobal = Effect.fn('Variable.fromGlobal')(function* (
+export const fromGlobal = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   global: Global.Global,
   valueType: Type.Type,
@@ -319,7 +319,7 @@ export const fromGlobal = Effect.fn('Variable.fromGlobal')(function* (
  * @category variables
  * @since 0.0.0
  */
-export const global = Effect.fn('Variable.global')(function* (
+export const global = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Variable,
 ): Effect.fn.Return<Global.Global, LlvmError> {
@@ -337,7 +337,7 @@ export const global = Effect.fn('Variable.global')(function* (
  * @category variables
  * @since 0.0.0
  */
-export const setInitializer = Effect.fn('Variable.setInitializer')(function* (
+export const setInitializer = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Variable,
   initializer: Constant.Constant | undefined,
@@ -372,7 +372,7 @@ export const setInitializer = Effect.fn('Variable.setInitializer')(function* (
  * @category variables
  * @since 0.0.0
  */
-export const configure = Effect.fn('Variable.configure')(function* (
+export const configure = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Variable,
   options: Pick<Options, 'constant' | 'threadLocal' | 'externallyInitialized' | 'debugExpressions'>,
@@ -414,7 +414,7 @@ export const configure = Effect.fn('Variable.configure')(function* (
  * @category variables
  * @since 0.0.0
  */
-export const properties = Effect.fn('Variable.properties')(function* (
+export const properties = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Variable,
 ): Effect.fn.Return<Properties, LlvmError> {

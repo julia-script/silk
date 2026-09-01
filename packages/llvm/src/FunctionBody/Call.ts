@@ -40,7 +40,7 @@ export interface CallOptions {
 }
 
 /** @internal */
-const callInternal = Effect.fn('FunctionBody.callInternal')(function* (
+const callInternal = Effect.fnUntraced(function* (
   self: FunctionBody,
   functionType: Type.Type,
   callee: Value.Input,
@@ -250,7 +250,7 @@ const callInternal = Effect.fn('FunctionBody.callInternal')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const call = Effect.fn('FunctionBody.call')(function* (
+export const call = Effect.fnUntraced(function* (
   self: FunctionBody,
   functionType: Type.Type,
   callee: Value.Input,
@@ -267,7 +267,7 @@ export const call = Effect.fn('FunctionBody.call')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const callAssembly = Effect.fn('FunctionBody.callAssembly')(function* (
+export const callAssembly = Effect.fnUntraced(function* (
   self: FunctionBody,
   functionType: Type.Type,
   assembly: ByteString.ByteString | Uint8Array | string,
@@ -294,7 +294,7 @@ export const callAssembly = Effect.fn('FunctionBody.callAssembly')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const callDirect = Effect.fn('FunctionBody.callDirect')(function* (
+export const callDirect = Effect.fnUntraced(function* (
   self: FunctionBody,
   targetFunction: FunctionActor.Function,
   args: ReadonlyArray<Value.Input>,

@@ -385,7 +385,7 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
  * @category data layouts
  * @since 0.0.0
  */
-export const parse = Effect.fn('DataLayout.parse')(function* (
+export const parse = Effect.fnUntraced(function* (
   input: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<DataLayout, LlvmError> {
   const original = ByteString.coerce(input)

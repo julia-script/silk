@@ -98,7 +98,7 @@ const keyForDescription = (description: TypeDescription.Description): string => 
 }
 
 /** @internal */
-const intern = Effect.fn('Type.intern')(function* (
+const intern = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   description: TypeDescription.Description,
 ) {
@@ -128,7 +128,7 @@ const simple = (builder: Builder.Builder, tag: TypeDescription.SimpleTag) =>
  * @category types
  * @since 0.0.0
  */
-export const voidType = Effect.fn('Type.voidType')(function* (builder: Builder.Builder) {
+export const voidType = Effect.fnUntraced(function* (builder: Builder.Builder) {
   return yield* simple(builder, 'Void')
 })
 
@@ -138,7 +138,7 @@ export const voidType = Effect.fn('Type.voidType')(function* (builder: Builder.B
  * @category types
  * @since 0.0.0
  */
-export const half = Effect.fn('Type.half')(function* (builder: Builder.Builder) {
+export const half = Effect.fnUntraced(function* (builder: Builder.Builder) {
   return yield* simple(builder, 'Half')
 })
 
@@ -148,7 +148,7 @@ export const half = Effect.fn('Type.half')(function* (builder: Builder.Builder) 
  * @category types
  * @since 0.0.0
  */
-export const bfloat = Effect.fn('Type.bfloat')(function* (builder: Builder.Builder) {
+export const bfloat = Effect.fnUntraced(function* (builder: Builder.Builder) {
   return yield* simple(builder, 'BFloat')
 })
 
@@ -158,7 +158,7 @@ export const bfloat = Effect.fn('Type.bfloat')(function* (builder: Builder.Build
  * @category types
  * @since 0.0.0
  */
-export const float = Effect.fn('Type.float')(function* (builder: Builder.Builder) {
+export const float = Effect.fnUntraced(function* (builder: Builder.Builder) {
   return yield* simple(builder, 'Float')
 })
 
@@ -168,7 +168,7 @@ export const float = Effect.fn('Type.float')(function* (builder: Builder.Builder
  * @category types
  * @since 0.0.0
  */
-export const double = Effect.fn('Type.double')(function* (builder: Builder.Builder) {
+export const double = Effect.fnUntraced(function* (builder: Builder.Builder) {
   return yield* simple(builder, 'Double')
 })
 
@@ -178,7 +178,7 @@ export const double = Effect.fn('Type.double')(function* (builder: Builder.Build
  * @category types
  * @since 0.0.0
  */
-export const x86Fp80 = Effect.fn('Type.x86Fp80')(function* (builder: Builder.Builder) {
+export const x86Fp80 = Effect.fnUntraced(function* (builder: Builder.Builder) {
   return yield* simple(builder, 'X86Fp80')
 })
 
@@ -188,7 +188,7 @@ export const x86Fp80 = Effect.fn('Type.x86Fp80')(function* (builder: Builder.Bui
  * @category types
  * @since 0.0.0
  */
-export const fp128 = Effect.fn('Type.fp128')(function* (builder: Builder.Builder) {
+export const fp128 = Effect.fnUntraced(function* (builder: Builder.Builder) {
   return yield* simple(builder, 'Fp128')
 })
 
@@ -198,7 +198,7 @@ export const fp128 = Effect.fn('Type.fp128')(function* (builder: Builder.Builder
  * @category types
  * @since 0.0.0
  */
-export const ppcFp128 = Effect.fn('Type.ppcFp128')(function* (builder: Builder.Builder) {
+export const ppcFp128 = Effect.fnUntraced(function* (builder: Builder.Builder) {
   return yield* simple(builder, 'PpcFp128')
 })
 
@@ -208,7 +208,7 @@ export const ppcFp128 = Effect.fn('Type.ppcFp128')(function* (builder: Builder.B
  * @category types
  * @since 0.0.0
  */
-export const label = Effect.fn('Type.label')(function* (builder: Builder.Builder) {
+export const label = Effect.fnUntraced(function* (builder: Builder.Builder) {
   return yield* simple(builder, 'Label')
 })
 
@@ -218,7 +218,7 @@ export const label = Effect.fn('Type.label')(function* (builder: Builder.Builder
  * @category types
  * @since 0.0.0
  */
-export const metadata = Effect.fn('Type.metadata')(function* (builder: Builder.Builder) {
+export const metadata = Effect.fnUntraced(function* (builder: Builder.Builder) {
   return yield* simple(builder, 'Metadata')
 })
 
@@ -228,7 +228,7 @@ export const metadata = Effect.fn('Type.metadata')(function* (builder: Builder.B
  * @category types
  * @since 0.0.0
  */
-export const x86Amx = Effect.fn('Type.x86Amx')(function* (builder: Builder.Builder) {
+export const x86Amx = Effect.fnUntraced(function* (builder: Builder.Builder) {
   return yield* simple(builder, 'X86Amx')
 })
 
@@ -238,7 +238,7 @@ export const x86Amx = Effect.fn('Type.x86Amx')(function* (builder: Builder.Build
  * @category types
  * @since 0.0.0
  */
-export const token = Effect.fn('Type.token')(function* (builder: Builder.Builder) {
+export const token = Effect.fnUntraced(function* (builder: Builder.Builder) {
   return yield* simple(builder, 'Token')
 })
 
@@ -271,7 +271,7 @@ export const token = Effect.fn('Type.token')(function* (builder: Builder.Builder
  * @category types
  * @since 0.0.0
  */
-export const integer = Effect.fn('Type.integer')(function* (
+export const integer = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   bitWidth: number,
 ): Effect.fn.Return<Type, LlvmError> {
@@ -293,7 +293,7 @@ export const integer = Effect.fn('Type.integer')(function* (
  * @category types
  * @since 0.0.0
  */
-export const pointer = Effect.fn('Type.pointer')(function* (
+export const pointer = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   addressSpace: AddrSpace.AddrSpace = AddrSpace.defaultAddrSpace,
 ) {
@@ -321,7 +321,7 @@ const indices = (
  * @category types
  * @since 0.0.0
  */
-export const functionType = Effect.fn('Type.functionType')(function* (
+export const functionType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   returnType: Type,
   parameters: ReadonlyArray<Type>,
@@ -341,7 +341,7 @@ export const functionType = Effect.fn('Type.functionType')(function* (
 })
 
 /** @internal */
-const vectorOf = Effect.fn('Type.vectorOf')(function* (
+const vectorOf = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   child: Type,
   length: number,
@@ -371,7 +371,7 @@ const vectorOf = Effect.fn('Type.vectorOf')(function* (
  * @category types
  * @since 0.0.0
  */
-export const vector = Effect.fn('Type.vector')(function* (
+export const vector = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   child: Type,
   length: number,
@@ -385,7 +385,7 @@ export const vector = Effect.fn('Type.vector')(function* (
  * @category types
  * @since 0.0.0
  */
-export const scalableVector = Effect.fn('Type.scalableVector')(function* (
+export const scalableVector = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   child: Type,
   minimumLength: number,
@@ -399,7 +399,7 @@ export const scalableVector = Effect.fn('Type.scalableVector')(function* (
  * @category types
  * @since 0.0.0
  */
-export const array = Effect.fn('Type.array')(function* (
+export const array = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   child: Type,
   length: number | bigint,
@@ -427,7 +427,7 @@ export const array = Effect.fn('Type.array')(function* (
  * @category types
  * @since 0.0.0
  */
-export const structure = Effect.fn('Type.structure')(function* (
+export const structure = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   fields: ReadonlyArray<Type>,
   options: { readonly packed?: boolean } = {},
@@ -455,7 +455,7 @@ export const structure = Effect.fn('Type.structure')(function* (
  * @category types
  * @since 0.0.0
  */
-export const namedStructure = Effect.fn('Type.namedStructure')(function* (
+export const namedStructure = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<Type, LlvmError> {
@@ -498,7 +498,7 @@ export const namedStructure = Effect.fn('Type.namedStructure')(function* (
  * @category types
  * @since 0.0.0
  */
-export const setNamedBody = Effect.fn('Type.setNamedBody')(function* (
+export const setNamedBody = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Type,
   fields: ReadonlyArray<Type>,
@@ -543,7 +543,7 @@ export const setNamedBody = Effect.fn('Type.setNamedBody')(function* (
  * @category types
  * @since 0.0.0
  */
-export const targetExtension = Effect.fn('Type.targetExtension')(function* (
+export const targetExtension = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
   types: ReadonlyArray<Type> = [],
@@ -609,7 +609,7 @@ const inspect = <A>(
  * @category types
  * @since 0.0.0
  */
-export const tag = Effect.fn('Type.tag')(function* (builder: Builder.Builder, self: Type) {
+export const tag = Effect.fnUntraced(function* (builder: Builder.Builder, self: Type) {
   return yield* inspect(builder, self, 'Type.tag', (description) =>
     Result.succeed(description._tag === 'Simple' ? description.tag : description._tag),
   )
@@ -621,7 +621,7 @@ export const tag = Effect.fn('Type.tag')(function* (builder: Builder.Builder, se
  * @category types
  * @since 0.0.0
  */
-export const integerBitWidth = Effect.fn('Type.integerBitWidth')(function* (
+export const integerBitWidth = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Type,
 ): Effect.fn.Return<number, LlvmError> {
@@ -647,7 +647,7 @@ export const integerBitWidth = Effect.fn('Type.integerBitWidth')(function* (
  * @category types
  * @since 0.0.0
  */
-export const childType = Effect.fn('Type.childType')(function* (
+export const childType = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Type,
 ): Effect.fn.Return<Type, LlvmError> {
@@ -673,7 +673,7 @@ export const childType = Effect.fn('Type.childType')(function* (
  * @category types
  * @since 0.0.0
  */
-export const functionSignature = Effect.fn('Type.functionSignature')(function* (
+export const functionSignature = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Type,
 ): Effect.fn.Return<FunctionSignature, LlvmError> {
@@ -721,7 +721,7 @@ export const functionSignature = Effect.fn('Type.functionSignature')(function* (
  * @category types
  * @since 0.0.0
  */
-export const aggregateShape = Effect.fn('Type.aggregateShape')(function* (
+export const aggregateShape = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Type,
 ): Effect.fn.Return<AggregateShape, LlvmError> {
@@ -907,7 +907,7 @@ const layoutOf = (
  * @category types
  * @since 0.0.0
  */
-export const sizeOf = Effect.fn('Type.sizeOf')(function* (
+export const sizeOf = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Type,
 ): Effect.fn.Return<bigint, LlvmError> {
@@ -930,7 +930,7 @@ export const sizeOf = Effect.fn('Type.sizeOf')(function* (
  * @category types
  * @since 0.0.0
  */
-export const alignmentOf = Effect.fn('Type.alignmentOf')(function* (
+export const alignmentOf = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Type,
 ): Effect.fn.Return<Alignment.Alignment, LlvmError> {

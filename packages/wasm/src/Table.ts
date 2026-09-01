@@ -62,7 +62,7 @@ export interface Options {
  * @category tables
  * @since 0.0.0
  */
-export const make = Effect.fn('Table.make')(function* (
+export const make = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   refType: ValType.RefType,
   limits: Limits.Limits,

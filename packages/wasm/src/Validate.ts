@@ -118,7 +118,7 @@ const compile = (implementation: Host, bytes: Uint8Array): ReadonlyArray<Violati
  * @category validation
  * @since 0.0.0
  */
-export const validate = Effect.fn('Validate.validate')(function* (
+export const validate = Effect.fnUntraced(function* (
   bytes: Uint8Array,
 ): Effect.fn.Return<ReadonlyArray<Violation>, WasmError> {
   const implementation = host()

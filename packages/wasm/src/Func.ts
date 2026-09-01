@@ -54,7 +54,7 @@ export interface DeclareOptions {
  * @category functions
  * @since 0.0.0
  */
-export const declare = Effect.fn('Func.declare')(function* (
+export const declare = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   type: Type.Type,
   options: DeclareOptions = {},
@@ -155,7 +155,7 @@ export interface Definition {
  * @category functions
  * @since 0.0.0
  */
-export const define = Effect.fn('Func.define')(function* (
+export const define = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   func: Func,
   definition: Definition,
@@ -225,7 +225,7 @@ export const define = Effect.fn('Func.define')(function* (
  * @category functions
  * @since 0.0.0
  */
-export const type = Effect.fn('Func.type')(function* (
+export const type = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   func: Func,
 ): Effect.fn.Return<Type.Type, WasmError> {
@@ -254,7 +254,7 @@ export const type = Effect.fn('Func.type')(function* (
  * @category functions
  * @since 0.0.0
  */
-export const name = Effect.fn('Func.name')(function* (
+export const name = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   func: Func,
 ): Effect.fn.Return<string | undefined, WasmError> {
@@ -292,7 +292,7 @@ export const name = Effect.fn('Func.name')(function* (
  * @category functions
  * @since 0.0.0
  */
-export const start = Effect.fn('Func.start')(function* (
+export const start = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   func: Func,
 ): Effect.fn.Return<void, WasmError> {

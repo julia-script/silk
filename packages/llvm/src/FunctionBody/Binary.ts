@@ -92,7 +92,7 @@ export interface BinaryOptions {
  *   const i32 = yield* Type.integer(builder, 32)
  *   const signature = yield* Type.functionType(builder, i32, [i32, i32])
  *   const add = yield* FunctionActor.declare(builder, 'add', signature)
- *   yield* FunctionActor.buildBody(builder, add, Effect.fn('Example.add')(function* (body) {
+ *   yield* FunctionActor.buildBody(builder, add, Effect.fnUntraced(function* (body) {
  *     yield* Block.make(body, 'entry')
  *     const left = yield* Value.argument(body, 0)
  *     const right = yield* Value.argument(body, 1)
@@ -105,7 +105,7 @@ export interface BinaryOptions {
  * @category instructions
  * @since 0.0.0
  */
-export const binary = Effect.fn('FunctionBody.binary')(function* (
+export const binary = Effect.fnUntraced(function* (
   self: FunctionBody,
   kind: BinaryKind,
   left: Value.Input,
@@ -198,7 +198,7 @@ export const binary = Effect.fn('FunctionBody.binary')(function* (
 })
 
 /** @internal */
-const integerOperandType = Effect.fn('FunctionBody.integerOperandType')(function* (
+const integerOperandType = Effect.fnUntraced(function* (
   self: FunctionBody,
   operand: Value.Input,
 ): Effect.fn.Return<{ readonly builder: Builder.Builder; readonly type: Type.Type }, LlvmError> {
@@ -249,7 +249,7 @@ const integerOperandType = Effect.fn('FunctionBody.integerOperandType')(function
  * @category instructions
  * @since 0.0.0
  */
-export const negate = Effect.fn('FunctionBody.negate')(function* (
+export const negate = Effect.fnUntraced(function* (
   self: FunctionBody,
   operand: Value.Input,
   name?: ByteString.ByteString | Uint8Array | string,
@@ -265,7 +265,7 @@ export const negate = Effect.fn('FunctionBody.negate')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const bitwiseNot = Effect.fn('FunctionBody.bitwiseNot')(function* (
+export const bitwiseNot = Effect.fnUntraced(function* (
   self: FunctionBody,
   operand: Value.Input,
   name?: ByteString.ByteString | Uint8Array | string,
@@ -293,7 +293,7 @@ export const bitwiseNot = Effect.fn('FunctionBody.bitwiseNot')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const integerCompare = Effect.fn('FunctionBody.integerCompare')(function* (
+export const integerCompare = Effect.fnUntraced(function* (
   self: FunctionBody,
   predicate: IntegerPredicate,
   left: Value.Input,
@@ -350,7 +350,7 @@ export const integerCompare = Effect.fn('FunctionBody.integerCompare')(function*
  * @category instructions
  * @since 0.0.0
  */
-export const floatingCompare = Effect.fn('FunctionBody.floatingCompare')(function* (
+export const floatingCompare = Effect.fnUntraced(function* (
   self: FunctionBody,
   predicate: FloatingPredicate,
   left: Value.Input,
@@ -408,7 +408,7 @@ export const floatingCompare = Effect.fn('FunctionBody.floatingCompare')(functio
  * @category instructions
  * @since 0.0.0
  */
-export const select = Effect.fn('FunctionBody.select')(function* (
+export const select = Effect.fnUntraced(function* (
   self: FunctionBody,
   condition: Value.Input,
   onTrue: Value.Input,

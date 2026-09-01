@@ -162,6 +162,28 @@ const mergeOrigin = (left: Origin, right: Origin): Origin => {
 
 const ownerKey = (instance: Instances.Instance): string => Instances.keyText(instance.key)
 
+const callsByOwnerCache = new WeakMap<
+  ReadonlyArray<Instances.CallInstance>,
+  Map<string, Array<Instances.CallInstance>>
+>()
+
+const callsByOwner = (
+  calls: ReadonlyArray<Instances.CallInstance>,
+): Map<string, Array<Instances.CallInstance>> => {
+  let index = callsByOwnerCache.get(calls)
+  if (index === undefined) {
+    index = new Map()
+    for (const call of calls) {
+      const owner = Instances.keyText(call.owner)
+      const bucket = index.get(owner)
+      if (bucket === undefined) index.set(owner, [call])
+      else bucket.push(call)
+    }
+    callsByOwnerCache.set(calls, index)
+  }
+  return index
+}
+
 const nestedStatements = (
   statements: ReadonlyArray<Hir.Statement>,
 ): ReadonlyArray<Hir.Statement> => {
@@ -637,13 +659,14 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         sameProvidedOwner(candidate.key.declaration, expected.key.declaration)
       )
         return true
-      const nextSeen = new Set(seen).add(identity)
-      return discovery.calls
-        .filter((call) => Instances.keyText(call.owner) === identity)
-        .some((call) => {
-          const target = instances.get(Instances.keyText(call.target))
-          return target !== undefined && reachesExecutionOwner(target, expected, nextSeen)
-        })
+      // The set is shared across sibling branches, not copied per path: a caller fully explored
+      // without reaching the owner cannot reach it through another path either, so reachability is
+      // unchanged while the walk stays linear in the call graph.
+      seen.add(identity)
+      return (callsByOwner(discovery.calls).get(identity) ?? []).some((call) => {
+        const target = instances.get(Instances.keyText(call.target))
+        return target !== undefined && reachesExecutionOwner(target, expected, seen)
+      })
     }
     // An ordinary effect helper executes with the provider bound around the helper construction at
     // its caller. The provider node therefore lives in the caller HIR, while the service operation
