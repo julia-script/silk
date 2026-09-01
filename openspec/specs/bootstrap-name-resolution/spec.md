@@ -4,7 +4,9 @@
 
 Define one deterministic closure-wide binding and lookup model that turns explicit imports and
 top-level declarations into canonical cross-module references without runtime module behavior.
+
 ## Requirements
+
 ### Requirement: Imports create explicit module-scope bindings
 
 Each source module SHALL publish one immutable module scope built from its local top-level

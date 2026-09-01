@@ -13,8 +13,8 @@ const parse = (source: string) =>
 
 const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> => [
   node,
-  ...node.children.flatMap(
-    (child): ReadonlyArray<SyntaxTree.Node> => (SyntaxTree.isNode(child) ? descendants(child) : []),
+  ...node.children.flatMap((child): ReadonlyArray<SyntaxTree.Node> =>
+    SyntaxTree.isNode(child) ? descendants(child) : [],
   ),
 ]
 

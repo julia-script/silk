@@ -7,13 +7,13 @@ validation are described in their exported TSDoc.
 
 `Builder.make()` creates one module with these defaults:
 
-| Option | Default |
-| --- | --- |
-| `strip` | `true` |
-| `moduleName` | empty bytes |
-| `sourceFilename` | empty bytes |
-| `targetTriple` | empty bytes |
-| `dataLayout` | empty bytes |
+| Option           | Default      |
+| ---------------- | ------------ |
+| `strip`          | `true`       |
+| `moduleName`     | empty bytes  |
+| `sourceFilename` | empty bytes  |
+| `targetTriple`   | empty bytes  |
+| `dataLayout`     | empty bytes  |
 | `moduleAssembly` | no fragments |
 
 `moduleName`, `sourceFilename`, `targetTriple`, `dataLayout`, and `moduleAssembly` accept a
@@ -73,13 +73,13 @@ attachment.
 
 Public validation failures use `LlvmError` in the Effect error channel.
 
-| Field | Meaning |
-| --- | --- |
-| `_tag` | Always `LlvmError`. |
-| `operation` | Actor operation that rejected the state or input. |
-| `message` | Human-readable failure context. |
-| `reason` | `InvalidInput` with `input`, `InvalidState` with `state`, or `WrappedFailure` with `cause`. |
-| `cause` | Present only for `WrappedFailure`, preserving genuine JavaScript causal ancestry. |
+| Field       | Meaning                                                                                     |
+| ----------- | ------------------------------------------------------------------------------------------- |
+| `_tag`      | Always `LlvmError`.                                                                         |
+| `operation` | Actor operation that rejected the state or input.                                           |
+| `message`   | Human-readable failure context.                                                             |
+| `reason`    | `InvalidInput` with `input`, `InvalidState` with `state`, or `WrappedFailure` with `cause`. |
+| `cause`     | Present only for `WrappedFailure`, preserving genuine JavaScript causal ancestry.           |
 
 Expected validation never crosses the public boundary as a throw. Unexpected exceptions remain
 defects, and private renderer or encoder exceptions are translated once into `WrappedFailure` at

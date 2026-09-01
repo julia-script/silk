@@ -1,14 +1,14 @@
-'use client';
-import { type ComponentProps, useMemo, useState } from 'react';
-import { Check, ChevronDown, Copy, ExternalLinkIcon, TextIcon } from 'lucide-react';
-import { cn } from '../../lib/cn';
-import { useCopyButton } from '@fumadocs/base-ui/utils/use-copy-button';
-import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover';
-import { buttonVariants } from '../ui/button';
-import { usePathname } from 'fumadocs-core/framework';
-import { useTranslations } from '@fuma-translate/react';
+'use client'
+import { type ComponentProps, useMemo, useState } from 'react'
+import { Check, ChevronDown, Copy, ExternalLinkIcon, TextIcon } from 'lucide-react'
+import { cn } from '../../lib/cn'
+import { useCopyButton } from '@fumadocs/base-ui/utils/use-copy-button'
+import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover'
+import { buttonVariants } from '../ui/button'
+import { usePathname } from 'fumadocs-core/framework'
+import { useTranslations } from '@fuma-translate/react'
 
-const cache = new Map<string, Promise<string>>();
+const cache = new Map<string, Promise<string>>()
 
 /**
  * see https://fumadocs.dev/docs/integrations/llms#page-actions to customize.
@@ -20,28 +20,28 @@ export function MarkdownCopyButton({
   /**
    * A URL to fetch the raw Markdown/MDX content of page
    */
-  markdownUrl: string;
+  markdownUrl: string
 }) {
-  const t = useTranslations({ note: 'page actions' });
-  const [isLoading, setLoading] = useState(false);
+  const t = useTranslations({ note: 'page actions' })
+  const [isLoading, setLoading] = useState(false)
   const [checked, onClick] = useCopyButton(async () => {
-    const cached = cache.get(markdownUrl);
-    if (cached) return navigator.clipboard.writeText(await cached);
+    const cached = cache.get(markdownUrl)
+    if (cached) return navigator.clipboard.writeText(await cached)
 
-    setLoading(true);
+    setLoading(true)
 
     try {
-      const promise = fetch(withBasePath(markdownUrl)).then((res) => res.text());
-      cache.set(markdownUrl, promise);
+      const promise = fetch(withBasePath(markdownUrl)).then((res) => res.text())
+      cache.set(markdownUrl, promise)
       await navigator.clipboard.write([
         new ClipboardItem({
           'text/plain': promise,
         }),
-      ]);
+      ])
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  });
+  })
 
   return (
     <button
@@ -60,7 +60,7 @@ export function MarkdownCopyButton({
       {checked ? <Check /> : <Copy />}
       {props.children ?? t('Copy Markdown')}
     </button>
-  );
+  )
 }
 /**
  * see https://fumadocs.dev/docs/integrations/llms#page-actions to customize.
@@ -73,21 +73,21 @@ export function ViewOptionsPopover({
   /**
    * A URL to the raw Markdown/MDX content of page
    */
-  markdownUrl?: string;
+  markdownUrl?: string
 
   /**
    * Source file URL on GitHub
    */
-  githubUrl?: string;
+  githubUrl?: string
 }) {
-  const pathname = usePathname();
-  const t = useTranslations({ note: 'page actions' });
+  const pathname = usePathname()
+  const t = useTranslations({ note: 'page actions' })
   const items = useMemo(() => {
     const pageUrl =
-      typeof window === 'undefined' ? pathname : new URL(pathname, window.location.origin);
+      typeof window === 'undefined' ? pathname : new URL(pathname, window.location.origin)
     const q = t('Read {url}, I want to ask questions about it.', {
       variables: { url: String(pageUrl) },
-    });
+    })
 
     return [
       githubUrl && {
@@ -221,8 +221,8 @@ export function ViewOptionsPopover({
           text: q,
         })}`,
       },
-    ].filter((v) => !!v);
-  }, [githubUrl, markdownUrl, pathname, t]);
+    ].filter((v) => !!v)
+  }, [githubUrl, markdownUrl, pathname, t])
 
   return (
     <Popover>
@@ -258,18 +258,18 @@ export function ViewOptionsPopover({
         ))}
       </PopoverContent>
     </Popover>
-  );
+  )
 }
 
 function withBasePath(href: string) {
   // ignore external
-  if (href.match(/^\w+:/) || href.startsWith('//')) return href;
+  if (href.match(/^\w+:/) || href.startsWith('//')) return href
 
   const basePath =
     // @ts-expect-error -- vite env
     typeof import.meta.env !== 'undefined' && typeof import.meta.env.BASE_URL === 'string'
       ? // @ts-expect-error -- vite env
         import.meta.env.BASE_URL.replace(/\/$/, '')
-      : '';
-  return basePath + href;
+      : ''
+  return basePath + href
 }

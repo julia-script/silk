@@ -892,8 +892,10 @@ export interface InterfaceOperationContractFact {
 }
 
 /** One complete interface operation after substituting a particular interface application. */
-export interface InterfaceOperationApplicationFact
-  extends Omit<InterfaceOperationContractFact, '_tag'> {
+export interface InterfaceOperationApplicationFact extends Omit<
+  InterfaceOperationContractFact,
+  '_tag'
+> {
   readonly _tag: 'InterfaceOperationApplication'
   readonly capability: Type.Nominal
   readonly provider: Type.Type
@@ -976,14 +978,13 @@ const interfaceOperationContract = (
   dependencyEligible: boolean,
   capability: Type.Nominal | undefined,
 ): InterfaceOperationContractFact => {
-  const authored = operation.parameters.map(
-    (parameter): InterfaceOperandFact =>
-      Object.freeze({
-        _tag: 'InterfaceOperand',
-        parameter,
-        type: parameter.declaredType,
-        access: interfaceOperandAccess(parameter.declaredType),
-      }),
+  const authored = operation.parameters.map((parameter): InterfaceOperandFact =>
+    Object.freeze({
+      _tag: 'InterfaceOperand',
+      parameter,
+      type: parameter.declaredType,
+      access: interfaceOperandAccess(parameter.declaredType),
+    }),
   )
   const serviceAccess =
     capability === undefined

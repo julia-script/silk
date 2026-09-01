@@ -15,4 +15,3 @@ source declarations MUST NOT override, infer, or attach compiler target privileg
 
 - **WHEN** ordinary source declares a function or service using the same name as a restricted intrinsic
 - **THEN** it remains an ordinary declaration with no compiler availability metadata
-

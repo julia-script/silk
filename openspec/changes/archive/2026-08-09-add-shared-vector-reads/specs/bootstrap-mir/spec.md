@@ -31,4 +31,3 @@ buffer remains an unsafe program invariant rather than a verifier claim.
 
 - **WHEN** HIR contains a valid shared raw-buffer read of a non-union Copy element
 - **THEN** MIR records the buffer, index, element type, result, checked bounds, shared access, and source provenance without a Slot or storage-state transition
-

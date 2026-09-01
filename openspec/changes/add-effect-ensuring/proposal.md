@@ -13,7 +13,7 @@ a defined position against two mechanisms that already exist:
   exits. A finalizer needs a defined order against that cleanup, and the specification does not
   have one to point at.
 - **The propagation exit.** A typed failure that propagates out of a frame leaves that frame behind.
-  A combinator that runs code *after* a failure therefore has to decide whether the failure reaches
+  A combinator that runs code _after_ a failure therefore has to decide whether the failure reaches
   it as a propagation or as data — and getting that wrong is exactly the leak `bootstrap-ownership`
   had to fix for a generic body holding an owner across a fallible run.
 

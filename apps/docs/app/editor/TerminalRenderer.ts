@@ -98,9 +98,7 @@ export const makeWith = <Host>(
   }
   const input = inputResult.success
 
-  const observerResult = attempt('observe its size', () =>
-    dependencies.createObserver(host, fit),
-  )
+  const observerResult = attempt('observe its size', () => dependencies.createObserver(host, fit))
   if (Result.isFailure(observerResult)) {
     report(attempt('remove input after an observer failure', input.dispose), options.onError)
     report(attempt('dispose after an observer failure', backend.dispose), options.onError)
@@ -112,7 +110,11 @@ export const makeWith = <Host>(
   fit()
 
   return Result.succeed({
-    write: (chunk) => report(attempt('write output', () => backend.write(chunk)), options.onError),
+    write: (chunk) =>
+      report(
+        attempt('write output', () => backend.write(chunk)),
+        options.onError,
+      ),
     fit,
     dispose: () => {
       if (disposed) {
@@ -160,4 +162,5 @@ const liveDependencies: Dependencies<HTMLElement> = {
   },
 }
 
-export const make = (host: HTMLElement, options: Options) => makeWith(liveDependencies, host, options)
+export const make = (host: HTMLElement, options: Options) =>
+  makeWith(liveDependencies, host, options)

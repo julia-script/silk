@@ -132,15 +132,14 @@ it.effect('rejects missing endings, consuming shared reads, and mismatched slice
             ? Object.freeze({
                 ...region,
                 operations: Object.freeze(
-                  region.operations.map(
-                    (operation): Mir.Operation =>
-                      operation._tag === 'ReadPlace' &&
-                      operation.selectors.some(
-                        (selector) =>
-                          selector._tag === 'SliceElementSelector' && selector.access === 'Shared',
-                      )
-                        ? Object.freeze({ ...operation, consume: true })
-                        : operation,
+                  region.operations.map((operation): Mir.Operation =>
+                    operation._tag === 'ReadPlace' &&
+                    operation.selectors.some(
+                      (selector) =>
+                        selector._tag === 'SliceElementSelector' && selector.access === 'Shared',
+                    )
+                      ? Object.freeze({ ...operation, consume: true })
+                      : operation,
                   ),
                 ),
               })

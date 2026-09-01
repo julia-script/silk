@@ -1,6 +1,6 @@
 interface:
-  display_name: "Silk Triage"
-  short_description: "Validate and prioritize Silk issues"
-  default_prompt: "Use $silk-triage to turn the strongest Linear Backlog issues into a verified Silk work queue."
+  display_name: 'Silk Triage'
+  short_description: 'Validate and prioritize Silk issues'
+  default_prompt: 'Use $silk-triage to turn the strongest Linear Backlog issues into a verified Silk work queue.'
 policy:
   allow_implicit_invocation: false

@@ -1,8 +1,11 @@
 # bootstrap-standard-streams Specification
 
 ## Purpose
+
 Define the smallest explicit process-output service needed to observe real Silk programs while preserving separate Logger, default-provider, and Stream/Sink designs.
+
 ## Requirements
+
 ### Requirement: Standard streams are an explicit service requirement
 
 `StandardStreams` SHALL provide stdout and stderr destinations as an explicitly required service. Programs using it SHALL retain that requirement until a provider is supplied; this change MUST NOT introduce ambient or Logger-specific defaults.

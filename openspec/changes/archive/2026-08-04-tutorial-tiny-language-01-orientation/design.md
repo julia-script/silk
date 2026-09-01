@@ -43,4 +43,3 @@ Static source, token, AST, IR, and command examples remain authoritative. The op
 ## Migration Plan
 
 Create the tutorial directory and Lesson 1 page without replacing the existing tiny-expression tutorial. Add the new series to the documentation index only when the minimum linked lesson set is available. Rollback removes the new page and index link without affecting runtime code.
-

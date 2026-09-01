@@ -40,8 +40,9 @@ See proposal.md — Why. Ten confirmed review findings across three executor bac
    - `WasmBackend.hookReleaseInstructions` `environmentOffsets` (~1767): consume `Layout.effectFieldLanes`/`callableFieldLanePlacements` to enumerate field offsets and hook-bearing lanes instead of re-walking representations. If the Layout helpers don't currently expose per-field offset + hook info, add the minimal accessor to `Layout.ts` next to `effectFieldLanes` rather than widening the backend walk.
 
 10. **Discovered during apply — two additional native/runner bugs fixed** (exposed by the new tests, same bug families as findings 3 and 5):
-   - `EntryAssembly.lowerEffectRunner` lowered capture parameter types via `mirType` without the layout, so a captured scalar enum lost its `Enum` representation and every enum operation in a generated runner body silently failed to lower (the runner was then dropped and `Mir.verify` rejected the module). Fix: pass the layout through.
-   - `MirLinearization.opensRuntimeContinuation` omitted `RunEffectComposite` while listing every sibling `Run*` operation, so locals defined after a composite run in the same linear block leaked as raw SSA values from the synthesized `following` block into later blocks — "non-phi forward value reference" at bitcode encoding. Fix: add the missing tag.
+
+- `EntryAssembly.lowerEffectRunner` lowered capture parameter types via `mirType` without the layout, so a captured scalar enum lost its `Enum` representation and every enum operation in a generated runner body silently failed to lower (the runner was then dropped and `Mir.verify` rejected the module). Fix: pass the layout through.
+- `MirLinearization.opensRuntimeContinuation` omitted `RunEffectComposite` while listing every sibling `Run*` operation, so locals defined after a composite run in the same linear block leaked as raw SSA values from the synthesized `following` block into later blocks — "non-phi forward value reference" at bitcode encoding. Fix: add the missing tag.
 
 ## Risks / Trade-offs
 

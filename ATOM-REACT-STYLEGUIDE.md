@@ -6,16 +6,24 @@ file references point at the v4 source.
 
 ```ts
 // Core primitives (v4)
-import { Atom, AtomRegistry, AsyncResult, Reactivity, Hydration } from "effect/unstable/reactivity"
-import { AtomHttpApi, AtomRpc } from "effect/unstable/reactivity"
+import { Atom, AtomRegistry, AsyncResult, Reactivity, Hydration } from 'effect/unstable/reactivity'
+import { AtomHttpApi, AtomRpc } from 'effect/unstable/reactivity'
 
 // React bindings
 import {
-  useAtom, useAtomValue, useAtomSet, useAtomRefresh, useAtomMount,
-  useAtomSuspense, useAtomSubscribe, useAtomInitialValues,
-  RegistryProvider, RegistryContext, HydrationBoundary
-} from "@effect/atom-react"
-import * as ScopedAtom from "@effect/atom-react/ScopedAtom"
+  useAtom,
+  useAtomValue,
+  useAtomSet,
+  useAtomRefresh,
+  useAtomMount,
+  useAtomSuspense,
+  useAtomSubscribe,
+  useAtomInitialValues,
+  RegistryProvider,
+  RegistryContext,
+  HydrationBoundary,
+} from '@effect/atom-react'
+import * as ScopedAtom from '@effect/atom-react/ScopedAtom'
 ```
 
 > Note: the barrel re-exports `ScopedAtom.make` as a top-level `make`. Always import ScopedAtom
@@ -102,7 +110,7 @@ function Todos() {
 
 ```ts
 // ❌ DON'T — mapping inline in the component body
-const name = useAtomValue(Atom.map(userAtom, (u) => u.name))  // new derived atom per render
+const name = useAtomValue(Atom.map(userAtom, (u) => u.name)) // new derived atom per render
 // ✅ DO — either define the derived atom at module scope…
 const userNameAtom = Atom.map(userAtom, (u) => u.name)
 // …or use the selector overload with a stable function (Rule 4.2)
@@ -116,10 +124,8 @@ entries weakly — unused atoms are GC'd.
 
 ```ts
 // ✅ DO
-const todoAtom = Atom.family((id: number) =>
-  runtime.atom(TodoApi.use((api) => api.getTodo(id)))
-)
-todoAtom(1) === todoAtom(1)  // true — stable identity, stable state
+const todoAtom = Atom.family((id: number) => runtime.atom(TodoApi.use((api) => api.getTodo(id))))
+todoAtom(1) === todoAtom(1) // true — stable identity, stable state
 ```
 
 ```ts
@@ -135,12 +141,12 @@ const todoAtom = (id: number) => {
 // ❌ DON'T — keepAlive inside a family with unbounded keys.
 // A keepAlive atom that has been read is retained by the registry forever, so the
 // family entry can never be collected. Unbounded args + keepAlive = memory leak.
-const searchAtom = Atom.family((query: string) =>
-  Atom.make(search(query)).pipe(Atom.keepAlive)   // leaks one atom per distinct query
+const searchAtom = Atom.family(
+  (query: string) => Atom.make(search(query)).pipe(Atom.keepAlive), // leaks one atom per distinct query
 )
 // ✅ DO — use a TTL so hot entries stay warm and cold ones die
 const searchAtom = Atom.family((query: string) =>
-  Atom.make(search(query)).pipe(Atom.setIdleTTL("1 minute"))
+  Atom.make(search(query)).pipe(Atom.setIdleTTL('1 minute')),
 )
 ```
 
@@ -154,7 +160,7 @@ state that must survive navigation needs an explicit lifetime.
 const sessionAtom = Atom.make<Session | null>(null).pipe(Atom.keepAlive)
 
 // ✅ DO — cached server data: warm for a while, then collected
-const productsAtom = runtime.atom(fetchProducts).pipe(Atom.setIdleTTL("5 minutes"))
+const productsAtom = runtime.atom(fetchProducts).pipe(Atom.setIdleTTL('5 minutes'))
 
 // ✅ DO — ephemeral UI state (dialog open, hover): default is correct, no combinator
 const dialogOpenAtom = Atom.make(false)
@@ -164,7 +170,7 @@ const dialogOpenAtom = Atom.make(false)
 // ❌ DON'T — writing to an atom nobody subscribes to and expecting it to stick
 registry.set(counterAtom, 1)
 // …microtask queue drains…
-registry.get(counterAtom)  // 0 again — the node was disposed and rebuilt
+registry.get(counterAtom) // 0 again — the node was disposed and rebuilt
 ```
 
 ```ts
@@ -180,15 +186,13 @@ atom that someone remembers to keep in sync, and not a `useMemo` chain in compon
 ```ts
 // ✅ DO
 const cartAtom = Atom.make<ReadonlyArray<Item>>([])
-const cartTotalAtom = Atom.make((get) =>
-  get(cartAtom).reduce((sum, item) => sum + item.price, 0)
-)
+const cartTotalAtom = Atom.make((get) => get(cartAtom).reduce((sum, item) => sum + item.price, 0))
 ```
 
 ```ts
 // ❌ DON'T — two writables that must be updated together
 const cartAtom = Atom.make<ReadonlyArray<Item>>([])
-const cartTotalAtom = Atom.make(0)   // someone will forget to update this
+const cartTotalAtom = Atom.make(0) // someone will forget to update this
 ```
 
 ```ts
@@ -208,7 +212,9 @@ notifies all subscribers every time, even when the content didn't change.
 ```ts
 // ✅ DO
 const visibleIdsAtom = Atom.make((get) =>
-  get(todosAtom).filter((t) => !t.done).map((t) => t.id)
+  get(todosAtom)
+    .filter((t) => !t.done)
+    .map((t) => t.id),
 ).pipe(Atom.withEquality(Equal.equals))
 ```
 
@@ -229,10 +235,12 @@ const checkoutAtom = Atom.make(...).pipe(Atom.withLabel("checkout"))
 const runtime = Atom.runtime(Layer.mergeAll(TodoApi.layer, Analytics.layer))
 
 const todosAtom = runtime.atom(TodoApi.use((api) => api.list))
-const addTodo = runtime.fn(Effect.fnUntraced(function*(text: string) {
-  const api = yield* TodoApi
-  return yield* api.add(text)
-}))
+const addTodo = runtime.fn(
+  Effect.fnUntraced(function* (text: string) {
+    const api = yield* TodoApi
+    return yield* api.add(text)
+  }),
+)
 ```
 
 ```ts
@@ -275,34 +283,36 @@ const registry = AtomRegistry.make({
 
 ```ts
 // ✅ DO — tracked read of a plain atom, awaited read of an AsyncResult atom
-const summaryAtom = runtime.atom((get) => Effect.gen(function*() {
-  const filter = get(filterAtom)                  // tracked: rebuilds when filter changes
-  const todos = yield* get.result(todosAtom)      // suspends until todosAtom has a value
-  return summarize(todos, filter)
-}))
+const summaryAtom = runtime.atom((get) =>
+  Effect.gen(function* () {
+    const filter = get(filterAtom) // tracked: rebuilds when filter changes
+    const todos = yield* get.result(todosAtom) // suspends until todosAtom has a value
+    return summarize(todos, filter)
+  }),
+)
 ```
 
 The rules, from the implementation:
 
-| Call | Tracked? | Behavior |
-|---|---|---|
-| `get(atom)` | yes | rebuild when it changes |
-| `get.once(atom)` | no | snapshot read |
-| `get.result(atom)` | yes | `Effect` that stays pending (`Effect.never`) while `Initial` |
-| `get.resultOnce(atom)` | no | resolves once, no dependency |
-| inside `Atom.fn` bodies | **no** | all reads are untracked; fn re-runs only when called |
+| Call                    | Tracked? | Behavior                                                     |
+| ----------------------- | -------- | ------------------------------------------------------------ |
+| `get(atom)`             | yes      | rebuild when it changes                                      |
+| `get.once(atom)`        | no       | snapshot read                                                |
+| `get.result(atom)`      | yes      | `Effect` that stays pending (`Effect.never`) while `Initial` |
+| `get.resultOnce(atom)`  | no       | resolves once, no dependency                                 |
+| inside `Atom.fn` bodies | **no**   | all reads are untracked; fn re-runs only when called         |
 
 ```ts
 // ❌ DON'T — expecting a fn atom to react to its dependencies.
 // Function-atom bodies read atoms UNTRACKED; this only sees filterAtom when invoked.
-const exportCsv = runtime.fn((_: void, get) =>
-  Effect.sync(() => toCsv(get(todosAtom), get(filterAtom))) // snapshot at call time — fine,
-)                                                           // but it will NOT re-run on change
+const exportCsv = runtime.fn(
+  (_: void, get) => Effect.sync(() => toCsv(get(todosAtom), get(filterAtom))), // snapshot at call time — fine,
+) // but it will NOT re-run on change
 ```
 
 ```ts
 // ❌ DON'T — get.once when you meant get: the derived value silently freezes
-const badAtom = Atom.make((get) => get.once(countAtom) * 2)  // never updates
+const badAtom = Atom.make((get) => get.once(countAtom) * 2) // never updates
 ```
 
 ### Rule 3.4 — Long-running or push-based data is a Stream atom, not a polling effect.
@@ -313,7 +323,7 @@ stream ends). Unmount interrupts the fiber — cleanup is automatic.
 ```ts
 // ✅ DO
 const priceAtom = runtime.atom(
-  Stream.fromEventListener(socket, "message").pipe(Stream.map(parsePrice))
+  Stream.fromEventListener(socket, 'message').pipe(Stream.map(parsePrice)),
 )
 ```
 
@@ -331,15 +341,15 @@ refetch-on-focus use `Atom.swr({ staleTime, revalidateOnFocus: true })` — don'
 
 ### Rule 4.1 — Pick the narrowest hook. This is the #1 render-performance lever.
 
-| You need | Use | Re-renders on change? |
-|---|---|---|
-| value only | `useAtomValue(atom)` | yes |
-| value + setter | `useAtom(atom)` | yes |
-| setter only | `useAtomSet(atom)` | **no** |
-| refresh trigger | `useAtomRefresh(atom)` | **no** |
-| keep alive, no read | `useAtomMount(atom)` | no |
-| side-effect on change | `useAtomSubscribe(atom, f)` | no |
-| suspend until ready | `useAtomSuspense(atom)` | yes |
+| You need              | Use                         | Re-renders on change? |
+| --------------------- | --------------------------- | --------------------- |
+| value only            | `useAtomValue(atom)`        | yes                   |
+| value + setter        | `useAtom(atom)`             | yes                   |
+| setter only           | `useAtomSet(atom)`          | **no**                |
+| refresh trigger       | `useAtomRefresh(atom)`      | **no**                |
+| keep alive, no read   | `useAtomMount(atom)`        | no                    |
+| side-effect on change | `useAtomSubscribe(atom, f)` | no                    |
+| suspend until ready   | `useAtomSuspense(atom)`     | yes                   |
 
 ```ts
 // ✅ DO — the submit button never re-renders while the form value changes
@@ -374,8 +384,8 @@ const userNameAtom = Atom.map(userAtom, (u) => u.name)
 
 ```ts
 // ❌ DON'T
-const name = useAtomValue(userAtom, (u) => u.name)          // new mapped atom every render
-useAtomSubscribe(priceAtom, (p) => console.log(p))          // resubscribes every render
+const name = useAtomValue(userAtom, (u) => u.name) // new mapped atom every render
+useAtomSubscribe(priceAtom, (p) => console.log(p)) // resubscribes every render
 ```
 
 Also: never toggle the selector's presence at one call site
@@ -395,7 +405,7 @@ function Todos() {
     onWaiting: () => <Spinner />,
     onError: (error) => <ErrorBanner error={error} />,
     onDefect: (defect) => <Crash defect={defect} />,
-    onSuccess: (todos) => <TodoList todos={todos} />
+    onSuccess: (todos) => <TodoList todos={todos} />,
   })
 }
 ```
@@ -404,7 +414,7 @@ function Todos() {
 // ✅ DO — the builder when you need per-error-tag branches; exhaustive() enforces coverage
 AsyncResult.builder(result)
   .onWaiting(() => <Spinner />)
-  .onErrorTag("TodoNotFound", () => <NotFound />)
+  .onErrorTag('TodoNotFound', () => <NotFound />)
   .onError((e) => <ErrorBanner error={e} />)
   .onDefect((d) => <Crash defect={d} />)
   .onSuccess((todos) => <TodoList todos={todos} />)
@@ -429,7 +439,9 @@ const todos = AsyncResult.getOrThrow(useAtomValue(todosAtom))
 
 // ❌ DON'T — mirroring an AsyncResult into local state to "simplify" it
 const [todos, setTodos] = React.useState<Todo[]>([])
-useAtomSubscribe(todosAtom, (r) => { if (AsyncResult.isSuccess(r)) setTodos(r.value) })
+useAtomSubscribe(todosAtom, (r) => {
+  if (AsyncResult.isSuccess(r)) setTodos(r.value)
+})
 // you now have two sources of truth and lost error/waiting states
 ```
 
@@ -440,14 +452,14 @@ useAtomSubscribe(todosAtom, (r) => { if (AsyncResult.isSuccess(r)) setTodos(r.va
 
 ```tsx
 // ✅ DO
-<ErrorBoundary fallback={<ErrorPage />}>
+;<ErrorBoundary fallback={<ErrorPage />}>
   <React.Suspense fallback={<Spinner />}>
     <TodoView />
   </React.Suspense>
 </ErrorBoundary>
 
 function TodoView() {
-  const todos = useAtomSuspense(todosAtom).value   // note: returns Success — read .value
+  const todos = useAtomSuspense(todosAtom).value // note: returns Success — read .value
   return <TodoList todos={todos} />
 }
 ```
@@ -484,9 +496,9 @@ store a function value directly through it — wrap it.
 
 ```ts
 const setCount = useAtomSet(countAtom)
-setCount((n) => n + 1)          // ✅ updater
-setCallback(() => myCallback)   // ✅ storing a function value: wrap it
-setCallback(myCallback)         // ❌ myCallback gets CALLED with the current value
+setCount((n) => n + 1) // ✅ updater
+setCallback(() => myCallback) // ✅ storing a function value: wrap it
+setCallback(myCallback) // ❌ myCallback gets CALLED with the current value
 ```
 
 ---
@@ -525,9 +537,9 @@ onClick={() => Effect.runPromise(api.add(text)).then(() => refetchSomehow())}
 
 ```ts
 // ✅ DO — the query declares what it depends on; mutations declare what they touch
-const todosAtom = runtime.atom(fetchTodos).pipe(Atom.withReactivity(["todos"]))
+const todosAtom = runtime.atom(fetchTodos).pipe(Atom.withReactivity(['todos']))
 const todoAtom = Atom.family((id: number) =>
-  runtime.atom(fetchTodo(id)).pipe(Atom.withReactivity({ todos: [id] }))
+  runtime.atom(fetchTodo(id)).pipe(Atom.withReactivity({ todos: [id] })),
 )
 const renameTodo = runtime.fn(renameEffect, { reactivityKeys: (arg) => ({ todos: [arg.id] }) })
 ```
@@ -552,7 +564,7 @@ When an event handler needs the mutation's outcome (navigate after save, toast o
 
 ```ts
 // ✅ DO
-const save = useAtomSet(saveAtom, { mode: "promiseExit" })
+const save = useAtomSet(saveAtom, { mode: 'promiseExit' })
 const onClick = async () => {
   const exit = await save(form)
   if (Exit.isSuccess(exit)) navigate(`/todo/${exit.value.id}`)
@@ -591,10 +603,12 @@ success, and rolls back on failure — including failures you forgot to handle.
 ```ts
 // ✅ DO
 const todosOptimistic = Atom.optimistic(todosAtom)
-const addTodo = todosOptimistic.pipe(Atom.optimisticFn({
-  reducer: (current, todo: Todo) => [...current, todo],
-  fn: runtime.fn((todo: Todo) => api.addTodo(todo), { reactivityKeys: ["todos"] })
-}))
+const addTodo = todosOptimistic.pipe(
+  Atom.optimisticFn({
+    reducer: (current, todo: Todo) => [...current, todo],
+    fn: runtime.fn((todo: Todo) => api.addTodo(todo), { reactivityKeys: ['todos'] }),
+  }),
+)
 // components read todosOptimistic; mutations go through addTodo
 ```
 
@@ -635,12 +649,14 @@ a demo; in tests it bleeds state between cases, and on a server it bleeds state 
 
 ```tsx
 // ✅ DO — app root
-<RegistryProvider>
+;<RegistryProvider>
   <App />
 </RegistryProvider>
 
 // ✅ DO — per test
-beforeEach(() => { registry = AtomRegistry.make() })
+beforeEach(() => {
+  registry = AtomRegistry.make()
+})
 render(<RegistryContext.Provider value={registry}>...</RegistryContext.Provider>)
 
 // ✅ DO — per SSR request: a fresh registry per request, always
@@ -660,9 +676,9 @@ what makes StrictMode's mount/unmount/remount cycle safe).
 
 ```ts
 // ✅ DO — inside an Effect with AtomRegistry available (e.g. a runtime.fn body)
-const program = Effect.gen(function*() {
-  const todos = yield* Atom.getResult(todosAtom)    // Effect<Todos, E, AtomRegistry>
-  yield* Atom.set(filterAtom, "done")
+const program = Effect.gen(function* () {
+  const todos = yield* Atom.getResult(todosAtom) // Effect<Todos, E, AtomRegistry>
+  yield* Atom.set(filterAtom, 'done')
   yield* Atom.refresh(todosAtom)
 })
 ```
@@ -678,8 +694,8 @@ dependency graph, `prop()` lenses for immutable nested updates. Use it for local
 (form rows, drag state) passed down a subtree; use `Atom` for anything shared or derived.
 
 ```ts
-const form = AtomRef.make({ name: "", email: "" })
-const name = useAtomRefPropValue(form, "name")   // subscribes to just .name
+const form = AtomRef.make({ name: '', email: '' })
+const name = useAtomRefPropValue(form, 'name') // subscribes to just .name
 ```
 
 ### Rule 6.4 — Per-subtree instances of the same atom shape use `ScopedAtom`.
@@ -714,22 +730,22 @@ a changed `value` prop after mount does not recreate the atom.
 
 ```ts
 // ✅ DO
-class Client extends AtomHttpApi.Service<Client>()("Client", {
+class Client extends AtomHttpApi.Service<Client>()('Client', {
   api: Api,
   httpClient: FetchHttpClient.layer,
-  baseUrl: "https://api.example.com"
+  baseUrl: 'https://api.example.com',
 }) {}
 
 // Queries: family-memoized — identical requests are the SAME atom everywhere
 const userAtom = (id: number) =>
-  Client.query("users", "get", {
+  Client.query('users', 'get', {
     params: { id },
     reactivityKeys: { users: [id] },
-    timeToLive: "1 minute"
+    timeToLive: '1 minute',
   })
 
 // Mutations
-const updateUser = Client.mutation("users", "update")
+const updateUser = Client.mutation('users', 'update')
 ```
 
 What you get for free (and would otherwise re-implement badly): family memoization on the full
@@ -750,13 +766,13 @@ stubbing the client.
 
 ```ts
 const theme = Atom.kvs({
-  runtime: kvsRuntime,               // runtime providing a KeyValueStore layer
-  key: "theme",
-  schema: Schema.Literals(["light", "dark"]),
-  defaultValue: () => "light"
+  runtime: kvsRuntime, // runtime providing a KeyValueStore layer
+  key: 'theme',
+  schema: Schema.Literals(['light', 'dark']),
+  defaultValue: () => 'light',
 })
 
-const page = Atom.searchParam("page", { schema: Schema.NumberFromString })
+const page = Atom.searchParam('page', { schema: Schema.NumberFromString })
 ```
 
 ```ts
@@ -774,9 +790,9 @@ const page = Atom.searchParam("page", { schema: Schema.NumberFromString })
 ### Rule 8.1 — Only `Atom.serializable` atoms cross the wire.
 
 ```ts
-const todosAtom = runtime.atom(fetchTodos).pipe(
-  Atom.serializable({ key: "todos", schema: AsyncResult.Schema({ success: TodoList }) })
-)
+const todosAtom = runtime
+  .atom(fetchTodos)
+  .pipe(Atom.serializable({ key: 'todos', schema: AsyncResult.Schema({ success: TodoList }) }))
 ```
 
 The `key` becomes the registry identity for that atom — it must be globally unique and stable
@@ -824,15 +840,16 @@ const analyticsAtom = Atom.make(browserOnlyEffect).pipe(Atom.withServerValueInit
 ### Rule 9.1 — Test atoms through a registry, not through React, whenever possible.
 
 ```ts
-it.effect("computes totals", () =>
-  Effect.gen(function*() {
+it.effect('computes totals', () =>
+  Effect.gen(function* () {
     const registry = AtomRegistry.make({
-      initialValues: [Atom.initialValue(runtime.layer, TodoApiTest)]
+      initialValues: [Atom.initialValue(runtime.layer, TodoApiTest)],
     })
-    registry.set(addTodo, "buy milk")
+    registry.set(addTodo, 'buy milk')
     const todos = yield* AtomRegistry.getResult(registry, todosAtom)
     assert.deepStrictEqual(todos.length, 1)
-  }))
+  }),
+)
 ```
 
 ### Rule 9.2 — Fresh registry per test; subscribe or keepAlive before asserting on state.
@@ -857,24 +874,24 @@ cancel()
 
 ## 10. Migrating common React patterns
 
-How the usual hook idioms translate. The left column is not "wrong React" — it's wrong *once this
-library is in the codebase*, because each pattern re-implements something the registry already does
+How the usual hook idioms translate. The left column is not "wrong React" — it's wrong _once this
+library is in the codebase_, because each pattern re-implements something the registry already does
 (identity, caching, cancellation, sharing) with weaker guarantees.
 
-| Classic pattern | Replacement |
-|---|---|
-| `useState` lifted up + prop drilling | module-level atom + `useAtomValue`/`useAtomSet` |
-| `useState` + `useEffect` fetch | `runtime.atom(effect)` |
-| `useEffect` + subscription + cleanup | stream atom (cleanup = fiber interruption) |
-| `useMemo` over shared data | derived atom |
-| `useReducer` | `Atom.writable` with a reducing write |
-| `useContext` for app state | plain atom (no provider needed); `ScopedAtom` for per-subtree |
-| `useEffect` → localStorage sync | `Atom.kvs` |
-| `useSearchParams` sync | `Atom.searchParam` |
-| `setInterval` polling in `useEffect` | `Atom.withRefresh` |
-| debounce via `setTimeout` in `useEffect` | `Atom.debounce` |
-| react-query `useQuery`/`useMutation` | `runtime.atom` + `reactivityKeys`, or `AtomHttpApi`/`AtomRpc` |
-| `useSyncExternalStore` on a custom store | `Atom.subscriptionRef` / `Atom.make(stream)` |
+| Classic pattern                          | Replacement                                                   |
+| ---------------------------------------- | ------------------------------------------------------------- |
+| `useState` lifted up + prop drilling     | module-level atom + `useAtomValue`/`useAtomSet`               |
+| `useState` + `useEffect` fetch           | `runtime.atom(effect)`                                        |
+| `useEffect` + subscription + cleanup     | stream atom (cleanup = fiber interruption)                    |
+| `useMemo` over shared data               | derived atom                                                  |
+| `useReducer`                             | `Atom.writable` with a reducing write                         |
+| `useContext` for app state               | plain atom (no provider needed); `ScopedAtom` for per-subtree |
+| `useEffect` → localStorage sync          | `Atom.kvs`                                                    |
+| `useSearchParams` sync                   | `Atom.searchParam`                                            |
+| `setInterval` polling in `useEffect`     | `Atom.withRefresh`                                            |
+| debounce via `setTimeout` in `useEffect` | `Atom.debounce`                                               |
+| react-query `useQuery`/`useMutation`     | `runtime.atom` + `reactivityKeys`, or `AtomHttpApi`/`AtomRpc` |
+| `useSyncExternalStore` on a custom store | `Atom.subscriptionRef` / `Atom.make(stream)`                  |
 
 ### 10.1 `useState` + lifting state up → one atom
 
@@ -882,8 +899,13 @@ library is in the codebase*, because each pattern re-implements something the re
 // ❌ BEFORE — state lifted to the nearest common ancestor, drilled through props;
 // every intermediate component re-renders on change
 function App() {
-  const [filter, setFilter] = React.useState<Filter>("all")
-  return <Layout><Sidebar filter={filter} onChange={setFilter} /><Main filter={filter} /></Layout>
+  const [filter, setFilter] = React.useState<Filter>('all')
+  return (
+    <Layout>
+      <Sidebar filter={filter} onChange={setFilter} />
+      <Main filter={filter} />
+    </Layout>
+  )
 }
 ```
 
@@ -960,9 +982,9 @@ const priceAtom = runtime.atom(
         ws.onmessage = (e) => emit.single(parse(e.data))
         return ws
       }),
-      (ws) => Effect.sync(() => ws.close())
-    )
-  )
+      (ws) => Effect.sync(() => ws.close()),
+    ),
+  ),
 )
 ```
 
@@ -982,7 +1004,7 @@ const visible = React.useMemo(() => todos.filter((t) => !t.done), [todos])
 const visibleTodosAtom = Atom.make((get) => get(todosAtom).filter((t) => !t.done))
 ```
 
-Keep `useMemo` for values derived from *props/local state only*. The rule of thumb: if the input
+Keep `useMemo` for values derived from _props/local state only_. The rule of thumb: if the input
 is an atom, the derivation belongs in an atom.
 
 ### 10.5 `useReducer` → writable atom with a reducing write
@@ -997,11 +1019,11 @@ const [state, dispatch] = React.useReducer(reducer, initial)
 // ✅ AFTER — same reducer, app-wide state, dispatch from anywhere via useAtomSet
 const cartAtom = Atom.writable<Cart, CartAction>(
   () => initialCart,
-  (ctx, action) => ctx.setSelf(reducer(ctx.get(cartAtom), action))
+  (ctx, action) => ctx.setSelf(reducer(ctx.get(cartAtom), action)),
 )
 
-const dispatch = useAtomSet(cartAtom)   // (action: CartAction) => void
-dispatch({ _tag: "AddItem", item })
+const dispatch = useAtomSet(cartAtom) // (action: CartAction) => void
+dispatch({ _tag: 'AddItem', item })
 ```
 
 For most cases you don't need the reducer shape at all — a plain writable atom plus updater
@@ -1023,12 +1045,12 @@ functions (`setCount((n) => n + 1)`) or a few `Atom.fn` mutations is simpler.
 // ✅ AFTER — atoms are globally addressable; subscriptions are per-atom, so
 // a theme change doesn't touch cart consumers. No providers beyond the one
 // RegistryProvider at the root.
-const themeAtom = Atom.make<Theme>("light").pipe(Atom.keepAlive)
+const themeAtom = Atom.make<Theme>('light').pipe(Atom.keepAlive)
 const userAtom = Atom.make<User | null>(null).pipe(Atom.keepAlive)
 ```
 
-React context remains the right tool for *composition-scoped* values (which subtree am I in,
-component-library theming overrides). When you want context-like scoping *of atom state*, that's
+React context remains the right tool for _composition-scoped_ values (which subtree am I in,
+component-library theming overrides). When you want context-like scoping _of atom state_, that's
 exactly `ScopedAtom` (Rule 6.4) — not a nested registry, not a hand-rolled context of atoms.
 
 ### 10.7 `useEffect` → localStorage / URL sync → `Atom.kvs` / `Atom.searchParam`
@@ -1036,17 +1058,19 @@ exactly `ScopedAtom` (Rule 6.4) — not a nested registry, not a hand-rolled con
 ```tsx
 // ❌ BEFORE — read-on-mount + write-on-change; no validation, no cross-tab story,
 // breaks under SSR (window access during render), duplicated per usage
-const [theme, setTheme] = React.useState(() => localStorage.getItem("theme") ?? "light")
-React.useEffect(() => { localStorage.setItem("theme", theme) }, [theme])
+const [theme, setTheme] = React.useState(() => localStorage.getItem('theme') ?? 'light')
+React.useEffect(() => {
+  localStorage.setItem('theme', theme)
+}, [theme])
 ```
 
 ```ts
 // ✅ AFTER — schema-validated, SSR-safe, one definition
 const themeAtom = Atom.kvs({
   runtime: kvsRuntime,
-  key: "theme",
-  schema: Schema.Literals(["light", "dark"]),
-  defaultValue: () => "light"
+  key: 'theme',
+  schema: Schema.Literals(['light', 'dark']),
+  defaultValue: () => 'light',
 })
 ```
 
@@ -1067,9 +1091,11 @@ React.useEffect(() => {
 
 ```ts
 // ✅ AFTER — polls only while someone subscribes; timer disposed with the atom
-const statusAtom = runtime.atom(fetchStatus).pipe(Atom.withRefresh("30 seconds"))
+const statusAtom = runtime.atom(fetchStatus).pipe(Atom.withRefresh('30 seconds'))
 // or refetch-on-focus with staleness instead of blind polling:
-const statusAtom = runtime.atom(fetchStatus).pipe(Atom.swr({ staleTime: "30 seconds", revalidateOnFocus: true }))
+const statusAtom = runtime
+  .atom(fetchStatus)
+  .pipe(Atom.swr({ staleTime: '30 seconds', revalidateOnFocus: true }))
 ```
 
 ```tsx
@@ -1082,7 +1108,7 @@ React.useEffect(() => {
 
 ```ts
 // ✅ AFTER
-const queryAtom = Atom.make("")
+const queryAtom = Atom.make('')
 const debouncedQueryAtom = queryAtom.pipe(Atom.debounce(300))
 const resultsAtom = Atom.make((get) => searchEffect(get(debouncedQueryAtom)))
 ```
@@ -1091,33 +1117,35 @@ const resultsAtom = Atom.make((get) => searchEffect(get(debouncedQueryAtom)))
 
 The `useQuery`/`useMutation`/`invalidateQueries` triple maps directly:
 
-| react-query | atoms |
-|---|---|
-| `useQuery({ queryKey, queryFn })` | `Atom.family` + `runtime.atom(effect)`, or `Client.query(...)` |
-| `queryKey` | the atom's identity (family arg / HttpApi request) |
-| `staleTime` / `refetchOnWindowFocus` | `Atom.swr({ staleTime, revalidateOnFocus })` |
-| `cacheTime` / `gcTime` | `Atom.setIdleTTL` |
-| `useMutation` | `runtime.fn` / `Client.mutation(...)` + `useAtomSet` |
-| `onSuccess` → `invalidateQueries(key)` | `reactivityKeys` on the mutation (automatic, success-only) |
-| `useInfiniteQuery` | `Atom.pull` / `runtime.pull` |
-| optimistic `onMutate`/`onError` rollback | `Atom.optimistic` + `Atom.optimisticFn` |
-| `<HydrationBoundary state>` | same name here: `Hydration.dehydrate` + `<HydrationBoundary>` |
+| react-query                              | atoms                                                          |
+| ---------------------------------------- | -------------------------------------------------------------- |
+| `useQuery({ queryKey, queryFn })`        | `Atom.family` + `runtime.atom(effect)`, or `Client.query(...)` |
+| `queryKey`                               | the atom's identity (family arg / HttpApi request)             |
+| `staleTime` / `refetchOnWindowFocus`     | `Atom.swr({ staleTime, revalidateOnFocus })`                   |
+| `cacheTime` / `gcTime`                   | `Atom.setIdleTTL`                                              |
+| `useMutation`                            | `runtime.fn` / `Client.mutation(...)` + `useAtomSet`           |
+| `onSuccess` → `invalidateQueries(key)`   | `reactivityKeys` on the mutation (automatic, success-only)     |
+| `useInfiniteQuery`                       | `Atom.pull` / `runtime.pull`                                   |
+| optimistic `onMutate`/`onError` rollback | `Atom.optimistic` + `Atom.optimisticFn`                        |
+| `<HydrationBoundary state>`              | same name here: `Hydration.dehydrate` + `<HydrationBoundary>`  |
 
 ```ts
 // ❌ BEFORE
-useQuery({ queryKey: ["todos", userId], queryFn: () => fetchTodos(userId), staleTime: 60_000 })
-useMutation({ mutationFn: addTodo, onSuccess: () => queryClient.invalidateQueries({ queryKey: ["todos"] }) })
+useQuery({ queryKey: ['todos', userId], queryFn: () => fetchTodos(userId), staleTime: 60_000 })
+useMutation({
+  mutationFn: addTodo,
+  onSuccess: () => queryClient.invalidateQueries({ queryKey: ['todos'] }),
+})
 ```
 
 ```ts
 // ✅ AFTER — and the errors are typed end to end
 const todosAtom = Atom.family((userId: number) =>
-  runtime.atom(TodoApi.use((api) => api.list(userId))).pipe(
-    Atom.withReactivity({ todos: [userId] }),
-    Atom.swr({ staleTime: "1 minute" })
-  )
+  runtime
+    .atom(TodoApi.use((api) => api.list(userId)))
+    .pipe(Atom.withReactivity({ todos: [userId] }), Atom.swr({ staleTime: '1 minute' })),
 )
-const addTodo = runtime.fn(addTodoEffect, { reactivityKeys: ["todos"] })
+const addTodo = runtime.fn(addTodoEffect, { reactivityKeys: ['todos'] })
 ```
 
 Don't run both systems over the same data. If the app already uses react-query, migrate a
@@ -1133,7 +1161,7 @@ don't write `useSyncExternalStore` adapters per component — bridge it once:
 const settingsAtom = runtime.subscriptionRef(makeSettingsRef)
 
 // ✅ arbitrary emitter → read-only stream atom
-const connectionAtom = runtime.atom(Stream.fromEventListener(sdk, "connectionChange"))
+const connectionAtom = runtime.atom(Stream.fromEventListener(sdk, 'connectionChange'))
 ```
 
 (The hooks already use `useSyncExternalStore` against the registry internally — that layer is
@@ -1185,25 +1213,25 @@ Architecture
 
 ## Appendix: quick reference
 
-| Task | API |
-|---|---|
-| local writable state | `Atom.make(value)` |
-| derived state | `Atom.make((get) => ...)` / `Atom.map` |
-| async data | `runtime.atom(effect)` → `AsyncResult` |
-| live/push data | `runtime.atom(stream)` |
-| mutation | `runtime.fn(effect, { reactivityKeys })` |
-| parameterized | `Atom.family((arg) => ...)` |
-| pagination | `runtime.pull(stream)` |
-| survive unmount | `Atom.keepAlive` / `Atom.setIdleTTL(duration)` |
-| cache policy | `Atom.swr({ staleTime, revalidateOnFocus })` |
-| polling | `Atom.withRefresh(duration)` |
-| optimistic UI | `Atom.optimistic` + `Atom.optimisticFn` |
-| persisted | `Atom.kvs({ runtime, key, schema, defaultValue })` |
-| URL param | `Atom.searchParam(name, { schema })` |
-| atomic writes | `Atom.batch(() => ...)` |
-| HTTP client | `AtomHttpApi.Service()(...)` — `.query` / `.mutation` |
-| RPC client | `AtomRpc.Service()(...)` — `.query` / `.mutation` |
-| per-subtree state | `ScopedAtom.make(() => ...)` |
-| registry-free cell | `AtomRef.make(value)` |
-| SSR | `Atom.serializable` + `Hydration.dehydrate` + `<HydrationBoundary>` |
-| test injection | `Atom.initialValue(runtime.layer, TestLayer)` |
+| Task                 | API                                                                 |
+| -------------------- | ------------------------------------------------------------------- |
+| local writable state | `Atom.make(value)`                                                  |
+| derived state        | `Atom.make((get) => ...)` / `Atom.map`                              |
+| async data           | `runtime.atom(effect)` → `AsyncResult`                              |
+| live/push data       | `runtime.atom(stream)`                                              |
+| mutation             | `runtime.fn(effect, { reactivityKeys })`                            |
+| parameterized        | `Atom.family((arg) => ...)`                                         |
+| pagination           | `runtime.pull(stream)`                                              |
+| survive unmount      | `Atom.keepAlive` / `Atom.setIdleTTL(duration)`                      |
+| cache policy         | `Atom.swr({ staleTime, revalidateOnFocus })`                        |
+| polling              | `Atom.withRefresh(duration)`                                        |
+| optimistic UI        | `Atom.optimistic` + `Atom.optimisticFn`                             |
+| persisted            | `Atom.kvs({ runtime, key, schema, defaultValue })`                  |
+| URL param            | `Atom.searchParam(name, { schema })`                                |
+| atomic writes        | `Atom.batch(() => ...)`                                             |
+| HTTP client          | `AtomHttpApi.Service()(...)` — `.query` / `.mutation`               |
+| RPC client           | `AtomRpc.Service()(...)` — `.query` / `.mutation`                   |
+| per-subtree state    | `ScopedAtom.make(() => ...)`                                        |
+| registry-free cell   | `AtomRef.make(value)`                                               |
+| SSR                  | `Atom.serializable` + `Hydration.dehydrate` + `<HydrationBoundary>` |
+| test injection       | `Atom.initialValue(runtime.layer, TestLayer)`                       |

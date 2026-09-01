@@ -1805,9 +1805,8 @@ const collectRequirementRow = (
 }
 
 const nestedNodes = (syntax: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
-  syntax.children.flatMap(
-    (element): ReadonlyArray<SyntaxTree.Node> =>
-      SyntaxTree.isNode(element) ? [element, ...nestedNodes(element)] : [],
+  syntax.children.flatMap((element): ReadonlyArray<SyntaxTree.Node> =>
+    SyntaxTree.isNode(element) ? [element, ...nestedNodes(element)] : [],
   )
 
 const constraintDomain = (

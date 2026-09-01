@@ -40,7 +40,14 @@ export type Workspace = typeof workspaceSchema.Type
 export const seededWorkspaces: ReadonlyArray<Workspace> = [
   {
     name: 'Syntax',
-    panes: { a1: 'source', a2: 'tokens', b1: 'tree', b2: 'diagnostics', c1: 'index', c2: 'closure' },
+    panes: {
+      a1: 'source',
+      a2: 'tokens',
+      b1: 'tree',
+      b2: 'diagnostics',
+      c1: 'index',
+      c2: 'closure',
+    },
   },
   {
     name: 'Semantics',

@@ -905,24 +905,23 @@ export const projectDataFlow = (
     }
   }
 
-  const groups = draft.groups.map(
-    (group): FlowGroup =>
-      Object.freeze({
-        _tag: 'FlowGroup',
-        id: group.id,
-        label: group.label,
-        detail: group.detail,
-        depth: group.depth,
-        ordinal: group.ordinal,
-        parentId: group.parentId,
-        state: group.state,
-        span: group.span,
-        nodeIds: Object.freeze([...group.nodeIds]),
-        edgeIds: Object.freeze([...group.edgeIds]),
-        ...(overlay?.groups.get(group.id) === undefined
-          ? {}
-          : { evaluation: overlay.groups.get(group.id) }),
-      }),
+  const groups = draft.groups.map((group): FlowGroup =>
+    Object.freeze({
+      _tag: 'FlowGroup',
+      id: group.id,
+      label: group.label,
+      detail: group.detail,
+      depth: group.depth,
+      ordinal: group.ordinal,
+      parentId: group.parentId,
+      state: group.state,
+      span: group.span,
+      nodeIds: Object.freeze([...group.nodeIds]),
+      edgeIds: Object.freeze([...group.edgeIds]),
+      ...(overlay?.groups.get(group.id) === undefined
+        ? {}
+        : { evaluation: overlay.groups.get(group.id) }),
+    }),
   )
   const nodes = draft.nodes.map((item): FlowNode => {
     const evaluation = item.evaluation ?? overlay?.items.get(item.id)

@@ -1,6 +1,6 @@
 ## Why
 
-Local Silk editor support in Cursor is fragile and slow to iterate: the documented symlink install points at an absolute package path, so worktrees (and deleted agent checkouts) leave a dangling extension; there is no Extension Development Host launch config; and the TextMate grammar only paints a coarse keyword blob. Developers rebuild and reload without confidence that Cursor is loading *this* checkout, and highlighting is merely adequate when it could read more like a real language.
+Local Silk editor support in Cursor is fragile and slow to iterate: the documented symlink install points at an absolute package path, so worktrees (and deleted agent checkouts) leave a dangling extension; there is no Extension Development Host launch config; and the TextMate grammar only paints a coarse keyword blob. Developers rebuild and reload without confidence that Cursor is loading _this_ checkout, and highlighting is merely adequate when it could read more like a real language.
 
 ## What Changes
 

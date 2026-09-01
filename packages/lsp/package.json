@@ -2,35 +2,31 @@
   "name": "@silklang/lsp",
   "version": "0.0.0",
   "description": "Language Server Protocol server for Silk Effect, powered by the bootstrap compiler analysis snapshot.",
+  "keywords": [
+    "effect",
+    "language-server",
+    "lsp",
+    "silk"
+  ],
+  "homepage": "https://github.com/julia-script/silk-effect#readme",
+  "bugs": {
+    "url": "https://github.com/julia-script/silk-effect/issues"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/julia-script/silk-effect.git",
     "directory": "packages/lsp"
   },
-  "homepage": "https://github.com/julia-script/silk-effect#readme",
-  "bugs": {
-    "url": "https://github.com/julia-script/silk-effect/issues"
+  "bin": {
+    "silk-lsp": "./dist/bin.js"
   },
-  "keywords": [
-    "silk",
-    "lsp",
-    "language-server",
-    "effect"
-  ],
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
-  "type": "module",
   "files": [
     "dist",
     "README.md",
     "LICENSE"
   ],
-  "bin": {
-    "silk-lsp": "./dist/bin.js"
-  },
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -57,6 +53,10 @@
       "types": "./dist/Workspace.d.ts",
       "import": "./dist/Workspace.js"
     }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "pnpm clean && tsc -p tsconfig.json",

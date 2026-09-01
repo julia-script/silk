@@ -8,4 +8,3 @@ Type completion SHALL offer canonical `f32` and `f64` items derived from semanti
 
 - **WHEN** completion is requested in a type position
 - **THEN** `f32` and `f64` appear deterministically
-

@@ -4,7 +4,7 @@
 
 The workspace already ships `@silklang/llvm`, whose conventions this package inherits at the
 repository level (Effect architecture rules, subpath exports, `@effect/vitest` testing, fixture
-oracles, changesets). Its internal architecture is *not* inherited: WebAssembly's module model —
+oracles, changesets). Its internal architecture is _not_ inherited: WebAssembly's module model —
 flat sections, index spaces, structured control flow, a closed instruction set — permits a
 substantially simpler, data-first design. See proposal.md for motivation and scope.
 
@@ -27,7 +27,7 @@ changes layer the rest. Design decisions here must not paint those follow-ups in
 
 - No CFG input or relooper: callers provide structured control flow (the wasm shape).
 - No streaming/incremental emission; modules are emitted whole from committed state.
-- No text or binary *parsing*; this package only produces the two representations.
+- No text or binary _parsing_; this package only produces the two representations.
 - No optimization of any kind (constant folding, dead-code elimination, local coalescing).
 
 ## Decisions
@@ -94,7 +94,7 @@ provably equivalent.
 One pinned `wasm-tools` release provides validation, wat→wasm assembly for round-trip
 comparison, and inspection for the name section. Dev-time only, recorded in provenance docs,
 mirroring the llvm package's pinned-upstream discipline with a single tool. Negative corpus
-verification (builder rejects ⇒ oracle rejects) guards against the builder being *stricter* in
+verification (builder rejects ⇒ oracle rejects) guards against the builder being _stricter_ in
 the wrong places or accepting what the spec forbids.
 
 ### 7. Package layout
@@ -132,7 +132,7 @@ Subpath exports per module, root barrel discouraged — matching repository conv
   rule, not per bug found; the spec appendix algorithm is followed structurally rather than
   re-derived.
 - [Byte-identical fixture comparison is brittle if wasm-tools canonicalizes differently] → the
-  committed expected bytes are *our* output checked into fixtures; the oracle asserts validity
+  committed expected bytes are _our_ output checked into fixtures; the oracle asserts validity
   and round-trip equality, never formatting opinions.
 - [Names in wat identifiers must be sanitized] → wat `$id` character set is restricted; names
   outside it fall back to indices in text while remaining exact in the binary name section.

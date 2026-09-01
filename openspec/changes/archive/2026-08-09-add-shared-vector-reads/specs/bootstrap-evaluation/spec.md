@@ -30,4 +30,3 @@ destruction, and release.
 
 - **WHEN** evaluation reads the same initialized element through two shared raw-buffer aliases
 - **THEN** both results agree and the later destruction and release trace is identical to a run with no reads
-

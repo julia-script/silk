@@ -2,26 +2,21 @@
   "name": "@silklang/llvm",
   "version": "0.0.0",
   "description": "LLVM integration primitives for Silk Effect.",
+  "keywords": [
+    "effect",
+    "llvm",
+    "typescript"
+  ],
+  "homepage": "https://github.com/julia-script/silk-effect#readme",
+  "bugs": {
+    "url": "https://github.com/julia-script/silk-effect/issues"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/julia-script/silk-effect.git",
     "directory": "packages/llvm"
   },
-  "homepage": "https://github.com/julia-script/silk-effect#readme",
-  "bugs": {
-    "url": "https://github.com/julia-script/silk-effect/issues"
-  },
-  "keywords": [
-    "llvm",
-    "effect",
-    "typescript"
-  ],
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
-  "type": "module",
   "files": [
     "dist",
     "docs",
@@ -30,6 +25,7 @@
     "THIRD_PARTY_NOTICES.md",
     "UPSTREAM.md"
   ],
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -139,6 +135,10 @@
       "types": "./dist/Verify.d.ts",
       "import": "./dist/Verify.js"
     }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "pnpm clean && tsc -p tsconfig.json",

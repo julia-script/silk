@@ -12,7 +12,7 @@ test('a run containing tests keeps the peak within the worker budget', () => {
   }
 })
 
-test('the per-suite worker count is vitest\'s host-derived default', () => {
+test("the per-suite worker count is vitest's host-derived default", () => {
   // Kept in step with vitest.shared.ts, which deliberately does not override it: the spare core
   // is what a syscall-heavy test needs to stay schedulable (#177).
   assert.equal(workersPerTask(['test'], 4), 3)

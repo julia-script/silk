@@ -16,4 +16,3 @@ produce one instance-key type, one worklist entry, and one deterministic member 
 
 - **WHEN** reachable contracts use both `Token | End` and `End | (Token | End)`
 - **THEN** their normalized instance keys identify the same runtime type
-

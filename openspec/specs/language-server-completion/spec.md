@@ -4,7 +4,9 @@
 
 Defines deterministic, recovery-aware Silk completions selected from compiler scope, type, member,
 intrinsic, and syntax context rather than protocol-side spelling heuristics.
+
 ## Requirements
+
 ### Requirement: Type completion offers canonical integer types
 
 Type completion SHALL derive the ordered lowercase integer vocabulary plus `bool`, `()`, and `never` from semantic identities and MUST NOT offer removed uppercase aliases.

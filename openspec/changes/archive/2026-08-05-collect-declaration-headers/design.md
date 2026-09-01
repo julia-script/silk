@@ -44,14 +44,14 @@ this change extracts the header half of the monolith into a `DeclarationIndex` p
    `Duplicate {original, cause}` for later ones, `Unidentified` for unavailable names. The
    structural per-module `DeclarationId {sourceId, ordinal}` stays as the deterministic
    source-local identity that parameter/argument identities nest under — the ordinal is exactly
-   the concrete-order fact the existing specs pin. The *index* is keyed canonically; downstream
+   the concrete-order fact the existing specs pin. The _index_ is keyed canonically; downstream
    phases key new tables against canonical identities as they arrive.
 
 3. **`collectModule(syntax)` and `collect(closure)`.** Per-module collection stays available so
    single-module semantic analysis keeps its current entry point; the closure-level `collect`
    maps it over canonically ordered modules and merges diagnostics with the unified ordering.
    Index order: canonical module identity, then concrete declaration order within the module —
-   name-sorting header lists would shuffle source facts for no downstream gain; canonical *keys*
+   name-sorting header lists would shuffle source facts for no downstream gain; canonical _keys_
    are what later phases sort by.
 
 4. **Header diagnostics move phase ownership, not codes.** `SEM0001` (on declared types),
@@ -66,7 +66,7 @@ this change extracts the header half of the monolith into a `DeclarationIndex` p
 ## Risks / Trade-offs
 
 - [Type moves ripple through imports] → Re-exports from `SemanticAnalysis` keep every existing
-  consumer compiling; the inspector and evaluator touch fact *values*, not module paths.
+  consumer compiling; the inspector and evaluator touch fact _values_, not module paths.
 - [Two entry points (module, closure) could drift] → `collect` is defined as the canonical-order
   fold of `collectModule`; there is one implementation of header analysis.
 - [Canonical states add a field every fixture sees] → `deepEqual`-style assertions on whole

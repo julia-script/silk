@@ -23,10 +23,7 @@ export default function Home() {
   // file. Read per render, not at module scope: the file is not an import, so the dev server
   // never invalidates the module for it, and a module-scope read would pin the first version
   // until restart. Production renders this page once at build time either way.
-  const html = readFileSync(
-    join(process.cwd(), 'app/_introduction/introduction.html'),
-    'utf8',
-  )
+  const html = readFileSync(join(process.cwd(), 'app/_introduction/introduction.html'), 'utf8')
   return (
     <div className={`silk-intro ${mono.variable}`}>
       <header className="bar">

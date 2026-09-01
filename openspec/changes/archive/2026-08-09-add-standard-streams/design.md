@@ -14,7 +14,7 @@ This change follows static text and uses the existing explicit service requireme
 
 `writeAll(destination, bytes)` remains in the requirement row until provided. Tests can provide memory; native entry provides process streams; Wasm hosts provide the versioned import.
 
-*Alternative considered:* ambient stdout. Rejected because it breaks capability transparency and provider replacement.
+_Alternative considered:_ ambient stdout. Rejected because it breaks capability transparency and provider replacement.
 
 ### MIR carries target-neutral writes
 
@@ -37,4 +37,3 @@ Add service contracts and requirement propagation, MIR/evaluator memory provider
 ## Open Questions
 
 None.
-

@@ -31,7 +31,7 @@ The alternatives were a new grammar production and reusing the `Intrinsic` root.
 
 - A grammar production costs a token or node kind plus the parser, the formatter, the syntax
   correspondence, and the editor surfaces — a large amount of machinery for four names.
-- `Intrinsic` is a closed catalog of *operations* with arities and availability contracts. A bound
+- `Intrinsic` is a closed catalog of _operations_ with arities and availability contracts. A bound
   is not an operation, and putting it there would drag the intrinsic-boundary specification into a
   change that has nothing to do with it. `Target` also says the true thing: the value comes from the
   target.
@@ -50,9 +50,9 @@ range.
 Declaring a selector at any other type is rejected. Without that, `pub const MAX: isize =
 Target.usizeMax` would be a plausible typo that produces a wrong bound with no diagnostic.
 
-`usize.MIN` is deliberately *not* a selector. Zero is zero at every pointer width, and routing it
+`usize.MIN` is deliberately _not_ a selector. Zero is zero at every pointer width, and routing it
 through the mechanism would suggest the mechanism is about pointer-width types rather than about
-pointer-width *values*.
+pointer-width _values_.
 
 ### Lowering selects; nothing before it does
 
@@ -61,7 +61,7 @@ before the three engines diverge — evaluation, WebAssembly, and native LLVM al
 emits. Selecting there gives all three the same number without any of them knowing a selection
 happened, and without a fourth copy of the pointer-width rule.
 
-Before lowering, elaboration records the fact's *widest* value together with its selector. A value
+Before lowering, elaboration records the fact's _widest_ value together with its selector. A value
 has to be present for the declaration to type-check and for tooling to treat the reference as an
 ordinary immediate, and 64 bits is the width elaboration already ranges every integer at. It is a
 placeholder, and two things keep it from leaking:
@@ -72,7 +72,7 @@ placeholder, and two things keep it from leaking:
   every `wasm32-unknown-unknown` compilation, because that check reads every declared `usize`
   constant whether or not the program mentions it.
 
-The acceptance test asserts the *absence* of the other width's value in the lowered MIR, not only
+The acceptance test asserts the _absence_ of the other width's value in the lowered MIR, not only
 the presence of the right one, because a placeholder that stops being replaced is the failure this
 design has to rule out.
 

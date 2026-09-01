@@ -2,32 +2,28 @@
   "name": "@silklang/editor-support",
   "version": "0.0.0",
   "description": "Portable Silk editor support: CodeMirror integration, TextMate grammar, protocol projections, and the <silk-snippet> custom element.",
+  "keywords": [
+    "codemirror",
+    "silk",
+    "syntax-highlighting",
+    "textmate"
+  ],
+  "homepage": "https://github.com/julia-script/silk-effect#readme",
+  "bugs": {
+    "url": "https://github.com/julia-script/silk-effect/issues"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/julia-script/silk-effect.git",
     "directory": "packages/editor-support"
   },
-  "homepage": "https://github.com/julia-script/silk-effect#readme",
-  "bugs": {
-    "url": "https://github.com/julia-script/silk-effect/issues"
-  },
-  "keywords": [
-    "silk",
-    "codemirror",
-    "textmate",
-    "syntax-highlighting"
-  ],
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
-  "type": "module",
   "files": [
     "dist",
     "README.md",
     "LICENSE"
   ],
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -58,6 +54,10 @@
       "import": "./dist/register.js"
     },
     "./bundle": "./dist/silk-snippet.bundle.js"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "pnpm clean && tsc -p tsconfig.json && node scripts/bundle.mjs",

@@ -102,12 +102,12 @@ registry.
 
 Provider modes preserve access:
 
-| Operation | Provider access | Typical use |
-| --- | --- | --- |
-| `Effect.provide` | shared borrow | read-only services |
-| `Effect.provideMut` | exclusive borrow | allocators, streams, filesystems, stateful test doubles |
-| `Effect.bindRequirementOwned` | ownership transfer | a provider retained by the computation |
-| `Effect.provideEffect` | acquired by an Effect | fresh scoped provider per execution or retry |
+| Operation                     | Provider access       | Typical use                                             |
+| ----------------------------- | --------------------- | ------------------------------------------------------- |
+| `Effect.provide`              | shared borrow         | read-only services                                      |
+| `Effect.provideMut`           | exclusive borrow      | allocators, streams, filesystems, stateful test doubles |
+| `Effect.bindRequirementOwned` | ownership transfer    | a provider retained by the computation                  |
+| `Effect.provideEffect`        | acquired by an Effect | fresh scoped provider per execution or retry            |
 
 Roles distinguish multiple requirements for the same service. If one provider could satisfy more
 than one row member, select the complete member explicitly as the first generic argument.

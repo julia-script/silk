@@ -4,7 +4,9 @@
 
 Define one closed, deterministic bootstrap expression-operator model that preserves qualified
 data-first behavior while giving source programs conventional precedence and pipeline syntax.
+
 ## Requirements
+
 ### Requirement: Operators resolve homogeneously across integers
 
 Arithmetic, bitwise, and comparison operators SHALL resolve only for compatible operands of the same integer type. They SHALL select that type's signed or unsigned checked semantics without implicit conversion, overload lookup, truthiness, or operand reordering. Prefix negation SHALL support signed integers only; logical negation SHALL support `bool` only; bitwise complement SHALL support integers only. Each bitwise operator SHALL select exactly the operation its named counterpart selects — `&` selects `bitAnd`, `|` selects `bitOr`, `^` selects `bitXor`, and prefix `~` selects `bitNot` — without introducing an intrinsic of its own.

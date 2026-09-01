@@ -64,4 +64,4 @@ questions: `Bool`'s MIR/LLVM representation, and whether `if` is statement-only 
   the accepted `if` shape (`if node.isLeaf { return 1 }`) and `Bool.not` as a qualified actor
   operation.
 - [Issue 01](../../../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md):
-  cleanup on *every* structured exit — per-arm exits are where that plural first matters.
+  cleanup on _every_ structured exit — per-arm exits are where that plural first matters.

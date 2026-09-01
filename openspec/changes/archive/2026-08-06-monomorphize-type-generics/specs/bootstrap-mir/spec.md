@@ -8,10 +8,11 @@ retain provenance naming its generic declaration and concrete arguments, while t
 reject open type parameters or missing concrete layout entries.
 
 #### Scenario: Lower a concrete identity
+
 - **WHEN** discovery supplies `identity<Token>`
 - **THEN** MIR contains one concrete Token-typed function whose provenance names the generic declaration and `Token` argument
 
 #### Scenario: Reject open generic MIR
+
 - **WHEN** a malformed MIR function still contains type parameter `T`
 - **THEN** verification rejects it before evaluation or backend emission
-

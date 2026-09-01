@@ -13,4 +13,3 @@ Evaluation SHALL store explicit float width and IEEE bits, round after every `f3
 
 - **WHEN** a float is created from same-width integer bits and reinterpreted back
 - **THEN** evaluation returns the original bits exactly
-

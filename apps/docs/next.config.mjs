@@ -1,11 +1,11 @@
-import { createMDX } from 'fumadocs-mdx/next';
+import { createMDX } from 'fumadocs-mdx/next'
 
-const withMDX = createMDX();
+const withMDX = createMDX()
 
 const editorIsolationHeaders = [
   { key: 'Cross-Origin-Embedder-Policy', value: 'require-corp' },
   { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
-];
+]
 
 /** @type {import('next').NextConfig} */
 const config = {
@@ -29,7 +29,7 @@ const config = {
         source: '/docs/:path*',
         headers: [{ key: 'Vary', value: 'Accept' }],
       },
-    ];
+    ]
   },
   async rewrites() {
     return [
@@ -37,8 +37,8 @@ const config = {
         source: '/docs/:path*.md',
         destination: '/llms.mdx/docs/:path*',
       },
-    ];
+    ]
   },
-};
+}
 
-export default withMDX(config);
+export default withMDX(config)

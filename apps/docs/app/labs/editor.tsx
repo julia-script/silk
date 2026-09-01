@@ -66,8 +66,7 @@ export function SilkEditor(props: {
     const handle = handleRef.current
     if (handle === null) return
     const source = Analysis.sources(props.snapshot).get(props.module)
-    const bytes =
-      source === undefined ? encoder.encode(props.value) : Uint8Array.from(source.bytes)
+    const bytes = source === undefined ? encoder.encode(props.value) : Uint8Array.from(source.bytes)
     handle.setSession(SnippetEditor.session(props.module, bytes, props.snapshot))
     // props.value is deliberately not a dependency: sessions pair bytes with their snapshot.
     // eslint-disable-next-line react-hooks/exhaustive-deps

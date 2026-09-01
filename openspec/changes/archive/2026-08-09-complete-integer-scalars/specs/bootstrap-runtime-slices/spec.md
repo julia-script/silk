@@ -13,4 +13,3 @@ Slice `length` and indices SHALL use target-selected `usize`. Access SHALL check
 
 - **WHEN** an exclusive index equals or exceeds length
 - **THEN** execution traps before evaluating the replacement
-

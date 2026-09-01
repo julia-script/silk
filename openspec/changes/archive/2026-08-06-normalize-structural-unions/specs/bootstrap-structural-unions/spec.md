@@ -94,4 +94,3 @@ payload once.
 
 - **WHEN** a contextual conversion attempts to inject a shared or exclusive borrow into an owned union
 - **THEN** ownership rejects the conversion without fabricating an owned payload
-

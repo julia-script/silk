@@ -105,14 +105,13 @@ const replaceMirOperation = (
         Object.freeze({
           ...fn,
           regions: Object.freeze(
-            fn.regions.map(
-              (region): Mir.Region =>
-                region._tag === 'OperationRegion'
-                  ? Object.freeze({
-                      ...region,
-                      operations: Object.freeze(region.operations.map(rewrite)),
-                    })
-                  : region,
+            fn.regions.map((region): Mir.Region =>
+              region._tag === 'OperationRegion'
+                ? Object.freeze({
+                    ...region,
+                    operations: Object.freeze(region.operations.map(rewrite)),
+                  })
+                : region,
             ),
           ),
         }),
@@ -910,14 +909,13 @@ it.effect('requires failure-path loan endings on every MIR run form', () =>
             Object.freeze({
               ...fn,
               regions: Object.freeze(
-                fn.regions.map(
-                  (region): Mir.Region =>
-                    region._tag === 'OperationRegion'
-                      ? Object.freeze({
-                          ...region,
-                          operations: Object.freeze(region.operations.map(rewrite)),
-                        })
-                      : region,
+                fn.regions.map((region): Mir.Region =>
+                  region._tag === 'OperationRegion'
+                    ? Object.freeze({
+                        ...region,
+                        operations: Object.freeze(region.operations.map(rewrite)),
+                      })
+                    : region,
                 ),
               ),
             }),
@@ -1644,14 +1642,13 @@ pub fn main() -> i32 {
     const forgedChoose: Mir.MirFunction = Object.freeze({
       ...choose,
       regions: Object.freeze(
-        choose.regions.map(
-          (region): Mir.Region =>
-            region._tag === 'OperationRegion'
-              ? Object.freeze({
-                  ...region,
-                  operations: injectBeforeEnding(region.operations),
-                })
-              : region,
+        choose.regions.map((region): Mir.Region =>
+          region._tag === 'OperationRegion'
+            ? Object.freeze({
+                ...region,
+                operations: injectBeforeEnding(region.operations),
+              })
+            : region,
         ),
       ),
     })
@@ -1808,17 +1805,16 @@ it.effect('repacks heterogeneous failure payload carriers without changing membe
       ...recover,
       localTypes: Object.freeze([...recover.localTypes, targetType]),
       regions: Object.freeze(
-        recover.regions.map(
-          (region): Mir.Region =>
-            !inserted && region._tag === 'OperationRegion'
-              ? (() => {
-                  inserted = true
-                  return Object.freeze({
-                    ...region,
-                    operations: Object.freeze([pack, ...region.operations]),
-                  })
-                })()
-              : region,
+        recover.regions.map((region): Mir.Region =>
+          !inserted && region._tag === 'OperationRegion'
+            ? (() => {
+                inserted = true
+                return Object.freeze({
+                  ...region,
+                  operations: Object.freeze([pack, ...region.operations]),
+                })
+              })()
+            : region,
         ),
       ),
     })
@@ -2091,14 +2087,13 @@ pub fn main() -> i32 { return run Effect.catchAll(selected(1), recoverAll) }`,
           Object.freeze({
             ...fn,
             regions: Object.freeze(
-              fn.regions.map(
-                (region): Mir.Region =>
-                  region._tag === 'OperationRegion'
-                    ? Object.freeze({
-                        ...region,
-                        operations: rewriteOperations(region.operations),
-                      })
-                    : region,
+              fn.regions.map((region): Mir.Region =>
+                region._tag === 'OperationRegion'
+                  ? Object.freeze({
+                      ...region,
+                      operations: rewriteOperations(region.operations),
+                    })
+                  : region,
               ),
             ),
           }),
@@ -2270,14 +2265,13 @@ pub fn main() -> i32 { return run Effect.catchAll(selected(1), recoverAll) }`,
           Object.freeze({
             ...fn,
             regions: Object.freeze(
-              fn.regions.map(
-                (region): Mir.Region =>
-                  region._tag === 'OperationRegion'
-                    ? Object.freeze({
-                        ...region,
-                        operations: injectStructuredPrefix(region.operations, region.id),
-                      })
-                    : region,
+              fn.regions.map((region): Mir.Region =>
+                region._tag === 'OperationRegion'
+                  ? Object.freeze({
+                      ...region,
+                      operations: injectStructuredPrefix(region.operations, region.id),
+                    })
+                  : region,
               ),
             ),
           }),

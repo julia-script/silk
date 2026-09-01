@@ -1,6 +1,6 @@
 ## Why
 
-The owned-allocation substrate shipped, but nothing yet proves it can carry a *useful* owned
+The owned-allocation substrate shipped, but nothing yet proves it can carry a _useful_ owned
 sequence. Raw allocation only demonstrates the boundary; the bootstrap language still cannot express
 runtime-sized owned output, which is the shape every real compiler pass produces. The deliberate
 handoff in `add-self-contained-owned-allocation` was to leave `Vector<T>` and the scanner proof to
@@ -11,7 +11,7 @@ Two prerequisites are missing and were confirmed by probing the current compiler
 
 - Parametric conformances do not exist. `impl<T> Drop for Vector<T>` fails at the parser
   (`PAR0001: Expected ForKeyword`) and at semantic analysis (`SEM0083: the capability and provider
-  must resolve to concrete nominal types`). Concrete instantiations like `impl Drop for Vector<I32>`
+must resolve to concrete nominal types`). Concrete instantiations like `impl Drop for Vector<I32>`
   already work, as do generic structs, generic fields, and `RawBuffer.from<T>` under a type
   parameter. Without a parametric form, a generic owned sequence would need one hand-written `Drop`
   per element type — which is not a standard library.

@@ -22,4 +22,3 @@ Native LLVM SHALL use the selected unsigned 64-bit `usize` lane; direct WebAssem
 
 - **WHEN** values cross the signed `i32` boundary
 - **THEN** WebAssembly uses unsigned comparison and matches evaluation
-

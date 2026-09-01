@@ -35,36 +35,39 @@ import * as Type from '@silklang/llvm/Type'
 After validating the AST shape, create the module and signature:
 
 ```typescript
-const builder = yield* Builder.make({
-  moduleName: 'tiny-language',
-  sourceFilename: 'answer.tiny',
-})
-const i32 = yield* Type.integer(builder, 32)
-const signature = yield* Type.functionType(builder, i32, [])
-const main = yield* FunctionActor.declare(builder, 'main', signature)
+const builder =
+  yield *
+  Builder.make({
+    moduleName: 'tiny-language',
+    sourceFilename: 'answer.tiny',
+  })
+const i32 = yield * Type.integer(builder, 32)
+const signature = yield * Type.functionType(builder, i32, [])
+const main = yield * FunctionActor.declare(builder, 'main', signature)
 ```
 
 These operations establish four things introduced in Lesson 2:
 
-| Builder operation | LLVM structure |
-| --- | --- |
-| `Builder.make` | One module and one owner for every handle that follows |
-| `Type.integer(builder, 32)` | The `i32` Tiny value type |
-| `Type.functionType(builder, i32, [])` | A function returning `i32` with no parameters |
-| `Function.declare(builder, 'main', signature)` | The module-global symbol `@main` |
+| Builder operation                              | LLVM structure                                         |
+| ---------------------------------------------- | ------------------------------------------------------ |
+| `Builder.make`                                 | One module and one owner for every handle that follows |
+| `Type.integer(builder, 32)`                    | The `i32` Tiny value type                              |
+| `Type.functionType(builder, i32, [])`          | A function returning `i32` with no parameters          |
+| `Function.declare(builder, 'main', signature)` | The module-global symbol `@main`                       |
 
 Now construct the body transaction:
 
 ```typescript
-yield* FunctionActor.buildBody(
-  builder,
-  main,
-  Effect.fnUntraced(function* (body) {
-    yield* Block.make(body, 'entry')
-    const value = yield* Constant.integerSigned(builder, i32, literal.value)
-    yield* FunctionBody.returnValue(body, value)
-  }),
-)
+yield *
+  FunctionActor.buildBody(
+    builder,
+    main,
+    Effect.fnUntraced(function* (body) {
+      yield* Block.make(body, 'entry')
+      const value = yield* Constant.integerSigned(builder, i32, literal.value)
+      yield* FunctionBody.returnValue(body, value)
+    }),
+  )
 ```
 
 `Block.make` creates `entry` and makes it the insertion block. `Constant.integerSigned` creates
@@ -79,7 +82,7 @@ than corrupting the module.
 Finally, render the teaching artifact:
 
 ```typescript
-return yield* IrText.render(builder)
+return yield * IrText.render(builder)
 ```
 
 `Compiler.compile` should be a named `Effect.fn` returning textual IR and preserving

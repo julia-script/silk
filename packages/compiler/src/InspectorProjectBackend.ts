@@ -1726,16 +1726,14 @@ export const arrayValueRows = (
       detail: types.length === 0 ? 'none' : `${types.length}`,
       head: true,
     },
-    ...types.map(
-      (type, ordinal): RowModel => ({
-        key: `array-type-${ordinal}`,
-        depth: 1,
-        dot: 'symbol',
-        label: typeText(type),
-        detail: `length ${type.length} · element ${typeText(type.element)}`,
-        tone: 'symbol',
-      }),
-    ),
+    ...types.map((type, ordinal): RowModel => ({
+      key: `array-type-${ordinal}`,
+      depth: 1,
+      dot: 'symbol',
+      label: typeText(type),
+      detail: `length ${type.length} · element ${typeText(type.element)}`,
+      tone: 'symbol',
+    })),
     {
       key: 'array-literals',
       label: 'literal elements',

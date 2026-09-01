@@ -8,4 +8,3 @@ The parser SHALL preserve decimal point, exponent marker/sign, leading sign, dig
 
 - **WHEN** source contains `-1.25e-3`
 - **THEN** syntax retains every component as one recoverable expression
-

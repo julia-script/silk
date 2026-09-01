@@ -21,7 +21,7 @@
 
 - [x] 3.1 Infer mapped target type, row, and representation binders from substituted conformance and operation contracts.
 - [x] 3.2 Preserve generic target-inference inputs in unresolved HIR witness questions and inferred
-  target arguments in conformance mappings and concrete instance keys.
+      target arguments in conformance mappings and concrete instance keys.
 - [x] 3.3 Add two-specialization acceptance plus unresolved and conflicting binder diagnostics.
 - [x] 3.4 Lower every admitted witness to one static target with no runtime dictionary or service slot.
 
@@ -62,7 +62,7 @@
   host-stack-sensitive clean-main failure at `WasmShadowStackHeapCollision.test.ts:430`: expected
   `0`, received `undefined`; the compiler suite otherwise passed 1,828/1,829 tests. The failure also
   reproduces in isolation and this change has no compiler implementation diff. `pnpm
-  release:candidate` passed (7/7 release validation tests).
+release:candidate` passed (7/7 release validation tests).
 - Verification (5.3): the focused compiler batch passed 36/36 tests. HIR retains exact failure and
   requirement rows on the generic bound-operation contract. Raw MIR retains the exact
   `EffectOutcome` and a direct call to the specialized witness target with no dictionary, vtable,

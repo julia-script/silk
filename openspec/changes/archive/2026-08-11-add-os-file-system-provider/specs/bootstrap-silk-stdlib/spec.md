@@ -21,4 +21,3 @@ MUST NOT mention `OsHandle`, native paths, target selectors, or the provider typ
 
 - **WHEN** an application supplies another value conforming to the portable `FileSystem` service
 - **THEN** Effect dispatch uses that provider without constructing `OsFileSystem` or requiring OS intrinsics
-

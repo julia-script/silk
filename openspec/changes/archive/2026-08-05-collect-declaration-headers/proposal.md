@@ -2,7 +2,7 @@
 
 The spike's `SemanticAnalysis` discovers declarations and resolves bodies in one pass over one
 file. The pinned pipeline requires every top-level declaration header to receive a canonical
-identity *before* any body resolves — canonical identities are what determine work order,
+identity _before_ any body resolves — canonical identities are what determine work order,
 diagnostic order, and every fact-table key downstream. This proposal extracts the header half of
 the monolith; body elaboration follows separately.
 

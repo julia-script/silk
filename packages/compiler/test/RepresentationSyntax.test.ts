@@ -21,9 +21,8 @@ const parse = (id: string, source: string) =>
   Parser.parse(Lexer.lex(SourceFile.make(id, encoder.encode(source))))
 
 const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Element> =>
-  node.children.flatMap(
-    (child): ReadonlyArray<SyntaxTree.Element> =>
-      SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [child],
+  node.children.flatMap((child): ReadonlyArray<SyntaxTree.Element> =>
+    SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [child],
   )
 
 const index = (id: string, source: string) =>

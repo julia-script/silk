@@ -53,7 +53,7 @@ enough context to make it. This is the shape a scoped resource wrapper uses: `ma
 
 Locals are cleaned in reverse acquisition order. The finalizer is acquired outside the protected
 Effect — `ensuring` wraps it — so reverse order puts the finalizer last. Any other choice would make
-the finalizer observe the Effect's locals *after* it had committed to running, which is both harder
+the finalizer observe the Effect's locals _after_ it had committed to running, which is both harder
 to reason about and impossible to guarantee, since those locals belong to a frame the combinator
 does not own.
 

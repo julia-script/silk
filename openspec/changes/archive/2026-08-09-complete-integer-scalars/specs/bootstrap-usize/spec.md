@@ -31,4 +31,3 @@ A non-negative literal in immediate `usize` context SHALL retain exact magnitude
 
 - **WHEN** `usize` subtraction would be negative
 - **THEN** ordinary execution traps rather than wrapping
-

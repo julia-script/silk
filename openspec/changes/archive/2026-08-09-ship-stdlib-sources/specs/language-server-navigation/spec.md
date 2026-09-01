@@ -18,4 +18,3 @@ For a target in another module, the language server SHALL return that module's a
 
 - **WHEN** a reference resolves to a declaration in a shipped standard-library module
 - **THEN** definition returns the canonical toolchain file URI and exact declaration range
-

@@ -9,21 +9,21 @@
  */
 export function remarkH1Title() {
   return (tree, file) => {
-    const index = tree.children.findIndex((node) => node.type === 'heading' && node.depth === 1);
-    if (index === -1) return;
+    const index = tree.children.findIndex((node) => node.type === 'heading' && node.depth === 1)
+    if (index === -1) return
 
-    const heading = tree.children[index];
+    const heading = tree.children[index]
     // Fumadocs renders the title itself via <DocsTitle>, so drop the duplicate heading.
-    tree.children.splice(index, 1);
+    tree.children.splice(index, 1)
 
     // The schema fills a file-name fallback and flags it; the H1 is the better title.
     // An author-written frontmatter title always wins.
-    const frontmatter = (file.data.frontmatter ??= {});
-    if (frontmatter.titleFromFileName) frontmatter.title = toText(heading);
-  };
+    const frontmatter = (file.data.frontmatter ??= {})
+    if (frontmatter.titleFromFileName) frontmatter.title = toText(heading)
+  }
 }
 
 function toText(node) {
-  if (typeof node.value === 'string') return node.value;
-  return (node.children ?? []).map(toText).join('');
+  if (typeof node.value === 'string') return node.value
+  return (node.children ?? []).map(toText).join('')
 }

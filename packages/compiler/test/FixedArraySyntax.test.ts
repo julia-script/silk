@@ -16,9 +16,8 @@ const parse = (source: string) =>
   Parser.parse(Lexer.lex(SourceFile.make('array-syntax/main', ascii(source))))
 
 const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
-  node.children.flatMap(
-    (child): ReadonlyArray<SyntaxTree.Node> =>
-      SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [],
+  node.children.flatMap((child): ReadonlyArray<SyntaxTree.Node> =>
+    SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [],
   )
 
 it('parses recursive array types, complete literals, and mixed postfix chains losslessly', () => {

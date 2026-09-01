@@ -75,14 +75,13 @@ const replaceMirOperation = (
         Object.freeze({
           ...fn,
           regions: Object.freeze(
-            fn.regions.map(
-              (region): Mir.Region =>
-                region._tag === 'OperationRegion'
-                  ? Object.freeze({
-                      ...region,
-                      operations: Object.freeze(region.operations.map(rewrite)),
-                    })
-                  : region,
+            fn.regions.map((region): Mir.Region =>
+              region._tag === 'OperationRegion'
+                ? Object.freeze({
+                    ...region,
+                    operations: Object.freeze(region.operations.map(rewrite)),
+                  })
+                : region,
             ),
           ),
         }),

@@ -35,4 +35,3 @@ or code generation rather than allowing backend-specific fallback.
 
 - **WHEN** one nominal union member has an invalid recursive inline layout
 - **THEN** the union layout names that member dependency and no executable calling shape is produced
-

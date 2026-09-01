@@ -20,9 +20,8 @@ export const parse = (id: string, source: string) =>
 
 /** Returns every descendant element in source preorder. */
 export const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Element> =>
-  node.children.flatMap(
-    (child): ReadonlyArray<SyntaxTree.Element> =>
-      SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [child],
+  node.children.flatMap((child): ReadonlyArray<SyntaxTree.Element> =>
+    SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [child],
   )
 
 /** Completes the declaration index for one in-memory module. */

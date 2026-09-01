@@ -23,4 +23,3 @@ None.
 ## Impact
 
 Adds conceptual documentation and an annotated IR asset. It reuses the existing public behavior documentation and introduces no code or API changes.
-

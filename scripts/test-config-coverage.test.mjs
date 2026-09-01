@@ -87,7 +87,7 @@ test('only the critical-path package chooses its own worker count', () => {
     chosen.filter((name) => !mayChooseItsOwnWorkerCount.has(name)),
     [],
     'How many suites overlap is bounded for the whole run by scripts/concurrency.mjs; how many ' +
-      'workers one suite uses is vitest\'s host-derived default. A package that needs to depart ' +
+      "workers one suite uses is vitest's host-derived default. A package that needs to depart " +
       'from that states why, and is listed here.',
   )
 })

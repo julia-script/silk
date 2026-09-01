@@ -23,4 +23,3 @@ cleanup cases, traces, and encodings without mutable object identity.
 
 - **WHEN** equivalent programs differ only in union member order and duplicate nesting
 - **THEN** their canonical facade answers agree while each snapshot retains its own exact source syntax
-

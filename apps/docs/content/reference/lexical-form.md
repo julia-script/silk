@@ -149,12 +149,12 @@ const preciseWindow: u64 = 1s999ms999us999ns
 The first component is limited only by the final `u64` nanosecond range. Every later component is
 a canonical subordinate field:
 
-| Unit | Later-component range |
-| --- | --- |
-| `d` | `0...6` |
-| `h` | `0...23` |
-| `m`, `s` | `0...59` |
-| `ms`, `us`, `ns` | `0...999` |
+| Unit             | Later-component range |
+| ---------------- | --------------------- |
+| `d`              | `0...6`               |
+| `h`              | `0...23`              |
+| `m`, `s`         | `0...59`              |
+| `ms`, `us`, `ns` | `0...999`             |
 
 Whitespace and punctuation end a duration token. `1h30m30s` is one literal, `1h + 30m + 30s` is
 three literals joined by operators, and `1h 30m` is two adjacent expressions rather than one
@@ -181,14 +181,14 @@ amounts report `LEX0008`, unknown units `LEX0009`, repeated units `LEX0010`, out
 Silk recognizes six quote-delimited text and byte forms. A modifier must touch its opening
 delimiter.
 
-| Form | Value category | Body policy |
-| --- | --- | --- |
-| `"text"` | `string` text | Escapes decoded |
-| `"""text"""` | `string` text | Escapes decoded |
-| `r"text"` | `string` text | Raw |
-| `r"""text"""` | `string` text | Raw |
-| `b"bytes"` | `&[u8]` bytes | Escapes decoded |
-| `b"""bytes"""` | `&[u8]` bytes | Escapes decoded |
+| Form           | Value category | Body policy     |
+| -------------- | -------------- | --------------- |
+| `"text"`       | `string` text  | Escapes decoded |
+| `"""text"""`   | `string` text  | Escapes decoded |
+| `r"text"`      | `string` text  | Raw             |
+| `r"""text"""`  | `string` text  | Raw             |
+| `b"bytes"`     | `&[u8]` bytes  | Escapes decoded |
+| `b"""bytes"""` | `&[u8]` bytes  | Escapes decoded |
 
 The triple delimiter permits physical line endings in the body. The single delimiter ends at a
 physical line ending when no closing quote appears first. Raw text treats every backslash as an

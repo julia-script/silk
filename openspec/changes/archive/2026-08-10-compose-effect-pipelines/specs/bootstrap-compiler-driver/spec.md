@@ -29,4 +29,3 @@ fresh analyses SHALL preserve deterministic artifacts.
 
 - **WHEN** equivalent pipeline fixtures are analyzed in fresh processes
 - **THEN** their closure, HIR, ownership, instances, layout, MIR, traces, symbols, and backend artifacts remain identical
-

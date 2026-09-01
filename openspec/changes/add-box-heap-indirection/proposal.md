@@ -10,7 +10,7 @@ Two claims in the issue that shaped its plan were measured against `main` (30310
 incomplete, so this proposal replaces the mechanism rather than restating it.
 
 - **The issue claims intrinsic nominals already break the cycle.** They do not.
-  `Type.nominals` (`Type.ts:694-713`) descends into a nominal's type *arguments*, so
+  `Type.nominals` (`Type.ts:694-713`) descends into a nominal's type _arguments_, so
   `RawBuffer<Node>` yields `[RawBuffer, Node]` and `Node` survives the `byKey.has` filter at
   `DeclarationIndex.ts:2790`. Measured on `main`: `struct Node { next: RawBuffer<Node> }` produces
   `SEM0020` with `dependency: Unavailable`. The cycle check needs a real change.
@@ -32,7 +32,7 @@ returns the right answer, and traces **6 acquires against 2 releases**.
   a struct over `RawBuffer<T>` with an `impl<T> Drop for Box<T>` hook, built the way `Vector<T>`
   already is. The compiler learns no new type and gains no new cleanup plan node, and both backends
   are untouched. See `design.md` for the rejected intrinsic alternative and the trade.
-- **Struct cycle detection distinguishes *inline* reach from *mentioned* reach.** A field's
+- **Struct cycle detection distinguishes _inline_ reach from _mentioned_ reach.** A field's
   neighbours become the nominals its layout actually requires: descent stops at `RawBuffer<T>` and
   `Slot<T>`, whose layouts are fixed and element-independent (`Layout.ts:644-651`), and descent into
   a user generic's type argument happens only when that parameter is itself reached inline, computed

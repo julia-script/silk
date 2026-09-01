@@ -13,4 +13,3 @@ HIR SHALL retain canonical lowercase integer identities, unit/bottom control flo
 
 - **WHEN** a unit function executes bare `return`
 - **THEN** HIR records unit completion with no scalar payload
-

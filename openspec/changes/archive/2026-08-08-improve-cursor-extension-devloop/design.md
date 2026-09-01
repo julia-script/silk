@@ -13,7 +13,7 @@ See proposal.md for motivation. Constraints that shape the approach:
 
 **Goals:**
 
-- One command retargets the local editor install to *this* checkout and builds what it needs.
+- One command retargets the local editor install to _this_ checkout and builds what it needs.
 - F5 / Extension Development Host loads the workspace extension without touching the global extensions dir.
 - Clear split: restart LS vs reload window.
 - Richer TextMate scopes that themes actually map, without abandoning the shared SoT or keyword-parity tests.
@@ -66,12 +66,12 @@ See proposal.md for motivation. Constraints that shape the approach:
 
 Improve `TextMate.ts` patterns:
 
-| Concern | Approach |
-| --- | --- |
+| Concern          | Approach                                                                                                                                                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Keyword families | Split keyword list into control (`if`/`else`/`return`/`while`/…) vs storage/declaration (`pub`/`fn`/`struct`/`let`/…) with scopes like `keyword.control.silk` and `storage.type.silk` / `keyword.declaration.silk` |
-| Function names | Match `fn` + identifier capture → `entity.name.function.silk` |
-| Types | Broaden PascalCase type matching beyond builtins and `Name{` patterns (signature/type positions), keeping builtins if useful for consistency |
-| Parity tests | Keep compiler keyword-set equality; add Shiki/scope fixture assertions for the new families |
+| Function names   | Match `fn` + identifier capture → `entity.name.function.silk`                                                                                                                                                      |
+| Types            | Broaden PascalCase type matching beyond builtins and `Name{` patterns (signature/type positions), keeping builtins if useful for consistency                                                                       |
+| Parity tests     | Keep compiler keyword-set equality; add Shiki/scope fixture assertions for the new families                                                                                                                        |
 
 - Still generate JSON via `sync:vscode`; extension remains a consumer.
 - **Why not LSP semantic tokens yet:** more protocol + theme surface; proposal defers them. TextMate upgrades help Cursor and Shiki immediately from one SoT.

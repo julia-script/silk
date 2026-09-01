@@ -162,8 +162,8 @@ pub fn main() -> i32 {
       ),
       'InvalidEnumOperation',
     )
-    const wrongLane: 'u16' = 'u16'
-    const wrongBits: 16 = 16
+    const wrongLane = 'u16' as const
+    const wrongBits = 16 as const
     assert.include(
       ruleSet(
         replace(stateDone, {

@@ -59,4 +59,3 @@ source.
 
 - **WHEN** an editor requests definition or hover information for `Bytes.asSlice`
 - **THEN** tooling reports the canonical source declaration rather than a compiler-synthesized collection operation
-

@@ -8,6 +8,6 @@ clone a declaration body per concrete call, and its deterministic encoding SHALL
 from every call to its generic declaration and substitution.
 
 #### Scenario: Keep one generic body
+
 - **WHEN** one generic function is called with `I32` and `Token`
 - **THEN** HIR contains one checked declaration body and two calls with distinct concrete substitutions
-

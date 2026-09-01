@@ -52,6 +52,7 @@ success type, failure row, requirement row, and receiver access. Interfaces SHAL
 contracts and MUST NOT create service slots or runtime dispatch.
 
 #### Scenario: Declare an effectful decoder
+
 - **WHEN** `Decoder<S, Arguments, A, !E, ?R>` declares an effectful operation
 - **THEN** its complete operation contract retains provider, consumed arguments, success, exact rows, and access
 
@@ -62,10 +63,12 @@ transfers ownership, `&T` observes through a shared borrow, and `&mut T` grants 
 General witness mapping MUST NOT blanket-adapt value operands to shared borrows.
 
 #### Scenario: Consume decoder input
+
 - **WHEN** an interface declares `decode(self: &S, encoded: Arguments)`
 - **THEN** a mapped witness receives `&S` and owns `Arguments`, not `&&S` and `&Arguments`
 
 #### Scenario: Reject a stronger receiver demand
+
 - **WHEN** a witness requires `&mut S` for an interface operation declaring `&S`
 - **THEN** mapping fails because a generic caller promises only shared access
 
@@ -77,6 +80,7 @@ subsumption; its local rows SHALL be widened to the interface contract for type 
 specialization MAY optimize unobservable dead machinery.
 
 #### Scenario: Admit a pure decoder under a fallible contract
+
 - **WHEN** a pure witness satisfies `Decoder<S, Arguments, A, !DecodeError, ?R>`
 - **THEN** the generic call retains the interface rows while lowering may omit unreachable failure work
 
@@ -88,6 +92,7 @@ incompatible access arguments MUST produce deterministic diagnostics. Concrete w
 SHALL include every inferred argument.
 
 #### Scenario: Specialize one generic mapped decoder twice
+
 - **WHEN** two mapped schemas select the same generic witness declaration with distinct source and
   transform representations
 - **THEN** instance discovery records two concrete static witness targets
@@ -99,6 +104,7 @@ Any transitional operand adapter MUST remain confined to sealed intrinsic witnes
 NOT affect general user interfaces.
 
 #### Scenario: Inspect a migrated order interface
+
 - **WHEN** ordinary source maps an `Order` operation after migration
 - **THEN** its declared borrow shapes match the witness directly without blanket adaptation
 

@@ -25,15 +25,9 @@ it('decodes only current workspace shapes and view ids', () => {
   const decode = Schema.decodeUnknownResult(workspacesSchema)
 
   assert.isTrue(Result.isSuccess(decode([current])))
+  assert.isTrue(Result.isFailure(decode([{ ...current, panes: { ...current.panes, a1: 'llvm' } }])))
   assert.isTrue(
-    Result.isFailure(
-      decode([{ ...current, panes: { ...current.panes, a1: 'llvm' } }]),
-    ),
-  )
-  assert.isTrue(
-    Result.isFailure(
-      decode([{ ...current, panes: { ...current.panes, retired: 'source' } }]),
-    ),
+    Result.isFailure(decode([{ ...current, panes: { ...current.panes, retired: 'source' } }])),
   )
 })
 

@@ -8,4 +8,3 @@ Compiler-known integer actors SHALL use canonical lowercase source names such as
 
 - **WHEN** `i32.add(2)` appears where `fn(i32) -> i32` is required
 - **THEN** it constructs the ordinary leading-argument section
-

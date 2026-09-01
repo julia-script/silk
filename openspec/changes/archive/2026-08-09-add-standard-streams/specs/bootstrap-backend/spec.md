@@ -8,4 +8,3 @@ Native lowering SHALL call the supplied process adapter; direct WebAssembly SHAL
 
 - **WHEN** a Wasm program writes bytes with a supplied host
 - **THEN** the host receives the same bytes and ordering as evaluation
-

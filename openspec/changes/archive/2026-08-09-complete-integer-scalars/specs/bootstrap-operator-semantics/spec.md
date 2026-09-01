@@ -27,4 +27,3 @@ Arithmetic and comparison operators SHALL resolve only for compatible operands o
 **Reason**: `usize` now follows the same rule as every integer type.
 
 **Migration**: Use the complete integer operator requirement.
-

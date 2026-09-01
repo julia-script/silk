@@ -40,14 +40,14 @@ Measured twice on 2026-08-13 at Git revision
 The values below are reproducible tested brackets on this host, not exact maximum depths or
 portable thresholds.
 
-| engine | isolated recursive phase | deepest tested completion | first tested failure | failure classification |
-|---|---|---:|---:|---|
-| direct Wasm | Effect + Box build | 725 | 750 | host stack exhaustion (`RangeError`) |
-| direct Wasm | borrowed Box walk | 2,000 | 3,000 | host stack exhaustion (`RangeError`) |
-| direct Wasm | recursive Box Drop | 3,000 | 4,000 | host stack exhaustion (`RangeError`) |
-| native release | Effect + Box build | 32,000 | 48,000 | `SIGSEGV` |
-| native release | borrowed Box walk | 100,000 | 320,000 | `SIGSEGV` |
-| native release | recursive Box Drop | 100,000 | 320,000 | `SIGSEGV` |
+| engine         | isolated recursive phase | deepest tested completion | first tested failure | failure classification               |
+| -------------- | ------------------------ | ------------------------: | -------------------: | ------------------------------------ |
+| direct Wasm    | Effect + Box build       |                       725 |                  750 | host stack exhaustion (`RangeError`) |
+| direct Wasm    | borrowed Box walk        |                     2,000 |                3,000 | host stack exhaustion (`RangeError`) |
+| direct Wasm    | recursive Box Drop       |                     3,000 |                4,000 | host stack exhaustion (`RangeError`) |
+| native release | Effect + Box build       |                    32,000 |               48,000 | `SIGSEGV`                            |
+| native release | borrowed Box walk        |                   100,000 |              320,000 | `SIGSEGV`                            |
+| native release | recursive Box Drop       |                   100,000 |              320,000 | `SIGSEGV`                            |
 
 The matrix was produced after `pnpm --filter @silklang/compiler build`. Each Wasm row used:
 

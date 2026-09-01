@@ -43,4 +43,3 @@ Lexical failures remain typed and observable while internal cursor helpers stay 
 ## Migration Plan
 
 Add `Token.ts`, `Lexer.ts`, lexer tests, and Lesson 4. The compiler entry remains stubbed until parsing lessons land. Rollback removes these additive tutorial files.
-

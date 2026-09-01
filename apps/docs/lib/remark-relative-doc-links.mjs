@@ -8,23 +8,23 @@
 export function remarkRelativeDocLinks() {
   return (tree) => {
     visit(tree, (node) => {
-      if (node.type !== 'link' || typeof node.url !== 'string') return;
-      if (!isBareMarkdownPath(node.url)) return;
+      if (node.type !== 'link' || typeof node.url !== 'string') return
+      if (!isBareMarkdownPath(node.url)) return
 
-      node.url = `./${node.url}`;
-    });
-  };
+      node.url = `./${node.url}`
+    })
+  }
 }
 
 function isBareMarkdownPath(url) {
-  if (url.startsWith('/') || url.startsWith('./') || url.startsWith('../')) return false;
-  if (/^[A-Za-z][A-Za-z\d+.-]*:/.test(url)) return false;
+  if (url.startsWith('/') || url.startsWith('./') || url.startsWith('../')) return false
+  if (/^[A-Za-z][A-Za-z\d+.-]*:/.test(url)) return false
 
-  const path = url.split(/[?#]/, 1)[0];
-  return path.endsWith('.md') || path.endsWith('.mdx');
+  const path = url.split(/[?#]/, 1)[0]
+  return path.endsWith('.md') || path.endsWith('.mdx')
 }
 
 function visit(node, callback) {
-  callback(node);
-  for (const child of node.children ?? []) visit(child, callback);
+  callback(node)
+  for (const child of node.children ?? []) visit(child, callback)
 }

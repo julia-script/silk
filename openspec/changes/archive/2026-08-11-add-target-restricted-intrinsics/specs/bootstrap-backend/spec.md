@@ -21,4 +21,3 @@ symbol, emit an import, or bundle a host adapter.
 
 - **WHEN** the same target is supported by more than one backend
 - **THEN** availability validation uses the explicitly selected backend request without silently selecting another implementation
-

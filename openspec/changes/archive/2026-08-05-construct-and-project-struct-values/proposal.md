@@ -7,7 +7,7 @@ the smallest runtime aggregate slice that turns those declaration facts into use
 ## What Changes
 
 - Add lossless, recoverable labeled struct literals such as `Token { kind: kind, lexeme: move
-  lexeme }` and chained field projections such as `token.span.start`.
+lexeme }` and chained field projections such as `token.span.start`.
 - Restrict raw struct literals to the module defining the nominal type; external modules construct
   values through ordinary public actor functions such as `Token.make`.
 - Require every literal field exactly once, permit source field order to differ from declaration

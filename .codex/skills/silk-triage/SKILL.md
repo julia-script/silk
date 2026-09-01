@@ -49,8 +49,8 @@ says otherwise, choose stabilization leads before feature leads for the default 
    from `WORKFLOW.md`. Reconcile existing Todo feature priorities only when needed to preserve this
    default, and report every such change. Do not reprioritize In Progress or In Review work.
 10. The coordinator writes Linear sequentially, reads each changed issue back, and reports the
-   verdict, priority, estimate, investigator/skeptic coverage, and one-line reason. Also name any
-   untriaged issue that plausibly outranks the new queue head.
+    verdict, priority, estimate, investigator/skeptic coverage, and one-line reason. Also name any
+    untriaged issue that plausibly outranks the new queue head.
 
 Language and standard-library changes must have acceptance that includes the OpenSpec artifacts
 required by `AGENTS.md`. Do not preserve compatibility paths merely because the current code has

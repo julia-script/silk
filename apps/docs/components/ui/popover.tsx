@@ -1,11 +1,11 @@
-'use client';
-import { Popover as Primitive } from '@base-ui/react/popover';
-import * as React from 'react';
-import { cn } from '../../lib/cn';
+'use client'
+import { Popover as Primitive } from '@base-ui/react/popover'
+import * as React from 'react'
+import { cn } from '../../lib/cn'
 
-export const Popover = Primitive.Root;
+export const Popover = Primitive.Root
 
-export const PopoverTrigger = Primitive.Trigger;
+export const PopoverTrigger = Primitive.Trigger
 
 export function PopoverContent({
   className,
@@ -28,7 +28,7 @@ export function PopoverContent({
         />
       </Primitive.Positioner>
     </Primitive.Portal>
-  );
+  )
 }
 
-export const PopoverClose = Primitive.Close;
+export const PopoverClose = Primitive.Close

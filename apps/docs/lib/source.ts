@@ -1,9 +1,9 @@
-import { loader } from 'fumadocs-core/source';
-import { applyMdxPreset, frontmatterSchema } from 'fumadocs-mdx/config';
-import { defineDocs } from 'fumadocs-mdx/macro';
-import * as TextMate from '@silklang/editor-support/TextMate';
-import { remarkH1Title } from './remark-h1-title.mjs';
-import { remarkRelativeDocLinks } from './remark-relative-doc-links.mjs';
+import { loader } from 'fumadocs-core/source'
+import { applyMdxPreset, frontmatterSchema } from 'fumadocs-mdx/config'
+import { defineDocs } from 'fumadocs-mdx/macro'
+import * as TextMate from '@silklang/editor-support/TextMate'
+import { remarkH1Title } from './remark-h1-title.mjs'
+import { remarkRelativeDocLinks } from './remark-relative-doc-links.mjs'
 
 /**
  * The language and compiler docs are plain Markdown with no frontmatter, so they remain useful
@@ -13,17 +13,23 @@ import { remarkRelativeDocLinks } from './remark-relative-doc-links.mjs';
  * `remarkH1Title` upgrades it to the document's `# H1`. An author-written title always wins.
  */
 const schema = (ctx: { path: string }) =>
-  frontmatterSchema.extend({ title: frontmatterSchema.shape.title.optional() }).transform((data) => ({
-    ...data,
-    title: data.title ?? fallbackTitle(ctx.path),
-    titleFromFileName: data.title === undefined,
-  }));
+  frontmatterSchema
+    .extend({ title: frontmatterSchema.shape.title.optional() })
+    .transform((data) => ({
+      ...data,
+      title: data.title ?? fallbackTitle(ctx.path),
+      titleFromFileName: data.title === undefined,
+    }))
 
 /** `how-to/debug-metadata.md` -> `Debug metadata`. Only used when a doc has no `# H1`. */
 function fallbackTitle(path: string): string {
-  const name = path.split('/').pop()?.replace(/\.mdx?$/, '') ?? path;
-  const words = name.replace(/^\d+-/, '').replace(/[-_]/g, ' ');
-  return words.charAt(0).toUpperCase() + words.slice(1);
+  const name =
+    path
+      .split('/')
+      .pop()
+      ?.replace(/\.mdx?$/, '') ?? path
+  const words = name.replace(/^\d+-/, '').replace(/[-_]/g, ' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
 // ponytail: one collection over the app-owned `content/` tree. Loader record keys are type
@@ -50,13 +56,13 @@ const docs = defineDocs({
       },
     }),
   },
-});
+})
 
 /** Sidebar label for each top-level content folder, keyed by directory name. */
 const folderTitles: Record<string, string> = {
   language: 'Silk language',
   reference: 'Prescriptive reference',
-};
+}
 
 export const source = loader({
   baseUrl: '/docs',
@@ -65,10 +71,10 @@ export const source = loader({
     transformers: [
       {
         folder(node, folderPath) {
-          const title = folderTitles[folderPath];
-          return title ? { ...node, name: title } : node;
+          const title = folderTitles[folderPath]
+          return title ? { ...node, name: title } : node
         },
       },
     ],
   },
-});
+})

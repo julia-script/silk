@@ -73,4 +73,3 @@ HIR, MIR, layout, evaluator, native LLVM, and direct WebAssembly SHALL support e
 
 - **WHEN** an accepted integer fixture completes, returns `Option`, or traps
 - **THEN** evaluator, native, and WebAssembly agree on its outcome and provenance
-

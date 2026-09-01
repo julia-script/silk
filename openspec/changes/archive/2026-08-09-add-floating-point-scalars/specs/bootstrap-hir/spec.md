@@ -8,4 +8,3 @@ HIR SHALL retain selected float width, correctly rounded constant bits, operatio
 
 - **WHEN** a decimal literal is contextually typed `f32`
 - **THEN** HIR encoding carries its canonical binary32 bits and source span
-

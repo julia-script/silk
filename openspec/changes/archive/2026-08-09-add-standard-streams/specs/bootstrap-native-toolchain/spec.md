@@ -13,4 +13,3 @@ Native finalization SHALL connect an explicit process-stream provider. WebAssemb
 
 - **WHEN** a Wasm program requires `StandardStreams`
 - **THEN** finalization preserves the import required for instantiation
-

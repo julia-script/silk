@@ -43,4 +43,3 @@ All Tiny functions return `i32`, so non-null assertions are unnecessary and forb
 ## Migration Plan
 
 Extend compiler state and diagnostics, add multi-function and factorial fixtures/tests, and add Lesson 9. No changes to the parser contract are required.
-

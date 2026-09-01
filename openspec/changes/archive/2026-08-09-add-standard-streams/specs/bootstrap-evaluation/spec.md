@@ -8,4 +8,3 @@ With an explicit provider, evaluation SHALL record complete ordered byte events 
 
 - **WHEN** a program writes a heading and two rows
 - **THEN** evaluation records exactly those three byte events in order
-

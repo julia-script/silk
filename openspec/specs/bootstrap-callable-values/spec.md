@@ -4,7 +4,9 @@
 
 Define first-class callable values, automatic data-first sections, invocation modes, and
 ownership-aware capture behavior for ordinary and higher-order Silk programs.
+
 ## Requirements
+
 ### Requirement: Integer actor callables use lowercase identities
 
 Compiler-known integer actors SHALL use canonical lowercase source names such as `i32.add` and `u8.wrappingAdd`. Sections SHALL preserve the selected type and operation mode; uppercase actor names MUST NOT resolve as aliases.
@@ -192,6 +194,7 @@ off the executable path and require one finite concrete instance before layout o
 
 - **WHEN** `f64.add(2.0)` appears where `fn(f64) -> f64` is expected
 - **THEN** it constructs a width-preserving callable section
+
 ### Requirement: Effect values cross ordinary higher-order boundaries
 
 Closed Effect values SHALL be valid ordinary parameter, result, local-binding, capture, generic-

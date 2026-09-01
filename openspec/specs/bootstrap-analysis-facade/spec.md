@@ -1,10 +1,12 @@
 # bootstrap-analysis-facade Specification
 
 ## Purpose
+
 The supported, snapshot-backed query surface over compiler analysis: one immutable snapshot per
 compilation request answering queries for sources, syntax, imports, declarations, references,
 types, contracts, HIR facts, evaluation, and merged diagnostics — the exclusive consumer surface
 for tooling, so tools can grow without reimplementing Silk semantics.
+
 ## Requirements
 
 ### Requirement: Editor facts retain proved implementations and inferred provider selectors
@@ -31,6 +33,7 @@ ambiguous, inaccessible, open, explicitly selected, or conditionally unproved ca
 
 - **WHEN** the selector is explicit or provider selection is unresolved, ambiguous, or invalid
 - **THEN** the facade returns no provider-selector hint fact for that call
+
 ### Requirement: Project views are queryable but not directly realizable
 
 The analysis facade SHALL distinguish a single-root frontend snapshot from a project-analysis root
@@ -362,6 +365,7 @@ call substitutions, discovered concrete instances, layouts, ownership facts, MIR
 diagnostics by canonical identity without reconstructing specialization from rendered text.
 
 #### Scenario: Trace a specialization across phases
+
 - **WHEN** a consumer selects one concrete generic call
 - **THEN** the facade returns its source application, substitution, instance key, layout, ownership proof, and MIR provenance
 

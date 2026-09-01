@@ -66,9 +66,8 @@ const nodeShape = (node: SyntaxTree.Node): ExpectedNodeShape => ({
 })
 
 const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Element> =>
-  node.children.flatMap(
-    (child): ReadonlyArray<SyntaxTree.Element> =>
-      SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [child],
+  node.children.flatMap((child): ReadonlyArray<SyntaxTree.Element> =>
+    SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [child],
   )
 
 const missingLeaves = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.MissingToken> =>

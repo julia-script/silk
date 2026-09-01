@@ -303,7 +303,7 @@ const diagnosticsPage = () => {
   }
 
   const codes = [...documented.entries()]
-    .map(([code, entry]) => ({ code, ...entry, ...(byName.get(entry.name) ?? {}) }))
+    .map(([code, entry]) => ({ code, ...entry, ...byName.get(entry.name) }))
     .sort((left, right) => left.code.localeCompare(right.code))
 
   const missingMessages = codes.filter(

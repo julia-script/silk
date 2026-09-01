@@ -7,6 +7,6 @@ the accepted syntax while retaining ordinary comparison and reserved-template hi
 their respective contexts.
 
 #### Scenario: Highlight generic call and comparison
+
 - **WHEN** one source contains `identity<I32>(value)` and `left < right`
 - **THEN** the generic arguments and comparison operator receive their respective canonical styles
-

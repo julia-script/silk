@@ -43,4 +43,3 @@ The parser owns that local syntactic invariant; function-table and call checks r
 ## Migration Plan
 
 Extend parser and AST files, add `Program.ts`, complete parser fixtures/tests, and add Lesson 6. Downstream compiler code should depend only on the resulting immutable data.
-

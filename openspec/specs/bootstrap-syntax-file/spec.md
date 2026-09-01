@@ -1,11 +1,14 @@
 # bootstrap-syntax-file Specification
 
 ## Purpose
+
 The per-module lossless syntax artifact: one immutable `SyntaxFile` owning the source bytes, the
 trivia-preserving token stream, and the source-faithful surface tree, with stable element
 identities that every later fact table keys against and a deterministic textual encoder gating
 byte-identical output.
+
 ## Requirements
+
 ### Requirement: One lossless syntax artifact per source module
 
 Parsing one source module SHALL produce exactly one immutable `SyntaxFile` artifact that owns the

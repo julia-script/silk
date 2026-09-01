@@ -24,4 +24,3 @@ spelling.
 
 - **WHEN** tooling enumerates the intrinsic catalog
 - **THEN** it finds one random-fill identity available to evaluation and current native targets but unavailable to direct WebAssembly
-

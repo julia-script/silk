@@ -457,15 +457,15 @@ export const resolveDeclaredType = (
         requirements.every(
           (requirement) => requirementRoleIdentity(requirement.role.fact) !== undefined,
         )
-      const rowArguments: ReadonlyArray<Type.GenericArgument | undefined> = Object.freeze([
-        ...(fact.requirementRow === undefined
+      const rowArguments: ReadonlyArray<Type.GenericArgument | undefined> = Object.freeze(
+        fact.requirementRow === undefined
           ? []
           : [
               requirementsAvailable
                 ? Type.requirementRowArgument(requirementTypes, fact.requirementRow.parameters)
                 : undefined,
-            ]),
-      ])
+            ],
+      )
       const available = Object.freeze([...valueArguments, ...rowArguments])
       const suppliedCount = available.length
       if (expected === suppliedCount && available.every((argument) => argument !== undefined)) {
@@ -1803,7 +1803,7 @@ export const inlineParametersOf = (
       declarations.set(canonicalKey(aggregate.canonical.id), aggregate)
   const inline = new Map<string, Set<number>>()
   for (const key of declarations.keys()) inline.set(key, new Set())
-  for (let growing = true; growing; ) {
+  for (let growing = true; growing;) {
     growing = false
     for (const [key, aggregate] of declarations) {
       const reached = inline.get(key)

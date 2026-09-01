@@ -172,17 +172,17 @@ fixed integer representation.
 
 ## Whole-Language Interaction Map
 
-| Surface | Status | Analysis |
-| --- | --- | --- |
-| Syntax and names | Affected | Declaration grammar, representation clause, members, qualified values and patterns, formatting, recovery, module visibility, and one flat nominal namespace. |
-| Types and abstraction | Affected | Closed nominal identity; no payloads or generics; member paths have the enum type; representation does not create interchangeability. |
-| Execution contracts | Not affected | Construction, equality, conversion, and matching are eager, total, failure-free, and requirement-free. |
-| Ownership and resources | Affected | Every enum is sealed `Copy`, has no cleanup, and follows ordinary Copy binding and move rules. |
-| Runtime and targets | Affected | Exact fixed-width integer layout and calling shape; evaluator, Wasm, and native parity; no hidden metadata. |
-| Compiler | Affected | Declaration index, resolution, typing, coverage, HIR, ownership facts, MIR, layout, evaluation, and backend lowering. |
-| Standard library | Not affected | No required declaration or compiler-known actor; future integer conversion policy stays in source. |
-| Tooling and diagnostics | Affected | Dedicated diagnostics, facade queries, canonical formatting, highlighting parity, hover/reference data, and labs snapshots. |
-| Learning and use | Affected | Teach enum members as values, default `u8`, explicit widening, `.value`, nominal equality, and exhaustive matching; distinguish structural unions. |
+| Surface                 | Status       | Analysis                                                                                                                                                     |
+| ----------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Syntax and names        | Affected     | Declaration grammar, representation clause, members, qualified values and patterns, formatting, recovery, module visibility, and one flat nominal namespace. |
+| Types and abstraction   | Affected     | Closed nominal identity; no payloads or generics; member paths have the enum type; representation does not create interchangeability.                        |
+| Execution contracts     | Not affected | Construction, equality, conversion, and matching are eager, total, failure-free, and requirement-free.                                                       |
+| Ownership and resources | Affected     | Every enum is sealed `Copy`, has no cleanup, and follows ordinary Copy binding and move rules.                                                               |
+| Runtime and targets     | Affected     | Exact fixed-width integer layout and calling shape; evaluator, Wasm, and native parity; no hidden metadata.                                                  |
+| Compiler                | Affected     | Declaration index, resolution, typing, coverage, HIR, ownership facts, MIR, layout, evaluation, and backend lowering.                                        |
+| Standard library        | Not affected | No required declaration or compiler-known actor; future integer conversion policy stays in source.                                                           |
+| Tooling and diagnostics | Affected     | Dedicated diagnostics, facade queries, canonical formatting, highlighting parity, hover/reference data, and labs snapshots.                                  |
+| Learning and use        | Affected     | Teach enum members as values, default `u8`, explicit widening, `.value`, nominal equality, and exhaustive matching; distinguish structural unions.           |
 
 No surface remains unknown.
 

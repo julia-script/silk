@@ -4,7 +4,7 @@
 
 Resolved nominal fields SHALL form a deterministic type-dependency graph. A field SHALL retain every
 nominal type it references as a reported dependency. Cycle detection SHALL use the narrower graph of
-*inline reach*: the nominals whose layout a field's layout actually requires.
+_inline reach_: the nominals whose layout a field's layout actually requires.
 
 Inline reach SHALL be defined as follows. A field reaches a nominal inline when the nominal appears
 in the field's type outside every indirecting position. A type argument of a compiler-owned

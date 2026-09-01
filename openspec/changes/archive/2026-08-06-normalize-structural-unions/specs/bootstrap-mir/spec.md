@@ -46,4 +46,3 @@ byte-identical MIR across fresh processes without materializing mutable graph id
 
 - **WHEN** one program injects, stores, widens, and drops a union in repeated fresh compilations
 - **THEN** its MIR type keys, mappings, regions, cleanup, and textual bytes are identical
-

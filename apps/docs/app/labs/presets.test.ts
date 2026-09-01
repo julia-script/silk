@@ -45,12 +45,8 @@ const suspendedEffectLabels = [
 const suspendedEffectPresets = suspendedEffectLabels.map((label) =>
   presets.find((preset) => preset.label === label),
 )
-const loggingPreset = presets.find(
-  (preset) => preset.label === 'ok · Portable Logger provider',
-)
-const scalarEnumPreset = presets.find(
-  (preset) => preset.label === 'ok · Scalar enum across phases',
-)
+const loggingPreset = presets.find((preset) => preset.label === 'ok · Portable Logger provider')
+const scalarEnumPreset = presets.find((preset) => preset.label === 'ok · Scalar enum across phases')
 const layoutPreset = presets.find((preset) => preset.label === 'ok · Validated target Layout')
 const allocationPreset = presets.find(
   (preset) => preset.label === 'ok · Self-contained Allocation contract',
@@ -100,12 +96,8 @@ const acceptanceContext = (
 
 describe('preset catalog', () => {
   it('shows both completed recursion and a configured call-depth stop', () => {
-    const completed = presets.find(
-      (preset) => preset.label === 'ok · Completed runtime recursion',
-    )
-    const limited = presets.find(
-      (preset) => preset.label === 'trap · Call-depth evaluation limit',
-    )
+    const completed = presets.find((preset) => preset.label === 'ok · Completed runtime recursion')
+    const limited = presets.find((preset) => preset.label === 'trap · Call-depth evaluation limit')
     expect(completed).toBeDefined()
     expect(limited).toBeDefined()
     if (completed === undefined || limited === undefined) return
@@ -189,25 +181,21 @@ describe('preset catalog', () => {
   // What must never happen is a preset that crashes the driver: a mistranscribed program would
   // take down whichever pane rendered it. One pass builds every snapshot (so a throw names its
   // preset) and checks the diagnostic polarity the label advertises.
-  it(
-    'builds every preset, damaged included, with diagnostics only on fail-prefixed ones',
-    () => {
-      for (const preset of presets) {
-        let snapshot: Analysis.Snapshot | undefined
-        expect(() => {
-          snapshot = snapshotOf(preset)
-        }, preset.label).not.toThrow()
-        if (snapshot === undefined) continue
-        const hasDiagnostics = Analysis.diagnostics(snapshot).length > 0
-        if (preset.label.startsWith('fail · ')) {
-          expect(hasDiagnostics, preset.label).toBe(true)
-        } else if (preset.label.startsWith('ok · ')) {
-          expect(hasDiagnostics, preset.label).toBe(false)
-        }
+  it('builds every preset, damaged included, with diagnostics only on fail-prefixed ones', () => {
+    for (const preset of presets) {
+      let snapshot: Analysis.Snapshot | undefined
+      expect(() => {
+        snapshot = snapshotOf(preset)
+      }, preset.label).not.toThrow()
+      if (snapshot === undefined) continue
+      const hasDiagnostics = Analysis.diagnostics(snapshot).length > 0
+      if (preset.label.startsWith('fail · ')) {
+        expect(hasDiagnostics, preset.label).toBe(true)
+      } else if (preset.label.startsWith('ok · ')) {
+        expect(hasDiagnostics, preset.label).toBe(false)
       }
-    },
-    120_000,
-  )
+    }
+  }, 120_000)
 
   it('roots every preset at a module it actually defines', () => {
     for (const preset of presets) {
@@ -221,17 +209,13 @@ describe('preset catalog', () => {
   // x86_64-unknown-linux-gnu (the compiler default the diagnostics sweep uses) and for
   // wasm32-unknown-unknown (the MIR React-key sweep), so all four selectable targets stay covered
   // across the file without any preset compiling twice for the same target.
-  it(
-    'builds a snapshot for every preset against every selectable target',
-    () => {
-      for (const target of ['aarch64-apple-darwin', 'aarch64-unknown-linux-gnu']) {
-        for (const preset of presets) {
-          expect(() => snapshotOf(preset, target), `${preset.label} · ${target}`).not.toThrow()
-        }
+  it('builds a snapshot for every preset against every selectable target', () => {
+    for (const target of ['aarch64-apple-darwin', 'aarch64-unknown-linux-gnu']) {
+      for (const preset of presets) {
+        expect(() => snapshotOf(preset, target), `${preset.label} · ${target}`).not.toThrow()
       }
-    },
-    240_000,
-  )
+    }
+  }, 240_000)
 
   it('keeps the phases the labs shipped presets for', () => {
     const groups = new Set(presets.map((preset) => preset.group))
@@ -351,9 +335,7 @@ describe('preset catalog', () => {
         evaluation.trace.some((event) => event._tag === 'SuspensionOrigin'),
         preset.label,
       ).toBe(true)
-      const pushes = evaluation.trace.filter(
-        (event) => event._tag === 'CoroutineFramePush',
-      ).length
+      const pushes = evaluation.trace.filter((event) => event._tag === 'CoroutineFramePush').length
       const completions = evaluation.trace.filter(
         (event) => event._tag === 'CoroutineFrameComplete',
       ).length
@@ -375,7 +357,16 @@ describe('preset catalog', () => {
     expect(evaluation._tag).toBe('Completed')
     if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(42n)
     const context = acceptanceContext(loggingPreset, native)
-    for (const id of ['closure', 'index', 'hir', 'ownership', 'instances', 'mir', 'evaluation', 'backend']) {
+    for (const id of [
+      'closure',
+      'index',
+      'hir',
+      'ownership',
+      'instances',
+      'mir',
+      'evaluation',
+      'backend',
+    ]) {
       const view = viewById(id)
       expect(view, id).toBeDefined()
       expect(() => view?.project(context), id).not.toThrow()
@@ -421,7 +412,15 @@ describe('preset catalog', () => {
       const evaluation = Analysis.evaluate(snapshot)
       expect(evaluation._tag, preset.label).toBe('Completed')
       if (evaluation._tag === 'Completed') expect(evaluation.result.value).toBe(42n)
-      for (const id of ['hir', 'ownership', 'instances', 'layout', 'mir', 'evaluation', 'backend']) {
+      for (const id of [
+        'hir',
+        'ownership',
+        'instances',
+        'layout',
+        'mir',
+        'evaluation',
+        'backend',
+      ]) {
         expect(viewById(id)?.id, `${preset.label} · ${id}`).toBe(id)
       }
     }
@@ -577,9 +576,7 @@ describe('preset catalog', () => {
     if (residualEffectPreset === undefined) return
     const snapshot = snapshotOf(residualEffectPreset, 'aarch64-apple-darwin')
 
-    expect(Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)).toContain(
-      'SEM0066',
-    )
+    expect(Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)).toContain('SEM0066')
     expect(Analysis.evaluate(snapshot)._tag).toBe('Trap')
   })
 

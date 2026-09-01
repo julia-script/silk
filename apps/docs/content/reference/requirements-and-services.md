@@ -379,10 +379,10 @@ including nominal roles and access, and concrete specializations and diagnostics
 
 A requirement entry records only how execution needs to borrow its provider:
 
-| Entry | Required provider access |
-| --- | --- |
-| `&Clock` | shared |
-| `&mut Clock` | exclusive |
+| Entry        | Required provider access |
+| ------------ | ------------------------ |
+| `&Clock`     | shared                   |
+| `&mut Clock` | exclusive                |
 
 There is no owned or consuming requirement-entry form. Ownership belongs to the operation that
 provides a concrete value to an Effect, not to the Effect's unresolved requirement row.

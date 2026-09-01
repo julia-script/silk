@@ -216,18 +216,17 @@ const compareCaptures = (left: CaptureSlot, right: CaptureSlot): number =>
 
 const loansOf = (captures: ReadonlyArray<CaptureSlot>): ReadonlyArray<LoanDependency> =>
   Object.freeze(
-    captures.flatMap(
-      (capture): ReadonlyArray<LoanDependency> =>
-        capture.access === 'Shared' || capture.access === 'Exclusive'
-          ? [
-              Object.freeze({
-                _tag: 'CallableCaptureLoan' as const,
-                capture: capture.ordinal,
-                access: capture.access,
-                type: capture.type,
-              }),
-            ]
-          : [],
+    captures.flatMap((capture): ReadonlyArray<LoanDependency> =>
+      capture.access === 'Shared' || capture.access === 'Exclusive'
+        ? [
+            Object.freeze({
+              _tag: 'CallableCaptureLoan' as const,
+              capture: capture.ordinal,
+              access: capture.access,
+              type: capture.type,
+            }),
+          ]
+        : [],
     ),
   )
 
@@ -298,7 +297,7 @@ const compareEffectEnvironmentSlots = (
 export const effectEnvironmentOf = (
   effect: Instances.EffectInstance,
 ): ReadonlyArray<EffectEnvironmentSlot> =>
-  Object.freeze([...effect.captures.map(effectEnvironmentSlot)].sort(compareEffectEnvironmentSlots))
+  Object.freeze(effect.captures.map(effectEnvironmentSlot).sort(compareEffectEnvironmentSlots))
 
 const effectRows = (contract: Type.Effect): EffectRows =>
   Object.freeze({
@@ -415,7 +414,7 @@ const environmentCaptures = (
     })
   return Object.freeze({
     _tag: 'ResolvedEnvironment',
-    slots: Object.freeze([...selected.captures.map(captureSlot)].sort(compareCaptures)),
+    slots: Object.freeze(selected.captures.map(captureSlot).sort(compareCaptures)),
     site: selected.site,
   })
 }

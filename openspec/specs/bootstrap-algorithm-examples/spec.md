@@ -1,8 +1,11 @@
 # bootstrap-algorithm-examples Specification
 
 ## Purpose
+
 Use familiar readable algorithms as honest end-to-end probes of Silk's practical expressiveness, diagnostics, ergonomics, and evaluator/native/WebAssembly parity.
+
 ## Requirements
+
 ### Requirement: The suite contains recognizable complete programs
 
 The repository SHALL contain Conway's Game of Life, Sieve of Eratosthenes, matrix multiplication, quicksort, CRC-32, and FFT under `examples/algorithms`. Each SHALL include complete source, deterministic input, expected behavior, capability inventory, and current status.

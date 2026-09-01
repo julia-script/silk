@@ -8,4 +8,3 @@ Evaluation SHALL model static bytes and views without allocation, mutation, or h
 
 - **WHEN** evaluation observes a non-ASCII text literal's byte view
 - **THEN** it returns the exact UTF-8 bytes and `usize` length
-

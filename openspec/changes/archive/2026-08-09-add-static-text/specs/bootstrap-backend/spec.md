@@ -8,4 +8,3 @@ Native LLVM and direct WebAssembly SHALL realize MIR static bytes, immutable add
 
 - **WHEN** one literal is referenced multiple times
 - **THEN** both backends expose the specified identical byte views whether or not storage is coalesced
-

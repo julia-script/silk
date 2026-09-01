@@ -141,6 +141,7 @@ source of truth.
 
 - **WHEN** a standard-library file contains a semantic error
 - **THEN** compilation reports the ordinary diagnostic against the canonical library source location
+
 ### Requirement: Effect combinators are canonical visible Silk source
 
 The standard library SHALL ship canonical `.silk` declarations for success, failure, and

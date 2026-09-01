@@ -23,4 +23,3 @@ None.
 ## Impact
 
 Adds the final tutorial lesson, hidden validation fixture, and exercise criteria. The reference solution affects only tutorial example code.
-

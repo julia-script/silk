@@ -36,7 +36,7 @@ so this change comes first: every later realignment proposal produces diagnostic
 ## Impact
 
 Every phase result type, all diagnostic fixtures and tests, and the inspector's diagnostic
-panels. No language surface changes. Existing diagnostic *content* is preserved; only its shape,
+panels. No language surface changes. Existing diagnostic _content_ is preserved; only its shape,
 codes, and ordering authority change.
 
 ## Plan References

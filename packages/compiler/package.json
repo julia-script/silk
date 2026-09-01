@@ -2,33 +2,29 @@
   "name": "@silklang/compiler",
   "version": "0.0.0",
   "description": "Effect-native stage-0 compiler and reusable compiler tooling for Silk Effect.",
+  "keywords": [
+    "compiler",
+    "effect",
+    "lexer",
+    "typescript"
+  ],
+  "homepage": "https://github.com/julia-script/silk-effect#readme",
+  "bugs": {
+    "url": "https://github.com/julia-script/silk-effect/issues"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/julia-script/silk-effect.git",
     "directory": "packages/compiler"
   },
-  "homepage": "https://github.com/julia-script/silk-effect#readme",
-  "bugs": {
-    "url": "https://github.com/julia-script/silk-effect/issues"
-  },
-  "keywords": [
-    "compiler",
-    "lexer",
-    "effect",
-    "typescript"
-  ],
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
-  "type": "module",
   "files": [
     "dist",
     "stdlib",
     "README.md",
     "LICENSE"
   ],
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -478,6 +474,10 @@
       "types": "./dist/WorkspaceInventory.d.ts",
       "import": "./dist/WorkspaceInventory.js"
     }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "pnpm unicode:generate && pnpm stdlib:generate && pnpm toolchain:generate && pnpm clean && tsc -p tsconfig.json",

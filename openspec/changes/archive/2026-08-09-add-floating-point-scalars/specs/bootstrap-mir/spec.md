@@ -8,4 +8,3 @@ MIR SHALL carry canonical float constants, arithmetic, comparisons, classificati
 
 - **WHEN** MIR reinterprets `f64` as `u64` with matching layouts
 - **THEN** verification accepts one backend-neutral bit operation
-

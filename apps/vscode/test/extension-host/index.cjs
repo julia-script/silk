@@ -93,9 +93,7 @@ const inlayHints = async (document) => {
         )
         const labels = Array.isArray(result)
           ? result.flatMap((hint) =>
-              typeof hint.label === 'string'
-                ? [hint.label]
-                : hint.label.map((part) => part.value),
+              typeof hint.label === 'string' ? [hint.label] : hint.label.map((part) => part.value),
             )
           : []
         if (labels.includes(': i32')) return

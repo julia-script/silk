@@ -43,4 +43,3 @@ This mirrors intended consumption and keeps the package barrel from growing.
 ## Migration Plan
 
 Add the standalone example scaffold and Lesson 3 page. CI integration can first run as an opt-in documentation check, then become required once stable. Rollback removes only the example and page.
-

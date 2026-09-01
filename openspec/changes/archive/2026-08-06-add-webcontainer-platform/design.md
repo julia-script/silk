@@ -89,12 +89,12 @@ Alternative considered: expose an `unsafeRaw` getter for completeness. Rejected 
 
 The implementation groups operations as follows:
 
-| Classification | Operations |
-|---|---|
-| Native | `makeDirectory`, `readDirectory`, `readFile`, `readFileString`, `writeFile`, `writeFileString`, `rename`, `remove`, `access`, `exists` |
-| Derived | `copy`, `copyFile`, temporary files/directories, scoped temporary entries, recursive directory reads, `realPath`, `truncate`, `stream`, `sink` |
-| Approximated | `stat` |
-| Unsupported | `chmod`, `chown`, `glob`, `link`, `open`, `readLink`, `symlink`, `utimes`, `watch` |
+| Classification | Operations                                                                                                                                     |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native         | `makeDirectory`, `readDirectory`, `readFile`, `readFileString`, `writeFile`, `writeFileString`, `rename`, `remove`, `access`, `exists`         |
+| Derived        | `copy`, `copyFile`, temporary files/directories, scoped temporary entries, recursive directory reads, `realPath`, `truncate`, `stream`, `sink` |
+| Approximated   | `stat`                                                                                                                                         |
+| Unsupported    | `chmod`, `chown`, `glob`, `link`, `open`, `readLink`, `symlink`, `utimes`, `watch`                                                             |
 
 Derived copy walks directories using typed directory entries and copies file bytes. Temporary names use Effect's random capability captured while constructing the layer and scoped variants remove their entries with brackets. `realPath` performs POSIX normalization relative to the runtime work directory and verifies existence; it cannot resolve symlinks because symlinks are unavailable. `truncate` reads, slices or zero-extends, and rewrites a file. Streams read the file once and emit bounded chunks honoring offsets and byte limits. Sinks collect input chunks in order and write once when the sink completes, so documentation calls out whole-file buffering and the absence of concurrent append semantics.
 

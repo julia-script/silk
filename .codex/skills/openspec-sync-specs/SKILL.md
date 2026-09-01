@@ -6,8 +6,8 @@ license: MIT
 compatibility: Requires openspec CLI.
 metadata:
   author: openspec
-  version: "1.0"
-  generatedBy: "1.7.0"
+  version: '1.0'
+  generatedBy: '1.7.0'
 ---
 
 Sync delta specs from a change to main specs.
@@ -34,6 +34,7 @@ This is an **agent-driven** operation - you will read delta specs and directly e
 2. **Resolve change context**
 
    Run:
+
    ```bash
    openspec status --change "<name>" --json
    ```
@@ -94,34 +95,34 @@ This is an **agent-driven** operation - you will read delta specs and directly e
 
    c. **Apply changes intelligently**:
 
-      **ADDED Requirements:**
-      - If requirement doesn't exist in main spec → add it
-      - If requirement already exists → update it to match (treat as implicit MODIFIED)
+   **ADDED Requirements:**
+   - If requirement doesn't exist in main spec → add it
+   - If requirement already exists → update it to match (treat as implicit MODIFIED)
 
-      **MODIFIED Requirements:**
-      - Find the requirement in main spec
-      - Apply the changes - this can be:
-        - Adding new scenarios (don't need to copy existing ones)
-        - Modifying existing scenarios
-        - Changing the requirement description
-      - Preserve scenarios/content not mentioned in the delta
+   **MODIFIED Requirements:**
+   - Find the requirement in main spec
+   - Apply the changes - this can be:
+     - Adding new scenarios (don't need to copy existing ones)
+     - Modifying existing scenarios
+     - Changing the requirement description
+   - Preserve scenarios/content not mentioned in the delta
 
-      **REMOVED Requirements:**
-      - Remove the entire requirement block from main spec
+   **REMOVED Requirements:**
+   - Remove the entire requirement block from main spec
 
-      **RENAMED Requirements:**
-      - Find the FROM requirement, rename to TO
+   **RENAMED Requirements:**
+   - Find the FROM requirement, rename to TO
 
-      **`## Purpose` in the delta:**
-      - The main spec already has one and it is authoritative - leave it alone
-        (this is what `openspec archive` does; it warns and moves on)
+   **`## Purpose` in the delta:**
+   - The main spec already has one and it is authoritative - leave it alone
+     (this is what `openspec archive` does; it warns and moves on)
 
    d. **Create new main spec** if capability doesn't exist yet:
-      - Create `<planningHome.root>/openspec/specs/<capability>/spec.md`
-      - Add Purpose section: copy the delta's `## Purpose` body verbatim when it has one
-        (this is what `openspec archive` does); only write a brief TBD placeholder when it does not
-      - Add Requirements section with the ADDED requirements
-      - Follow the **Main Spec Format Reference** below
+   - Create `<planningHome.root>/openspec/specs/<capability>/spec.md`
+   - Add Purpose section: copy the delta's `## Purpose` body verbatim when it has one
+     (this is what `openspec archive` does); only write a brief TBD placeholder when it does not
+   - Add Requirements section with the ADDED requirements
+   - Follow the **Main Spec Format Reference** below
 
 5. **Show summary**
 
@@ -141,16 +142,20 @@ Only on a delta that introduces a brand-new capability. Seeds the new main spec.
 ## ADDED Requirements
 
 ### Requirement: New Feature
+
 The system SHALL do something new.
 
 #### Scenario: Basic case
+
 - **WHEN** user does X
 - **THEN** system does Y
 
 ## MODIFIED Requirements
 
 ### Requirement: Existing Feature
+
 #### Scenario: New scenario to add
+
 - **WHEN** user does A
 - **THEN** system does B
 
@@ -172,14 +177,17 @@ Main specs are what the delta merges INTO. They must never contain delta operati
 # <capability> Specification
 
 ## Purpose
+
 Short description of what this capability does and why it exists.
 
 ## Requirements
 
 ### Requirement: New Feature
+
 The system SHALL do something new.
 
 #### Scenario: Basic case
+
 - **WHEN** user does X
 - **THEN** system does Y
 ```
@@ -187,8 +195,9 @@ The system SHALL do something new.
 **Key Principle: Intelligent Merging**
 
 Unlike programmatic merging, you can apply **partial updates**:
+
 - To add a scenario, just include that scenario under MODIFIED - don't copy existing scenarios
-- The delta represents *intent*, not a wholesale replacement
+- The delta represents _intent_, not a wholesale replacement
 - Use your judgment to merge changes sensibly
 
 **Output On Success**
@@ -199,10 +208,12 @@ Unlike programmatic merging, you can apply **partial updates**:
 Updated main specs:
 
 **<capability-1>**:
+
 - Added requirement: "New Feature"
 - Modified requirement: "Existing Feature" (added 1 scenario)
 
 **<capability-2>**:
+
 - Created new spec file
 - Added requirement: "Another Feature"
 
@@ -210,6 +221,7 @@ Main specs are now updated. The change remains active - archive when implementat
 ```
 
 **Guardrails**
+
 - Read both delta and main specs before making changes
 - Preserve existing content not mentioned in delta
 - Never copy a delta file into a main spec as-is - merge its content so the main spec keeps the Main Spec Format Reference structure, with no delta operation headers

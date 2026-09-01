@@ -60,21 +60,21 @@ The domains are:
 Requirement rows contain only `Shared` and `Exclusive` labels. `Take` describes an Effect value or
 provider-handle capture; it is not a stored service demand. Requirement union is a pointwise join:
 
-| Left | Right | Stored result |
-|---|---|---|
-| Shared | Shared | Shared |
-| Shared | Exclusive | Exclusive |
-| Exclusive | Shared | Exclusive |
-| Exclusive | Exclusive | Exclusive |
+| Left      | Right     | Stored result |
+| --------- | --------- | ------------- |
+| Shared    | Shared    | Shared        |
+| Shared    | Exclusive | Exclusive     |
+| Exclusive | Shared    | Exclusive     |
+| Exclusive | Exclusive | Exclusive     |
 
 Checked membership/subset and raw difference compare the normalized stored label exactly:
 
 | Stored left | Selected right | Checked membership | `Without` result for that key |
-|---|---|---|---|
-| Shared | Shared | present | removed |
-| Shared | Exclusive | access mismatch | Shared remains |
-| Exclusive | Shared | access mismatch | Exclusive remains |
-| Exclusive | Exclusive | present | removed |
+| ----------- | -------------- | ------------------ | ----------------------------- |
+| Shared      | Shared         | present            | removed                       |
+| Shared      | Exclusive      | access mismatch    | Shared remains                |
+| Exclusive   | Shared         | access mismatch    | Exclusive remains             |
+| Exclusive   | Exclusive      | present            | removed                       |
 
 Intersection also uses exact normalized stored-member equality rather than the access join used by
 union. For requirement rows, `Shared ∩ Shared` is `Shared`, `Exclusive ∩ Exclusive` is `Exclusive`,
@@ -250,6 +250,7 @@ The solver then intersects complete key sets to a fixed point before interpretin
      }>
    }
    ```
+
 3. Discard statuses for keys outside the intersection. For surviving keys, emit every
    `Ambiguous` or `Invalid` conformance diagnostic in canonical `(memberKey, constraintKey)` order
    at its relation/member primary span with duplicate occurrence spans secondary, and stop without
@@ -296,10 +297,10 @@ multiplicity, identities, or canonical payloads.
 Provider compatibility is:
 
 | Provider parameter | May select stored Shared | May select stored Exclusive |
-|---|---|---|
-| `&P` | yes | no |
-| `&mut P` | yes | yes |
-| owned `P` | yes | yes |
+| ------------------ | ------------------------ | --------------------------- |
+| `&P`               | yes                      | no                          |
+| `&mut P`           | yes                      | yes                         |
+| owned `P`          | yes                      | yes                         |
 
 In every successful case `P` must equal the stored capability or have one unique valid service
 conformance witness for it. A role is part of `S`; a role name alone never resolves multiple

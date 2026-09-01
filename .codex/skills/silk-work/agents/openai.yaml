@@ -1,6 +1,6 @@
 interface:
-  display_name: "Silk Work"
-  short_description: "Implement one queued Silk issue"
-  default_prompt: "Use $silk-work to claim and implement the next verified Silk issue from Linear."
+  display_name: 'Silk Work'
+  short_description: 'Implement one queued Silk issue'
+  default_prompt: 'Use $silk-work to claim and implement the next verified Silk issue from Linear.'
 policy:
   allow_implicit_invocation: false

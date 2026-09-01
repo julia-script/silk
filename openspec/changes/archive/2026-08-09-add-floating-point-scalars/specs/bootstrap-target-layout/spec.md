@@ -8,4 +8,3 @@ The target layout plan SHALL represent `f32` as IEEE binary32 with four-byte siz
 
 - **WHEN** a reachable signature contains `f32` and `f64`
 - **THEN** layout publishes both canonical lanes before MIR lowering
-

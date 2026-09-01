@@ -33,4 +33,3 @@ loop transfers, returns, and traps MUST NOT duplicate the union obligation.
 
 - **WHEN** assignment replaces an owned union containing `Token` with one containing `End`
 - **THEN** the old active `Token` is cleaned once before the new complete union commits
-

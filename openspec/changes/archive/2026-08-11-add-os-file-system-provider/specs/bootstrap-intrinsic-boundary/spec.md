@@ -34,4 +34,3 @@ the only source-callable compiler privilege.
 
 - **WHEN** consuming close reports failure
 - **THEN** the source handle is nevertheless dead and cannot be retried or dropped as a live resource
-

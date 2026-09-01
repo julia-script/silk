@@ -100,9 +100,11 @@ export const writeMetadata = (
     const node = entry.value
     switch (node._tag) {
       case 'Tuple':
-        Bitstream.writeUnabbreviatedRecord(block, node.distinct ? 5 : 3, [
-          ...node.elements.map(optional),
-        ])
+        Bitstream.writeUnabbreviatedRecord(
+          block,
+          node.distinct ? 5 : 3,
+          node.elements.map(optional),
+        )
         break
       case 'Constant': {
         const constant = state.constants[node.constant]

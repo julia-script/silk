@@ -1,11 +1,14 @@
 # bootstrap-module-closure Specification
 
 ## Purpose
+
 Loading the complete source-module closure of one compilation request: syntactic import
 following, canonical module identities and deterministic ordering, explicit import-resolution
 facts, and module-cycle facts, so every later phase operates over a known, reproducible set of
 `SyntaxFile` artifacts.
+
 ## Requirements
+
 ### Requirement: Load the reachable closure of one compilation request
 
 A compilation request SHALL name one canonical root module, provide that root's exact source bytes,
@@ -163,4 +166,3 @@ use or target incompatibility.
 
 - **WHEN** an ordinary reachable wrapper calls one sealed restricted intrinsic
 - **THEN** executable closure preserves that canonical intrinsic identity for target validation rather than treating the wrapper's module as the availability unit
-

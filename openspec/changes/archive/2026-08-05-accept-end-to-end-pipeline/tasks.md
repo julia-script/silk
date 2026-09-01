@@ -2,20 +2,20 @@
 
 - [x] 1.1 Add `hostLayout()` to `NativeToolchain.ts`; re-point toolchain tests to it
 - [x] 1.2 Create `packages/compiler/src/Driver.ts` (deep import only): `compile(request)`
-  orchestrating closure → index → elaboration → ownership → discovery → lowering → backend →
-  object → shim → link with closed outcomes naming failing stages with provenance
+      orchestrating closure → index → elaboration → ownership → discovery → lowering → backend →
+      object → shim → link with closed outcomes naming failing stages with provenance
 - [x] 1.3 Per-phase report: elapsed time, input/output counts, diagnostic counts, engine-heap
-  totals
+      totals
 - [x] 1.4 Driver tests: compile-and-run equals interpreter result, no-entry outcome, failing-stage
-  provenance, report shape
+      provenance, report shape
 
 ## 2. Continuous gates
 
 - [x] 2.1 Differential harness test over the shared corpus: completing programs agree by exit
-  status, trap programs terminate abnormally, recursion programs compile; divergence fails naming
-  the program
+      status, trap programs terminate abnormally, recursion programs compile; divergence fails naming
+      the program
 - [x] 2.2 Determinism audit: syntax, HIR, MIR, and bitcode gates all golden- and repeat-checked
-  (already present — verify coverage and reference from the driver tests)
+      (already present — verify coverage and reference from the driver tests)
 
 ## 3. Package surface
 
@@ -24,7 +24,7 @@
 ## 4. Inspector lab
 
 - [x] 4.1 Create the direct-link `/docs/labs/pipeline` lab: phases in order with status, counts,
-  per-phase diagnostics, elapsed snapshot time, links to each phase lab, planned native stages
+      per-phase diagnostics, elapsed snapshot time, links to each phase lab, planned native stages
 - [x] 4.2 Lab tests: healthy overview, damaged program per-phase diagnostic counts
 
 ## 5. Close the realignment

@@ -296,15 +296,15 @@ The confirmed rules above define construction, one-layer execution, nested succe
 eager/deferred boundary, and closure at an ordinary execution boundary. The rest of the current
 language-level Effect model is defined in focused pages:
 
-| Area | Reference |
-| --- | --- |
-| Success, failure, and requirement channels | [Effect contracts](effect-contracts.md) |
-| Requirements, services, roles, and provision | [Requirements and services](requirements-and-services.md) |
-| Captures, run access, reuse, and cleanup | [Ownership and borrowing](ownership-and-borrowing.md) |
-| Typed propagation, recovery, and traps | [Typed failures](typed-failures.md) |
-| Stack-safe recursive transfer | [Effect suspension and stack-safe recursion](effect-suspension.md) |
-| Owner-controlled parking and resumption | [Independently resumable Effect executions](independent-execution.md) |
-| Single-threaded scheduling, Fibers, and structured cancellation | [Single-threaded schedulers and Fibers](single-threaded-fibers.md) |
+| Area                                                            | Reference                                                             |
+| --------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Success, failure, and requirement channels                      | [Effect contracts](effect-contracts.md)                               |
+| Requirements, services, roles, and provision                    | [Requirements and services](requirements-and-services.md)             |
+| Captures, run access, reuse, and cleanup                        | [Ownership and borrowing](ownership-and-borrowing.md)                 |
+| Typed propagation, recovery, and traps                          | [Typed failures](typed-failures.md)                                   |
+| Stack-safe recursive transfer                                   | [Effect suspension and stack-safe recursion](effect-suspension.md)    |
+| Owner-controlled parking and resumption                         | [Independently resumable Effect executions](independent-execution.md) |
+| Single-threaded scheduling, Fibers, and structured cancellation | [Single-threaded schedulers and Fibers](single-threaded-fibers.md)    |
 
 These execution facilities are explicit source-level layers. They do not make ordinary Effect
 construction concurrent, add an ambient scheduler, or turn `Effect.suspend` into a parking

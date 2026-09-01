@@ -160,7 +160,9 @@ function SourceBody() {
         >
           format
         </button>
-        <span>{cursor === undefined ? 'no selection' : `sel [${cursor.start}, ${cursor.end})`}</span>
+        <span>
+          {cursor === undefined ? 'no selection' : `sel [${cursor.start}, ${cursor.end})`}
+        </span>
       </div>
     </>
   )
@@ -825,9 +827,7 @@ function WorkbenchInner() {
                 >
                   <span className={shell.sidebarRowName}>{name}</span>
                   {name === root ? <i className={shell.rootDot} title="root module" /> : null}
-                  <span className={shell.sidebarRowMeta}>
-                    {(modules[name] ?? '').length} B
-                  </span>
+                  <span className={shell.sidebarRowMeta}>{(modules[name] ?? '').length} B</span>
                 </button>
               ))}
 
@@ -923,11 +923,7 @@ function WorkbenchInner() {
         <span className={shell.statusEnd}>url synced</span>
       </div>
 
-      <PresetPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        onPick={loadPreset}
-      />
+      <PresetPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onPick={loadPreset} />
     </div>
   )
 }

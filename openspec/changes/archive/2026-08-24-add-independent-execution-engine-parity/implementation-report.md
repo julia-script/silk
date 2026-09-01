@@ -50,7 +50,7 @@ non-LIFO fixture pass.
   drive of one root cannot rewind or overwrite another parked root's continuation frame.
 - The evaluator/Wasm latched-resume acceptance program agrees on result `42`, one stable logical
   root, and `Initialize, Drive, Register, Latch, RetainGuard, Notify, Eligible, Resume, Drive,
-  Complete`.
+Complete`.
 
 Native realization, the complete destruction/cancellation matrix, two-root alternating acceptance,
 and reactor availability remain open; task 3.2 therefore remains unchecked despite the first

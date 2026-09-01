@@ -39,13 +39,13 @@ structs, scalar enums, nominal unions, arrays, references, slices, and structura
 
 Silk defines these scalar types:
 
-| Category | Types |
-| --- | --- |
-| Boolean | `bool` |
-| Unicode scalar | `char` |
+| Category          | Types                              |
+| ----------------- | ---------------------------------- |
+| Boolean           | `bool`                             |
+| Unicode scalar    | `char`                             |
 | Unsigned integers | `u8`, `u16`, `u32`, `u64`, `usize` |
-| Signed integers | `i8`, `i16`, `i32`, `i64`, `isize` |
-| Floating point | `f32`, `f64` |
+| Signed integers   | `i8`, `i16`, `i32`, `i64`, `isize` |
+| Floating point    | `f32`, `f64`                       |
 
 The foundational non-scalar types are unit `()`, bottom `never`, and immutable UTF-8 view
 `string`. Every spelling denotes a distinct type. Uppercase forms such as `I32`, `Bool`, and
@@ -220,16 +220,16 @@ The diagnostic must retain its exact magnitude rather than a rounded host-number
 Every valid duration literal has type `u64`, independent of its surrounding context. The compiler
 scales every component exactly and sums the result before HIR lowering.
 
-| Suffix | Exact nanoseconds |
-| --- | ---: |
-| `ns` | `1` |
-| `us` | `1_000` |
-| `ms` | `1_000_000` |
-| `s` | `1_000_000_000` |
-| `m` | `60_000_000_000` |
-| `h` | `3_600_000_000_000` |
-| `d` | `86_400_000_000_000` |
-| `w` | `604_800_000_000_000` |
+| Suffix |     Exact nanoseconds |
+| ------ | --------------------: |
+| `ns`   |                   `1` |
+| `us`   |               `1_000` |
+| `ms`   |           `1_000_000` |
+| `s`    |       `1_000_000_000` |
+| `m`    |      `60_000_000_000` |
+| `h`    |   `3_600_000_000_000` |
+| `d`    |  `86_400_000_000_000` |
+| `w`    | `604_800_000_000_000` |
 
 Days and weeks are fixed spans: one day is exactly 24 hours and one week is exactly seven days.
 They do not represent calendar days, time zones, daylight-saving transitions, or leap seconds.
@@ -441,12 +441,12 @@ compile errors, cycles, and evaluator limits retain their static diagnostic and 
 The ordinary `silk.target` module publishes these primitive constants. Their initializers use the
 same static evaluator as every other constant, and the selected target determines their values.
 
-| Fact | Type | Value |
-| --- | --- | --- |
-| `Target.usizeMax` | `usize` | Largest `usize` at the target pointer width |
-| `Target.isizeMax` | `isize` | Largest `isize` at the target pointer width |
-| `Target.isizeMin` | `isize` | Smallest `isize` at the target pointer width |
-| `Target.pointerBits` | `u32` | Target pointer width in bits |
+| Fact                 | Type    | Value                                        |
+| -------------------- | ------- | -------------------------------------------- |
+| `Target.usizeMax`    | `usize` | Largest `usize` at the target pointer width  |
+| `Target.isizeMax`    | `isize` | Largest `isize` at the target pointer width  |
+| `Target.isizeMin`    | `isize` | Smallest `isize` at the target pointer width |
+| `Target.pointerBits` | `u32`   | Target pointer width in bits                 |
 
 ```silk
 import silk.target as Target

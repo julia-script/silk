@@ -62,7 +62,7 @@ maximum, checked at declaration).
 
 `FEATURES` in `oracle.mjs` gains `simd`, `relaxed-simd`, `threads`, `memory64` in the same
 change that emits those forms, keeping negative-corpus agreement meaningful: cases the builder
-rejects must fail oracle validation *with these features enabled*, so the corpus proves the
+rejects must fail oracle validation _with these features enabled_, so the corpus proves the
 builder is not merely lagging the feature set.
 
 ### 5. Fixture stability check

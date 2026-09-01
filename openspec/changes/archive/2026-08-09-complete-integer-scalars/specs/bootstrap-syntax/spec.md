@@ -22,4 +22,3 @@ The parser SHALL preserve every lowercase integer primitive spelling, `()` in ty
 **Reason**: Uppercase `Usize` is removed and lowercase `usize` follows the complete contextual integer syntax.
 
 **Migration**: Write `usize` and use explicit conversions where needed.
-

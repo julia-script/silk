@@ -24,7 +24,7 @@ not.
 
 - No new typing power: the frozen slice has one type, so "generic-aware" and "contract rows"
   reduce to their degenerate forms — the structure (normalized contract as data) is what lands.
-- No cross-module call resolution: import *bindings* do not exist yet (issue 04's binding rules
+- No cross-module call resolution: import _bindings_ do not exist yet (issue 04's binding rules
   arrive with the language surface); resolution stays module-local.
 - No MIR, no evaluator semantics changes — `retarget-evaluator-to-mir` owns the evaluator's
   future.
@@ -41,13 +41,13 @@ not.
 2. **HIR is projected inside the elaboration phase from the typed facts.** One phase, two
    internal steps: fact analysis (existing logic), then HIR projection per function. The phase
    boundary — headers in, facts + HIR + diagnostics out — is what ticket 06 pins; internal
-   staging is an implementation detail. *Alternative rejected:* constructing HIR inline during
+   staging is an implementation detail. _Alternative rejected:_ constructing HIR inline during
    fact analysis — interleaves two concerns the facts already separate cleanly.
 
 3. **Dependency-graph walking is the trivial order in this slice.** All contracts are explicit
    (declared types), so no on-demand memoization or SCC contract requirement can fire;
    declarations elaborate in header order. The ticket's structure is honored by contracts being
-   *inputs* to body elaboration (from the header phase), never inferred from bodies.
+   _inputs_ to body elaboration (from the header phase), never inferred from bodies.
 
 4. **HIR expressions carry `type`, `span`, and — for unavailable states — the originating
    diagnostic identity** (from the existing caused sentinels). Calls reference canonical

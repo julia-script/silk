@@ -1,9 +1,12 @@
 # bootstrap-project-analysis Specification
 
 ## Purpose
+
 Defines coherent multi-root frontend analysis that computes shared compiler facts once per project
 revision and exposes immutable root views without duplicating module work.
+
 ## Requirements
+
 ### Requirement: One project revision analyzes the union module closure once
 
 Project frontend analysis SHALL accept one or more canonical root sources, resolve the union of

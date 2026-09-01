@@ -8,4 +8,3 @@ Type completion SHALL derive the ordered lowercase integer vocabulary plus `bool
 
 - **WHEN** completion is requested in a type position
 - **THEN** all fixed- and target-width integer spellings are offered deterministically
-

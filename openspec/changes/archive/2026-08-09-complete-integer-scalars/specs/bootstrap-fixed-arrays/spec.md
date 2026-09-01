@@ -8,4 +8,3 @@
 
 - **WHEN** `Array<i32, 4>` is indexed by runtime `usize`
 - **THEN** execution checks the canonical length and returns the selected element or traps
-

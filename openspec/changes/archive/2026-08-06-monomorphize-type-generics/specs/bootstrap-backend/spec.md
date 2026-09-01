@@ -7,10 +7,11 @@ as one concrete definition using its compiler-selected type layout, calling shap
 symbol. Backends MUST NOT merge layout-distinct instances or add runtime generic dispatch.
 
 #### Scenario: Emit layout-distinct instances
+
 - **WHEN** MIR contains specializations whose argument types have different selected layouts
 - **THEN** each backend emits distinct concrete definitions and both executions agree with evaluation
 
 #### Scenario: Repeat specialization symbols
+
 - **WHEN** equivalent specialized MIR is emitted in fresh processes
 - **THEN** native and WebAssembly symbol identities and artifacts are deterministic
-

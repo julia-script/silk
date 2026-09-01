@@ -43,4 +43,3 @@ Every result name corresponds to one expression node; mutable-source comparison 
 ## Migration Plan
 
 Extend `Compiler.ts`, add expression IR/native tests and SSA assets, and add Lesson 8. The public compiler result remains textual IR.
-

@@ -37,4 +37,4 @@
       listing-only with zero sizes) and the rename-race note
 - [x] 5.2 Update the package changeset to mention watch support and the stat behavior change
 - [x] 5.3 Run package typecheck, unit tests, and browser tests; run `openspec validate
-      fix-webcontainer-watch-and-stat --strict`
+fix-webcontainer-watch-and-stat --strict`

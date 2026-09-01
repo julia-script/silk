@@ -14,10 +14,12 @@ parameter types, return type, and body, and duplicate or unbound parameters MUST
 deterministic diagnostics.
 
 #### Scenario: Bind one generic struct parameter
+
 - **WHEN** `pub struct Box<T> { pub value: T }` is analyzed
 - **THEN** the field type refers to the canonical `T` parameter owned by `Box`, not to a nominal type named `T`
 
 #### Scenario: Reject a duplicate parameter
+
 - **WHEN** a declaration introduces `<T, T>`
 - **THEN** analysis reports the second parameter as a deterministic duplicate without fabricating another identity
 
@@ -29,10 +31,12 @@ arguments. Applying arguments to a non-generic declaration, omitting arguments i
 position, or supplying the wrong arity MUST remain explicit semantic failures.
 
 #### Scenario: Reuse one applied type identity
+
 - **WHEN** independent declarations refer to `Box<Token>`
 - **THEN** both references resolve to the same canonical applied type identity
 
 #### Scenario: Reject the wrong arity
+
 - **WHEN** `Pair<I32>` refers to a declaration with two type parameters
 - **THEN** analysis reports the expected and actual argument counts and produces no available applied type
 
@@ -44,14 +48,17 @@ and later uses MUST NOT contribute inference. Missing, conflicting, or excess ar
 produce deterministic diagnostics at the call.
 
 #### Scenario: Infer identity from its argument
+
 - **WHEN** `identity(value)` calls `identity<T>(value: T)` with a `Token`
 - **THEN** the call specializes `T` as `Token`
 
 #### Scenario: Refuse return-only inference
+
 - **WHEN** `empty()` calls `empty<T>() -> T` without explicit type arguments
 - **THEN** specialization fails even when the call result is later used where `Token` is expected
 
 #### Scenario: Specialize explicitly
+
 - **WHEN** `empty<Token>()` calls `empty<T>() -> T`
 - **THEN** the call records the concrete `Token` specialization
 
@@ -63,10 +70,12 @@ operations through concrete duck typing or type-directed source branching. Copya
 SHALL remain compiler-owned type properties available to generic ownership checking.
 
 #### Scenario: Preserve a generic whole-value move
+
 - **WHEN** `identity<T>(value: T)` returns `move value`
 - **THEN** ownership checks that transfer once over `T` and every concrete specialization reuses the proof
 
 #### Scenario: Reject undeclared concrete behavior
+
 - **WHEN** an unconstrained generic body calls an operation unavailable for its type parameter
 - **THEN** the declaration is rejected before any concrete specialization can make the call appear valid
 
@@ -79,14 +88,17 @@ MUST receive only concrete monomorphic instances and MUST NOT require runtime ge
 type descriptors.
 
 #### Scenario: Discover two concrete instances
+
 - **WHEN** the entry reaches `identity<I32>` and `identity<Token>`
 - **THEN** discovery records exactly two deterministic instance keys and lowering produces two concrete MIR functions
 
 #### Scenario: Terminate ordinary generic recursion
+
 - **WHEN** `walk<T>` recursively calls `walk<T>`
 - **THEN** discovery reuses the already recorded instance key rather than expanding a new instance
 
 #### Scenario: Reject polymorphic recursion
+
 - **WHEN** a recursive generic call changes its current type arguments
 - **THEN** analysis rejects the call before instance discovery can expand indefinitely
 
@@ -96,5 +108,6 @@ Canonical applied types, substitutions, instance keys, concrete symbols, layouts
 diagnostics SHALL be deterministic across fresh processes for equivalent source and target inputs.
 
 #### Scenario: Repeat specialization artifacts
+
 - **WHEN** the same multi-specialization program is compiled repeatedly in fresh processes
 - **THEN** its generic facts, instance ordering, layouts, MIR text, and emitted symbols are byte-identical

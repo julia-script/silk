@@ -1,9 +1,9 @@
 ---
-name: "OPSX: Update"
-description: "Update a change - revise existing planning artifacts and keep them coherent (Experimental)"
+name: 'OPSX: Update'
+description: 'Update a change - revise existing planning artifacts and keep them coherent (Experimental)'
 allowed-tools: Bash(openspec:*)
-category: "Workflow"
-tags: ["workflow", "artifacts", "experimental"]
+category: 'Workflow'
+tags: ['workflow', 'artifacts', 'experimental']
 ---
 
 Revise a change's existing planning artifacts and keep them coherent. Never edit code.
@@ -34,9 +34,11 @@ Revise a change's existing planning artifacts and keep them coherent. Never edit
    Always announce: "Using change: <name>" and how to override (e.g., `/opsx:update <other>`).
 
 2. **Get the change's artifacts**
+
    ```bash
    openspec status --change "<name>" --json
    ```
+
    Parse the JSON to understand current state. The response includes:
    - `schemaName`: The workflow schema being used (e.g., "spec-driven")
    - `artifacts`: Array of artifacts with their status ("done", "skipped", "ready", "blocked")
@@ -74,14 +76,16 @@ Revise a change's existing planning artifacts and keep them coherent. Never edit
 **Output**
 
 After each invocation, show:
+
 - Which artifacts were revised (and which proposed revisions were rejected)
 - Anything deferred to `/opsx:continue` (not-yet-created artifacts or files)
 - Where the change stands and the recommended next command
 
 **Guardrails**
+
 - Planning artifacts only - NEVER edit implementation code. If the revised plan implies code changes, stop and point to `/opsx:apply`.
 - Use the artifact ids and paths reported by `openspec status`; never branch on hardcoded artifact names.
 - Edit only the concrete files in `existingOutputPaths`; never write to a glob `resolvedOutputPath`.
 - Do not advance the build frontier: no new artifacts, no new files under glob artifacts - that is `/opsx:continue`'s job.
 - Confirm every edit with the user before writing.
-- If the request changes the change's *intent* rather than refining it, first verify whether the optional `/opsx:new` workflow is available. If it is, recommend starting fresh with `/opsx:new` (the "Update vs. Start Fresh" heuristic). If it is unavailable, ask for a distinct unused change name and recommend `openspec new change "<new-change-name>"` instead.
+- If the request changes the change's _intent_ rather than refining it, first verify whether the optional `/opsx:new` workflow is available. If it is, recommend starting fresh with `/opsx:new` (the "Update vs. Start Fresh" heuristic). If it is unavailable, ask for a distinct unused change name and recommend `openspec new change "<new-change-name>"` instead.

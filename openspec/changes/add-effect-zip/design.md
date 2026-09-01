@@ -60,7 +60,7 @@ simply never gets there. The unrun `other` is an owned local of the frame the pr
 and the propagation exit releases it exactly as it releases every other local.
 
 This is why the combinator needs no reification. `ensuring` and `provideEffect` reify with
-`Effect.result` because they have work to do *after* a failure and must not do it on the propagation
+`Effect.result` because they have work to do _after_ a failure and must not do it on the propagation
 path. `zip` has nothing to do after a failure, so the propagation path is the correct one.
 
 ### The collected values are ordinary public data
@@ -69,7 +69,7 @@ path. `zip` has nothing to do after a failure, so the propagation path is the co
 combinator constructs them inside their own defining module — and then be unreadable by every
 caller, since cross-module projection of a non-public field raises `SEM0028`.
 
-Cross-module *construction* stays closed regardless: `SEM0021` limits raw construction to the
+Cross-module _construction_ stays closed regardless: `SEM0021` limits raw construction to the
 defining module, so a caller reads a `Pair` that `zip` produced but cannot build one. That is the
 same shape `Result` already has, where `succeed` and `failResult` are the constructors, and it costs
 nothing here because the only source of a `Pair` that matters is `zip` itself.

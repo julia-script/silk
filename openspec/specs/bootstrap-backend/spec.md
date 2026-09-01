@@ -1,11 +1,14 @@
 # bootstrap-backend Specification
 
 ## Purpose
+
 The nominal `Backend` service: one operation consuming a target-aware monomorphized MIR program and
 a codegen request, and the bootstrap `LlvmBackend` lowering MIR through the Silk LLVM builder to
 deterministic bitcode — the seam the driver and any future backend share, with textual LLVM IR as
 an inspection artifact only.
+
 ## Requirements
+
 ### Requirement: The Backend service is a nominal contract
 
 The `Backend` service SHALL expose a stable backend identifier, its canonical compatible targets, and one emission operation consuming the whole target-aware monomorphized MIR program plus a codegen request, producing one typed program artifact. It MUST NOT accept a second target-layout input or choose an alternate representation for a Silk type. One compilation request SHALL produce one MIR program, one backend module, and one artifact; source modules are semantic namespaces, not codegen units. Artifact finalization SHALL follow the artifact kind and selected target rather than assuming every backend result requires native object emission and linking.
@@ -366,10 +369,12 @@ as one concrete definition using its compiler-selected type layout, calling shap
 symbol. Backends MUST NOT merge layout-distinct instances or add runtime generic dispatch.
 
 #### Scenario: Emit layout-distinct instances
+
 - **WHEN** MIR contains specializations whose argument types have different selected layouts
 - **THEN** each backend emits distinct concrete definitions and both executions agree with evaluation
 
 #### Scenario: Repeat specialization symbols
+
 - **WHEN** equivalent specialized MIR is emitted in fresh processes
 - **THEN** native and WebAssembly symbol identities and artifacts are deterministic
 

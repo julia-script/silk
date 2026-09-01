@@ -36,14 +36,17 @@ only in positions admitted by its kind, and duplicate or unbound parameters MUST
 deterministic diagnostics.
 
 #### Scenario: Bind one generic struct parameter
+
 - **WHEN** `pub struct Box<T> { pub value: T }` is analyzed
 - **THEN** the field type refers to the canonical `T` parameter owned by `Box`, not to a nominal type named `T`
 
 #### Scenario: Bind a representation parameter
+
 - **WHEN** `pub struct Mapper<A, B, F: fn(A) -> B> { transform: F }` is analyzed
 - **THEN** `F` is canonical to `Mapper` and can appear only as a represented callable value
 
 #### Scenario: Reject a duplicate parameter
+
 - **WHEN** a declaration introduces `<T, T>`
 - **THEN** analysis reports the second parameter as a deterministic duplicate without fabricating another identity
 
@@ -59,10 +62,12 @@ parameter uninferred, or producing conflicting field constraints MUST remain exp
 failures. Expected result types and later uses MUST NOT participate in construction inference.
 
 #### Scenario: Reuse one applied type identity
+
 - **WHEN** independent declarations refer to `Box<Token>`
 - **THEN** both references resolve to the same canonical applied type identity
 
 #### Scenario: Infer a construction representation
+
 - **WHEN** `Mapper` construction supplies a named function for field `F`
 - **THEN** the complete applied type includes that exact representation argument
 
@@ -138,6 +143,7 @@ deterministic diagnostic at the responsible prefix or application.
 - **THEN** analysis reports a kind mismatch at that explicit generic argument rather than treating every value type as a valid row singleton
 
 #### Scenario: Infer identity from its argument
+
 - **WHEN** `identity(value)` calls `identity<T>(value: T)` with a `Token`
 - **THEN** the call specializes `T` as `Token`
 
@@ -147,10 +153,12 @@ deterministic diagnostic at the responsible prefix or application.
 - **THEN** the complete application resolves one canonical `Token` specialization
 
 #### Scenario: Refuse return-only inference
+
 - **WHEN** `empty()` calls `empty<T>() -> T` without explicit type arguments
 - **THEN** specialization fails even when the call result is later used where `Token` is expected
 
 #### Scenario: Specialize explicitly
+
 - **WHEN** `empty<Token>()` calls `empty<T>() -> T`
 - **THEN** the call records the concrete `Token` specialization
 
@@ -184,10 +192,12 @@ symbolic evidence SHALL propagate through nested generic calls.
 - **THEN** generic checking rejects the use even if one later specialization would contain only Copy fields
 
 #### Scenario: Preserve a generic whole-value move
+
 - **WHEN** `identity<T>(value: T)` returns `move value`
 - **THEN** ownership checks that transfer once over `T` and every concrete specialization reuses the proof
 
 #### Scenario: Reject undeclared concrete behavior
+
 - **WHEN** an unconstrained generic body calls an operation unavailable for its type parameter
 - **THEN** the declaration is rejected before any concrete specialization can make the call appear valid
 
@@ -200,14 +210,17 @@ MUST receive only concrete monomorphic instances and MUST NOT require runtime ge
 type descriptors.
 
 #### Scenario: Discover two concrete instances
+
 - **WHEN** the entry reaches `identity<i32>` and `identity<Token>`
 - **THEN** discovery records exactly two deterministic instance keys and lowering produces two concrete MIR functions
 
 #### Scenario: Terminate ordinary generic recursion
+
 - **WHEN** `walk<T>` recursively calls `walk<T>`
 - **THEN** discovery reuses the already recorded instance key rather than expanding a new instance
 
 #### Scenario: Reject polymorphic recursion
+
 - **WHEN** a recursive generic call changes its current type arguments
 - **THEN** analysis rejects the call before instance discovery can expand indefinitely
 
@@ -217,8 +230,10 @@ Canonical applied types, substitutions, instance keys, concrete symbols, layouts
 diagnostics SHALL be deterministic across fresh processes for equivalent source and target inputs.
 
 #### Scenario: Repeat specialization artifacts
+
 - **WHEN** the same multi-specialization program is compiled repeatedly in fresh processes
 - **THEN** its generic facts, instance ordering, layouts, MIR text, and emitted symbols are byte-identical
+
 ### Requirement: Generics distinguish ordinary types from requirement rows
 
 Generic declarations SHALL bind ordinary type parameters and requirement-row parameters as distinct

@@ -1,9 +1,12 @@
 # bootstrap-syntax-correspondence Specification
 
 ## Purpose
+
 Relates unchanged concrete syntax across adjacent immutable source revisions without replacing each
 revision's deterministic source-qualified syntax identities.
+
 ## Requirements
+
 ### Requirement: Correspondence is source-owned and bidirectional
 
 A syntax correspondence SHALL relate elements only between two syntax artifacts with the same

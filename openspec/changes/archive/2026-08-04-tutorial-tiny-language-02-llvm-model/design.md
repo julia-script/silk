@@ -43,4 +43,3 @@ The lesson may say instruction results are named values, but assignment-once sem
 ## Migration Plan
 
 Add the numbered LLVM-model page and link it between Lessons 1 and 3. The page is additive and can be removed independently if the series is rolled back.
-

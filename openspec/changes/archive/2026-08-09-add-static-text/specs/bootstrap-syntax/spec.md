@@ -8,4 +8,3 @@ The parser SHALL preserve quote delimiters, byte prefix, content, escapes, trivi
 
 - **WHEN** a literal contains a malformed escape
 - **THEN** damage remains local and the following statement remains parseable
-

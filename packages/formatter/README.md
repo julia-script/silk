@@ -7,7 +7,7 @@ formatted recursively in the source file that owns them.
 ```ts
 import * as Formatter from '@silklang/formatter/Formatter'
 
-const formatted = yield* Formatter.format(syntax)
+const formatted = yield * Formatter.format(syntax)
 ```
 
 The formatter is pure and document-local. Syntax damage, an unclosed active fence, or damage in any

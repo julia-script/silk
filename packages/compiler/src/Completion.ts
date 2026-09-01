@@ -255,21 +255,20 @@ const actorCandidates = (actor: Intrinsic.Actor): ReadonlyArray<Candidate> =>
 
 const enumCandidates = (enum_: DeclarationFacts.EnumFact): ReadonlyArray<Candidate> =>
   Object.freeze([
-    ...enum_.members.flatMap(
-      (member): ReadonlyArray<Candidate> =>
-        member.name._tag !== 'Present' || member.canonical._tag !== 'Canonical'
-          ? []
-          : [
-              candidate({
-                identity: semantic(
-                  Object.freeze({ _tag: 'EnumMemberIdentity', id: member.canonical.id }),
-                ),
-                kind: 'Constant',
-                label: member.name.spelling,
-                detail: PresentationRenderer.enumMember(enum_, member),
-                sortGroup: 0,
-              }),
-            ],
+    ...enum_.members.flatMap((member): ReadonlyArray<Candidate> =>
+      member.name._tag !== 'Present' || member.canonical._tag !== 'Canonical'
+        ? []
+        : [
+            candidate({
+              identity: semantic(
+                Object.freeze({ _tag: 'EnumMemberIdentity', id: member.canonical.id }),
+              ),
+              kind: 'Constant',
+              label: member.name.spelling,
+              detail: PresentationRenderer.enumMember(enum_, member),
+              sortGroup: 0,
+            }),
+          ],
     ),
     ...enum_.associatedOperations.map((operation) =>
       candidate({
@@ -286,41 +285,39 @@ const enumCandidates = (enum_: DeclarationFacts.EnumFact): ReadonlyArray<Candida
 
 const unionCandidates = (union: DeclarationFacts.UnionFact): ReadonlyArray<Candidate> =>
   Object.freeze(
-    union.variants.flatMap(
-      (variant): ReadonlyArray<Candidate> =>
-        variant.name._tag !== 'Present' || variant.canonical._tag !== 'Canonical'
-          ? []
-          : [
-              candidate({
-                identity: semantic(
-                  Object.freeze({ _tag: 'UnionVariantIdentity', id: variant.canonical.id }),
-                ),
-                kind: 'Constructor',
-                label: variant.name.spelling,
-                detail: PresentationRenderer.unionVariant(union, variant),
-                sortGroup: 0,
-              }),
-            ],
+    union.variants.flatMap((variant): ReadonlyArray<Candidate> =>
+      variant.name._tag !== 'Present' || variant.canonical._tag !== 'Canonical'
+        ? []
+        : [
+            candidate({
+              identity: semantic(
+                Object.freeze({ _tag: 'UnionVariantIdentity', id: variant.canonical.id }),
+              ),
+              kind: 'Constructor',
+              label: variant.name.spelling,
+              detail: PresentationRenderer.unionVariant(union, variant),
+              sortGroup: 0,
+            }),
+          ],
     ),
   )
 
 const serviceCandidates = (service: DeclarationFacts.ServiceFact): ReadonlyArray<Candidate> =>
   Object.freeze(
-    service.operations.flatMap(
-      (operation): ReadonlyArray<Candidate> =>
-        operation.name._tag !== 'Present' || operation.state._tag !== 'Unique'
-          ? []
-          : [
-              candidate({
-                identity: semantic(
-                  Object.freeze({ _tag: 'ServiceOperationIdentity', id: operation.state.id }),
-                ),
-                kind: 'Operation',
-                label: operation.name.spelling,
-                detail: PresentationRenderer.serviceOperation(operation),
-                sortGroup: 0,
-              }),
-            ],
+    service.operations.flatMap((operation): ReadonlyArray<Candidate> =>
+      operation.name._tag !== 'Present' || operation.state._tag !== 'Unique'
+        ? []
+        : [
+            candidate({
+              identity: semantic(
+                Object.freeze({ _tag: 'ServiceOperationIdentity', id: operation.state.id }),
+              ),
+              kind: 'Operation',
+              label: operation.name.spelling,
+              detail: PresentationRenderer.serviceOperation(operation),
+              sortGroup: 0,
+            }),
+          ],
     ),
   )
 

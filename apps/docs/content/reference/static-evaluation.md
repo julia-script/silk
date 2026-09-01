@@ -222,12 +222,12 @@ reports `SEM0176` at the invalid operation. The failed evaluation exposes no par
 The ordinary standard-library module `silk.static_text` provides static byte operations for text
 available during compilation:
 
-| Member | Result | Meaning |
-| --- | --- | --- |
-| `byteLength(value)` | `usize` | Number of bytes in the UTF-8 encoding |
-| `byteAt(value, index)` | `u8` | Byte at one in-bounds byte index |
-| `concat(left, right)` | `string` | Concatenated static text, retaining `left` as its diagnostic source anchor |
-| `slice(value, start, end)` | `string` | Text in one byte range whose endpoints are UTF-8 scalar boundaries |
+| Member                     | Result   | Meaning                                                                    |
+| -------------------------- | -------- | -------------------------------------------------------------------------- |
+| `byteLength(value)`        | `usize`  | Number of bytes in the UTF-8 encoding                                      |
+| `byteAt(value, index)`     | `u8`     | Byte at one in-bounds byte index                                           |
+| `concat(left, right)`      | `string` | Concatenated static text, retaining `left` as its diagnostic source anchor |
+| `slice(value, start, end)` | `string` | Text in one byte range whose endpoints are UTF-8 scalar boundaries         |
 
 ```silk,ignore
 import silk.static_text { byteLength, byteAt, concat, slice }
@@ -260,15 +260,15 @@ tuples and anonymous positional aggregates expose positions; named structs and a
 expose visible labels. Declaration order, nominal owner identity, generic substitution, aggregate
 kind, and the reflecting declaration's visibility authority are retained.
 
-| Member | Result | Meaning |
-| --- | --- | --- |
-| `typeOf<Owner>()` | `Intrinsic.Type<Owner>` | Descriptor for one concrete aggregate owner |
-| `fields<Owner>()` | `Intrinsic.Fields<Owner>` | Ordered heterogeneous field collection |
-| `typeKind(descriptor)` | `u8` | Stable named/positional aggregate-kind code |
-| `fieldKind(field)` | `u8` | Stable labeled/positional member-kind code |
-| `fieldLabel(field)` | `string` | Label of a labeled field |
-| `fieldOrdinal(field)` | `usize` | Position of a positional field |
-| `borrowField(owner, static field)` | `&Value` | Shared runtime projection authorized by the descriptor |
+| Member                             | Result                    | Meaning                                                |
+| ---------------------------------- | ------------------------- | ------------------------------------------------------ |
+| `typeOf<Owner>()`                  | `Intrinsic.Type<Owner>`   | Descriptor for one concrete aggregate owner            |
+| `fields<Owner>()`                  | `Intrinsic.Fields<Owner>` | Ordered heterogeneous field collection                 |
+| `typeKind(descriptor)`             | `u8`                      | Stable named/positional aggregate-kind code            |
+| `fieldKind(field)`                 | `u8`                      | Stable labeled/positional member-kind code             |
+| `fieldLabel(field)`                | `string`                  | Label of a labeled field                               |
+| `fieldOrdinal(field)`              | `usize`                   | Position of a positional field                         |
+| `borrowField(owner, static field)` | `&Value`                  | Shared runtime projection authorized by the descriptor |
 
 Descriptors remain nominal: equal field shapes from separate structs do not become assignment-
 compatible or share projection authority. Private fields are absent outside their declaring module
@@ -408,15 +408,15 @@ static arguments, and selected `static if` arms. Static-text diagnostics may als
 literal and byte offset. They do not expose host stack frames, JavaScript causes, compiler
 addresses, cache identities, or backend details.
 
-| Code | Condition |
-| --- | --- |
+| Code      | Condition                                                     |
+| --------- | ------------------------------------------------------------- |
 | `SEM0176` | An operation or value is unavailable during static evaluation |
-| `SEM0177` | A selected `compileError` requests compilation failure |
-| `SEM0178` | A demanded static application forms a cycle |
-| `SEM0179` | The deterministic evaluator-step limit is exhausted |
-| `SEM0180` | The logical static call-depth limit is exhausted |
-| `SEM0181` | The retained canonical-value byte limit is exhausted |
-| `SEM0182` | The residual-program growth limit is exhausted |
+| `SEM0177` | A selected `compileError` requests compilation failure        |
+| `SEM0178` | A demanded static application forms a cycle                   |
+| `SEM0179` | The deterministic evaluator-step limit is exhausted           |
+| `SEM0180` | The logical static call-depth limit is exhausted              |
+| `SEM0181` | The retained canonical-value byte limit is exhausted          |
+| `SEM0182` | The residual-program growth limit is exhausted                |
 
 Limit diagnostics name the exhausted resource and produce no partial value or residual program.
 They never masquerade as a source-requested `compileError`.
@@ -439,14 +439,14 @@ arguments produces the same code, semantic details, related spans, and trace enc
 The ordinary standard-library module `silk.target` exposes two zero-argument static queries and four
 primitive constants:
 
-| Member | Type | Value |
-| --- | --- | --- |
-| `Target.profile()` | `Target.Profile` | Nominal profile enum member for the selected target |
-| `Target.arch()` | `Target.Arch` | Nominal architecture enum member for the selected target |
-| `Target.pointerBits` | `u32` | `32` for `wasm32-unknown-unknown`; `64` for every canonical native target |
-| `Target.usizeMax` | `usize` | Largest `usize` at the selected pointer width |
-| `Target.isizeMax` | `isize` | Largest `isize` at the selected pointer width |
-| `Target.isizeMin` | `isize` | Smallest `isize` at the selected pointer width |
+| Member               | Type             | Value                                                                     |
+| -------------------- | ---------------- | ------------------------------------------------------------------------- |
+| `Target.profile()`   | `Target.Profile` | Nominal profile enum member for the selected target                       |
+| `Target.arch()`      | `Target.Arch`    | Nominal architecture enum member for the selected target                  |
+| `Target.pointerBits` | `u32`            | `32` for `wasm32-unknown-unknown`; `64` for every canonical native target |
+| `Target.usizeMax`    | `usize`          | Largest `usize` at the selected pointer width                             |
+| `Target.isizeMax`    | `isize`          | Largest `isize` at the selected pointer width                             |
+| `Target.isizeMin`    | `isize`          | Smallest `isize` at the selected pointer width                            |
 
 `Target.Profile` is closed over `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`,
 `wasm32-unknown-unknown`, and `x86_64-unknown-linux-gnu`. `Target.Arch` is closed over the

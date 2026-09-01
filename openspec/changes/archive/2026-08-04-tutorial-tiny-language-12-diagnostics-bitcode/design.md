@@ -43,4 +43,3 @@ This directly reveals the package guarantee without introducing synthetic faults
 ## Migration Plan
 
 Add diagnostic rendering/tests, invalid fixtures, bitcode variation, and Lesson 12. These are additive to the successful compiler path and can be removed without changing core semantics.
-

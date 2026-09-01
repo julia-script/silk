@@ -1,11 +1,14 @@
 # bootstrap-declaration-index Specification
 
 ## Purpose
+
 The closure-wide declaration index: every top-level declaration header collected and given a
 canonical identity before any body resolves, header-level signatures resolved with explicit
 unresolved states, and the result published as an immutable, canonically ordered fact table that
 downstream phases key against.
+
 ## Requirements
+
 ### Requirement: Canonical identities precede body resolution
 
 Header collection SHALL visit every public and private top-level function declaration of every

@@ -653,9 +653,12 @@ export const resolve = Effect.fnUntraced(function* (
     variadic === undefined ? {} : { variadic },
   )
   const attributes = options.attributes ?? (yield* commonAttributes(builder, id))
-  return yield* FunctionActor.declare(builder, yield* intrinsicName(builder, id, overloads), type, {
-    ...(attributes === undefined ? {} : { attributes }),
-  })
+  return yield* FunctionActor.declare(
+    builder,
+    yield* intrinsicName(builder, id, overloads),
+    type,
+    attributes === undefined ? {} : { attributes },
+  )
 })
 
 /** @internal */

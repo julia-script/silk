@@ -1,11 +1,11 @@
-import { Analytics } from '@vercel/analytics/next';
-import { RootProvider } from 'fumadocs-ui/provider/next';
-import './global.css';
-import type { Metadata } from 'next';
-import type { ReactNode } from 'react';
+import { Analytics } from '@vercel/analytics/next'
+import { RootProvider } from 'fumadocs-ui/provider/next'
+import './global.css'
+import type { Metadata } from 'next'
+import type { ReactNode } from 'react'
 
 const description =
-  'A low-level language where typed failures, borrowed service requirements, ownership, explicit allocation, and structured concurrency compose together.';
+  'A low-level language where typed failures, borrowed service requirements, ownership, explicit allocation, and structured concurrency compose together.'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://silklang.org'),
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
     title: 'Silk — What If Effect Were a Low-Level Language?',
     description,
   },
-};
+}
 
 export default function Layout({ children }: { children: ReactNode }) {
   return (
@@ -40,5 +40,5 @@ export default function Layout({ children }: { children: ReactNode }) {
         <Analytics />
       </body>
     </html>
-  );
+  )
 }

@@ -3231,41 +3231,39 @@ const checkFunction = (
   )
 
   const exitPlans = Object.freeze(
-    exits.map(
-      (exit): ExitPlan =>
-        Object.freeze({
-          _tag: 'Exit' as const,
-          kind: exit.kind,
-          span: exit.span,
-          ...(exit.region === undefined ? {} : { region: exit.region }),
-          ...(exit.arm === undefined ? {} : { arm: exit.arm }),
-          ...(exit.target === undefined ? {} : { target: exit.target }),
-          loanEnds: Object.freeze(
-            loanAnalysis.loans
-              .filter(
-                (loan) =>
-                  exit.region !== undefined && loan.endRegion.ordinal === exit.region.ordinal,
-              )
-              .map((loan) => loan.id),
-          ),
-          releases: Object.freeze(
-            exit.sites.flatMap((site): ReadonlyArray<Release> => {
-              const fact = bindingBySite.get(site)
-              if (fact === undefined) return []
-              return [
-                Object.freeze({
-                  _tag: 'Release' as const,
-                  binding: fact,
-                  fields:
-                    fact.category._tag === 'MoveOnly' && Type.isNominal(fact.category.type)
-                      ? CleanupPlan.cleanupFields(index, fact.category.type)
-                      : Object.freeze([]),
-                  cleanup: fact.cleanup,
-                }),
-              ]
-            }),
-          ),
-        }),
+    exits.map((exit): ExitPlan =>
+      Object.freeze({
+        _tag: 'Exit' as const,
+        kind: exit.kind,
+        span: exit.span,
+        ...(exit.region === undefined ? {} : { region: exit.region }),
+        ...(exit.arm === undefined ? {} : { arm: exit.arm }),
+        ...(exit.target === undefined ? {} : { target: exit.target }),
+        loanEnds: Object.freeze(
+          loanAnalysis.loans
+            .filter(
+              (loan) => exit.region !== undefined && loan.endRegion.ordinal === exit.region.ordinal,
+            )
+            .map((loan) => loan.id),
+        ),
+        releases: Object.freeze(
+          exit.sites.flatMap((site): ReadonlyArray<Release> => {
+            const fact = bindingBySite.get(site)
+            if (fact === undefined) return []
+            return [
+              Object.freeze({
+                _tag: 'Release' as const,
+                binding: fact,
+                fields:
+                  fact.category._tag === 'MoveOnly' && Type.isNominal(fact.category.type)
+                    ? CleanupPlan.cleanupFields(index, fact.category.type)
+                    : Object.freeze([]),
+                cleanup: fact.cleanup,
+              }),
+            ]
+          }),
+        ),
+      }),
     ),
   )
 

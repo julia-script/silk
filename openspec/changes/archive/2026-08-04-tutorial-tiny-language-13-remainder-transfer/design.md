@@ -43,4 +43,3 @@ A runtime result alone could pass despite incorrect precedence; AST and IR check
 ## Migration Plan
 
 Add Lesson 13, exercise fixtures, and hidden reference validation. Keep the reference solution out of the published step-by-step content. Rollback removes only the transfer lesson and its validation assets.
-

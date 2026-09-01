@@ -1,11 +1,14 @@
 # bootstrap-instances Specification
 
 ## Purpose
+
 Deterministic discovery of the concrete runtime instances reachable from the user entry:
 instance keys over canonical declaration identities, and the recorded worklist whose
 record-before-follow discipline makes ordinary recursion terminate — the structure the full
 generic language inherits, degenerate while the slice has no type or contract-row arguments.
+
 ## Requirements
+
 ### Requirement: Instances are discovered from the entry by a recorded worklist
 
 Instance discovery SHALL start from one of the root module's three valid user entries: a unique
@@ -193,10 +196,12 @@ following calls, values, cleanup, and runtime helpers reachable through its subs
 ordering and encoding SHALL remain deterministic.
 
 #### Scenario: Distinguish specializations
+
 - **WHEN** the entry reaches `identity<i32>` and `identity<bool>`
 - **THEN** discovery records two keys differing only in their concrete argument lists
 
 #### Scenario: Exclude an unused specialization
+
 - **WHEN** a generic declaration can accept `Token` but no reachable call uses that argument
 - **THEN** no `Token` instance is discovered merely from the declaration
 
@@ -332,10 +337,12 @@ the concrete provider/interface application and mapped target arguments, and MIR
 direct target with no runtime dictionary.
 
 #### Scenario: Discover two mapped target specializations
+
 - **WHEN** two concrete providers select one generic witness declaration with different kinded arguments
 - **THEN** discovery records two concrete witness target instances in deterministic order
 
 #### Scenario: Reject an unresolved target binder
+
 - **WHEN** a mapped witness target has a generic binder not inferable from its conformance and operation contract
 - **THEN** analysis rejects the mapping before instance discovery can create an open key
 

@@ -4,7 +4,9 @@
 
 Defines how the Silk language server keeps project analysis consistent with editor buffers and
 filesystem changes while bounding redundant work and preventing stale protocol results.
+
 ## Requirements
+
 ### Requirement: Open documents form project-scoped overlays
 
 The language server SHALL group synchronized documents by discovered Silk project, SHALL resolve an

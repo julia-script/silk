@@ -24,7 +24,8 @@ const program = Effect.gen(function* () {
   return {
     text,
     bytes: first,
-    deterministic: first.length === second.length && first.every((byte, index) => byte === second[index]),
+    deterministic:
+      first.length === second.length && first.every((byte, index) => byte === second[index]),
   }
 })
 

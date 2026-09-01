@@ -4,7 +4,9 @@
 
 Define canonical bootstrap targets and one deterministic, backend-neutral compiler layout plan that
 all later phases and consumers share for reachable concrete Silk types.
+
 ## Requirements
+
 ### Requirement: Compilation selects one canonical bootstrap target
 
 Each compilation SHALL select exactly one canonical target before runtime instance discovery. The
@@ -287,10 +289,12 @@ MUST NOT receive speculative physical layouts, and equivalent concrete applicati
 canonical layout entry before MIR and backend selection.
 
 #### Scenario: Plan two concrete boxes
+
 - **WHEN** runtime discovery reaches `Box<i32>` and `Box<Token>`
 - **THEN** the selected target plan contains two canonical entries with independently derived concrete layouts
 
 #### Scenario: Omit an open generic layout
+
 - **WHEN** the compiler analyzes `Box<T>` without a concrete runtime instance
 - **THEN** no physical layout is invented for the open type
 

@@ -15,7 +15,7 @@
 - [x] 2.1 Assert the true arm runs and none of the false arm's effects are performed, counting
       service calls through a `&mut Counter` provider.
 - [x] 2.2 Assert the same in the opposite polarity.
-- [x] 2.3 Assert the unselected arm is never *constructed*, not merely never run — the reworded #98
+- [x] 2.3 Assert the unselected arm is never _constructed_, not merely never run — the reworded #98
       criterion — using ordinary `fn` arms whose bodies allocate at invocation, so the allocation
       trace distinguishes an arm that was built from one that was not. Both polarities.
 - [x] 2.4 Assert the requirement rows of both arms are unioned and both are dischargeable, in both

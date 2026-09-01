@@ -34,6 +34,7 @@ and resolution failures and SHALL NOT invoke a backend.
 
 - **WHEN** a snapshot contains a missing-module or semantic error diagnostic
 - **THEN** its codegen query is unavailable and does not invoke the selected backend
+
 #### Scenario: Refuse emission after resolver failure
 
 - **WHEN** a snapshot records an operational source-resolution failure

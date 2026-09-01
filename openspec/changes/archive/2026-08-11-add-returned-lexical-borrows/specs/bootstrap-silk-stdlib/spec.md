@@ -21,4 +21,3 @@ remain subject to returned lexical borrow checking.
 
 - **WHEN** tooling navigates either slice accessor or the compiler lowers its body
 - **THEN** the accessor resolves to canonical Silk source and only its raw-buffer operation resolves to `Intrinsic`
-

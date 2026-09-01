@@ -23,8 +23,5 @@ export const make = (request: {
 }
 
 /** Builds one single-source browser snapshot with the compiler's empty resolver. */
-export const ofSource = (
-  sourceId: string,
-  bytes: Uint8Array,
-  target?: string,
-): Analysis.Snapshot => Effect.runSync(Analysis.ofSourceRealized(sourceId, bytes, target))
+export const ofSource = (sourceId: string, bytes: Uint8Array, target?: string): Analysis.Snapshot =>
+  Effect.runSync(Analysis.ofSourceRealized(sourceId, bytes, target))

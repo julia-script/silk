@@ -8,4 +8,3 @@
 
 - **WHEN** `f64.add(2.0)` appears where `fn(f64) -> f64` is expected
 - **THEN** it constructs a width-preserving callable section
-

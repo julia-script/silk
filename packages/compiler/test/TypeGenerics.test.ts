@@ -37,9 +37,8 @@ pub fn main() -> i32 {
 const file = SourceFile.make('generics/Main', new TextEncoder().encode(source))
 
 const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
-  node.children.flatMap(
-    (child): ReadonlyArray<SyntaxTree.Node> =>
-      SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [],
+  node.children.flatMap((child): ReadonlyArray<SyntaxTree.Node> =>
+    SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [],
   )
 
 it.effect('retains source-shaped row expressions and callable constraints in module facts', () =>
@@ -102,7 +101,8 @@ it.effect('rejects residual rows at the complete-application specialization fron
     const module = 'generics/frontier'
     const snapshot = yield* Analysis.ofSourceRealized(
       module,
-      new TextEncoder().encode(`effect fn forward<A, E, ?R>(self: once Effect<A ! E ? R>) -> A ! E ? R {
+      new TextEncoder()
+        .encode(`effect fn forward<A, E, ?R>(self: once Effect<A ! E ? R>) -> A ! E ? R {
   return run self
 }
 pub fn main() -> i32 { return 0 }`),

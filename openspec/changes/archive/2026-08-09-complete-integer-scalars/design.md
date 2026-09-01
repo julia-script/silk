@@ -14,19 +14,19 @@ The compiler has closed, repeated cases for `I32`, `Usize`, and `Bool` across ty
 
 Introduce one immutable catalog for spelling, logical category, fixed/target width, signedness, operations, layout, and backend lanes. Actor modules still own phase behavior; the catalog prevents vocabulary drift.
 
-*Alternative considered:* extend every switch independently. Rejected because omissions would appear only late in backend/editor parity.
+_Alternative considered:_ extend every switch independently. Rejected because omissions would appear only late in backend/editor parity.
 
 ### Exact integers use bigint internally
 
 Literal magnitude and evaluator values use `bigint` until checked target/serialization boundaries. Every operation applies explicit width and signedness; deterministic encoders use canonical decimal text.
 
-*Alternative considered:* keep `number` below 64-bit boundaries. Rejected because native `usize`, `u64`, and `i64` would be observably lossy.
+_Alternative considered:_ keep `number` below 64-bit boundaries. Rejected because native `usize`, `u64`, and `i64` would be observably lossy.
 
 ### Recoverable checked operations use Option
 
 Ordinary operations trap. `checked*` returns `Some<T> | None`; wrapping and saturating return `T`. Canonical Option declarations are ordinary shipped Silk source, while MIR carries backend-neutral arithmetic outcome data.
 
-*Alternative considered:* return value-plus-flag tuples. Rejected because anonymous tuples are outside bootstrap.
+_Alternative considered:_ return value-plus-flag tuples. Rejected because anonymous tuples are outside bootstrap.
 
 ### Usize migration is atomic
 
@@ -52,4 +52,3 @@ Rollback is revision-level by completed parity phase; no public compatibility mo
 ## Open Questions
 
 None.
-
