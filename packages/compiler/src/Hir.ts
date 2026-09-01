@@ -821,15 +821,13 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   /**
-   * One call to an operation a type parameter's bound declares, spelled through the bound's own
-   * name. It records the question rather than an answer: which operation of which interface, over
-   * which bounded parameter. An operator carries its compiler-known operation from elaboration
-   * because the specialized operand type alone selects the instruction; an operation no operator
-   * spells has no such lowering, so the concrete instruction is the one the witness selected for
-   * the specialized type argument, and only lowering — where the substitution exists — knows it.
+   * One statically selected interface-operation call. It records the conformance question rather
+   * than an answer: which operation of which normalized interface application, over which provider.
+   * The concrete instruction is the one the witness selected for the specialized provider, and only
+   * lowering — where the substitution exists — knows it.
    */
   | {
-      readonly _tag: 'BoundOperationCall'
+      readonly _tag: 'InterfaceOperationCall'
       readonly capability: Type.Nominal
       readonly provider: Type.Type
       readonly operation: string
@@ -1056,7 +1054,7 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
       case 'EffectConstruct':
       case 'ServiceEffectConstruct':
       case 'BuiltinCall':
-      case 'BoundOperationCall':
+      case 'InterfaceOperationCall':
         return expression.arguments
       case 'CallableSection':
         return expression.captures.map((capture) => capture.value)
@@ -1142,7 +1140,7 @@ export const firstUnavailable = (
       case 'EffectConstruct':
       case 'ServiceEffectConstruct':
       case 'BuiltinCall':
-      case 'BoundOperationCall': {
+      case 'InterfaceOperationCall': {
         for (const argument of expression.arguments) {
           const found = walk(argument)
           if (found !== undefined) return found
@@ -1390,7 +1388,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
     if (
       expression._tag === 'Call' ||
       expression._tag === 'BuiltinCall' ||
-      expression._tag === 'BoundOperationCall' ||
+      expression._tag === 'InterfaceOperationCall' ||
       expression._tag === 'CallableApply'
     ) {
       const begins = expression.arguments
@@ -1406,7 +1404,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         .map((candidate) => borrowText(candidate.borrow))
       const authoredEnds = [
         ...expression.loanEnds,
-        ...(expression._tag === 'BoundOperationCall' ? [] : expression.heldLoans),
+        ...(expression._tag === 'InterfaceOperationCall' ? [] : expression.heldLoans),
       ]
       const ends = authoredEnds
         .filter(
@@ -1850,9 +1848,9 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     }
-    case 'BoundOperationCall':
+    case 'InterfaceOperationCall':
       return [
-        `${indent}bound ${Type.encode(expression.capability)}.${expression.operation} over ${Type.encode(expression.provider)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}interface ${Type.encode(expression.capability)}.${expression.operation} over ${Type.encode(expression.provider)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'Unavailable':

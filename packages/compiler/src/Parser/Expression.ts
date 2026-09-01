@@ -211,8 +211,16 @@ export const hasCompleteAppliedPostfix = (
   return false
 }
 
-/** True for a complete applied parent followed by one subordinate variant name. */
-export const hasAppliedUnionVariant = (state: State): boolean => {
+/** True for an applied parent followed by a member, including a locally recoverable missing `>`. */
+export const hasAppliedMember = (state: State): boolean => {
+  let previousIndex = state.index - 1
+  let previous = state.lexical.tokens.at(previousIndex)
+  while (previous !== undefined && isTrivia(previous.kind)) {
+    previousIndex -= 1
+    previous = state.lexical.tokens.at(previousIndex)
+  }
+  const recoverableQualifierContext =
+    previous?.kind === 'Equals' || previous?.kind === 'PipeGreater'
   let index = state.index
   const significant = (): Token.Token | undefined => {
     let token = state.lexical.tokens.at(index)
@@ -224,11 +232,14 @@ export const hasAppliedUnionVariant = (state: State): boolean => {
   }
   if (significant()?.kind !== 'Identifier') return false
   index += 1
+  let qualifiedOwner = false
   if (significant()?.kind === 'Dot') {
+    qualifiedOwner = true
     index += 1
     if (significant()?.kind !== 'Identifier') return false
     index += 1
   }
+  const compactOpening = state.lexical.tokens.at(index)?.kind === 'Less'
   if (significant()?.kind !== 'Less') return false
   let depth = 0
   while (index < state.lexical.tokens.length) {
@@ -241,7 +252,69 @@ export const hasAppliedUnionVariant = (state: State): boolean => {
         index += 1
         if (significant()?.kind !== 'Dot') return false
         index += 1
-        return significant()?.kind === 'Identifier'
+        const member = significant()?.kind
+        return member === 'Identifier' || member === 'LeftParenthesis'
+      }
+    } else if (
+      token.kind === 'Dot' &&
+      depth === 1 &&
+      recoverableQualifierContext &&
+      !qualifiedOwner &&
+      compactOpening &&
+      state.lexical.tokens.at(index - 1)?.kind === 'Identifier'
+    ) {
+      let lookahead = index + 1
+      const nextSignificant = (): Token.Token | undefined => {
+        let candidate = state.lexical.tokens.at(lookahead)
+        while (candidate !== undefined && isTrivia(candidate.kind)) {
+          lookahead += 1
+          candidate = state.lexical.tokens.at(lookahead)
+        }
+        return candidate
+      }
+      const member = nextSignificant()
+      if (member?.kind === 'LeftParenthesis') return true
+      if (member?.kind === 'Identifier') {
+        lookahead += 1
+        const following = nextSignificant()?.kind
+        if (
+          following === 'LeftParenthesis' ||
+          following === 'LetKeyword' ||
+          following === 'ConstKeyword' ||
+          following === 'ReturnKeyword' ||
+          following === 'RightBrace' ||
+          following === 'EndOfFile'
+        )
+          return true
+      }
+    }
+    index += 1
+  }
+  return false
+}
+
+/** True only for an operation-owned `<...>` suffix followed by its required argument list. */
+const hasCompleteAppliedMemberCallSuffix = (state: State): boolean => {
+  let index = state.index
+  const significant = (): Token.Token | undefined => {
+    let token = state.lexical.tokens.at(index)
+    while (token !== undefined && isTrivia(token.kind)) {
+      index += 1
+      token = state.lexical.tokens.at(index)
+    }
+    return token
+  }
+  if (significant()?.kind !== 'Less') return false
+  let depth = 0
+  while (index < state.lexical.tokens.length) {
+    const token = significant()
+    if (token === undefined) return false
+    if (token.kind === 'Less') depth += 1
+    else if (token.kind === 'Greater') {
+      depth -= 1
+      if (depth === 0) {
+        index += 1
+        return significant()?.kind === 'LeftParenthesis'
       }
     }
     index += 1
@@ -368,8 +441,8 @@ export const primaryKind = (
   | 'Unsafe'
   | 'Call'
   | 'StructLiteral'
+  | 'AppliedMember'
   | 'ContextualRecordLiteral'
-  | 'UnionVariant'
   | 'ArrayLiteral'
   | 'Match'
   | 'Grouped'
@@ -407,7 +480,7 @@ export const primaryKind = (
     if (token.kind === 'LeftBracket') return 'ArrayLiteral'
     if (token.kind === 'Dot' && peek(state, 1) === 'LeftBrace') return 'ContextualRecordLiteral'
     if (token.kind === 'Identifier') {
-      if (hasAppliedUnionVariant(state)) return 'UnionVariant'
+      if (hasAppliedMember(state)) return 'AppliedMember'
       const following = peek(state, 1)
       if (hasCompleteAppliedPostfix(state, 'LeftParenthesis')) return 'Call'
       if (hasCompleteAppliedPostfix(state, 'LeftBrace')) {
@@ -806,11 +879,11 @@ export function parseContextualRecordLiteralExpression(
   })
 }
 
-export const parseUnionVariantSelector = (
+export const parseAppliedMemberSelector = (
   initial: State,
   following: ReadonlyArray<Token.TokenKind>,
 ): NodeResult => {
-  const parent = hasAppliedUnionVariant(initial)
+  const parent = hasAppliedMember(initial)
     ? parseTypePrimary(initial, ['Dot', ...following])
     : (() => {
         const name = expect(initial, 'Identifier', ['Dot', ...following])
@@ -823,7 +896,7 @@ export const parseUnionVariantSelector = (
   const variant = expect(dot.state, 'Identifier', following)
   return Object.freeze({
     state: variant.state,
-    node: syntaxNode(variant.state, 'UnionVariantSelector', [
+    node: syntaxNode(variant.state, 'AppliedMemberSelector', [
       parent.node,
       ...dot.elements,
       ...variant.elements,
@@ -831,16 +904,21 @@ export const parseUnionVariantSelector = (
   })
 }
 
-export function parseUnionVariantExpression(
+export function parseAppliedMemberExpression(
   initial: State,
   reservedForEnclosingCalls: number,
   depth: number,
 ): NodeResult {
-  const selector = parseUnionVariantSelector(initial, ['LeftBrace', ...expressionFollowing])
+  const selector = parseAppliedMemberSelector(initial, [
+    'Less',
+    'LeftParenthesis',
+    'LeftBrace',
+    ...expressionFollowing,
+  ])
   if (nextSignificantKind(selector.state) !== 'LeftBrace') {
     return Object.freeze({
       state: selector.state,
-      node: syntaxNode(selector.state, 'UnionVariantExpression', [selector.node]),
+      node: syntaxNode(selector.state, 'AppliedMemberExpression', [selector.node]),
     })
   }
   const left = expect(selector.state, 'LeftBrace', [
@@ -877,7 +955,7 @@ export function parseUnionVariantExpression(
   const right = expect(state, 'RightBrace', expressionFollowing)
   return Object.freeze({
     state: right.state,
-    node: syntaxNode(right.state, 'UnionVariantExpression', [...children, ...right.elements]),
+    node: syntaxNode(right.state, 'AppliedMemberExpression', [...children, ...right.elements]),
   })
 }
 
@@ -1016,7 +1094,7 @@ export const isRowWithoutStart = (state: State): boolean =>
 
 export const isNominalPatternStart = (state: State): boolean => {
   if (nextSignificantKind(state) !== 'Identifier') return false
-  if (hasAppliedUnionVariant(state)) return true
+  if (hasAppliedMember(state)) return true
   if (hasCompleteAppliedPostfix(state, 'LeftBrace')) return true
   const following = peek(state, 1)
   if (following === 'LeftBrace') return true
@@ -1116,7 +1194,7 @@ export function parsePattern(
     })
   }
   if (isEnumMemberPatternStart(initial)) return parseEnumMemberPattern(initial)
-  if (hasAppliedUnionVariant(initial)) return parseUnionVariantPattern(initial)
+  if (hasAppliedMember(initial)) return parseUnionVariantPattern(initial)
   const kind = nextSignificantKind(initial)
   if (kind === 'DecimalInteger' || (kind === 'Minus' && peek(initial, 1) === 'DecimalInteger'))
     return parseIntegerPattern(initial)
@@ -1135,7 +1213,7 @@ export function parsePattern(
 }
 
 export function parseUnionVariantPattern(initial: State): NodeResult {
-  const selector = parseUnionVariantSelector(initial, [
+  const selector = parseAppliedMemberSelector(initial, [
     'LeftBrace',
     'IfKeyword',
     'FatArrow',
@@ -1186,7 +1264,7 @@ export function parseUnionVariantPattern(initial: State): NodeResult {
         ])
         state = colon.state
         if (isNominalPatternStart(state)) {
-          const nested = hasAppliedUnionVariant(state)
+          const nested = hasAppliedMember(state)
             ? parseUnionVariantPattern(state)
             : parseNominalPattern(state)
           fieldChildren = Object.freeze([...fieldChildren, ...colon.elements, nested.node])
@@ -1494,10 +1572,10 @@ export function parsePrimaryExpression(
   if (kind === 'Call') return parseCallExpression(initial, reservedForEnclosingCalls, depth)
   if (kind === 'StructLiteral')
     return parseStructLiteralExpression(initial, reservedForEnclosingCalls, depth)
+  if (kind === 'AppliedMember')
+    return parseAppliedMemberExpression(initial, reservedForEnclosingCalls, depth)
   if (kind === 'ContextualRecordLiteral')
     return parseContextualRecordLiteralExpression(initial, reservedForEnclosingCalls, depth)
-  if (kind === 'UnionVariant')
-    return parseUnionVariantExpression(initial, reservedForEnclosingCalls, depth)
   if (kind === 'ArrayLiteral')
     return parseArrayLiteralExpression(initial, reservedForEnclosingCalls, depth)
   if (kind === 'Match') return parseMatchExpression(initial, reservedForEnclosingCalls, depth)
@@ -1572,8 +1650,28 @@ export function parseProjectionChain(initial: NodeResult, depth: number): NodeRe
   while (
     nextSignificantKind(result.state) === 'Dot' ||
     nextSignificantKind(result.state) === 'LeftBracket' ||
-    nextSignificantKind(result.state) === 'LeftParenthesis'
+    nextSignificantKind(result.state) === 'LeftParenthesis' ||
+    (result.node.kind === 'AppliedMemberExpression' &&
+      hasCompleteAppliedMemberCallSuffix(result.state))
   ) {
+    if (
+      result.node.kind === 'AppliedMemberExpression' &&
+      hasCompleteAppliedMemberCallSuffix(result.state)
+    ) {
+      const typeArguments = parseTypeArgumentList(result.state, 'CallTypeArgumentList', [
+        'LeftParenthesis',
+      ])
+      const arguments_ = parseArgumentList(typeArguments.state, 0, depth)
+      result = Object.freeze({
+        state: arguments_.state,
+        node: syntaxNode(arguments_.state, 'CallExpression', [
+          result.node,
+          typeArguments.node,
+          arguments_.node,
+        ]),
+      })
+      continue
+    }
     if (nextSignificantKind(result.state) === 'LeftParenthesis') {
       const arguments_ = parseArgumentList(result.state, 0, depth)
       result = Object.freeze({

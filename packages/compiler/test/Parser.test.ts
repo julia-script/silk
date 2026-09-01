@@ -2532,6 +2532,129 @@ it('parses complete callable pipelines left-to-right', () => {
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
 
+it('keeps applied owner arguments distinct in direct and pipeline operation forms', () => {
+  const source = `pub fn direct(age: &Age) -> u32 {
+  return Encodable<u32>.encode<bool>(age)
+}
+pub fn piped(age: &Age) -> u32 {
+  return age |> Encodable<u32>.encode
+}`
+  const result = parseText('memory/applied-interface-operation', source)
+  const appliedMembers = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'AppliedMemberExpression',
+  )
+  const ownerArguments = appliedMembers.flatMap((member) =>
+    SyntaxTree.directNodes(member, 'AppliedMemberSelector').flatMap((selector) =>
+      SyntaxTree.directNodes(selector, 'AppliedType').flatMap((owner) =>
+        SyntaxTree.directNodes(owner, 'TypeArgumentList'),
+      ),
+    ),
+  )
+  const operationArguments = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'CallTypeArgumentList',
+  )
+
+  assert.strictEqual(appliedMembers.length, 2)
+  assert.strictEqual(ownerArguments.length, 2)
+  assert.strictEqual(operationArguments.length, 1)
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('keeps a generic union member followed by relational less-than out of call parsing', () => {
+  const source = `fn compare(value: Option<i32>) -> bool {
+  return Option<i32>.None < value
+}`
+  const result = parseText('memory/applied-union-relational-less-than', source)
+  const appliedMembers = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'AppliedMemberExpression',
+  )
+  const operationArguments = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'CallTypeArgumentList',
+  )
+  const comparisons = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'InfixExpression',
+  )
+
+  assert.strictEqual(appliedMembers.length, 1)
+  assert.strictEqual(operationArguments.length, 0)
+  assert.strictEqual(comparisons.length, 1)
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('recovers a missing applied operation name before the following statement', () => {
+  const source = `pub fn broken(age: &Age) -> i32 {
+  let value = Encodable<u32>.(&age)
+  return 42
+}`
+  const result = parseText('memory/damaged-applied-interface-operation', source)
+  const applied = descendants(result.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'AppliedMemberExpression',
+  )
+  const followingReturn = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'ReturnStatement',
+  )
+
+  assert.notStrictEqual(applied, undefined)
+  assert.isTrue(
+    applied === undefined ||
+      missingLeaves(applied).some(
+        (element) => element._tag === 'MissingToken' && element.expected === 'Identifier',
+      ),
+  )
+  assert.strictEqual(followingReturn.length, 1)
+  assert.isTrue(result.parserDiagnostics.length > 0)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('recovers a missing applied qualifier delimiter before the following statement', () => {
+  const directSource = `pub fn broken(age: &Age) -> i32 {
+  let value = Encodable<u32.encode(&age)
+  return 42
+}`
+  const pipelineSource = `pub fn broken(age: &Age) -> i32 {
+  let value = age |> Encodable<u32.encode
+  return 42
+}`
+  for (const [name, source] of [
+    ['direct', directSource],
+    ['pipeline', pipelineSource],
+  ] as const) {
+    const result = parseText(`memory/damaged-applied-interface-delimiter-${name}`, source)
+    const applied = descendants(result.root).find(
+      (element): element is SyntaxTree.Node =>
+        SyntaxTree.isNode(element) && element.kind === 'AppliedMemberExpression',
+    )
+    const followingReturn = descendants(result.root).filter(
+      (element): element is SyntaxTree.Node =>
+        SyntaxTree.isNode(element) && element.kind === 'ReturnStatement',
+    )
+
+    assert.notStrictEqual(applied, undefined)
+    assert.isTrue(
+      applied === undefined ||
+        missingLeaves(applied).some(
+          (element) => element._tag === 'MissingToken' && element.expected === 'Greater',
+        ),
+    )
+    assert.strictEqual(followingReturn.length, 1)
+    assert.isTrue(result.parserDiagnostics.length > 0)
+    assertOriginalTokenTraversal(result)
+    assert.deepEqual(reconstructedBytes(result), ascii(source))
+  }
+})
+
 it('parses callable contracts with ordered parameters and all invocation modes', () => {
   const source =
     'fn use(shared: fn(i32, bool) -> i32, exclusive: mut fn(i32) -> bool, consuming: once fn() -> i32) -> i32 { return 0 }'
@@ -2817,7 +2940,7 @@ pub fn inspect(result: Result<i32, bool>) -> i32 {
   const fields = variants.flatMap((variant) => SyntaxTree.directNodes(variant, 'UnionVariantField'))
   const constructors = descendants(result.root).filter(
     (element): element is SyntaxTree.Node =>
-      SyntaxTree.isNode(element) && element.kind === 'UnionVariantExpression',
+      SyntaxTree.isNode(element) && element.kind === 'AppliedMemberExpression',
   )
   const patterns = descendants(result.root).filter(
     (element): element is SyntaxTree.Node =>

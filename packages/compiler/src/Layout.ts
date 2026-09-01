@@ -2101,11 +2101,11 @@ const addExpressionTypes = (
     expression._tag === 'EffectConstruct' ||
     expression._tag === 'ServiceEffectConstruct' ||
     expression._tag === 'BuiltinCall' ||
-    expression._tag === 'BoundOperationCall'
+    expression._tag === 'InterfaceOperationCall'
   ) {
     for (const argument of expression.arguments) addExpressionTypes(types, argument, substitution)
     let contract: DeclarationFacts.InterfaceOperationApplicationFact | undefined
-    if (expression._tag === 'BoundOperationCall') {
+    if (expression._tag === 'InterfaceOperationCall') {
       contract = expression.contract
     } else if (expression._tag === 'BuiltinCall') {
       contract = expression.interfaceOperation?.contract
@@ -2656,11 +2656,11 @@ const effectEnvironments = (
         .flatMap(Hir.statementExpressions)
         .flatMap(Hir.expressionTree)
         .flatMap((expression) => {
-          if (expression._tag !== 'BoundOperationCall' && expression._tag !== 'BuiltinCall')
+          if (expression._tag !== 'InterfaceOperationCall' && expression._tag !== 'BuiltinCall')
             return []
           if (expression.witnessEffectSite === undefined) return []
           let contract: DeclarationFacts.InterfaceOperationApplicationFact | undefined
-          if (expression._tag === 'BoundOperationCall') {
+          if (expression._tag === 'InterfaceOperationCall') {
             contract = expression.contract
           } else if (expression._tag === 'BuiltinCall') {
             contract = expression.interfaceOperation?.contract

@@ -1137,13 +1137,13 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     })
   }
   if (
-    fact.reference._tag === 'ResolvedBoundOperation' &&
+    fact.reference._tag === 'ResolvedInterfaceOperation' &&
     fact.contract._tag === 'Compatible' &&
     fact.type._tag === 'Available'
   ) {
     const borrowIds = loanEndsOf(fact.arguments)
     return Object.freeze({
-      _tag: 'BoundOperationCall',
+      _tag: 'InterfaceOperationCall',
       capability: fact.reference.capability,
       provider: fact.reference.provider,
       operation: fact.reference.operation,

@@ -207,13 +207,12 @@ export type CallReferenceFact =
       readonly operation: DeclarationFacts.ServiceOperationFact
     }
   /**
-   * One operation of a type parameter's bound, reached through the bound's own name. The contract
-   * is the interface's own declaration over the bounded parameter, checked once before any concrete
-   * argument exists; which implementation runs is the witness's answer at specialization, not one
-   * this reference records.
+   * One statically selected interface operation. The normalized capability and provider identify
+   * the conformance question; which implementation runs is the witness's answer at specialization,
+   * not one this reference records.
    */
   | {
-      readonly _tag: 'ResolvedBoundOperation'
+      readonly _tag: 'ResolvedInterfaceOperation'
       readonly spelling: string
       readonly token: Token.Token
       readonly capability: Type.Nominal
@@ -1006,6 +1005,7 @@ export type ExpressionFact =
       readonly _tag: 'Call'
       readonly reference: CallReferenceFact
       readonly path: ReferencePathFact
+      readonly interfaceApplication?: DeclarationFacts.DeclaredTypeFact
       readonly typeArguments: ReadonlyArray<TypeArgumentFact>
       readonly arguments: ReadonlyArray<ArgumentFact>
       readonly mappings: ReadonlyArray<ArgumentMappingFact>
@@ -1456,9 +1456,9 @@ export const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.fr
   'BorrowExpression',
   'MatchExpression',
   'StructLiteralExpression',
+  'AppliedMemberExpression',
   'TupleLiteralExpression',
   'ContextualRecordLiteralExpression',
-  'UnionVariantExpression',
   'ArrayLiteralExpression',
   'FieldProjectionExpression',
   'OrdinalProjectionExpression',
@@ -1484,9 +1484,9 @@ export const isRecursiveArgumentNode = (element: SyntaxTree.Element): element is
     element.kind === 'BorrowExpression' ||
     element.kind === 'MatchExpression' ||
     element.kind === 'StructLiteralExpression' ||
+    element.kind === 'AppliedMemberExpression' ||
     element.kind === 'TupleLiteralExpression' ||
     element.kind === 'ContextualRecordLiteralExpression' ||
-    element.kind === 'UnionVariantExpression' ||
     element.kind === 'ArrayLiteralExpression' ||
     element.kind === 'FieldProjectionExpression' ||
     element.kind === 'OrdinalProjectionExpression' ||
@@ -1515,6 +1515,10 @@ export const callCallee = (node: SyntaxTree.Node): SyntaxTree.Node =>
 
 export const callReferenceTokens = (node: SyntaxTree.Node): ReadonlyArray<Token.Token> => {
   const callee = callCallee(node)
+  if (callee.kind === 'PipelineExpression') {
+    const target = pipelineCallable(callee)
+    return target === undefined ? Object.freeze([]) : callReferenceTokens(target)
+  }
   if (callee.kind === 'GroupedExpression') {
     const expression = callee.children.find(isExpressionNode)
     return expression === undefined ? Object.freeze([]) : callReferenceTokens(expression)
@@ -1522,6 +1526,22 @@ export const callReferenceTokens = (node: SyntaxTree.Node): ReadonlyArray<Token.
   if (callee.kind === 'IdentifierExpression') {
     const identifier = directToken(callee, 'Identifier')
     return identifier === undefined ? Object.freeze([]) : Object.freeze([identifier])
+  }
+  if (callee.kind === 'AppliedMemberExpression') {
+    const selector = SyntaxTree.directNode(callee, 'AppliedMemberSelector')
+    const owner =
+      selector === undefined ? undefined : SyntaxTree.directNode(selector, 'AppliedType')
+    const path = owner === undefined ? undefined : SyntaxTree.directNode(owner, 'TypePath')
+    const qualifier =
+      path === undefined
+        ? undefined
+        : SyntaxTree.tokens(path)
+            .filter((token) => token.kind === 'Identifier')
+            .at(-1)
+    const member = selector === undefined ? undefined : directToken(selector, 'Identifier')
+    return qualifier === undefined || member === undefined
+      ? Object.freeze([])
+      : Object.freeze([qualifier, member])
   }
   if (callee.kind !== 'FieldProjectionExpression') return Object.freeze([])
   const subject = callee.children.find(isExpressionNode)

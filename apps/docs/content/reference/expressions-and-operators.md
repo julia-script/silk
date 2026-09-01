@@ -181,8 +181,10 @@ makeCounter().value + 1
 The call and projection complete before addition: `(makeCounter().value) + 1`.
 
 **Boundary:** Postfix syntax does not imply a method call, hidden borrow, or conversion. `Actor.fn`
-is name qualification when `Actor` is a namespace-like declaration; `value.field` is projection
-when `value` is a value. The resolved declaration determines which operation the source names.
+is name qualification when `Actor` is a namespace-like declaration; `Interface<A>.operation`
+selects a complete compile-time interface application; and `value.field` is projection when
+`value` is a value. The resolved declaration determines which operation the source names. Applied
+qualification is not available for service operations.
 
 **Diagnostics:** Projecting a non-struct reports `SEM0026`; an unknown or inaccessible field reports
 `SEM0027` or `SEM0028`. Indexing a non-indexable value reports `SEM0032`; a non-`usize` index reports

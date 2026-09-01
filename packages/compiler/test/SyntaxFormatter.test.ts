@@ -103,8 +103,8 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'UnionDeclaration',
   'UnionVariant',
   'UnionVariantField',
-  'UnionVariantSelector',
-  'UnionVariantExpression',
+  'AppliedMemberSelector',
+  'AppliedMemberExpression',
   'UnionVariantPattern',
   'FieldProjectionExpression',
   'ReferentProjectionExpression',
@@ -342,6 +342,54 @@ fn main(attempt: Effect<i32>) -> i32 {
       assert.deepEqual(second.bytes, first.bytes)
       assert.strictEqual(second.changed, false)
     }),
+)
+
+it.effect('formats applied interface operation calls and pipelines idempotently', () =>
+  Effect.gen(function* () {
+    const source =
+      'fn main(age:&Age)->u32{let direct=run Encodable<u32>.encode(&age) let piped=run &age|>Encodable<u32>.encode return direct}'
+    const first = yield* SyntaxFormatter.format(
+      parse('memory://applied-interface-operation.silk', source),
+    )
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `fn main(age: &Age) -> u32 {
+  let direct = run Encodable<u32>.encode(&age)
+  let piped = run &age
+    |> Encodable<u32>.encode
+  return direct
+}
+`,
+    )
+    const second = yield* SyntaxFormatter.format(
+      parse('memory://applied-interface-operation.silk', text),
+    )
+    assert.deepEqual(second.bytes, first.bytes)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
+it.effect('formats relational comparisons after applied union members idempotently', () =>
+  Effect.gen(function* () {
+    const source = 'fn compare(value:Option<i32>)->bool{return Option<i32>.None<value}'
+    const first = yield* SyntaxFormatter.format(
+      parse('memory://applied-union-relational-less-than.silk', source),
+    )
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `fn compare(value: Option<i32>) -> bool {
+  return Option<i32>.None < value
+}
+`,
+    )
+    const second = yield* SyntaxFormatter.format(
+      parse('memory://applied-union-relational-less-than.silk', text),
+    )
+    assert.deepEqual(second.bytes, first.bytes)
+    assert.strictEqual(second.changed, false)
+  }),
 )
 
 it.effect('formats mutable owned parameters canonically and idempotently', () =>
