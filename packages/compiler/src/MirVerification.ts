@@ -5183,7 +5183,12 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         }
         if (operation._tag === 'Call') {
           const target = self.functions.find((candidate) =>
-            matchesInstance(candidate, operation.target, operation.typeArguments),
+            matchesInstance(
+              candidate,
+              operation.target,
+              operation.typeArguments,
+              operation.staticArguments,
+            ),
           )
           const valid =
             target !== undefined &&

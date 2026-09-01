@@ -42,6 +42,9 @@ export type AdmissionCategory =
 /** Closed execution surfaces against which intrinsic availability is validated. */
 export type ExecutionTarget = 'Evaluator' | 'LLVM' | 'Wasm'
 
+/** Whether an intrinsic executes during static evaluation or in the residual runtime program. */
+export type Phase = 'Runtime' | 'StaticOnly'
+
 /** Canonical deterministic order for intrinsic execution targets. */
 export const executionTargets: ReadonlyArray<ExecutionTarget> = Object.freeze([
   'Evaluator',
@@ -72,6 +75,10 @@ export type Rule =
     }
   | { readonly _tag: 'PlaceRule'; readonly operation: 'Replace' }
   | {
+      readonly _tag: 'StaticOnlyRule'
+      readonly contract: CallableContract.CallableContract
+    }
+  | {
       /** Result and parameter types are derived from the owning canonical enum declaration. */
       readonly _tag: 'EnumValueRule'
     }
@@ -85,6 +92,7 @@ export interface Operation {
   readonly parameters: ReadonlyArray<ValueParameter>
   readonly result: string
   readonly unsafe: boolean
+  readonly phase: Phase
   readonly admission?: AdmissionCategory
   readonly consumer?: string
   readonly targets: ReadonlyArray<ExecutionTarget>
@@ -233,6 +241,7 @@ const builtin = (options: {
     callParameters: Object.freeze(Array.from(options.callParameters ?? options.semanticParameters)),
     result: options.result,
     unsafe: options.unsafe ?? false,
+    phase: 'Runtime',
     admission: admission(options.actor),
     consumer: consumer(options.actor, options.name),
     targets: normalizeExecutionTargets(options.targets ?? executionTargets),
@@ -275,6 +284,7 @@ const contractEffect = (options: {
     parameters: Object.freeze(Array.from(options.parameters)),
     result: options.result,
     unsafe: false,
+    phase: 'Runtime',
     admission: admission('Effect'),
     consumer: consumer('Effect', options.name),
     targets: normalizeExecutionTargets(options.targets ?? executionTargets),
@@ -779,6 +789,83 @@ const stringOperations = Object.freeze([
 
 const stringActor = actor('string', 'Type', Object.freeze([]))
 
+const targetProfileOperation: Operation = Object.freeze({
+  _tag: 'IntrinsicOperation',
+  id: operationId('Intrinsic', 'targetProfile'),
+  spelling: 'targetProfile',
+  typeParameters: Object.freeze([]),
+  parameters: Object.freeze([]),
+  result: 'u8',
+  unsafe: false,
+  phase: 'StaticOnly',
+  admission: 'Language',
+  consumer: 'silk/target.profile',
+  targets: Object.freeze([]),
+  rule: Object.freeze({
+    _tag: 'StaticOnlyRule',
+    contract: CallableContract.make({ functionKind: 'Function', result: 'u8' }),
+  }),
+})
+
+const staticTextOperation = (
+  name: string,
+  parameters: ReadonlyArray<ValueParameter>,
+  semanticParameters: ReadonlyArray<Type.Type>,
+  result: string,
+  semanticResult: Type.Type,
+): Operation =>
+  Object.freeze({
+    _tag: 'IntrinsicOperation',
+    id: operationId('Intrinsic', name),
+    spelling: name,
+    typeParameters: Object.freeze([]),
+    parameters,
+    result,
+    unsafe: false,
+    phase: 'StaticOnly',
+    admission: 'Language',
+    consumer: `silk/static_text.${name.replace('staticText', '').replace(/^./, (value) => value.toLowerCase())}`,
+    targets: Object.freeze([]),
+    rule: Object.freeze({
+      _tag: 'StaticOnlyRule',
+      contract: CallableContract.make({
+        functionKind: 'Function',
+        parameters: semanticParameters.map((type) =>
+          Object.freeze({ type, mode: 'Value' as const }),
+        ),
+        result: semanticResult,
+      }),
+    }),
+  })
+
+const staticTextOperations = Object.freeze([
+  staticTextOperation(
+    'staticTextByteLength',
+    Object.freeze([valueParameter('value', 'string')]),
+    Object.freeze([Type.string]),
+    'usize',
+    'usize',
+  ),
+  staticTextOperation(
+    'staticTextByteAt',
+    Object.freeze([valueParameter('value', 'string'), valueParameter('index', 'usize')]),
+    Object.freeze([Type.string, 'usize']),
+    'u8',
+    'u8',
+  ),
+  staticTextOperation(
+    'staticTextSlice',
+    Object.freeze([
+      valueParameter('value', 'string'),
+      valueParameter('start', 'usize'),
+      valueParameter('end', 'usize'),
+    ]),
+    Object.freeze([Type.string, 'usize', 'usize']),
+    'string',
+    Type.string,
+  ),
+])
+
 const enumValueOperation: Operation = Object.freeze({
   _tag: 'IntrinsicOperation',
   id: operationId('Intrinsic', 'enumValue'),
@@ -787,6 +874,7 @@ const enumValueOperation: Operation = Object.freeze({
   parameters: Object.freeze([valueParameter('value', '<owning enum>')]),
   result: '<owning enum representation>',
   unsafe: false,
+  phase: 'Runtime',
   admission: 'Representation',
   consumer: 'language:scalar-enum-value',
   targets: executionTargets,
@@ -801,6 +889,7 @@ const replaceOperation: Operation = Object.freeze({
   parameters: Object.freeze([valueParameter('place', '&mut T'), valueParameter('value', 'T')]),
   result: 'T',
   unsafe: false,
+  phase: 'Runtime',
   admission: admission('Place'),
   consumer: consumer('Place', 'replace'),
   targets: executionTargets,
@@ -1690,6 +1779,8 @@ const intrinsicOperations = Object.freeze([
       contract: catchContract,
     }),
   ]),
+  targetProfileOperation,
+  ...staticTextOperations,
   enumValueOperation,
   replaceOperation,
 ])
@@ -1751,12 +1842,13 @@ export interface InventoryEntry {
   readonly operation: string
   readonly signature: string
   readonly unsafe: boolean
+  readonly phase: Phase
   readonly invariant?: string
   readonly admission: AdmissionCategory
   readonly consumer: string
-  readonly hir: string
-  readonly mir: string
-  readonly evaluator: string
+  readonly hir?: string
+  readonly mir?: string
+  readonly evaluator?: string
   readonly targets: ReadonlyArray<ExecutionTarget>
   readonly hostImport?: string
 }
@@ -1767,15 +1859,17 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
     intrinsicOperations.map((operation) => {
       if (operation.admission === undefined || operation.consumer === undefined)
         throw new RangeError(`Intrinsic ${operation.spelling} is missing admission metadata`)
-      if (operation.targets.length === 0)
-        throw new RangeError(`Intrinsic ${operation.spelling} has no execution target`)
+      if (operation.phase === 'Runtime' && operation.targets.length === 0)
+        throw new RangeError(`Runtime intrinsic ${operation.spelling} has no execution target`)
+      if (operation.phase === 'StaticOnly' && operation.targets.length !== 0)
+        throw new RangeError(`Static-only intrinsic ${operation.spelling} has a runtime target`)
       const normalizedTargets = normalizeExecutionTargets(operation.targets)
       if (
         normalizedTargets.length !== operation.targets.length ||
         normalizedTargets.some((target, index) => operation.targets.at(index) !== target)
       )
         throw new RangeError(`Intrinsic ${operation.spelling} has non-normalized target metadata`)
-      let identity: string
+      let identity: string | undefined
       switch (operation.rule._tag) {
         case 'BuiltinRule':
           identity = operation.rule.operation
@@ -1786,6 +1880,9 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
         case 'EnumValueRule':
           identity = operation.rule._tag
           break
+        case 'StaticOnlyRule':
+          identity = undefined
+          break
         default:
           identity = `${operation.rule._tag}.${operation.rule.operation}`
           break
@@ -1794,12 +1891,11 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
         operation: `Intrinsic.${operation.spelling}`,
         signature: signature(operation),
         unsafe: operation.unsafe,
+        phase: operation.phase,
         ...(operation.invariant === undefined ? {} : { invariant: operation.invariant }),
         admission: operation.admission,
         consumer: operation.consumer,
-        hir: identity,
-        mir: identity,
-        evaluator: identity,
+        ...(identity === undefined ? {} : { hir: identity, mir: identity, evaluator: identity }),
         targets: operation.targets,
         ...(operation.hostImport === undefined ? {} : { hostImport: operation.hostImport }),
       })

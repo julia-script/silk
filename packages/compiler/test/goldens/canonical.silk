@@ -41,6 +41,15 @@ pub union Maybe<T> {
 
 pub role Clock
 
+static fn staticHelper(static value: i32) -> i32 {
+  let static retained = value
+  static if true {
+    return compileError(retained)
+  } else {
+    return retained
+  }
+}
+
 fn helper(value: i32, other: i32) -> i32 {
   let mut moved = move value
   let singleton = (1,)

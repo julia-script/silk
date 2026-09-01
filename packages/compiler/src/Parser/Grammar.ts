@@ -8,6 +8,7 @@ export const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze
   'RightBrace',
   'Equals',
   'FatArrow',
+  'StaticKeyword',
   'LetKeyword',
   'ConstKeyword',
   'IfKeyword',
@@ -40,6 +41,7 @@ export const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'ByteStringLiteral',
   'CharLiteral',
   'InvalidStaticLiteral',
+  'CompileErrorKeyword',
   'Identifier',
   'LeftBrace',
   'Dot',
@@ -71,6 +73,7 @@ export const typeStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
 ])
 export const topLevelFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'ImportKeyword',
+  'StaticKeyword',
   'PubKeyword',
   'ConstKeyword',
   'StructKeyword',

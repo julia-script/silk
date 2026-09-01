@@ -16,10 +16,10 @@ local `let static` binding SHALL evaluate its initializer statically and retain 
 for later static use. An ordinary local binding SHALL remain runtime even when initialized by a
 literal.
 
-A literal supplied directly where a static parameter, condition, initializer, or panic message is
-required SHALL satisfy that static context without a call-site `static` prefix. Any non-literal
-expression supplied to a static context SHALL be accepted only when all of its dependencies and
-operations are available to static evaluation.
+A literal supplied directly where a static parameter, condition, initializer, or compile-error
+message is required SHALL satisfy that static context without a call-site `static` prefix. Any
+non-literal expression supplied to a static context SHALL be accepted only when all of its
+dependencies and operations are available to static evaluation.
 
 #### Scenario: Specialize an ordinary function with one static parameter
 
@@ -97,6 +97,12 @@ MAY call another static function but MUST NOT invoke an ordinary runtime functio
 an Effect, access a runtime binding, perform unsafe or external operations, or retain compiler
 storage in a residual value.
 
+The ordinary `silk.static_text` source actor SHALL expose static functions for UTF-8 byte length,
+byte indexing, and boundary-checked byte slicing. Those wrappers MAY use sealed static-only
+intrinsics as their minimal primitive boundary, but the compiler MUST NOT recognize the source
+actor or its declarations by spelling. Static text operations SHALL return ordinary admitted
+values and SHALL NOT expose compiler storage, addresses, or host strings.
+
 #### Scenario: Reuse a static value whose runtime type is affine
 
 - **WHEN** a static function reads the same admissible static value more than once and its declared runtime type does not implement `Copy`
@@ -106,6 +112,11 @@ storage in a residual value.
 
 - **WHEN** a static function loops over static text and repeatedly replaces one `let mut` parse state with the complete result of a static step function
 - **THEN** evaluation produces the final value without creating a borrow, mutable alias, cleanup obligation, or observable allocation identity
+
+#### Scenario: Inspect static UTF-8 bytes through ordinary source
+
+- **WHEN** a static function imports `silk.static_text` and asks for the byte length, one byte, and a scalar-boundary slice of a text literal
+- **THEN** the source wrappers produce deterministic static `usize`, `u8`, and `string` values while no text-inspection intrinsic reaches runtime HIR
 
 #### Scenario: Reject runtime work in a static function
 
@@ -117,28 +128,29 @@ storage in a residual value.
 - **WHEN** a mixed function supplies a runtime-representable, cleanup-free static value to an ordinary runtime operation
 - **THEN** residualization embeds that value directly and does not add a runtime parameter or reference to compiler storage
 
-### Requirement: Static panic terminates only the selected specialization
+### Requirement: Compile error terminates only the selected specialization
 
-`static panic(message)` SHALL require a statically evaluated `string`, terminate the current
-specialization with a deliberate static diagnostic, and produce no residual runtime path. It SHALL
-act as `never` for the selected static expression or statement path, so that path has no return-value
-or fallthrough obligation. A panic in an unselected static arm or an uncalled static function MUST
-NOT execute.
+`compileError(message)` SHALL be an inherently compile-time expression that requires a statically
+evaluated `string`, terminates the current specialization with a deliberate compile-error
+diagnostic, and produces no residual runtime path. It SHALL act as `never` for the selected static
+expression or statement path, so that path has no return-value or fallthrough obligation. A
+`compileError` in an unselected static arm or an uncalled static function MUST NOT execute. Runtime
+control flow MUST NOT decide whether `compileError` executes.
 
-#### Scenario: Exempt a panicking arm from its expected result
+#### Scenario: Exempt a compile-error arm from its expected result
 
-- **WHEN** one selected expression arm produces the expected value and the alternative contains `static panic`
-- **THEN** the panicking arm requires no value of the expected type and a specialization selecting it fails with the panic diagnostic
+- **WHEN** one selected expression arm produces the expected value and the alternative contains `compileError`
+- **THEN** the compile-error arm requires no value of the expected type and a specialization selecting it fails with the compile-error diagnostic
 
-#### Scenario: Discard residual runtime work before a panic
+#### Scenario: Discard residual runtime work before a compile error
 
-- **WHEN** a selected static arm retains an ordinary runtime operation and later reaches `static panic`
+- **WHEN** a selected static arm retains an ordinary runtime operation and later reaches `compileError`
 - **THEN** compilation fails and discards the incomplete residual program without executing or emitting that runtime operation
 
-#### Scenario: Ignore an unselected panic
+#### Scenario: Ignore an unselected compile error
 
-- **WHEN** a `static if` condition does not select an arm containing `static panic`
-- **THEN** specialization succeeds without evaluating or reporting that panic
+- **WHEN** a `static if` condition does not select an arm containing `compileError`
+- **THEN** specialization succeeds without evaluating or reporting that compile error
 
 ### Requirement: Static evaluation is reachable, finite, and reproducible
 
@@ -150,12 +162,13 @@ diagnostics, residual program, and specialization identity across fresh processe
 
 The evaluator SHALL enforce deterministic recursion, work, retained-value, and residual-growth
 limits. Exceeding a limit SHALL report a dedicated evaluation-limit diagnostic distinct from
-`static panic`, name the exhausted resource, and produce no partial static value or residual program.
+`compileError`, name the exhausted resource, and produce no partial static value or residual
+program.
 
 #### Scenario: Leave an uncalled static function unevaluated
 
-- **WHEN** a loaded module declares a static function containing a panic but no reachable constant initializer or specialization calls it
-- **THEN** the declaration remains indexable without reporting the panic
+- **WHEN** a loaded module declares a static function containing `compileError` but no reachable constant initializer or specialization calls it
+- **THEN** the declaration remains indexable without reporting the compile error
 
 #### Scenario: Evaluate one reachable concrete application
 
@@ -165,11 +178,11 @@ limits. Exceeding a limit SHALL report a dedicated evaluation-limit diagnostic d
 #### Scenario: Report a resource limit separately
 
 - **WHEN** static recursion or looping exceeds its deterministic evaluation budget
-- **THEN** compilation reports an evaluation-limit diagnostic rather than presenting the failure as a source-requested panic
+- **THEN** compilation reports an evaluation-limit diagnostic rather than presenting the failure as a source-requested compile error
 
 ### Requirement: Static diagnostics retain the specialization trace
 
-Every static panic, phase violation, and evaluation-limit diagnostic SHALL identify the primary
+Every `compileError`, phase violation, and evaluation-limit diagnostic SHALL identify the primary
 source operation and retain an ordered trace of static function calls, static arguments in a stable
 presentation, selected `static if` arms, and the concrete target. A diagnostic originating while
 processing static text SHALL retain the source literal and applicable byte offset. Diagnostics MUST
@@ -177,8 +190,8 @@ NOT expose compiler addresses, cache identities, host stack frames, or backend d
 
 #### Scenario: Trace a nested target failure
 
-- **WHEN** a reachable mixed function selects a target arm, calls a static helper, and that helper panics
-- **THEN** the diagnostic identifies the panic and presents the selected target, arm, helper call, and responsible static arguments in source order
+- **WHEN** a reachable mixed function selects a target arm, calls a static helper, and that helper reaches `compileError`
+- **THEN** the diagnostic identifies the compile-error expression and presents the selected target, arm, helper call, and responsible static arguments in source order
 
 #### Scenario: Repeat a static diagnostic
 
@@ -189,14 +202,15 @@ NOT expose compiler addresses, cache identities, host stack frames, or backend d
 
 The selected compilation target SHALL contribute one closed profile value to the static environment
 before any reachable specialization is evaluated. Ordinary source in the standard library SHALL
-map that profile to nominal scalar enums and target facts. Source target checks SHALL compare those
+map that profile through zero-argument static functions to nominal scalar enums and SHALL derive
+primitive target facts as statically evaluated constants. Source target checks SHALL compare those
 enum values rather than string spellings. Target information MUST NOT be readable at runtime,
 changed by source, inferred from the host when an explicit target was selected, or recomputed by an
 execution engine.
 
 #### Scenario: Select code by target architecture
 
-- **WHEN** a mixed function compares the standard-library target architecture with its `Wasm32` enum member
+- **WHEN** a mixed function calls the standard-library static architecture query and compares its result with the `Wasm32` enum member
 - **THEN** a WebAssembly compilation selects the wasm arm and every native compilation selects the other arm before residual HIR is produced
 
 #### Scenario: Keep the selected target out of runtime state

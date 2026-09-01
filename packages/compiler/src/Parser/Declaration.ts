@@ -36,6 +36,7 @@ import {
 
 export const beginsTopLevelDeclaration = (state: State): boolean => {
   const kind = nextSignificantKind(state)
+  if (kind === 'StaticKeyword') return peek(state, 1) === 'FnKeyword'
   if (
     kind === 'ImportKeyword' ||
     kind === 'ConstKeyword' ||
@@ -55,6 +56,7 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
   if (kind !== 'PubKeyword') return false
   const following = peek(state, 1)
   return (
+    (following === 'StaticKeyword' && peek(state, 2) === 'FnKeyword') ||
     following === 'FnKeyword' ||
     following === 'EffectKeyword' ||
     (following === 'UnsafeKeyword' &&
@@ -68,6 +70,44 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
     following === 'RoleKeyword' ||
     following === 'ConstKeyword'
   )
+}
+
+const parseInvalidStaticDeclaration = (initial: State): NodeResult => {
+  const leading = consumeTrivia(initial)
+  let state = leading.state
+  let children: ReadonlyArray<SyntaxTree.Element> = leading.elements
+  let braces = 0
+  let sawBrace = false
+  let token = currentToken(state)
+
+  while (token !== undefined && token.kind !== 'EndOfFile') {
+    if (children.length > leading.elements.length && sawBrace && braces === 0) {
+      if (beginsTopLevelDeclaration(state)) break
+    }
+    children = Object.freeze([...children, token])
+    state = advance(state)
+    if (token.kind === 'LeftBrace') {
+      sawBrace = true
+      braces += 1
+    } else if (token.kind === 'RightBrace' && braces > 0) {
+      braces -= 1
+    }
+    token = currentToken(state)
+  }
+
+  const node = syntaxNode(state, 'Error', children)
+  return Object.freeze({
+    state: addDiagnostic(
+      state,
+      Diagnostic.unexpectedTokens(
+        children.filter(SyntaxTree.isToken).map((item) => item.kind),
+        'syntax',
+        ['`static fn`'],
+        node.span,
+      ),
+    ),
+    node,
+  })
 }
 
 export const parseConstantDeclaration = (initial: State): NodeResult => {
@@ -751,6 +791,11 @@ export const parseImplDeclaration = (initial: State): NodeResult => {
 export const parseTopLevelDeclaration = (state: State): NodeResult => {
   const kind = nextSignificantKind(state)
   const following = kind === 'PubKeyword' ? peek(state, 1) : undefined
+  if (
+    (kind === 'StaticKeyword' && peek(state, 1) !== 'FnKeyword') ||
+    (kind === 'PubKeyword' && following === 'StaticKeyword' && peek(state, 2) !== 'FnKeyword')
+  )
+    return parseInvalidStaticDeclaration(state)
   if (kind === 'ImportKeyword') return parseImportDeclaration(state)
   if (kind === 'ConstKeyword' || following === 'ConstKeyword')
     return parseConstantDeclaration(state)
@@ -775,6 +820,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
   while (
     lookaheadToken !== undefined &&
     lookaheadToken.kind !== 'FnKeyword' &&
+    lookaheadToken.kind !== 'StaticKeyword' &&
     lookaheadToken.kind !== 'EffectKeyword' &&
     lookaheadToken.kind !== 'UnsafeKeyword' &&
     lookaheadToken.kind !== 'StructKeyword' &&
@@ -796,6 +842,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
   }
   const pubKeyword = hasPublicModifier
     ? expect(initial, 'PubKeyword', [
+        'StaticKeyword',
         'UnsafeKeyword',
         'EffectKeyword',
         'FnKeyword',
@@ -803,15 +850,19 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
         'LeftParenthesis',
       ])
     : Object.freeze({ state: initial, elements: Object.freeze([]) })
+  const staticKeyword =
+    nextSignificantKind(pubKeyword.state) === 'StaticKeyword'
+      ? expect(pubKeyword.state, 'StaticKeyword', ['FnKeyword', 'Identifier', 'LeftParenthesis'])
+      : Object.freeze({ state: pubKeyword.state, elements: Object.freeze([]) })
   const unsafeKeyword =
-    nextSignificantKind(pubKeyword.state) === 'UnsafeKeyword'
-      ? expect(pubKeyword.state, 'UnsafeKeyword', [
+    nextSignificantKind(staticKeyword.state) === 'UnsafeKeyword'
+      ? expect(staticKeyword.state, 'UnsafeKeyword', [
           'EffectKeyword',
           'FnKeyword',
           'Identifier',
           'LeftParenthesis',
         ])
-      : Object.freeze({ state: pubKeyword.state, elements: Object.freeze([]) })
+      : Object.freeze({ state: staticKeyword.state, elements: Object.freeze([]) })
   const effectKeyword =
     nextSignificantKind(unsafeKeyword.state) === 'EffectKeyword'
       ? expect(unsafeKeyword.state, 'EffectKeyword', ['FnKeyword', 'Identifier', 'LeftParenthesis'])
@@ -836,6 +887,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     state: block.state,
     node: syntaxNode(block.state, 'FunctionDeclaration', [
       ...pubKeyword.elements,
+      ...staticKeyword.elements,
       ...unsafeKeyword.elements,
       ...effectKeyword.elements,
       ...fnKeyword.elements,

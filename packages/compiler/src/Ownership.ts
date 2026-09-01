@@ -1530,6 +1530,9 @@ const analyzeLoans = (
       case 'EnumValue':
         scanRunEnds(expression.argument, region)
         return
+      case 'CompileError':
+        scanRunEnds(expression.message, region)
+        return
       case 'EffectCatch':
         scanRunEnds(expression.protected, region)
         scanRunEnds(expression.handler, region)
@@ -2628,6 +2631,7 @@ const checkFunction = (
 
   const initialLive = new Set<string>()
   for (const parameter of declaration.parameters) {
+    if (parameter.phase === 'Static') continue
     const type =
       parameter.declaredType._tag === 'Resolved' ? parameter.declaredType.type : undefined
     const cause = 'cause' in parameter.declaredType ? parameter.declaredType.cause : undefined
@@ -3321,6 +3325,23 @@ const checkFunction = (
     diagnostics: Object.freeze([...state.diagnostics]),
   })
 }
+
+/** Checks one target-selected residual function without reusing declaration-level ownership. */
+export const checkResidualFunction = (
+  fn: Hir.HirFunction,
+  semantic: Elaboration.FunctionFact,
+  index: DeclarationIndex.Index,
+  accessBoundaryPlan: LocalSharedAccessBoundaryPlan,
+): CheckedFunction =>
+  checkFunction(
+    fn,
+    index,
+    semantic,
+    fn.declaration.canonical._tag === 'Canonical'
+      ? (accessBoundaryPlan.boundaries.get(localSharedTargetKey(fn.declaration.canonical.id)) ??
+          Object.freeze([]))
+      : Object.freeze([]),
+  )
 
 /** Classifies the result-side ownership facts of one access-scoped callback invocation. */
 export const localSharedResultEscapes = (facts: {

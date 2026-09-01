@@ -25,6 +25,8 @@ import * as Match from './Match.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import { executableStatements } from './StatementAnalysis.js'
+import type * as StaticText from './StaticText.js'
+import type * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
@@ -64,6 +66,109 @@ export const hirReference = (
       ? { cause: reference.cause }
       : {}),
   })
+}
+
+const staticValueExpression = (
+  value: StaticValue.Value,
+  type: SemanticType,
+  span: SourceSpan.SourceSpan,
+): Hir.Expression => {
+  switch (value._tag) {
+    case 'UnitValue':
+      return Object.freeze({ _tag: 'UnitLiteral', type: Type.unit, span })
+    case 'BooleanValue':
+      return Object.freeze({ _tag: 'BooleanLiteral', value: value.value, type: 'bool', span })
+    case 'CharacterValue':
+      return Object.freeze({ _tag: 'CharacterLiteral', value: value.value, type: 'char', span })
+    case 'IntegerValue':
+      return Object.freeze({ _tag: 'IntegerLiteral', value: value.value, type: value.type, span })
+    case 'FloatValue':
+      return Object.freeze({
+        _tag: 'FloatingLiteral',
+        bits: value.bits,
+        spelling: `${value.type}(bits=0x${value.bits.toString(16)})`,
+        type: value.type,
+        span,
+      })
+    case 'TextValue': {
+      const data: StaticText.Data = Object.freeze({
+        _tag: 'StaticData',
+        id: `text:${value.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')}`,
+        kind: 'Text',
+        bytes: value.bytes,
+        utf8: true,
+      })
+      return Object.freeze({ _tag: 'StaticStringLiteral', data, type: Type.string, span })
+    }
+    case 'EnumValue':
+      return Type.isNominal(type)
+        ? Object.freeze({
+            _tag: 'EnumMember',
+            enum: value.type,
+            member: Object.freeze({
+              _tag: 'CanonicalEnumMemberId',
+              enum: value.type,
+              name: value.member,
+            }),
+            discriminant: value.discriminant,
+            type,
+            span,
+          })
+        : Object.freeze({ _tag: 'Unavailable', span })
+    case 'AggregateValue': {
+      if (value.identity._tag === 'ArrayAggregateIdentity' && Type.isFixedArray(type)) {
+        const elements = value.fields.map((field) =>
+          staticValueExpression(field.value, type.element, span),
+        )
+        return elements.some((element) => element._tag === 'Unavailable')
+          ? Object.freeze({ _tag: 'Unavailable', span })
+          : Object.freeze({ _tag: 'ArrayConstruct', elements, type, span })
+      }
+      if (
+        value.identity._tag !== 'NominalAggregateIdentity' ||
+        !Type.isNominal(type) ||
+        value.runtimeFields === undefined ||
+        value.runtimeFields.length !== value.fields.length
+      )
+        return Object.freeze({ _tag: 'Unavailable', span })
+      const fields = value.fields.flatMap((field) => {
+        const runtime = value.runtimeFields?.find(
+          (candidate) => candidate.id.ordinal === field.ordinal,
+        )
+        if (runtime === undefined) return []
+        const expression = staticValueExpression(field.value, runtime.type, span)
+        return expression._tag === 'Unavailable'
+          ? []
+          : [Object.freeze({ field: runtime.id, value: expression })]
+      })
+      if (fields.length !== value.fields.length) return Object.freeze({ _tag: 'Unavailable', span })
+      const evaluationOrder = Object.freeze(fields.map((field) => field.field))
+      const variant = value.identity.variant
+      return variant === undefined
+        ? Object.freeze({
+            _tag: 'Construct',
+            nominal: type,
+            evaluationOrder,
+            fields: Object.freeze(fields),
+            type,
+            span,
+          })
+        : Object.freeze({
+            _tag: 'ConstructUnionVariant',
+            nominal: type,
+            variant: Object.freeze({
+              _tag: 'CanonicalUnionVariantId',
+              union: value.identity.declaration,
+              name: variant.name,
+            }),
+            variantOrdinal: variant.ordinal,
+            evaluationOrder,
+            fields: Object.freeze(fields),
+            type,
+            span,
+          })
+    }
+  }
 }
 
 export const hirPatternSelection = (selection: PatternSelectionFact): Hir.PatternSelection => {
@@ -129,15 +234,16 @@ export const lowerStatements = (
     (options.eraseIntrinsicSections ? executableStatements(facts) : facts)
       .filter(
         (statement) =>
-          !options.eraseIntrinsicSections ||
-          !(
-            (statement._tag === 'BindStatement' &&
-              callableSectionOf(statement.binding.initializer)?.reference._tag ===
-                'ResolvedIntrinsicContract') ||
-            (statement._tag === 'DropStatement' &&
-              callableSectionOf(statement.expression)?.reference._tag ===
-                'ResolvedIntrinsicContract')
-          ),
+          (statement._tag !== 'BindStatement' || statement.binding.phase === 'Runtime') &&
+          (!options.eraseIntrinsicSections ||
+            !(
+              (statement._tag === 'BindStatement' &&
+                callableSectionOf(statement.binding.initializer)?.reference._tag ===
+                  'ResolvedIntrinsicContract') ||
+              (statement._tag === 'DropStatement' &&
+                callableSectionOf(statement.expression)?.reference._tag ===
+                  'ResolvedIntrinsicContract')
+            )),
       )
       .map((statement): Hir.Statement => {
         if (statement._tag === 'UnsafeStatement')
@@ -346,6 +452,8 @@ export const loanEndsOf = (
   )
 
 export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Expression => {
+  if (fact._tag === 'CompileError')
+    return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
   if (fact._tag === 'ShortCircuit') {
     const left = fact.arguments.at(0)
     const right = fact.arguments.at(1)
@@ -465,7 +573,6 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
         ...(fact.declaration.canonical._tag === 'Canonical'
           ? { constant: fact.declaration.canonical.id }
           : {}),
-        ...(fact.value.target === undefined ? {} : { targetConstant: fact.value.target }),
         span: fact.syntax.span,
       })
     if (fact.value?._tag === 'Floating')
@@ -521,6 +628,16 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
         })
   }
   if (fact._tag === 'Identifier') {
+    if (
+      fact.reference._tag === 'ResolvedBinding' &&
+      fact.reference.binding.staticValue !== undefined &&
+      fact.type._tag === 'Available'
+    )
+      return staticValueExpression(
+        fact.reference.binding.staticValue,
+        fact.type.type,
+        fact.syntax.span,
+      )
     return hirReference(fact.reference, fact.type, fact.syntax.span)
   }
   if (fact._tag === 'Move') {
@@ -1348,29 +1465,48 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     fact.contract._tag === 'Compatible' &&
     fact.type._tag === 'Available'
   ) {
+    if (fact._tag === 'Call' && fact.staticValue !== undefined)
+      return staticValueExpression(fact.staticValue, fact.type.type, fact.syntax.span)
     const target = fact.reference.declaration
     const substitution = fact.contract.substitution
     const returnedBorrowOrdinal = returnedBorrowArgument(fact)?.id.ordinal
     const call = {
       target: fact.reference.declaration.canonical.id,
       typeArguments: fact.contract.typeArguments,
+      evidence: fact.contract.evidence,
+      staticArguments: Object.freeze(
+        (fact._tag === 'Call' ? (fact.staticArguments ?? []) : []).map(
+          (argument) => argument.value,
+        ),
+      ),
       arguments: Object.freeze(
-        fact.arguments.map((argument, ordinal) => {
+        fact.arguments.flatMap((argument, ordinal) => {
           const parameter = target.parameters.at(ordinal)
+          if (parameter?.phase === 'Static') return []
           const borrowId = argumentBorrowId(argument, ordinal)
-          return parameter?.declaredType._tag === 'Resolved'
-            ? hirExpectedExpression(
-                argument.expression,
-                Type.substitute(parameter.declaredType.type, substitution),
-                'Argument',
-                parameter.syntax.span,
-                borrowId,
-              )
-            : hirExpression(argument.expression, borrowId)
+          return [
+            parameter?.declaredType._tag === 'Resolved'
+              ? hirExpectedExpression(
+                  argument.expression,
+                  Type.substitute(parameter.declaredType.type, substitution),
+                  'Argument',
+                  parameter.syntax.span,
+                  borrowId,
+                )
+              : hirExpression(argument.expression, borrowId),
+          ]
         }),
       ),
-      loanEnds: loanEndsOf(fact.arguments, (ordinal) => returnedBorrowOrdinal !== ordinal),
-      heldLoans: loanEndsOf(fact.arguments, (ordinal) => returnedBorrowOrdinal === ordinal),
+      loanEnds: loanEndsOf(
+        fact.arguments,
+        (ordinal) =>
+          target.parameters.at(ordinal)?.phase !== 'Static' && returnedBorrowOrdinal !== ordinal,
+      ),
+      heldLoans: loanEndsOf(
+        fact.arguments,
+        (ordinal) =>
+          target.parameters.at(ordinal)?.phase !== 'Static' && returnedBorrowOrdinal === ordinal,
+      ),
       type: fact.type.type,
       span: fact.syntax.span,
     }
@@ -1684,6 +1820,8 @@ export const directExpressionChildren = (
   expression: ExpressionFact,
 ): ReadonlyArray<ExpressionFact> => {
   switch (expression._tag) {
+    case 'CompileError':
+      return Object.freeze([expression.message])
     case 'EnumValue':
       return Object.freeze([expression.argument])
     case 'Move':

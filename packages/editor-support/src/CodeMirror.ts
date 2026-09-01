@@ -40,6 +40,8 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
   ByteStringLiteral: { name: 'string', tags: [tags.string] },
   CharLiteral: { name: 'character', tags: [tags.character] },
   InvalidStaticLiteral: { name: 'invalid', tags: [tags.invalid] },
+  StaticKeyword: keyword,
+  CompileErrorKeyword: keyword,
   PubKeyword: keyword,
   StructKeyword: keyword,
   TupleKeyword: keyword,

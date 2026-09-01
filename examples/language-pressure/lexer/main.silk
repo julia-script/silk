@@ -28,6 +28,8 @@ const tokenUnion: u8 = 78
 const tokenDurationLiteral: u8 = 79
 const tokenInvalidDurationLiteral: u8 = 80
 const tokenTuple: u8 = 81
+const tokenStatic: u8 = 82
+const tokenCompileError: u8 = 83
 
 struct Token {
   kind: u8
@@ -182,6 +184,8 @@ fn matches(source: &[u8], start: usize, end: usize, spelling: &[u8]) -> bool {
 
 fn keywordKind(source: &[u8], start: usize, end: usize) -> u8 {
   if matches(source, start, end, b"pub") { return 9 }
+  if matches(source, start, end, b"static") { return tokenStatic }
+  if matches(source, start, end, b"compileError") { return tokenCompileError }
   if matches(source, start, end, b"struct") { return 10 }
   if matches(source, start, end, b"tuple") { return tokenTuple }
   if matches(source, start, end, b"effect") { return 11 }

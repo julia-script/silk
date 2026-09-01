@@ -21,7 +21,6 @@ import * as MirNormalization from '../src/MirNormalization.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
-import type * as Ownership from '../src/Ownership.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as StandardStreams from '../src/StandardStreams.js'
 import * as SuspensionMir from '../src/SuspensionMir.js'
@@ -110,11 +109,8 @@ const lowerSource = Effect.fnUntraced(function* (
   )
   const catalog = Layout.catalog(target, snapshot.index, snapshot.instances)
   const layout = Layout.plan(catalog, snapshot.instances, snapshot.index)
-  const ownership =
-    Analysis.ownershipOf(snapshot, name) ?? unreachable('expected module ownership facts')
   const lowered = Lower.lowerProgram(
     snapshot.instances,
-    new Map<string, Ownership.ModuleOwnership>([[name, ownership]]),
     layout,
     snapshot.index,
     OpaqueRealization.catalogOf(snapshot),

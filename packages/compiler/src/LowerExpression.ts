@@ -46,7 +46,6 @@ import { lowerBuiltinExpression } from './LowerBuiltin.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as Scalar from './Scalar.js'
-import * as TargetConstant from './TargetConstant.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 import {
@@ -94,21 +93,12 @@ export function lowerExpressionInner(
       const type = fn.type(expression.type)
       if (type === undefined || !Type.isBuiltin(Mir.semanticType(type))) return undefined
       const destination = fn.alloc(type)
-      // Lowering is the first phase that holds the selected target, and every engine reads the MIR
-      // it produces, so this is where a pointer-width fact becomes one exact number.
-      const value =
-        expression.targetConstant === undefined
-          ? expression.value
-          : TargetConstant.value(
-              expression.targetConstant,
-              TargetConstant.pointerBits(fn.layout.target),
-            )
       fn.emit(
         Object.freeze({
           _tag: 'Literal',
           destination,
           type,
-          value,
+          value: expression.value,
           provenance: Object.freeze({ span: expression.span, generated: false }),
         }),
       )
@@ -1974,6 +1964,7 @@ export function lowerExpressionInner(
         call?.target.typeArguments ??
           expression.typeArguments.map((argument) => fn.semanticArgument(argument)),
       )
+      const staticArguments = call?.target.staticArguments ?? expression.staticArguments
       const type =
         (call?.resultEffect === undefined
           ? undefined
@@ -1988,6 +1979,7 @@ export function lowerExpressionInner(
           destination,
           target: expression.target,
           typeArguments,
+          ...(staticArguments.length === 0 ? {} : { staticArguments }),
           arguments: Object.freeze(argumentLocals),
           type,
           provenance: Object.freeze({ span: expression.span, generated: false }),

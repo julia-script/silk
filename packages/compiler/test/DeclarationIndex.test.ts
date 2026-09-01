@@ -685,6 +685,33 @@ it.effect('resolves header signatures and diagnoses unknown types at exact spans
   }),
 )
 
+it.effect('retains static function and parameter modes with a deterministic body template', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `pub static fn parse(value: string) -> i32 { return 1 }
+pub fn render(static template: string, value: i32) -> i32 {
+  let static parsed = parse(template)
+  return value
+}`,
+      ],
+    ])
+    const parse = index.modules.at(0)?.declarations.at(0)
+    const render = index.modules.at(0)?.declarations.at(1)
+
+    assert.strictEqual(parse?.phase, 'Static')
+    assert.strictEqual(parse?.parameters.at(0)?.phase, 'Static')
+    assert.strictEqual(render?.phase, 'Runtime')
+    assert.strictEqual(render?.parameters.at(0)?.phase, 'Static')
+    assert.strictEqual(render?.parameters.at(1)?.phase, 'Runtime')
+    assert.strictEqual(parse?.bodyTemplate?._tag, 'FunctionBodyTemplate')
+    assert.strictEqual(render?.bodyTemplate?._tag, 'FunctionBodyTemplate')
+    assert.include(parse?.bodyTemplate?.canonical ?? '', 'ReturnStatement')
+    assert.include(render?.bodyTemplate?.canonical ?? '', 'StaticKeyword')
+  }),
+)
+
 it.effect('resolves string in signatures and generic arguments without treating it as scalar', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [

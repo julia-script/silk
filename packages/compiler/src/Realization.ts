@@ -63,20 +63,42 @@ function discoverAndLower(
   const specializationInvalid =
     Diagnostic.hasGenericSpecializationErrors(self.diagnostics) ||
     hasInvalidGenericBody(self.index, self.diagnostics)
+  // Static specialization is target-relative. Resolve the closed target before constructing any
+  // executable worklist so no candidate body can observe a missing or host-inferred target.
+  const targetSelection = Target.select(targetId)
   const instances = PhaseReport.measureInto(
     report,
     'instance-discovery',
     self.results.size,
     () =>
-      backend === undefined && specializationInvalid
+      targetSelection._tag === 'Unavailable' || (backend === undefined && specializationInvalid)
         ? Instances.invalid(self.closure.rootModule)
-        : Instances.discover(self.closure.rootModule, self.results, self.ownership, self.index),
+        : Instances.discover(
+            self.closure.rootModule,
+            self.results,
+            self.index,
+            targetSelection.target,
+            self.resolution,
+          ),
     (value) => value.instances.length,
     (value) => value.violations.length,
     options,
   )
+  const declarationDiagnosticKeys = new Set(
+    self.diagnostics.map(
+      (diagnostic) =>
+        `${diagnostic.phase}\u0000${diagnostic.code}\u0000${diagnostic.span.sourceId}\u0000${diagnostic.span.start}\u0000${diagnostic.span.end}`,
+    ),
+  )
+  const residualizationDiagnostics = instances.residualizationDiagnostics.filter(
+    (diagnostic) =>
+      !declarationDiagnosticKeys.has(
+        `${diagnostic.phase}\u0000${diagnostic.code}\u0000${diagnostic.span.sourceId}\u0000${diagnostic.span.start}\u0000${diagnostic.span.end}`,
+      ),
+  )
   const baseDiagnostics = Diagnostic.merge(
     self.diagnostics,
+    residualizationDiagnostics,
     instanceViolationDiagnostics(self, instances),
   )
   if (backend !== undefined && Diagnostic.hasErrors(baseDiagnostics))
@@ -85,17 +107,6 @@ function discoverAndLower(
       diagnostics: baseDiagnostics,
       report: Object.freeze(report),
     })
-  if (backend !== undefined && instances.entry._tag === 'Unavailable')
-    return Object.freeze({
-      _tag: 'NoEntry',
-      reason: instances.entry.reason,
-      ...(instances.entry.requirements === undefined
-        ? {}
-        : { requirements: instances.entry.requirements }),
-      diagnostics: baseDiagnostics,
-      report: Object.freeze(report),
-    })
-
   const analysisUnavailable = (() => {
     if (backend !== undefined) return undefined
     if (specializationInvalid || Diagnostic.hasGenericSpecializationErrors(baseDiagnostics))
@@ -122,7 +133,7 @@ function discoverAndLower(
     'target-layout',
     instances.instances.length,
     () => {
-      const selection = Target.select(targetId)
+      const selection = targetSelection
       if (selection._tag === 'Unavailable')
         return Object.freeze({ _tag: 'Unavailable' as const, selection, error: selection.error })
       if (backend !== undefined) {
@@ -195,6 +206,16 @@ function discoverAndLower(
       diagnostics: baseDiagnostics,
       report: Object.freeze(report),
     })
+  if (backend !== undefined && instances.entry._tag === 'Unavailable')
+    return Object.freeze({
+      _tag: 'NoEntry',
+      reason: instances.entry.reason,
+      ...(instances.entry.requirements === undefined
+        ? {}
+        : { requirements: instances.entry.requirements }),
+      diagnostics: baseDiagnostics,
+      report: Object.freeze(report),
+    })
 
   const diagnostics = Diagnostic.merge(
     baseDiagnostics,
@@ -230,7 +251,6 @@ function discoverAndLower(
             finalizeMir(
               Lower.lowerProgram(
                 instances,
-                self.ownership,
                 targetLayout.layout,
                 self.index,
                 OpaqueRealization.catalogOf(self),

@@ -3,17 +3,23 @@ import * as ConformanceProof from './ConformanceProof.js'
 import * as Constraint from './Constraint.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as ExecutableOrigin from './ExecutableOrigin.js'
 import * as Hir from './Hir.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
+import type * as NameResolution from './NameResolution.js'
 import * as Ownership from './Ownership.js'
 import * as ProviderSelection from './ProviderSelection.js'
+import * as Residualization from './Residualization.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Specialization from './Specialization.js'
+import * as StaticEvaluation from './StaticEvaluation.js'
+import * as StaticValue from './StaticValue.js'
 import * as SuspensionMode from './SuspensionMode.js'
+import type * as Target from './Target.js'
 import * as Type from './Type.js'
 
 /**
@@ -29,6 +35,9 @@ export interface InstanceKey {
   readonly declaration: DeclarationFacts.CanonicalId
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
   readonly contractRow: ReadonlyArray<string>
+  /** Canonical selected-evidence encodings in declaration order. */
+  readonly evidence: ReadonlyArray<string>
+  readonly staticArguments: ReadonlyArray<StaticValue.Value>
 }
 
 /** One discovered instance with its elaborated HIR function. */
@@ -38,6 +47,7 @@ export interface Instance {
   readonly function: Hir.HirFunction
   readonly substitution: Type.Substitution
   readonly specialization: ConcreteSpecialization
+  readonly ownership: Ownership.FunctionOwnership
   readonly resultCallable?: Type.CallableIdentityArgument
   readonly resultEffect?: string
   readonly effectSuccesses?: ReadonlyArray<{
@@ -147,6 +157,13 @@ export interface EntryFailure {
   readonly identity: string
 }
 
+/** One target-selected primitive constant value with no runtime storage. */
+export interface SelectedConstant {
+  readonly _tag: 'SelectedConstant'
+  readonly declaration: DeclarationFacts.CanonicalId
+  readonly value: StaticValue.Value
+}
+
 /** The resolved or explicitly unavailable user entry. */
 export type Entry =
   | {
@@ -168,6 +185,7 @@ export type Entry =
         | 'MissingEntry'
         | 'AmbiguousEntry'
         | 'GenericEntry'
+        | 'StaticEntry'
         | 'ParameterizedEntry'
         | 'PrivateEntry'
         | 'UntypedEntry'
@@ -184,14 +202,26 @@ export interface Discovery {
   readonly rootModule: string
   readonly entry: Entry
   readonly instances: ReadonlyArray<Instance>
+  /** Demanded residual specializations rejected before executable reachability. */
+  readonly unavailableOwnership: ReadonlyArray<UnavailableResidualOwnership>
   readonly callables: ReadonlyArray<CallableInstance>
   readonly effects: ReadonlyArray<EffectInstance>
   readonly calls: ReadonlyArray<CallInstance>
   readonly intrinsics: ReadonlyArray<IntrinsicCall>
+  readonly constants: ReadonlyArray<SelectedConstant>
   /** Exact direct/nested/external-park summaries in canonical subject order. */
   readonly suspension: ReadonlyArray<SuspensionFact>
+  /** Target-relative diagnostics produced while selecting and residualizing static work. */
+  readonly residualizationDiagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly specializationFailures: ReadonlyArray<NonConcreteSpecialization>
   readonly violations: ReadonlyArray<PolymorphicRecursion>
+}
+
+/** One specialization-keyed unavailable ownership result retained for semantic inspection. */
+export interface UnavailableResidualOwnership {
+  readonly _tag: 'UnavailableResidualOwnership'
+  readonly key: InstanceKey
+  readonly ownership: Ownership.FunctionOwnership
 }
 
 /** A recursive generic edge that changes an ancestor declaration's concrete arguments. */
@@ -269,11 +299,14 @@ export const invalid = (rootModule: string): Discovery =>
     rootModule,
     entry: Object.freeze({ _tag: 'Unavailable', reason: 'InvalidSource' }),
     instances: Object.freeze([]),
+    unavailableOwnership: Object.freeze([]),
     callables: Object.freeze([]),
     effects: Object.freeze([]),
     calls: Object.freeze([]),
     intrinsics: Object.freeze([]),
+    constants: Object.freeze([]),
     suspension: Object.freeze([]),
+    residualizationDiagnostics: Object.freeze([]),
     specializationFailures: Object.freeze([]),
     violations: Object.freeze([]),
   })
@@ -318,6 +351,8 @@ const keyOf = (
   contract: Hir.ContractFact,
   typeParameters: ReadonlyArray<Type.Parameter> = [],
   rawTypeArguments: ReadonlyArray<Type.GenericArgument> = [],
+  staticArguments: ReadonlyArray<StaticValue.Value> = [],
+  evidence: ReadonlyArray<string> = [],
 ): InstanceKey =>
   (() => {
     const typeArguments = rawTypeArguments.map(carriedSectionArgument)
@@ -332,6 +367,8 @@ const keyOf = (
       _tag: 'InstanceKey',
       declaration,
       typeArguments: Object.freeze(Array.from(typeArguments)),
+      evidence: Object.freeze([...evidence]),
+      staticArguments: Object.freeze([...staticArguments]),
       contractRow:
         contract._tag === 'Contract'
           ? Object.freeze([
@@ -369,7 +406,11 @@ export const keyText = (key: InstanceKey): string => {
   if (cached === undefined) {
     cached = `${key.declaration.module}\u0000${key.declaration.name}\u0000${key.typeArguments
       .map(Type.genericArgumentKey)
-      .join('\u0000')}\u0002${key.contractRow.join('\u0000')}`
+      .join('\u0000')}${key.evidence.length === 0 ? '' : `\u0004${key.evidence.join('\u0000')}`}${
+      key.staticArguments.length === 0
+        ? ''
+        : `\u0001${key.staticArguments.map(StaticValue.key).join('\u0000')}`
+    }\u0002${key.contractRow.join('\u0000')}`
     keyTextCache.set(key, cached)
   }
   return cached
@@ -598,6 +639,9 @@ const resolveEntry = (root: Elaboration.Result): Entry => {
     return Object.freeze({ _tag: 'Unavailable', reason: 'AmbiguousEntry' })
   }
   const declaration = lookup.declaration
+  if (declaration.phase === 'Static') {
+    return Object.freeze({ _tag: 'Unavailable', reason: 'StaticEntry' })
+  }
   if (declaration.typeParameters.length > 0) {
     return Object.freeze({ _tag: 'Unavailable', reason: 'GenericEntry' })
   }
@@ -918,8 +962,9 @@ export const representedEffectSuspensionOf = (
 export const discover = (
   rootModule: string,
   results: ReadonlyMap<string, Elaboration.Result>,
-  ownership: ReadonlyMap<string, Ownership.ModuleOwnership>,
   index: DeclarationIndex.Index,
+  target: Target.Target,
+  resolution: NameResolution.Resolution,
 ): Discovery => {
   const root = results.get(rootModule)
   if (root === undefined) {
@@ -932,17 +977,64 @@ export const discover = (
       rootModule,
       entry,
       instances: Object.freeze([]),
+      unavailableOwnership: Object.freeze([]),
       callables: Object.freeze([]),
       effects: Object.freeze([]),
       calls: Object.freeze([]),
       intrinsics: Object.freeze([]),
+      constants: Object.freeze([]),
       suspension: Object.freeze([]),
+      residualizationDiagnostics: Object.freeze([]),
       specializationFailures: Object.freeze([]),
       violations: Object.freeze([]),
     })
   }
 
-  const recorded = new Map<string, Instance>()
+  const residualization = Residualization.make(target, results, resolution, index)
+  const accessBoundaryPlan = Ownership.localSharedAccessBoundaryPlan(results)
+  interface PreparedInstance {
+    readonly instance: Omit<Instance, 'ownership'>
+    readonly fact: Elaboration.FunctionFact
+  }
+  interface PreparedUnavailableOwnership {
+    readonly key: InstanceKey
+    readonly function: Hir.HirFunction
+    readonly fact: Elaboration.FunctionFact
+    readonly diagnostic: Diagnostic.Diagnostic
+  }
+  const prepared = new Map<string, PreparedInstance>()
+  const preparedUnavailableOwnership = new Map<string, PreparedUnavailableOwnership>()
+  const residualizationDiagnostics = new Map<string, Diagnostic.Diagnostic>()
+  const selectedConstants: Array<SelectedConstant> = []
+  for (const module of index.modules) {
+    const moduleDiagnostics = results.get(module.module)?.diagnostics ?? Object.freeze([])
+    for (const declaration of module.constants) {
+      const declarationHasError = moduleDiagnostics.some(
+        (diagnostic) =>
+          diagnostic.severity === 'error' &&
+          diagnostic.span.sourceId === declaration.syntax.span.sourceId &&
+          declaration.syntax.span.start <= diagnostic.span.start &&
+          diagnostic.span.end <= declaration.syntax.span.end,
+      )
+      if (declarationHasError) continue
+      const selected = Residualization.evaluateConstant(residualization, declaration)
+      if (selected._tag === 'Failed') {
+        const diagnostic = StaticEvaluation.diagnostic(selected.failure, target.id)
+        residualizationDiagnostics.set(
+          `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
+          diagnostic,
+        )
+      } else if (declaration.canonical._tag === 'Canonical') {
+        selectedConstants.push(
+          Object.freeze({
+            _tag: 'SelectedConstant',
+            declaration: declaration.canonical.id,
+            value: selected.value,
+          }),
+        )
+      }
+    }
+  }
   const recordedCallables = new Map<string, CallableInstance>()
   const recordedCalls = new Map<string, CallInstance>()
   const providerCalls = new Map<string, CallInstance>()
@@ -1010,6 +1102,28 @@ export const discover = (
           `${declaration}\u0002${keyText(ancestor.key)}\u0002${ancestor.structuralProvider === undefined ? '' : Type.key(ancestor.structuralProvider)}`,
       )
       .join('\u0003')}`
+  const cleanupPrepassTargets = (
+    fn: Hir.HirFunction,
+    fact: Elaboration.FunctionFact,
+    substitution: Type.Substitution,
+  ): ReadonlyArray<CallTarget> => {
+    const types = new Map<string, Type.Type>()
+    for (const parameter of fn.declaration.parameters) {
+      if (parameter.phase !== 'Runtime' || parameter.declaredType._tag !== 'Resolved') continue
+      const type = Type.substitute(parameter.declaredType.type, substitution)
+      types.set(Type.key(type), type)
+    }
+    Elaboration.visitStatementFacts(fact.statements, {
+      expression: (expression) => {
+        if (expression.type._tag !== 'Available') return
+        const type = Type.substitute(expression.type.type, substitution)
+        types.set(Type.key(type), type)
+      },
+    })
+    return Object.freeze(
+      [...types.values()].flatMap((type) => hookCalls(CleanupPlan.cleanupPlan(index, type), index)),
+    )
+  }
   let graph: ExecutableOrigin.SuspensionGraph | undefined
   while (true) {
     while (pending.length > 0) {
@@ -1022,9 +1136,46 @@ export const discover = (
       const ownerContexts = recordedContexts.get(keyText(key)) ?? new Map<string, WorkItem>()
       ownerContexts.set(context, item)
       recordedContexts.set(keyText(key), ownerContexts)
-      const fn = functionByKey(results, key)
-      if (fn === undefined) continue
-      const parameters = fn.declaration.typeParameters.map((parameter) => parameter.type)
+      const template = functionByKey(results, key)
+      if (template === undefined) continue
+      const application = Object.freeze({
+        declaration: key.declaration,
+        typeArguments: key.typeArguments.map(Type.genericArgumentKey),
+        evidence: key.evidence,
+        contractRow: key.contractRow,
+        staticArguments: key.staticArguments,
+      })
+      const residual = Residualization.residualize(residualization, application)
+      if (residual._tag === 'StaticFailure') {
+        const diagnostic = StaticEvaluation.diagnostic(residual.failure, target.id)
+        residualizationDiagnostics.set(
+          `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
+          diagnostic,
+        )
+        continue
+      }
+      for (const diagnostic of residual.diagnostics)
+        residualizationDiagnostics.set(
+          `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
+          diagnostic,
+        )
+      const residualError = residual.diagnostics.find(
+        (diagnostic) => diagnostic.severity === 'error',
+      )
+      if (residualError !== undefined) {
+        preparedUnavailableOwnership.set(
+          keyText(key),
+          Object.freeze({
+            key,
+            function: residual.function,
+            fact: residual.fact,
+            diagnostic: residualError,
+          }),
+        )
+        continue
+      }
+      const fn = residual.function
+      const parameters = template.declaration.typeParameters.map((parameter) => parameter.type)
       const substitution = TypeInference.substitution(
         parameters,
         key.typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
@@ -1042,45 +1193,30 @@ export const discover = (
         )
         continue
       }
-      if (!recorded.has(keyText(key))) {
+      if (!prepared.has(keyText(key))) {
         const resultCallable = resultCallableIdentity(fn, key, results, index)
         const resultEffect = resultEffectIdentity(fn, key, results, index)
-        recorded.set(
+        prepared.set(
           keyText(key),
           Object.freeze({
-            _tag: 'Instance',
-            key,
-            function: fn,
-            substitution,
-            specialization,
-            effectSuccesses: effectSuccesses(fn, key, substitution, results, index),
-            ...(resultCallable === undefined ? {} : { resultCallable }),
-            ...(resultEffect === undefined ? {} : { resultEffect }),
+            fact: residual.fact,
+            instance: Object.freeze({
+              _tag: 'Instance',
+              key,
+              function: fn,
+              substitution,
+              specialization,
+              effectSuccesses: effectSuccesses(fn, key, substitution, results, index),
+              ...(resultCallable === undefined ? {} : { resultCallable }),
+              ...(resultEffect === undefined ? {} : { resultEffect }),
+            }),
           }),
         )
       }
       for (const callable of concreteCallables(fn, key, substitution, results, index)) {
         recordedCallables.set(callableIdentity(callable), callable)
       }
-      const functionOwnership = ownership
-        ?.get(key.declaration.module)
-        ?.functions.find(
-          (candidate) => candidate.declaration.id.ordinal === fn.declaration.id.ordinal,
-        )
-      // Deferred effect-body bindings publish only through exit releases, so the joined binding
-      // facts and the exit releases both feed hook reachability.
-      const cleanupHooks = [
-        ...Ownership.allBindings(functionOwnership).map((binding) => binding.cleanup),
-        ...(functionOwnership?.exits.flatMap((exit) =>
-          exit.releases.map((release) => release.cleanup),
-        ) ?? []),
-      ]
-        .map((cleanup) =>
-          CleanupPlan.specializeCleanup(cleanup, substitution, (type) =>
-            CleanupPlan.cleanupPlan(index, type),
-          ),
-        )
-        .flatMap((cleanup) => hookCalls(cleanup, index))
+      const cleanupHooks = cleanupPrepassTargets(fn, residual.fact, substitution)
       const calls = new Map<string, CallTarget>()
       const directCalls = directCallInstances(fn, key, substitution, results, index)
       const callableTargets = callableCallTargets(fn, key, substitution, results, index)
@@ -1108,6 +1244,8 @@ export const discover = (
         ...directCalls.map((call) => ({
           declaration: call.target.declaration,
           typeArguments: call.target.typeArguments,
+          evidence: call.target.evidence,
+          staticArguments: call.target.staticArguments,
         })),
         ...forwardedRequirementCallTargets(directCalls, results, index),
         ...callableTargets,
@@ -1130,7 +1268,14 @@ export const discover = (
         if (callOrdinary) {
           calls.set(
             identity,
-            Object.freeze({ declaration: call.declaration, typeArguments: call.typeArguments }),
+            Object.freeze({
+              declaration: call.declaration,
+              typeArguments: call.typeArguments,
+              ...(call.evidence === undefined ? {} : { evidence: call.evidence }),
+              ...(call.staticArguments === undefined
+                ? {}
+                : { staticArguments: call.staticArguments }),
+            }),
           )
           continue
         }
@@ -1141,7 +1286,14 @@ export const discover = (
         )
           calls.set(
             identity,
-            Object.freeze({ declaration: call.declaration, typeArguments: call.typeArguments }),
+            Object.freeze({
+              declaration: call.declaration,
+              typeArguments: call.typeArguments,
+              ...(call.evidence === undefined ? {} : { evidence: call.evidence }),
+              ...(call.staticArguments === undefined
+                ? {}
+                : { staticArguments: call.staticArguments }),
+            }),
           )
       }
       for (const call of calls.values()) {
@@ -1162,6 +1314,8 @@ export const discover = (
           targetFunction.contract,
           targetFunction.declaration.typeParameters.map((parameter) => parameter.type),
           targetArguments,
+          call.staticArguments ?? Object.freeze([]),
+          call.evidence ?? Object.freeze([]),
         )
         const ancestor = item.ancestors.get(declarationText(targetKey))
         const structurallyDescending =
@@ -1184,7 +1338,7 @@ export const discover = (
           !structurallyDescending &&
           !terminalCallableSpecialization &&
           !(
-            recorded.has(keyText(targetKey)) &&
+            prepared.has(keyText(targetKey)) &&
             (item.cleanupReachable || cleanupIdentities.has(identityOfCall(call)))
           )
         ) {
@@ -1215,7 +1369,9 @@ export const discover = (
       }
     }
 
-    const currentInstances = Object.freeze([...recorded.values()])
+    const currentInstances = Object.freeze(
+      [...prepared.values()].map((candidate) => candidate.instance),
+    )
     const currentGraph = suspensionGraph(currentInstances, results, index)
     providerCalls.clear()
     for (const provided of currentGraph.providedTargets) {
@@ -1272,7 +1428,48 @@ export const discover = (
     }
   }
 
-  const instances = Object.freeze([...recorded.values()])
+  const instances = Object.freeze(
+    [...prepared.values()].map(({ instance, fact }) => {
+      const checked = Ownership.checkResidualFunction(
+        instance.function,
+        fact,
+        index,
+        accessBoundaryPlan,
+      )
+      for (const diagnostic of checked.diagnostics)
+        residualizationDiagnostics.set(
+          `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
+          diagnostic,
+        )
+      return Object.freeze({ ...instance, ownership: checked.ownership })
+    }),
+  )
+  const unavailableOwnership = Object.freeze(
+    [...preparedUnavailableOwnership.values()].map((candidate) => {
+      const checked = Ownership.checkResidualFunction(
+        candidate.function,
+        candidate.fact,
+        index,
+        accessBoundaryPlan,
+      )
+      for (const diagnostic of checked.diagnostics)
+        residualizationDiagnostics.set(
+          `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
+          diagnostic,
+        )
+      return Object.freeze({
+        _tag: 'UnavailableResidualOwnership' as const,
+        key: candidate.key,
+        ownership: Object.freeze({
+          ...checked.ownership,
+          verdict: Object.freeze({
+            _tag: 'Unavailable' as const,
+            cause: Diagnostic.identity(candidate.diagnostic),
+          }),
+        }),
+      })
+    }),
+  )
   const finalGraph = graph ?? suspensionGraph(instances, results, index)
   const summaries = ExecutableOrigin.suspensionSummaries(finalGraph)
   const summaryOfNode = (node: string): SuspensionMode.Summary =>
@@ -1283,6 +1480,7 @@ export const discover = (
     rootModule,
     entry,
     instances,
+    unavailableOwnership,
     callables: Object.freeze([...recordedCallables.values()]),
     effects: concreteEffects(
       instances,
@@ -1293,6 +1491,7 @@ export const discover = (
     ),
     calls: callInstances,
     intrinsics: ExecutableOrigin.reachableIntrinsics(instances, index),
+    constants: Object.freeze(selectedConstants),
     suspension: Object.freeze([
       ...instances
         .slice()
@@ -1325,6 +1524,7 @@ export const discover = (
           }),
       ),
     ]),
+    residualizationDiagnostics: Object.freeze([...residualizationDiagnostics.values()]),
     specializationFailures: Object.freeze([...specializationFailures.values()]),
     violations: Object.freeze(violations),
   })

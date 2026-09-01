@@ -4527,6 +4527,7 @@ function* executeFunction(
               program,
               operation.target,
               operation.typeArguments,
+              operation.staticArguments,
             )
             if (target === undefined) {
               return blockedStep({

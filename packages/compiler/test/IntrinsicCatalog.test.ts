@@ -397,7 +397,9 @@ it.effect(
       }
       const catalog = Intrinsic.all().flatMap((actor) =>
         actor.operations.flatMap((operation) =>
-          operation.rule._tag === 'EnumValueRule' ? [] : [key(actor.spelling, operation.spelling)],
+          operation.rule._tag === 'EnumValueRule' || operation.rule._tag === 'StaticOnlyRule'
+            ? []
+            : [key(actor.spelling, operation.spelling)],
         ),
       )
       assert.deepEqual([...observed].sort(), [...catalog].sort())
@@ -409,7 +411,8 @@ it.effect('keeps every intrinsic identifiable and presentable in rejected calls'
   Effect.gen(function* () {
     for (const actor of Intrinsic.all())
       for (const operation of actor.operations) {
-        if (operation.rule._tag === 'EnumValueRule') continue
+        if (operation.rule._tag === 'EnumValueRule' || operation.rule._tag === 'StaticOnlyRule')
+          continue
         const arguments_ = operation.parameters.length === 0 ? '0' : ''
         const source =
           operation.rule._tag === 'PlaceRule'
@@ -521,7 +524,7 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
     unsafe: entry.unsafe,
     admission: entry.admission,
     consumer: entry.consumer,
-    identity: entry.hir,
+    ...(entry.hir === undefined ? {} : { identity: entry.hir }),
     ...(entry.invariant === undefined ? {} : { invariant: entry.invariant }),
     ...(entry.hostImport === undefined ? {} : { hostImport: entry.hostImport }),
   }))
@@ -592,6 +595,55 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
       ),
     ),
   )
+})
+
+it('classifies targetProfile as a static-only u8 intrinsic with no runtime identity', () => {
+  const operation = Intrinsic.findOperation('Intrinsic', 'targetProfile')
+  assert.isDefined(operation)
+  if (operation === undefined) return
+  assert.deepEqual(
+    {
+      signature: Intrinsic.signature(operation),
+      phase: operation.phase,
+      parameters: operation.parameters,
+      result: operation.result,
+      unsafe: operation.unsafe,
+      targets: operation.targets,
+      rule: operation.rule,
+    },
+    {
+      signature: 'fn Intrinsic.targetProfile() -> u8',
+      phase: 'StaticOnly',
+      parameters: [],
+      result: 'u8',
+      unsafe: false,
+      targets: [],
+      rule: {
+        _tag: 'StaticOnlyRule',
+        contract: {
+          functionKind: 'Function',
+          unsafe: false,
+          binders: [],
+          parameters: [],
+          result: 'u8',
+          constraints: [],
+          captures: [],
+        },
+      },
+    },
+  )
+  const entry = Intrinsic.inventory().find(
+    (candidate) => candidate.operation === 'Intrinsic.targetProfile',
+  )
+  assert.deepEqual(entry, {
+    operation: 'Intrinsic.targetProfile',
+    signature: 'fn Intrinsic.targetProfile() -> u8',
+    unsafe: false,
+    phase: 'StaticOnly',
+    admission: 'Language',
+    consumer: 'silk/target.profile',
+    targets: [],
+  })
 })
 
 it.effect(

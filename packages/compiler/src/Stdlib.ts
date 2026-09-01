@@ -16,6 +16,7 @@ export interface Module {
   readonly documentation: string
   readonly layer: 'portable' | 'target-provider'
   readonly providerTargets?: ReadonlyArray<'Evaluator' | 'LLVM' | 'Wasm'>
+  readonly staticInventory: ReadonlyArray<string>
   readonly runtimeInventory: ReadonlyArray<string>
   readonly namespace?: string
   readonly aliases?: ReadonlyArray<string>
@@ -24,6 +25,9 @@ export interface Module {
 }
 
 const encoder = new TextEncoder()
+
+const staticInventory = (entry: object): ReadonlyArray<string> =>
+  'staticInventory' in entry && Array.isArray(entry.staticInventory) ? entry.staticInventory : []
 
 /** The deterministic standard-library manifest, ordered by canonical module identity. */
 export const manifest: ReadonlyArray<Module> = Object.freeze(
@@ -36,6 +40,7 @@ export const manifest: ReadonlyArray<Module> = Object.freeze(
       documentation: entry.documentation,
       layer: entry.layer,
       ...('providerTargets' in entry ? { providerTargets: entry.providerTargets } : {}),
+      staticInventory: staticInventory(entry),
       runtimeInventory: entry.runtimeInventory,
       ...('namespace' in entry ? { namespace: entry.namespace } : {}),
       ...('aliases' in entry ? { aliases: entry.aliases } : {}),

@@ -26,6 +26,8 @@ const instance = (declaration: DeclarationFacts.CanonicalId): Instances.Instance
     _tag: 'InstanceKey',
     declaration,
     typeArguments: Object.freeze([]),
+    evidence: Object.freeze([]),
+    staticArguments: Object.freeze([]),
     contractRow: Object.freeze([]),
   })
 

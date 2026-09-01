@@ -8,6 +8,7 @@ import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as StandardStreams from '../src/StandardStreams.js'
+import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
 import { constrainedCallableForwarding } from './support/corpus.js'
 import * as Json from './support/Json.js'
@@ -439,8 +440,9 @@ it.effect('carries a provider section through a multi-hop closed forwarding chai
     const discovery = Instances.discover(
       'logging/main',
       frontend.results,
-      frontend.ownership,
       frontend.index,
+      Target.wasm32UnknownUnknown,
+      frontend.resolution,
     )
     assert.deepEqual(discovery.specializationFailures, [])
     assert.deepEqual(discovery.violations, [])

@@ -621,6 +621,7 @@ export const parseWhereClause = (
 
 export const parseParameterList = (initial: State): NodeResult => {
   const leftParenthesis = expect(initial, 'LeftParenthesis', [
+    'StaticKeyword',
     'MutKeyword',
     'Identifier',
     'RightParenthesis',
@@ -634,6 +635,7 @@ export const parseParameterList = (initial: State): NodeResult => {
     kind !== undefined &&
     kind !== 'RightParenthesis' &&
     kind !== 'Arrow' &&
+    !(kind === 'StaticKeyword' && peek(state, 1) === 'FnKeyword') &&
     kind !== 'PubKeyword' &&
     kind !== 'StructKeyword' &&
     kind !== 'TupleKeyword' &&
@@ -646,11 +648,29 @@ export const parseParameterList = (initial: State): NodeResult => {
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
   ) {
-    const mut =
-      nextSignificantKind(state) === 'MutKeyword'
-        ? expect(state, 'MutKeyword', ['Identifier', 'Colon', 'Comma', 'RightParenthesis', 'Arrow'])
-        : Object.freeze({ state, elements: Object.freeze([]) })
-    const name = expect(mut.state, 'Identifier', ['Colon', 'Comma', 'RightParenthesis', 'Arrow'])
+    let modifier: ElementsResult = Object.freeze({ state, elements: Object.freeze([]) })
+    if (nextSignificantKind(state) === 'StaticKeyword')
+      modifier = expect(state, 'StaticKeyword', [
+        'Identifier',
+        'Colon',
+        'Comma',
+        'RightParenthesis',
+        'Arrow',
+      ])
+    else if (nextSignificantKind(state) === 'MutKeyword')
+      modifier = expect(state, 'MutKeyword', [
+        'Identifier',
+        'Colon',
+        'Comma',
+        'RightParenthesis',
+        'Arrow',
+      ])
+    const name = expect(modifier.state, 'Identifier', [
+      'Colon',
+      'Comma',
+      'RightParenthesis',
+      'Arrow',
+    ])
     const colon = expect(name.state, 'Colon', [
       ...typeStarts.filter((candidate) => candidate !== 'MutKeyword'),
       'Comma',
@@ -659,7 +679,7 @@ export const parseParameterList = (initial: State): NodeResult => {
     ])
     const type = parseType(colon.state, ['Comma', 'RightParenthesis', 'Arrow'])
     const parameter = syntaxNode(type.state, 'ParameterDeclaration', [
-      ...mut.elements,
+      ...modifier.elements,
       ...name.elements,
       ...colon.elements,
       type.node,
@@ -671,6 +691,7 @@ export const parseParameterList = (initial: State): NodeResult => {
     if (
       kind === 'RightParenthesis' ||
       kind === 'Arrow' ||
+      (kind === 'StaticKeyword' && peek(state, 1) === 'FnKeyword') ||
       kind === 'PubKeyword' ||
       kind === 'StructKeyword' ||
       kind === 'TupleKeyword' ||
@@ -685,6 +706,7 @@ export const parseParameterList = (initial: State): NodeResult => {
       break
 
     const comma = expect(state, 'Comma', [
+      'StaticKeyword',
       'MutKeyword',
       'Identifier',
       'RightParenthesis',
@@ -717,6 +739,7 @@ export const parseParameterList = (initial: State): NodeResult => {
     'EffectKeyword',
     'RightBrace',
     'ImportKeyword',
+    'StaticKeyword',
   ])
   return Object.freeze({
     state: rightParenthesis.state,

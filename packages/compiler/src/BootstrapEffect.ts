@@ -4,6 +4,7 @@ import type { EffectOutcomeValue, EffectValue, Value } from './BootstrapValue.js
 import { repackFailurePayload } from './BootstrapValue.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Mir from './Mir.js'
+import type * as StaticValue from './StaticValue.js'
 import type * as Termination from './Termination.js'
 import * as Type from './Type.js'
 
@@ -216,8 +217,9 @@ export const functionFor = (
   program: Mir.Module,
   id: DeclarationFacts.CanonicalId,
   typeArguments: ReadonlyArray<Type.GenericArgument>,
+  staticArguments: ReadonlyArray<StaticValue.Value> = Object.freeze([]),
 ): Mir.MirFunction | undefined =>
-  program.functions.find((fn) => Mir.matchesInstance(fn, id, typeArguments))
+  program.functions.find((fn) => Mir.matchesInstance(fn, id, typeArguments, staticArguments))
 
 interface ExecutionState {
   nextFrame: number

@@ -1,5 +1,6 @@
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
+import * as Constraint from './Constraint.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Elaboration from './Elaboration.js'
@@ -9,10 +10,11 @@ import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Specialization from './Specialization.js'
+import type * as StaticValue from './StaticValue.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import * as Type from './Type.js'
 
-type Instance = Instances.Instance
+type Instance = Omit<Instances.Instance, 'ownership'>
 type InstanceKey = Instances.InstanceKey
 type IntrinsicCall = Instances.IntrinsicCall
 
@@ -33,6 +35,8 @@ export interface SuspensionGraph {
 export interface CallTarget {
   readonly declaration: DeclarationFacts.CanonicalId
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+  readonly evidence?: ReadonlyArray<string>
+  readonly staticArguments?: ReadonlyArray<StaticValue.Value>
   readonly structuralProvider?: Type.Type
 }
 
@@ -85,6 +89,11 @@ export const reachableIntrinsics = (
             operation = selected
           }
           if (operation === undefined) continue
+          const intrinsic = Intrinsic.findOperationById(operation)
+          if (intrinsic?.phase === 'StaticOnly')
+            throw new RangeError(
+              `Runtime HIR retained static-only intrinsic ${Intrinsic.operationText(operation)}`,
+            )
           const span = expression.span
           const key = `${Intrinsic.operationText(operation)}\u0000${span.sourceId}\u0000${span.start}\u0000${span.end}`
           retained.set(key, Object.freeze({ _tag: 'ReachableIntrinsicCall', operation, span }))
@@ -111,6 +120,8 @@ export interface Operations {
     contract: Hir.ContractFact,
     typeParameters?: ReadonlyArray<Type.Parameter>,
     typeArguments?: ReadonlyArray<Type.GenericArgument>,
+    staticArguments?: ReadonlyArray<StaticValue.Value>,
+    evidence?: ReadonlyArray<string>,
   ) => Instances.InstanceKey
   readonly keyText: (key: Instances.InstanceKey) => string
   readonly requirementBindings: (
@@ -180,7 +191,7 @@ export const make = (operations: Operations) => {
     effectIdentity,
   } = operations
   type InstanceKey = Instances.InstanceKey
-  type Instance = Instances.Instance
+  type Instance = Omit<Instances.Instance, 'ownership'>
   type CallInstance = Instances.CallInstance
   type CallableInstance = Instances.CallableInstance
   type EffectInstance = Instances.EffectInstance
@@ -392,6 +403,8 @@ export const make = (operations: Operations) => {
           Object.freeze({
             declaration: expression.target,
             typeArguments: expression.typeArguments,
+            evidence: expression.evidence.map(Constraint.evidenceKey),
+            ...(expression._tag === 'Call' ? { staticArguments: expression.staticArguments } : {}),
           }),
           ...nested,
         ]
@@ -1349,6 +1362,8 @@ export const make = (operations: Operations) => {
       target.contract,
       target.declaration.typeParameters.map((parameter) => parameter.type),
       [...typeArguments, ...hiddenArguments],
+      expression._tag === 'Call' ? expression.staticArguments : Object.freeze([]),
+      expression.evidence.map(Constraint.evidenceKey),
     )
     context.recordResolvedCall?.(expression, key)
     return key

@@ -44,12 +44,15 @@ import {
   witnessEffectContract,
 } from './WitnessLowering.js'
 
+const runtimeParameterCount = (fn: Hir.HirFunction): number =>
+  fn.declaration.parameters.filter((parameter) => parameter.phase === 'Runtime').length
+
 export const trapFunction = (
   instance: Instances.Instance,
   reason: string,
   span: SourceSpan.SourceSpan,
 ): Mir.MirFunction => {
-  const parameterCount = instance.function.declaration.parameterCount
+  const parameterCount = runtimeParameterCount(instance.function)
   return Object.freeze({
     _tag: 'MirFunction',
     id: instance.key.declaration,
@@ -184,7 +187,7 @@ export const lowerInstance = (
       return lowered === undefined ? [] : [lowered]
     })
   } else {
-    parameterTypes = Array.from({ length: fn.declaration.parameterCount }, () => i32)
+    parameterTypes = Array.from({ length: runtimeParameterCount(fn) }, () => i32)
   }
   const effectOutcome =
     contract._tag === 'Contract' && contract.functionKind === 'Effect'
@@ -250,6 +253,12 @@ export const lowerInstance = (
     generatedRunners,
     opaqueRealizations,
   )
+  lowering.parameterLocals.clear()
+  fn.declaration.parameters
+    .filter((parameter) => parameter.phase === 'Runtime')
+    .forEach((parameter, ordinal) => {
+      lowering.parameterLocals.set(parameter.id.ordinal, local(ordinal))
+    })
   const terminal: Mir.Outcome = Object.freeze({
     _tag: 'Trap',
     reason: 'body fell through without return',
@@ -266,7 +275,7 @@ export const lowerInstance = (
     _tag: 'MirFunction',
     id: instance.key.declaration,
     instance: instance.key,
-    parameterCount: fn.declaration.parameterCount,
+    parameterCount: runtimeParameterCount(fn),
     localTypes: Object.freeze([...lowering.localTypes]),
     result: resultType,
     entry,
@@ -324,6 +333,8 @@ export const lowerEffectRunner = (
     _tag: 'InstanceKey',
     declaration: id,
     typeArguments: owner.key.typeArguments,
+    evidence: owner.key.evidence,
+    staticArguments: owner.key.staticArguments,
     contractRow: Object.freeze([
       ...owner.key.contractRow,
       `effect-site:${Hir.executableSiteKey(block.site)}`,
@@ -457,6 +468,8 @@ export const lowerCatchEffectRunner = (
     _tag: 'InstanceKey',
     declaration: spec.id,
     typeArguments: spec.owner.key.typeArguments,
+    evidence: spec.owner.key.evidence,
+    staticArguments: spec.owner.key.staticArguments,
     contractRow: Object.freeze([
       ...spec.owner.key.contractRow,
       `effect-site:${Hir.executableSiteKey(spec.type.site)}`,
@@ -588,6 +601,8 @@ export const lowerBuiltinEffectRunner = (
     _tag: 'InstanceKey',
     declaration: spec.id,
     typeArguments: spec.owner.key.typeArguments,
+    evidence: spec.owner.key.evidence,
+    staticArguments: spec.owner.key.staticArguments,
     contractRow: Object.freeze([
       ...spec.owner.key.contractRow,
       `builtin-effect-site:${Hir.executableSiteKey(spec.type.site)}`,
@@ -739,6 +754,8 @@ export const lowerWitnessEffectRunner = (
     _tag: 'InstanceKey',
     declaration: spec.id,
     typeArguments: spec.owner.key.typeArguments,
+    evidence: spec.owner.key.evidence,
+    staticArguments: spec.owner.key.staticArguments,
     contractRow: Object.freeze([
       ...spec.owner.key.contractRow,
       `witness-effect-site:${Hir.executableSiteKey(spec.type.site)}`,

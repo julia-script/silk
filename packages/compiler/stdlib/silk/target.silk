@@ -1,0 +1,82 @@
+//! Compile-time nominal facts for the selected compilation target.
+//!
+//! # Details
+//!
+//! [`profile`] identifies
+//! the complete target profile, while [`arch`] groups profiles by instruction-set architecture.
+//! The integer facts are derived from that profile during static evaluation and have no runtime
+//! storage.
+
+/// One complete compilation-target profile with stable profile-code discriminants.
+pub enum(u8) Profile {
+  /// The 64-bit Arm profile for Apple Darwin.
+  Aarch64AppleDarwin = 0,
+  /// The 64-bit Arm profile for GNU/Linux.
+  Aarch64UnknownLinuxGnu = 1,
+  /// The freestanding 32-bit WebAssembly profile.
+  Wasm32UnknownUnknown = 2,
+  /// The 64-bit x86 profile for GNU/Linux.
+  X86_64UnknownLinuxGnu = 3
+}
+
+/// One instruction-set architecture shared by one or more target profiles.
+pub enum Arch {
+  /// The 64-bit Arm architecture.
+  Aarch64,
+  /// The 32-bit WebAssembly architecture.
+  Wasm32,
+  /// The 64-bit x86 architecture.
+  X86_64
+}
+
+/// Returns the selected complete target profile during static evaluation.
+pub static fn profile() -> Profile {
+  let code = Intrinsic.targetProfile()
+  if code == 0 { return Profile.Aarch64AppleDarwin }
+  if code == 1 { return Profile.Aarch64UnknownLinuxGnu }
+  if code == 2 { return Profile.Wasm32UnknownUnknown }
+  if code == 3 { return Profile.X86_64UnknownLinuxGnu }
+  compileError("Intrinsic.targetProfile returned an unknown profile code")
+}
+
+/// Returns the selected instruction-set architecture during static evaluation.
+pub static fn arch() -> Arch {
+  let selected = profile()
+  if selected == Profile.Aarch64AppleDarwin { return Arch.Aarch64 }
+  if selected == Profile.Aarch64UnknownLinuxGnu { return Arch.Aarch64 }
+  if selected == Profile.Wasm32UnknownUnknown { return Arch.Wasm32 }
+  if selected == Profile.X86_64UnknownLinuxGnu { return Arch.X86_64 }
+  compileError("Target.profile returned an unknown profile")
+}
+
+static fn selectedPointerBits() -> u32 {
+  if profile() == Profile.Wasm32UnknownUnknown { return 32 }
+  return 64
+}
+
+static fn selectedUsizeMax() -> usize {
+  if profile() == Profile.Wasm32UnknownUnknown { return 4294967295 }
+  return 18446744073709551615
+}
+
+static fn selectedIsizeMax() -> isize {
+  if profile() == Profile.Wasm32UnknownUnknown { return 2147483647 }
+  return 9223372036854775807
+}
+
+static fn selectedIsizeMin() -> isize {
+  if profile() == Profile.Wasm32UnknownUnknown { return -2147483648 }
+  return -9223372036854775808
+}
+
+/// The pointer width of the selected compilation target, in bits.
+pub const pointerBits: u32 = selectedPointerBits()
+
+/// The greatest `usize` value supported by the selected compilation target.
+pub const usizeMax: usize = selectedUsizeMax()
+
+/// The greatest `isize` value supported by the selected compilation target.
+pub const isizeMax: isize = selectedIsizeMax()
+
+/// The least `isize` value supported by the selected compilation target.
+pub const isizeMin: isize = selectedIsizeMin()

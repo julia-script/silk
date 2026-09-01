@@ -418,9 +418,17 @@
       "types": "./dist/Target.d.ts",
       "import": "./dist/Target.js"
     },
-    "./TargetConstant": {
-      "types": "./dist/TargetConstant.d.ts",
-      "import": "./dist/TargetConstant.js"
+    "./Residualization": {
+      "types": "./dist/Residualization.d.ts",
+      "import": "./dist/Residualization.js"
+    },
+    "./StaticEvaluation": {
+      "types": "./dist/StaticEvaluation.d.ts",
+      "import": "./dist/StaticEvaluation.js"
+    },
+    "./StaticValue": {
+      "types": "./dist/StaticValue.d.ts",
+      "import": "./dist/StaticValue.js"
     },
     "./WasmBackend": {
       "types": "./dist/WasmBackend.d.ts",

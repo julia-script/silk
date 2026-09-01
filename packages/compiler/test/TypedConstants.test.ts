@@ -100,7 +100,7 @@ it.effect('resolves typed constants and lowers only immediate values', () =>
   }),
 )
 
-it.effect('rejects non-literal and mismatched constant initializers at their declarations', () =>
+it.effect('accepts computed constant initializers while rejecting mismatched values', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'constants/invalid',
@@ -112,7 +112,52 @@ pub fn main() -> i32 { return move answer }`),
     const invalid = Analysis.diagnostics(snapshot).filter(
       (diagnostic) => diagnostic.code === 'SEM0086',
     )
-    assert.strictEqual(invalid.length, 3)
+    assert.strictEqual(invalid.length, 2)
+  }),
+)
+
+it.effect('evaluates computed primitive constants across module boundaries', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.makeRealized({
+      root: SourceFile.make(
+        'constants/computed-main',
+        encoder.encode(`import constants.computed { answer }
+pub fn main() -> i32 { return answer }`),
+      ),
+    }).pipe(
+      Effect.provide(
+        SourceResolver.memory(
+          new Map([
+            [
+              'constants/computed',
+              encoder.encode(`pub const base: i32 = 40
+pub const answer: i32 = base + 2`),
+            ],
+          ]),
+        ),
+      ),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
+it.effect('reports one deterministic cycle diagnostic for cyclic constants', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'constants/cycle',
+      encoder.encode(`const first: i32 = second
+const second: i32 = first
+pub fn main() -> i32 { return 0 }`),
+    )
+
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [Diagnostic.staticEvaluationCycleCode],
+    )
   }),
 )
 
@@ -211,7 +256,7 @@ pub fn main() -> i32 { return usize.toI32(byteLength(greeting)) }`
   }),
 )
 
-it.effect('names the restriction that remains on a string constant initializer', () =>
+it.effect('accepts constant references while retaining string initializer restrictions', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'constants/string-invalid',
@@ -225,7 +270,6 @@ pub fn main() -> i32 { return 0 }`),
       .filter((diagnostic) => diagnostic.code === 'SEM0086')
       .map((diagnostic) => diagnostic.message)
     assert.deepEqual(messages, [
-      'Invalid constant: the initializer must be one literal',
       'Invalid constant: a byte-string literal does not produce a string',
       'Invalid constant: unknown escape sequence',
     ])

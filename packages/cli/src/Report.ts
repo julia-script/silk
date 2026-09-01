@@ -177,6 +177,8 @@ const entryReason = (entry: Driver.NoEntry): string => {
       return 'the root module declares no `main`'
     case 'AmbiguousEntry':
       return 'the root module declares more than one `main`'
+    case 'StaticEntry':
+      return '`main` must be a runtime function'
     case 'GenericEntry':
       return '`main` must not declare type parameters'
     case 'ParameterizedEntry':

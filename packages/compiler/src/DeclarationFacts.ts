@@ -11,7 +11,6 @@ import * as RowAlgebra from './RowAlgebra.js'
 import type * as Scalar from './Scalar.js'
 import type * as StaticText from './StaticText.js'
 import type * as SyntaxTree from './SyntaxTree.js'
-import type * as TargetConstant from './TargetConstant.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
 
@@ -21,6 +20,7 @@ export interface DeclarationFact {
   readonly id: DeclarationId
   readonly canonical: CanonicalState
   readonly visibility: 'Public' | 'Private'
+  readonly phase: 'Runtime' | 'Static'
   readonly functionKind: 'Ordinary' | 'Effect'
   readonly unsafe: boolean
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
@@ -38,7 +38,15 @@ export interface DeclarationFact {
     readonly operation: string
     readonly self: Type.Parameter
   }
+  readonly bodyTemplate?: FunctionBodyTemplate
   readonly syntax: SyntaxTree.Node
+}
+
+/** One retained function body plus its source-independent deterministic syntax encoding. */
+export interface FunctionBodyTemplate {
+  readonly _tag: 'FunctionBodyTemplate'
+  readonly syntax: SyntaxTree.Node
+  readonly canonical: string
 }
 
 /** The semantic types recognized in declaration and executable analysis. */
@@ -460,6 +468,7 @@ export interface ParameterFact {
   readonly _tag: 'ParameterDeclaration'
   readonly id: ParameterId
   readonly name: DeclaredName
+  readonly phase: 'Runtime' | 'Static'
   readonly bindingMutability: 'Immutable' | 'Mutable'
   readonly declaredType: DeclaredTypeFact
   readonly syntax: SyntaxTree.Node
@@ -533,14 +542,6 @@ export type ConstantLiteralFact =
       readonly data: StaticText.Data
       readonly token: Token.Token
     }
-  // One pointer-width fact named below `Target`. It is not a literal the source spells; it selects
-  // between literals the compiler already holds, because no single number bounds a pointer-width
-  // integer on both a 32-bit and a 64-bit target.
-  | {
-      readonly _tag: 'TargetConstant'
-      readonly selector: TargetConstant.Selector
-      readonly token: Token.Token
-    }
   // A literal the lexer accepted but no value can be decoded from; it carries its own detail so
   // the reference site reports the real cause instead of a literal-kind mismatch.
   | { readonly _tag: 'Malformed'; readonly detail: string; readonly syntax: SyntaxTree.Element }
@@ -555,9 +556,17 @@ export interface ConstantFact {
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly name: DeclaredName
   readonly declaredType: DeclaredTypeFact
+  readonly initializerTemplate: StaticExpressionTemplate
   readonly literal: ConstantLiteralFact
   readonly initializer: SyntaxTree.Node
   readonly syntax: SyntaxTree.Node
+}
+
+/** One target-neutral static initializer retained with deterministic source-independent syntax. */
+export interface StaticExpressionTemplate {
+  readonly _tag: 'StaticExpressionTemplate'
+  readonly syntax: SyntaxTree.Node
+  readonly canonical: string
 }
 
 /** One nominal compile-time dependency role declaration. */
@@ -1002,6 +1011,7 @@ const interfaceOperationContract = (
               spelling: 'self',
               token: operation.name.token,
             }),
+            phase: 'Runtime',
             bindingMutability: 'Immutable',
             declaredType,
             syntax: operation.syntax,

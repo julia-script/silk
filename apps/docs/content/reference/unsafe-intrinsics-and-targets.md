@@ -739,9 +739,10 @@ Ordinary wrapper functions need no target annotation: their reachable primitive 
 compatibility transitively. Ordinary source cannot add to, subtract from, or override an intrinsic's
 compiler-owned target set.
 
-This first stable model adds no target-conditional source, target predicates, target reflection, or
-runtime inspection. Portable public APIs use ordinary source abstractions and target-appropriate
-providers selected outside this rule; future conditional compilation requires its own design.
+Target-conditional source uses the ordinary static `silk.target` API and `static if`. Static
+selection removes an inactive intrinsic call before executable availability is checked. Runtime
+conditions, target reflection, and runtime target inspection remain unavailable. Portable public
+APIs may also use ordinary source abstractions and target-appropriate providers.
 
 **Boundary:** An intrinsic may return a typed failure for a supported target's ordinary operational
 failure. That does not make absence of the intrinsic implementation recoverable on an unsupported
@@ -756,4 +757,5 @@ availability, if needed, must refine the same compile-time rule rather than crea
 
 **Evidence:** [target diagnostic](../../../../packages/compiler/src/Diagnostic.ts),
 [target selection](../../../../packages/compiler/src/Target.ts),
-[target availability specification](../../../../openspec/specs/bootstrap-intrinsic-target-availability/spec.md).
+[target availability specification](../../../../openspec/specs/bootstrap-intrinsic-target-availability/spec.md),
+[static target selection](static-evaluation.md#static-009--silktarget-exposes-target-information-only-as-static-source-values).

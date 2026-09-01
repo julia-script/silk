@@ -1,5 +1,5 @@
 import * as Diagnostic from '../Diagnostic.js'
-import type { NodeResult, State } from '../internal/ParseState.js'
+import type { ElementsResult, NodeResult, State } from '../internal/ParseState.js'
 import {
   addDiagnostic,
   advance,
@@ -92,6 +92,7 @@ export const parseUnsafeStatement = (initial: State): NodeResult => {
 
 export const parseBindingStatement = (initial: State): NodeResult => {
   const keyword = expect(initial, 'LetKeyword', [
+    'StaticKeyword',
     'MutKeyword',
     'Identifier',
     'Equals',
@@ -99,11 +100,15 @@ export const parseBindingStatement = (initial: State): NodeResult => {
     'UnsafeKeyword',
     'RightBrace',
   ])
-  const mut =
-    nextSignificantKind(keyword.state) === 'MutKeyword'
-      ? expect(keyword.state, 'MutKeyword', ['Identifier', 'Equals', 'RightBrace'])
-      : Object.freeze({ state: keyword.state, elements: Object.freeze([]) })
-  const name = expect(mut.state, 'Identifier', [
+  let modifier: ElementsResult = Object.freeze({
+    state: keyword.state,
+    elements: Object.freeze([]),
+  })
+  if (nextSignificantKind(keyword.state) === 'StaticKeyword')
+    modifier = expect(keyword.state, 'StaticKeyword', ['Identifier', 'Equals', 'RightBrace'])
+  else if (nextSignificantKind(keyword.state) === 'MutKeyword')
+    modifier = expect(keyword.state, 'MutKeyword', ['Identifier', 'Equals', 'RightBrace'])
+  const name = expect(modifier.state, 'Identifier', [
     'Colon',
     'Equals',
     'LetKeyword',
@@ -129,7 +134,7 @@ export const parseBindingStatement = (initial: State): NodeResult => {
     state: expression.state,
     node: syntaxNode(expression.state, 'BindingStatement', [
       ...keyword.elements,
-      ...mut.elements,
+      ...modifier.elements,
       ...name.elements,
       ...annotation.elements,
       ...equals.elements,
@@ -139,7 +144,7 @@ export const parseBindingStatement = (initial: State): NodeResult => {
 }
 
 export const startsPatternBindingStatement = (initial: State): boolean => {
-  if (peek(initial, 1) === 'MutKeyword') return false
+  if (peek(initial, 1) === 'MutKeyword' || peek(initial, 1) === 'StaticKeyword') return false
   if (peek(initial, 1) === 'Equals') return false
   if (peek(initial, 1) !== 'Identifier') return true
   if (peek(initial, 2) === 'Colon') return false
@@ -248,6 +253,34 @@ export function parseConditionalStatement(initial: State): NodeResult {
   })
 }
 
+export const parseStaticConditionalStatement = (initial: State): NodeResult => {
+  const staticKeyword = expect(initial, 'StaticKeyword', ['IfKeyword', ...expressionStarts])
+  const ifKeyword = expect(staticKeyword.state, 'IfKeyword', [
+    ...expressionStarts,
+    'LeftBrace',
+    'RightBrace',
+  ])
+  const condition = parseExpression(ifKeyword.state, 0, 'Identifier', false, ExpressionNesting.root)
+  const taken = parseBlock(condition.state, false)
+  let state = taken.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+    ...staticKeyword.elements,
+    ...ifKeyword.elements,
+    condition.node,
+    taken.node,
+  ])
+  if (nextSignificantKind(state) === 'ElseKeyword') {
+    const elseKeyword = expect(state, 'ElseKeyword', ['LeftBrace'])
+    const otherwise = parseBlock(elseKeyword.state, false)
+    state = otherwise.state
+    children = Object.freeze([...children, ...elseKeyword.elements, otherwise.node])
+  }
+  return Object.freeze({
+    state,
+    node: syntaxNode(state, 'StaticConditionalStatement', children),
+  })
+}
+
 export function parseWhileStatement(initial: State): NodeResult {
   const keyword = expect(initial, 'WhileKeyword', [...expressionStarts, 'LeftBrace', 'RightBrace'])
   const condition = parseExpression(keyword.state, 0, 'Identifier', false, ExpressionNesting.root)
@@ -291,6 +324,7 @@ export const startsBlockStatement = (state: State): boolean => {
     kind === 'FailKeyword' ||
     kind === 'DropKeyword' ||
     kind === 'UnsafeKeyword' ||
+    (kind === 'StaticKeyword' && peek(state, 1) === 'IfKeyword') ||
     kind === 'IfKeyword' ||
     kind === 'WhileKeyword' ||
     kind === 'BreakKeyword' ||
@@ -315,6 +349,7 @@ export const endsBlock = (state: State): boolean => {
     kind === 'UnionKeyword' ||
     kind === 'FnKeyword' ||
     kind === 'ImplKeyword' ||
+    (kind === 'StaticKeyword' && peek(state, 1) === 'FnKeyword') ||
     (kind === 'EffectKeyword' && peek(state, 1) === 'FnKeyword')
   )
 }
@@ -342,6 +377,7 @@ export const parseErrorStatement = (initial: State): NodeResult => {
         '`let`',
         '`return`',
         '`if`',
+        '`static if`',
         '`while`',
         '`fail`',
         '`drop`',
@@ -390,6 +426,9 @@ const parseBlockChild = (state: State): NodeResult => {
       return parseBindingStatement(state)
     case 'IfKeyword':
       return parseConditionalStatement(state)
+    case 'StaticKeyword':
+      if (peek(state, 1) === 'IfKeyword') return parseStaticConditionalStatement(state)
+      return parseErrorStatement(state)
     case 'WhileKeyword':
       return parseWhileStatement(state)
     case 'BreakKeyword':
@@ -420,6 +459,7 @@ export function parseBlock(
 ): NodeResult {
   const leftBrace = expect(initial, 'LeftBrace', [
     'LetKeyword',
+    'StaticKeyword',
     'IfKeyword',
     'WhileKeyword',
     'BreakKeyword',
@@ -451,6 +491,7 @@ export function parseBlock(
     'ReturnKeyword',
     'FailKeyword',
     'UnsafeKeyword',
+    'StaticKeyword',
     'ElseKeyword',
     'PubKeyword',
     'StructKeyword',

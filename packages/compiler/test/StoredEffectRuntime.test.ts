@@ -9,7 +9,6 @@ import type * as Mir from '../src/Mir.js'
 import * as MirNormalization from '../src/MirNormalization.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
-import type * as Ownership from '../src/Ownership.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as SuspensionMir from '../src/SuspensionMir.js'
 import * as SuspensionOwnership from '../src/SuspensionOwnership.js'
@@ -34,11 +33,8 @@ const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
   )
   const catalog = Layout.catalog(Target.wasm32UnknownUnknown, snapshot.index, snapshot.instances)
   const layout = Layout.plan(catalog, snapshot.instances, snapshot.index)
-  const ownership =
-    Analysis.ownershipOf(snapshot, name) ?? unreachable('expected module ownership facts')
   const lowered = Lower.lowerProgram(
     snapshot.instances,
-    new Map<string, Ownership.ModuleOwnership>([[name, ownership]]),
     layout,
     snapshot.index,
     OpaqueRealization.catalogOf(snapshot),

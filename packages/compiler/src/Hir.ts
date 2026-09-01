@@ -1,4 +1,4 @@
-import type * as Constraint from './Constraint.js'
+import * as Constraint from './Constraint.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Intrinsic from './Intrinsic.js'
@@ -8,7 +8,7 @@ import * as RowAlgebra from './RowAlgebra.js'
 import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StaticText from './StaticText.js'
-import type * as TargetConstant from './TargetConstant.js'
+import type * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
@@ -401,9 +401,6 @@ export type Expression =
       readonly value: bigint
       readonly type: DeclarationFacts.SemanticType
       readonly constant?: DeclarationFacts.CanonicalId
-      // A pointer-width fact rather than a spelled number. `value` carries the widest selection so
-      // target-independent analysis has one; `Lower` replaces it with the selected target's value.
-      readonly targetConstant?: TargetConstant.Selector
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -675,6 +672,8 @@ export type Expression =
       readonly _tag: 'Call'
       readonly target: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+      readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
+      readonly staticArguments: ReadonlyArray<StaticValue.Value>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
       /** Direct argument loans deliberately retained by a returned lexical view. */
@@ -724,6 +723,7 @@ export type Expression =
       readonly _tag: 'EffectConstruct'
       readonly target: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+      readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
       readonly type: Type.Effect
@@ -1514,6 +1514,7 @@ export interface Module {
 export const contractOf = (declaration: DeclarationFacts.DeclarationFact): ContractFact => {
   const parameters: Array<DeclarationFacts.SemanticType> = []
   for (const parameter of declaration.parameters) {
+    if (parameter.phase === 'Static') continue
     if (parameter.declaredType._tag !== 'Resolved') {
       return Object.freeze({
         _tag: 'Unavailable',
@@ -1584,9 +1585,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
   const indent = '  '.repeat(depth)
   switch (expression._tag) {
     case 'IntegerLiteral':
-      // A pointer-width fact prints its selector rather than its unselected value, so the text
-      // never shows a number that the chosen target would contradict.
-      return `${indent}literal ${expression.targetConstant === undefined ? expression.value : `target=${expression.targetConstant}`} : ${Type.encode(expression.type)}${expression.constant === undefined ? '' : ` constant=${expression.constant.module}::${expression.constant.name}`} ${spanText(expression.span)}`
+      return `${indent}literal ${expression.value} : ${Type.encode(expression.type)}${expression.constant === undefined ? '' : ` constant=${expression.constant.module}::${expression.constant.name}`} ${spanText(expression.span)}`
     case 'FloatingLiteral':
       return `${indent}literal ${expression.spelling} bits=0x${expression.bits.toString(16)} : ${expression.type} ${spanText(expression.span)}`
     case 'StaticStringLiteral':
@@ -1831,7 +1830,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
           expression.typeArguments.length === 0
             ? ''
             : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(', ')}>`
-        } : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${spanText(expression.span)}`,
+        }${expression.evidence.length === 0 ? '' : ` evidence=${expression.evidence.map(Constraint.evidenceKey).join(',')}`} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${spanText(expression.span)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'ServiceEffectConstruct':

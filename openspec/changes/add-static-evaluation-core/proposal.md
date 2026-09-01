@@ -8,7 +8,7 @@ compile-time memory behavior.
 
 ## What Changes
 
-- Add explicit static functions, parameters, local bindings, conditionals, and panics. A static
+- Add explicit static functions, parameters, local bindings, conditionals, and compile errors. A static
   function executes wholly during compilation; an ordinary function may mix explicitly static
   operations with runtime parameters and residual runtime operations.
 - Let literals satisfy static contexts directly, while requiring a static parameter or binding when
@@ -20,8 +20,10 @@ compile-time memory behavior.
 - Select `static if` before semantic elaboration of either branch: both branches parse, only the
   selected branch contributes semantic and runtime program facts, and declarations cannot be
   conditional.
-- Make `static panic` terminate specialization with a source-traced compiler diagnostic and no
-  residual runtime path. Evaluation-limit failures remain distinct from deliberate static panics.
+- Add the dedicated `compileError(message)` expression to terminate specialization with a
+  source-traced compiler diagnostic and no residual runtime path. It is inherently compile-time and
+  requires no `static` prefix; evaluation-limit failures remain distinct from source-requested
+  compile errors.
 - Expose the selected target through a closed enum-based ordinary standard-library API over the
   smallest sealed static intrinsic, then use target specialization as the acceptance case.
 - Replace the syntax-only `Target.<fact>` constant-initializer exception with the same ordinary
@@ -36,13 +38,13 @@ compile-time memory behavior.
 ### New Capabilities
 
 - `static-evaluation`: Defines static functions, mixed staged functions, static parameters and
-  bindings, static conditionals and panics, the static value domain, residualization, evaluator
+  bindings, static conditionals and compile errors, the static value domain, residualization, evaluator
   limits, and diagnostic traces.
 
 ### Modified Capabilities
 
 - `bootstrap-syntax`: Adds lossless, recoverable syntax for the initial static declarations,
-  parameters, bindings, conditionals, and panic form without admitting conditional declarations.
+  parameters, bindings, conditionals, and compile-error form without admitting conditional declarations.
 - `bootstrap-intrinsic-boundary`: Adds only the sealed target-query primitive required for ordinary
   source to implement the public enum-based target API and static target facts.
 - `bootstrap-typed-constants`: Replaces the syntax-only target-fact initializer exception with

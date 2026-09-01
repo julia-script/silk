@@ -95,6 +95,9 @@ not belong in a language rule unless a program can observe them.
 - [Functions, callables, and control flow](functions-callables-and-control-flow.md) — named function
   contracts, Effect-block terminal inference, ordered calls, returns, callable sections, pipelines,
   conditionals, loops, and matches.
+- [Static evaluation](static-evaluation.md) — static functions, parameters, bindings, statement-only
+  selection, compile errors, value and mutation limits, deterministic diagnostics, target values,
+  and the residual runtime boundary.
 - [Patterns and destructuring](patterns-and-destructuring.md) — one pattern language across exact
   union-member matches, scalar enum member matches, irrefutable local destructuring, and
   conditional `if let`.

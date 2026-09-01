@@ -324,6 +324,12 @@
     "aliases": ["EndOfInput", "Filled", "ReadOutcome", "StreamReadError"]
   },
   {
+    "module": "silk/static_text",
+    "path": "silk/static_text.silk",
+    "layer": "portable",
+    "namespace": "StaticText"
+  },
+  {
     "module": "silk/string",
     "path": "silk/string.silk",
     "layer": "portable",
@@ -336,6 +342,13 @@
     "layer": "portable",
     "namespace": "SystemClock",
     "aliases": ["Instant"]
+  },
+  {
+    "module": "silk/target",
+    "path": "silk/target.silk",
+    "layer": "portable",
+    "namespace": "Target",
+    "aliases": ["Arch", "Profile"]
   },
   {
     "module": "silk/u16",

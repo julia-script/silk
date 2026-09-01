@@ -439,6 +439,7 @@ export const primaryKind = (
   | 'Run'
   | 'Borrow'
   | 'Unsafe'
+  | 'CompileError'
   | 'Call'
   | 'StructLiteral'
   | 'AppliedMember'
@@ -476,6 +477,7 @@ export const primaryKind = (
     if (token.kind === 'RunKeyword') return 'Run'
     if (token.kind === 'Ampersand') return 'Borrow'
     if (token.kind === 'UnsafeKeyword') return 'Unsafe'
+    if (token.kind === 'CompileErrorKeyword') return 'CompileError'
     if (token.kind === 'MatchKeyword') return 'Match'
     if (token.kind === 'LeftBracket') return 'ArrayLiteral'
     if (token.kind === 'Dot' && peek(state, 1) === 'LeftBrace') return 'ContextualRecordLiteral'
@@ -506,6 +508,7 @@ export const primaryKind = (
       token.kind === 'RightBrace' ||
       token.kind === 'FatArrow' ||
       token.kind === 'LetKeyword' ||
+      token.kind === 'StaticKeyword' ||
       token.kind === 'IfKeyword' ||
       token.kind === 'ReturnKeyword' ||
       token.kind === 'FailKeyword' ||
@@ -541,6 +544,7 @@ export const remainingRightParentheses = (state: State): number => {
     if (token.kind === 'RightParenthesis') count += 1
     if (
       token.kind === 'RightBrace' ||
+      token.kind === 'StaticKeyword' ||
       token.kind === 'PubKeyword' ||
       token.kind === 'StructKeyword' ||
       token.kind === 'TupleKeyword' ||
@@ -586,6 +590,7 @@ export const expectCallRightParenthesis = (
   }
   return expect(initial, 'RightParenthesis', [
     'RightBrace',
+    'StaticKeyword',
     'PubKeyword',
     'StructKeyword',
     'TupleKeyword',
@@ -614,6 +619,7 @@ export function parseArgumentList(
     ...expressionStarts,
     'RightParenthesis',
     'RightBrace',
+    'StaticKeyword',
     'PubKeyword',
     'StructKeyword',
     'TupleKeyword',
@@ -630,6 +636,7 @@ export function parseArgumentList(
     kind !== undefined &&
     kind !== 'RightParenthesis' &&
     kind !== 'RightBrace' &&
+    kind !== 'StaticKeyword' &&
     kind !== 'PubKeyword' &&
     kind !== 'StructKeyword' &&
     kind !== 'TupleKeyword' &&
@@ -650,6 +657,7 @@ export function parseArgumentList(
     if (
       kind === 'RightParenthesis' ||
       kind === 'RightBrace' ||
+      kind === 'StaticKeyword' ||
       kind === 'PubKeyword' ||
       kind === 'StructKeyword' ||
       kind === 'TupleKeyword' ||
@@ -664,6 +672,7 @@ export function parseArgumentList(
       ...expressionStarts,
       'RightParenthesis',
       'RightBrace',
+      'StaticKeyword',
       'PubKeyword',
       'StructKeyword',
       'TupleKeyword',
@@ -1470,6 +1479,7 @@ export const reservedTemplateBoundaries: ReadonlyArray<Token.TokenKind> = Object
   'RightBracket',
   'RightBrace',
   'LetKeyword',
+  'StaticKeyword',
   'IfKeyword',
   'WhileKeyword',
   'BreakKeyword',
@@ -1544,6 +1554,35 @@ export const parseEffectExpression = (initial: State): NodeResult => {
   })
 }
 
+export const parseCompileErrorExpression = (
+  initial: State,
+  reservedForEnclosingCalls: number,
+  depth: number,
+): NodeResult => {
+  const keyword = expect(initial, 'CompileErrorKeyword', [
+    'LeftParenthesis',
+    ...expressionFollowing,
+  ])
+  const left = expect(keyword.state, 'LeftParenthesis', [
+    ...expressionStarts,
+    'RightParenthesis',
+    ...expressionFollowing,
+  ])
+  const message = parseChildExpression(left.state, depth, true, (childDepth) =>
+    parseExpression(left.state, reservedForEnclosingCalls + 1, 'Identifier', true, childDepth),
+  )
+  const right = expectCallRightParenthesis(message.state, reservedForEnclosingCalls)
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'CompileErrorExpression', [
+      ...keyword.elements,
+      ...left.elements,
+      message.node,
+      ...right.elements,
+    ]),
+  })
+}
+
 /** Parses the expression form that acknowledges exactly one direct invocation. */
 export const parseUnsafeExpression = (
   initial: State,
@@ -1569,6 +1608,8 @@ export function parsePrimaryExpression(
 ): NodeResult {
   const kind = primaryKind(initial, recoveryKind, allowStructLiteral)
   if (kind === 'ReservedTemplate') return parseReservedTemplateExpression(initial)
+  if (kind === 'CompileError')
+    return parseCompileErrorExpression(initial, reservedForEnclosingCalls, depth)
   if (kind === 'Call') return parseCallExpression(initial, reservedForEnclosingCalls, depth)
   if (kind === 'StructLiteral')
     return parseStructLiteralExpression(initial, reservedForEnclosingCalls, depth)

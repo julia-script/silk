@@ -44,6 +44,7 @@ import silk.i8 as i8
 import silk.isize as isize
 import silk.option { Option, none, some }
 import silk.result { Result }
+import silk.target as Target
 import silk.u16 as u16
 import silk.u32 as u32
 import silk.u64 as u64

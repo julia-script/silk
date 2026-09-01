@@ -52,8 +52,10 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/shared`](./shared.md) | `Shared` | 5 | Explicitly allocated, single-threaded shared ownership with callback-scoped access. |
 | [`silk/slot`](./slot.md) | `Slot` | 5 | Explicit initialization-state transitions for one slot selected from raw storage. |
 | [`silk/standard_input`](./standard-input.md) | `StandardInput` | 11 | Portable blocking reads of raw standard-input bytes through an explicit provider. |
+| [`silk/static_text`](./static-text.md) | `StaticText` | 3 | Deterministic byte inspection for text available during static evaluation. |
 | [`silk/string`](./string.md) | `String` | 22 | Valid UTF-8 text, including owned storage, byte validation, and scalar-by-scalar traversal. |
 | [`silk/system_clock`](./system-clock.md) | `SystemClock` | 7 | Provider-replaceable Unix-epoch time with canonical split-second instants. |
+| [`silk/target`](./target.md) | `Target` | 8 | Compile-time nominal facts for the selected compilation target. |
 | [`silk/u16`](./u16.md) | `u16` | 56 | Sixteen-bit unsigned integers with explicit arithmetic and conversion failure policies. |
 | [`silk/u32`](./u32.md) | `u32` | 56 | Thirty-two-bit unsigned integers for fixed-width counts, masks, and binary fields. |
 | [`silk/u64`](./u64.md) | `u64` | 56 | Sixty-four-bit unsigned integers for wide masks, counters, hashes, and exact interchange values. |

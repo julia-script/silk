@@ -505,3 +505,195 @@ it('carries the original declaration span on a rebinding diagnostic', () => {
   assert.strictEqual(diagnostic.relatedSpans?.at(0)?.label, 'first declared here')
   assert.strictEqual(diagnostic.relatedSpans?.at(0)?.span.start, 2)
 })
+
+it('publishes deterministic static-evaluation diagnostics with source traces', () => {
+  const callerSource = SourceFile.make('memory://static-caller.silk', new Uint8Array(64))
+  const helperSource = SourceFile.make('memory://static-helper.silk', new Uint8Array(64))
+  const callerSpan = (start: number, end: number) =>
+    Option.getOrThrow(SourceSpan.make(callerSource, start, end))
+  const helperSpan = (start: number, end: number) =>
+    Option.getOrThrow(SourceSpan.make(helperSource, start, end))
+  const trace = [
+    {
+      kind: 'SelectedArm' as const,
+      label: 'selected wasm arm',
+      arguments: ['Wasm32'],
+      span: callerSpan(2, 8),
+    },
+    {
+      kind: 'Call' as const,
+      label: 'parse("{}")',
+      arguments: ['"{}"'],
+      span: helperSpan(10, 18),
+    },
+  ]
+  const primary = helperSpan(20, 28)
+  const diagnostics = [
+    Diagnostic.staticPhaseViolation('Effect.log', 'wasm32-unknown-unknown', trace, primary),
+    Diagnostic.selectedCompileError('empty template', 'wasm32-unknown-unknown', trace, primary),
+    Diagnostic.staticEvaluationCycle('parse("{}")', 'wasm32-unknown-unknown', trace, primary),
+    Diagnostic.staticStepLimit(10_000, 'wasm32-unknown-unknown', trace, primary),
+    Diagnostic.staticCallDepthLimit(128, 'wasm32-unknown-unknown', trace, primary),
+    Diagnostic.staticRetainedValueLimit(1_048_576, 'wasm32-unknown-unknown', trace, primary),
+    Diagnostic.staticResidualGrowthLimit(100_000, 'wasm32-unknown-unknown', trace, primary),
+  ]
+  const staticCodes: ReadonlyArray<Diagnostic.Code> = [
+    'SEM0176',
+    'SEM0177',
+    'SEM0178',
+    'SEM0179',
+    'SEM0180',
+    'SEM0181',
+    'SEM0182',
+  ]
+
+  assert.deepEqual(
+    diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      span: {
+        sourceId: diagnostic.span.sourceId,
+        start: diagnostic.span.start,
+        end: diagnostic.span.end,
+      },
+      related: diagnostic.relatedSpans?.map((related) => ({
+        label: related.label,
+        sourceId: related.span.sourceId,
+        start: related.span.start,
+        end: related.span.end,
+      })),
+    })),
+    staticCodes.map((code) => ({
+      code,
+      span: { sourceId: 'memory://static-helper.silk', start: 20, end: 28 },
+      related: [
+        {
+          label: 'selected wasm arm',
+          sourceId: 'memory://static-caller.silk',
+          start: 2,
+          end: 8,
+        },
+        {
+          label: 'parse("{}")',
+          sourceId: 'memory://static-helper.silk',
+          start: 10,
+          end: 18,
+        },
+      ],
+    })),
+  )
+
+  const reasonDetails = (reason: Diagnostic.Reason) => {
+    switch (reason._tag) {
+      case 'StaticPhaseViolation':
+        return {
+          payload: {
+            tag: reason._tag,
+            operation: reason.operation,
+            target: reason.target,
+          },
+          trace: reason.trace,
+        }
+      case 'SelectedCompileError':
+        return {
+          payload: { tag: reason._tag, detail: reason.detail, target: reason.target },
+          trace: reason.trace,
+        }
+      case 'StaticEvaluationCycle':
+        return {
+          payload: {
+            tag: reason._tag,
+            application: reason.application,
+            target: reason.target,
+          },
+          trace: reason.trace,
+        }
+      case 'StaticEvaluationLimit':
+        return {
+          payload: {
+            tag: reason._tag,
+            resource: reason.resource,
+            limit: reason.limit,
+            target: reason.target,
+          },
+          trace: reason.trace,
+        }
+      default:
+        return raise(`expected a static-evaluation reason, received ${reason._tag}`)
+    }
+  }
+
+  assert.deepEqual(
+    diagnostics.map((diagnostic) => reasonDetails(diagnostic.reason).payload),
+    [
+      {
+        tag: 'StaticPhaseViolation',
+        operation: 'Effect.log',
+        target: 'wasm32-unknown-unknown',
+      },
+      {
+        tag: 'SelectedCompileError',
+        detail: 'empty template',
+        target: 'wasm32-unknown-unknown',
+      },
+      {
+        tag: 'StaticEvaluationCycle',
+        application: 'parse("{}")',
+        target: 'wasm32-unknown-unknown',
+      },
+      {
+        tag: 'StaticEvaluationLimit',
+        resource: 'Steps',
+        limit: 10_000,
+        target: 'wasm32-unknown-unknown',
+      },
+      {
+        tag: 'StaticEvaluationLimit',
+        resource: 'CallDepth',
+        limit: 128,
+        target: 'wasm32-unknown-unknown',
+      },
+      {
+        tag: 'StaticEvaluationLimit',
+        resource: 'RetainedValueBytes',
+        limit: 1_048_576,
+        target: 'wasm32-unknown-unknown',
+      },
+      {
+        tag: 'StaticEvaluationLimit',
+        resource: 'ResidualNodes',
+        limit: 100_000,
+        target: 'wasm32-unknown-unknown',
+      },
+    ],
+  )
+
+  for (const diagnostic of diagnostics)
+    assert.deepEqual(
+      reasonDetails(diagnostic.reason).trace.map((frame) => ({
+        kind: frame.kind,
+        label: frame.label,
+        arguments: frame.arguments,
+        sourceId: frame.span.sourceId,
+        start: frame.span.start,
+        end: frame.span.end,
+      })),
+      [
+        {
+          kind: 'SelectedArm',
+          label: 'selected wasm arm',
+          arguments: ['Wasm32'],
+          sourceId: 'memory://static-caller.silk',
+          start: 2,
+          end: 8,
+        },
+        {
+          kind: 'Call',
+          label: 'parse("{}")',
+          arguments: ['"{}"'],
+          sourceId: 'memory://static-helper.silk',
+          start: 10,
+          end: 18,
+        },
+      ],
+    )
+})

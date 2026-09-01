@@ -30,7 +30,6 @@ import type * as SourceSpan from './SourceSpan.js'
 import type * as StaticText from './StaticText.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import type * as Target from './Target.js'
-import * as TargetConstant from './TargetConstant.js'
 import * as Type from './Type.js'
 
 /** Physical placement shared by every aggregate and hidden-environment field. */
@@ -2023,15 +2022,9 @@ export const catalog = (
         module.constants.flatMap((constant) => {
           if (constant.declaredType._tag !== 'Resolved' || constant.declaredType.type !== 'usize')
             return []
-          // A pointer-width fact is ranged at the target it selects for, so it is checked against
-          // that value rather than against the widest one elaboration recorded.
           const literal = constant.literal
-          if (literal._tag !== 'IntegerLiteral' && literal._tag !== 'TargetConstant') return []
-          const value =
-            literal._tag === 'IntegerLiteral'
-              ? literal.value
-              : TargetConstant.value(literal.selector, TargetConstant.pointerBits(target))
-          return [Object.freeze({ value, span: literal.token.span })]
+          if (literal._tag !== 'IntegerLiteral') return []
+          return [Object.freeze({ value: literal.value, span: literal.token.span })]
         }),
       ),
     ),
