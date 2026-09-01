@@ -1396,6 +1396,9 @@ pub fn main() -> i32 { return 0 }`,
         assert.throws(() => Analysis.loweredMir(snapshot), /MIR is unavailable/)
     }
   }),
+  // Measured near the 60s floor while the full parallel gate saturates the host; the timeout
+  // is headroom for contention, not a performance assertion.
+  180_000,
 )
 
 /**
