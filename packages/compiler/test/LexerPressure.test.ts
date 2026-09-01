@@ -289,7 +289,14 @@ const sourceFor = (
   return Object.freeze({ source, expected })
 }
 
-const quotaSourceFor = (input: string, id: string, quota: number): string => {
+/**
+ * One program sweeps every allocation ordinal itself: each iteration builds a fresh
+ * QuotaAllocator with the loop's quota, `quotaSweepIteration` marks the iteration so the test
+ * segments one evaluator trace per quota, and the sweep terminates on the first quota that
+ * completes. Compiling once replaced one full pipeline per ordinal whose sources differed only
+ * in one integer literal.
+ */
+const quotaSweepSourceFor = (input: string, id: string): string => {
   const generated = sourceFor(input, id).source
   const withAllocator = replaceExactlyOnce(
     generated,
@@ -312,10 +319,41 @@ effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! Ou
 
 impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }`,
   )
-  return replaceExactlyOnce(
+  const withHarness = replaceExactlyOnce(
     withAllocator,
-    '  let mut allocator = Allocator.systemAllocatorProvider()',
-    `  let mut allocator = QuotaAllocator { remaining: ${quota} }`,
+    `pub effect fn main() -> () ! OutOfMemoryError | WriterError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+`,
+    `fn quotaSweepIteration() -> () { return () }
+
+effect fn attemptRecover(error: OutOfMemoryError | WriterError) -> bool {
+  drop error
+  return false
+}
+
+effect fn attemptQuota(quota: i32, source: &[u8]) -> bool ! OutOfMemoryError | WriterError {
+  let mut allocator = QuotaAllocator { remaining: quota }
+  let checked = run check(source) |> Effect.provideMut(&mut allocator)
+  return true
+}
+
+pub effect fn main() -> () ! OutOfMemoryError | WriterError {
+`,
+  )
+  return replaceExactlyOnce(
+    withHarness,
+    `  return run check(source) |> Effect.provideMut(&mut allocator)
+}`,
+    `  let mut quota = 0
+  while quota < 64 {
+    quotaSweepIteration()
+    let succeeded = run Effect.catchAll(attemptQuota(quota, source), attemptRecover)
+    if succeeded { return () }
+    quota = quota + 1
+  }
+  let unreachedTerminal = 1 / 0
+  return ()
+}`,
   )
 }
 
@@ -502,81 +540,65 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const representative = corpus[3]
-      const baseline = sourceFor(representative.input, 'lexer-pressure/quota/baseline')
-      const baselineSnapshot = yield* Analysis.ofSourceRealized(
-        'lexer-pressure/quota/baseline',
-        ascii(baseline.source),
-        'wasm32-unknown-unknown',
+      const id = 'lexer-pressure/quota/sweep'
+      const source = quotaSweepSourceFor(representative.input, id)
+      const snapshot = yield* Analysis.ofSourceRealized(id, ascii(source), 'wasm32-unknown-unknown')
+      assert.deepEqual(Analysis.diagnostics(snapshot), [], id)
+
+      // Every ordinal shares one evaluation; the raised step ceiling is the sum of what the
+      // per-quota runs used separately, not a change in what any single run may cost.
+      const evaluated = Analysis.evaluate(snapshot, { maxSteps: 50_000_000 })
+      assert.strictEqual(evaluated._tag, 'Completed')
+      if (evaluated._tag !== 'Completed') return
+
+      const markers = evaluated.trace.flatMap((event, index) =>
+        event._tag === 'Call' && event.target.name === 'quotaSweepIteration' ? [index] : [],
       )
-      const baselineOutcome = Analysis.evaluate(baselineSnapshot)
-      assert.strictEqual(baselineOutcome._tag, 'Completed')
-      if (baselineOutcome._tag !== 'Completed') return
-      const allocationCount = baselineOutcome.trace.filter(
-        (event) => event._tag === 'AllocationAcquire',
-      ).length
+      const allocationCount = markers.length - 1
       // Rendering is Writer-backed now; only token and diagnostic vector growth allocates.
       assert.isAtLeast(allocationCount, 2)
 
-      // Native execution runs at the boundary ordinals only — immediate failure, one mid-growth
-      // rollback, and unrestricted completion — while the evaluator and Wasm carry every ordinal.
-      // Each native leg is a full release pipeline, and the allocator's rollback path does not
-      // vary by ordinal index beyond those three shapes.
-      const nativeQuotas = new Set([0, Math.floor(allocationCount / 2), allocationCount])
-
       for (let quota = 0; quota <= allocationCount; quota += 1) {
-        const id = `lexer-pressure/quota/q${quota}`
-        const source = quotaSourceFor(representative.input, id, quota)
-        const snapshot = yield* Analysis.ofSourceRealized(
-          id,
-          ascii(source),
-          'wasm32-unknown-unknown',
+        const label = `q${quota}`
+        const segment = evaluated.trace.slice(
+          (markers[quota] ?? 0) + 1,
+          markers[quota + 1] ?? evaluated.trace.length,
         )
-        assert.deepEqual(Analysis.diagnostics(snapshot), [], id)
-        const expectedTag = quota === allocationCount ? 'Completed' : 'UnhandledFailure'
-        const evaluated = Analysis.evaluate(snapshot)
-        assert.strictEqual(evaluated._tag, expectedTag, id)
-        const acquired = evaluated.trace.filter(
-          (event) => event._tag === 'AllocationAcquire',
-        ).length
-        const released = evaluated.trace.filter(
-          (event) => event._tag === 'AllocationRelease',
-        ).length
-        assert.strictEqual(acquired, quota, id)
-        assert.strictEqual(released, acquired, id)
-        const again = Analysis.evaluate(snapshot)
-        assert.strictEqual(again._tag, expectedTag, id)
-        assert.deepEqual(
-          again.trace.filter(
-            (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
-          ),
-          evaluated.trace.filter(
-            (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
-          ),
-          id,
-        )
-
-        const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-        const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-        assert.strictEqual(
-          (instance.exports.silk_main as () => number)(),
-          quota === allocationCount ? 0 : 1,
-          id,
-        )
-
-        if (!nativeQuotas.has(quota)) continue
-        const compiled = yield* Driver.compile({
-          compilation: { root: SourceFile.make(id, ascii(source)) },
-          toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-          profile: 'release',
-          destination: join(destinationRoot, `quota-${quota}`),
-        }).pipe(Effect.provide(SourceResolver.empty))
-        assert.strictEqual(compiled._tag, 'Compiled', id)
-        if (compiled._tag !== 'Compiled') continue
-        const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-        assert.strictEqual(run.status, quota === allocationCount ? 0 : 1, `${id}: ${run.stderr}`)
-        if (quota === allocationCount) assert.strictEqual(run.stderr, '')
-        else assert.strictEqual(run.stderr, 'Error: silk/allocator.OutOfMemoryError\n')
+        const acquired = segment.filter((event) => event._tag === 'AllocationAcquire').length
+        const released = segment.filter((event) => event._tag === 'AllocationRelease').length
+        assert.strictEqual(acquired, quota, label)
+        assert.strictEqual(released, acquired, label)
       }
+
+      const again = Analysis.evaluate(snapshot, { maxSteps: 50_000_000 })
+      assert.strictEqual(again._tag, 'Completed')
+      if (again._tag !== 'Completed') return
+      assert.deepEqual(
+        again.trace.filter(
+          (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
+        ),
+        evaluated.trace.filter(
+          (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
+        ),
+      )
+
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 0)
+
+      // One native execution now carries every ordinal: the sweep only completes if each earlier
+      // quota rolled back cleanly enough for the next attempt to run.
+      const compiled = yield* Driver.compile({
+        compilation: { root: SourceFile.make(id, ascii(source)) },
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+        profile: 'release',
+        destination: join(destinationRoot, 'quota-sweep'),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.strictEqual(compiled._tag, 'Compiled', id)
+      if (compiled._tag !== 'Compiled') return
+      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
+      assert.strictEqual(run.status, 0, `${id}: ${run.stderr}`)
+      assert.strictEqual(run.stderr, '')
     }),
   180_000,
 )
