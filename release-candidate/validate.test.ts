@@ -40,28 +40,35 @@ const lspInstalledVersion = (name: string): string =>
   JSON.parse(readFileSync(resolve(lspPackageRoot, `node_modules/${name}/package.json`), 'utf8'))
     .version
 
-const installedDependencyNames = (parent: string): ReadonlyArray<string> =>
+interface InstalledDependencyParent {
+  readonly name: string
+  readonly root: string
+}
+
+const installedDependencyRoot = (parent: InstalledDependencyParent, name: string): string =>
+  realpathSync(resolve(parent.root, ...parent.name.split('/').map(() => '..'), name))
+
+const installedDependencyNames = (parent: InstalledDependencyParent): ReadonlyArray<string> =>
   Object.keys(
-    JSON.parse(readFileSync(resolve(installedPackageRoot(parent), 'package.json'), 'utf8'))
-      .dependencies ?? {},
+    JSON.parse(readFileSync(resolve(parent.root, 'package.json'), 'utf8')).dependencies ?? {},
   ).sort()
 
-const installedDependencyVersion = (parent: string, name: string): string =>
-  JSON.parse(
-    readFileSync(
-      resolve(
-        installedPackageRoot(parent),
-        ...parent.split('/').map(() => '..'),
-        name,
-        'package.json',
-      ),
-      'utf8',
-    ),
-  ).version
+const installedDependencyVersion = (parent: InstalledDependencyParent, name: string): string =>
+  JSON.parse(readFileSync(resolve(installedDependencyRoot(parent, name), 'package.json'), 'utf8'))
+    .version
 
-const consumerDependencyParents: ReadonlyArray<string> = Object.freeze([
-  'effect',
-  '@effect/platform-node',
+const platformNodeParent: InstalledDependencyParent = Object.freeze({
+  name: '@effect/platform-node',
+  root: installedPackageRoot('@effect/platform-node'),
+})
+
+const consumerDependencyParents: ReadonlyArray<InstalledDependencyParent> = Object.freeze([
+  { name: 'effect', root: installedPackageRoot('effect') },
+  platformNodeParent,
+  {
+    name: '@effect/platform-node-shared',
+    root: installedDependencyRoot(platformNodeParent, '@effect/platform-node-shared'),
+  },
 ])
 
 const consumerDependencyVersions = new Map<string, string>()
@@ -1575,7 +1582,7 @@ test('the CLI release candidate installs with its project-first command surface'
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
       ),
     )
     installConsumer(consumerRoot)
@@ -1871,7 +1878,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  vscode-languageserver: ${lspInstalledVersion('vscode-languageserver')}\n  vscode-languageserver-textdocument: ${lspInstalledVersion('vscode-languageserver-textdocument')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  vscode-languageserver: ${lspInstalledVersion('vscode-languageserver')}\n  vscode-languageserver-textdocument: ${lspInstalledVersion('vscode-languageserver-textdocument')}\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
       ),
     )
     installConsumer(consumerRoot)
