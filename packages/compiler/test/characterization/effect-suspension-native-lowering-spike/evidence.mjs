@@ -4,30 +4,33 @@ import { dirname, join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { fileURLToPath } from 'node:url'
 import * as Console from 'effect/Console'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 
 const log = (...values) => Effect.runSync(Console.log(...values))
+const configured = (name, fallback) =>
+  Effect.runSync(Config.string(name).pipe(Config.withDefault(fallback)))
 
 const root = dirname(fileURLToPath(import.meta.url))
 const evidenceRoot = join(root, 'evidence')
 const reportPath = join(root, 'evidence-report.md')
 const selectionPath = join(root, 'selection-report.md')
 const jsonPath = join(root, 'evidence.json')
-const llvmBin = process.env.SILK_SPIKE_LLVM_BIN ?? '/opt/homebrew/opt/llvm/bin'
+const llvmBin = configured('SILK_SPIKE_LLVM_BIN', '/opt/homebrew/opt/llvm/bin')
 const target = 'aarch64-apple-darwin'
 const coroutinePassPipeline = 'coro-early,cgscc(coro-split),coro-cleanup'
 const tools = Object.freeze({
-  clang: process.env.SILK_SPIKE_CLANG ?? join(llvmBin, 'clang'),
-  dsymutil: process.env.SILK_SPIKE_DSYMUTIL ?? join(llvmBin, 'dsymutil'),
-  llvmAs: process.env.SILK_SPIKE_LLVM_AS ?? join(llvmBin, 'llvm-as'),
-  llvmDis: process.env.SILK_SPIKE_LLVM_DIS ?? join(llvmBin, 'llvm-dis'),
-  llvmDwarfdump: process.env.SILK_SPIKE_LLVM_DWARFDUMP ?? join(llvmBin, 'llvm-dwarfdump'),
-  llvmNm: process.env.SILK_SPIKE_LLVM_NM ?? join(llvmBin, 'llvm-nm'),
-  llvmObjdump: process.env.SILK_SPIKE_LLVM_OBJDUMP ?? join(llvmBin, 'llvm-objdump'),
-  llvmReadobj: process.env.SILK_SPIKE_LLVM_READOBJ ?? join(llvmBin, 'llvm-readobj'),
-  llvmSize: process.env.SILK_SPIKE_LLVM_SIZE ?? join(llvmBin, 'llvm-size'),
-  llvmSymbolizer: process.env.SILK_SPIKE_LLVM_SYMBOLIZER ?? join(llvmBin, 'llvm-symbolizer'),
-  opt: process.env.SILK_SPIKE_OPT ?? join(llvmBin, 'opt'),
+  clang: configured('SILK_SPIKE_CLANG', join(llvmBin, 'clang')),
+  dsymutil: configured('SILK_SPIKE_DSYMUTIL', join(llvmBin, 'dsymutil')),
+  llvmAs: configured('SILK_SPIKE_LLVM_AS', join(llvmBin, 'llvm-as')),
+  llvmDis: configured('SILK_SPIKE_LLVM_DIS', join(llvmBin, 'llvm-dis')),
+  llvmDwarfdump: configured('SILK_SPIKE_LLVM_DWARFDUMP', join(llvmBin, 'llvm-dwarfdump')),
+  llvmNm: configured('SILK_SPIKE_LLVM_NM', join(llvmBin, 'llvm-nm')),
+  llvmObjdump: configured('SILK_SPIKE_LLVM_OBJDUMP', join(llvmBin, 'llvm-objdump')),
+  llvmReadobj: configured('SILK_SPIKE_LLVM_READOBJ', join(llvmBin, 'llvm-readobj')),
+  llvmSize: configured('SILK_SPIKE_LLVM_SIZE', join(llvmBin, 'llvm-size')),
+  llvmSymbolizer: configured('SILK_SPIKE_LLVM_SYMBOLIZER', join(llvmBin, 'llvm-symbolizer')),
+  opt: configured('SILK_SPIKE_OPT', join(llvmBin, 'opt')),
 })
 
 const commands = []

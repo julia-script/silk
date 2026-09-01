@@ -314,9 +314,8 @@ export const makeDiskArtifactCache = (directory: string): ArtifactCache => {
 
 const processArtifactCache = new Map<string, Uint8Array>()
 
-export const defaultArtifactCache = (): ArtifactCache => {
-  const directory = process.env.SILK_NATIVE_CACHE_DIR
-  if (directory !== undefined && directory !== '') return makeDiskArtifactCache(directory)
+export const defaultArtifactCache = (directory = ''): ArtifactCache => {
+  if (directory !== '') return makeDiskArtifactCache(directory)
   return Object.freeze({
     _tag: 'ArtifactCache',
     get: (key: string) => Effect.succeed(processArtifactCache.get(key)),

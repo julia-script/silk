@@ -1,6 +1,14 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import * as Config from 'effect/Config'
+import * as Effect from 'effect/Effect'
 import { defineSilkConfig, wholeMachineWorkers } from '../../vitest.shared.js'
+
+const nativeCacheDirectory = Effect.runSync(
+  Config.string('SILK_NATIVE_CACHE_DIR').pipe(
+    Config.withDefault(join(homedir(), '.cache', 'silk-effect', 'native')),
+  ),
+)
 
 export default defineSilkConfig({
   test: {
@@ -20,8 +28,7 @@ export default defineSilkConfig({
     maxWorkers: wholeMachineWorkers,
     env: {
       // Shared across worktrees: identical bitcode + Clang version → cached executable.
-      SILK_NATIVE_CACHE_DIR:
-        process.env.SILK_NATIVE_CACHE_DIR ?? join(homedir(), '.cache', 'silk-effect', 'native'),
+      SILK_NATIVE_CACHE_DIR: nativeCacheDirectory,
     },
   },
 })

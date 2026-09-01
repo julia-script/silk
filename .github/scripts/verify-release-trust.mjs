@@ -1,10 +1,19 @@
-const registry = process.env.NPM_REGISTRY ?? 'https://registry.npmjs.org'
+import * as Config from 'effect/Config'
+import * as Effect from 'effect/Effect'
+import * as Schema from 'effect/Schema'
 
-function readPublishedPackages() {
-  const raw = process.env.PUBLISHED_PACKAGES
+const registry = Effect.runSync(
+  Config.string('NPM_REGISTRY').pipe(Config.withDefault('https://registry.npmjs.org')),
+)
+const publishedPackages = Effect.runSync(
+  Config.string('PUBLISHED_PACKAGES').pipe(Config.withDefault('')),
+)
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
+
+function readPublishedPackages(raw = publishedPackages) {
   if (!raw) throw new Error('PUBLISHED_PACKAGES is empty')
 
-  const published = JSON.parse(raw)
+  const published = decodeJson(raw)
   if (!Array.isArray(published) || published.length === 0) {
     throw new Error('PUBLISHED_PACKAGES must contain a non-empty array')
   }
@@ -65,4 +74,4 @@ async function main() {
   }
 }
 
-if (process.env.PUBLISHED_PACKAGES !== undefined) await main()
+if (publishedPackages.length > 0) await main()

@@ -1,3 +1,4 @@
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as AddrSpace from '../dist/AddrSpace.js'
 import * as Attribute from '../dist/Attribute.js'
@@ -10,6 +11,14 @@ import * as FunctionBody from '../dist/FunctionBody.js'
 import * as IrText from '../dist/IrText.js'
 import * as Type from '../dist/Type.js'
 import * as Value from '../dist/Value.js'
+
+const stopAfter = Effect.runSync(Config.string('CORE_STOP_AFTER').pipe(Config.withDefault('')))
+const floatBinaryCount = Effect.runSync(
+  Config.integer('CORE_FLOAT_BINARY_COUNT').pipe(Config.withDefault(5)),
+)
+const floatCompareCount = Effect.runSync(
+  Config.integer('CORE_FLOAT_COMPARE_COUNT').pipe(Config.withDefault(15)),
+)
 
 const output = await Effect.runPromise(
   Effect.gen(function* () {
@@ -107,7 +116,7 @@ const output = await Effect.runPromise(
         yield* FunctionBody.returnValue(body, next)
       }),
     )
-    if (process.env.CORE_STOP_AFTER === 'cfg') return yield* finish()
+    if (stopAfter === 'cfg') return yield* finish()
     const integerOps = yield* FunctionActor.declare(builder, 'integer_ops', type)
     yield* FunctionActor.buildBody(
       builder,
@@ -144,7 +153,7 @@ const output = await Effect.runPromise(
         yield* FunctionBody.returnValue(body, result)
       }),
     )
-    if (process.env.CORE_STOP_AFTER === 'integer') return yield* finish()
+    if (stopAfter === 'integer') return yield* finish()
     const float = yield* Type.float(builder)
     const floatType = yield* Type.functionType(builder, float, [float, float])
     const floatingOps = yield* FunctionActor.declare(builder, 'floating_ops', floatType)
@@ -156,10 +165,7 @@ const output = await Effect.runPromise(
         const left = yield* Value.argument(body, 0)
         const right = yield* Value.argument(body, 1)
         let result = yield* FunctionBody.unary(body, 'fneg', left, 'negated', { fastMath: true })
-        for (const kind of ['fadd', 'fsub', 'fmul', 'fdiv', 'frem'].slice(
-          0,
-          Number(process.env.CORE_FLOAT_BINARY_COUNT ?? 5),
-        )) {
+        for (const kind of ['fadd', 'fsub', 'fmul', 'fdiv', 'frem'].slice(0, floatBinaryCount)) {
           result = yield* FunctionBody.binary(body, kind, result, right, kind, { fastMath: true })
         }
         let condition = yield* FunctionBody.floatingCompare(body, 'false', left, right, 'false')
@@ -179,7 +185,7 @@ const output = await Effect.runPromise(
           'une',
           'uno',
           'true',
-        ].slice(0, Number(process.env.CORE_FLOAT_COMPARE_COUNT ?? 15))) {
+        ].slice(0, floatCompareCount)) {
           condition = yield* FunctionBody.floatingCompare(body, predicate, left, right, predicate, {
             fastMath: true,
           })
@@ -190,7 +196,7 @@ const output = await Effect.runPromise(
         yield* FunctionBody.returnValue(body, result)
       }),
     )
-    if (process.env.CORE_STOP_AFTER === 'floating') return yield* finish()
+    if (stopAfter === 'floating') return yield* finish()
     const i16 = yield* Type.integer(builder, 16)
     const i64 = yield* Type.integer(builder, 64)
     const double = yield* Type.double(builder)
@@ -225,7 +231,7 @@ const output = await Effect.runPromise(
         yield* FunctionBody.returnValue(body, int32)
       }),
     )
-    if (process.env.CORE_STOP_AFTER === 'casts') return yield* finish()
+    if (stopAfter === 'casts') return yield* finish()
     const pair = yield* Type.structure(builder, [i32, i64])
     const aggregateType = yield* Type.functionType(builder, i64, [i32, i64])
     const aggregateOps = yield* FunctionActor.declare(builder, 'aggregate_ops', aggregateType)
@@ -243,7 +249,7 @@ const output = await Effect.runPromise(
         yield* FunctionBody.returnValue(body, extracted)
       }),
     )
-    if (process.env.CORE_STOP_AFTER === 'aggregate') return yield* finish()
+    if (stopAfter === 'aggregate') return yield* finish()
     const voidType = yield* Type.voidType(builder)
     const voidFunctionType = yield* Type.functionType(builder, voidType, [])
     const noop = yield* FunctionActor.declare(builder, 'noop', voidFunctionType)

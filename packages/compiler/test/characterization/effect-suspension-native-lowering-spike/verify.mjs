@@ -3,13 +3,18 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import * as Config from 'effect/Config'
+import * as Effect from 'effect/Effect'
+
+const configured = (name, fallback) =>
+  Effect.runSync(Config.string(name).pipe(Config.withDefault(fallback)))
 
 const root = dirname(fileURLToPath(import.meta.url))
 const temporary = mkdtempSync(join(tmpdir(), 'silk-effect-native-lowering-spike-'))
-const llvmBin = process.env.SILK_SPIKE_LLVM_BIN ?? '/opt/homebrew/opt/llvm/bin'
-const clang = process.env.SILK_SPIKE_CLANG ?? join(llvmBin, 'clang')
-const llvmAs = process.env.SILK_SPIKE_LLVM_AS ?? join(llvmBin, 'llvm-as')
-const opt = process.env.SILK_SPIKE_OPT ?? join(llvmBin, 'opt')
+const llvmBin = configured('SILK_SPIKE_LLVM_BIN', '/opt/homebrew/opt/llvm/bin')
+const clang = configured('SILK_SPIKE_CLANG', join(llvmBin, 'clang'))
+const llvmAs = configured('SILK_SPIKE_LLVM_AS', join(llvmBin, 'llvm-as'))
+const opt = configured('SILK_SPIKE_OPT', join(llvmBin, 'opt'))
 
 const run = (command, arguments_, options = {}) =>
   execFileSync(command, arguments_, {

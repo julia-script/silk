@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import * as Console from 'effect/Console'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import { deriveConcurrency, hostParallelism, tasksOf, workersPerTask } from './concurrency.mjs'
 
@@ -50,12 +51,15 @@ const turboBin = require.resolve('turbo/bin/turbo')
  * concurrent runs at worst duplicate a write. An explicit TURBO_CACHE_DIR still wins.
  */
 const worktreeRoot = process.cwd().match(/^(.*?)[\\/]\.claude[\\/]worktrees[\\/]/)
-const env =
-  worktreeRoot && !process.env.TURBO_CACHE_DIR
-    ? { ...process.env, TURBO_CACHE_DIR: `${worktreeRoot[1]}/.turbo/cache` }
-    : process.env
+const explicitCacheDirectory = Effect.runSync(
+  Config.string('TURBO_CACHE_DIR').pipe(Config.withDefault('')),
+)
+const effectiveTurboArgs =
+  worktreeRoot !== null && explicitCacheDirectory.length === 0
+    ? [...turboArgs, `--cache-dir=${worktreeRoot[1]}/.turbo/cache`]
+    : turboArgs
 
-const child = spawn(process.execPath, [turboBin, ...turboArgs], { stdio: 'inherit', env })
+const child = spawn(process.execPath, [turboBin, ...effectiveTurboArgs], { stdio: 'inherit' })
 
 child.on('error', (error) => {
   logError(`turbo: failed to start (${error.message})`)

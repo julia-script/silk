@@ -26,6 +26,7 @@
   "devDependencies": {
     "@changesets/cli": "^2.31.1",
     "@effect/tsgo": "0.39.0",
+    "effect": "catalog:",
     "oxfmt": "0.66.0",
     "oxlint": "1.80.0",
     "oxlint-tsgolint": "7.0.2001",

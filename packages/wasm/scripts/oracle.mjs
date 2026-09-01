@@ -14,11 +14,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import * as Config from 'effect/Config'
+import * as Effect from 'effect/Effect'
 import { negativeCorpus } from './negative-corpus.mjs'
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const fixtureRoot = resolve(packageRoot, 'fixtures')
-const wasmTools = process.env.WASM_TOOLS ?? 'wasm-tools'
+const wasmTools = Effect.runSync(Config.string('WASM_TOOLS').pipe(Config.withDefault('wasm-tools')))
 
 /** The pinned oracle release. Update UPSTREAM.md when this changes. */
 const PINNED_VERSION = 'wasm-tools 1.255.0'

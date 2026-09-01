@@ -3,6 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as LlvmBackend from '@silklang/compiler/LlvmBackend'
 import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
 import * as Project from '@silklang/compiler/Project'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
@@ -15,16 +16,14 @@ import * as Timeouts from './timeouts.js'
 
 const source = 'pub fn main() -> i32 { return 42 }'
 
-let wasmClang = process.env.SILK_TEST_CLANG
-if (wasmClang === undefined) {
-  if (existsSync('/opt/homebrew/opt/llvm/bin/clang')) {
-    wasmClang = '/opt/homebrew/opt/llvm/bin/clang'
-  } else if (existsSync('/usr/local/opt/llvm/bin/clang')) {
-    wasmClang = '/usr/local/opt/llvm/bin/clang'
-  } else {
-    wasmClang = 'clang'
-  }
+const defaultClang = (): string => {
+  if (existsSync('/opt/homebrew/opt/llvm/bin/clang')) return '/opt/homebrew/opt/llvm/bin/clang'
+  if (existsSync('/usr/local/opt/llvm/bin/clang')) return '/usr/local/opt/llvm/bin/clang'
+  return 'clang'
 }
+const wasmClang = Effect.runSync(
+  Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
+)
 
 const writeFile = Effect.fnUntraced(function* (path: string, text: string) {
   const fileSystem = yield* FileSystem.FileSystem

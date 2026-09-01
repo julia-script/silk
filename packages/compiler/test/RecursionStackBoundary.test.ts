@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
@@ -35,7 +36,9 @@ const defaultClang = (): string => {
   return 'clang'
 }
 
-const clang = process.env.SILK_TEST_CLANG ?? defaultClang()
+const clang = Effect.runSync(
+  Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
+)
 const toolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
   clang,

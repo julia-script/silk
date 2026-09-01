@@ -8,6 +8,9 @@ import {
   toUIMessageStream,
 } from 'ai'
 import { z } from 'zod'
+import * as Config from 'effect/Config'
+import * as Effect from 'effect/Effect'
+import * as Schema from 'effect/Schema'
 import { source } from '@/lib/source'
 import { Document, type DocumentData } from 'flexsearch'
 import type { ChatUIMessage, SearchTool } from '../../../components/ai/search'
@@ -19,6 +22,7 @@ interface CustomDocument extends DocumentData {
   content: string
 }
 const searchServer = createSearchServer()
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 async function createSearchServer() {
   const search = new Document<CustomDocument>({
@@ -66,8 +70,13 @@ const systemPrompt = [
   'If you cannot find the answer in search results, say you do not know and suggest a better search query.',
 ].join('\n')
 
-export async function POST(req: Request) {
-  const apiKey = process.env.OPENROUTER_API_KEY
+export interface Options {
+  readonly apiKey: string
+  readonly model: string
+}
+
+export const makePost = (options: Options) => async (req: Request) => {
+  const { apiKey } = options
   if (!apiKey) {
     return Response.json({ error: 'Ask AI is not configured.' }, { status: 503 })
   }
@@ -76,7 +85,7 @@ export async function POST(req: Request) {
   const openrouter = createOpenRouter({ apiKey })
 
   const result = streamText({
-    model: openrouter.chat(process.env.OPENROUTER_MODEL ?? 'anthropic/claude-sonnet-5'),
+    model: openrouter.chat(options.model),
     instructions: systemPrompt,
     stopWhen: stepCountIs(5),
     tools: {
@@ -87,7 +96,7 @@ export async function POST(req: Request) {
         if (part.type === 'data-client')
           return {
             type: 'text',
-            text: `[Client Context: ${JSON.stringify(part.data)}]`,
+            text: `[Client Context: ${encodeJson(part.data)}]`,
           }
       },
     }),
@@ -103,6 +112,14 @@ export async function POST(req: Request) {
     }),
   })
 }
+
+export const POST = (request: Request): Promise<Response> =>
+  makePost({
+    apiKey: Effect.runSync(Config.string('OPENROUTER_API_KEY').pipe(Config.withDefault(''))),
+    model: Effect.runSync(
+      Config.string('OPENROUTER_MODEL').pipe(Config.withDefault('anthropic/claude-sonnet-5')),
+    ),
+  })(request)
 
 const searchTool = tool({
   description: 'Search the docs content and return raw JSON results.',

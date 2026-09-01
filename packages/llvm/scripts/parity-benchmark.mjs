@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { fileURLToPath } from 'node:url'
+import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as Bitcode from '../dist/Bitcode.js'
 import * as Block from '../dist/Block.js'
@@ -13,7 +14,9 @@ import * as Metadata from '../dist/Metadata.js'
 import * as Type from '../dist/Type.js'
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const samples = Number(process.env.PARITY_BENCHMARK_SAMPLES ?? 7)
+const samples = Effect.runSync(
+  Config.number('PARITY_BENCHMARK_SAMPLES').pipe(Config.withDefault(7)),
+)
 
 const median = (values) =>
   [...values].sort((left, right) => left - right)[Math.floor(values.length / 2)]
