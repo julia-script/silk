@@ -979,7 +979,9 @@ it.effect(
         }
       }
     }),
-  60_000,
+  // Measured near the 60s floor while the full parallel gate saturates the host; the timeout
+  // is headroom for contention, not a performance assertion.
+  180_000,
 )
 
 const actorNeutralFixtures = [

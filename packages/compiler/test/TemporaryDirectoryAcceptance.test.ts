@@ -62,6 +62,63 @@ pub fn main() -> i32 {
 }`
 
 /**
+ * The native programs read their confined root from SILK_TEST_ROOT at runtime instead of baking
+ * the test run's mkdtemp path into the source text. A per-run path in the source made every
+ * compilation byte-unique, so the content-addressed emission and executable caches could never
+ * hit; with a stable source they hit on every warm run.
+ */
+const nativeRootResolution = `import silk.bytes { Bytes, asSlice as rootSlice }
+import silk.host_input { HostInputError, inputFailure, variableNamed }
+import silk.option { Option }
+import silk.os_host_input as OsHostInput
+import silk.string { InvalidUtf8, String, copy as stringCopy, copyUtf8 as stringCopyUtf8, view as stringView }
+
+effect fn missingRoot() -> Bytes ! HostInputError {
+  fail inputFailure()
+}
+
+effect fn requiredRoot(found: Option<Bytes>) -> Bytes ! HostInputError {
+  return match move found {
+    Option<Bytes>.Some { value: bytes } => move bytes
+    Option<Bytes>.None => run missingRoot()
+  }
+}
+
+/// A root that is not valid UTF-8 is a harness defect, not a program outcome; trap like osMake
+/// does for its own malformed-root preconditions.
+effect fn invalidRoot() -> String ! OutOfMemoryError ? &mut Allocator {
+  let invalid = 1 / 0
+  return run stringCopy("/")
+}
+
+effect fn confinedRootString() -> String ! HostInputError | OutOfMemoryError ? &mut Allocator {
+  let mut hostInput = OsHostInput.make()
+  let found = run Effect.provideMut(variableNamed("SILK_TEST_ROOT"), &mut hostInput)
+  let rootBytes = run requiredRoot(move found)
+  let copied = run stringCopyUtf8(rootSlice(&rootBytes))
+  return match move copied {
+    Result<String, InvalidUtf8>.Success { value } => move value
+    Result<String, InvalidUtf8>.Failure { error } => run invalidRoot()
+  }
+}`
+
+const nativeEpilogue = `import silk.allocator { OutOfMemoryError }
+import silk.filesystem { FileError }
+import silk.host_input { HostInputError }
+import silk.result { Result }
+pub fn main() -> i32 {
+  let completed = run Effect.result(program())
+  return match move completed {
+      Result<i32, FileError | OutOfMemoryError | HostInputError>.Success { value } => value
+      Result<i32, FileError | OutOfMemoryError | HostInputError>.Failure { error } => match move error {
+        FileError failure => 100 + failure.reason.code
+        OutOfMemoryError exhausted => 99
+        HostInputError missing => 98
+      }
+  }
+}`
+
+/**
  * The whole lifecycle against a real confined root. Each numbered return is one acceptance
  * criterion, so a native exit status names which one failed rather than merely that one did.
  */
@@ -73,10 +130,12 @@ import silk.filesystem { FileError }
 import silk.filesystem { FileSystem }
 import silk.u8 as u8
 ${prelude}
+${nativeRootResolution}
 
-effect fn program() -> i32 ! FileError | OutOfMemoryError {
+effect fn program() -> i32 ! FileError | OutOfMemoryError | HostInputError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
+  let root = run confinedRootString() |> Effect.provideMut(&mut allocator)
+  let mut fs = run osMake(stringView(&root)) |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/scopes") |> Effect.provideMut(&mut allocator)
   let prepared = run Intrinsic.bindRequirementMut(
     Intrinsic.bindRequirementMut(createDirectoriesRecursively(&parent), &mut fs),
@@ -113,7 +172,7 @@ effect fn program() -> i32 ! FileError | OutOfMemoryError {
   return 42
 }
 
-${epilogue}`
+${nativeEpilogue}`
 
 /**
  * Recursive removal against a real populated tree. `release` removes contents, not just an empty
@@ -126,10 +185,12 @@ import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.filesystem { FileError }
 ${prelude}
+${nativeRootResolution}
 
-effect fn program() -> i32 ! FileError | OutOfMemoryError {
+effect fn program() -> i32 ! FileError | OutOfMemoryError | HostInputError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
+  let root = run confinedRootString() |> Effect.provideMut(&mut allocator)
+  let mut fs = run osMake(stringView(&root)) |> Effect.provideMut(&mut allocator)
   let target = run pathMake("/tree") |> Effect.provideMut(&mut allocator)
   let removed = run Intrinsic.bindRequirementMut(
     Intrinsic.bindRequirementMut(removeDirectoryRecursively(&target), &mut fs),
@@ -138,7 +199,7 @@ effect fn program() -> i32 ! FileError | OutOfMemoryError {
   return 42
 }
 
-${epilogue}`
+${nativeEpilogue}`
 
 /**
  * Several populated scopes, each released while the others are still owned. This is the shape that
@@ -154,10 +215,12 @@ import silk.filesystem { FileError }
 import silk.filesystem { FileSystem }
 import silk.u8 as u8
 ${prelude}
+${nativeRootResolution}
 
-effect fn program() -> i32 ! FileError | OutOfMemoryError {
+effect fn program() -> i32 ! FileError | OutOfMemoryError | HostInputError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
+  let root = run confinedRootString() |> Effect.provideMut(&mut allocator)
+  let mut fs = run osMake(stringView(&root)) |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/many") |> Effect.provideMut(&mut allocator)
   let prepared = run Intrinsic.bindRequirementMut(
     Intrinsic.bindRequirementMut(createDirectoriesRecursively(&parent), &mut fs),
@@ -191,7 +254,7 @@ ${[0, 1, 2]
   return 42
 }
 
-${epilogue}`
+${nativeEpilogue}`
 
 /**
  * The provider protocol on the evaluator: the provider chooses the name, so the created name comes
@@ -254,7 +317,10 @@ it.effect(
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled', JSON.stringify(compiled).slice(0, 2500))
       if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
+      const run = spawnSync(compiled.path, [], {
+        encoding: 'utf8',
+        env: { ...process.env, SILK_TEST_ROOT: nativeRoot },
+      })
       assert.strictEqual(
         run.status,
         42,
@@ -290,7 +356,10 @@ it.effect(
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled', JSON.stringify(compiled).slice(0, 2500))
       if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
+      const run = spawnSync(compiled.path, [], {
+        encoding: 'utf8',
+        env: { ...process.env, SILK_TEST_ROOT: nativeRoot },
+      })
       assert.strictEqual(run.status, 42, JSON.stringify({ signal: run.signal, stderr: run.stderr }))
       // The file, the nested directory's file, the nested directory, and the directory itself.
       assert.isFalse(existsSync(join(nativeRoot, 'tree')))
@@ -317,7 +386,10 @@ it.effect(
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled', JSON.stringify(compiled).slice(0, 2500))
       if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
+      const run = spawnSync(compiled.path, [], {
+        encoding: 'utf8',
+        env: { ...process.env, SILK_TEST_ROOT: nativeRoot },
+      })
       // Before #130 was fixed this trapped (SIGILL) even at -O0: a cleanup arm's reloaded lanes
       // escaped into the arm's join block, so the join read an undefined union tag and fell
       // through to the invalid-tag trap. The status, not just the absence of a crash, is what
