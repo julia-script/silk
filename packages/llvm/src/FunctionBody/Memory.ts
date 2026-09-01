@@ -68,7 +68,7 @@ const accessInfo = (input: MemoryAccess.Input): FunctionBodyDescription.MemoryIn
  * @category instructions
  * @since 0.0.0
  */
-export const alloca = Effect.fn('FunctionBody.alloca')(function* (
+export const alloca = Effect.fnUntraced(function* (
   self: FunctionBody,
   allocationType: Type.Type,
   name?: ByteString.ByteString | Uint8Array | string,
@@ -160,7 +160,7 @@ export const alloca = Effect.fn('FunctionBody.alloca')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const load = Effect.fn('FunctionBody.load')(function* (
+export const load = Effect.fnUntraced(function* (
   self: FunctionBody,
   valueType: Type.Type,
   pointer: Value.Input,
@@ -215,7 +215,7 @@ export const load = Effect.fn('FunctionBody.load')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const store = Effect.fn('FunctionBody.store')(function* (
+export const store = Effect.fnUntraced(function* (
   self: FunctionBody,
   value: Value.Input,
   pointer: Value.Input,
@@ -264,7 +264,7 @@ export const store = Effect.fn('FunctionBody.store')(function* (
 })
 
 /** @internal */
-const gepPlan = Effect.fn('FunctionBody.gepPlan')(function* (
+const gepPlan = Effect.fnUntraced(function* (
   self: FunctionBody,
   sourceType: Type.Type,
   base: Value.Input,
@@ -479,7 +479,7 @@ const gepPlan = Effect.fn('FunctionBody.gepPlan')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const getElementPtr = Effect.fn('FunctionBody.getElementPtr')(function* (
+export const getElementPtr = Effect.fnUntraced(function* (
   self: FunctionBody,
   sourceType: Type.Type,
   base: Value.Input,
@@ -530,7 +530,7 @@ export const getElementPtr = Effect.fn('FunctionBody.getElementPtr')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const structuredGetElementPtr = Effect.fn('FunctionBody.structuredGetElementPtr')(function* (
+export const structuredGetElementPtr = Effect.fnUntraced(function* (
   self: FunctionBody,
   sourceType: Type.Type,
   base: Value.Input,
@@ -563,7 +563,7 @@ export const structuredGetElementPtr = Effect.fn('FunctionBody.structuredGetElem
  * @category instructions
  * @since 0.0.0
  */
-export const fence = Effect.fn('FunctionBody.fence')(function* (
+export const fence = Effect.fnUntraced(function* (
   self: FunctionBody,
   ordering: Exclude<MemoryAccess.AtomicOrdering, 'none' | 'unordered' | 'monotonic'>,
   syncScope: MemoryAccess.SyncScope = 'system',
@@ -594,7 +594,7 @@ export const fence = Effect.fn('FunctionBody.fence')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const compareExchange = Effect.fn('FunctionBody.compareExchange')(function* (
+export const compareExchange = Effect.fnUntraced(function* (
   self: FunctionBody,
   pointer: Value.Input,
   comparison: Value.Input,
@@ -702,7 +702,7 @@ export const compareExchange = Effect.fn('FunctionBody.compareExchange')(functio
  * @category instructions
  * @since 0.0.0
  */
-export const atomicRmw = Effect.fn('FunctionBody.atomicRmw')(function* (
+export const atomicRmw = Effect.fnUntraced(function* (
   self: FunctionBody,
   operation: MemoryAccess.AtomicOperation,
   pointer: Value.Input,
@@ -785,7 +785,7 @@ export const atomicRmw = Effect.fn('FunctionBody.atomicRmw')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const vaArg = Effect.fn('FunctionBody.vaArg')(function* (
+export const vaArg = Effect.fnUntraced(function* (
   self: FunctionBody,
   list: Value.Input,
   valueType: Type.Type,

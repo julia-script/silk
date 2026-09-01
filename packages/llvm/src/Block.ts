@@ -46,7 +46,7 @@ export interface Block extends Handle.Handle<'Block'> {}
  *   const voidType = yield* Type.voidType(builder)
  *   const signature = yield* Type.functionType(builder, voidType, [])
  *   const fn = yield* FunctionActor.declare(builder, 'two_blocks', signature)
- *   yield* FunctionActor.buildBody(builder, fn, Effect.fn('Example.twoBlocks')(function* (body) {
+ *   yield* FunctionActor.buildBody(builder, fn, Effect.fnUntraced(function* (body) {
  *     yield* Block.make(body, 'entry')
  *     const exit = yield* Block.make(body, 'exit')
  *     yield* FunctionBody.branch(body, exit)
@@ -59,7 +59,7 @@ export interface Block extends Handle.Handle<'Block'> {}
  * @category blocks
  * @since 0.0.0
  */
-export const make = Effect.fn('Block.make')(function* (
+export const make = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   name?: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<Block, LlvmError> {
@@ -74,7 +74,7 @@ export const make = Effect.fn('Block.make')(function* (
  * @category blocks
  * @since 0.0.0
  */
-export const setInsertionPoint = Effect.fn('Block.setInsertionPoint')(function* (
+export const setInsertionPoint = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   self: Block,
 ): Effect.fn.Return<void, LlvmError> {
@@ -89,7 +89,7 @@ export const setInsertionPoint = Effect.fn('Block.setInsertionPoint')(function* 
  * @category blocks
  * @since 0.0.0
  */
-export const index = Effect.fn('Block.index')(function* (
+export const index = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   self: Block,
 ): Effect.fn.Return<number, LlvmError> {
@@ -104,7 +104,7 @@ export const index = Effect.fn('Block.index')(function* (
  * @category blocks
  * @since 0.0.0
  */
-export const name = Effect.fn('Block.name')(function* (
+export const name = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   self: Block,
 ): Effect.fn.Return<ByteString.ByteString, LlvmError> {
@@ -131,7 +131,7 @@ export const name = Effect.fn('Block.name')(function* (
  * @category blocks
  * @since 0.0.0
  */
-export const predecessors = Effect.fn('Block.predecessors')(function* (
+export const predecessors = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   self: Block,
 ): Effect.fn.Return<ReadonlyArray<Block>, LlvmError> {

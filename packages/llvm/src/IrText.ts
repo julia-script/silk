@@ -123,7 +123,7 @@ const renderSnapshot = (state: BuilderState.Snapshot): string => {
  * @category serialization
  * @since 0.0.0
  */
-export const render = Effect.fn('IrText.render')(function* (
+export const render = Effect.fnUntraced(function* (
   self: Builder.Builder,
 ): Effect.fn.Return<string, LlvmError> {
   const state = yield* BuilderState.snapshot(self, 'IrText.render')

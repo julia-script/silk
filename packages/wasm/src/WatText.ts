@@ -46,7 +46,7 @@ import type { WasmError } from './WasmError.js'
  * @category output
  * @since 0.0.0
  */
-export const render = Effect.fn('WatText.render')(function* (
+export const render = Effect.fnUntraced(function* (
   builder: Builder.Builder,
 ): Effect.fn.Return<string, WasmError> {
   const snapshot = yield* ModuleState.snapshot(builder, 'WatText.render')

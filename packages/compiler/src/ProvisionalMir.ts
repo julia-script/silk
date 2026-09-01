@@ -110,26 +110,30 @@ export interface Module {
 
 const executionIdentity = (key: ExecutionKey): string => key.identity
 
+const executionInstanceCache = new WeakMap<ExecutionKey, Instances.InstanceKey>()
+
 const executionInstance = (key: ExecutionKey): Instances.InstanceKey => {
   if (key._tag === 'InstanceExecution') {
     return key.instance
   }
-  return Object.freeze({
-    _tag: 'InstanceKey',
-    declaration: key.runner,
-    typeArguments: key.owner.typeArguments,
-    contractRow: Object.freeze([
-      ...key.owner.contractRow,
-      `effect-site:${Hir.executableSiteKey(key.site)}`,
-      ...(key._tag === 'ProvidedEffectRunnerExecution'
-        ? key.providers.map(providedContractEntry)
-        : []),
-    ]),
-  })
+  let cached = executionInstanceCache.get(key)
+  if (cached === undefined) {
+    cached = Object.freeze({
+      _tag: 'InstanceKey',
+      declaration: key.runner,
+      typeArguments: key.owner.typeArguments,
+      contractRow: Object.freeze([
+        ...key.owner.contractRow,
+        `effect-site:${Hir.executableSiteKey(key.site)}`,
+        ...(key._tag === 'ProvidedEffectRunnerExecution'
+          ? key.providers.map(providedContractEntry)
+          : []),
+      ]),
+    })
+    executionInstanceCache.set(key, cached)
+  }
+  return cached
 }
-
-const sameInstance = (left: Instances.InstanceKey, right: Instances.InstanceKey): boolean =>
-  Instances.keyText(left) === Instances.keyText(right)
 
 const sameTypeArguments = (
   left: ReadonlyArray<Type.GenericArgument>,
@@ -149,13 +153,26 @@ const providedBaseName = (name: string): string | undefined => {
   return marker < 0 ? undefined : name.slice(0, marker)
 }
 
+const executionIndexCache = new WeakMap<ReadonlyArray<Execution>, Map<string, Execution>>()
+
+const executionIndex = (executions: ReadonlyArray<Execution>): Map<string, Execution> => {
+  let index = executionIndexCache.get(executions)
+  if (index === undefined) {
+    index = new Map()
+    for (const execution of executions) {
+      const key = Instances.keyText(executionInstance(execution.key))
+      if (!index.has(key)) index.set(key, execution)
+    }
+    executionIndexCache.set(executions, index)
+  }
+  return index
+}
+
 const executionForInstance = (
   self: Module,
   instance: Instances.InstanceKey,
 ): Execution | undefined => {
-  const exact = self.executions.find((execution) =>
-    sameInstance(executionInstance(execution.key), instance),
-  )
+  const exact = executionIndex(self.executions).get(Instances.keyText(instance))
   if (exact !== undefined) return exact
   const baseName = providedBaseName(instance.declaration.name)
   if (baseName === undefined) return undefined

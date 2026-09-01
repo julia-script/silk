@@ -74,7 +74,7 @@ const aggregatePath = (
  * @category instructions
  * @since 0.0.0
  */
-export const extractValue = Effect.fn('FunctionBody.extractValue')(function* (
+export const extractValue = Effect.fnUntraced(function* (
   self: FunctionBody,
   aggregate: Value.Input,
   indices: ReadonlyArray<number>,
@@ -113,7 +113,7 @@ export const extractValue = Effect.fn('FunctionBody.extractValue')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const insertValue = Effect.fn('FunctionBody.insertValue')(function* (
+export const insertValue = Effect.fnUntraced(function* (
   self: FunctionBody,
   aggregate: Value.Input,
   element: Value.Input,
@@ -173,7 +173,7 @@ export const insertValue = Effect.fn('FunctionBody.insertValue')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const buildAggregate = Effect.fn('FunctionBody.buildAggregate')(function* (
+export const buildAggregate = Effect.fnUntraced(function* (
   self: FunctionBody,
   type: Type.Type,
   elements: ReadonlyArray<Value.Input>,
@@ -212,7 +212,7 @@ export const buildAggregate = Effect.fn('FunctionBody.buildAggregate')(function*
  * @category instructions
  * @since 0.0.0
  */
-export const extractElement = Effect.fn('FunctionBody.extractElement')(function* (
+export const extractElement = Effect.fnUntraced(function* (
   self: FunctionBody,
   vector: Value.Input,
   index: Value.Input,
@@ -277,7 +277,7 @@ export const extractElement = Effect.fn('FunctionBody.extractElement')(function*
  * @category instructions
  * @since 0.0.0
  */
-export const insertElement = Effect.fn('FunctionBody.insertElement')(function* (
+export const insertElement = Effect.fnUntraced(function* (
   self: FunctionBody,
   vector: Value.Input,
   element: Value.Input,
@@ -354,7 +354,7 @@ export const insertElement = Effect.fn('FunctionBody.insertElement')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const shuffleVector = Effect.fn('FunctionBody.shuffleVector')(function* (
+export const shuffleVector = Effect.fnUntraced(function* (
   self: FunctionBody,
   left: Value.Input,
   right: Value.Input,
@@ -458,7 +458,7 @@ export const shuffleVector = Effect.fn('FunctionBody.shuffleVector')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const splatVector = Effect.fn('FunctionBody.splatVector')(function* (
+export const splatVector = Effect.fnUntraced(function* (
   self: FunctionBody,
   vectorType: Type.Type,
   element: Value.Input,

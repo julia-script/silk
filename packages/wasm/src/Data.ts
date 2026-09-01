@@ -59,7 +59,7 @@ export interface Options {
  * @category data segments
  * @since 0.0.0
  */
-export const active = Effect.fn('Data.active')(function* (
+export const active = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   memory: Memory.Memory,
   offset: ConstExpr.ConstExpr,
@@ -113,7 +113,7 @@ export const active = Effect.fn('Data.active')(function* (
  * @category data segments
  * @since 0.0.0
  */
-export const passive = Effect.fn('Data.passive')(function* (
+export const passive = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   bytes: Uint8Array,
   options: Options = {},

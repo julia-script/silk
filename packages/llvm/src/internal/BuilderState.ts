@@ -1,6 +1,5 @@
 import * as Effect from 'effect/Effect'
 import type * as Result from 'effect/Result'
-import type * as Semaphore from 'effect/Semaphore'
 import type * as Attribute from '../Attribute.js'
 import type * as Builder from '../Builder.js'
 import type * as ByteString from '../ByteString.js'
@@ -45,7 +44,6 @@ export interface MutableState {
 
 export interface State {
   readonly owner: OwnedHandle.Owner
-  readonly gate: Semaphore.Semaphore
   readonly value: MutableState
 }
 
@@ -83,66 +81,65 @@ export const register = (self: Builder.Builder, state: State): void => {
   states.set(self, state)
 }
 
-/** @internal */
-const lookup = Effect.fnUntraced(function* (
-  self: Builder.Builder,
-  operation: string,
-): Effect.fn.Return<State, LlvmError> {
-  const state = states.get(self)
-  if (state === undefined) {
-    return yield* Effect.fail(
-      invalidState({ operation, message: 'Unknown LLVM builder value', state: self }),
-    )
-  }
-  return state
-})
-
-/** @internal */
-export const mutate = Effect.fnUntraced(function* <A>(
+/**
+ * Transitions and snapshots are synchronous `Result` computations, so each critical section
+ * completes without an interleaving point and the per-operation semaphore permit only added
+ * scheduling overhead on the hottest path in the builder: concurrent fibers still observe every
+ * mutation as atomic. `mutate` therefore runs as one suspended step.
+ *
+ * @internal
+ */
+export const mutate = <A>(
   self: Builder.Builder,
   operation: string,
   transition: (state: MutableState, owner: OwnedHandle.Owner) => Result.Result<A, LlvmError>,
-): Effect.fn.Return<A, LlvmError> {
-  return yield* Effect.flatMap(lookup(self, operation), (state) =>
-    state.gate.withPermit(
-      Effect.suspend(() => Effect.fromResult(transition(state.value, state.owner))),
-    ),
-  )
-})
+): Effect.Effect<A, LlvmError> =>
+  Effect.suspend(() => {
+    const state = states.get(self)
+    if (state === undefined) {
+      return Effect.fail(
+        invalidState({ operation, message: 'Unknown LLVM builder value', state: self }),
+      )
+    }
+    return Effect.fromResult(transition(state.value, state.owner))
+  })
 
 /** @internal */
-export const snapshot = Effect.fnUntraced(function* (
+export const snapshot = (
   self: Builder.Builder,
   operation: string,
-): Effect.fn.Return<Snapshot, LlvmError> {
-  return yield* Effect.flatMap(lookup(self, operation), (state) =>
-    state.gate.withPermit(
-      Effect.sync(() => ({
-        owner: state.owner,
-        strip: state.value.strip,
-        moduleName: state.value.moduleName,
-        sourceFilename: state.value.sourceFilename,
-        targetTriple: state.value.targetTriple,
-        dataLayout: state.value.dataLayout,
-        layout: state.value.layout,
-        moduleAssembly: Object.freeze([...state.value.moduleAssembly]),
-        strings: Object.freeze([...state.value.strings]),
-        types: Table.freeze(state.value.types).descriptions,
-        typeHandles: Table.freeze(state.value.types).handles,
-        attributes: Table.freeze(state.value.attributes).descriptions,
-        attributeSets: Table.freeze(state.value.attributeSets).descriptions,
-        functionAttributeSets: Table.freeze(state.value.functionAttributeSets).descriptions,
-        constants: Table.freeze(state.value.constants).descriptions,
-        constantHandles: Table.freeze(state.value.constants).handles,
-        globals: GlobalTable.freeze(state.value.globals).globals,
-        globalHandles: GlobalTable.freeze(state.value.globals).globalHandles,
-        variables: GlobalTable.freeze(state.value.globals).variables,
-        aliases: GlobalTable.freeze(state.value.globals).aliases,
-        functions: GlobalTable.freeze(state.value.globals).functions,
-        metadata: MetadataTable.freeze(state.value.metadata).descriptions,
-        namedMetadata: MetadataTable.freeze(state.value.metadata).named,
-        globalMetadata: GlobalTable.freeze(state.value.globals).attachments,
-      })),
-    ),
-  )
-})
+): Effect.Effect<Snapshot, LlvmError> =>
+  Effect.suspend(() => {
+    const state = states.get(self)
+    if (state === undefined) {
+      return Effect.fail(
+        invalidState({ operation, message: 'Unknown LLVM builder value', state: self }),
+      )
+    }
+    return Effect.sync(() => ({
+      owner: state.owner,
+      strip: state.value.strip,
+      moduleName: state.value.moduleName,
+      sourceFilename: state.value.sourceFilename,
+      targetTriple: state.value.targetTriple,
+      dataLayout: state.value.dataLayout,
+      layout: state.value.layout,
+      moduleAssembly: Object.freeze([...state.value.moduleAssembly]),
+      strings: Object.freeze([...state.value.strings]),
+      types: Table.freeze(state.value.types).descriptions,
+      typeHandles: Table.freeze(state.value.types).handles,
+      attributes: Table.freeze(state.value.attributes).descriptions,
+      attributeSets: Table.freeze(state.value.attributeSets).descriptions,
+      functionAttributeSets: Table.freeze(state.value.functionAttributeSets).descriptions,
+      constants: Table.freeze(state.value.constants).descriptions,
+      constantHandles: Table.freeze(state.value.constants).handles,
+      globals: GlobalTable.freeze(state.value.globals).globals,
+      globalHandles: GlobalTable.freeze(state.value.globals).globalHandles,
+      variables: GlobalTable.freeze(state.value.globals).variables,
+      aliases: GlobalTable.freeze(state.value.globals).aliases,
+      functions: GlobalTable.freeze(state.value.globals).functions,
+      metadata: MetadataTable.freeze(state.value.metadata).descriptions,
+      namedMetadata: MetadataTable.freeze(state.value.metadata).named,
+      globalMetadata: GlobalTable.freeze(state.value.globals).attachments,
+    }))
+  })

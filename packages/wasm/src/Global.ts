@@ -61,7 +61,7 @@ export interface Options {
  * @category globals
  * @since 0.0.0
  */
-export const make = Effect.fn('Global.make')(function* (
+export const make = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   valType: ValType.ValType,
   mutable: boolean,

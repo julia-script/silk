@@ -289,7 +289,7 @@ export const encodeAlignment = (alignment: Alignment.Alignment): number => {
   return exponent + 1
 }
 
-export const alignmentCode = Effect.fn('MemoryAccess.alignmentCode')(function* (
+export const alignmentCode = Effect.fnUntraced(function* (
   alignment: Alignment.Alignment,
 ): Effect.fn.Return<number, LlvmError> {
   return yield* Effect.try({
@@ -309,7 +309,7 @@ export const alignmentCode = Effect.fn('MemoryAccess.alignmentCode')(function* (
  * @category memory access
  * @since 0.0.0
  */
-export const validateLoadOrdering = Effect.fn('MemoryAccess.validateLoadOrdering')(function* (
+export const validateLoadOrdering = Effect.fnUntraced(function* (
   ordering: AtomicOrdering,
 ): Effect.fn.Return<void, LlvmError> {
   if (ordering === 'release' || ordering === 'acq_rel') {
@@ -329,7 +329,7 @@ export const validateLoadOrdering = Effect.fn('MemoryAccess.validateLoadOrdering
  * @category memory access
  * @since 0.0.0
  */
-export const validateStoreOrdering = Effect.fn('MemoryAccess.validateStoreOrdering')(function* (
+export const validateStoreOrdering = Effect.fnUntraced(function* (
   ordering: AtomicOrdering,
 ): Effect.fn.Return<void, LlvmError> {
   if (ordering === 'acquire' || ordering === 'acq_rel') {
@@ -349,7 +349,7 @@ export const validateStoreOrdering = Effect.fn('MemoryAccess.validateStoreOrderi
  * @category memory access
  * @since 0.0.0
  */
-export const validateFenceOrdering = Effect.fn('MemoryAccess.validateFenceOrdering')(function* (
+export const validateFenceOrdering = Effect.fnUntraced(function* (
   ordering: AtomicOrdering,
 ): Effect.fn.Return<void, LlvmError> {
   if (
@@ -374,7 +374,7 @@ export const validateFenceOrdering = Effect.fn('MemoryAccess.validateFenceOrderi
  * @category memory access
  * @since 0.0.0
  */
-export const validateRmwOrdering = Effect.fn('MemoryAccess.validateRmwOrdering')(function* (
+export const validateRmwOrdering = Effect.fnUntraced(function* (
   ordering: AtomicOrdering,
 ): Effect.fn.Return<void, LlvmError> {
   if (ordering === 'none' || ordering === 'unordered') {
@@ -399,7 +399,7 @@ export const validateRmwOrdering = Effect.fn('MemoryAccess.validateRmwOrdering')
  * @category memory access
  * @since 0.0.0
  */
-export const validateCompareExchange = Effect.fn('MemoryAccess.validateCompareExchange')(function* (
+export const validateCompareExchange = Effect.fnUntraced(function* (
   success: AtomicOrdering,
   failure: AtomicOrdering,
 ): Effect.fn.Return<void, LlvmError> {

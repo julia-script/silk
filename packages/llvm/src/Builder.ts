@@ -1,6 +1,5 @@
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
-import * as Semaphore from 'effect/Semaphore'
 import * as ByteString from './ByteString.js'
 import * as DataLayout from './DataLayout.js'
 import * as BuilderState from './internal/BuilderState.js'
@@ -71,16 +70,14 @@ export interface Options {
  * @category builders
  * @since 0.0.0
  */
-export const make = Effect.fn('Builder.make')(function* (
+export const make = Effect.fnUntraced(function* (
   options: Options = {},
 ): Effect.fn.Return<Builder, LlvmError> {
-  const gate = yield* Semaphore.make(1)
   const dataLayout = ByteString.coerceOrEmpty(options.dataLayout)
   const layout = yield* DataLayout.parse(dataLayout)
   const self: Builder = Object.freeze({ _tag: 'Builder' })
   BuilderState.register(self, {
     owner: OwnedHandle.makeOwner(),
-    gate,
     value: {
       strip: options.strip ?? true,
       moduleName: ByteString.coerceOrEmpty(options.moduleName),
@@ -114,7 +111,7 @@ export const make = Effect.fn('Builder.make')(function* (
  * @category builders
  * @since 0.0.0
  */
-export const appendModuleAssembly = Effect.fn('Builder.appendModuleAssembly')(function* (
+export const appendModuleAssembly = Effect.fnUntraced(function* (
   self: Builder,
   assembly: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<void, LlvmError> {

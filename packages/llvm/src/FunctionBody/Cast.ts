@@ -71,7 +71,7 @@ const scalarWidth = (
  * @category instructions
  * @since 0.0.0
  */
-export const cast = Effect.fn('FunctionBody.cast')(function* (
+export const cast = Effect.fnUntraced(function* (
   self: FunctionBody,
   kind: CastKind,
   operand: Value.Input,

@@ -107,7 +107,7 @@ const compatible = (
  * @category functions
  * @since 0.0.0
  */
-export const declare = Effect.fn('Function.declare')(function* (
+export const declare = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
   type: Type.Type,
@@ -218,7 +218,7 @@ export const declare = Effect.fn('Function.declare')(function* (
  * @category functions
  * @since 0.0.0
  */
-export const fromGlobal = Effect.fn('Function.fromGlobal')(function* (
+export const fromGlobal = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   global: Global.Global,
   type: Type.Type,
@@ -289,7 +289,7 @@ export const fromGlobal = Effect.fn('Function.fromGlobal')(function* (
  * @category functions
  * @since 0.0.0
  */
-export const global = Effect.fn('Function.global')(function* (
+export const global = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Function,
 ): Effect.fn.Return<Global.Global, LlvmError> {
@@ -314,7 +314,7 @@ export const global = Effect.fn('Function.global')(function* (
  * @category functions
  * @since 0.0.0
  */
-export const setAttributes = Effect.fn('Function.setAttributes')(function* (
+export const setAttributes = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Function,
   attributes: Attribute.FunctionSet | undefined,
@@ -361,7 +361,7 @@ export const setAttributes = Effect.fn('Function.setAttributes')(function* (
  * @category functions
  * @since 0.0.0
  */
-export const setSubprogram = Effect.fn('Function.setSubprogram')(function* (
+export const setSubprogram = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Function,
   subprogram: Metadata.Optional,
@@ -409,7 +409,7 @@ export const setSubprogram = Effect.fn('Function.setSubprogram')(function* (
  * @category functions
  * @since 0.0.0
  */
-export const properties = Effect.fn('Function.properties')(function* (
+export const properties = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Function,
 ): Effect.fn.Return<Properties, LlvmError> {
@@ -491,7 +491,7 @@ const releaseBodyBuild = Effect.fnUntraced(function* (
  *   const voidType = yield* Type.voidType(builder)
  *   const signature = yield* Type.functionType(builder, voidType, [])
  *   const fn = yield* FunctionActor.declare(builder, 'noop', signature)
- *   yield* FunctionActor.buildBody(builder, fn, Effect.fn('Example.noop')(function* (body) {
+ *   yield* FunctionActor.buildBody(builder, fn, Effect.fnUntraced(function* (body) {
  *     yield* Block.make(body, 'entry')
  *     yield* FunctionBody.returnVoid(body)
  *   }))
@@ -501,7 +501,7 @@ const releaseBodyBuild = Effect.fnUntraced(function* (
  * @category functions
  * @since 0.0.0
  */
-export const buildBody = Effect.fn('Function.buildBody')(function* <A, E, R>(
+export const buildBody = Effect.fnUntraced(function* <A, E, R>(
   builder: Builder.Builder,
   self: Function,
   action: (body: FunctionBody.FunctionBody) => Effect.Effect<A, E, R>,

@@ -77,43 +77,53 @@ export const create = (
   return self
 }
 
-/** @internal */
-export const builder = Effect.fn('FunctionBody.builder')(function* (
+/**
+ * The three accessors below run once per emitted instruction, so each is a single runtime
+ * primitive: `Effect.withFiber` reads the current fiber synchronously (`fiber.id` is the same
+ * number `Effect.fiberId` yields) and the draft lookup, active/ownership assertion, and
+ * transition all complete inside that one step instead of bouncing through the fiber run loop
+ * for every stage.
+ *
+ * @internal
+ */
+export const builder = (
   self: FunctionBodyActor.FunctionBody,
-): Effect.fn.Return<Builder.Builder, LlvmError> {
-  const fiber = yield* Effect.fiberId
-  const draft = yield* Effect.fromResult(lookup(self, 'FunctionBody.builder'))
-  yield* Effect.fromResult(assertActive(draft, fiber, 'FunctionBody.builder'))
-  return draft.builder
-})
+): Effect.Effect<Builder.Builder, LlvmError> =>
+  Effect.withFiber((fiber) =>
+    Effect.fromResult(
+      Result.flatMap(lookup(self, 'FunctionBody.builder'), (draft) =>
+        Result.map(assertActive(draft, fiber.id, 'FunctionBody.builder'), () => draft.builder),
+      ),
+    ),
+  )
 
 /** @internal */
-export const mutate = Effect.fnUntraced(function* <A>(
+export const mutate = <A>(
   self: FunctionBodyActor.FunctionBody,
   operation: string,
   transition: (draft: Draft) => Result.Result<A, LlvmError>,
-): Effect.fn.Return<A, LlvmError> {
-  const fiber = yield* Effect.fiberId
-  const draft = yield* Effect.fromResult(lookup(self, operation))
-  yield* Effect.fromResult(assertActive(draft, fiber, operation))
-  return yield* Effect.suspend(() => Effect.fromResult(transition(draft)))
-})
+): Effect.Effect<A, LlvmError> =>
+  Effect.withFiber((fiber) =>
+    Effect.fromResult(
+      Result.flatMap(lookup(self, operation), (draft) =>
+        Result.flatMap(assertActive(draft, fiber.id, operation), () => transition(draft)),
+      ),
+    ),
+  )
 
 /** @internal */
-export const mutateModule = Effect.fnUntraced(function* <A>(
+export const mutateModule = <A>(
   self: FunctionBodyActor.FunctionBody,
   operation: string,
   transition: (draft: Draft, module: BuilderState.MutableState) => Result.Result<A, LlvmError>,
-): Effect.fn.Return<A, LlvmError> {
-  const fiber = yield* Effect.fiberId
-  const draft = yield* Effect.fromResult(lookup(self, operation))
-  return yield* BuilderState.mutate(draft.builder, operation, (module) =>
-    Result.gen(function* () {
-      yield* assertActive(draft, fiber, operation)
-      return yield* transition(draft, module)
-    }),
+): Effect.Effect<A, LlvmError> =>
+  Effect.withFiber((fiber) =>
+    Effect.flatMap(Effect.fromResult(lookup(self, operation)), (draft) =>
+      BuilderState.mutate(draft.builder, operation, (module) =>
+        Result.flatMap(assertActive(draft, fiber.id, operation), () => transition(draft, module)),
+      ),
+    ),
   )
-})
 
 /** @internal */
 export const close = (
@@ -580,7 +590,7 @@ export const makeSwitchHandle = (
   })
 
 /** @internal */
-export const validate = Effect.fn('FunctionBody.validate')(function* (
+export const validate = Effect.fnUntraced(function* (
   self: FunctionBodyActor.FunctionBody,
 ): Effect.fn.Return<FunctionBodyDescription.Snapshot, LlvmError> {
   return yield* mutate(self, 'FunctionBody.validate', (draft) =>

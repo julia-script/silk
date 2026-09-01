@@ -30,7 +30,7 @@ export type Input = Value | Constant.Constant
  * @category values
  * @since 0.0.0
  */
-export const argument = Effect.fn('Value.argument')(function* (
+export const argument = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   index: number,
 ): Effect.fn.Return<Value, LlvmError> {
@@ -74,7 +74,7 @@ export const argument = Effect.fn('Value.argument')(function* (
  *   yield* FunctionActor.buildBody(
  *     builder,
  *     loopFunction,
- *     Effect.fn('Example.loopOnce')(function* (body) {
+ *     Effect.fnUntraced(function* (body) {
  *       const entry = yield* Block.make(body, 'entry')
  *       const loop = yield* Block.make(body, 'loop')
  *       const exit = yield* Block.make(body, 'exit')
@@ -107,7 +107,7 @@ export const argument = Effect.fn('Value.argument')(function* (
  * @category values
  * @since 0.0.0
  */
-export const forward = Effect.fn('Value.forward')(function* (
+export const forward = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   type: Type.Type,
   name?: ByteString.ByteString | Uint8Array | string,
@@ -129,7 +129,7 @@ export const forward = Effect.fn('Value.forward')(function* (
  * @category values
  * @since 0.0.0
  */
-export const resolveForward = Effect.fn('Value.resolveForward')(function* (
+export const resolveForward = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   self: Value,
   resolved: Input,
@@ -145,7 +145,7 @@ export const resolveForward = Effect.fn('Value.resolveForward')(function* (
  * @category values
  * @since 0.0.0
  */
-export const typeOf = Effect.fn('Value.typeOf')(function* (
+export const typeOf = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   self: Value,
 ): Effect.fn.Return<Type.Type, LlvmError> {
@@ -172,7 +172,7 @@ export const typeOf = Effect.fn('Value.typeOf')(function* (
  * @category values
  * @since 0.0.0
  */
-export const name = Effect.fn('Value.name')(function* (
+export const name = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   self: Value,
 ): Effect.fn.Return<ByteString.ByteString, LlvmError> {
@@ -187,7 +187,7 @@ export const name = Effect.fn('Value.name')(function* (
  * @category values
  * @since 0.0.0
  */
-export const setName = Effect.fn('Value.setName')(function* (
+export const setName = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   self: Value,
   name: ByteString.ByteString | Uint8Array | string,
@@ -203,7 +203,7 @@ export const setName = Effect.fn('Value.setName')(function* (
  * @category values
  * @since 0.0.0
  */
-export const instruction = Effect.fn('Value.instruction')(function* (
+export const instruction = Effect.fnUntraced(function* (
   body: FunctionBody.FunctionBody,
   self: Value,
 ): Effect.fn.Return<FunctionBody.Instruction | undefined, LlvmError> {

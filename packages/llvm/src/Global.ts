@@ -106,7 +106,7 @@ export interface Properties extends GlobalDescription.Common {
  * @category globals
  * @since 0.0.0
  */
-export const lookup = Effect.fn('Global.lookup')(function* (
+export const lookup = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<Global | undefined, LlvmError> {
@@ -130,7 +130,7 @@ export const lookup = Effect.fn('Global.lookup')(function* (
  * @category globals
  * @since 0.0.0
  */
-export const name = Effect.fn('Global.name')(function* (
+export const name = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Global,
 ): Effect.fn.Return<ByteString.ByteString, LlvmError> {
@@ -148,7 +148,7 @@ export const name = Effect.fn('Global.name')(function* (
  * @category globals
  * @since 0.0.0
  */
-export const kind = Effect.fn('Global.kind')(function* (
+export const kind = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Global,
 ): Effect.fn.Return<GlobalDescription.GlobalDescription['kind'], LlvmError> {
@@ -166,7 +166,7 @@ export const kind = Effect.fn('Global.kind')(function* (
  * @category globals
  * @since 0.0.0
  */
-export const properties = Effect.fn('Global.properties')(function* (
+export const properties = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Global,
 ): Effect.fn.Return<Properties, LlvmError> {
@@ -206,7 +206,7 @@ export const properties = Effect.fn('Global.properties')(function* (
  * @category globals
  * @since 0.0.0
  */
-export const rename = Effect.fn('Global.rename')(function* (
+export const rename = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Global,
   nextName: ByteString.ByteString | Uint8Array | string,
@@ -257,7 +257,7 @@ export const rename = Effect.fn('Global.rename')(function* (
  * @category globals
  * @since 0.0.0
  */
-export const configure = Effect.fn('Global.configure')(function* (
+export const configure = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Global,
   options: Options,
@@ -292,7 +292,7 @@ export const configure = Effect.fn('Global.configure')(function* (
  * @category globals
  * @since 0.0.0
  */
-export const attachMetadata = Effect.fn('Global.attachMetadata')(function* (
+export const attachMetadata = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Global,
   kind: 'dbg' | 'prof' | 'unpredictable',
@@ -335,7 +335,7 @@ export const attachMetadata = Effect.fn('Global.attachMetadata')(function* (
  * @category globals
  * @since 0.0.0
  */
-export const replace = Effect.fn('Global.replace')(function* (
+export const replace = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Global,
   replacement: Global,
@@ -367,7 +367,7 @@ export const replace = Effect.fn('Global.replace')(function* (
  * @category globals
  * @since 0.0.0
  */
-export const remove = Effect.fn('Global.remove')(function* (
+export const remove = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Global,
 ): Effect.fn.Return<void, LlvmError> {

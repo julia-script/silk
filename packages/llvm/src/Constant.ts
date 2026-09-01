@@ -135,7 +135,7 @@ const descriptionKey = (description: ConstantDescription.Description): string =>
 }
 
 /** @internal */
-const intern = Effect.fn('Constant.intern')(function* (
+const intern = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   description: ConstantDescription.Description,
 ) {
@@ -156,7 +156,7 @@ const intern = Effect.fn('Constant.intern')(function* (
 })
 
 /** @internal */
-const integerOf = Effect.fn('Constant.integerOf')(function* (
+const integerOf = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   type: Type.Type,
   value: bigint,
@@ -229,7 +229,7 @@ const integerOf = Effect.fn('Constant.integerOf')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const integerUnsigned = Effect.fn('Constant.integerUnsigned')(function* (
+export const integerUnsigned = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   type: Type.Type,
   value: number | bigint,
@@ -249,7 +249,7 @@ export const integerUnsigned = Effect.fn('Constant.integerUnsigned')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const fromGlobal = Effect.fn('Constant.fromGlobal')(function* (
+export const fromGlobal = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   global: Global.Global,
 ): Effect.fn.Return<Constant, LlvmError> {
@@ -275,7 +275,7 @@ export const fromGlobal = Effect.fn('Constant.fromGlobal')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const integerSigned = Effect.fn('Constant.integerSigned')(function* (
+export const integerSigned = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   type: Type.Type,
   value: number | bigint,
@@ -344,7 +344,7 @@ const formatBytes: Record<FloatFormat, number> = {
  * @category constants
  * @since 0.0.0
  */
-export const floatingRaw = Effect.fn('Constant.floatingRaw')(function* (
+export const floatingRaw = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   type: Type.Type,
   format: FloatFormat,
@@ -390,7 +390,7 @@ export const floatingRaw = Effect.fn('Constant.floatingRaw')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const halfBits = Effect.fn('Constant.halfBits')(function* (
+export const halfBits = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   type: Type.Type,
   bits: number,
@@ -404,7 +404,7 @@ export const halfBits = Effect.fn('Constant.halfBits')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const bfloatBits = Effect.fn('Constant.bfloatBits')(function* (
+export const bfloatBits = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   type: Type.Type,
   bits: number,
@@ -432,7 +432,7 @@ const numberBytes = (value: number, byteLength: 4 | 8): Uint8Array => {
  * @category constants
  * @since 0.0.0
  */
-export const floatFromNumber = Effect.fn('Constant.floatFromNumber')(function* (
+export const floatFromNumber = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   type: Type.Type,
   value: number,
@@ -446,7 +446,7 @@ export const floatFromNumber = Effect.fn('Constant.floatFromNumber')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const doubleFromNumber = Effect.fn('Constant.doubleFromNumber')(function* (
+export const doubleFromNumber = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   type: Type.Type,
   value: number,
@@ -455,7 +455,7 @@ export const doubleFromNumber = Effect.fn('Constant.doubleFromNumber')(function*
 })
 
 /** @internal */
-const special = Effect.fn('Constant.special')(function* (
+const special = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   type: Type.Type,
   kind: Extract<ConstantDescription.Description, { readonly _tag: 'Special' }>['kind'],
@@ -472,10 +472,7 @@ const special = Effect.fn('Constant.special')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const nullValue = Effect.fn('Constant.nullValue')(function* (
-  builder: Builder.Builder,
-  type: Type.Type,
-) {
+export const nullValue = Effect.fnUntraced(function* (builder: Builder.Builder, type: Type.Type) {
   return yield* special(builder, type, 'null')
 })
 
@@ -485,10 +482,7 @@ export const nullValue = Effect.fn('Constant.nullValue')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const none = Effect.fn('Constant.none')(function* (
-  builder: Builder.Builder,
-  type: Type.Type,
-) {
+export const none = Effect.fnUntraced(function* (builder: Builder.Builder, type: Type.Type) {
   return yield* special(builder, type, 'none')
 })
 
@@ -498,10 +492,7 @@ export const none = Effect.fn('Constant.none')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const zero = Effect.fn('Constant.zero')(function* (
-  builder: Builder.Builder,
-  type: Type.Type,
-) {
+export const zero = Effect.fnUntraced(function* (builder: Builder.Builder, type: Type.Type) {
   return yield* special(builder, type, 'zeroinitializer')
 })
 
@@ -511,10 +502,7 @@ export const zero = Effect.fn('Constant.zero')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const undef = Effect.fn('Constant.undef')(function* (
-  builder: Builder.Builder,
-  type: Type.Type,
-) {
+export const undef = Effect.fnUntraced(function* (builder: Builder.Builder, type: Type.Type) {
   return yield* special(builder, type, 'undef')
 })
 
@@ -524,10 +512,7 @@ export const undef = Effect.fn('Constant.undef')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const poison = Effect.fn('Constant.poison')(function* (
-  builder: Builder.Builder,
-  type: Type.Type,
-) {
+export const poison = Effect.fnUntraced(function* (builder: Builder.Builder, type: Type.Type) {
   return yield* special(builder, type, 'poison')
 })
 
@@ -537,7 +522,7 @@ export const poison = Effect.fn('Constant.poison')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const string = Effect.fn('Constant.string')(function* (
+export const string = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   value: ByteString.ByteString | Uint8Array | string,
   options: { readonly nullTerminated?: boolean } = {},
@@ -561,7 +546,7 @@ export const string = Effect.fn('Constant.string')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const aggregate = Effect.fn('Constant.aggregate')(function* (
+export const aggregate = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   type: Type.Type,
   elements: ReadonlyArray<Constant>,
@@ -647,7 +632,7 @@ export const aggregate = Effect.fn('Constant.aggregate')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const splat = Effect.fn('Constant.splat')(function* (
+export const splat = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   type: Type.Type,
   value: Constant,
@@ -679,7 +664,7 @@ export const splat = Effect.fn('Constant.splat')(function* (
 })
 
 /** @internal */
-const functionConstant = Effect.fn('Constant.functionConstant')(function* (
+const functionConstant = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   fn: FunctionActor.Function,
 ): Effect.fn.Return<Constant, LlvmError> {
@@ -692,7 +677,7 @@ const functionConstant = Effect.fn('Constant.functionConstant')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const blockAddress = Effect.fn('Constant.blockAddress')(function* (
+export const blockAddress = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   fn: FunctionActor.Function,
   block: number,
@@ -751,7 +736,7 @@ export const blockAddress = Effect.fn('Constant.blockAddress')(function* (
 })
 
 /** @internal */
-const functionReference = Effect.fn('Constant.functionReference')(function* (
+const functionReference = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   fn: FunctionActor.Function,
   kind: 'dso_local_equivalent' | 'no_cfi',
@@ -788,7 +773,7 @@ const functionReference = Effect.fn('Constant.functionReference')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const dsoLocalEquivalent = Effect.fn('Constant.dsoLocalEquivalent')(function* (
+export const dsoLocalEquivalent = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   fn: FunctionActor.Function,
 ): Effect.fn.Return<Constant, LlvmError> {
@@ -801,7 +786,7 @@ export const dsoLocalEquivalent = Effect.fn('Constant.dsoLocalEquivalent')(funct
  * @category constants
  * @since 0.0.0
  */
-export const noCfi = Effect.fn('Constant.noCfi')(function* (
+export const noCfi = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   fn: FunctionActor.Function,
 ): Effect.fn.Return<Constant, LlvmError> {
@@ -848,7 +833,7 @@ const castWidth = (description: TypeDescription.Description): number | undefined
  * @category constants
  * @since 0.0.0
  */
-export const cast = Effect.fn('Constant.cast')(function* (
+export const cast = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   kind: CastKind,
   value: Constant,
@@ -929,7 +914,7 @@ export const cast = Effect.fn('Constant.cast')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const binary = Effect.fn('Constant.binary')(function* (
+export const binary = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   kind: BinaryKind,
   left: Constant,
@@ -992,7 +977,7 @@ export const binary = Effect.fn('Constant.binary')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const getElementPtr = Effect.fn('Constant.getElementPtr')(function* (
+export const getElementPtr = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   sourceType: Type.Type,
   resultType: Type.Type,
@@ -1204,7 +1189,7 @@ export const getElementPtr = Effect.fn('Constant.getElementPtr')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const assembly = Effect.fn('Constant.assembly')(function* (
+export const assembly = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   type: Type.Type,
   assembly: ByteString.ByteString | Uint8Array | string,
@@ -1235,7 +1220,7 @@ export const assembly = Effect.fn('Constant.assembly')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const typeOf = Effect.fn('Constant.typeOf')(function* (
+export const typeOf = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Constant,
 ): Effect.fn.Return<Type.Type, LlvmError> {
@@ -1259,7 +1244,7 @@ export const typeOf = Effect.fn('Constant.typeOf')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const tag = Effect.fn('Constant.tag')(function* (
+export const tag = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Constant,
 ): Effect.fn.Return<ConstantDescription.Description['_tag'], LlvmError> {
@@ -1277,7 +1262,7 @@ export const tag = Effect.fn('Constant.tag')(function* (
  * @category constants
  * @since 0.0.0
  */
-export const integerBitPattern = Effect.fn('Constant.integerBitPattern')(function* (
+export const integerBitPattern = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Constant,
 ): Effect.fn.Return<bigint, LlvmError> {
@@ -1316,7 +1301,7 @@ export const integerBitPattern = Effect.fn('Constant.integerBitPattern')(functio
  * @category constants
  * @since 0.0.0
  */
-export const floatingBits = Effect.fn('Constant.floatingBits')(function* (
+export const floatingBits = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Constant,
 ): Effect.fn.Return<ByteString.ByteString, LlvmError> {

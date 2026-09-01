@@ -13,7 +13,7 @@ import type { FunctionBody, Instruction } from './_internal.js'
  * @category instructions
  * @since 0.0.0
  */
-export const attachMetadata = Effect.fn('FunctionBody.attachMetadata')(function* (
+export const attachMetadata = Effect.fnUntraced(function* (
   self: FunctionBody,
   instruction: Instruction,
   kind: 'dbg' | 'prof' | 'unpredictable',
@@ -58,7 +58,7 @@ export const attachMetadata = Effect.fn('FunctionBody.attachMetadata')(function*
  * @category instructions
  * @since 0.0.0
  */
-export const setDebugLocation = Effect.fn('FunctionBody.setDebugLocation')(function* (
+export const setDebugLocation = Effect.fnUntraced(function* (
   self: FunctionBody,
   instruction: Instruction,
   location: Metadata.Optional,
@@ -105,7 +105,7 @@ export const setDebugLocation = Effect.fn('FunctionBody.setDebugLocation')(funct
  * @category instructions
  * @since 0.0.0
  */
-export const setBranchWeights = Effect.fn('FunctionBody.setBranchWeights')(function* (
+export const setBranchWeights = Effect.fnUntraced(function* (
   self: FunctionBody,
   instruction: Instruction,
   weights: ReadonlyArray<number>,
@@ -140,7 +140,7 @@ export const setBranchWeights = Effect.fn('FunctionBody.setBranchWeights')(funct
  * @category instructions
  * @since 0.0.0
  */
-export const setUnpredictable = Effect.fn('FunctionBody.setUnpredictable')(function* (
+export const setUnpredictable = Effect.fnUntraced(function* (
   self: FunctionBody,
   instruction: Instruction,
 ): Effect.fn.Return<void, LlvmError> {

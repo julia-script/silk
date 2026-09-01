@@ -80,7 +80,7 @@ const descriptionKey = (description: AttributeDescription.Description): string =
 }
 
 /** @internal */
-const intern = Effect.fn('Attribute.intern')(function* (
+const intern = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   description: AttributeDescription.Description,
 ) {
@@ -120,7 +120,7 @@ const validateName = Effect.fnUntraced(function* (
  * @category attributes
  * @since 0.0.0
  */
-export const flag = Effect.fn('Attribute.flag')(function* (
+export const flag = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<Attribute, LlvmError> {
@@ -134,7 +134,7 @@ export const flag = Effect.fn('Attribute.flag')(function* (
  * @category attributes
  * @since 0.0.0
  */
-export const integer = Effect.fn('Attribute.integer')(function* (
+export const integer = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
   value: number | bigint,
@@ -160,7 +160,7 @@ export const integer = Effect.fn('Attribute.integer')(function* (
  * @category attributes
  * @since 0.0.0
  */
-export const typeAttribute = Effect.fn('Attribute.typeAttribute')(function* (
+export const typeAttribute = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
   type: Type.Type,
@@ -183,7 +183,7 @@ export const typeAttribute = Effect.fn('Attribute.typeAttribute')(function* (
  * @category attributes
  * @since 0.0.0
  */
-export const string = Effect.fn('Attribute.string')(function* (
+export const string = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
   value: ByteString.ByteString | Uint8Array | string = ByteString.empty,
@@ -201,7 +201,7 @@ export const string = Effect.fn('Attribute.string')(function* (
  * @category attributes
  * @since 0.0.0
  */
-export const integerList = Effect.fn('Attribute.integerList')(function* (
+export const integerList = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
   values: ReadonlyArray<number | bigint>,
@@ -222,7 +222,7 @@ export const integerList = Effect.fn('Attribute.integerList')(function* (
 })
 
 /** @internal */
-const internSet = Effect.fn('Attribute.internSet')(function* (
+const internSet = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   attributeIndices: ReadonlyArray<number>,
 ): Effect.fn.Return<Set, LlvmError> {
@@ -304,7 +304,7 @@ const internSet = Effect.fn('Attribute.internSet')(function* (
  * @category attributes
  * @since 0.0.0
  */
-export const set = Effect.fn('Attribute.set')(function* (
+export const set = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   attributes: ReadonlyArray<Attribute>,
 ): Effect.fn.Return<Set, LlvmError> {
@@ -326,7 +326,7 @@ export const set = Effect.fn('Attribute.set')(function* (
  * @category attributes
  * @since 0.0.0
  */
-export const add = Effect.fn('Attribute.add')(function* (
+export const add = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Set,
   attribute: Attribute,
@@ -363,7 +363,7 @@ export const add = Effect.fn('Attribute.add')(function* (
  * @category attributes
  * @since 0.0.0
  */
-export const remove = Effect.fn('Attribute.remove')(function* (
+export const remove = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Set,
   attribute: Attribute,
@@ -406,7 +406,7 @@ export const remove = Effect.fn('Attribute.remove')(function* (
  * @category attributes
  * @since 0.0.0
  */
-export const entries = Effect.fn('Attribute.entries')(function* (
+export const entries = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Set,
 ): Effect.fn.Return<ReadonlyArray<Attribute>, LlvmError> {
@@ -440,7 +440,7 @@ export const entries = Effect.fn('Attribute.entries')(function* (
  * @category attributes
  * @since 0.0.0
  */
-export const functionSet = Effect.fn('Attribute.functionSet')(function* (
+export const functionSet = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   input: FunctionSetInput = {},
 ): Effect.fn.Return<FunctionSet, LlvmError> {
@@ -506,7 +506,7 @@ export const functionSet = Effect.fn('Attribute.functionSet')(function* (
  * @category attributes
  * @since 0.0.0
  */
-export const functionSetEntries = Effect.fn('Attribute.functionSetEntries')(function* (
+export const functionSetEntries = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: FunctionSet,
 ): Effect.fn.Return<FunctionSetEntries, LlvmError> {

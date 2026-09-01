@@ -370,7 +370,7 @@ const encodeSnapshot = (state: BuilderState.Snapshot, options: Options): Uint8Ar
  * @category encoding
  * @since 0.0.0
  */
-export const encode = Effect.fn('Bitcode.encode')(function* (
+export const encode = Effect.fnUntraced(function* (
   self: Builder.Builder,
   options: Options = {},
 ): Effect.fn.Return<Uint8Array, LlvmError> {

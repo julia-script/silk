@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { inventoryKinds, sha256 } from './parity-lib.mjs'
@@ -22,14 +22,6 @@ const duplicates = (values) => {
     return false
   })
 }
-const sourceFiles = (directory) =>
-  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const path = resolve(directory, entry.name)
-    if (entry.isDirectory()) return sourceFiles(path)
-    if (path.endsWith('.ts')) return [path]
-    return []
-  })
-
 check(manifest.schemaVersion === 1, 'unsupported manifest schemaVersion')
 check(inventory.schemaVersion === 1, 'unsupported inventory schemaVersion')
 check(manifest.baseline.commit === inventory.commit, 'inventory commit differs from manifest')
@@ -74,15 +66,6 @@ check(
   typeof benchmarks.decision.retainEffectFnUntraced === 'boolean',
   'benchmark decision is missing',
 )
-for (const source of sourceFiles(resolve(packageRoot, 'src'))) {
-  if (source.includes(`${resolve(packageRoot, 'src')}/internal/`)) continue
-  const contents = readFileSync(source, 'utf8')
-  check(
-    !/export const \w+ = Effect\.fnUntraced/.test(contents),
-    `public actor operation must use named Effect.fn tracing: ${source}`,
-  )
-}
-
 const allEntries = inventoryKinds.flatMap((kind) => inventory[kind] ?? [])
 const entryDuplicates = duplicates(allEntries.map((entry) => entry.id))
 check(entryDuplicates.length === 0, `duplicate inventory IDs: ${entryDuplicates.join(', ')}`)

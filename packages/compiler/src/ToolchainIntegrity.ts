@@ -91,7 +91,21 @@ const rotateRight = (value: number, count: number): number =>
   (value >>> count) | (value << (32 - count))
 
 /** Computes the path- and timestamp-independent SHA-256 identity of exact bytes. */
+const contentDigestCache = new WeakMap<Uint8Array, string>()
+
 export const contentDigest = (value: Uint8Array | string): string => {
+  if (typeof value !== 'string') {
+    let cached = contentDigestCache.get(value)
+    if (cached === undefined) {
+      cached = computeContentDigest(value)
+      contentDigestCache.set(value, cached)
+    }
+    return cached
+  }
+  return computeContentDigest(value)
+}
+
+const computeContentDigest = (value: Uint8Array | string): string => {
   const source = typeof value === 'string' ? new TextEncoder().encode(value) : value
   const bitLength = BigInt(source.length) * 8n
   const paddedLength = Math.ceil((source.length + 9) / 64) * 64

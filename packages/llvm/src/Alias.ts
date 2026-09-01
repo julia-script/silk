@@ -138,7 +138,7 @@ const resolve = (
  * @category aliases
  * @since 0.0.0
  */
-export const make = Effect.fn('Alias.make')(function* (
+export const make = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
   valueType: Type.Type,
@@ -180,7 +180,7 @@ export const make = Effect.fn('Alias.make')(function* (
  * @category aliases
  * @since 0.0.0
  */
-export const fromGlobal = Effect.fn('Alias.fromGlobal')(function* (
+export const fromGlobal = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   global: Global.Global,
   valueType: Type.Type,
@@ -219,7 +219,7 @@ export const fromGlobal = Effect.fn('Alias.fromGlobal')(function* (
  * @category aliases
  * @since 0.0.0
  */
-export const setAliasee = Effect.fn('Alias.setAliasee')(function* (
+export const setAliasee = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Alias,
   aliasee: Constant.Constant,
@@ -241,7 +241,7 @@ export const setAliasee = Effect.fn('Alias.setAliasee')(function* (
  * @category aliases
  * @since 0.0.0
  */
-export const global = Effect.fn('Alias.global')(function* (
+export const global = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Alias,
 ): Effect.fn.Return<Global.Global, LlvmError> {
@@ -259,7 +259,7 @@ export const global = Effect.fn('Alias.global')(function* (
  * @category aliases
  * @since 0.0.0
  */
-export const aliasee = Effect.fn('Alias.aliasee')(function* (
+export const aliasee = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   self: Alias,
 ): Effect.fn.Return<Constant.Constant, LlvmError> {

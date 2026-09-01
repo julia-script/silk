@@ -16,12 +16,24 @@ import { documentation as stdlibDocumentation } from './support/doctestStdlibDoc
  */
 const skipped: ReadonlyArray<string> = []
 
+/**
+ * The live doctest sweep compiles every stdlib example and is by far this file's dominant cost, so
+ * the two tests that need the same live report share one run instead of each paying for their own.
+ */
+let liveReportOnce: Doctest.Report | undefined
+const liveReport = Effect.gen(function* () {
+  if (liveReportOnce === undefined) {
+    const documentation = yield* stdlibDocumentation
+    liveReportOnce = yield* Doctest.run({ documentation, sources: Stdlib.sources })
+  }
+  return liveReportOnce
+})
+
 it.effect(
   'compiles every fenced Silk example in the standard library',
   () =>
     Effect.gen(function* () {
-      const documentation = yield* stdlibDocumentation
-      const report = yield* Doctest.run({ documentation, sources: Stdlib.sources })
+      const report = yield* liveReport
 
       assert.isAbove(
         report.collected,
@@ -76,7 +88,7 @@ it.effect(
     Effect.gen(function* () {
       const documentation = yield* stdlibDocumentation
       const parsed: unknown = JSON.parse(Json.encode(documentation))
-      const live = yield* Doctest.run({ documentation, sources: Stdlib.sources })
+      const live = yield* liveReport
       const roundTripped = yield* Doctest.run({
         documentation: parsed,
         sources: Stdlib.sources,

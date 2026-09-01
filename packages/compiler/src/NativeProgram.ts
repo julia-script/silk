@@ -42,7 +42,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     readonly symbols: ReadonlyArray<SymbolEntry>
     readonly nativeRuntimeSymbols: ReadonlyArray<string>
     readonly runtimeFeatures: ReadonlyArray<RuntimeFeature>
-    readonly ir: string
+    /** Renders the textual IR on demand; most compiles never read it. */
+    readonly renderIr: () => string
     readonly bitcode: Uint8Array
   },
   BackendError | LlvmError.LlvmError
@@ -517,7 +518,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ...(suspensionEnabled ? CoroutineRuntime.symbols : []),
     ]),
     runtimeFeatures: Object.freeze([...runtimeFeatures].sort()),
-    ir: yield* IrText.render(builder),
+    renderIr: () => Effect.runSync(IrText.render(builder)),
     bitcode: yield* Bitcode.encode(builder),
   }
 })

@@ -31,7 +31,7 @@ export const LlvmBackend: Backend.Backend<Backend.LlvmBitcodeArtifact> = Object.
         ),
       ),
     )
-    return Object.freeze({
+    const artifact = {
       _tag: 'LlvmBitcodeArtifact',
       backend: 'llvm',
       module: program.module,
@@ -42,7 +42,17 @@ export const LlvmBackend: Backend.Backend<Backend.LlvmBitcodeArtifact> = Object.
       runtimeFeatures: output.runtimeFeatures,
       control: llvmControl(program),
       bitcode: output.bitcode,
-      ir: output.ir,
+    }
+    // Textual IR is rendered only when read: it is a full extra pass over the module and most
+    // compiles (including the cached-artifact path) never look at it.
+    let renderedIr: string | undefined
+    Object.defineProperty(artifact, 'ir', {
+      enumerable: true,
+      get: () => {
+        renderedIr ??= output.renderIr()
+        return renderedIr
+      },
     })
+    return Object.freeze(artifact) as Backend.LlvmBitcodeArtifact
   }),
 })

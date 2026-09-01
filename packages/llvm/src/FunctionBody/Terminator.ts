@@ -24,7 +24,7 @@ export interface Switch extends Handle.Handle<'Switch'> {}
  * @category instructions
  * @since 0.0.0
  */
-export const indirectBranch = Effect.fn('FunctionBody.indirectBranch')(function* (
+export const indirectBranch = Effect.fnUntraced(function* (
   self: FunctionBody,
   address: Value.Input,
   destinations: ReadonlyArray<Block.Block>,
@@ -113,7 +113,7 @@ export const indirectBranch = Effect.fn('FunctionBody.indirectBranch')(function*
  * @category instructions
  * @since 0.0.0
  */
-export const branch = Effect.fn('FunctionBody.branch')(function* (
+export const branch = Effect.fnUntraced(function* (
   self: FunctionBody,
   destination: Block.Block,
 ): Effect.fn.Return<Instruction, LlvmError> {
@@ -151,7 +151,7 @@ export const branch = Effect.fn('FunctionBody.branch')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const conditionalBranch = Effect.fn('FunctionBody.conditionalBranch')(function* (
+export const conditionalBranch = Effect.fnUntraced(function* (
   self: FunctionBody,
   condition: Value.Input,
   onTrue: Block.Block,
@@ -242,7 +242,7 @@ export const conditionalBranch = Effect.fn('FunctionBody.conditionalBranch')(fun
  * @category instructions
  * @since 0.0.0
  */
-export const switchTerminator = Effect.fn('FunctionBody.switchTerminator')(function* (
+export const switchTerminator = Effect.fnUntraced(function* (
   self: FunctionBody,
   value: Value.Input,
   defaultBlock: Block.Block,
@@ -314,7 +314,7 @@ export const switchTerminator = Effect.fn('FunctionBody.switchTerminator')(funct
  * @category instructions
  * @since 0.0.0
  */
-export const addSwitchCase = Effect.fn('FunctionBody.addSwitchCase')(function* (
+export const addSwitchCase = Effect.fnUntraced(function* (
   self: FunctionBody,
   switchHandle: Switch,
   value: Constant.Constant,
@@ -402,7 +402,7 @@ export const addSwitchCase = Effect.fn('FunctionBody.addSwitchCase')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const sealSwitch = Effect.fn('FunctionBody.sealSwitch')(function* (
+export const sealSwitch = Effect.fnUntraced(function* (
   self: FunctionBody,
   switchHandle: Switch,
 ): Effect.fn.Return<Instruction, LlvmError> {
@@ -457,7 +457,7 @@ export const sealSwitch = Effect.fn('FunctionBody.sealSwitch')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const returnValue = Effect.fn('FunctionBody.returnValue')(function* (
+export const returnValue = Effect.fnUntraced(function* (
   self: FunctionBody,
   value: Value.Input,
 ): Effect.fn.Return<Instruction, LlvmError> {
@@ -497,7 +497,7 @@ export const returnValue = Effect.fn('FunctionBody.returnValue')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const returnVoid = Effect.fn('FunctionBody.returnVoid')(function* (
+export const returnVoid = Effect.fnUntraced(function* (
   self: FunctionBody,
 ): Effect.fn.Return<Instruction, LlvmError> {
   return yield* FunctionBodyState.mutateModule(self, 'FunctionBody.returnVoid', (draft, module) =>
@@ -534,7 +534,7 @@ export const returnVoid = Effect.fn('FunctionBody.returnVoid')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const unreachable = Effect.fn('FunctionBody.unreachable')(function* (
+export const unreachable = Effect.fnUntraced(function* (
   self: FunctionBody,
 ): Effect.fn.Return<Instruction, LlvmError> {
   return yield* FunctionBodyState.mutate(self, 'FunctionBody.unreachable', (draft) =>

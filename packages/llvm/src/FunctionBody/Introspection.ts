@@ -13,7 +13,7 @@ import type { FunctionBody, Instruction } from './_internal.js'
  * @category instructions
  * @since 0.0.0
  */
-export const instructionResult = Effect.fn('FunctionBody.instructionResult')(function* (
+export const instructionResult = Effect.fnUntraced(function* (
   self: FunctionBody,
   instruction: Instruction,
 ): Effect.fn.Return<Value.Value | undefined, LlvmError> {
@@ -28,7 +28,7 @@ export const instructionResult = Effect.fn('FunctionBody.instructionResult')(fun
  * @category instructions
  * @since 0.0.0
  */
-export const instructionIndex = Effect.fn('FunctionBody.instructionIndex')(function* (
+export const instructionIndex = Effect.fnUntraced(function* (
   self: FunctionBody,
   instruction: Instruction,
 ): Effect.fn.Return<number, LlvmError> {
@@ -43,7 +43,7 @@ export const instructionIndex = Effect.fn('FunctionBody.instructionIndex')(funct
  * @category instructions
  * @since 0.0.0
  */
-export const builder = Effect.fn('FunctionBody.builder')(function* (
+export const builder = Effect.fnUntraced(function* (
   self: FunctionBody,
 ): Effect.fn.Return<Builder.Builder, LlvmError> {
   return yield* FunctionBodyState.builder(self)
@@ -55,7 +55,7 @@ export const builder = Effect.fn('FunctionBody.builder')(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const inputType = Effect.fn('FunctionBody.inputType')(function* (
+export const inputType = Effect.fnUntraced(function* (
   self: FunctionBody,
   input: Value.Input,
 ): Effect.fn.Return<Type.Type, LlvmError> {

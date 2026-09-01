@@ -3973,16 +3973,40 @@ export const callingShapes = (
   )
 }
 
+/**
+ * Both lookups run once per lowered operation, so each plan's arrays are indexed by canonical type
+ * key on first use; `Type.equals` is key equality, so the index answers exactly what the linear
+ * scan answered.
+ */
+const entryIndexCache = new WeakMap<ReadonlyArray<Entry>, Map<string, Entry>>()
+const callingShapeIndexCache = new WeakMap<ReadonlyArray<CallingShape>, Map<string, CallingShape>>()
+
+const indexByTypeKey = <A extends { readonly type: DeclarationFacts.SemanticType }>(
+  cache: WeakMap<ReadonlyArray<A>, Map<string, A>>,
+  values: ReadonlyArray<A>,
+): Map<string, A> => {
+  let index = cache.get(values)
+  if (index === undefined) {
+    index = new Map()
+    for (const value of values) {
+      const key = Type.key(value.type)
+      if (!index.has(key)) index.set(key, value)
+    }
+    cache.set(values, index)
+  }
+  return index
+}
+
 /** Looks up one canonical runtime-plan entry. */
 export const entry = (self: Plan, type: DeclarationFacts.SemanticType): Entry | undefined =>
-  self.entries.find((candidate) => Type.equals(candidate.type, type))
+  indexByTypeKey(entryIndexCache, self.entries).get(Type.key(type))
 
 /** Looks up one compiler-owned calling shape by logical type. */
 export const callingShape = (
   self: Plan,
   type: DeclarationFacts.SemanticType,
 ): CallingShape | undefined =>
-  self.callingShapes.find((candidate) => Type.equals(candidate.type, type))
+  indexByTypeKey(callingShapeIndexCache, self.callingShapes).get(Type.key(type))
 
 /**
  * Plans the bit-exact movement of one nominal failure payload between two tagged carriers.

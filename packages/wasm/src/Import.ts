@@ -93,7 +93,7 @@ export interface MemoryOptions extends Options {
  * @category imports
  * @since 0.0.0
  */
-export const func = Effect.fn('Import.func')(function* (
+export const func = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   module: string,
   field: string,
@@ -124,7 +124,7 @@ export const func = Effect.fn('Import.func')(function* (
  * @category imports
  * @since 0.0.0
  */
-export const table = Effect.fn('Import.table')(function* (
+export const table = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   module: string,
   field: string,
@@ -158,7 +158,7 @@ export const table = Effect.fn('Import.table')(function* (
  * @category imports
  * @since 0.0.0
  */
-export const memory = Effect.fn('Import.memory')(function* (
+export const memory = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   module: string,
   field: string,
@@ -207,7 +207,7 @@ export const memory = Effect.fn('Import.memory')(function* (
  * @category imports
  * @since 0.0.0
  */
-export const global = Effect.fn('Import.global')(function* (
+export const global = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   module: string,
   field: string,
@@ -239,7 +239,7 @@ export const global = Effect.fn('Import.global')(function* (
  * @category imports
  * @since 0.0.0
  */
-export const tag = Effect.fn('Import.tag')(function* (
+export const tag = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   module: string,
   field: string,

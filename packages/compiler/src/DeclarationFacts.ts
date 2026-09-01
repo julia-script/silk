@@ -1598,28 +1598,34 @@ export const lookupParameter = (
     : Object.freeze({ _tag: 'Ambiguous', spelling: name, parameters: Object.freeze(matches) })
 }
 
-const presentMemberEntries = (members: ReadonlyArray<MemberFact>) =>
-  members.flatMap((declaration) =>
-    declaration.name._tag === 'Present'
-      ? [
-          Object.freeze({
-            spelling: declaration.name.spelling,
-            token: declaration.name.token,
-            declaration,
-          }),
-        ]
-      : [],
-  )
+const memberIndexCache = new WeakMap<ReadonlyArray<MemberFact>, Map<string, Array<MemberFact>>>()
+
+const memberIndex = (members: ReadonlyArray<MemberFact>): Map<string, Array<MemberFact>> => {
+  let index = memberIndexCache.get(members)
+  if (index === undefined) {
+    index = new Map()
+    for (const declaration of members) {
+      if (declaration.name._tag !== 'Present') continue
+      const bucket = index.get(declaration.name.spelling)
+      if (bucket === undefined) index.set(declaration.name.spelling, [declaration])
+      else bucket.push(declaration)
+    }
+    memberIndexCache.set(members, index)
+  }
+  return index
+}
 
 export const lookupMember = (members: ReadonlyArray<MemberFact>, name: string): MemberLookup => {
-  const matches = presentMemberEntries(members)
-    .filter((entry) => entry.spelling === name)
-    .map((entry) => entry.declaration)
+  const matches = memberIndex(members).get(name) ?? []
   const first = matches.at(0)
   if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: name })
   return matches.length === 1
     ? Object.freeze({ _tag: 'Resolved', spelling: name, declaration: first })
-    : Object.freeze({ _tag: 'Ambiguous', spelling: name, declarations: Object.freeze(matches) })
+    : Object.freeze({
+        _tag: 'Ambiguous',
+        spelling: name,
+        declarations: Object.freeze([...matches]),
+      })
 }
 
 export const lookupDeclaration = (

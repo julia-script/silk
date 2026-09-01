@@ -1,5 +1,4 @@
 import * as Effect from 'effect/Effect'
-import * as Semaphore from 'effect/Semaphore'
 import * as ModuleState from './internal/ModuleState.js'
 import * as OwnedHandle from './internal/OwnedHandle.js'
 
@@ -70,12 +69,10 @@ export interface Options {
  * @category builders
  * @since 0.0.0
  */
-export const make = Effect.fn('Builder.make')(function* (options: Options = {}) {
-  const gate = yield* Semaphore.make(1)
+export const make = Effect.fnUntraced(function* (options: Options = {}) {
   const self: Builder = Object.freeze({ _tag: 'Builder' })
   ModuleState.register(self, {
     owner: OwnedHandle.makeOwner(),
-    gate,
     value: {
       moduleName: options.moduleName,
       types: [],

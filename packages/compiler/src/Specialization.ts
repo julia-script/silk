@@ -10,11 +10,19 @@ export interface Specialization {
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
 }
 
+const keyCache = new WeakMap<Specialization, string>()
+
 /** Returns the canonical identity shared by discovery, proof dependencies, and lowering. */
-export const key = (self: Specialization): string =>
-  `${self.declaration.module}\u0000${self.declaration.name}\u0000${self.typeArguments
-    .map(Type.genericArgumentKey)
-    .join('\u0000')}`
+export const key = (self: Specialization): string => {
+  let cached = keyCache.get(self)
+  if (cached === undefined) {
+    cached = `${self.declaration.module}\u0000${self.declaration.name}\u0000${self.typeArguments
+      .map(Type.genericArgumentKey)
+      .join('\u0000')}`
+    keyCache.set(self, cached)
+  }
+  return cached
+}
 
 /** Applies one concrete executable owner and its substitutions to a retained source type. */
 export const specializeType = (
