@@ -37,7 +37,7 @@ export async function fetchRegistryManifest(
     if (attempt >= retries) {
       throw new Error(`Registry does not list ${name}@${version} after ${retries + 1} attempts`)
     }
-    await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)))
+    await Effect.runPromise(Effect.sleep(2000 * (attempt + 1)))
   }
 }
 

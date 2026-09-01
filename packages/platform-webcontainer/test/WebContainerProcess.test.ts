@@ -76,12 +76,12 @@ it.effect('releases reader and writer locks after interruption', () =>
   Effect.gen(function* () {
     const output = new ReadableStream<string>({
       pull() {
-        return new Promise<void>(() => undefined)
+        return Promise.withResolvers<void>().promise
       },
     })
     const input = new WritableStream<string>({
       write() {
-        return new Promise<void>(() => undefined)
+        return Promise.withResolvers<void>().promise
       },
     })
     const process = WebContainerProcess.fromWebStreams({

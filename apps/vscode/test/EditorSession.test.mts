@@ -185,7 +185,7 @@ it.effect('forces acknowledged process retirement before starting a replacement'
       firstProcess,
       () => document,
       undefined,
-      () => new Promise<void>(() => undefined),
+      () => Promise.withResolvers<void>().promise,
     )
     const secondProcess = new FakeProcess('second', events)
     const second = new FakeClient('second', events, secondProcess, () => document)
