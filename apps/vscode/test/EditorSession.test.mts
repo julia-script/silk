@@ -25,7 +25,7 @@ class FakeProcess implements EditorSession.OwnedProcess {
 
   exit(): void {
     this.events.push(`${this.name}:exit`)
-    Deferred.doneUnsafe(this.exited, Effect.succeed(undefined))
+    Deferred.doneUnsafe(this.exited, Effect.void)
   }
 }
 

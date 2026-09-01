@@ -122,9 +122,9 @@ export const start = (options: Options = {}): void => {
         token: CancellationToken,
       ): Promise<QueryOutcome.QueryOutcome<EditorQuery.Result<K>>> => {
         const canceled = Deferred.makeUnsafe<void>()
-        if (token.isCancellationRequested) Deferred.doneUnsafe(canceled, Effect.succeed(undefined))
+        if (token.isCancellationRequested) Deferred.doneUnsafe(canceled, Effect.void)
         const subscription = token.onCancellationRequested(() => {
-          Deferred.doneUnsafe(canceled, Effect.succeed(undefined))
+          Deferred.doneUnsafe(canceled, Effect.void)
         })
         return run(
           Effect.race(

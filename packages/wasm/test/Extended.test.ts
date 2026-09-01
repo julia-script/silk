@@ -16,7 +16,7 @@ import { mixedMemoryCopy, requiring } from './support/hostCapability.js'
 
 const failure = <A>(effect: Effect.Effect<A, WasmError>) =>
   effect.pipe(
-    Effect.map(() => undefined),
+    Effect.as(undefined),
     Effect.catchTag('WasmError', (error) => Effect.succeed(error)),
   )
 

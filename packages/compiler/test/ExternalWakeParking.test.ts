@@ -852,14 +852,14 @@ it.effect('delivers a retained Wake through an ordinary same-thread reactor poll
       .replaceAll('Reactor', 'PulseSource')
       .replaceAll('reactor', 'pulseSource')
       .replaceAll('poll', 'advance')
-    const snapshots = yield* Effect.all(
-      [independentExecutionLocalReactor, renamed].map((text, ordinal) =>
+    const snapshots = yield* Effect.forEach(
+      [independentExecutionLocalReactor, renamed],
+      (text, ordinal) =>
         Analysis.ofSourceRealized(
           `independent-execution/local-reactor-${ordinal}`,
           new TextEncoder().encode(text),
           'wasm32-unknown-unknown',
         ),
-      ),
     )
     for (const snapshot of snapshots) {
       assert.deepEqual(Analysis.diagnostics(snapshot), [])

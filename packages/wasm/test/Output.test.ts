@@ -40,7 +40,7 @@ const utf8Vectors = [
 
 const failure = <A>(effect: Effect.Effect<A, WasmError>) =>
   effect.pipe(
-    Effect.map(() => undefined),
+    Effect.as(undefined),
     Effect.catchTag('WasmError', (error) => Effect.succeed(error)),
   )
 

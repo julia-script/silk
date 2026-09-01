@@ -119,9 +119,7 @@ it.effect('retains partial closure facts around ordered operational failures', (
       toolchainSources: SourceResolver.embeddedToolchainSources,
       resolve: (module: string) => {
         if (module === 'readable') {
-          return Effect.succeed(
-            Option.some(SourceResolver.resolved(ascii(fn), SourceOrigin.memory())),
-          )
+          return Effect.succeedSome(SourceResolver.resolved(ascii(fn), SourceOrigin.memory()))
         }
         return Effect.fail(
           new SourceResolver.SourceResolverError({

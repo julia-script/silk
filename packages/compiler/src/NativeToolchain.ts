@@ -463,7 +463,7 @@ export const withBuildScope = Effect.fn('NativeToolchain.withBuildScope')(functi
     run,
     (scope, exit) =>
       options.saveTemps === true
-        ? Effect.succeed(undefined)
+        ? Effect.void
         : releaseCleanup(
             exit,
             cleanupPath(

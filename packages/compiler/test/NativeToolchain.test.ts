@@ -356,7 +356,7 @@ it.effect('translates synchronously throwing shim-cache reads with cache-stage p
       get: () => {
         throw cause
       },
-      set: () => Effect.succeed(undefined),
+      set: () => Effect.void,
       stats: () => Object.freeze({ entries: 0, hits: 0, misses: 0 }),
     })
     const result = yield* Effect.result(
@@ -385,7 +385,7 @@ it.effect('translates synchronously throwing shim-cache writes with cache-stage 
     const cause = Object.freeze({ injected: 'cache-write' })
     const cache: NativeToolchain.ShimCache = Object.freeze({
       _tag: 'ShimCache',
-      get: () => Effect.succeed(undefined),
+      get: () => Effect.as(Effect.void, undefined),
       set: () => {
         throw cause
       },

@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
-import * as Option from 'effect/Option'
 import * as TestClock from 'effect/testing/TestClock'
 import * as Analysis from '../src/Analysis.js'
 import type * as Backend from '../src/Backend.js'
@@ -310,7 +309,7 @@ it.effect('rejects a mismatched distribution before resolving user imports', () 
       resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
       resolve: () => {
         projectResolutions += 1
-        return Effect.succeed(Option.none())
+        return Effect.succeedNone
       },
     })
     const outcome = yield* Driver.compile({
@@ -644,7 +643,7 @@ it.effect('translates a synchronously throwing artifact-cache write at the Drive
     const cause = Object.freeze({ injected: 'artifact-cache-write' })
     const artifactCache: NativeToolchain.ArtifactCache = Object.freeze({
       _tag: 'ArtifactCache',
-      get: () => Effect.succeed(undefined),
+      get: () => Effect.as(Effect.void, undefined),
       set: () => {
         throw cause
       },
