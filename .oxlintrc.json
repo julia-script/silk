@@ -1,6 +1,9 @@
 {
   "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
   "extends": ["./node_modules/@effect/tsgo/oxlint-presets/recommended.json"],
+  "options": {
+    "denyWarnings": true
+  },
   "rules": {
     "no-nested-ternary": "error"
   },
