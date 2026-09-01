@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node scripts/turbo.mjs run build",
     "changeset": "changeset",
-    "check": "oxfmt --check . && oxlint . && node scripts/turbo.mjs run build && node scripts/turbo.mjs run typecheck test && pnpm test:scripts",
+    "check": "oxfmt --check . && node scripts/turbo.mjs run build && oxlint . && node scripts/turbo.mjs run typecheck test && pnpm test:scripts",
     "check:write": "oxfmt --write . && oxlint --fix .",
     "dev": "node scripts/turbo.mjs run dev --concurrency=15",
     "format": "oxfmt --write .",
