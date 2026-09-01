@@ -639,7 +639,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       return StaticEvaluation.complete(
         Object.freeze({
           _tag: 'ResidualBody' as const,
-          function: Elaboration.residualHirFunction(analyzed.fact),
+          function: Elaboration.residualHirFunction(analyzed.fact, self[stateSymbol].index),
           fact: analyzed.fact,
           diagnostics: analyzed.diagnostics,
         }),
