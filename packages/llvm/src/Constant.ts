@@ -472,10 +472,7 @@ const special = Effect.fnUntraced(function* (
  * @category constants
  * @since 0.0.0
  */
-export const nullValue = Effect.fnUntraced(function* (
-  builder: Builder.Builder,
-  type: Type.Type,
-) {
+export const nullValue = Effect.fnUntraced(function* (builder: Builder.Builder, type: Type.Type) {
   return yield* special(builder, type, 'null')
 })
 
@@ -485,10 +482,7 @@ export const nullValue = Effect.fnUntraced(function* (
  * @category constants
  * @since 0.0.0
  */
-export const none = Effect.fnUntraced(function* (
-  builder: Builder.Builder,
-  type: Type.Type,
-) {
+export const none = Effect.fnUntraced(function* (builder: Builder.Builder, type: Type.Type) {
   return yield* special(builder, type, 'none')
 })
 
@@ -498,10 +492,7 @@ export const none = Effect.fnUntraced(function* (
  * @category constants
  * @since 0.0.0
  */
-export const zero = Effect.fnUntraced(function* (
-  builder: Builder.Builder,
-  type: Type.Type,
-) {
+export const zero = Effect.fnUntraced(function* (builder: Builder.Builder, type: Type.Type) {
   return yield* special(builder, type, 'zeroinitializer')
 })
 
@@ -511,10 +502,7 @@ export const zero = Effect.fnUntraced(function* (
  * @category constants
  * @since 0.0.0
  */
-export const undef = Effect.fnUntraced(function* (
-  builder: Builder.Builder,
-  type: Type.Type,
-) {
+export const undef = Effect.fnUntraced(function* (builder: Builder.Builder, type: Type.Type) {
   return yield* special(builder, type, 'undef')
 })
 
@@ -524,10 +512,7 @@ export const undef = Effect.fnUntraced(function* (
  * @category constants
  * @since 0.0.0
  */
-export const poison = Effect.fnUntraced(function* (
-  builder: Builder.Builder,
-  type: Type.Type,
-) {
+export const poison = Effect.fnUntraced(function* (builder: Builder.Builder, type: Type.Type) {
   return yield* special(builder, type, 'poison')
 })
 
