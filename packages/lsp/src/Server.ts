@@ -508,10 +508,7 @@ export const start = (options: Options = {}): void => {
             const paths: Array<string> = []
             let rediscover = false
             for (const change of changes) {
-              const parsed = yield* Effect.try({
-                try: () => new URL(change.uri),
-                catch: (cause) => cause,
-              }).pipe(Effect.option)
+              const parsed = yield* Effect.try(() => new URL(change.uri)).pipe(Effect.option)
               if (Option.isNone(parsed) || parsed.value.protocol !== 'file:') continue
               const changedPath = yield* path.fromFileUrl(parsed.value).pipe(Effect.option)
               if (Option.isNone(changedPath)) continue
@@ -557,15 +554,13 @@ export const start = (options: Options = {}): void => {
                   Effect.ignore,
                 )
               for (const document of event.documents)
-                yield* Effect.tryPromise({
-                  try: () =>
-                    connection.sendNotification(Inspection.invalidatedNotification, {
-                      workspace: event.workspace,
-                      uri: document.uri,
-                      version: document.version,
-                    } satisfies Inspection.InvalidatedParameters),
-                  catch: (cause) => cause,
-                }).pipe(Effect.ignore)
+                yield* Effect.tryPromise(() =>
+                  connection.sendNotification(Inspection.invalidatedNotification, {
+                    workspace: event.workspace,
+                    uri: document.uri,
+                    version: document.version,
+                  } satisfies Inspection.InvalidatedParameters),
+                ).pipe(Effect.ignore)
               break
             case 'Failed':
               yield* Effect.sync(() =>

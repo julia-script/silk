@@ -1357,7 +1357,7 @@ it.effect('rejects malformed semantic encodings through the typed boundary', () 
     ]
 
     for (const [operation, decoding] of cases) {
-      const failure = yield* Effect.flip(decoding)
+      const failure = yield* Effect.flip(decoding).pipe(Effect.orDie)
       assert.instanceOf(failure, ModuleSurface.ModuleSurfaceDecodeError)
       assert.strictEqual(failure.operation, operation)
       assert.strictEqual(failure.reason._tag, 'InvalidEncoding')

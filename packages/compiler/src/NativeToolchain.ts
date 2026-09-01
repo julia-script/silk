@@ -224,26 +224,11 @@ const cleanupPath = Effect.fnUntraced(function* (
   cleanup: CleanupOperation,
   stage: 'scope-cleanup' | 'artifact-cleanup',
 ): Effect.fn.Return<void, ToolchainError> {
-  const first = yield* Effect.result(
-    Effect.try({
-      try: () => cleanup.remove(path, options),
-      catch: (cause) => cause,
-    }),
-  )
+  const first = yield* Effect.result(Effect.try(() => cleanup.remove(path, options)))
   if (Result.isSuccess(first)) return
-  const retry = yield* Effect.result(
-    Effect.try({
-      try: () => cleanup.remove(path, options),
-      catch: (cause) => cause,
-    }),
-  )
+  const retry = yield* Effect.result(Effect.try(() => cleanup.remove(path, options)))
   if (Result.isSuccess(retry)) return
-  const fallback = yield* Effect.result(
-    Effect.try({
-      try: () => nodeCleanup.remove(path, options),
-      catch: (cause) => cause,
-    }),
-  )
+  const fallback = yield* Effect.result(Effect.try(() => nodeCleanup.remove(path, options)))
   return yield* storageError('NativeToolchain.cleanupPath', stage, path, {
     first: first.failure,
     retry: retry.failure,

@@ -144,26 +144,36 @@ const workloads = {
     ),
 }
 
-const instructionCandidate = (wrapper) => () =>
+const tracedInstructionCandidate = () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const builder = yield* Builder.make()
       yield* makeFunction(builder, 'candidate', 500)
-      yield* wrapper(function* () {
+      const candidate = Effect.fn('ParityBenchmark.bitstreamCandidate')(function* () {
         return yield* Bitcode.encode(builder)
-      })()
+      })
+      yield* candidate()
     }),
   )
 
-const traced = (body) => Effect.fn('ParityBenchmark.bitstreamCandidate')(body)
-const untraced = (body) => Effect.fnUntraced(body)
+const untracedInstructionCandidate = () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const builder = yield* Builder.make()
+      yield* makeFunction(builder, 'candidate', 500)
+      const candidate = Effect.fnUntraced(function* () {
+        return yield* Bitcode.encode(builder)
+      })
+      yield* candidate()
+    }),
+  )
 
 const results = []
 for (const [name, workload] of Object.entries(workloads))
   results.push(await measure(name, workload))
 const candidates = [
-  await measure('bitstream-and-instruction-loop/traced', instructionCandidate(traced)),
-  await measure('bitstream-and-instruction-loop/untraced', instructionCandidate(untraced)),
+  await measure('bitstream-and-instruction-loop/traced', tracedInstructionCandidate),
+  await measure('bitstream-and-instruction-loop/untraced', untracedInstructionCandidate),
 ]
 const tracedMedian = candidates[0].medianMs
 const untracedMedian = candidates[1].medianMs

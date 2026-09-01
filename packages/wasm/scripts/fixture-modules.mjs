@@ -22,7 +22,10 @@ import {
 } from '../dist/index.js'
 import * as InstructionTable from '../dist/internal/InstructionTable.js'
 
-const build = (name, program) => ({
+const build = (
+  /** @type {string} */ name,
+  /** @type {Effect.Effect<Builder.Builder, import('../dist/WasmError.js').WasmError>} */ program,
+) => ({
   name,
   run: () =>
     Effect.runPromise(
