@@ -13,10 +13,9 @@ const mono = JetBrains_Mono({
   variable: '--intro-mono',
 })
 
+// Title/description inherit from the root layout defaults.
 export const metadata: Metadata = {
-  title: 'What If Effect Were a Low-Level Language?',
-  description:
-    'An introduction to Silk — a low-level language with typed effects, ownership, and structured concurrency — with live compiler-checked examples.',
+  title: { absolute: 'Silk — What If Effect Were a Low-Level Language?' },
 }
 
 export default function Home() {
