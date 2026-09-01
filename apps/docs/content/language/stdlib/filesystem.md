@@ -954,7 +954,7 @@ Removes a directory, every descendant file, and every descendant directory.
 
 ### Details
 
-Two passes, because the portable primitive removes exactly one *empty* directory. The first
+Two passes, because the portable primitive removes exactly one _empty_ directory. The first
 pass walks the tree front to back, unlinking every file it meets and recording every directory
 it meets; the second removes the recorded directories back to front. That order is
 child-before-parent for free: a directory is always recorded before the children found inside

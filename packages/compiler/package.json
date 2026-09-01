@@ -512,6 +512,7 @@
   "devDependencies": {
     "@effect/platform-node": "4.0.0-rc.112",
     "@effect/vitest": "catalog:",
-    "@types/node": "^24.10.1"
+    "@types/node": "^24.10.1",
+    "oxfmt": "0.66.0"
   }
 }

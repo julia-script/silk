@@ -9,7 +9,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as Console from 'effect/Console'
+import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
+import { format } from 'oxfmt'
 import * as DocumentationProject from '../../docgen/dist/Project.js'
 import * as DocumentationReference from '../../docgen/dist/Reference.js'
 import * as ProjectAnalysis from '../dist/ProjectAnalysis.js'
@@ -26,6 +28,23 @@ const stdlibRoot = fileURLToPath(
   new URL('../../../apps/docs/content/language/stdlib/', import.meta.url),
 )
 const diagnosticSource = fileURLToPath(new URL('../src/Diagnostic.ts', import.meta.url))
+const formatterConfig = JSON.parse(
+  readFileSync(new URL('../../../.oxfmtrc.json', import.meta.url), 'utf8'),
+)
+
+class DocumentationFormatError extends Data.TaggedError('DocumentationFormatError') {}
+
+const formatMarkdown = Effect.fnUntraced(
+  function* (/** @type {string} */ path, /** @type {string} */ contents) {
+    const result = yield* Effect.tryPromise({
+      try: () => format(path, contents, formatterConfig),
+      catch: (cause) => new DocumentationFormatError({ path, cause }),
+    })
+    if (result.errors.length > 0)
+      return yield* new DocumentationFormatError({ path, cause: result.errors })
+    return result.code
+  },
+)
 
 const stdlibTree = async () => {
   const roots = []
@@ -437,8 +456,17 @@ const writeStdlib = (files) => {
 
 // The complete tree and diagnostic page are rendered before anything is written, so a collision
 // or rejected diagnostic index leaves generated documentation untouched.
-const stdlib = await stdlibTree()
-const diagnostics = diagnosticsPage()
+const rawStdlib = await stdlibTree()
+const [stdlib, diagnostics] = await Effect.runPromise(
+  Effect.all([
+    Effect.forEach(rawStdlib, (file) =>
+      formatMarkdown(`${stdlibRoot}${file.path}`, file.contents).pipe(
+        Effect.map((contents) => Object.freeze({ ...file, contents })),
+      ),
+    ),
+    formatMarkdown(`${documentationRoot}diagnostics.md`, diagnosticsPage()),
+  ]),
+)
 
 writeStdlib(stdlib)
 write('diagnostics.md', diagnostics)
