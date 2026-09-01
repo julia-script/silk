@@ -778,6 +778,10 @@ it('evaluates checked primitive, enum, text, aggregate, and target-profile opera
     },
   )
   assert.deepEqual(
+    completedValue(StaticEvaluation.staticTextConcat(environment, text, text, staticSpan)),
+    { _tag: 'TextValue', bytes: [0x68, 0xc3, 0xa9, 0x68, 0xc3, 0xa9] },
+  )
+  assert.deepEqual(
     completedValue(StaticEvaluation.staticTextSlice(environment, text, 1n, 3n, staticSpan)),
     { _tag: 'TextValue', bytes: [0xc3, 0xa9] },
   )

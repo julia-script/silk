@@ -955,6 +955,26 @@ export const staticTextByteAt = (
       )
 }
 
+/** Concatenates two admitted static texts while retaining the left operand as the source anchor. */
+export const staticTextConcat = (
+  environment: TargetEnvironment,
+  left: StaticValue.TextValue,
+  right: StaticValue.TextValue,
+  literal: SourceSpan.SourceSpan,
+  trace: Trace = Object.freeze([]),
+): Outcome<StaticValue.Value> =>
+  admittedValue(
+    environment,
+    {
+      _tag: 'TextValue',
+      bytes: Object.freeze([...left.bytes, ...right.bytes]),
+      ...(left.origin === undefined ? {} : { origin: left.origin }),
+    },
+    'StaticEvaluation.staticTextConcat',
+    literal,
+    trace,
+  )
+
 /** Returns the half-open UTF-8 byte slice when both offsets lie on scalar boundaries. */
 export const staticTextSlice = (
   environment: TargetEnvironment,
@@ -1199,7 +1219,8 @@ const staticTextSpan = (
     fact._tag === 'Call' &&
     fact.reference._tag === 'ResolvedIntrinsicContract' &&
     fact.reference.intrinsic.id.actor === 'Intrinsic' &&
-    fact.reference.intrinsic.id.name === 'staticTextSlice'
+    (fact.reference.intrinsic.id.name === 'staticTextSlice' ||
+      fact.reference.intrinsic.id.name === 'staticTextConcat')
   ) {
     const subject = fact.arguments.at(0)
     return subject === undefined ? undefined : staticTextSpan(subject.expression, context)
@@ -1234,7 +1255,8 @@ export const staticTextOrigin = (
     fact._tag === 'Call' &&
     fact.reference._tag === 'ResolvedIntrinsicContract' &&
     fact.reference.intrinsic.id.actor === 'Intrinsic' &&
-    fact.reference.intrinsic.id.name === 'staticTextSlice'
+    (fact.reference.intrinsic.id.name === 'staticTextSlice' ||
+      fact.reference.intrinsic.id.name === 'staticTextConcat')
   ) {
     const subject = fact.arguments.at(0)
     return subject === undefined ? undefined : staticTextOrigin(subject.expression, context)
@@ -1696,6 +1718,27 @@ export const evaluateFact = (
           return unavailableFact(fact, context, `${operation} requires static text`)
         if (operation === 'staticTextByteLength')
           return staticTextByteLength(context.environment, text, literal, context.trace)
+        if (operation === 'staticTextConcat') {
+          const right = arguments_.value.at(1)
+          if (right?._tag !== 'TextValue')
+            return unavailableFact(fact, context, `${operation} requires two static texts`)
+          const concatenated = staticTextConcat(
+            context.environment,
+            text,
+            right,
+            literal,
+            context.trace,
+          )
+          if (concatenated._tag === 'Complete') {
+            const origin =
+              argument === undefined ? undefined : staticTextOrigin(argument.expression, context)
+            if (origin !== undefined) context.expressionOrigins.set(fact, origin)
+            context.expressionSpans.set(fact, literal)
+            if (origin !== undefined && concatenated.value._tag === 'TextValue')
+              return complete(Object.freeze({ ...concatenated.value, origin }))
+          }
+          return concatenated
+        }
         const first = arguments_.value.at(1)
         if (first?._tag !== 'IntegerValue')
           return unavailableFact(fact, context, `${operation} requires a static index`)

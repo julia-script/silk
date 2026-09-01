@@ -226,13 +226,15 @@ available during compilation:
 | --- | --- | --- |
 | `byteLength(value)` | `usize` | Number of bytes in the UTF-8 encoding |
 | `byteAt(value, index)` | `u8` | Byte at one in-bounds byte index |
+| `concat(left, right)` | `string` | Concatenated static text, retaining `left` as its diagnostic source anchor |
 | `slice(value, start, end)` | `string` | Text in one byte range whose endpoints are UTF-8 scalar boundaries |
 
 ```silk,ignore
-import silk.static_text { byteLength, byteAt, slice }
+import silk.static_text { byteLength, byteAt, concat, slice }
 
 static fn hasAccent(value: string) -> bool {
-  return byteLength(value) == 3 && byteAt(value, 1) == 195 && slice(value, 1, 3) == "é"
+  return byteLength(value) == 3 && byteAt(value, 1) == 195 &&
+    concat(slice(value, 1, 3), "!") == "é!"
 }
 ```
 
@@ -242,7 +244,7 @@ in runtime HIR.
 
 **Boundary:** `byteAt` rejects an out-of-bounds index. `slice` rejects an invalid range and any
 endpoint that splits a UTF-8 scalar encoding. Both failures are phase violations with source text
-provenance rather than runtime traps.
+provenance rather than runtime traps. `concat` is bounded by the ordinary retained-value budget.
 
 **Evidence:** [static text source actor](../../../../packages/compiler/stdlib/silk/static_text.silk),
 [static value requirements](../../../../openspec/changes/add-static-evaluation-core/specs/static-evaluation/spec.md).

@@ -261,6 +261,20 @@ static fn hasPositionalPart(
   return found
 }
 
+static fn visibleNamedFields<Args>() -> string {
+  let mut labels = ""
+  let mut first = true
+  static for field in Reflect.fields<Args>() {
+    static if Reflect.fieldKind(field) == Reflect.labeledFieldKind {
+      if !first { labels = StaticText.concat(labels, ", ") }
+      labels = StaticText.concat(labels, Reflect.fieldLabel(field))
+      first = false
+    }
+  }
+  if first { return "<none>" }
+  return labels
+}
+
 static fn validatedTemplate<Args>(
   template: string
 ) -> Intrinsic.StaticSequence<Part> {
@@ -280,7 +294,17 @@ static fn validatedTemplate<Args>(
           static if Reflect.fieldLabel(field) == part.text { found = true }
         }
       }
-      if !found { compileError(part.source) }
+      if !found {
+        compileError(
+          StaticText.concat(
+            part.source,
+            StaticText.concat(
+              "; available visible fields: ",
+              visibleNamedFields<Args>()
+            )
+          )
+        )
+      }
     }
   }
 

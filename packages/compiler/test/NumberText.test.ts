@@ -414,6 +414,8 @@ it.effect('anchors malformed, mixed, arity, and field diagnostics to template by
         diagnostic?.span.end,
         byteOffset(source, markedCharacterStart + testCase.marked.length),
       )
+      if (testCase.name === 'missing-multibyte')
+        assert.include(diagnostic?.message ?? '', 'available visible fields: name')
     }
 
     for (const testCase of [
@@ -524,6 +526,7 @@ pub fn make() -> Person { return Person { name: "Julia", token: 42 } }`),
       diagnostics.at(0)?.span.end,
       byteOffset(source, placeholderStart + '{missing}'.length),
     )
+    assert.include(diagnostics.at(0)?.message ?? '', 'available visible fields: name')
     assert.isTrue(diagnostics.every((diagnostic) => !diagnostic.message.includes('token')))
   }),
 )

@@ -7,6 +7,7 @@ import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as StaticValue from './StaticValue.js'
 import type * as Target from './Target.js'
 import type * as TerminationModel from './Termination.js'
 import * as Type from './Type.js'
@@ -217,6 +218,7 @@ export const symbolFor = (fn: Mir.MirFunction, entry: Instances.InstanceKey): st
         fn.instance.declaration.module,
         fn.instance.declaration.name,
         ...fn.instance.typeArguments.map(Type.genericArgumentKey),
+        ...fn.instance.staticArguments.map(StaticValue.key),
         ...fn.instance.contractRow,
       ]
         .map(injectivePart)

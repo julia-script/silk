@@ -54,7 +54,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/slot`](./slot.md) | `Slot` | 5 | Explicit initialization-state transitions for one slot selected from raw storage. |
 | [`silk/standard_input`](./standard-input.md) | `StandardInput` | 11 | Portable blocking reads of raw standard-input bytes through an explicit provider. |
 | [`silk/static_sequence`](./static-sequence.md) | `StaticSequence` | 5 | Immutable homogeneous sequences available only during static evaluation. |
-| [`silk/static_text`](./static-text.md) | `StaticText` | 3 | Deterministic byte inspection for text available during static evaluation. |
+| [`silk/static_text`](./static-text.md) | `StaticText` | 4 | Deterministic byte inspection for text available during static evaluation. |
 | [`silk/string`](./string.md) | `String` | 22 | Valid UTF-8 text, including owned storage, byte validation, and scalar-by-scalar traversal. |
 | [`silk/system_clock`](./system-clock.md) | `SystemClock` | 7 | Provider-replaceable Unix-epoch time with canonical split-second instants. |
 | [`silk/target`](./target.md) | `Target` | 8 | Compile-time nominal facts for the selected compilation target. |

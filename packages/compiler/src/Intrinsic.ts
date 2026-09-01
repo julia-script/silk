@@ -866,6 +866,13 @@ const staticTextOperations = Object.freeze([
     'u8',
   ),
   staticTextOperation(
+    'staticTextConcat',
+    Object.freeze([valueParameter('left', 'string'), valueParameter('right', 'string')]),
+    Object.freeze([Type.string, Type.string]),
+    'string',
+    Type.string,
+  ),
+  staticTextOperation(
     'staticTextSlice',
     Object.freeze([
       valueParameter('value', 'string'),

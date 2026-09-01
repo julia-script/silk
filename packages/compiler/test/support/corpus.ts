@@ -213,7 +213,9 @@ impl Writer for Capture {
 effect fn render() -> i32 ! WriterError {
   let mut capture = Capture { index: usize.ZERO, valid: true }
   let args = .{ name: "Julia", age: 31 }
-  run Format.format("{name}:{age}", &args)
+  run Format.format("{name}", &args)
+    |> Effect.provideMut<Writer>(&mut capture)
+  run Format.format(":{age}", &args)
     |> Effect.provideMut<Writer>(&mut capture)
   if !capture.valid { return 1 }
   if capture.index != 8 { return 2 }

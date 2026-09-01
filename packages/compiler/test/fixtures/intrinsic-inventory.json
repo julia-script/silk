@@ -5470,6 +5470,13 @@
       "consumer": "silk/static_text.byteAt"
     },
     {
+      "operation": "Intrinsic.staticTextConcat",
+      "signature": "fn Intrinsic.staticTextConcat(left: string, right: string) -> string",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/static_text.concat"
+    },
+    {
       "operation": "Intrinsic.staticTextSlice",
       "signature": "fn Intrinsic.staticTextSlice(value: string, start: usize, end: usize) -> string",
       "unsafe": false,

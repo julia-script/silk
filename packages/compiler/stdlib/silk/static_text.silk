@@ -15,6 +15,11 @@ pub static fn byteAt(value: string, index: usize) -> u8 {
   return Intrinsic.staticTextByteAt(value, index)
 }
 
+/// Concatenates two static texts and retains `left` as the source anchor for diagnostics.
+pub static fn concat(left: string, right: string) -> string {
+  return Intrinsic.staticTextConcat(left, right)
+}
+
 /// Returns the UTF-8 byte range `start..end` when both boundaries are scalar boundaries.
 pub static fn slice(value: string, start: usize, end: usize) -> string {
   return Intrinsic.staticTextSlice(value, start, end)
