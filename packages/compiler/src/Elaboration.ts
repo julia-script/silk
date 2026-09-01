@@ -1999,22 +1999,125 @@ export interface Input {
   readonly index: DeclarationIndex.Index
 }
 
-/** Lowers one already-residual ordinary function fact into backend-facing HIR. */
-export const residualHirFunction = (fact: FunctionFact): Hir.HirFunction => {
-  if (fact.declaration.phase === 'Static')
-    throw new RangeError('Static functions have no runtime HIR body')
-  const entryRegion =
+const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): Hir.HirFunction => {
+  const originalEntryRegion =
     fact.regionOrder.at(0) ??
     Object.freeze({
       _tag: 'HirRegion' as const,
       function: fact.declaration.id,
       ordinal: 0,
     })
+  const baseContract = Hir.contractOf(fact.declaration)
+  if (
+    fact.declaration.functionKind === 'Effect' &&
+    fact.declaration.returnType._tag === 'Resolved' &&
+    baseContract._tag === 'Contract'
+  ) {
+    const captures = effectCaptureFacts(
+      fact.statements,
+      0,
+      index,
+      copyAssumptionsOf(fact.declaration),
+    ).map((capture) => {
+      if (capture.reference._tag !== 'ParameterDeclaration') return capture
+      const declared = capture.reference.declaredType
+      if (declared._tag !== 'Resolved' || Type.isSlice(declared.type)) return capture
+      return Object.freeze({
+        ...capture,
+        access: ConformanceProof.copyType(index, declared.type, copyAssumptionsOf(fact.declaration))
+          ? ('Copy' as const)
+          : ('Take' as const),
+      })
+    })
+    const semanticCaptureAccess = (capture: EffectCaptureFact): Type.Effect['access'] | 'Copy' => {
+      if (capture.reference._tag !== 'ParameterDeclaration') return capture.access
+      const declared = capture.reference.declaredType
+      if (declared._tag !== 'Resolved') return capture.access
+      if (Type.isEffect(declared.type)) return declared.type.access
+      if (Type.isCallable(declared.type)) return declared.type.mode
+      if (Type.isReference(declared.type)) return declared.type.access
+      return capture.access
+    }
+    const semanticAccesses = captures.map(semanticCaptureAccess)
+    let access: 'Take' | 'Exclusive' | 'Shared'
+    if (semanticAccesses.some((capture) => capture === 'Take')) {
+      access = 'Take'
+    } else if (semanticAccesses.some((capture) => capture === 'Exclusive')) {
+      access = 'Exclusive'
+    } else {
+      access = 'Shared'
+    }
+    const type = Type.effectWithRows(
+      fact.declaration.returnType.type,
+      fact.declaration.failureRow.row,
+      access,
+      fact.declaration.requirementRow.row,
+    )
+    const body = SyntaxTree.directNode(fact.declaration.syntax, 'Block')
+    const siteSpan = body?.span ?? fact.declaration.syntax.span
+    const entryRegion: Hir.RegionId = Object.freeze({
+      _tag: 'HirRegion',
+      function: fact.declaration.id,
+      ordinal: Math.max(-1, ...fact.regionOrder.map((region) => region.ordinal)) + 1,
+    })
+    const effectBlock: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }> = Object.freeze({
+      _tag: 'EffectBlock',
+      site: Object.freeze({
+        _tag: 'EffectSiteId',
+        function: fact.declaration.id,
+        ...(fact.declaration.canonical._tag === 'Canonical'
+          ? { owner: fact.declaration.canonical.id }
+          : {}),
+        ordinal: -1,
+        span: siteSpan,
+      }),
+      statements: lowerStatements(fact.statements, {
+        resultType: fact.declaration.returnType.type,
+        functionId: fact.declaration.id,
+        eraseIntrinsicSections: true,
+        borrowBindingInitializers: true,
+      }),
+      captures: Object.freeze(
+        captures.map((capture) =>
+          Object.freeze({
+            ...(capture.reference._tag === 'BindingFact'
+              ? { binding: capture.reference.id }
+              : { parameter: capture.reference.id }),
+            access: capture.access,
+            span: capture.span,
+          }),
+        ),
+      ),
+      type,
+      span: siteSpan,
+    })
+    return Object.freeze({
+      _tag: 'HirFunction',
+      declaration: fact.declaration,
+      contract: Object.freeze({
+        _tag: 'Contract',
+        unsafe: baseContract.unsafe,
+        parameters: baseContract.parameters,
+        result: type,
+        constraints: baseContract.constraints,
+      }),
+      entryRegion,
+      regionOrder: Object.freeze([entryRegion, ...fact.regionOrder]),
+      statements: Object.freeze([
+        Object.freeze({
+          _tag: 'Return',
+          expression: effectBlock,
+          region: entryRegion,
+          span: siteSpan,
+        }),
+      ]),
+    })
+  }
   return Object.freeze({
     _tag: 'HirFunction',
     declaration: fact.declaration,
-    contract: Hir.contractOf(fact.declaration),
-    entryRegion,
+    contract: baseContract,
+    entryRegion: originalEntryRegion,
     regionOrder: fact.regionOrder,
     statements: lowerStatements(fact.statements, {
       ...(fact.declaration.returnType._tag === 'Resolved'
@@ -2025,6 +2128,16 @@ export const residualHirFunction = (fact: FunctionFact): Hir.HirFunction => {
       borrowBindingInitializers: true,
     }),
   })
+}
+
+/** Lowers one already-residual runtime function fact into backend-facing HIR. */
+export const residualHirFunction = (
+  fact: FunctionFact,
+  index: DeclarationIndex.Index,
+): Hir.HirFunction => {
+  if (fact.declaration.phase === 'Static')
+    throw new RangeError('Static functions have no runtime HIR body')
+  return runtimeHirFunction(fact, index)
 }
 
 export const elaborateModule = (input: Input): Result => {
@@ -2051,147 +2164,7 @@ export const elaborateModule = (input: Input): Result => {
     module: source.id,
     functions: Object.freeze(
       functions.flatMap((fact) =>
-        fact.declaration.phase === 'Static'
-          ? []
-          : [
-              (() => {
-                const originalEntryRegion =
-                  fact.regionOrder.at(0) ??
-                  Object.freeze({
-                    _tag: 'HirRegion' as const,
-                    function: fact.declaration.id,
-                    ordinal: 0,
-                  })
-                const baseContract = Hir.contractOf(fact.declaration)
-                if (
-                  fact.declaration.functionKind === 'Effect' &&
-                  fact.declaration.returnType._tag === 'Resolved' &&
-                  baseContract._tag === 'Contract'
-                ) {
-                  const captures = effectCaptureFacts(
-                    fact.statements,
-                    0,
-                    index,
-                    copyAssumptionsOf(fact.declaration),
-                  ).map((capture) => {
-                    if (capture.reference._tag !== 'ParameterDeclaration') return capture
-                    const declared = capture.reference.declaredType
-                    if (declared._tag !== 'Resolved' || Type.isSlice(declared.type)) return capture
-                    return Object.freeze({
-                      ...capture,
-                      access: ConformanceProof.copyType(
-                        index,
-                        declared.type,
-                        copyAssumptionsOf(fact.declaration),
-                      )
-                        ? ('Copy' as const)
-                        : ('Take' as const),
-                    })
-                  })
-                  const semanticCaptureAccess = (
-                    capture: EffectCaptureFact,
-                  ): Type.Effect['access'] | 'Copy' => {
-                    if (capture.reference._tag !== 'ParameterDeclaration') return capture.access
-                    const declared = capture.reference.declaredType
-                    if (declared._tag !== 'Resolved') return capture.access
-                    if (Type.isEffect(declared.type)) return declared.type.access
-                    if (Type.isCallable(declared.type)) return declared.type.mode
-                    if (Type.isReference(declared.type)) return declared.type.access
-                    return capture.access
-                  }
-                  const semanticAccesses = captures.map(semanticCaptureAccess)
-                  let access: 'Take' | 'Exclusive' | 'Shared'
-                  if (semanticAccesses.some((capture) => capture === 'Take')) {
-                    access = 'Take'
-                  } else if (semanticAccesses.some((capture) => capture === 'Exclusive')) {
-                    access = 'Exclusive'
-                  } else {
-                    access = 'Shared'
-                  }
-                  const type = Type.effectWithRows(
-                    fact.declaration.returnType.type,
-                    fact.declaration.failureRow.row,
-                    access,
-                    fact.declaration.requirementRow.row,
-                  )
-                  const body = SyntaxTree.directNode(fact.declaration.syntax, 'Block')
-                  const siteSpan = body?.span ?? fact.declaration.syntax.span
-                  const entryRegion: Hir.RegionId = Object.freeze({
-                    _tag: 'HirRegion',
-                    function: fact.declaration.id,
-                    ordinal: Math.max(-1, ...fact.regionOrder.map((region) => region.ordinal)) + 1,
-                  })
-                  const effectBlock: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }> =
-                    Object.freeze({
-                      _tag: 'EffectBlock',
-                      site: Object.freeze({
-                        _tag: 'EffectSiteId',
-                        function: fact.declaration.id,
-                        ...(fact.declaration.canonical._tag === 'Canonical'
-                          ? { owner: fact.declaration.canonical.id }
-                          : {}),
-                        ordinal: -1,
-                        span: siteSpan,
-                      }),
-                      statements: lowerStatements(fact.statements, {
-                        resultType: fact.declaration.returnType.type,
-                        functionId: fact.declaration.id,
-                        eraseIntrinsicSections: true,
-                        borrowBindingInitializers: true,
-                      }),
-                      captures: Object.freeze(
-                        captures.map((capture) =>
-                          Object.freeze({
-                            ...(capture.reference._tag === 'BindingFact'
-                              ? { binding: capture.reference.id }
-                              : { parameter: capture.reference.id }),
-                            access: capture.access,
-                            span: capture.span,
-                          }),
-                        ),
-                      ),
-                      type,
-                      span: siteSpan,
-                    })
-                  return Object.freeze({
-                    _tag: 'HirFunction' as const,
-                    declaration: fact.declaration,
-                    contract: Object.freeze({
-                      _tag: 'Contract' as const,
-                      unsafe: baseContract.unsafe,
-                      parameters: baseContract.parameters,
-                      result: type,
-                      constraints: baseContract.constraints,
-                    }),
-                    entryRegion,
-                    regionOrder: Object.freeze([entryRegion, ...fact.regionOrder]),
-                    statements: Object.freeze([
-                      Object.freeze({
-                        _tag: 'Return' as const,
-                        expression: effectBlock,
-                        region: entryRegion,
-                        span: siteSpan,
-                      }),
-                    ]),
-                  })
-                }
-                return Object.freeze({
-                  _tag: 'HirFunction' as const,
-                  declaration: fact.declaration,
-                  contract: baseContract,
-                  entryRegion: originalEntryRegion,
-                  regionOrder: fact.regionOrder,
-                  statements: lowerStatements(fact.statements, {
-                    ...(fact.declaration.returnType._tag === 'Resolved'
-                      ? { resultType: fact.declaration.returnType.type }
-                      : {}),
-                    functionId: fact.declaration.id,
-                    eraseIntrinsicSections: true,
-                    borrowBindingInitializers: true,
-                  }),
-                })
-              })(),
-            ],
+        fact.declaration.phase === 'Static' ? [] : [runtimeHirFunction(fact, index)],
       ),
     ),
   })

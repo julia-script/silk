@@ -128,6 +128,28 @@ it.effect('maps an ordinary unit entry to status zero on every engine', () =>
   }),
 )
 
+it.effect('retains an effect entry whose only authored statement residualizes away', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'effect-entry/inactive-static-if',
+      ascii(`pub const test: bool = false
+pub effect fn main() -> () {
+  static if test {
+    compileError("inactive")
+  }
+}`),
+      'aarch64-apple-darwin',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    assert.strictEqual(program.entry._tag, 'EffectEntry')
+    assert.deepEqual(MirVerification.verify(program), [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer))
+  }),
+)
+
 it.effect('runs an effect entry once and retains deterministic unhandled-failure data', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
