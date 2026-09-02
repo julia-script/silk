@@ -62,9 +62,12 @@ bindings and expression-only keywords MUST NOT be offered as type candidates.
 
 ### Requirement: Qualified completion uses resolved actor and value semantics
 
-After a qualifier or typed subject followed by `.`, completion SHALL return accessible namespace or
-actor operations, imported module members, or fields appropriate to the resolved subject. Intrinsic
-operations SHALL come from the same authoritative catalog used by analysis and hover.
+After a qualifier or typed subject followed by `.`, completion SHALL return exactly the items the
+resolved subject exposes: associated items of a nominal declaration, public root declarations of a
+module namespace, or fields and receiver methods of a typed value. Completion after a nominal
+qualifier MUST NOT include root declarations of the declaring module, and completion after a
+namespace MUST NOT include inherent members. Intrinsic operations SHALL come from the same
+authoritative catalog used by analysis and hover.
 
 #### Scenario: Complete an Effect operation
 
@@ -80,6 +83,16 @@ operations SHALL come from the same authoritative catalog used by analysis and h
 
 - **WHEN** completion is requested after a value whose available type has accessible fields
 - **THEN** the result includes those fields and excludes fields unavailable by visibility or subject type
+
+#### Scenario: Exclude root declarations after a nominal qualifier
+
+- **WHEN** completion is requested after `Option.` and `silk/option` declares a private root helper
+- **THEN** the result lists the variants and inherent members and excludes the helper
+
+#### Scenario: Exclude members after a namespace
+
+- **WHEN** completion is requested after `OptionModule.` for `import silk.option as OptionModule`
+- **THEN** the result lists `Option` and any public root declarations and excludes `map`
 
 ### Requirement: Completion remains deterministic under recovery
 
@@ -136,3 +149,40 @@ their lexical scope.
 
 - **WHEN** completion is requested inside the taken and mismatch bodies of one if-let
 - **THEN** the pattern binding appears only in the taken-body result
+
+### Requirement: Type-qualified completion lists associated members
+
+After a nominal qualifier followed by `.`, completion SHALL list that declaration's associated
+items: variants, enum members, generated operations, declared contract operations, and accessible
+inherent members, each labeled by kind so a receiver method, an associated function, and a variant
+are distinguishable. Inherent members SHALL present the same signature hover presents, including the
+receiver as the first parameter. Private members SHALL be listed only inside their declaring module.
+
+#### Scenario: Complete Option members
+
+- **WHEN** completion is requested after `Option.` with `impl<T> Option<T>` declaring `none`, `some`, and `map`
+- **THEN** the result lists `None`, `Some`, `none`, `some`, and `map` with `map` labeled as a method and `some` as an associated function
+
+#### Scenario: Exclude a private member outside its module
+
+- **WHEN** completion is requested after `Counter.` from another module and `Counter` has a private inherent member
+- **THEN** the private member is absent and public members are present
+
+### Requirement: Value-qualified completion lists receiver methods
+
+After a typed value followed by `.`, completion SHALL list accessible fields and, for a nominal or
+bounded generic subject, the receiver methods available to that subject: inherent receiver
+methods, or for a generic subject the receiver operations of its bounds, labeled as methods and presented
+with their receiver-bound signature. Associated functions without a receiver SHALL NOT be listed
+after a value. Completion after a chained receiver such as `a.b.` or `f().` is outside this
+requirement.
+
+#### Scenario: Complete methods and fields on a value
+
+- **WHEN** completion is requested after `option.` with `option: Option<i32>`
+- **THEN** the result lists `map`, `flatMap`, and `unwrapOr` as methods with `T` shown as `i32`, and excludes `none` and `some`
+
+#### Scenario: Complete a bound's operation on a generic value
+
+- **WHEN** completion is requested after `value.` inside `fn show<T: Printable>(value: &T)`
+- **THEN** the result lists `print` from the `Printable` bound and nothing from any concrete conformance
