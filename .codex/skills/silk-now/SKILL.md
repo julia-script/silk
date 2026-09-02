@@ -1,6 +1,6 @@
 ---
 name: silk-now
-description: Capture one immediate Silk request in Linear, independently triage it, implement the verified issue, and finish with a draft PR and In Review handoff. Use only when Julia explicitly invokes $silk-now or asks to track and implement a request immediately.
+description: Capture one immediate Silk request in Linear, independently triage it, implement the verified issue, and finish with a draft PR and In Review handoff. Use only when Julia explicitly invokes this skill or asks to track and implement a request immediately.
 ---
 
 # Deliver an immediate Silk request
@@ -10,6 +10,7 @@ Read these files completely before acting:
 - `../../silk-manager/WORKFLOW.md`
 - `../../silk-manager/LINEAR.md`
 - `../../silk-manager/TRIAGE.md`
+- `../../silk-manager/TEST_REVIEW.md`
 - `../silk-demand/SKILL.md`
 - `../silk-triage/SKILL.md`
 - `../silk-work/SKILL.md`
@@ -34,7 +35,7 @@ At the start, publish and maintain a task plan covering:
 2. independent investigation and skeptical triage;
 3. specification and Linear admission;
 4. implementation and verification;
-5. independent review, draft PR, and Linear handoff.
+5. independent code and test-economics reviews, draft PR, and Linear handoff.
 
 Only one phase is in progress at a time. Do not begin repository edits while intake or triage is
 unfinished.
@@ -115,6 +116,10 @@ issues, and rerun affected checks. Repeat independent review after fixes. A fina
 commit must inspect the exact diff that the PR will publish; handoff cannot rely only on a review of
 the pre-commit working tree.
 
+Assign a second, distinct reviewer subagent solely for test relevance, execution complexity,
+optimization, scaling, and measured runtime cost under `TEST_REVIEW.md`. The general reviewer may
+not fill this role. Both reviewers must approve the exact final committed PR diff.
+
 Finish exactly as `silk-work` requires:
 
 1. Resolve the actual intended PR base, verify its current remote commit, and compute the issue
@@ -125,13 +130,14 @@ Finish exactly as `silk-work` requires:
    this issue. If it does not, safely isolate the issue on a clean `julia/` branch or stop; never
    publish unrelated commits or changes.
 3. If isolation, commit hooks, formatting, generated artifacts, or a review fix changes the final
-   branch diff, rerun affected checks and independent review. Require a reviewer to approve the
-   exact committed three-dot diff with no unresolved material finding before pushing.
+   branch diff, rerun affected checks and both independent reviews. Require the general reviewer
+   and test-economics reviewer to approve the exact committed three-dot diff with no unresolved
+   material finding before pushing.
 4. Push the audited branch and create or reuse a draft PR targeting the verified base. Reuse a PR
    only when its head branch and complete scope belong to this issue. Never repurpose an unrelated
    PR or turn a PR that is already ready for review back into a draft.
-5. Include the Linear link, accepted outcome, verification evidence, risks, and relevant OpenSpec
-   change in the PR.
+5. Include the Linear link, accepted outcome, verification evidence, test-review verdict and timing
+   delta, risks, and relevant OpenSpec change in the PR.
 6. Read the PR back and confirm its URL, verified base, expected head branch, draft state, and
    issue-scoped diff.
 7. Comment on Linear with the PR and verification evidence, move the issue to In Review, and read it

@@ -56,6 +56,10 @@ Keep one coordinator responsible for shared Linear state and final decisions. Su
 inspect, investigate, challenge, or review and return structured evidence. Do not let multiple
 agents update the same Linear issue or edit overlapping repository files concurrently.
 
+Every implementation run MUST also use one dedicated test-economics reviewer under
+`TEST_REVIEW.md`. This reviewer is separate from the implementer and any general code reviewer and
+can require tests to be optimized, consolidated, or deleted before handoff.
+
 ## Maintenance themes
 
 Classify each issue as exactly one primary theme:

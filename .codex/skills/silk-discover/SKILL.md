@@ -1,6 +1,6 @@
 ---
 name: silk-discover
-description: Verify the checkout is exactly current remote main, then run a deep parallel Silk sweep for stabilization, documentation drift, simplification, dead-code, and technical-debt leads and file every lead passing the Backlog intake bar in Linear. Use only when Julia explicitly asks for a Silk maintenance sweep or invokes $silk-discover.
+description: Verify the checkout is exactly current remote main, then run a deep parallel Silk sweep for stabilization, documentation drift, simplification, dead-code, and technical-debt leads and file every lead passing the Backlog intake bar in Linear. Use only when Julia explicitly invokes this skill or asks for a Silk maintenance sweep.
 ---
 
 # Discover Silk maintenance work
@@ -30,8 +30,9 @@ cap the result or stop after the first strong finding.
 2. Fetch the canonical Linear project by ID from `LINEAR.md` and verify its team. Never recreate it
    from its display name. If it cannot be resolved, stop before writing. Read all canonical-project
    issues in every status for deduplication.
-3. Record the verified remote-main SHA and dirty paths. Review recent commits, active Codex tasks,
-   open PRs, and active OpenSpec changes so work underway is not rediscovered.
+3. Record the verified remote-main SHA and dirty paths. Review recent commits, active agent tasks or
+   worktrees visible in the current environment, open PRs, and active OpenSpec changes so work
+   underway is not rediscovered.
 4. Execute the parallel assignments in `DISCOVERY.md`. Use the codebase graph first for structural
    discovery. If an index lookup fails, select the index that corresponds to the current repository
    rather than abandoning that lens.

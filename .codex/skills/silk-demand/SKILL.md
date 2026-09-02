@@ -1,6 +1,6 @@
 ---
 name: silk-demand
-description: Capture a direct request from Julia as one deduplicated Silk issue in Linear without prematurely prioritizing or implementing it. Use only when Julia explicitly invokes $silk-demand or asks to record a request.
+description: Capture a direct request from Julia as one deduplicated Silk issue in Linear without prematurely prioritizing or implementing it. Use only when Julia explicitly invokes this skill or asks to record a request.
 ---
 
 # Capture direct demand

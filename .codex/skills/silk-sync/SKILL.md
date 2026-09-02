@@ -1,6 +1,6 @@
 ---
 name: silk-sync
-description: Reconcile Silk Linear issues with repository, OpenSpec, branch, and GitHub PR reality, applying only unambiguous status corrections and reporting uncertain drift. Use only when Julia explicitly invokes $silk-sync or asks to sync the Silk queue.
+description: Reconcile Silk Linear issues with repository, OpenSpec, branch, and GitHub PR reality, applying only unambiguous status corrections and reporting uncertain drift. Use only when Julia explicitly invokes this skill or asks to sync the Silk queue.
 ---
 
 # Sync the Silk queue
@@ -34,7 +34,7 @@ new maintenance issues.
    specification unless the observed transition requires a focused note.
 6. Report but do not automatically reset ambiguous stale In Progress work, In Review issues without
    a PR, possible overlaps, unresolved gates, dirty worktrees, or branches that may belong to a live
-   Codex task. Give the evidence and the smallest next decision.
+   agent task. Give the evidence and the smallest next decision.
 7. Report applied transitions, unresolved drift, queue head, and coverage. A fully consistent sync
    is a useful result; do not invent cleanup.
 

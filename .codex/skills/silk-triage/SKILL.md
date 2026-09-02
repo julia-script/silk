@@ -1,6 +1,6 @@
 ---
 name: silk-triage
-description: Validate, deduplicate, specify, size, and prioritize Silk maintenance issues from the Linear Backlog. Use only when Julia explicitly asks to triage Silk issues or invokes $silk-triage.
+description: Validate, deduplicate, specify, size, and prioritize Silk maintenance issues from the Linear Backlog. Use only when Julia explicitly invokes this skill or asks to triage Silk issues.
 ---
 
 # Triage Silk issues
