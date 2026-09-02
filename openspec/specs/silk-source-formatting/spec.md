@@ -564,3 +564,37 @@ spacing.
 
 - **WHEN** a complete alias declaration whose target is a multi-member union contains irregular spaces and attached comments
 - **THEN** two formatting passes produce identical canonical source without changing tokens or comment content
+
+### Requirement: Foreign function declarations have one canonical layout
+
+The formatter SHALL print a foreign function declaration as `[pub] unsafe extern "C" fn
+<name>(<parameters>) [-> <type>] [as "<symbol>"]` with single spaces between modifiers, the existing
+width-aware parameter-list layout, and no trailing body. An omitted result type SHALL stay omitted.
+Formatting SHALL be idempotent and SHALL retain attached comments.
+
+#### Scenario: Format a foreign declaration idempotently
+
+- **WHEN** a source with irregular spacing declares `pub   unsafe extern "C"  fn cAbs( value : i32 )->i32 as "abs"` under a line comment
+- **THEN** one pass yields the canonical single-line form with the comment retained and a second pass is byte-identical
+
+### Requirement: Exported function declarations have one canonical layout
+
+The formatter SHALL print an exported function as `[pub] export "C" fn <name>(<parameters>) ->
+<type> [as "<symbol>"] {` followed by the ordinary block layout, with single spaces between
+modifiers and the existing width-aware parameter layout. Formatting SHALL be idempotent and SHALL
+retain attached comments.
+
+#### Scenario: Format an export idempotently
+
+- **WHEN** a source with irregular spacing declares `pub  export "C"fn double( value:i32 )->i32 as "silk_test_double_v1"{ return value * 2 }`
+- **THEN** one pass yields the canonical form and a second pass is byte-identical
+
+### Requirement: Pointer types have one canonical layout
+
+The formatter SHALL print pointer types as `*const <type>` and `*mut <type>` with no space after
+the star and one space before the pointee, idempotently.
+
+#### Scenario: Format a pointer type
+
+- **WHEN** source spells `* mut   u8`
+- **THEN** formatting yields `*mut u8` and a second pass is byte-identical

@@ -1118,3 +1118,78 @@ They SHALL require no new runtime entry point or intrinsic and SHALL agree with 
 
 - **WHEN** a referent is followed by field or index projections, including a zero-lane target
 - **THEN** both backends derive the same canonical address without inventing runtime state
+
+### Requirement: Native backends declare reachable foreign functions under the C calling convention
+
+Supported native LLVM emission SHALL declare each reachable foreign symbol exactly once as an
+external function under the target's C calling convention (LLVM convention `0`, which the textual
+renderer prints without a marker) with the LLVM types the classified C signature selects:
+exact-width integers, the target pointer-width integer for `isize`/`usize`, `float`/`double`, and
+`void` for a `()` result. Each foreign-call operation SHALL emit one direct call to that
+declaration and SHALL reload every address-taken root afterwards, as synchronous Silk calls do. The
+artifact SHALL record the reachable foreign imports with their signatures in deterministic order;
+an unreachable foreign declaration SHALL leave no trace in the module or the inventory.
+
+#### Scenario: Declare once and call directly
+
+- **WHEN** two reachable functions each call `silk_test_add`
+- **THEN** the LLVM module contains exactly one `declare i32 @silk_test_add(i32, i32)` whose calling convention property is `0`, and two direct `call` instructions to it
+
+#### Scenario: Select the target pointer width
+
+- **WHEN** a foreign function takes `usize` and the target is a 64-bit native target
+- **THEN** the declaration's parameter type is `i64`
+
+### Requirement: Non-native surfaces receive no foreign function ABI
+
+Direct-WebAssembly emission, LLVM emission for a WebAssembly target, and the evaluator MUST NOT
+lower a foreign-call operation to an invented import, host shim, or adapter. Availability
+validation SHALL reject a reachable foreign call for those surfaces before backend or evaluator
+construction, and SHALL allow programs whose closure contains none.
+
+#### Scenario: Reject a reachable foreign call under direct Wasm
+
+- **WHEN** a direct-Wasm entry reaches a foreign function
+- **THEN** planning reports foreign-function target unavailability and no partial module is constructed
+
+### Requirement: Native backends emit one C thunk per export
+
+Supported native LLVM emission SHALL define, for each discovered export, one external function
+under the target's C calling convention and the export symbol with the LLVM types its classified C
+signature selects, whose body forwards the arguments to the export's ordinary implementation
+function and returns its result. The implementation SHALL keep its compiler-versioned symbol and
+internal signature. The artifact SHALL record exports with their symbols and signatures in
+deterministic order. Planning for a WebAssembly target SHALL reject an export before construction under either backend.
+
+#### Scenario: Emit a thunk
+
+- **WHEN** `export "C" fn silk_test_double_v1(value: i32) -> i32` is emitted
+- **THEN** the LLVM module contains `define i32 @silk_test_double_v1(i32)` with calling convention property `0` whose body is one call to the implementation symbol and one `ret`, and the implementation symbol is distinct
+
+#### Scenario: Keep bitcode deterministic
+
+- **WHEN** identical target-aware MIR with exports is emitted in fresh processes
+- **THEN** the bitcode is byte-identical
+
+### Requirement: Backends realize raw pointers as one address lane
+
+Native LLVM emission SHALL lower a raw pointer to one LLVM pointer lane, null to the null pointer
+constant, formation to the address of the source place's authoritative storage, offset to a typed
+element index, and read and write to a load or store of the pointee's lanes. Direct-WebAssembly
+emission SHALL lower a raw pointer to one linear-memory address lane with the same operations over
+its heap. A place from which a pointer is formed SHALL be materialized in memory for its live range
+and reloaded after every call, foreign or Silk, exactly as borrowed roots are today; the
+direct-WebAssembly reload reachability SHALL include pointer lanes so a callee writing through a
+`*mut` parameter is observed by its caller. Pointer artifacts SHALL be
+deterministic and both backends SHALL agree with the evaluator on every program that reaches no
+foreign call.
+
+#### Scenario: Reload after a foreign call
+
+- **WHEN** a native program forms a pointer to a local, passes it to a foreign function that writes through it, and reads the local
+- **THEN** the emitted code loads the local from its storage after the call and the read observes the write
+
+#### Scenario: Pointer parity without foreign calls
+
+- **WHEN** the pointer corpus program (form, offset, write, read over a local array) runs on the evaluator, LLVM, and direct Wasm
+- **THEN** all three report the same exit status
