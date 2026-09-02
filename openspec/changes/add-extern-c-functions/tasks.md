@@ -59,4 +59,4 @@
 
 - [x] 9.1 Add a "Foreign functions" section to `unsafe-intrinsics-and-targets.md` with FFI-numbered entries for the declaration and identities, mandatory unsafety, the admitted type subset, restrictions and symbol rules, direct linkage, and native-only availability; add a glossary entry; narrow the `alpha-status.md` FFI boundary; point RUNTIME-003 at `extern "C"`; and verify the docs snippet tests compile every new example.
 - [x] 9.2 Regenerate the diagnostic index and stdlib source tables and verify the staleness checks pass.
-- [ ] 9.3 Run the full gate with `node scripts/turbo.mjs run test` and verify it passes.
+- [x] 9.3 Run the full gate with `node scripts/turbo.mjs run test` and verify it passes.
