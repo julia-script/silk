@@ -4,13 +4,13 @@ import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 /** The origin tier used to rank one importable candidate. */
 export type Tier = 'Project' | 'Toolchain'
 
-/** One public export qualified by its immutable summary and inventory tier. */
+/** One public declaration qualified by its immutable summary and inventory tier. */
 export interface Candidate {
   readonly _tag: 'WorkspaceInventoryCandidate'
   readonly tier: Tier
   readonly module: string
   readonly summary: ModuleSummary.ModuleSummary
-  readonly exported: ModuleSummary.Export
+  readonly declaration: ModuleSummary.PublicDeclaration
 }
 
 /** Deterministic observations produced while revising one inventory. */
@@ -21,7 +21,7 @@ export interface Observation {
   readonly revised: number
   readonly removed: number
   readonly indexedModules: number
-  readonly indexedExports: number
+  readonly indexedDeclarations: number
   readonly discoveryElapsedMs: number
   readonly summaryElapsedMs: number
 }
@@ -41,7 +41,9 @@ export interface WorkspaceInventory {
 export interface Input {
   readonly project?: Iterable<readonly [string, ModuleSummary.ModuleSummary]>
   readonly toolchain?: Iterable<readonly [string, ModuleSummary.ModuleSummary]>
-  readonly observation?: Partial<Omit<Observation, '_tag' | 'indexedModules' | 'indexedExports'>>
+  readonly observation?: Partial<
+    Omit<Observation, '_tag' | 'indexedModules' | 'indexedDeclarations'>
+  >
   readonly distribution?: ToolchainIntegrity.Graph
 }
 
@@ -51,7 +53,7 @@ const compareCandidate = (left: Candidate, right: Candidate): number => {
   return (
     tierOrder ||
     left.module.localeCompare(right.module) ||
-    left.exported.ordinal - right.exported.ordinal
+    left.declaration.ordinal - right.declaration.ordinal
   )
 }
 
@@ -69,16 +71,16 @@ const build = (
   const byName = new Map<string, Array<Candidate>>()
   const add = (tier: Tier, summaries: ReadonlyMap<string, ModuleSummary.ModuleSummary>): void => {
     for (const [module, summary] of summaries)
-      for (const exported of summary.exports) {
+      for (const declaration of summary.publicDeclarations) {
         const candidate: Candidate = Object.freeze({
           _tag: 'WorkspaceInventoryCandidate',
           tier,
           module,
           summary,
-          exported,
+          declaration,
         })
-        const bucket = byName.get(exported.spelling)
-        if (bucket === undefined) byName.set(exported.spelling, [candidate])
+        const bucket = byName.get(declaration.spelling)
+        if (bucket === undefined) byName.set(declaration.spelling, [candidate])
         else bucket.push(candidate)
       }
   }
@@ -89,7 +91,10 @@ const build = (
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([name, entries]) => [name, Object.freeze(entries.sort(compareCandidate))] as const),
   )
-  const indexedExports = [...exact.values()].reduce((total, entries) => total + entries.length, 0)
+  const indexedDeclarations = [...exact.values()].reduce(
+    (total, entries) => total + entries.length,
+    0,
+  )
   const observation: Observation = Object.freeze({
     _tag: 'WorkspaceInventoryObservation',
     scanned: input.scanned ?? 0,
@@ -97,7 +102,7 @@ const build = (
     revised: input.revised ?? 0,
     removed: input.removed ?? 0,
     indexedModules: project.size + toolchain.size,
-    indexedExports,
+    indexedDeclarations,
     discoveryElapsedMs: input.discoveryElapsedMs ?? 0,
     summaryElapsedMs: input.summaryElapsedMs ?? 0,
   })

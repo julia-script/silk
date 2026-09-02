@@ -383,6 +383,29 @@ it.effect('formats retained foreign declaration forms without repair', () =>
   }),
 )
 
+it.effect('formats exported function declarations canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source = `// exported symbol
+pub  export "C"fn double( value:i32 )->i32 as "silk_test_double_v1"{ return value * 2 }
+export "C"  fn tick( ) {}`
+    const first = yield* SyntaxFormatter.format(parse('memory://export-format.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `// exported symbol
+pub export "C" fn double(value: i32) -> i32 as "silk_test_double_v1" {
+  return value * 2
+}
+
+export "C" fn tick() {}
+`,
+    )
+    const second = yield* SyntaxFormatter.format(parse('memory://export-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
 it.effect('omits semantic fallthrough completion nodes from formatted source', () =>
   Effect.gen(function* () {
     const source = 'fn missing()->i32 { let value=42 } pub fn main()->() {}'
@@ -1193,6 +1216,7 @@ fn helper(value: i32, other: i32) -> i32 {
 }
 pub unsafe fn unchecked(value: i32) -> i32 { return value }
 pub unsafe extern "C" fn cAbs(value:i32)->i32 as "abs"
+pub export "C" fn double(value:i32)->i32 as "silk_test_double_v1" { return value * 2 }
 fn inspect(event: Token | End) -> i32 {
   return match &mut event { Token { span: Span { start: offset, .. }, .. } if true => offset _ => 0 }
 }

@@ -26,7 +26,7 @@ pub const answer: i32 = 42`,
 
   assert.deepEqual(summary.imports, ['silk/bytes', 'app/log'])
   assert.deepEqual(
-    summary.exports.map(({ spelling, declarationKind, namespace, ordinal }) => ({
+    summary.publicDeclarations.map(({ spelling, declarationKind, namespace, ordinal }) => ({
       spelling,
       declarationKind,
       namespace,
@@ -55,7 +55,7 @@ pub fn usable() -> i32 { return 4 }`,
   )
 
   assert.deepEqual(
-    summary.exports.map((exported) => exported.spelling),
+    summary.publicDeclarations.map((exported) => exported.spelling),
     ['usable'],
   )
 })

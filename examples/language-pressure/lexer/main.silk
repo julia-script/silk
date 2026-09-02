@@ -32,6 +32,7 @@ const tokenStatic: u8 = 82
 const tokenCompileError: u8 = 83
 const tokenType: u8 = 84
 const tokenExtern: u8 = 85
+const tokenExport: u8 = 86
 
 struct Token {
   kind: u8
@@ -221,6 +222,7 @@ fn keywordKind(source: &[u8], start: usize, end: usize) -> u8 {
   if matches(source, start, end, b"union") { return tokenUnion }
   if matches(source, start, end, b"type") { return tokenType }
   if matches(source, start, end, b"extern") { return tokenExtern }
+  if matches(source, start, end, b"export") { return tokenExport }
   return tokenIdentifier
 }
 

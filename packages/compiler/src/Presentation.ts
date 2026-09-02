@@ -106,14 +106,25 @@ const typeParameterName = (parameter: DeclarationFacts.TypeParameterFact): strin
   return `${parameter.type.kind === 'RequirementRow' ? '?' : ''}${name}`
 }
 
+/** The `extern "C"`/`export "C"` marker and native symbol, when the declaration has one. */
+const nativeMarker = (
+  self: DeclarationFacts.DeclarationFact,
+): { readonly marker: string; readonly symbol: string } | undefined => {
+  if (self.foreign !== undefined)
+    return { marker: `extern "${self.foreign.abi}" `, symbol: self.foreign.symbol }
+  if (self.foreignExport !== undefined)
+    return { marker: `export "${self.foreignExport.abi}" `, symbol: self.foreignExport.symbol }
+  return undefined
+}
+
 /** Renders a declaration in its source-level callable form. */
 export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
   const phase = self.phase === 'Static' ? 'static ' : ''
-  const extern = self.foreign === undefined ? '' : `extern "${self.foreign.abi}" `
-  const kind = `${phase}${self.unsafe ? 'unsafe ' : ''}${extern}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
-  const symbol = self.foreign === undefined ? '' : ` as "${self.foreign.symbol}"`
+  const native = nativeMarker(self)
+  const kind = `${phase}${self.unsafe ? 'unsafe ' : ''}${native?.marker ?? ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
+  const symbol = native === undefined ? '' : ` as "${native.symbol}"`
   const typeParameters =
     self.typeParameters.length === 0
       ? ''

@@ -1,9 +1,13 @@
+import * as LlvmBlock from '@silklang/llvm/Block'
 import type * as Builder from '@silklang/llvm/Builder'
 import * as FunctionActor from '@silklang/llvm/Function'
+import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import type * as LlvmError from '@silklang/llvm/LlvmError'
 import * as LlvmType from '@silklang/llvm/Type'
+import * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
-import { symbolFor } from './Backend.js'
+import { BackendError, symbolFor } from './Backend.js'
+import type * as CAbi from './CAbi.js'
 import type * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
 import { linearize } from './MirLinearization.js'
@@ -88,6 +92,75 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
     declared: Object.freeze(declared),
     ...(voidType === undefined ? {} : { voidType }),
   })
+})
+
+export interface ExportContext {
+  readonly builder: Builder.Builder
+  readonly program: Mir.Module
+  readonly declared: ReadonlyArray<NativeLoweringContext.DeclaredFunction>
+  /** LLVM type for one classified C type; `undefined` for `void`. */
+  readonly cType: (type: CAbi.CAbiType) => LlvmType.Type | undefined
+}
+
+/**
+ * Defines one external C-convention thunk per export that forwards its scalar arguments to the
+ * private implementation and returns its result, so the internal ABI never becomes the public one.
+ */
+export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
+  context: ExportContext,
+): Effect.fn.Return<void, BackendError | LlvmError.LlvmError> {
+  for (const record of context.program.foreignExports) {
+    const implementation = context.declared.find((entry) =>
+      Mir.matchesInstanceKey(entry.fn, record.key),
+    )
+    if (implementation === undefined)
+      throw new RangeError(`LLVM export ${record.symbol} lost its implementation`)
+    if (implementation.suspendable)
+      throw new RangeError(`LLVM export ${record.symbol} forwards to a suspendable implementation`)
+    const parameters = record.signature.parameters.map(context.cType)
+    if (parameters.some((type) => type === undefined))
+      throw new RangeError(`LLVM export ${record.symbol} has a void parameter`)
+    const resultType =
+      context.cType(record.signature.result) ?? (yield* LlvmType.voidType(context.builder))
+    const thunk = yield* FunctionActor.declare(
+      context.builder,
+      record.symbol,
+      yield* LlvmType.functionType(
+        context.builder,
+        resultType,
+        parameters.flatMap((type) => (type === undefined ? [] : [type])),
+      ),
+    ).pipe(
+      Effect.mapError(
+        (cause) =>
+          new BackendError({
+            operation: 'Backend.emit',
+            backend: 'LLVM',
+            message: `exported function ${record.symbol} conflicts with another declaration of that symbol: ${cause.message}`,
+            reason: { _tag: 'ForeignSymbolConflict', symbol: record.symbol },
+          }),
+      ),
+    )
+    yield* FunctionActor.buildBody(
+      context.builder,
+      thunk,
+      Effect.fnUntraced(function* (body) {
+        yield* LlvmBlock.make(body, 'entry')
+        const arguments_: Array<Value.Input> = []
+        for (let ordinal = 0; ordinal < parameters.length; ordinal += 1)
+          arguments_.push(yield* Value.argument(body, ordinal))
+        const result = yield* FunctionBody.callDirect(
+          body,
+          implementation.handle,
+          arguments_,
+          'forward',
+        )
+        if (record.signature.result._tag === 'Void') return yield* FunctionBody.returnVoid(body)
+        if (result === undefined) throw new RangeError('LLVM export thunk lost its result')
+        return yield* FunctionBody.returnValue(body, result)
+      }),
+    )
+  }
 })
 
 /** Stable C ABI symbol for one sealed OS intrinsic. */

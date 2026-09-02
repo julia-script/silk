@@ -165,6 +165,16 @@ export interface ForeignCall {
   readonly callSpan: SourceSpan.SourceSpan
 }
 
+/** One `export "C"` function discovered as a native root, with the instance it selects. */
+export interface ForeignExport {
+  readonly _tag: 'ForeignExport'
+  readonly symbol: string
+  readonly signature: CAbi.CAbiSignature
+  readonly key: InstanceKey
+  readonly declaration: DeclarationFacts.CanonicalId
+  readonly declarationSpan: SourceSpan.SourceSpan
+}
+
 /** One normalized owned failure retained by an effectful user entry. */
 export interface EntryFailure {
   readonly type: Type.Type
@@ -224,6 +234,8 @@ export interface Discovery {
   readonly intrinsics: ReadonlyArray<IntrinsicCall>
   /** Reachable foreign declarations in canonical order; native-only availability reads it. */
   readonly foreignCalls: ReadonlyArray<ForeignCall>
+  /** Every closure export in canonical module then declaration order; roots only on native. */
+  readonly foreignExports: ReadonlyArray<ForeignExport>
   readonly constants: ReadonlyArray<SelectedConstant>
   /** Exact direct/nested/external-park summaries in canonical subject order. */
   readonly suspension: ReadonlyArray<SuspensionFact>
@@ -321,6 +333,7 @@ export const invalid = (rootModule: string): Discovery =>
     calls: Object.freeze([]),
     intrinsics: Object.freeze([]),
     foreignCalls: Object.freeze([]),
+    foreignExports: Object.freeze([]),
     constants: Object.freeze([]),
     suspension: Object.freeze([]),
     residualizationDiagnostics: Object.freeze([]),
@@ -973,6 +986,44 @@ export const representedEffectSuspensionOf = (
 }
 
 /**
+ * Every admitted `export "C"` header in the loaded closure as a monomorphic root record, in
+ * canonical module then declaration order. A rejected header (unresolved result) is skipped.
+ */
+const exportRoots = (
+  index: DeclarationIndex.Index,
+  target: Target.Target,
+): ReadonlyArray<ForeignExport> =>
+  Object.freeze(
+    [...index.modules]
+      .sort((left, right) => {
+        if (left.module < right.module) return -1
+        if (left.module > right.module) return 1
+        return 0
+      })
+      .flatMap((module) =>
+        module.declarations.flatMap((fact): ReadonlyArray<ForeignExport> => {
+          if (
+            fact.foreignExport === undefined ||
+            fact.canonical._tag !== 'Canonical' ||
+            fact.name._tag !== 'Present' ||
+            fact.returnType._tag !== 'Resolved'
+          )
+            return []
+          return [
+            Object.freeze({
+              _tag: 'ForeignExport',
+              symbol: fact.foreignExport.symbol,
+              signature: ExecutableOrigin.foreignSignature(fact, target),
+              key: keyOf(fact.canonical.id, Hir.contractOf(fact)),
+              declaration: fact.canonical.id,
+              declarationSpan: fact.name.token.span,
+            }),
+          ]
+        }),
+      ),
+  )
+
+/**
  * Discovers the reachable instances from the root module's entry. The worklist records an
  * instance before following its calls, so directly and mutually recursive programs terminate.
  */
@@ -1000,6 +1051,7 @@ export const discover = (
       calls: Object.freeze([]),
       intrinsics: Object.freeze([]),
       foreignCalls: Object.freeze([]),
+      foreignExports: Object.freeze([]),
       constants: Object.freeze([]),
       suspension: Object.freeze([]),
       residualizationDiagnostics: Object.freeze([]),
@@ -1096,13 +1148,18 @@ export const discover = (
       })
     )
   }
-  const pending: Array<WorkItem> = [
+  const rootItem = (key: InstanceKey): WorkItem =>
     Object.freeze({
-      key: entry.key,
-      ancestors: new Map([[declarationText(entry.key), Object.freeze({ key: entry.key })]]),
+      key,
+      ancestors: new Map([[declarationText(key), Object.freeze({ key })]]),
       cleanupReachable: false,
-    }),
-  ]
+    })
+  const pending: Array<WorkItem> = [rootItem(entry.key)]
+  // The export inventory is recorded for every target so planning can reject it off native;
+  // only a native target seeds the worklist with it.
+  const foreignExports = exportRoots(index, target)
+  if (target.kind === 'Native')
+    for (const record of foreignExports) pending.push(rootItem(record.key))
   const violations: Array<PolymorphicRecursion> = []
   const violationKeys = new Set<string>()
   const specializationFailures = new Map<string, NonConcreteSpecialization>()
@@ -1533,6 +1590,7 @@ export const discover = (
     calls: callInstances,
     intrinsics: ExecutableOrigin.reachableIntrinsics(instances, index),
     foreignCalls: ExecutableOrigin.reachableForeignCalls(instances, index, target),
+    foreignExports,
     constants: Object.freeze(selectedConstants),
     suspension: Object.freeze([
       ...instances

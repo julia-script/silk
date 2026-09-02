@@ -267,6 +267,22 @@ pub fn main() -> i32 { return unsafe cAbs(-1) }`
   }),
 )
 
+it.effect('hovers an exported function with its export marker and native symbol', () =>
+  Effect.gen(function* () {
+    const source = `pub export "C" fn double(value: i32) -> i32 as "silk_test_double_v1" { return value * 2 }
+pub fn main() -> i32 { return double(2) }`
+    const { document, snapshot } = yield* open(source)
+    const declaration = Document.hover(document, snapshot, positionOf(source, 'double', 0))
+    // Occurrence 1 is inside the `"silk_test_double_v1"` literal; the call is occurrence 2.
+    const reference = Document.hover(document, snapshot, positionOf(source, 'double', 2))
+    assert.deepEqual(declaration?.contents, {
+      kind: 'markdown',
+      value: '```silk\npub export "C" fn double(value: i32) -> i32 as "silk_test_double_v1"\n```',
+    })
+    assert.deepEqual(reference?.contents, declaration?.contents)
+  }),
+)
+
 it.effect('appends full declaration documentation to definition and reference hovers', () =>
   Effect.gen(function* () {
     const source = `/// Recovers a problem.
@@ -859,6 +875,7 @@ pub role Primary
 pub type Answer = i32
 pub struct Box { answer: i32 }
 pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"
+export "C" fn double(value: i32) -> i32 as "silk_test_double_v1" { return value * 2 }
 pub fn main() -> i32 { return 42 }`
     const { document, snapshot } = yield* open(source)
     const symbols = Document.symbols(document, snapshot)
@@ -870,6 +887,7 @@ pub fn main() -> i32 { return 42 }`
         ['Answer', SymbolKind.Interface],
         ['Box', SymbolKind.Struct],
         ['cAbs', SymbolKind.Function],
+        ['double', SymbolKind.Function],
         ['main', SymbolKind.Function],
       ],
     )

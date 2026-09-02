@@ -1764,6 +1764,87 @@ it.effect('rejects foreign headers outside the C contract and publishes no calla
   }),
 )
 
+it.effect('indexes exported functions as ordinary facts with a native export symbol', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `export "C" fn double(value: i32) -> i32 { return value * 2 }
+pub export "C" fn twice(value: i32) -> i32 as "silk_test_double_v1" { return value * 2 }
+pub fn plain(value: i32) -> i32 { return value }`,
+      ],
+    ])
+    const [named, renamed, plain] = index.modules.at(0)?.declarations ?? []
+
+    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(named?.foreignExport, { abi: 'C', symbol: 'double' })
+    assert.strictEqual(named?.foreign, undefined)
+    assert.strictEqual(named?.visibility, 'Private')
+    assert.strictEqual(named?.unsafe, false)
+    assert.strictEqual(named?.phase, 'Runtime')
+    assert.strictEqual(named?.functionKind, 'Ordinary')
+    assert.strictEqual(named?.syntax.kind, 'FunctionDeclaration')
+    assert.strictEqual(named?.returnType._tag, 'Resolved')
+    assert.strictEqual(
+      named === undefined ? undefined : DeclarationFacts.callableContract(named).unsafe,
+      false,
+    )
+    assert.deepEqual(renamed?.foreignExport, { abi: 'C', symbol: 'silk_test_double_v1' })
+    assert.strictEqual(renamed?.visibility, 'Public')
+    assert.strictEqual(plain?.foreignExport, undefined)
+    assert.strictEqual(plain?.visibility, 'Public')
+    assert.strictEqual(DeclarationFacts.lookup(index, 'root', 'double')._tag, 'Resolved')
+  }),
+)
+
+it.effect(
+  'rejects exported headers outside the C contract and publishes no callable or export',
+  () =>
+    Effect.gen(function* () {
+      const cases: ReadonlyArray<readonly [string, string, ReadonlyArray<string>]> = [
+        ['export "fastcall" fn f() -> () { }', 'SEM0185', ['"fastcall"']],
+        ['pub static export "C" fn f() -> i32 { return 1 }', 'SEM0188', ['static']],
+        ['unsafe export "C" fn f() -> i32 { return 1 }', 'SEM0188', ['unsafe']],
+        ['export "C" effect fn f() -> () { }', 'SEM0188', ['effect']],
+        ['export "C" fn bad<T>(value: T) -> T { return move value }', 'SEM0188', ['<T>']],
+        [
+          'struct Problem {}\nexport "C" fn f() -> i32 ! Problem { return 1 }',
+          'SEM0188',
+          ['! Problem'],
+        ],
+        [
+          'struct Clock {}\nexport "C" fn f() -> i32 ? &Clock { return 1 }',
+          'SEM0188',
+          ['? &Clock'],
+        ],
+        [
+          'export "C" fn f<?S, P, ?R>() -> i32 where P provides S from R { return 1 }',
+          'SEM0188',
+          ['<?S, P, ?R>', 'where P provides S from R'],
+        ],
+        ['export "C" fn bad() -> string { return "" }', 'SEM0187', ['string']],
+        ['export "C" fn bad(flag: bool) -> char { return \'a\' }', 'SEM0187', ['bool', 'char']],
+        ['export "C" fn f() -> () as "not a symbol" { }', 'SEM0190', ['"not a symbol"']],
+        ['export "C" fn f() -> i32 as "main" { return 1 }', 'SEM0191', ['"main"']],
+        ['export "C" fn main() -> i32 { return 1 }', 'SEM0191', ['main']],
+        [
+          'export "C" fn silk_os_file_open_v1() -> i32 { return 1 }',
+          'SEM0191',
+          ['silk_os_file_open_v1'],
+        ],
+      ]
+
+      for (const [source, code, expected] of cases) {
+        const index = yield* collect('root', [['root', source]])
+        const header = index.modules.at(0)?.declarations.at(-1)
+
+        assert.deepEqual(spans(index, source, code), expected, source)
+        assert.strictEqual(header?.foreignExport, undefined, source)
+        assert.strictEqual(header?.returnType._tag, 'Unavailable', source)
+      }
+    }),
+)
+
 it.effect('does not double-report a foreign header whose ABI literal the parser lost', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [['root', 'unsafe extern fn f() -> i32']])

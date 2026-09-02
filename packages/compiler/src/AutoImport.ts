@@ -59,9 +59,9 @@ const candidateKey = (candidate: WorkspaceInventory.Candidate): CandidateKey =>
   Object.freeze({
     _tag: 'AutoImportCandidateKey',
     module: candidate.module,
-    spelling: candidate.exported.spelling,
-    declarationKind: candidate.exported.declarationKind,
-    ordinal: candidate.exported.ordinal,
+    spelling: candidate.declaration.spelling,
+    declarationKind: candidate.declaration.declarationKind,
+    ordinal: candidate.declaration.ordinal,
   })
 
 export const key = (candidate: CandidateKey): string =>
@@ -95,7 +95,7 @@ export const discover = (request: Request): ReadonlyArray<Action> => {
     .filter(
       (candidate) =>
         candidate.module !== request.module &&
-        applicableNamespace(occurrence.role, candidate.exported.namespace),
+        applicableNamespace(occurrence.role, candidate.declaration.namespace),
     )
     .sort((left, right) => {
       const importOrder =
@@ -104,7 +104,8 @@ export const discover = (request: Request): ReadonlyArray<Action> => {
       if (importOrder !== 0) return importOrder
       if (left.tier !== right.tier) return left.tier === 'Project' ? -1 : 1
       return (
-        left.module.localeCompare(right.module) || left.exported.ordinal - right.exported.ordinal
+        left.module.localeCompare(right.module) ||
+        left.declaration.ordinal - right.declaration.ordinal
       )
     })
   return Object.freeze(

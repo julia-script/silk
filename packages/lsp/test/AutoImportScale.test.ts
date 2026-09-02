@@ -91,7 +91,7 @@ it.effect(
         revised.observation.indexedModules,
         moduleCount + 1 + revised.toolchain.size,
       )
-      assert.isAtLeast(revised.observation.indexedExports, moduleCount + 1)
+      assert.isAtLeast(revised.observation.indexedDeclarations, moduleCount + 1)
       if (measure)
         process.stderr.write(
           `${Inspectable.toStringUnknown({

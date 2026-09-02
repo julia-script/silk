@@ -704,6 +704,17 @@ it('recognizes extern only as a complete keyword', () => {
   )
 })
 
+it('recognizes export only as a complete keyword', () => {
+  const result = Lexer.lex(
+    SourceFile.make('memory://export-keyword.silk', ascii('export exported exports')),
+  )
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['ExportKeyword', 'Identifier', 'Identifier', 'EndOfFile'],
+  )
+})
+
 it('recognizes the effect execution and failure keywords without prefix capture', () => {
   const result = Lexer.lex(
     SourceFile.make(
