@@ -41,7 +41,7 @@
 ## 7. Review and repository verification
 
 - [x] 7.1 Run focused parser, formatter, analysis/HIR/ownership/MIR, evaluator, Wasm, native-corpus, hover, and completion tests and verify every JUL-72 acceptance path is covered at its cheapest tier.
-- [ ] 7.2 Run the mandatory independent test-economics review against the committed diff, resolve every in-scope finding, and record the final reviewer verdict.
+- [x] 7.2 Run the mandatory independent test-economics review against the committed diff, resolve every in-scope finding, and record the final reviewer verdict. Verdict: `approve` for `22b73a9`; measured focused increment `+2.45s` wall / `+2.05s` test time, with approximately `3.1s` incremental default-suite work including the shared native corpus case.
 - [x] 7.3 Run `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, and `pnpm test` in order, fixing any change-caused failure.
 - [x] 7.4 Run `pnpm check` and verify the complete repository gate passes.
 - [x] 7.5 Run `pnpm release:candidate` if package contents or exports changed and verify the release-candidate gate passes or record why it is not applicable.
