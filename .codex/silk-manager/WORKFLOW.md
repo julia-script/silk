@@ -220,6 +220,27 @@ Backlog issue with `Triage disposition: queue-ready` is eligible for automatic w
 Use Linear comments for dated discovery additions, implementation reports, and reconciliation
 history. Keep the description as the current specification rather than an activity log.
 
+## Pull request quality bar
+
+A draft PR must be understandable to a reviewer who has not read the agent conversation. Give it a
+specific outcome-oriented title. In the body, explain the problem and why it mattered, summarize
+the delivered behavior and meaningful design choices, link the Linear issue and relevant OpenSpec
+change, and report verification, test-economics evidence, risks, and deferred work truthfully.
+
+Strongly prefer short paired `Before` and `After` code or output examples when they make the change
+concrete. This is the default for API-shape changes, call-site changes, diagnostics, generated
+output, configuration, documentation examples, and user-visible behavior. Copy `Before` from the
+verified PR base and `After` from the final PR head; keep both minimal, syntactically valid when
+practical, and focused on the observable difference rather than incidental implementation. Refresh
+examples after review fixes so they describe the exact published diff.
+
+Examples are encouraged, not universal ceremony. Omit one or both sides when the change is pure
+deletion, internal restructuring with no useful representative snippet, research or metadata work,
+or any case where an example would be invented, misleading, or less clear than prose. Make omission
+a deliberate clarity decision, not the automatic result of copying a generic PR template. Never
+paste large functions, generated files, unrelated setup, secrets, or a stale ticket example into a
+PR.
+
 ## Triage decisions
 
 Validate five claims:

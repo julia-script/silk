@@ -143,8 +143,11 @@ Finish exactly as `silk-work` requires:
 4. Push the audited branch and create or reuse a draft PR targeting the verified base. Reuse a PR
    only when its head branch and complete scope belong to this issue. Never repurpose an unrelated
    PR or turn a PR that is already ready for review back into a draft.
-5. Include the Linear link, accepted outcome, verification evidence, test-review verdict and timing
-   delta, risks, and relevant OpenSpec change in the PR.
+5. Follow the Pull request quality bar in `WORKFLOW.md`. Include the Linear link, accepted outcome,
+   verification evidence, test-review verdict and timing delta, risks, and relevant OpenSpec change
+   in a clear PR body. Strongly prefer concise `Before` and `After` code or output examples when they
+   materially clarify the delivered change; omit them only when examples would add no useful signal
+   or would misrepresent the work.
 6. Read the PR back and confirm its URL, verified base, expected head branch, draft state, and
    issue-scoped diff.
 7. Comment on Linear with the PR and verification evidence, move the issue to In Review, and read it

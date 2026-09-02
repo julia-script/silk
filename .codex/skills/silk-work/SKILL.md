@@ -91,9 +91,12 @@ verification and review:
    artifacts, or review fixes alter it, rerun affected checks, recommit, and repeat review until the
    committed diff is approved.
 3. Push the approved branch to `origin`.
-4. Create a draft PR targeting `main`. Include the Linear issue link, outcome, acceptance evidence,
-   exact checks run, test-review verdict and timing delta, risks or deferred checks, and relevant
-   OpenSpec change.
+4. Create a clear draft PR targeting `main` and follow the Pull request quality bar in
+   `WORKFLOW.md`. Include the Linear issue link, outcome, acceptance evidence, exact checks run,
+   test-review verdict and timing delta, risks or deferred checks, and relevant OpenSpec change.
+   Strongly prefer concise `Before` and `After` code or output examples when they materially clarify
+   the delivered change; omit them only when examples would add no useful signal or would
+   misrepresent the work.
 5. If the branch already has an open PR, reuse it rather than creating a duplicate and ensure it is
    still a draft. Never mark the PR ready for review as part of this skill.
 6. Read the PR back and require both its URL and draft state before treating the run as complete.
