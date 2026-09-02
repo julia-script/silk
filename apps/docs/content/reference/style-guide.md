@@ -133,16 +133,14 @@ them. Silk does not select by import order or form an overload set.
 
 **Boundary:** This is an API convention, not a validity rule. A member may place another argument
 first when its domain meaning calls for that order, and a valid inline conformance is not rejected
-for lacking a mapped member. An inherent member is called through its owner; the language does not
-currently reinterpret a member as an instance method:
-
-```silk,ignore
-counter.increment(1)
-```
-
-Use `Counter.increment(counter, 1)` or `counter |> Counter.increment(1)`. Receiver-position
-method-call syntax is defined by a separate later change; the receiver-first contract described here
-is what lets that spelling reuse the same member without a second calling convention.
+for lacking a mapped member. A receiver method is also callable as `counter.increment(1)`; that
+spelling resolves to the same member as `Counter.increment(counter, 1)` and
+`counter |> Counter.increment(1)`, with the receiver's ownership taken from the declared `self`
+parameter (`Self` consumes, `&Self` borrows, `&mut Self` borrows exclusively). Only a member whose
+first parameter is `self` is callable through a value; an associated function such as
+`Counter.zero()` is not, and `counter.increment` without a call is not a callable value. The
+receiver-first contract described here is what lets all three spellings share one member without a
+second calling convention.
 
 Extension functions do not retroactively make an external type conform to an interface or service;
 a third-party type/interface combination requires an owned adapter type. This coherence boundary is
