@@ -774,6 +774,70 @@ pub fn main() -> i32 { return 42 }`
   )
 })
 
+it.effect('completes inherent members after a nominal qualifier with kind labels', () => {
+  const source = `pub union Option<T> { None, Some { pub value: T } }
+impl<T> Option<T> {
+  pub fn none() -> Self { return Option<T>.None }
+  pub fn some(value: T) -> Self { return Option.Some { value: move value } }
+  pub fn map<U>(self: Self, transform: once fn(T) -> U) -> Option<U> {
+    return match move self {
+      Option<T>.Some { value } => Option.some<U>(transform(move value))
+      Option<T>.None => Option.none<U>()
+    }
+  }
+}
+pub fn main() -> i32 { let option = Option. return 0 }`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const offset = source.indexOf('Option.') + 'Option.'.length
+      const completion = Analysis.completionAt(snapshot, 'main', offset)
+      assert.deepEqual(
+        completion?.candidates.map((candidate) => [candidate.label, candidate.kind]),
+        [
+          ['None', 'Constructor'],
+          ['Some', 'Constructor'],
+          ['none', 'AssociatedFunction'],
+          ['some', 'AssociatedFunction'],
+          ['map', 'Method'],
+        ],
+      )
+      assert.strictEqual(
+        completion?.candidates.find((candidate) => candidate.label === 'map')?.detail?.text,
+        'pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> Option<U>',
+      )
+      return undefined
+    }),
+  )
+})
+
+it.effect('lists a private inherent member only inside its declaring module', () => {
+  const main = `import shapes { Counter }
+pub fn main() -> i32 { let counter = Counter. return 0 }`
+  const shapes = `pub struct Counter { value: i32 }
+impl Counter {
+  pub fn make(value: i32) -> Self { return Counter { value: value } }
+  fn secret(self: &Self) -> i32 { return self.value }
+}
+pub fn local() -> i32 { let counter = Counter. return 0 }`
+  return Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(main)) }).pipe(
+    Effect.provide(SourceResolver.memory(new Map([['shapes', encoder.encode(shapes)]]))),
+    Effect.map((snapshot) => {
+      const labels = (module: string, source: string) =>
+        Analysis.completionAt(
+          snapshot,
+          module,
+          source.indexOf('Counter.') + 'Counter.'.length,
+        )?.candidates.map((candidate) => [candidate.label, candidate.kind])
+      assert.deepEqual(labels('main', main), [['make', 'AssociatedFunction']])
+      assert.deepEqual(labels('shapes', shapes), [
+        ['make', 'AssociatedFunction'],
+        ['secret', 'Method'],
+      ])
+      return undefined
+    }),
+  )
+})
+
 it.effect('answers deterministic inferred hints and recovered completions', () =>
   Analysis.ofSourceRealized('main', encoder.encode(recoveredMemberSource)).pipe(
     Effect.map((snapshot) => {
@@ -1749,6 +1813,45 @@ it.effect('presents and completes the sealed suspension intrinsic with its exact
       assert.strictEqual(
         candidate?.detail?.text,
         'fn Intrinsic.suspendEffect<A, E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E ? R>',
+      )
+      return undefined
+    }),
+  )
+})
+
+it.effect('keeps inherent members out of a module-namespace completion', () => {
+  const shapes = `pub struct Counter { value: i32 }
+impl Counter { pub fn make() -> Self { return Counter { value: 1 } } }
+pub fn helper() -> i32 { return 1 }
+`
+  const source = `import shapes as Shapes
+pub fn main() -> i32 { let value = Shapes. return 0 }`
+  return Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(source)) }).pipe(
+    Effect.provide(SourceResolver.memory(new Map([['shapes', encoder.encode(shapes)]]))),
+    Effect.map((snapshot) => {
+      const offset = source.indexOf('Shapes.') + 'Shapes.'.length
+      const completion = Analysis.completionAt(snapshot, 'main', offset)
+      assert.deepEqual(
+        [...(completion?.candidates.map((candidate) => candidate.label) ?? [])].sort(),
+        ['Counter', 'helper'],
+      )
+      return undefined
+    }),
+  )
+})
+
+it.effect('completes members of the aliased owner after a type-alias qualifier', () => {
+  const source = `pub struct Counter { value: i32 }
+impl Counter { pub fn make() -> Self { return Counter { value: 1 } } }
+type Tally = Counter
+pub fn main() -> i32 { let value = Tally. return 0 }`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const offset = source.indexOf('Tally.') + 'Tally.'.length
+      const completion = Analysis.completionAt(snapshot, 'main', offset)
+      assert.deepEqual(
+        completion?.candidates.map((candidate) => [candidate.label, candidate.kind]),
+        [['make', 'AssociatedFunction']],
       )
       return undefined
     }),

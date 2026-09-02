@@ -401,6 +401,14 @@ export const reservedForeignSymbolCode = 'SEM0191' as const
 export const conflictingForeignSignatureCode = 'SEM0192' as const
 /** Stable code for one reachable foreign call unavailable on the requested execution surface. */
 export const foreignFunctionTargetUnavailableCode = 'SEM0193' as const
+/** Stable code for an inherent impl head that is not the whole family of a module-local nominal. */
+export const invalidInherentHeadCode = 'SEM0194' as const
+/** Stable code for an inherent impl member that cannot be an associated member. */
+export const invalidInherentMemberCode = 'SEM0195' as const
+/** Stable code for two inherent members of one owner sharing a name. */
+export const duplicateInherentMemberCode = 'SEM0196' as const
+/** Stable code for a selective import naming an inherent member as if it were a root declaration. */
+export const importedInherentMemberCode = 'SEM0197' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -636,6 +644,10 @@ export type Code =
   | typeof reservedForeignSymbolCode
   | typeof conflictingForeignSignatureCode
   | typeof foreignFunctionTargetUnavailableCode
+  | typeof invalidInherentHeadCode
+  | typeof invalidInherentMemberCode
+  | typeof duplicateInherentMemberCode
+  | typeof importedInherentMemberCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -1312,7 +1324,25 @@ export type Reason =
       readonly _tag: 'LocalSharedAccessEscape'
       readonly kind: 'Callback' | 'Result' | 'Suspension'
     }
-
+  | {
+      readonly _tag: 'InvalidInherentHead'
+      readonly owner: string
+      readonly problem: 'Specialized' | 'Bounded' | 'ForeignOwner' | 'AliasOwner' | 'NotNominal'
+    }
+  | {
+      readonly _tag: 'InvalidInherentMember'
+      readonly owner: string
+      readonly member: string
+      readonly problem: 'MappedOperation' | 'DropHook' | 'Collision'
+      readonly collidesWith?: string
+    }
+  | { readonly _tag: 'DuplicateInherentMember'; readonly owner: string; readonly member: string }
+  | {
+      readonly _tag: 'ImportedInherentMember'
+      readonly module: string
+      readonly member: string
+      readonly owner: string
+    }
 /** One additional source span labeled with its relationship to the diagnostic. */
 export interface RelatedSpan {
   readonly label: string
@@ -2466,6 +2496,125 @@ export const foreignFunctionTargetUnavailable = (
     severity: 'error',
     message: `Foreign function ${symbol} is unavailable for ${surface}`,
     reason: Object.freeze({ _tag: 'ForeignFunctionTargetUnavailable', symbol, surface }),
+    span,
+  })
+
+const inherentHeadMessage = (
+  owner: string,
+  problem: 'Specialized' | 'Bounded' | 'ForeignOwner' | 'AliasOwner' | 'NotNominal',
+): string => {
+  switch (problem) {
+    case 'Specialized':
+      return `impl ${owner} must name the whole type family: its arguments are exactly the impl's own binders, in order, each once`
+    case 'Bounded':
+      return `impl ${owner} cannot bound its binders; inherent members belong to every instantiation`
+    case 'ForeignOwner':
+      return `impl ${owner} must be declared in the module that declares ${owner}`
+    case 'AliasOwner':
+      return `impl ${owner} cannot use a type alias as its owner; name the aliased nominal type instead`
+    case 'NotNominal':
+      return `impl ${owner} must name a struct, union, enum, service, or interface declaration`
+  }
+}
+
+/** Rejects an inherent impl head that does not own the complete family of a module-local nominal. */
+export const invalidInherentHead = (
+  owner: string,
+  problem: 'Specialized' | 'Bounded' | 'ForeignOwner' | 'AliasOwner' | 'NotNominal',
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidInherentHeadCode,
+    severity: 'error',
+    message: inherentHeadMessage(owner, problem),
+    reason: Object.freeze({ _tag: 'InvalidInherentHead', owner, problem }),
+    span,
+  })
+
+const inherentMemberMessage = (
+  owner: string,
+  member: string,
+  problem: 'MappedOperation' | 'DropHook' | 'Collision',
+  collidesWith: string | undefined,
+): string => {
+  switch (problem) {
+    case 'MappedOperation':
+      return `impl ${owner} cannot map ${member} to another declaration; only a conformance maps operations`
+    case 'DropHook':
+      return `impl ${owner} cannot declare a drop hook; declare impl Drop for ${owner} instead`
+    case 'Collision':
+      return `${owner}.${member} collides with the ${collidesWith ?? 'existing item'} ${member} of ${owner}`
+  }
+}
+
+/** Rejects an inherent impl member that cannot become an associated member of its owner. */
+export const invalidInherentMember = (
+  owner: string,
+  member: string,
+  problem: 'MappedOperation' | 'DropHook' | 'Collision',
+  span: SourceSpan.SourceSpan,
+  collidesWith?: string,
+  relatedSpan?: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidInherentMemberCode,
+    severity: 'error',
+    message: inherentMemberMessage(owner, member, problem, collidesWith),
+    reason: Object.freeze({
+      _tag: 'InvalidInherentMember',
+      owner,
+      member,
+      problem,
+      ...(collidesWith === undefined ? {} : { collidesWith }),
+    }),
+    span,
+    ...(relatedSpan === undefined
+      ? {}
+      : {
+          relatedSpans: Object.freeze([
+            Object.freeze({ label: `${collidesWith ?? 'item'} ${member}`, span: relatedSpan }),
+          ]),
+        }),
+  })
+
+/** Rejects a second inherent member of one owner with a name an earlier impl block already used. */
+export const duplicateInherentMember = (
+  owner: string,
+  member: string,
+  span: SourceSpan.SourceSpan,
+  otherSpan: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: duplicateInherentMemberCode,
+    severity: 'error',
+    message: `${owner}.${member} is declared more than once; one owner has at most one member of each name`,
+    reason: Object.freeze({ _tag: 'DuplicateInherentMember', owner, member }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: `other declaration of ${owner}.${member}`, span: otherSpan }),
+    ]),
+  })
+
+/** Rejects a selective import that names an inherent member as though it were a root declaration. */
+export const importedInherentMember = (
+  module: string,
+  member: string,
+  owner: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: importedInherentMemberCode,
+    severity: 'error',
+    message: `${module} has no root declaration ${member}; it is a member of ${owner}, so import ${owner} and write ${owner}.${member}`,
+    reason: Object.freeze({ _tag: 'ImportedInherentMember', module, member, owner }),
     span,
   })
 

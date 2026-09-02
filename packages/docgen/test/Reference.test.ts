@@ -145,6 +145,64 @@ it.effect('produces byte-identical files for repeated input', () =>
   }),
 )
 
+it.effect('groups inherent members under their owner and resolves member links', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'test/option',
+      encoder.encode(`//! Optional values; see [\`map\`] and [\`none\`].
+
+/// An optional value.
+pub union Option<T> { None, Some { pub value: T } }
+
+impl<T> Option<T> {
+  /// Transform.
+  pub fn map<U>(self: Self, transform: once fn(T) -> U) -> Option<U> {
+    return match move self {
+      Option<T>.Some { value } => Option<U>.Some { value: transform(move value) }
+      Option<T>.None => Option<U>.None
+    }
+  }
+  /// Nothing.
+  pub fn none() -> Self { return Option<T>.None }
+  fn hidden() -> i32 { return 0 }
+}
+`),
+    )
+    const project = Project.make(snapshot)
+    const module = project.modules.at(0)
+    assert.deepStrictEqual(
+      module?.items.map((item) => item.name),
+      ['Option'],
+    )
+    const option = module?.items.at(0)
+    assert.deepStrictEqual(
+      option?.children
+        .filter((item) => item.kind === 'Method' || item.kind === 'AssociatedFunction')
+        .map((item) => [item.kind, item.name, item.documentation?.markdown]),
+      [
+        ['Method', 'Option.map', 'Transform.'],
+        ['AssociatedFunction', 'Option.none', 'Nothing.'],
+      ],
+    )
+    const links = module?.documentation?.blocks
+      .flatMap((block) => (block._tag === 'Paragraph' ? block.children : []))
+      .flatMap((inline) => (inline._tag === 'SymbolLink' ? [inline.target?.id] : []))
+    assert.deepStrictEqual(links, ['test/option::Option.map', 'test/option::Option.none'])
+
+    const result = Reference.make([{ module: 'test/option', namespace: 'Option' }], project)
+    assert.strictEqual(result._tag, 'Success')
+    if (result._tag !== 'Success') return
+    const page = result.reference.files.find((file) => file.path === 'option.md')?.contents
+    assert.isDefined(page)
+    assert.include(page, 'Public declarations: 1.')
+    assert.include(page, '### Method `Option.map`')
+    assert.include(page, '### Associated function `Option.none`')
+    assert.notInclude(page, 'hidden')
+    assert.include(page, `[\`map\`](#${Reference.declarationAnchor('test/option::Option.map')})`)
+    assert.isBelow(page.indexOf('## `Option`'), page.indexOf('### Method `Option.map`'))
+  }),
+)
+
 const item = (id: string, start: number): Project.Item =>
   Object.freeze({
     id,

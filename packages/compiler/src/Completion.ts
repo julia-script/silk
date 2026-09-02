@@ -28,6 +28,8 @@ export type Kind =
   | 'Binding'
   | 'Parameter'
   | 'Function'
+  | 'Method'
+  | 'AssociatedFunction'
   | 'Constant'
   | 'Constructor'
   | 'Type'
@@ -324,13 +326,54 @@ const serviceCandidates = (service: DeclarationFacts.ServiceFact): ReadonlyArray
     ),
   )
 
+/**
+ * The owner's accessible inherent members, labeled `Method` when parameter zero is the receiver
+ * and `AssociatedFunction` otherwise. Visibility and duplicate rules are the resolver's.
+ */
+const inherentCandidates = (
+  index: DeclarationIndex.Index,
+  owner: DeclarationFacts.MemberFact,
+  module: string,
+): ReadonlyArray<Candidate> => {
+  if (owner.canonical._tag !== 'Canonical') return Object.freeze([])
+  const ownerId = owner.canonical.id
+  const names = new Set<string>()
+  for (const member of index.modules.find((headers) => headers.module === ownerId.module)
+    ?.members ?? []) {
+    const associated = member._tag === 'FunctionDeclaration' ? member.associatedMember : undefined
+    if (associated === undefined) continue
+    if ((associated.owner?.name ?? associated.ownerSpelling) === ownerId.name)
+      names.add(associated.name)
+  }
+  return Object.freeze(
+    [...names].flatMap((name): ReadonlyArray<Candidate> => {
+      const lookup = NameResolution.lookupAssociated(index, owner, name, module)
+      if (lookup._tag !== 'Inherent' || lookup.declaration._tag !== 'FunctionDeclaration') return []
+      return [
+        candidate({
+          identity: semantic(declarationIdentity(lookup.declaration)),
+          kind: lookup.declaration.associatedMember?.receiver ? 'Method' : 'AssociatedFunction',
+          label: name,
+          detail: PresentationRenderer.functionDeclaration(lookup.declaration),
+          sortGroup: 1,
+        }),
+      ]
+    }),
+  )
+}
+
 const namespaceCandidates = (
   index: DeclarationIndex.Index,
   module: string,
+  sortGroup = 0,
 ): ReadonlyArray<Candidate> =>
   (index.modules.find((headers) => headers.module === module)?.members ?? []).flatMap(
     (declaration) => {
-      if (declaration.visibility !== 'Public' || declaration.name._tag !== 'Present') {
+      if (
+        declaration.visibility !== 'Public' ||
+        declaration.name._tag !== 'Present' ||
+        (declaration._tag === 'FunctionDeclaration' && declaration.associatedMember !== undefined)
+      ) {
         return []
       }
       return [
@@ -339,7 +382,7 @@ const namespaceCandidates = (
           kind: declarationKind(declaration, 'Type'),
           label: declaration.name.spelling,
           detail: declarationDetail(declaration),
-          sortGroup: 0,
+          sortGroup,
         }),
       ]
     },
@@ -720,6 +763,28 @@ export const complete = (options: {
         replacement: replacement.span,
         candidates: stable(namespaceCandidates(options.index, lookup.module)),
       })
+    // Declared inherent members lead the legacy basename projection, which is consulted only
+    // as the trailing group until the standard library migrates.
+    const inherent =
+      lookup?._tag === 'Resolved'
+        ? inherentCandidates(
+            options.index,
+            NameResolution.erasedOwner(options.index, lookup.declaration),
+            options.module,
+          )
+        : Object.freeze([])
+    // A transparent alias qualifier offers the aliased owner's members and nothing of its own.
+    if (
+      lookup?._tag === 'Resolved' &&
+      lookup.declaration._tag === 'AliasDeclaration' &&
+      inherent.length > 0
+    )
+      return Object.freeze({
+        _tag: 'CompletionResult',
+        context: Object.freeze({ _tag: 'ActorMemberContext', actor: lookup.spelling }),
+        replacement: replacement.span,
+        candidates: stable(inherent),
+      })
     if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'EnumDeclaration')
       return Object.freeze({
         _tag: 'CompletionResult',
@@ -731,7 +796,7 @@ export const complete = (options: {
               : (qualifier ?? 'enum'),
         }),
         replacement: replacement.span,
-        candidates: stable(enumCandidates(lookup.declaration)),
+        candidates: stable([...enumCandidates(lookup.declaration), ...inherent]),
       })
     if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'UnionDeclaration') {
       const scoped = NameResolution.scopedModule(lookup.declaration)
@@ -747,7 +812,8 @@ export const complete = (options: {
         replacement: replacement.span,
         candidates: stable([
           ...unionCandidates(lookup.declaration),
-          ...(scoped === undefined ? [] : namespaceCandidates(options.index, scoped)),
+          ...inherent,
+          ...(scoped === undefined ? [] : namespaceCandidates(options.index, scoped, 2)),
         ]),
       })
     }
@@ -756,8 +822,9 @@ export const complete = (options: {
       (lookup.declaration._tag === 'StructDeclaration' ||
         lookup.declaration._tag === 'InterfaceDeclaration') &&
       lookup.declaration.canonical._tag === 'Canonical' &&
-      NameResolution.scopedModule(lookup.declaration) !== undefined
-    )
+      (inherent.length > 0 || NameResolution.scopedModule(lookup.declaration) !== undefined)
+    ) {
+      const scoped = NameResolution.scopedModule(lookup.declaration)
       return Object.freeze({
         _tag: 'CompletionResult',
         context: Object.freeze({
@@ -765,10 +832,12 @@ export const complete = (options: {
           actor: lookup.declaration.canonical.id.name,
         }),
         replacement: replacement.span,
-        candidates: stable(
-          namespaceCandidates(options.index, lookup.declaration.canonical.id.module),
-        ),
+        candidates: stable([
+          ...inherent,
+          ...(scoped === undefined ? [] : namespaceCandidates(options.index, scoped, 2)),
+        ]),
       })
+    }
     if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'ServiceDeclaration') {
       const scoped = NameResolution.scopedModule(lookup.declaration)
       return Object.freeze({
@@ -783,7 +852,8 @@ export const complete = (options: {
         replacement: replacement.span,
         candidates: stable([
           ...serviceCandidates(lookup.declaration),
-          ...(scoped === undefined ? [] : namespaceCandidates(options.index, scoped)),
+          ...inherent,
+          ...(scoped === undefined ? [] : namespaceCandidates(options.index, scoped, 2)),
         ]),
       })
     }

@@ -376,7 +376,7 @@ const syntaxForIdentity = (
     return DeclarationFacts.byCanonical(self.index, identity.id.enum)?.syntax
   if (identity._tag === 'TypeParameterIdentity') {
     for (const headers of self.index.modules)
-      for (const member of headers.members) {
+      for (const member of [...headers.members, ...headers.inherentImpls]) {
         const parameter = member.typeParameters.find((candidate) =>
           Type.equals(candidate.type, identity.id),
         )
@@ -529,7 +529,7 @@ const presentationOfIdentity = (
   }
   if (identity._tag === 'TypeParameterIdentity') {
     for (const headers of self.index.modules)
-      for (const member of headers.members) {
+      for (const member of [...headers.members, ...headers.inherentImpls]) {
         const parameter = member.typeParameters.find((candidate) =>
           Type.equals(candidate.type, identity.id),
         )

@@ -779,6 +779,50 @@ pub fn main() -> i32 {
     }),
 )
 
+it.effect('nests inherent members under their impl symbol and hovers the full contract', () =>
+  Effect.gen(function* () {
+    const source = `pub struct Counter { count: i32 }
+impl Counter {
+  pub fn make(count: i32) -> Self { return Counter { count: count } }
+  pub fn value(self: &Self) -> i32 { return self.count }
+}
+pub fn main() -> i32 { let counter = Counter.make(1) return Counter.value(&counter) }`
+    const { document, snapshot } = yield* open(source)
+    const symbols = Document.symbols(document, snapshot)
+    assert.deepEqual(
+      symbols.map((symbol) => [
+        symbol.name,
+        symbol.kind,
+        symbol.children?.map((child) => [child.name, child.kind]),
+      ]),
+      [
+        ['Counter', SymbolKind.Struct, [['count', SymbolKind.Field]]],
+        [
+          'impl Counter',
+          SymbolKind.Object,
+          [
+            ['make', SymbolKind.Function],
+            ['value', SymbolKind.Method],
+          ],
+        ],
+        ['main', SymbolKind.Function, undefined],
+      ],
+    )
+    const expected = {
+      kind: 'markdown' as const,
+      value: '```silk\npub fn value(self: &Counter) -> i32\n```',
+    }
+    assert.deepEqual(
+      Document.hover(document, snapshot, positionOf(source, 'value(self'))?.contents,
+      expected,
+    )
+    assert.deepEqual(
+      Document.hover(document, snapshot, positionOf(source, 'value(&counter)'))?.contents,
+      expected,
+    )
+  }),
+)
+
 it.effect(
   'uses canonical nominal union identities for editor navigation and constructor help',
   () =>

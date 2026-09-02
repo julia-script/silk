@@ -1217,6 +1217,9 @@ const collectMember = (
       declaration,
     )
   for (const typeParameter of member.typeParameters) {
+    // An inherent member carries its impl head's binders ahead of its own; the head declares
+    // those once (see `collectInherentImpl`), so only binders spelled inside the member count.
+    if (typeParameter.syntax.span.start < member.syntax.span.start) continue
     const parameterLocation = locationOfTypeParameter(typeParameter)
     if (typeParameter.name._tag === 'Present')
       push(
@@ -1364,6 +1367,25 @@ const collectMember = (
   }
 }
 
+/** The head `impl<Binders> Owner<Binders>` declares the binders once and references the owner. */
+const collectInherentImpl = (
+  head: DeclarationFacts.InherentImplFact,
+  index: DeclarationIndex.Index,
+  scope: NameResolution.ModuleScope | undefined,
+  pending: Array<Pending>,
+): void => {
+  for (const typeParameter of head.typeParameters)
+    if (typeParameter.name._tag === 'Present')
+      push(
+        pending,
+        typeParameter.name.token.span,
+        'Declaration',
+        available(Object.freeze({ _tag: 'TypeParameterIdentity', id: typeParameter.type })),
+        locationOfTypeParameter(typeParameter),
+      )
+  collectDeclaredType(head.owner, index, scope, pending)
+}
+
 const collectImports = (
   scope: NameResolution.ModuleScope | undefined,
   index: DeclarationIndex.Index,
@@ -1438,6 +1460,7 @@ export const makeModule = (
   const scope = NameResolution.scopeOf(resolution, module)
   const headers = index.modules.find((candidate) => candidate.module === module)
   for (const member of headers?.members ?? []) collectMember(member, index, scope, pending)
+  for (const head of headers?.inherentImpls ?? []) collectInherentImpl(head, index, scope, pending)
   for (const fn of result.functions)
     for (const statement of fn.statements) collectStatement(statement, index, scope, pending)
   collectImports(scope, index, pending)

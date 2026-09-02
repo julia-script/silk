@@ -99,6 +99,14 @@ it('highlights parametric conformance syntax through compiler tokens', () => {
   assert.deepStrictEqual(spellings('impl<T> Drop for Vector<T> { }', 'keyword'), ['impl', 'for'])
 })
 
+it('highlights inherent impl syntax through compiler tokens', () => {
+  assert.deepStrictEqual(spellings('impl<T> Option<T> { pub fn none() -> Self { } }', 'keyword'), [
+    'impl',
+    'pub',
+    'fn',
+  ])
+})
+
 it('highlights callable mode keywords without reserving dual', () => {
   assert.deepStrictEqual(
     spellings('fn(fn(i32) -> i32, mut fn(i32) -> i32, once fn(i32) -> i32) dual', 'keyword'),

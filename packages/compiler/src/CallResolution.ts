@@ -26,6 +26,7 @@ import type {
 import {
   argumentFact,
   availableExpressionType,
+  callCallee,
   callReferenceTokens,
   childNode,
   contextualIntegerCompatible,
@@ -130,7 +131,18 @@ export function analyzeArguments(
     const qualifierSpelling = spelling(source, first)
     const memberSpelling = spelling(source, second)
     const qualifier = NameResolution.lookup(resolution.scope, resolution.index, qualifierSpelling)
-    if (qualifier._tag === 'Intrinsic') {
+    const associated =
+      qualifier._tag === 'Resolved'
+        ? NameResolution.lookupAssociated(
+            resolution.index,
+            qualifier.declaration,
+            memberSpelling,
+            resolution.scope.module,
+          )
+        : undefined
+    if (associated?._tag === 'Inherent') {
+      target = associated.declaration
+    } else if (qualifier._tag === 'Intrinsic') {
       const library =
         qualifierSpelling === 'Effect'
           ? DeclarationFacts.lookup(resolution.index, 'silk/effect', memberSpelling)
@@ -287,14 +299,45 @@ export interface CallTypeArgumentsResult {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
+const isTypeArgumentNode = (element: SyntaxTree.Element): element is SyntaxTree.Node =>
+  SyntaxTree.isNode(element) &&
+  (element.kind === 'RequirementSelector' ||
+    element.kind === 'TypePath' ||
+    element.kind === 'AppliedType' ||
+    element.kind === 'FixedArrayType' ||
+    element.kind === 'SliceType' ||
+    element.kind === 'ReferenceType' ||
+    element.kind === 'CallableType' ||
+    element.kind === 'ParenthesizedType' ||
+    element.kind === 'UnionType')
+
+/**
+ * The type arguments an applied qualifier supplies ahead of the call's own list: for an inherent
+ * member `Option<i32>.map<i64>(...)` the owner's `<i32>` binds the owner binders, so the complete
+ * explicit prefix reads as `Option.map<i32, i64>`.
+ */
+export const appliedOwnerTypeArgumentNodes = (
+  call: SyntaxTree.Node,
+): ReadonlyArray<SyntaxTree.Node> => {
+  const callee = callCallee(call)
+  if (callee.kind !== 'AppliedMemberExpression') return Object.freeze([])
+  const selector = SyntaxTree.directNode(callee, 'AppliedMemberSelector')
+  const owner = selector === undefined ? undefined : SyntaxTree.directNode(selector, 'AppliedType')
+  const list = owner === undefined ? undefined : SyntaxTree.directNode(owner, 'TypeArgumentList')
+  return list === undefined
+    ? Object.freeze([])
+    : Object.freeze(list.children.filter(isTypeArgumentNode))
+}
+
 export const analyzeCallTypeArguments = (
   source: SourceFile.SourceFile,
   call: SyntaxTree.Node,
   caller: DeclarationFact,
   resolution: ResolutionContext,
+  leading: ReadonlyArray<SyntaxTree.Node> = Object.freeze([]),
 ): CallTypeArgumentsResult => {
   const list = SyntaxTree.directNode(call, 'CallTypeArgumentList')
-  if (list === undefined) {
+  if (list === undefined && leading.length === 0) {
     return Object.freeze({
       explicit: false,
       facts: Object.freeze([]),
@@ -311,19 +354,10 @@ export const analyzeCallTypeArguments = (
     modules: Object.freeze([resolution.scope]),
     diagnostics: Object.freeze([]),
   })
-  const nodes = list.children.filter(
-    (element): element is SyntaxTree.Node =>
-      SyntaxTree.isNode(element) &&
-      (element.kind === 'RequirementSelector' ||
-        element.kind === 'TypePath' ||
-        element.kind === 'AppliedType' ||
-        element.kind === 'FixedArrayType' ||
-        element.kind === 'SliceType' ||
-        element.kind === 'ReferenceType' ||
-        element.kind === 'CallableType' ||
-        element.kind === 'ParenthesizedType' ||
-        element.kind === 'UnionType'),
-  )
+  const nodes = [
+    ...leading,
+    ...(list === undefined ? [] : list.children.filter(isTypeArgumentNode)),
+  ]
   const analyzed = nodes.map((node, ordinal) => {
     const selectorNodes =
       node.kind === 'RequirementSelector'
@@ -1742,6 +1776,22 @@ export const resolvedFunctionReference = (
         ? {}
         : { returnedBorrowParameter: signature.returnedBorrowParameter }),
     })
+  }
+  if (qualifierLookup._tag === 'Resolved') {
+    const associated = NameResolution.lookupAssociated(
+      resolution.index,
+      qualifierLookup.declaration,
+      member,
+      resolution.scope.module,
+    )
+    return associated._tag === 'Inherent'
+      ? Object.freeze({
+          _tag: 'Resolved',
+          spelling: `${qualifier}.${member}`,
+          token: second,
+          declaration: associated.declaration,
+        })
+      : undefined
   }
   if (qualifierLookup._tag !== 'Namespace') return undefined
   const memberLookup = DeclarationFacts.lookup(resolution.index, qualifierLookup.module, member)

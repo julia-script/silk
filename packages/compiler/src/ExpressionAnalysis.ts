@@ -603,6 +603,14 @@ export const analyzeEnumMember = (
   const memberName = spelling(source, memberToken)
   const memberLookup = DeclarationFacts.lookupEnumMember(enum_.members, memberName)
   const member = memberLookup._tag === 'Resolved' ? memberLookup.member : undefined
+  // An enum owns inherent members beside its members; `Status.describe` is a function item, not a
+  // misspelled member, when an impl declares it.
+  if (
+    member === undefined &&
+    NameResolution.lookupAssociated(resolution.index, enum_, memberName, resolution.scope.module)
+      ._tag !== 'Missing'
+  )
+    return undefined
   const nominal =
     enum_.canonical._tag === 'Canonical'
       ? Type.nominal(enum_.canonical.id.module, enum_.canonical.id.name)
@@ -3896,6 +3904,7 @@ import {
   analyzeArguments,
   analyzeCallContract,
   analyzeCallTypeArguments,
+  appliedOwnerTypeArgumentNodes,
   analyzeFunctionItem,
   boundOperationReference,
   builtinSignature,
@@ -6270,6 +6279,31 @@ const appliedMemberParts = (
     : Object.freeze({ owner, member })
 }
 
+/** Whether a call's applied qualifier names an inherent member of a nominal owner. */
+const appliedInherentMember = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  resolution: ResolutionContext,
+): boolean => {
+  const parts = appliedMemberParts(node)
+  if (parts === undefined) return false
+  const path = SyntaxTree.directNode(parts.owner, 'TypePath')
+  const tokens =
+    path === undefined ? [] : SyntaxTree.tokens(path).filter((item) => item.kind === 'Identifier')
+  const token = tokens.at(0)
+  if (token === undefined || tokens.length !== 1) return false
+  const owner = NameResolution.lookup(resolution.scope, resolution.index, spelling(source, token))
+  return (
+    owner._tag === 'Resolved' &&
+    NameResolution.lookupAssociated(
+      resolution.index,
+      owner.declaration,
+      spelling(source, parts.member),
+      resolution.scope.module,
+    )._tag !== 'Missing'
+  )
+}
+
 const appliedInterfaceOwnerDeclaration = (
   source: SourceFile.SourceFile,
   owner: SyntaxTree.Node,
@@ -7674,13 +7708,19 @@ export function analyzeExpression(
 
   if (node.kind !== 'CallExpression') return undefined
 
-  const callTypeArguments = analyzeCallTypeArguments(source, node, declaration, resolution)
-  const appliedTarget = resolveAppliedInterfaceOperationTarget(
+  // `Owner<Args>.member(...)` on an inherent member is the bare form with the owner arguments
+  // prepended to the explicit generic prefix; it never reaches the interface-operation path.
+  const appliedInherent = appliedInherentMember(source, node, resolution)
+  const callTypeArguments = analyzeCallTypeArguments(
     source,
     node,
     declaration,
     resolution,
+    appliedInherent ? appliedOwnerTypeArgumentNodes(node) : Object.freeze([]),
   )
+  const appliedTarget = appliedInherent
+    ? undefined
+    : resolveAppliedInterfaceOperationTarget(source, node, declaration, resolution)
   if (appliedTarget !== undefined) {
     const argumentList = childNode(node, 'ArgumentList')
     const argumentNodes = argumentList.children.filter(isRecursiveArgumentNode)
@@ -7793,6 +7833,61 @@ export function analyzeExpression(
         resolution,
         declaration,
       )
+    }
+    // A declared inherent member of the qualifier wins over every other projection of that
+    // spelling: contract operations, the legacy module projection, and enum members are consulted
+    // only when the owner declares no such member.
+    if (qualifierLookup._tag === 'Resolved') {
+      const associated = NameResolution.lookupAssociated(
+        resolution.index,
+        qualifierLookup.declaration,
+        member,
+        resolution.scope.module,
+      )
+      if (associated._tag !== 'Missing') {
+        let diagnostic: Diagnostic.Diagnostic | undefined
+        let reference: CallReferenceFact
+        if (associated._tag === 'Inherent') {
+          diagnostic = undefined
+          reference = Object.freeze({
+            _tag: 'Resolved',
+            spelling: `${qualifier}.${member}`,
+            token: memberToken,
+            declaration: associated.declaration,
+          })
+        } else if (associated._tag === 'Inaccessible') {
+          diagnostic = Diagnostic.inaccessibleImportedMember(
+            associated.declaration.canonical._tag === 'Canonical'
+              ? associated.declaration.canonical.id.module
+              : qualifier,
+            member,
+            memberToken.span,
+          )
+          reference = Object.freeze({
+            _tag: 'Missing',
+            spelling: `${qualifier}.${member}`,
+            token: memberToken,
+            cause: Diagnostic.identity(diagnostic),
+          })
+        } else {
+          diagnostic = undefined
+          reference = Object.freeze({
+            _tag: 'Missing',
+            spelling: `${qualifier}.${member}`,
+            token: memberToken,
+            cause: associated.cause,
+          })
+        }
+        return finishDeclarationCall(
+          node,
+          reference,
+          argumentsResult,
+          callTypeArguments,
+          diagnostic,
+          declaration,
+          resolution,
+        )
+      }
     }
     if (
       qualifierLookup._tag === 'Resolved' &&

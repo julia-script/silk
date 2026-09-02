@@ -1386,8 +1386,11 @@ const completionKind = (kind: string): CompletionItemKind => {
     case 'Parameter':
       return CompletionItemKind.Variable
     case 'Function':
+    case 'AssociatedFunction':
     case 'Operation':
       return CompletionItemKind.Function
+    case 'Method':
+      return CompletionItemKind.Method
     case 'Constructor':
       return CompletionItemKind.Constructor
     case 'Type':
@@ -1580,7 +1583,39 @@ export const completion = (
   return { isIncomplete: false, items: [...items, ...namespaces, ...catalog] }
 }
 
-/** Returns the document's top-level declarations as symbols. */
+/** Inherent impl heads as symbols, each nesting the members declared in its block. */
+const inherentImplSymbols = (
+  self: Document,
+  headers: DeclarationFacts.ModuleHeaders,
+): ReadonlyArray<DocumentSymbol> =>
+  headers.inherentImpls.map((impl) => {
+    const owner = SyntaxTree.tokens(impl.syntax).find((token) => token.kind === 'Identifier')
+    const range = LineIndex.rangeOf(self.index, SyntaxTree.span(impl.syntax))
+    const children = headers.members.flatMap((member): ReadonlyArray<DocumentSymbol> =>
+      member._tag === 'FunctionDeclaration' &&
+      member.associatedMember?.ordinal === impl.ordinal &&
+      member.name._tag === 'Present'
+        ? [
+            {
+              name: member.name.spelling,
+              detail: Presentation.functionDeclaration(member).text,
+              kind: member.associatedMember.receiver ? SymbolKind.Method : SymbolKind.Function,
+              range: LineIndex.rangeOf(self.index, SyntaxTree.span(member.syntax)),
+              selectionRange: LineIndex.rangeOf(self.index, member.name.token.span),
+            },
+          ]
+        : [],
+    )
+    return {
+      name: `impl ${impl.ownerSpelling}`,
+      kind: SymbolKind.Object,
+      range,
+      selectionRange: owner === undefined ? range : LineIndex.rangeOf(self.index, owner.span),
+      ...(children.length > 0 ? { children } : {}),
+    }
+  })
+
+/** Returns the document's top-level declarations as symbols, in source order. */
 export const symbols = (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
@@ -1589,8 +1624,10 @@ export const symbols = (
     (candidate) => candidate.module === self.module,
   )
   if (headers === undefined) return []
-  return headers.members.flatMap((member): ReadonlyArray<DocumentSymbol> => {
+  const members = headers.members.flatMap((member): ReadonlyArray<DocumentSymbol> => {
     if (member.name._tag !== 'Present') return []
+    // Inherent members are nested under their impl, never listed at module level.
+    if (member._tag === 'FunctionDeclaration' && member.associatedMember !== undefined) return []
     const range = LineIndex.rangeOf(self.index, SyntaxTree.span(member.syntax))
     const selectionRange = LineIndex.rangeOf(self.index, member.name.token.span)
     if (member._tag === 'FunctionDeclaration') {
@@ -1735,6 +1772,11 @@ export const symbols = (
       },
     ]
   })
+  return [...members, ...inherentImplSymbols(self, headers)].sort(
+    (left, right) =>
+      left.range.start.line - right.range.start.line ||
+      left.range.start.character - right.range.start.character,
+  )
 }
 
 /**

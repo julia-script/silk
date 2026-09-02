@@ -23,6 +23,8 @@ export type ItemKind =
   | 'Field'
   | 'Implementation'
   | 'Operation'
+  | 'Method'
+  | 'AssociatedFunction'
 
 export interface Signature {
   readonly text: string
@@ -88,10 +90,26 @@ const linkTargetKind = (member: DeclarationFacts.MemberFact): Document.LinkTarge
   }
 }
 
+const isAssociated = (
+  member: DeclarationFacts.MemberFact,
+): member is DeclarationFacts.DeclarationFact & {
+  readonly associatedMember: DeclarationFacts.AssociatedMemberFact
+} => member._tag === 'FunctionDeclaration' && member.associatedMember !== undefined
+
+const sameId = (left: DeclarationFacts.CanonicalId, right: DeclarationFacts.CanonicalId): boolean =>
+  left.module === right.module && left.name === right.name
+
+/** The owner whose associated members a doc block attached to this declaration links first. */
+const ownerOf = (member: DeclarationFacts.MemberFact): DeclarationFacts.CanonicalId | undefined => {
+  if (isAssociated(member)) return member.associatedMember.owner
+  return member.canonical._tag === 'Canonical' ? member.canonical.id : undefined
+}
+
 const itemKind = (member: DeclarationFacts.MemberFact): ItemKind => {
   switch (member._tag) {
     case 'FunctionDeclaration':
-      return 'Function'
+      if (member.associatedMember === undefined) return 'Function'
+      return member.associatedMember.receiver ? 'Method' : 'AssociatedFunction'
     case 'StructDeclaration':
       return 'Struct'
     case 'EnumDeclaration':
@@ -128,11 +146,53 @@ const parsedDocumentation = (
   return raw === undefined ? undefined : Document.parse(source, raw)
 }
 
+/**
+ * A `[`member`]` link inside the owner's module reaches an inherent member, which the unqualified
+ * root lookup cannot see. The doc block's own owner wins; otherwise the member must be unique
+ * across the module's owners.
+ */
+const associatedTarget = (
+  snapshot: Analysis.FrontendSnapshot,
+  module: string,
+  spelling: string,
+  owner: DeclarationFacts.CanonicalId | undefined,
+): Document.LinkTarget | undefined => {
+  const headers = Analysis.declarationIndex(snapshot).modules.find(
+    (candidate) => candidate.module === module,
+  )
+  const candidates = (headers?.members ?? []).filter(
+    (member) =>
+      isAssociated(member) &&
+      member.associatedMember.name === spelling &&
+      member.canonical._tag === 'Canonical',
+  )
+  const preferred =
+    owner === undefined
+      ? undefined
+      : candidates.find(
+          (member) =>
+            isAssociated(member) &&
+            member.associatedMember.owner !== undefined &&
+            sameId(member.associatedMember.owner, owner),
+        )
+  const member = preferred ?? (candidates.length === 1 ? candidates.at(0) : undefined)
+  if (member === undefined || member.canonical._tag !== 'Canonical') return undefined
+  return Object.freeze({
+    id: declarationId(module, member),
+    module: member.canonical.id.module,
+    name: member.canonical.id.name,
+    kind: 'Function',
+  })
+}
+
 const targetOf = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
   spelling: string,
+  owner: DeclarationFacts.CanonicalId | undefined,
 ): Document.LinkTarget | undefined => {
+  const associated = associatedTarget(snapshot, module, spelling, owner)
+  if (associated !== undefined) return associated
   const lookup = Analysis.lookupName(snapshot, module, spelling)
   if (lookup._tag === 'Resolved') {
     const targetModule =
@@ -208,10 +268,11 @@ const resolveDocumentation = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
   documentation: Document.Document | undefined,
+  owner: DeclarationFacts.CanonicalId | undefined,
 ): Document.Document | undefined =>
   documentation === undefined
     ? undefined
-    : Document.resolve(documentation, (spelling) => targetOf(snapshot, module, spelling))
+    : Document.resolve(documentation, (spelling) => targetOf(snapshot, module, spelling, owner))
 
 const typeParameterItem = (
   snapshot: Analysis.FrontendSnapshot,
@@ -220,12 +281,14 @@ const typeParameterItem = (
   ownerId: string,
   parameter: DeclarationFacts.TypeParameterFact,
   ordinal: number,
+  owner: DeclarationFacts.CanonicalId | undefined,
 ): Item => {
   const presentation = Presentation.typeParameter(parameter)
   const documentation = resolveDocumentation(
     snapshot,
     module,
     parsedDocumentation(snapshot, module, source, parameter.syntax),
+    owner,
   )
   return Object.freeze({
     id: `${ownerId}::type-parameter:${ordinal}`,
@@ -245,12 +308,14 @@ const parameterItem = (
   source: SourceFile.SourceFile,
   ownerId: string,
   parameter: DeclarationFacts.ParameterFact,
+  owner: DeclarationFacts.CanonicalId | undefined,
 ): Item => {
   const presentation = Presentation.parameter(parameter)
   const documentation = resolveDocumentation(
     snapshot,
     module,
     parsedDocumentation(snapshot, module, source, parameter.syntax),
+    owner,
   )
   return Object.freeze({
     id: `${ownerId}::parameter:${parameter.id.ordinal}`,
@@ -270,12 +335,14 @@ const fieldItem = (
   source: SourceFile.SourceFile,
   ownerId: string,
   field: DeclarationFacts.FieldFact,
+  owner: DeclarationFacts.CanonicalId | undefined,
 ): Item => {
   const presentation = Presentation.field(field)
   const documentation = resolveDocumentation(
     snapshot,
     module,
     parsedDocumentation(snapshot, module, source, field.syntax),
+    owner,
   )
   return Object.freeze({
     id: `${ownerId}::field:${field.id.ordinal}`,
@@ -295,19 +362,21 @@ const serviceOperationItem = (
   source: SourceFile.SourceFile,
   ownerId: string,
   operation: DeclarationFacts.ServiceOperationFact,
+  owner: DeclarationFacts.CanonicalId | undefined,
 ): Item => {
   const presentation = Presentation.serviceOperation(operation)
   const documentation = resolveDocumentation(
     snapshot,
     module,
     parsedDocumentation(snapshot, module, source, operation.syntax),
+    owner,
   )
   const id = `${ownerId}::operation:${nameOf(operation.name, '_')}`
   const typeParameters = operation.typeParameters.map((parameter, ordinal) =>
-    typeParameterItem(snapshot, module, source, id, parameter, ordinal),
+    typeParameterItem(snapshot, module, source, id, parameter, ordinal, owner),
   )
   const parameters = operation.parameters.map((parameter) =>
-    parameterItem(snapshot, module, source, id, parameter),
+    parameterItem(snapshot, module, source, id, parameter, owner),
   )
   return Object.freeze({
     id,
@@ -327,6 +396,7 @@ const enumMemberItem = (
   source: SourceFile.SourceFile,
   parent: string,
   member: DeclarationFacts.EnumMemberFact,
+  owner: DeclarationFacts.CanonicalId | undefined,
 ): Item => {
   const name = nameOf(member.name, '_')
   const discriminant =
@@ -335,6 +405,7 @@ const enumMemberItem = (
     snapshot,
     module,
     parsedDocumentation(snapshot, module, source, member.syntax),
+    owner,
   )
   return Object.freeze({
     id: `${parent}::member:${member.id.ordinal}`,
@@ -356,12 +427,14 @@ const unionVariantItem = (
   union: DeclarationFacts.UnionFact,
   variant: DeclarationFacts.UnionVariantFact,
   options: Options,
+  owner: DeclarationFacts.CanonicalId | undefined,
 ): Item => {
   const name = nameOf(variant.name, '_')
   const documentation = resolveDocumentation(
     snapshot,
     module,
     parsedDocumentation(snapshot, module, source, variant.syntax),
+    owner,
   )
   const id = `${parent}::variant:${variant.id.ordinal}`
   return Object.freeze({
@@ -375,7 +448,7 @@ const unionVariantItem = (
     children: Object.freeze(
       variant.fields
         .filter((field) => options.includePrivate === true || field.visibility === 'Public')
-        .map((field) => fieldItem(snapshot, module, source, id, field)),
+        .map((field) => fieldItem(snapshot, module, source, id, field, owner)),
     ),
   })
 }
@@ -409,28 +482,29 @@ const ownedChildren = (
   id: string,
   member: DeclarationFacts.MemberFact,
   options: Options,
+  owner: DeclarationFacts.CanonicalId | undefined,
 ): ReadonlyArray<Item> => {
   switch (member._tag) {
     case 'FunctionDeclaration':
       return member.parameters.map((parameter) =>
-        parameterItem(snapshot, module, source, id, parameter),
+        parameterItem(snapshot, module, source, id, parameter, owner),
       )
     case 'StructDeclaration':
       return member.fields
         .filter((field) => options.includePrivate === true || field.visibility === 'Public')
-        .map((field) => fieldItem(snapshot, module, source, id, field))
+        .map((field) => fieldItem(snapshot, module, source, id, field, owner))
     case 'EnumDeclaration':
       return member.members.map((enumMember) =>
-        enumMemberItem(snapshot, module, source, id, enumMember),
+        enumMemberItem(snapshot, module, source, id, enumMember, owner),
       )
     case 'UnionDeclaration':
       return member.variants.map((variant) =>
-        unionVariantItem(snapshot, module, source, id, member, variant, options),
+        unionVariantItem(snapshot, module, source, id, member, variant, options, owner),
       )
     case 'ServiceDeclaration':
     case 'InterfaceDeclaration':
       return member.operations.map((operation) =>
-        serviceOperationItem(snapshot, module, source, id, operation),
+        serviceOperationItem(snapshot, module, source, id, operation, owner),
       )
     default:
       return []
@@ -443,27 +517,35 @@ const memberItem = (
   source: SourceFile.SourceFile,
   member: DeclarationFacts.MemberFact,
   options: Options,
+  associated: ReadonlyArray<DeclarationFacts.MemberFact>,
 ): Item => {
   const id = declarationId(module, member)
+  const owner = ownerOf(member)
   const presentation = memberPresentation(member)
   const documentation = resolveDocumentation(
     snapshot,
     module,
     parsedDocumentation(snapshot, module, source, member.syntax),
+    owner,
   )
   const typeParameters = member.typeParameters.map((parameter, ordinal) =>
-    typeParameterItem(snapshot, module, source, id, parameter, ordinal),
+    typeParameterItem(snapshot, module, source, id, parameter, ordinal, owner),
   )
-  const children = ownedChildren(snapshot, module, source, id, member, options)
+  const children = ownedChildren(snapshot, module, source, id, member, options, owner)
+  const members = associated.map((candidate) =>
+    memberItem(snapshot, module, source, candidate, options, []),
+  )
   return Object.freeze({
     id,
     kind: itemKind(member),
-    name: nameOf(member.name, '_'),
+    name: isAssociated(member)
+      ? `${member.associatedMember.ownerSpelling}.${member.associatedMember.name}`
+      : nameOf(member.name, '_'),
     visibility: member.visibility,
     signature: Object.freeze({ text: presentation.text }),
     source: rangeOf(member.syntax),
     ...(documentation === undefined ? {} : { documentation }),
-    children: Object.freeze([...typeParameters, ...children]),
+    children: Object.freeze([...typeParameters, ...children, ...members]),
   })
 }
 
@@ -481,6 +563,7 @@ const conformanceItem = (
     snapshot,
     module,
     parsedDocumentation(snapshot, module, source, conformance.syntax),
+    undefined,
   )
   const children = conformance.operations.map((operation, ordinal): Item => {
     const operationName = nameOf(operation.name, `operation-${ordinal}`)
@@ -488,6 +571,7 @@ const conformanceItem = (
       snapshot,
       module,
       parsedDocumentation(snapshot, module, source, operation.syntax),
+      undefined,
     )
     return Object.freeze({
       id: `${id}::operation:${ordinal}`,
@@ -528,10 +612,28 @@ const moduleModel = (
     snapshot,
     headers.module,
     raw === undefined ? undefined : Document.parse(syntax.source, raw),
+    undefined,
   )
+  const visible = (member: DeclarationFacts.MemberFact): boolean =>
+    options.includePrivate === true || member.visibility === 'Public'
+  const associatedOf = (
+    owner: DeclarationFacts.MemberFact,
+  ): ReadonlyArray<DeclarationFacts.MemberFact> => {
+    if (owner.canonical._tag !== 'Canonical') return []
+    const id = owner.canonical.id
+    return headers.members.filter(
+      (member) =>
+        isAssociated(member) &&
+        member.associatedMember.owner !== undefined &&
+        sameId(member.associatedMember.owner, id) &&
+        visible(member),
+    )
+  }
   const members = headers.members
-    .filter((member) => options.includePrivate === true || member.visibility === 'Public')
-    .map((member) => memberItem(snapshot, headers.module, syntax.source, member, options))
+    .filter((member) => !isAssociated(member) && visible(member))
+    .map((member) =>
+      memberItem(snapshot, headers.module, syntax.source, member, options, associatedOf(member)),
+    )
   const conformances = headers.conformances.map((conformance) =>
     conformanceItem(snapshot, headers.module, syntax.source, conformance),
   )

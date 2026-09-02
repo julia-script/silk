@@ -5,6 +5,7 @@ import type * as Constraint from './Constraint.js'
 import type { Index } from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as TypeInference from './internal/TypeInference.js'
+import * as Presentation from './Presentation.js'
 import type * as Operator from './Operator.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
@@ -40,7 +41,39 @@ export interface DeclarationFact {
     readonly operation: string
     readonly self: Type.Parameter
   }
+  /**
+   * Present on a function declared inside an inherent impl. The owner's canonical identity is
+   * filled in once declaration completion resolves the head; until then the head's spelling and
+   * ordinal identify it. `receiver` is true when parameter zero is spelled `self` and typed as the
+   * owner, which is what makes the member callable through a value later.
+   */
+  readonly associatedMember?: AssociatedMemberFact
   readonly bodyTemplate?: FunctionBodyTemplate
+  readonly syntax: SyntaxTree.Node
+}
+
+/** The membership facts of one function declared inside an inherent impl. */
+export interface AssociatedMemberFact {
+  readonly ordinal: number
+  readonly ownerSpelling: string
+  readonly owner?: CanonicalId
+  readonly name: string
+  readonly self: Type.Parameter
+  readonly receiver: boolean
+}
+
+/** One inherent impl head: `impl [<Binders>] Owner { ... }` before and after owner resolution. */
+export interface InherentImplFact {
+  readonly _tag: 'InherentImplDeclaration'
+  readonly module: string
+  readonly ordinal: number
+  readonly self: Type.Parameter
+  readonly typeParameters: ReadonlyArray<TypeParameterFact>
+  readonly ownerSpelling: string
+  readonly owner: DeclaredTypeFact
+  readonly validity:
+    | { readonly _tag: 'Valid' }
+    | { readonly _tag: 'Invalid'; readonly cause: Diagnostic.Identity }
   readonly syntax: SyntaxTree.Node
 }
 
@@ -1079,15 +1112,30 @@ export const interfaceOperationContracts = (
 const substituteDeclaredTypeFact = (
   fact: DeclaredTypeFact,
   substitution: Type.Substitution,
+  module: string,
 ): DeclaredTypeFact => {
+  if (fact._tag === 'Reference') {
+    const target = substituteDeclaredTypeFact(fact.target, substitution, module)
+    return target === fact.target
+      ? fact
+      : Object.freeze({
+          ...fact,
+          target,
+          spelling: `${fact.access === 'Exclusive' ? '&mut ' : '&'}${target._tag === 'Unavailable' ? '_' : target.spelling}`,
+        })
+  }
+  // ponytail: Callable, Applied, and Union facts keep their `Self` spelling; recurse when a
+  // presentation needs `fn(Self) -> U` closed too.
   if (fact._tag !== 'Resolved') return fact
   const type = Type.substitute(fact.type, substitution)
-  return Object.freeze({ ...fact, type, spelling: Type.encode(type) })
+  // The spelling stays source-like: the local owner reads `Option<T>`, not `main.Option<T>`.
+  return Object.freeze({ ...fact, type, spelling: Presentation.type(type, module) })
 }
 
 const substituteRowExpressionFact = (
   fact: RowExpressionFact,
   substitution: Type.Substitution,
+  module: string,
 ): RowExpressionFact => {
   switch (fact._tag) {
     case 'EmptyRowExpression':
@@ -1097,38 +1145,39 @@ const substituteRowExpressionFact = (
     case 'FailureMemberExpression':
       return Object.freeze({
         ...fact,
-        member: substituteDeclaredTypeFact(fact.member, substitution),
+        member: substituteDeclaredTypeFact(fact.member, substitution, module),
       })
     case 'RequirementMemberExpression': {
       return Object.freeze({
         ...fact,
-        capability: substituteDeclaredTypeFact(fact.capability, substitution),
+        capability: substituteDeclaredTypeFact(fact.capability, substitution, module),
       })
     }
     case 'UnionRowExpression':
       return Object.freeze({
         ...fact,
         operands: Object.freeze(
-          fact.operands.map((operand) => substituteRowExpressionFact(operand, substitution)),
+          fact.operands.map((operand) =>
+            substituteRowExpressionFact(operand, substitution, module),
+          ),
         ),
       })
     case 'WithoutRowExpression':
       return Object.freeze({
         ...fact,
-        source: substituteRowExpressionFact(fact.source, substitution),
-        selected: substituteRowExpressionFact(fact.selected, substitution),
+        source: substituteRowExpressionFact(fact.source, substitution, module),
+        selected: substituteRowExpressionFact(fact.selected, substitution, module),
       })
   }
 }
 
 export const closeConformanceSelf = (
   declaration: DeclarationFact,
+  self: Type.Parameter,
   provider: Type.Type,
 ): DeclarationFact => {
-  const implementation = declaration.conformanceImplementation
-  if (implementation === undefined) return declaration
   const substitution: Type.Substitution = new Map<string, Type.GenericArgument>([
-    [Type.key(implementation.self), provider],
+    [Type.key(self), provider],
   ])
   const rowsType = Type.substitute(
     Type.effectWithRows(
@@ -1140,19 +1189,28 @@ export const closeConformanceSelf = (
     substitution,
   )
   const rows = Type.isEffect(rowsType) ? rowsType : Type.effect(Type.unit, [], 'Shared')
+  const module =
+    declaration.canonical._tag === 'Canonical'
+      ? declaration.canonical.id.module
+      : declaration.id.sourceId
   return Object.freeze({
     ...declaration,
     parameters: Object.freeze(
       declaration.parameters.map((parameter) =>
         Object.freeze({
           ...parameter,
-          declaredType: substituteDeclaredTypeFact(parameter.declaredType, substitution),
+          declaredType: substituteDeclaredTypeFact(parameter.declaredType, substitution, module),
         }),
       ),
     ),
-    returnType: substituteDeclaredTypeFact(declaration.returnType, substitution),
-    failureRow: substituteFailureRowFact(declaration.failureRow, substitution, rows),
-    requirementRow: substituteRequirementRowFact(declaration.requirementRow, substitution, rows),
+    returnType: substituteDeclaredTypeFact(declaration.returnType, substitution, module),
+    failureRow: substituteFailureRowFact(declaration.failureRow, substitution, rows, module),
+    requirementRow: substituteRequirementRowFact(
+      declaration.requirementRow,
+      substitution,
+      rows,
+      module,
+    ),
   })
 }
 
@@ -1175,14 +1233,15 @@ const substituteFailureRowFact = (
   fact: FailureRowFact,
   substitution: Type.Substitution,
   rows: Type.Effect,
+  module: string,
 ): FailureRowFact => {
   const members = Object.freeze(
-    fact.members.map((member) => substituteDeclaredTypeFact(member, substitution)),
+    fact.members.map((member) => substituteDeclaredTypeFact(member, substitution, module)),
   )
   return Object.freeze({
     ...fact,
     members,
-    expression: substituteRowExpressionFact(fact.expression, substitution),
+    expression: substituteRowExpressionFact(fact.expression, substitution, module),
     row: failureRowFromEffect(rows),
     parameters: Object.freeze([]),
     failures: Type.failureMembers(rows),
@@ -1196,19 +1255,20 @@ const substituteRequirementRowFact = (
   fact: RequirementRowFact,
   substitution: Type.Substitution,
   rows: Type.Effect,
+  module: string,
 ): RequirementRowFact => {
   const entries = Object.freeze(
     fact.entries.map((entry) =>
       Object.freeze({
         ...entry,
-        capability: substituteDeclaredTypeFact(entry.capability, substitution),
+        capability: substituteDeclaredTypeFact(entry.capability, substitution, module),
       }),
     ),
   )
   return Object.freeze({
     ...fact,
     entries,
-    expression: substituteRowExpressionFact(fact.expression, substitution),
+    expression: substituteRowExpressionFact(fact.expression, substitution, module),
     row: requirementRowFromEffect(rows),
     parameters: Type.requirementRowParameters(rows),
     requirements: Type.requirementMembers(rows),
@@ -1247,7 +1307,7 @@ const applyInterfaceOperation = (
     })
   const operands = Object.freeze(
     source.operands.map((operand): InterfaceOperandFact => {
-      const type = substituteDeclaredTypeFact(operand.type, substitution)
+      const type = substituteDeclaredTypeFact(operand.type, substitution, capability.module)
       return Object.freeze({
         ...operand,
         parameter: Object.freeze({ ...operand.parameter, declaredType: type }),
@@ -1272,9 +1332,14 @@ const applyInterfaceOperation = (
     functionKind: source.functionKind,
     unsafe: source.unsafe,
     operands,
-    success: substituteDeclaredTypeFact(source.success, substitution),
-    failureRow: substituteFailureRowFact(source.failureRow, substitution, rows),
-    requirementRow: substituteRequirementRowFact(source.requirementRow, substitution, rows),
+    success: substituteDeclaredTypeFact(source.success, substitution, capability.module),
+    failureRow: substituteFailureRowFact(source.failureRow, substitution, rows, capability.module),
+    requirementRow: substituteRequirementRowFact(
+      source.requirementRow,
+      substitution,
+      rows,
+      capability.module,
+    ),
     receiverAccess: interfaceReceiverAccess(operands, provider),
   })
 }
@@ -1572,6 +1637,7 @@ export interface ModuleHeaders {
   readonly interfaces: ReadonlyArray<InterfaceFact>
   readonly constants: ReadonlyArray<ConstantFact>
   readonly conformances: ReadonlyArray<ConformanceFact>
+  readonly inherentImpls: ReadonlyArray<InherentImplFact>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
@@ -1628,14 +1694,27 @@ export const lookupParameter = (
 
 const memberIndexCache = new WeakMap<ReadonlyArray<MemberFact>, Map<string, Array<MemberFact>>>()
 
+/**
+ * A member is keyed by its canonical name, which for an inherent member is `Owner.member` while
+ * its presented spelling stays the bare `member`. A duplicate or unidentified inherent member is
+ * keyed under the same dotted spelling so it never shadows a root declaration of that name.
+ */
+const memberKey = (declaration: MemberFact): string | undefined => {
+  if (declaration.canonical._tag === 'Canonical') return declaration.canonical.id.name
+  if (declaration._tag === 'FunctionDeclaration' && declaration.associatedMember !== undefined)
+    return `${declaration.associatedMember.ownerSpelling}.${declaration.associatedMember.name}`
+  return declaration.name._tag === 'Present' ? declaration.name.spelling : undefined
+}
+
 const memberIndex = (members: ReadonlyArray<MemberFact>): Map<string, Array<MemberFact>> => {
   let index = memberIndexCache.get(members)
   if (index === undefined) {
     index = new Map()
     for (const declaration of members) {
-      if (declaration.name._tag !== 'Present') continue
-      const bucket = index.get(declaration.name.spelling)
-      if (bucket === undefined) index.set(declaration.name.spelling, [declaration])
+      const key = memberKey(declaration)
+      if (key === undefined) continue
+      const bucket = index.get(key)
+      if (bucket === undefined) index.set(key, [declaration])
       else bucket.push(declaration)
     }
     memberIndexCache.set(members, index)
@@ -1660,9 +1739,9 @@ export const lookupDeclaration = (
   declarations: ReadonlyArray<DeclarationFact>,
   name: string,
 ): DeclarationLookup => {
-  const matches = declarations.filter(
-    (declaration) => declaration.name._tag === 'Present' && declaration.name.spelling === name,
-  )
+  // Keyed like members: a canonical declaration by its canonical name, so an inherent member is
+  // found as `Owner.member` and never as the bare spelling a root declaration would use.
+  const matches = declarations.filter((declaration) => memberKey(declaration) === name)
   const first = matches.at(0)
   if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: name })
   return matches.length === 1
