@@ -147,6 +147,11 @@ it.effect('realizes stored declaration and scalar wrapper sections in LLVM and W
       `fn add(value: i32, adjustment: i32) -> i32 { return value + adjustment }
 pub fn main() -> i32 { let plusTwo = add(2) return plusTwo(40) }`,
       'import silk.i32 as i32\npub fn main() -> i32 { let plusTwo = i32.add(2) return plusTwo(40) }',
+      // A bound method captures parameter zero, so the backends must place the supplied argument
+      // after the capture rather than before it.
+      `pub struct Counter { value: i32 }
+impl Counter { pub fn add(self: &Self, adjustment: i32) -> i32 { return self.value + adjustment } }
+pub fn main() -> i32 { let counter = Counter { value: 40 } let plusForty = counter.add return plusForty(2) }`,
     ]
     for (const [ordinal, source] of programs.entries()) {
       const native = yield* Analysis.ofSourceRealized(
@@ -170,7 +175,7 @@ pub fn main() -> i32 { let plusTwo = add(2) return plusTwo(40) }`,
       if (typeof main !== 'function') return
       assert.strictEqual(main(), 42)
       assert.strictEqual(Analysis.evaluate(native)._tag, 'Completed')
-      assert.include(nativeArtifact.ir, ordinal === 0 ? 'callable' : '@silk_silk_i32_add')
+      assert.include(nativeArtifact.ir, ordinal === 1 ? '@silk_silk_i32_add' : 'callable')
     }
   }),
 )

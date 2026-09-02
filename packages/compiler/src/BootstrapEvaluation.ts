@@ -1702,19 +1702,18 @@ function* executeFunction(
         span,
       })
     callableState.state = consume ? 'Consumed' : 'Running'
-    const parameters = new Map<number, Value>()
-    arguments_.forEach((argument, ordinal) => {
-      parameters.set(ordinal, argument)
-    })
-    for (const capture of callable.captures) {
-      const resolved =
-        capture.value._tag === 'CallableBorrowValue'
-          ? state.cells.get(cellKey(capture.value.frame, capture.value.cell))?.value
-          : capture.value
-      if (resolved === undefined)
-        throw new RangeError('Execution callback capture references a missing evaluator cell')
-      parameters.set(capture.parameterOrdinal, resolved)
-    }
+    const parameters = Mir.applyOperands(
+      callable.captures.map((capture) => {
+        const resolved =
+          capture.value._tag === 'CallableBorrowValue'
+            ? state.cells.get(cellKey(capture.value.frame, capture.value.cell))?.value
+            : capture.value
+        if (resolved === undefined)
+          throw new RangeError('Execution callback capture references a missing evaluator cell')
+        return Object.freeze({ parameterOrdinal: capture.parameterOrdinal, items: [resolved] })
+      }),
+      arguments_.map((argument) => [argument]),
+    )
     trace.push(
       Object.freeze({
         _tag: 'CallableApply',
@@ -1727,9 +1726,7 @@ function* executeFunction(
     const result = yield* invokeCallableTarget(
       callable.target,
       callable.typeArguments,
-      Object.freeze(
-        [...parameters.entries()].sort(([left], [right]) => left - right).map(([, value]) => value),
-      ),
+      parameters,
       span,
     )
     if (!consume && callableState.state === 'Running') callableState.state = 'Available'
@@ -3245,27 +3242,30 @@ function* executeFunction(
                 throw new RangeError('Local-shared callback capture references a missing cell')
               return Object.freeze({ parameterOrdinal: capture.parameterOrdinal, value: resolved })
             })
-            const parameters = new Map<number, Value>()
+            let supplied: ReadonlyArray<ReadonlyArray<Value>> = Object.freeze([])
             if (selection._tag === 'Use') {
               const payloadCell = operation.payload.ordinal
               state.cells.set(cellKey(frame, payloadCell), { value: shared.value, fromCall: false })
-              parameters.set(
-                0,
-                Object.freeze({
-                  _tag: 'ReferenceValue' as const,
-                  frame,
-                  cell: payloadCell,
-                  selectors: Object.freeze([]),
-                  indexes: Object.freeze([]),
-                }),
-              )
+              supplied = Object.freeze([
+                [
+                  Object.freeze({
+                    _tag: 'ReferenceValue' as const,
+                    frame,
+                    cell: payloadCell,
+                    selectors: Object.freeze([]),
+                    indexes: Object.freeze([]),
+                  }),
+                ],
+              ])
             }
-            for (const capture of captureValues)
-              parameters.set(capture.parameterOrdinal, capture.value)
-            const arguments_ = Object.freeze(
-              [...parameters.entries()]
-                .sort(([left], [right]) => left - right)
-                .map(([, argument]) => argument),
+            const arguments_ = Mir.applyOperands(
+              captureValues.map((capture) =>
+                Object.freeze({
+                  parameterOrdinal: capture.parameterOrdinal,
+                  items: [capture.value],
+                }),
+              ),
+              supplied,
             )
             trace.push(
               Object.freeze({
@@ -4582,16 +4582,14 @@ function* executeFunction(
                 throw new RangeError('Callable capture references a missing evaluator cell')
               return Object.freeze({ parameterOrdinal: capture.parameterOrdinal, value: resolved })
             })
-            const parameters = new Map<number, Value>()
-            operation.arguments.forEach((argument, ordinal) => {
-              parameters.set(ordinal, read(argument).value)
-            })
-            for (const capture of captureValues)
-              parameters.set(capture.parameterOrdinal, capture.value)
-            const arguments_ = Object.freeze(
-              [...parameters.entries()]
-                .sort(([left], [right]) => left - right)
-                .map(([, argument]) => argument),
+            const arguments_ = Mir.applyOperands(
+              captureValues.map((capture) =>
+                Object.freeze({
+                  parameterOrdinal: capture.parameterOrdinal,
+                  items: [capture.value],
+                }),
+              ),
+              operation.arguments.map((argument) => [read(argument).value]),
             )
             trace.push(
               Object.freeze({

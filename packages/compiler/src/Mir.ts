@@ -1542,6 +1542,28 @@ export const machineEntry = (self: Module): Instances.InstanceKey => {
   return self.entry.machine
 }
 
+/**
+ * Orders one callable application's operands by parameter: each capture sits at its parameter
+ * ordinal and the supplied arguments fill the remaining ordinals in order, so a trailing section
+ * and a bound method value (parameter zero captured) apply through one rule.
+ */
+export const applyOperands = <T>(
+  captures: ReadonlyArray<{ readonly parameterOrdinal: number; readonly items: ReadonlyArray<T> }>,
+  arguments_: ReadonlyArray<ReadonlyArray<T>>,
+): ReadonlyArray<T> => {
+  const slots = new Map<number, ReadonlyArray<T>>()
+  for (const capture of captures) slots.set(capture.parameterOrdinal, capture.items)
+  let ordinal = 0
+  for (const argument of arguments_) {
+    while (slots.has(ordinal)) ordinal += 1
+    slots.set(ordinal, argument)
+    ordinal += 1
+  }
+  return Object.freeze(
+    [...slots.entries()].sort(([left], [right]) => left - right).flatMap(([, items]) => [...items]),
+  )
+}
+
 /** Tests whether a MIR function realizes one concrete call target. */
 export const matchesInstance = (
   fn: MirFunction,

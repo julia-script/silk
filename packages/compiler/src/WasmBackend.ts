@@ -4261,14 +4261,18 @@ const emitExecutionReadyNotification = (
         }),
       ]
     })
-    .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
-    .flatMap((capture) => capture.instructions)
+    .map((capture) =>
+      Object.freeze({ parameterOrdinal: capture.parameterOrdinal, items: capture.instructions }),
+    )
   return [
-    Instr.localGet(base),
-    ...((endpointOffset ?? 0) === 0
-      ? []
-      : [Instr.i32Const(endpointOffset ?? 0), Instr.op('i32.add')]),
-    ...captureOperands,
+    ...Mir.applyOperands(captureOperands, [
+      [
+        Instr.localGet(base),
+        ...((endpointOffset ?? 0) === 0
+          ? []
+          : [Instr.i32Const(endpointOffset ?? 0), Instr.op('i32.add')]),
+      ],
+    ]),
     Instr.call(
       resolve(
         target.declaration,
@@ -6717,9 +6721,6 @@ const emitApplyCallableOperation = (
       )
     }
   }
-  const captureOperands = [...captureGroups]
-    .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
-    .flatMap((capture) => [...capture.operands])
   if (target._tag === 'BuiltinCallableTarget') {
     const operandSlots = [
       ...operation.arguments.flatMap((argument) => [...slots(argument)]),
@@ -6930,11 +6931,13 @@ const emitApplyCallableOperation = (
   const diverges = sourceType?._tag === 'CallableValue' && SilkType.isNever(sourceType.type.result)
   const callableSource = operation.callable === undefined ? [] : [operation.callable]
   return [
-    ...(
+    ...Mir.applyOperands(
+      captureGroups.map((capture) =>
+        Object.freeze({ parameterOrdinal: capture.parameterOrdinal, items: capture.operands }),
+      ),
       explicitArguments ??
-      operation.arguments.map((argument) => slots(argument).map((slot) => Instr.localGet(slot)))
-    ).flat(),
-    ...captureOperands,
+        operation.arguments.map((argument) => slots(argument).map((slot) => Instr.localGet(slot))),
+    ),
     Instr.call(resolve(target.declaration, operation.typeArguments)),
     ...(diverges
       ? [Instr.op('unreachable')]
