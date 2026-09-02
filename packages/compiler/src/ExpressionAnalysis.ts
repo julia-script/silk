@@ -1356,7 +1356,13 @@ export const resolveStructTarget = (
             module: base.module,
             name: base.name,
           })
-    if (base !== undefined && candidate?._tag === 'StructDeclaration') {
+    // A base that already carries arguments came through an alias; its arguments are final, so
+    // the ordinary resolution below keeps them instead of re-inferring from the literal.
+    if (
+      base !== undefined &&
+      base.arguments.length === 0 &&
+      candidate?._tag === 'StructDeclaration'
+    ) {
       const supplied = applied?.arguments ?? []
       const sourceParameters = candidate.typeParameters.filter(
         (parameter) =>

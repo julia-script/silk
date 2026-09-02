@@ -121,6 +121,25 @@ it.effect('hovers the type of the smallest enclosing expression', () =>
   }),
 )
 
+it.effect('hovers a type alias use with its erased target', () =>
+  Effect.gen(function* () {
+    const source = `pub struct Circle {}
+pub struct Square {}
+pub type Shape = Circle | Square
+pub fn pick(shape: Shape) -> i32 { return 0 }`
+    const { document, snapshot } = yield* open(source)
+    const hover = Document.hover(document, snapshot, positionOf(source, 'Shape) -> i32'))
+    assert.isDefined(hover)
+    const contents = hover?.contents
+    const entries = Array.isArray(contents) ? contents : [contents]
+    const text = entries
+      .map((entry) => (typeof entry === 'string' ? entry : (entry?.value ?? '')))
+      .join('\n')
+    assert.include(text, 'Circle')
+    assert.include(text, 'Square')
+  }),
+)
+
 it.effect('hovers the exact default float width', () =>
   Effect.gen(function* () {
     const source = 'fn value() -> f64 { return 1.25e2 }'
@@ -656,15 +675,20 @@ pub fn main() -> i32 {
 it.effect('completes types in damaged parameter and generic-argument positions', () =>
   Effect.gen(function* () {
     const parameterSource = `struct Problem {}
+type Trouble = Problem
 fn identity<T>(value: ) -> i32 { return 0 }`
     const parameter = yield* open(parameterSource)
     const parameterCompletion = Document.completion(parameter.document, parameter.snapshot, {
-      line: 1,
+      line: 2,
       character: 'fn identity<T>(value: '.length,
     })
     assert.include(
       parameterCompletion.items.map((item) => item.label),
       'Problem',
+    )
+    assert.include(
+      parameterCompletion.items.map((item) => item.label),
+      'Trouble',
     )
     assert.notInclude(
       parameterCompletion.items.map((item) => item.label),
@@ -817,6 +841,7 @@ it.effect('lists constants, roles, functions, and structs with fields as documen
   Effect.gen(function* () {
     const source = `pub const defaultAnswer: i32 = 42
 pub role Primary
+pub type Answer = i32
 pub struct Box { answer: i32 }
 pub fn main() -> i32 { return 42 }`
     const { document, snapshot } = yield* open(source)
@@ -826,12 +851,13 @@ pub fn main() -> i32 { return 42 }`
       [
         ['defaultAnswer', SymbolKind.Constant],
         ['Primary', SymbolKind.Enum],
+        ['Answer', SymbolKind.Interface],
         ['Box', SymbolKind.Struct],
         ['main', SymbolKind.Function],
       ],
     )
     assert.deepEqual(
-      symbols[2]?.children?.map((child) => [child.name, child.kind]),
+      symbols[3]?.children?.map((child) => [child.name, child.kind]),
       [['answer', SymbolKind.Field]],
     )
   }),

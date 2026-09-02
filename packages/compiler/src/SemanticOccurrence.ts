@@ -92,6 +92,22 @@ const location = (
   selectionSpan: SourceSpan.SourceSpan,
 ): DeclarationLocation => Object.freeze({ module, span, selectionSpan })
 
+/**
+ * The alias a retained type path names, if any. An alias is erased from the resolved type, so
+ * the path spelling is the only trace of it and is re-looked-up through the same module scope.
+ */
+const aliasAtPath = (
+  path: DeclarationFacts.TypePathFact | undefined,
+  scope: NameResolution.ModuleScope | undefined,
+  index: DeclarationIndex.Index,
+): DeclarationFacts.AliasFact | undefined => {
+  if (path === undefined || scope === undefined) return undefined
+  const result = NameResolution.lookupPath(scope, index, path)
+  return result._tag === 'Resolved' && result.declaration._tag === 'AliasDeclaration'
+    ? result.declaration
+    : undefined
+}
+
 const currentDeclaration = (
   index: DeclarationIndex.Index,
   declaration: DeclarationFacts.MemberFact,
@@ -415,6 +431,17 @@ const collectResolvedType = (
       'Type',
       available(Object.freeze({ _tag: 'TypeParameterIdentity', id: fact.type })),
       declaration === undefined ? undefined : locationOfTypeParameter(declaration),
+    )
+    return
+  }
+  const alias = aliasAtPath(fact.path, scope, index)
+  if (alias !== undefined) {
+    push(
+      pending,
+      token.span,
+      'Type',
+      available(identityOfDeclaration(alias)),
+      locationOfDeclaration(index, alias),
     )
     return
   }
@@ -1230,6 +1257,10 @@ const collectMember = (
   }
   if (member._tag === 'ConstantDeclaration') {
     collectDeclaredType(member.declaredType, index, scope, pending)
+    return
+  }
+  if (member._tag === 'AliasDeclaration') {
+    collectDeclaredType(member.target, index, scope, pending)
     return
   }
   if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {

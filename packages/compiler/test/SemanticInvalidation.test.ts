@@ -106,6 +106,31 @@ it.effect('keeps unrelated modules and body-only importers reusable', () =>
   }),
 )
 
+it.effect('keeps importers reusable when an alias target is only re-spelled', () =>
+  Effect.gen(function* () {
+    const importer = 'import app.B { Choice } pub fn use(value: Choice) -> Choice { return value }'
+    const previous = yield* analyze(
+      sources({
+        'app/A': importer,
+        'app/B': 'pub struct L {} pub struct R {} pub type Choice = L | R',
+      }),
+      ['app/A'],
+    )
+    const current = yield* analyze(
+      sources({
+        'app/A': importer,
+        'app/B': 'pub struct L {} pub struct R {} pub type Choice = R | L',
+      }),
+      ['app/A'],
+      previous,
+    )
+
+    expectReusable(current, 'app/A')
+    expectReasons(current, 'app/B', ['LocalChange'])
+    assert.strictEqual(current.semantics.get('app/A'), previous.semantics.get('app/A'))
+  }),
+)
+
 it.effect('invalidates importers for signatures, visibility, and nominal struct shape', () =>
   Effect.gen(function* () {
     const cases = [
@@ -123,6 +148,11 @@ it.effect('invalidates importers for signatures, visibility, and nominal struct 
         'pub struct Pair { pub left: i32 }',
         'pub struct Pair { pub left: i32 pub right: i32 }',
         'import app.Dependency { Pair } pub fn use(value: Pair) -> Pair { return value }',
+      ],
+      [
+        'pub struct A {} pub struct B {} pub struct C {} pub type Choice = A | B',
+        'pub struct A {} pub struct B {} pub struct C {} pub type Choice = A | B | C',
+        'import app.Dependency { Choice } pub fn use(value: Choice) -> Choice { return value }',
       ],
     ] as const
 

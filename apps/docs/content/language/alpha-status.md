@@ -71,7 +71,7 @@ The following are not current language capabilities:
 - parallel execution, multithreading, preemptive scheduling, or detached tasks;
 - a package registry or stable third-party dependency format;
 - broad native FFI and a stable C ABI surface;
-- self-hosting, macros, async/await syntax, or type aliases; and
+- self-hosting, macros, async/await syntax, or generic type aliases; and
 - a compatibility guarantee for syntax, diagnostics, manifests, generated artifacts, or standard
   library APIs.
 

@@ -32,6 +32,7 @@ export interface LinkTarget {
     | 'Interface'
     | 'Constant'
     | 'Role'
+    | 'Alias'
 }
 
 export type Inline =

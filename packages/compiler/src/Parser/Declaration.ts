@@ -47,6 +47,7 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
     kind === 'TupleKeyword' ||
     kind === 'EnumKeyword' ||
     kind === 'UnionKeyword' ||
+    kind === 'TypeKeyword' ||
     kind === 'ServiceKeyword' ||
     kind === 'InterfaceKeyword' ||
     kind === 'RoleKeyword' ||
@@ -65,6 +66,7 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
     following === 'TupleKeyword' ||
     following === 'EnumKeyword' ||
     following === 'UnionKeyword' ||
+    following === 'TypeKeyword' ||
     following === 'ServiceKeyword' ||
     following === 'InterfaceKeyword' ||
     following === 'RoleKeyword' ||
@@ -135,6 +137,45 @@ export const parseConstantDeclaration = (initial: State): NodeResult => {
       type.node,
       ...equals.elements,
       initializer.node,
+    ]),
+  })
+}
+
+export const parseTypeAliasDeclaration = (initial: State): NodeResult => {
+  const hasPublicModifier = nextSignificantKind(initial) === 'PubKeyword'
+  const pubKeyword = hasPublicModifier
+    ? expect(initial, 'PubKeyword', ['TypeKeyword', 'Identifier', ...topLevelFollowing])
+    : Object.freeze({ state: initial, elements: Object.freeze([]) })
+  const keyword = expect(pubKeyword.state, 'TypeKeyword', [
+    'Identifier',
+    'Equals',
+    ...topLevelFollowing,
+  ])
+  const name = expect(keyword.state, 'Identifier', [
+    'Less',
+    'Equals',
+    ...typeStarts,
+    ...topLevelFollowing,
+  ])
+  // The parameter list is retained so semantic analysis can reject it at its exact span.
+  const typeParameters =
+    nextSignificantKind(name.state) === 'Less'
+      ? parseTypeParameterList(name.state, ['Equals'])
+      : undefined
+  const equals = expect(typeParameters?.state ?? name.state, 'Equals', [
+    ...typeStarts,
+    ...topLevelFollowing,
+  ])
+  const target = parseType(equals.state, topLevelFollowing)
+  return Object.freeze({
+    state: target.state,
+    node: syntaxNode(target.state, 'TypeAliasDeclaration', [
+      ...pubKeyword.elements,
+      ...keyword.elements,
+      ...name.elements,
+      ...(typeParameters === undefined ? [] : [typeParameters.node]),
+      ...equals.elements,
+      target.node,
     ]),
   })
 }
@@ -691,6 +732,7 @@ const parseServiceLikeDeclaration = (initial: State, kind: 'Service' | 'Interfac
     nextSignificantKind(state) !== 'TupleKeyword' &&
     nextSignificantKind(state) !== 'EnumKeyword' &&
     nextSignificantKind(state) !== 'UnionKeyword' &&
+    nextSignificantKind(state) !== 'TypeKeyword' &&
     nextSignificantKind(state) !== 'ServiceKeyword' &&
     nextSignificantKind(state) !== 'InterfaceKeyword' &&
     nextSignificantKind(state) !== 'ImplKeyword'
@@ -810,6 +852,7 @@ export const parseTopLevelDeclaration = (state: State): NodeResult => {
   if (kind === 'TupleKeyword' || following === 'TupleKeyword') return parseTupleDeclaration(state)
   if (kind === 'EnumKeyword' || following === 'EnumKeyword') return parseEnumDeclaration(state)
   if (kind === 'UnionKeyword' || following === 'UnionKeyword') return parseUnionDeclaration(state)
+  if (kind === 'TypeKeyword' || following === 'TypeKeyword') return parseTypeAliasDeclaration(state)
   return parseFunctionDeclaration(state)
 }
 
@@ -827,6 +870,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     lookaheadToken.kind !== 'TupleKeyword' &&
     lookaheadToken.kind !== 'EnumKeyword' &&
     lookaheadToken.kind !== 'UnionKeyword' &&
+    lookaheadToken.kind !== 'TypeKeyword' &&
     lookaheadToken.kind !== 'ServiceKeyword' &&
     lookaheadToken.kind !== 'InterfaceKeyword' &&
     lookaheadToken.kind !== 'RoleKeyword' &&

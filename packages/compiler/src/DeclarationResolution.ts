@@ -198,6 +198,8 @@ export const resolveDeclaredType = (
   if (fact._tag === 'Unresolved') {
     const resolved = resolvers.type(module, fact.path)
     if (resolved.fact._tag !== 'Resolved' || !Type.isNominal(resolved.fact.type)) return resolved
+    // A nominal that already carries arguments came through an alias, which applied them.
+    if (resolved.fact.type.arguments.length > 0) return resolved
     const declaration = memberByNominal(modules, resolved.fact.type)
     const expected =
       declaration?.typeParameters.length ?? Type.intrinsicNominalArity(resolved.fact.type)
@@ -427,8 +429,11 @@ export const resolveDeclaredType = (
     ]
     if (target.fact._tag === 'Resolved' && Type.isNominal(target.fact.type)) {
       const declaration = memberByNominal(modules, target.fact.type)
+      // An alias to an applied nominal accepts no further arguments.
       const expected =
-        declaration?.typeParameters.length ?? Type.intrinsicNominalArity(target.fact.type)
+        target.fact.type.arguments.length > 0
+          ? 0
+          : (declaration?.typeParameters.length ?? Type.intrinsicNominalArity(target.fact.type))
       const declaredParameters = declaration?.typeParameters.map((parameter) => parameter.type)
       const valueArguments = arguments_.map(
         (argument, ordinal): Type.GenericArgument | undefined => {
@@ -647,6 +652,20 @@ export const resolveDeclaredType = (
         fact.spelling,
         expected,
         suppliedCount,
+        fact.token.span,
+      )
+      diagnostics.push(diagnostic)
+      return Object.freeze({
+        fact: Object.freeze({ ...fact, cause: Diagnostic.identity(diagnostic) }),
+        diagnostics: Object.freeze(diagnostics),
+      })
+    }
+    if (target.fact._tag === 'Resolved') {
+      // Only a nominal accepts arguments. An alias can resolve a path to any other type.
+      const diagnostic = Diagnostic.typeArgumentArity(
+        fact.spelling,
+        0,
+        fact.arguments.length,
         fact.token.span,
       )
       diagnostics.push(diagnostic)
@@ -1473,7 +1492,7 @@ const semanticFailureRow = (fact: RowExpressionFact): Type.FailureRow => {
           fact.syntax.span,
         )
       return Type.isRuntimeConcrete(fact.member.type)
-        ? RowAlgebra.concrete(Type.failureRowPolicy(), [fact.member.type])
+        ? RowAlgebra.concrete(Type.failureRowPolicy(), Type.failureLeaves(fact.member.type))
         : RowAlgebra.concrete(Type.failureRowPolicy(), [])
     case 'UnionRowExpression':
       return fact.operands.reduce<Type.FailureRow>(
@@ -1609,7 +1628,8 @@ export const resolveFailureRow = (
         )
       continue
     }
-    if (!Type.isParameter(member.type)) failures.set(Type.key(member.type), member.type)
+    if (!Type.isParameter(member.type))
+      for (const leaf of Type.failureLeaves(member.type)) failures.set(Type.key(leaf), leaf)
   }
   return Object.freeze({
     fact: Object.freeze({

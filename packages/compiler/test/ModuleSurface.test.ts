@@ -153,6 +153,23 @@ it.effect('retains constant initializer templates in the module surface', () =>
   }),
 )
 
+it.effect('encodes type aliases by their erased target', () =>
+  Effect.gen(function* () {
+    const preamble = 'pub struct HttpError {}\npub struct JsonError {}\npub struct Timeout {}\n'
+    const left = yield* surface(`${preamble}pub type FetchError = HttpError | JsonError`)
+    const reordered = yield* surface(`${preamble}pub type FetchError = JsonError | HttpError`)
+    const widened = yield* surface(
+      `${preamble}pub type FetchError = HttpError | JsonError | Timeout`,
+    )
+    const hidden = yield* surface(`${preamble}type FetchError = HttpError | JsonError`)
+
+    assert.include(left.canonical, 'AliasDeclaration')
+    assert.strictEqual(ModuleSurface.equals(left, reordered), true)
+    assert.strictEqual(ModuleSurface.equals(left, widened), false)
+    assert.strictEqual(ModuleSurface.equals(left, hidden), false)
+  }),
+)
+
 it.effect('ignores bodies and source positions while retaining header meaning', () =>
   Effect.gen(function* () {
     const left = yield* surface(`fn helper() -> i32 { return 1 }

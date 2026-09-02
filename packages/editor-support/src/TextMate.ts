@@ -16,6 +16,7 @@ export const keywords: Record<KeywordKind, string> = {
   TupleKeyword: 'tuple',
   EnumKeyword: 'enum',
   UnionKeyword: 'union',
+  TypeKeyword: 'type',
   ServiceKeyword: 'service',
   InterfaceKeyword: 'interface',
   RoleKeyword: 'role',

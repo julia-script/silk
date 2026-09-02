@@ -145,6 +145,8 @@ const memberSignature = (member: DeclarationFacts.MemberFact): string => {
   }
   if (member._tag === 'ConstantDeclaration')
     return `${member.visibility === 'Public' ? 'pub ' : ''}const · ${declaredTypeText(member.declaredType)}`
+  if (member._tag === 'AliasDeclaration')
+    return `${member.visibility === 'Public' ? 'pub ' : ''}type · ${declaredTypeText(member.target)}`
   if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration')
     return `${member.visibility === 'Public' ? 'pub ' : ''}${member._tag === 'ServiceDeclaration' ? 'service' : 'interface'}${parameters} · ${member.operations.length} operation${member.operations.length === 1 ? '' : 's'}`
   const values = member.parameters

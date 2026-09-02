@@ -39,6 +39,8 @@ pub union Maybe<T> {
   Some {pub value: T},
 }
 
+pub type Choice = Alpha | Beta
+
 pub role Clock
 
 static fn staticHelper(static value: i32) -> i32 {

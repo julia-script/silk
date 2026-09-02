@@ -28,6 +28,7 @@ export type Presentation =
   | (Base & { readonly _tag: 'RolePresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ServiceOperationPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ConstantPresentation'; readonly name: string })
+  | (Base & { readonly _tag: 'AliasPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ParameterPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'TypeParameterPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'FieldPresentation'; readonly name: string })
@@ -287,6 +288,17 @@ export const constantDeclaration = (self: DeclarationFacts.ConstantFact): Presen
     _tag: 'ConstantPresentation',
     name,
     text: `${visibility}const ${name}: ${declaredType(self.declaredType)}`,
+  })
+}
+
+/** Renders an alias by its erased target: the alias name never survives resolution. */
+export const aliasDeclaration = (self: DeclarationFacts.AliasFact): Presentation => {
+  const name = self.name._tag === 'Present' ? self.name.spelling : '_'
+  const visibility = self.visibility === 'Public' ? 'pub ' : ''
+  return Object.freeze({
+    _tag: 'AliasPresentation',
+    name,
+    text: `${visibility}type ${name} = ${declaredType(self.target)}`,
   })
 }
 

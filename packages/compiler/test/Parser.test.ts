@@ -1840,6 +1840,7 @@ it('parses reserved import-path segments without changing their token kinds', ()
   const source = `import silk.effect as Effect
 import toolkit.effect.helpers as Helpers
 import silk.effect { map }
+import app.type as Types
 fn main() -> i32 { return 42 }`
   const result = parseText('fixture://reserved-import-paths.silk', source)
   const paths = SyntaxTree.directNodes(result.root, 'ImportDeclaration').map((declaration) =>
@@ -1853,6 +1854,7 @@ fn main() -> i32 { return 42 }`
       ['Identifier', 'EffectKeyword'],
       ['Identifier', 'EffectKeyword', 'Identifier'],
       ['Identifier', 'EffectKeyword'],
+      ['Identifier', 'TypeKeyword'],
     ],
   )
   assert.deepEqual(result.parserDiagnostics, [])
@@ -3623,4 +3625,54 @@ it('keeps compileError dedicated and non-shadowable in value declarations', () =
   assert.deepEqual(reconstructedBytes(result), ascii(source))
   assertOriginalTokenTraversal(binding)
   assert.deepEqual(reconstructedBytes(binding), ascii(bindingSource))
+})
+
+it('parses type alias declarations losslessly', () => {
+  const source = `pub type FetchError = HttpError | JsonError
+type PointF32 = Point<f32>
+pub fn after() -> i32 { return 1 }`
+  const result = parseText('memory/type-alias', source)
+  const declarations = SyntaxTree.directNodes(result.root, 'TypeAliasDeclaration')
+  const [unionAlias, appliedAlias] = declarations
+  const union =
+    unionAlias === undefined ? undefined : SyntaxTree.directNode(unionAlias, 'UnionType')
+
+  assert.strictEqual(declarations.length, 2)
+  assert.notStrictEqual(union, undefined)
+  assert.strictEqual(union === undefined ? 0 : SyntaxTree.directNodes(union, 'TypePath').length, 2)
+  assert.notStrictEqual(
+    appliedAlias === undefined ? undefined : SyntaxTree.directNode(appliedAlias, 'AppliedType'),
+    undefined,
+  )
+  assert.notStrictEqual(SyntaxTree.directNode(result.root, 'FunctionDeclaration'), undefined)
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('recovers a type alias without a target at the next declaration', () => {
+  const source = 'type Broken = struct Next {}'
+  const result = parseText('memory/damaged-type-alias', source)
+  const declaration = SyntaxTree.directNode(result.root, 'TypeAliasDeclaration')
+
+  assert.notStrictEqual(declaration, undefined)
+  assert.strictEqual(missingLeaves(declaration ?? result.root).length > 0, true)
+  assert.notStrictEqual(SyntaxTree.directNode(result.root, 'StructDeclaration'), undefined)
+  assert.notStrictEqual(result.parserDiagnostics.length, 0)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('retains a type alias parameter list for semantic rejection', () => {
+  const source = 'type Pair<T> = Point<T>'
+  const result = parseText('memory/parameterized-type-alias', source)
+  const declaration = SyntaxTree.directNode(result.root, 'TypeAliasDeclaration')
+
+  assert.notStrictEqual(
+    declaration === undefined ? undefined : SyntaxTree.directNode(declaration, 'TypeParameterList'),
+    undefined,
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
 })

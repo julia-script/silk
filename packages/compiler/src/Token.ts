@@ -22,6 +22,7 @@ export type TokenKind =
   | 'TupleKeyword'
   | 'EnumKeyword'
   | 'UnionKeyword'
+  | 'TypeKeyword'
   | 'ServiceKeyword'
   | 'InterfaceKeyword'
   | 'RoleKeyword'
@@ -108,6 +109,7 @@ const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
   TupleKeyword: '`tuple`',
   EnumKeyword: '`enum`',
   UnionKeyword: '`union`',
+  TypeKeyword: '`type`',
   ServiceKeyword: '`service`',
   InterfaceKeyword: '`interface`',
   RoleKeyword: '`role`',

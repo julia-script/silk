@@ -155,6 +155,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'StructFieldInitializer',
   'StructLiteralExpression',
   'TupleLiteralExpression',
+  'TypeAliasDeclaration',
   'ContextualRecordLiteralExpression',
   'OrdinalProjectionExpression',
   'TypeArgumentList',
@@ -319,6 +320,29 @@ pub union Maybe<T> {
       parse('memory://nominal-union-comments.silk', text),
     )
     assert.strictEqual(formattedText(second), text)
+  }),
+)
+
+it.effect('formats type alias declarations canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source = `// alias docs
+pub   type   FetchError=HttpError|JsonError  |  Timeout
+// applied alias
+type PointF32 = Point < f32 >`
+    const first = yield* SyntaxFormatter.format(parse('memory://type-alias-format.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `// alias docs
+pub type FetchError = HttpError | JsonError | Timeout
+
+// applied alias
+type PointF32 = Point<f32>
+`,
+    )
+    const second = yield* SyntaxFormatter.format(parse('memory://type-alias-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
+    assert.strictEqual(second.changed, false)
   }),
 )
 
@@ -1110,6 +1134,7 @@ pub struct End {}
 enum AssertionResult { Pass, Fail, Skip }
 pub enum(u8) ExitCode { Success = 0, Failure = 1 }
 pub union Maybe<T> { None, Some { pub value: T } }
+pub type Choice=Alpha|Beta
 pub role Clock
 static fn staticHelper(static value: i32) -> i32 {
   let static retained = value

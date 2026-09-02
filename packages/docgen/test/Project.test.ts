@@ -48,6 +48,9 @@ pub union Outcome<T> {
   /// No payload is available.
   Empty
 }
+
+/// A name for the recoverable problem.
+pub type Trouble = Problem
 `
     const snapshot = yield* Analysis.ofSource('project/main', encode(source))
     const publicProject = Project.make(snapshot)
@@ -56,8 +59,12 @@ pub union Outcome<T> {
     assert.strictEqual(module.documentation?.markdown, 'Recovery utilities.')
     assert.deepStrictEqual(
       module.items.filter((item) => item.kind !== 'Implementation').map((item) => item.name),
-      ['defaultCode', 'Primary', 'recover', 'Problem', 'State', 'Outcome'],
+      ['defaultCode', 'Primary', 'recover', 'Problem', 'State', 'Outcome', 'Trouble'],
     )
+    const trouble = module.items.find((item) => item.name === 'Trouble')
+    assert.strictEqual(trouble?.kind, 'Alias')
+    assert.include(trouble?.signature.text, 'Problem')
+    assert.strictEqual(trouble?.documentation?.markdown, 'A name for the recoverable problem.')
     const defaultCode = module.items.find((item) => item.name === 'defaultCode')
     assert.strictEqual(defaultCode?.kind, 'Constant')
     assert.strictEqual(defaultCode?.signature.text, 'pub const defaultCode: i32')

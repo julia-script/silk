@@ -817,6 +817,16 @@ const implicitRowOrigin: SourceSpan.SourceSpan = (() => {
   return span
 })()
 
+/**
+ * The row members one failure type contributes: a structural union spreads into its members,
+ * `never` contributes none, and everything else (including a nominal union) is one member. A row
+ * spelled through a union alias is therefore the row its members would spell directly.
+ */
+export const failureLeaves = (failure: Type): ReadonlyArray<Type> => {
+  if (isNever(failure)) return []
+  return isUnion(failure) ? failure.members : [failure]
+}
+
 /** Constructs one normalized compiler-private lazy effect contract. */
 export const effect = (
   success: Type,
@@ -825,15 +835,11 @@ export const effect = (
   requirements: ReadonlyArray<Requirement> = [],
   requirementParameters: ReadonlyArray<Parameter> = [],
 ): Effect => {
-  const failureLeaves = failures.flatMap((failure): ReadonlyArray<Type> => {
-    if (isNever(failure)) return []
-    if (isUnion(failure)) return failure.members
-    return [failure]
-  })
-  const concreteFailures = failureLeaves.filter(
+  const leaves = failures.flatMap(failureLeaves)
+  const concreteFailures = leaves.filter(
     (failure) => !(isParameter(failure) && failure.kind === 'Value'),
   )
-  const symbolicFailures = failureLeaves.filter(
+  const symbolicFailures = leaves.filter(
     (failure): failure is Parameter => isParameter(failure) && failure.kind === 'Value',
   )
   const normalized = FiniteRow.make<Type>(

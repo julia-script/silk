@@ -2330,7 +2330,8 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         element.kind === 'ServiceDeclaration' ||
         element.kind === 'InterfaceDeclaration' ||
         element.kind === 'RoleDeclaration' ||
-        element.kind === 'ConstantDeclaration'),
+        element.kind === 'ConstantDeclaration' ||
+        element.kind === 'TypeAliasDeclaration'),
   )
   const first = new Map<string, { readonly id: CanonicalId; readonly token: Token.Token }>()
   const diagnostics: Array<Diagnostic.Diagnostic> = []
@@ -2570,6 +2571,31 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       name._tag === 'Present' ? name.spelling : `#${ordinal}`,
     )
     diagnostics.push(...typeParameters.diagnostics)
+    if (node.kind === 'TypeAliasDeclaration') {
+      const parameterList = SyntaxTree.directNode(node, 'TypeParameterList')
+      const targetSyntax = node.children.find(isDeclaredTypeNode)
+      // A parameterized alias is rejected as a whole, so its target is never analyzed: analyzing
+      // it would only report the parameters it names as unknown types on top of the rejection.
+      const target =
+        parameterList !== undefined || targetSyntax === undefined
+          ? Object.freeze({
+              fact: Object.freeze({ _tag: 'Unavailable' as const, syntax: node }),
+              diagnostics: Object.freeze([]),
+            })
+          : analyzeDeclaredType(source, targetSyntax)
+      diagnostics.push(...target.diagnostics)
+      return Object.freeze({
+        _tag: 'AliasDeclaration',
+        id,
+        canonical,
+        visibility,
+        typeParameters: Object.freeze([]),
+        name,
+        target: target.fact,
+        ...(parameterList === undefined ? {} : { parameterList }),
+        syntax: node,
+      })
+    }
     if (node.kind === 'ConstantDeclaration') {
       const initializer =
         node.children.find(

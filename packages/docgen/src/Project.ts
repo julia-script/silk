@@ -17,6 +17,7 @@ export type ItemKind =
   | 'Interface'
   | 'Constant'
   | 'Role'
+  | 'Alias'
   | 'Parameter'
   | 'TypeParameter'
   | 'Field'
@@ -80,6 +81,8 @@ const linkTargetKind = (member: DeclarationFacts.MemberFact): Document.LinkTarge
       return 'Interface'
     case 'RoleDeclaration':
       return 'Role'
+    case 'AliasDeclaration':
+      return 'Alias'
     default:
       return 'Constant'
   }
@@ -101,6 +104,8 @@ const itemKind = (member: DeclarationFacts.MemberFact): ItemKind => {
       return 'Interface'
     case 'RoleDeclaration':
       return 'Role'
+    case 'AliasDeclaration':
+      return 'Alias'
     default:
       return 'Constant'
   }
@@ -392,6 +397,8 @@ const memberPresentation = (member: DeclarationFacts.MemberFact) => {
       return Presentation.roleDeclaration(member)
     case 'ConstantDeclaration':
       return Presentation.constantDeclaration(member)
+    case 'AliasDeclaration':
+      return Presentation.aliasDeclaration(member)
   }
 }
 

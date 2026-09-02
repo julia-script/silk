@@ -358,7 +358,7 @@ export const parseAutoImportData = (value: unknown): AutoImportData | undefined 
     typeof candidate.module !== 'string' ||
     typeof candidate.spelling !== 'string' ||
     typeof candidate.ordinal !== 'number' ||
-    !['Function', 'Constant', 'Struct', 'Union', 'Service', 'Interface'].includes(
+    !['Function', 'Constant', 'Struct', 'Union', 'Service', 'Interface', 'Alias'].includes(
       typeof candidate.declarationKind === 'string' ? candidate.declarationKind : '',
     )
   )
@@ -1487,6 +1487,8 @@ export const completion = (
       case 'Service':
       case 'Interface':
         return CompletionItemKind.Interface
+      case 'Alias':
+        return CompletionItemKind.Interface
     }
   }
   const partial = Option.getOrElse(SourceFile.spelling(syntax.source, result.replacement), () => '')
@@ -1606,6 +1608,16 @@ export const symbols = (
         {
           name: member.name.spelling,
           kind: SymbolKind.Constant,
+          range,
+          selectionRange,
+        },
+      ]
+    }
+    if (member._tag === 'AliasDeclaration') {
+      return [
+        {
+          name: member.name.spelling,
+          kind: SymbolKind.Interface,
           range,
           selectionRange,
         },
