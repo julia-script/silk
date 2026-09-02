@@ -3,6 +3,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Analysis from '../src/Analysis.js'
+import * as Hir from '../src/Hir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SemanticOccurrence from '../src/SemanticOccurrence.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -92,8 +94,6 @@ impl Counter {
 
 it.effect('resolves the three spellings of one member to one target', () =>
   Effect.gen(function* () {
-    // The pipeline spelling captures no callable here: a section capturing a callable argument is
-    // a separately tracked lowering gap, unrelated to receiver syntax.
     const source = `${option}
 pub fn main() -> i32 {
   let direct = Option.unwrapOr(Option.some<i32>(13), 0)
@@ -115,6 +115,77 @@ pub fn main() -> i32 {
     const receiverKey = identityAt(self, source, 'value.map', 0)
     assert.isDefined(receiverKey)
     assert.isTrue(receiverKey?.startsWith('binding:'), receiverKey)
+  }),
+)
+
+it.effect('preserves callable captures in root and associated-member pipeline sections', () =>
+  Effect.gen(function* () {
+    const source = `${option}
+fn add(value: i32, amount: i32) -> i32 { return value + amount }
+fn apply(value: i32, transform: once fn(i32) -> i32) -> i32 {
+  return transform(value)
+}
+fn observe(value: i32, trace: &mut [i32]) -> i32 {
+  trace[0] = trace[0] * 10 + 2
+  return value
+}
+fn first(trace: &mut [i32]) -> i32 {
+  trace[0] = trace[0] * 10 + 1
+  return 1
+}
+fn applyExclusive(value: i32, transform: mut fn(i32) -> i32) -> i32 {
+  return transform(value)
+}
+pub fn main() -> i32 {
+  let transform = addOne
+  let rootNamed = 1 |> apply(addOne)
+  let rootLocal = 1 |> apply(transform)
+  let rootCaptured = 1 |> apply(add(1))
+  let rootSection = apply(add(1))
+  let rootStored = rootSection(1)
+  let memberNamed = Option.some<i32>(1) |> Option.map(addOne)
+  let memberLocal = Option.some<i32>(1) |> Option.map(transform)
+  let memberCaptured = Option.some<i32>(1) |> Option.map(add(1))
+  let memberSection = Option.map(add(1))
+  let memberStored = memberSection(Option.some<i32>(1))
+  let directRoot = apply(1, addOne)
+  let directMember = Option.map(Option.some<i32>(1), addOne)
+  let mut trace = [0]
+  let ordered = first(&mut trace) |> applyExclusive(observe(&mut trace))
+  let directMemberValue = directMember.unwrapOr(0)
+  return rootNamed - directRoot + rootLocal - directRoot
+    + rootCaptured - rootStored
+    + memberNamed.unwrapOr(0) - directMemberValue
+    + memberLocal.unwrapOr(0) - directMemberValue
+    + memberCaptured.unwrapOr(0) - memberStored.unwrapOr(0)
+    + ordered + trace[0]
+}`
+    const self = yield* analyze(source)
+    const main = Analysis.rootAnalysis(self).hir.functions.find(
+      (fn) =>
+        fn.declaration.canonical._tag === 'Canonical' &&
+        fn.declaration.canonical.id.name === 'main',
+    )
+    const pipelines =
+      main === undefined
+        ? []
+        : main.statements
+            .flatMap(Hir.statementExpressions)
+            .flatMap(Hir.expressionTree)
+            .filter(
+              (expression) =>
+                expression._tag === 'CallableApply' && expression.evaluation === 'LeftThenCallable',
+            )
+    assert.strictEqual(pipelines.length, 7)
+    assert.isTrue(
+      pipelines.every(
+        (expression) =>
+          expression._tag === 'CallableApply' && expression.realization === 'DirectErasedSection',
+      ),
+    )
+    const lowered = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(lowered), [])
+    assert.strictEqual(evaluated(self), 13n)
   }),
 )
 
@@ -205,6 +276,170 @@ effect fn program() -> i32 ! OutOfMemoryError ? &mut Allocator {
 }
 pub fn main() -> i32 { return 0 }`)
     assert.deepEqual(codes(boxed), ['SEM0027'])
+  }),
+)
+
+it.effect('preserves call-scoped borrow identity through grouping', () =>
+  Effect.gen(function* () {
+    const source = `${counter}
+pub fn main() -> i32 {
+  let mut value = Counter { value: 40 }
+  let ungrouped = Counter.read(&value)
+  let grouped = Counter.read((&value))
+  let doubleGrouped = Counter.read(((&value)))
+  let receiver = (&value).read()
+  let bumped = Counter.bump(((&mut value)))
+  let after = value.read()
+  return ungrouped + grouped + doubleGrouped + receiver + bumped + after
+}`
+    const self = yield* analyze(source)
+    assert.deepEqual(codes(self), [])
+    const main = Analysis.rootAnalysis(self).hir.functions.find(
+      (fn) =>
+        fn.declaration.canonical._tag === 'Canonical' &&
+        fn.declaration.canonical.id.name === 'main',
+    )
+    assert.strictEqual(main === undefined ? undefined : Hir.firstUnavailable(main), undefined)
+    const calls =
+      main?.statements
+        .flatMap(Hir.statementExpressions)
+        .filter((expression) => expression._tag === 'Call') ?? []
+    assert.deepEqual(
+      calls.map((call) => call.target.name),
+      [
+        'Counter.read',
+        'Counter.read',
+        'Counter.read',
+        'Counter.read',
+        'Counter.bump',
+        'Counter.read',
+      ],
+    )
+    for (const call of calls) {
+      const argument = call.arguments.at(0)
+      assert.strictEqual(argument?._tag, 'ValueBorrow')
+      if (argument?._tag === 'ValueBorrow') assert.deepEqual(call.loanEnds, [argument.borrow])
+    }
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.strictEqual(evaluated(self), 242n)
+    const unsupported = yield* analyze(`${counter}
+fn consume(value: Counter) -> i32 { return value.value }
+pub fn main() -> i32 {
+  let value = Counter { value: 42 }
+  return consume((&value))
+}`)
+    assert.deepEqual(codes(unsupported), ['SEM0012'])
+  }),
+)
+
+it.effect('discovers calls inside compiler-owned temporary borrow roots', () =>
+  Effect.gen(function* () {
+    const source = `${counter}
+struct Guard { value: i32 }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () { return () }
+}
+fn makeCounter(trace: &mut [i32], digit: i32) -> Counter {
+  trace[0] = trace[0] * 10 + digit
+  return Counter { value: digit }
+}
+fn makeRows(trace: &mut [i32]) -> [[i32; 2]; 2] {
+  trace[0] = trace[0] * 10 + 3
+  return [[1, 2], [40, 2]]
+}
+fn select(trace: &mut [i32]) -> usize {
+  trace[0] = trace[0] * 10 + 4
+  return 1
+}
+fn sum(values: &[i32]) -> i32 { return values[0] + values[1] }
+fn selectSlice(trace: &mut [i32]) -> usize {
+  trace[0] = trace[0] * 10 + 5
+  return 1
+}
+fn read(value: &i32) -> i32 { return value.* }
+fn readSelected(values: &[i32], trace: &mut [i32]) -> i32 {
+  return read(&values[selectSlice(trace)])
+}
+fn makeGuards(trace: &mut [i32]) -> [Guard; 1] {
+  trace[0] = trace[0] * 10 + 6
+  return [Guard { value: 42 }]
+}
+fn readGuard(values: &[Guard]) -> i32 { return values[0].value }
+pub fn main() -> i32 {
+  let mut trace = [0]
+  let directZero = Counter.read(&Counter.zero())
+  let receiverZero = Counter.zero().read()
+  let direct = Counter.read(&makeCounter(&mut trace, 1))
+  let receiver = makeCounter(&mut trace, 2).read()
+  let selected = sum(&makeRows(&mut trace)[select(&mut trace)])
+  let values = [1, 42]
+  let sliceSelected = readSelected(&values, &mut trace)
+  let guarded = readGuard(&makeGuards(&mut trace))
+  return directZero + receiverZero + direct + receiver + selected + sliceSelected + guarded + trace[0]
+}`
+    const self = yield* analyze(source)
+    assert.deepEqual(codes(self), [])
+    const lowered = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(lowered), [])
+    const main = lowered.functions.find((fn) => fn.id.name === 'main')
+    const operations =
+      main?.regions.flatMap((region) => {
+        if (region._tag === 'OperationRegion') return region.operations
+        if (region._tag === 'CleanupRegion') return region.releases
+        return []
+      }) ?? []
+    assert.deepEqual(
+      operations.flatMap((operation) => (operation._tag === 'Call' ? [operation.target.name] : [])),
+      [
+        'Counter.zero',
+        'Counter.read',
+        'Counter.zero',
+        'Counter.read',
+        'makeCounter',
+        'Counter.read',
+        'makeCounter',
+        'Counter.read',
+        'makeRows',
+        'select',
+        'sum',
+        'readSelected',
+        'makeGuards',
+        'readGuard',
+      ],
+    )
+    const readSelected = lowered.functions.find((fn) => fn.id.name === 'readSelected')
+    assert.deepEqual(
+      readSelected?.regions.flatMap((region) =>
+        region._tag === 'OperationRegion'
+          ? region.operations.flatMap((operation) =>
+              operation._tag === 'Call' ? [operation.target.name] : [],
+            )
+          : [],
+      ),
+      ['selectSlice', 'read'],
+    )
+    const guardRead = operations.findIndex(
+      (operation) => operation._tag === 'Call' && operation.target.name === 'readGuard',
+    )
+    const guardLoanEnd = operations.findIndex(
+      (operation, ordinal) => operation._tag === 'EndLoan' && ordinal > guardRead,
+    )
+    const guardCleanup = operations.findIndex(
+      (operation, ordinal) =>
+        operation._tag === 'Drop' &&
+        operation.cleanup._tag === 'ArrayCleanup' &&
+        ordinal > guardLoanEnd,
+    )
+    assert.isAtLeast(guardRead, 0)
+    assert.isAbove(guardLoanEnd, guardRead)
+    assert.isAbove(guardCleanup, guardLoanEnd)
+    assert.strictEqual(
+      operations.filter(
+        (operation) => operation._tag === 'Drop' && operation.cleanup._tag === 'ArrayCleanup',
+      ).length,
+      1,
+    )
+    assert.strictEqual(evaluated(self), 123585n)
   }),
 )
 
@@ -523,14 +758,6 @@ it.effect(
   'accepts explicit borrows, reference receivers, chains, and explicit type arguments',
   () =>
     Effect.gen(function* () {
-      // A written borrow of the receiver analyzes as the reference receiver it is; the grouped
-      // borrow's lowering is a separately tracked gap shared with `Counter.read((&value))`.
-      const explicitBorrow = yield* analyze(`${counter}
-pub fn main() -> i32 {
-  let value = Counter { value: 42 }
-  return (&value).read()
-}`)
-      assert.deepEqual(described(explicitBorrow), [])
       // A `&mut` reference reborrows for a `&Self` method, inside and outside the owner.
       const reborrow = yield* analyze(`pub struct Counter { value: i32 }
 impl Counter {
