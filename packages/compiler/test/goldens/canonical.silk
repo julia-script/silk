@@ -111,6 +111,10 @@ fn readReferent(value: &i32) -> i32 {
   return value.*
 }
 
+fn pointers(cursor: *mut *const u8, count: *const i32) -> *const u8 {
+  return cursor
+}
+
 fn callbacks(
   shared: fn(i32, bool) -> i32,
   exclusive: mut fn(i32) -> bool,

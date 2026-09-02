@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as CleanupPlan from '../src/CleanupPlan.js'
 import * as ConformanceProof from '../src/ConformanceProof.js'
 import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import type * as DeclarationIndex from '../src/DeclarationIndex.js'
@@ -1854,5 +1855,46 @@ it.effect('does not double-report a foreign header whose ABI literal the parser 
       [],
     )
     assert.strictEqual(index.modules.at(0)?.declarations.at(0)?.foreign?.symbol, 'f')
+  }),
+)
+
+it.effect('resolves raw pointer types in every position and proves them Copy without impl', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('pointers', [
+      [
+        'pointers',
+        `struct Opaque {}
+struct Handle { raw: *mut Opaque }
+impl Copy for Handle {}
+fn take(value: *const i32, nested: *mut *const u8, handle: *mut Handle) -> *mut Handle { return handle }`,
+      ],
+    ])
+    const module = index.modules.at(0)
+    const take = module?.declarations.find((declaration) => declaration.parameterCount === 3)
+    const encoded = (fact: DeclarationFacts.DeclaredTypeFact | undefined) =>
+      fact?._tag === 'Resolved' ? Type.encode(fact.type) : fact?._tag
+
+    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(
+      take?.parameters.map((parameter) => encoded(parameter.declaredType)),
+      ['*const i32', '*mut *const u8', '*mut pointers.Handle'],
+    )
+    assert.strictEqual(encoded(take?.returnType), '*mut pointers.Handle')
+    assert.strictEqual(
+      encoded(module?.structs.at(1)?.fields.at(0)?.declaredType),
+      '*mut pointers.Opaque',
+    )
+    assert.deepEqual(
+      module?.conformances.map((conformance) => conformance.validity._tag),
+      ['ValidConformance'],
+    )
+    const handle = Type.nominal('pointers', 'Handle')
+    assert.strictEqual(ConformanceProof.copyType(index, handle), true)
+    assert.strictEqual(ConformanceProof.copyType(index, Type.pointer(true, handle)), true)
+    assert.strictEqual(CleanupPlan.cleanupPlan(index, handle)._tag, 'NoCleanup')
+    assert.strictEqual(
+      CleanupPlan.cleanupPlan(index, Type.pointer(false, Type.nominal('pointers', 'Opaque')))._tag,
+      'NoCleanup',
+    )
   }),
 )

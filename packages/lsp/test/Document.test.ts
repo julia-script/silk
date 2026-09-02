@@ -252,6 +252,41 @@ pub effect fn main() -> i32 {
   }),
 )
 
+it.effect('hovers and hints raw pointer types with their mutability', () =>
+  Effect.gen(function* () {
+    const source = `fn fill(buffer: *mut u8, length: usize) -> *const u8 { return buffer }
+fn use(buffer: *mut u8) -> *const u8 {
+  let p = fill(buffer, 1)
+  return p
+}`
+    const { document, snapshot } = yield* open(source)
+    const declaration = Document.hover(document, snapshot, positionOf(source, 'fill', 0))
+    const reference = Document.hover(document, snapshot, positionOf(source, 'fill', 1))
+    assert.deepEqual(declaration?.contents, {
+      kind: 'markdown',
+      value: '```silk\nfn fill(buffer: *mut u8, length: usize) -> *const u8\n```',
+    })
+    assert.deepEqual(reference?.contents, declaration?.contents)
+    const buffer = Document.hover(document, snapshot, positionOf(source, 'buffer', 1))
+    assert.deepEqual(buffer?.contents, { kind: 'markdown', value: '```silk\nbuffer: *mut u8\n```' })
+    assert.deepEqual(
+      Document.inlayHints(document, snapshot, {
+        start: { line: 2, character: 0 },
+        end: { line: 2, character: 30 },
+      }),
+      [
+        {
+          position: { line: 2, character: 7 },
+          label: ': *const u8',
+          kind: 1,
+          paddingLeft: false,
+          paddingRight: false,
+        },
+      ],
+    )
+  }),
+)
+
 it.effect('hovers a foreign function with its unsafe signature and native symbol', () =>
   Effect.gen(function* () {
     const source = `pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"

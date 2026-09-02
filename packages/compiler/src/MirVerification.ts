@@ -772,6 +772,17 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         operation.length,
         operation.value,
       ]
+    case 'PointerNull':
+      return [operation.destination]
+    case 'PointerIsNull':
+    case 'PointerRead':
+      return [operation.destination, operation.pointer]
+    case 'PointerFromReference':
+      return [operation.destination, operation.source]
+    case 'PointerOffset':
+      return [operation.destination, operation.pointer, operation.count]
+    case 'PointerWrite':
+      return [operation.destination, operation.pointer, operation.value]
     case 'SlotWrite':
       return [operation.destination, operation.slot, operation.value]
     case 'SlotTake':
@@ -1676,6 +1687,14 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
       return [semanticType(operation.type), operation.element]
     case 'RawBufferFill':
       return [semanticType(operation.type)]
+    case 'PointerNull':
+    case 'PointerFromReference':
+    case 'PointerOffset':
+    case 'PointerRead':
+      return [semanticType(operation.type)]
+    case 'PointerIsNull':
+    case 'PointerWrite':
+      return []
     case 'SlotDrop':
       return [semanticType(operation.type), operation.element, ...cleanupTypes(operation.cleanup)]
     case 'BeginLoan':
@@ -1880,6 +1899,17 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.buffer, operation.offset, operation.source, operation.length]
     case 'RawBufferFill':
       return [operation.buffer, operation.offset, operation.length, operation.value]
+    case 'PointerNull':
+      return []
+    case 'PointerIsNull':
+    case 'PointerRead':
+      return [operation.pointer]
+    case 'PointerFromReference':
+      return [operation.source]
+    case 'PointerOffset':
+      return [operation.pointer, operation.count]
+    case 'PointerWrite':
+      return [operation.pointer, operation.value]
     case 'SlotWrite':
       return [operation.slot, operation.value]
     case 'SlotTake':
@@ -2455,6 +2485,92 @@ const verifyCache = new WeakMap<Module, ReadonlyArray<Violation>>()
  * than once (tests assert emptiness, then evaluation re-verifies before executing), so the result
  * is cached per module identity.
  */
+/** The structural reason one pointer operation disagrees with its operand types, if any. */
+const pointerOperationViolation = (
+  layout: Layout.Plan,
+  fn: MirFunction,
+  operation: Extract<
+    Operation,
+    {
+      readonly _tag:
+        | 'PointerNull'
+        | 'PointerIsNull'
+        | 'PointerFromReference'
+        | 'PointerOffset'
+        | 'PointerRead'
+        | 'PointerWrite'
+    }
+  >,
+): string | undefined => {
+  const destination = fn.localTypes.at(operation.destination.ordinal)
+  const pointerAt = (local: LocalId): SilkType.Pointer | undefined => {
+    const type = fn.localTypes.at(local.ordinal)
+    return type?._tag === 'Pointer' ? type.type : undefined
+  }
+  switch (operation._tag) {
+    case 'PointerNull':
+      return destination?._tag === 'Pointer' &&
+        operation.type.type.mutable &&
+        SilkType.equals(destination.type, operation.type.type)
+        ? undefined
+        : 'Pointer null lost its *mut destination'
+    case 'PointerIsNull':
+      return pointerAt(operation.pointer) !== undefined && destination?._tag === 'bool'
+        ? undefined
+        : 'Pointer null test lost its pointer operand or bool destination'
+    case 'PointerFromReference': {
+      const source = fn.localTypes.at(operation.source.ordinal)
+      let borrowed:
+        | { readonly pointee: SilkType.Type; readonly access: SilkType.BorrowAccess }
+        | undefined
+      if (source?._tag === 'Reference')
+        borrowed = { pointee: source.type.target, access: source.type.access }
+      else if (source?._tag === 'Slice')
+        borrowed = { pointee: source.type.element, access: source.type.access }
+      return borrowed !== undefined &&
+        destination?._tag === 'Pointer' &&
+        SilkType.equals(destination.type, operation.type.type) &&
+        SilkType.equals(operation.type.type.pointee, borrowed.pointee) &&
+        operation.type.type.mutable === (borrowed.access === 'Exclusive')
+        ? undefined
+        : 'Pointer formation lost its borrowed source, pointee, or mutability agreement'
+    }
+    case 'PointerOffset': {
+      const pointer = pointerAt(operation.pointer)
+      return pointer !== undefined &&
+        SilkType.equals(pointer, operation.type.type) &&
+        fn.localTypes.at(operation.count.ordinal)?._tag === 'usize' &&
+        destination?._tag === 'Pointer' &&
+        SilkType.equals(destination.type, operation.type.type)
+        ? undefined
+        : 'Pointer offset lost its pointer operand, usize count, or result agreement'
+    }
+    case 'PointerRead': {
+      const pointer = pointerAt(operation.pointer)
+      return pointer !== undefined &&
+        destination !== undefined &&
+        SilkType.equals(semanticType(destination), pointer.pointee) &&
+        SilkType.equals(semanticType(operation.type), pointer.pointee) &&
+        isCopy(layout, pointer.pointee)
+        ? undefined
+        : 'Pointer read lost its pointer operand, Copy pointee, or result agreement'
+    }
+    case 'PointerWrite': {
+      const pointer = pointerAt(operation.pointer)
+      const value = fn.localTypes.at(operation.value.ordinal)
+      return pointer !== undefined &&
+        pointer.mutable &&
+        value !== undefined &&
+        SilkType.equals(semanticType(value), pointer.pointee) &&
+        destination?._tag === 'Nominal' &&
+        SilkType.equals(destination.type, SilkType.unit) &&
+        isCopy(layout, pointer.pointee)
+        ? undefined
+        : 'Pointer write lost its *mut pointer operand, Copy pointee, value, or unit destination'
+    }
+  }
+}
+
 export const verify = (self: Module): ReadonlyArray<Violation> => {
   let cached = verifyCache.get(self)
   if (cached === undefined) {
@@ -3614,6 +3730,16 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             operation.signature.parameters.every((parameter, ordinal) => {
               const argument = operation.arguments.at(ordinal)
               const actual = argument === undefined ? undefined : fn.localTypes.at(argument.ordinal)
+              if (parameter._tag === 'Pointer') {
+                // `*mut T` widens to `*const T` at an argument boundary; the pointee must agree.
+                const semantic = actual === undefined ? undefined : semanticType(actual)
+                return (
+                  semantic !== undefined &&
+                  SilkType.isPointer(semantic) &&
+                  (semantic.mutable || !parameter.mutable) &&
+                  SilkType.key(semantic.pointee) === SilkType.key(parameter.pointee)
+                )
+              }
               return classKey(actual, 'Parameter') === CAbi.typeText(parameter)
             })
           if (
@@ -4233,6 +4359,27 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 provenance: operation.provenance,
                 detail:
                   'Local-shared access lost its core, take-once callback, result, cleanup, or target-layout contract',
+              }),
+            )
+        }
+        if (
+          operation._tag === 'PointerNull' ||
+          operation._tag === 'PointerIsNull' ||
+          operation._tag === 'PointerFromReference' ||
+          operation._tag === 'PointerOffset' ||
+          operation._tag === 'PointerRead' ||
+          operation._tag === 'PointerWrite'
+        ) {
+          const detail = pointerOperationViolation(self.layout, fn, operation)
+          if (detail !== undefined)
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidPointerOperation',
+                function: fn.id,
+                region: region.id,
+                provenance: operation.provenance,
+                detail,
               }),
             )
         }

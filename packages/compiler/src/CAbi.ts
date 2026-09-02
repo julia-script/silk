@@ -11,6 +11,11 @@ export type CAbiType =
   | { readonly _tag: 'Void' }
   | { readonly _tag: 'Integer'; readonly bits: 8 | 16 | 32 | 64; readonly signed: boolean }
   | { readonly _tag: 'Float'; readonly bits: 32 | 64 }
+  /**
+   * The C pointer class. Admission never examines the pointee (opaque pointers are admitted); it
+   * is carried so a call site can be checked against the declared pointee.
+   */
+  | { readonly _tag: 'Pointer'; readonly mutable: boolean; readonly pointee: Type.Type }
 
 /** The classified C signature that identifies one foreign symbol within an executable. */
 export interface CAbiSignature {
@@ -70,6 +75,8 @@ const classifyOrUndefined = (
   pointerBits: 32 | 64,
 ): CAbiType | undefined => {
   if (Type.isBuiltin(type)) return scalar(type, pointerBits)
+  if (Type.isPointer(type))
+    return Object.freeze({ _tag: 'Pointer', mutable: type.mutable, pointee: type.pointee })
   if (position === 'Result' && Type.equals(type, Type.unit)) return void_
   return undefined
 }
@@ -109,6 +116,8 @@ export const typeText = (self: CAbiType): string => {
       return `${self.signed ? 'i' : 'u'}${self.bits}`
     case 'Float':
       return `f${self.bits}`
+    case 'Pointer':
+      return self.mutable ? '*mut' : '*const'
   }
 }
 

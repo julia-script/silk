@@ -334,6 +334,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
         return type.bits === 32 ? f32 : f64
       case 'Integer':
         return integerTypes.get(type.bits)
+      case 'Pointer':
+        return pointer
     }
   }
   for (const call of program.foreignCalls) {

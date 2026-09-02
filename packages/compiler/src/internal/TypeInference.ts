@@ -27,6 +27,7 @@ import {
   isNever,
   isNominal,
   isParameter,
+  isPointer,
   isReference,
   isRepresentationArgument,
   isRepresentationParameterArgument,
@@ -393,6 +394,8 @@ export const rowInferenceFailure = (
     return rowInferenceFailure(pattern.element, actual.element)
   if (isReference(pattern) && isReference(actual))
     return rowInferenceFailure(pattern.target, actual.target)
+  if (isPointer(pattern) && isPointer(actual))
+    return rowInferenceFailure(pattern.pointee, actual.pointee)
   if (isCallable(pattern) && isCallable(actual)) {
     for (const [index, parameter_] of pattern.parameters.entries()) {
       const supplied = actual.parameters.at(index)
@@ -499,6 +502,13 @@ const inferType = (
     return (
       compareAccess(actual.access, pattern.access) &&
       inferType(pattern.target, actual.target, inferred, context)
+    )
+  }
+  if (isPointer(pattern) && isPointer(actual)) {
+    // `*mut T` satisfies a `*const T` pattern; the reverse does not.
+    return (
+      (!pattern.mutable || actual.mutable) &&
+      inferType(pattern.pointee, actual.pointee, inferred, context)
     )
   }
   if (isCallable(pattern) && isCallable(actual)) {

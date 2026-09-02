@@ -207,6 +207,8 @@ const hirTypeText = (type: Type.Type): string => {
       return `(${type.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(type.result)} ${type.mode.toLowerCase()}`
     case 'ReferenceType':
       return `${type.access === 'Exclusive' ? '&mut ' : '&'}${hirTypeText(type.target)}`
+    case 'PointerType':
+      return `${type.mutable ? '*mut ' : '*const '}${hirTypeText(type.pointee)}`
     case 'RepresentedType':
       return Type.encode(type)
     case 'StructuralUnionType':

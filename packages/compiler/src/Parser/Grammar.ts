@@ -73,6 +73,7 @@ export const typeStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'LeftParenthesis',
   'LeftBracket',
   'Ampersand',
+  'Star',
 ])
 export const topLevelFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'ImportKeyword',

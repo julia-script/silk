@@ -612,6 +612,26 @@ export const referenceEntry = (target: Target.Target, type: Type.Reference): Ent
     }),
   })
 
+/** A raw pointer is one Copy address lane; the pointee's layout is never embedded. */
+export const pointerEntry = (target: Target.Target, type: Type.Pointer): Entry =>
+  Object.freeze({
+    _tag: 'LayoutEntry',
+    type,
+    copy: true,
+    size: target.pointerSize,
+    alignment: target.pointerAlignment,
+    representation: Object.freeze({
+      _tag: 'Reference',
+      target: type.pointee,
+      address: Object.freeze({
+        bits: target.pointerSize === 4 ? 32 : 64,
+        offset: 0,
+        size: target.pointerSize,
+        alignment: target.pointerAlignment,
+      }),
+    }),
+  })
+
 export const unionEntry = (type: Type.StructuralUnion, members: ReadonlyArray<Entry>): Entry => {
   const payloadAlignment = members.reduce(
     (maximum, member) => Math.max(maximum, member.alignment),
@@ -1804,6 +1824,11 @@ export const catalog = (
       completed.set(Type.key(type), result)
       return result
     }
+    if (Type.isPointer(type)) {
+      const result = pointerEntry(target, type)
+      completed.set(Type.key(type), result)
+      return result
+    }
     const key = Type.key(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
@@ -1884,6 +1909,7 @@ export const catalog = (
     if (Type.isFixedArray(type)) addReferenced(type.element)
     if (Type.isSlice(type)) addReferenced(type.element)
     else if (Type.isReference(type)) addReferenced(type.target)
+    else if (Type.isPointer(type)) addReferenced(type.pointee)
     if (Type.isUnion(type)) for (const member of type.members) addReferenced(member)
     if (Type.isEffect(type)) {
       addReferenced(type.success)
@@ -2994,6 +3020,7 @@ export const plan = (
       return element === undefined ? undefined : sliceEntry(self.target, type, element)
     }
     if (Type.isReference(type)) return referenceEntry(self.target, type)
+    if (Type.isPointer(type)) return pointerEntry(self.target, type)
     if (!Type.isFixedArray(type) || candidate?._tag === 'UnavailableLayoutEntry') return undefined
     const element = resolve(type.element)
     return element === undefined ? undefined : repeatedEntry(type, element)
@@ -3502,6 +3529,21 @@ const shapeNode = (
         type: Object.freeze({
           _tag: 'Address',
           element: type,
+          bits: target.pointerSize === 4 ? 32 : 64,
+        }),
+        lane: 0,
+      }),
+      laneCount: 1,
+    })
+  }
+  if (Type.isPointer(type)) {
+    return Object.freeze({
+      _tag: 'AddressShape',
+      type,
+      address: Object.freeze({
+        type: Object.freeze({
+          _tag: 'Address',
+          element: type.pointee,
           bits: target.pointerSize === 4 ? 32 : 64,
         }),
         lane: 0,

@@ -206,7 +206,9 @@ export const hasCompleteAppliedPostfix = (
       token.kind !== 'Pipe' &&
       token.kind !== 'Ampersand' &&
       token.kind !== 'At' &&
-      token.kind !== 'MutKeyword'
+      token.kind !== 'MutKeyword' &&
+      token.kind !== 'Star' &&
+      token.kind !== 'ConstKeyword'
     )
       return false
     index += 1

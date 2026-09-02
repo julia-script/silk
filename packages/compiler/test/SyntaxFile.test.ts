@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
+import * as Analysis from '../src/Analysis.js'
 import * as InspectorProjectSyntax from '../src/InspectorProjectSyntax.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
@@ -114,3 +116,26 @@ it('encodes and projects static iteration syntax deterministically', () => {
   assert.deepEqual(first.lexicalDiagnostics, [])
   assert.deepEqual(first.parserDiagnostics, [])
 })
+
+it.effect('encodes and projects raw pointer type syntax and contracts', () =>
+  Effect.gen(function* () {
+    const source = 'fn fill(buffer: *mut u8, length: usize) -> *const u8 { return buffer }'
+    const syntax = parseBytes('memory://pointer-inspection.silk', ascii(source))
+    const encoded = SyntaxFile.encode(syntax)
+    const rows = InspectorProjectSyntax.treeRows(syntax, true, '')
+
+    assert.include(encoded, 'PointerType')
+    assert.include(encoded, 'token MutKeyword')
+    assert.include(encoded, 'token ConstKeyword')
+    assert.isTrue(rows.some((row) => row.label === 'PointerType' && row.dot === 'node'))
+    assert.deepEqual(syntax.lexicalDiagnostics, [])
+    assert.deepEqual(syntax.parserDiagnostics, [])
+
+    const snapshot = yield* Analysis.ofSource('memory/pointer-inspection', ascii(source))
+    const hirRows = InspectorProjectSyntax.hirRows(Analysis.rootAnalysis(snapshot).hir)
+    assert.strictEqual(
+      hirRows.find((row) => row.head === true)?.detail,
+      '(*mut u8, usize) -> *const u8',
+    )
+  }),
+)

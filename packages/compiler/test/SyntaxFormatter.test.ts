@@ -134,6 +134,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'ParameterList',
   'ParenthesizedType',
   'PipelineExpression',
+  'PointerType',
   'CallableType',
   'ExactRepresentationType',
   'ExpressionStatement',
@@ -1228,6 +1229,7 @@ fn scan(values: &[i32], output: &mut [i32]) -> i32 {
   return helper(usize.toI32(values.length), output[0])
 }
 fn readReferent(value: &i32) -> i32 { return value.* }
+fn pointers(cursor: *mut *const u8, count: *const i32) -> *const u8 { return cursor }
 fn callbacks(shared: fn(i32, bool) -> i32, exclusive: mut fn(i32) -> bool, consuming: once fn() -> i32) -> i32 {
   return shared(1, true)
 }
@@ -1277,6 +1279,25 @@ pub fn main() -> i32 { return unsafe unchecked(helper(-1, 2) |> Core.finish()) }
     assert.strictEqual(formattedText(first), golden('canonical.silk'))
 
     const second = yield* SyntaxFormatter.format(reparsed)
+    assert.deepEqual(second.bytes, first.bytes)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
+it.effect('formats pointer types canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source = 'fn raw(cursor:* mut   u8,nested:*mut *const u8)->*const u8{return cursor}'
+    const first = yield* SyntaxFormatter.format(parse('memory://pointer-types.silk', source))
+    const text = formattedText(first)
+
+    assert.strictEqual(
+      text,
+      `fn raw(cursor: *mut u8, nested: *mut *const u8) -> *const u8 {
+  return cursor
+}
+`,
+    )
+    const second = yield* SyntaxFormatter.format(parse('memory://pointer-types.silk', text))
     assert.deepEqual(second.bytes, first.bytes)
     assert.strictEqual(second.changed, false)
   }),

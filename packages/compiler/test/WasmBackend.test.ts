@@ -761,3 +761,57 @@ pub fn main() -> i32 { return 0 }`),
       )
   }),
 )
+
+it.effect('writes and reads through an offset slice pointer over a local array', () =>
+  Effect.gen(function* () {
+    assert.strictEqual(
+      yield* run(`import silk.pointer as Pointer
+pub fn main() -> i32 {
+  let mut values = [1, 2, 3, 4]
+  let pointer = Pointer.fromMutSlice(&mut values)
+  unsafe {
+    let third = Pointer.offsetMut(pointer, 2)
+    Pointer.write(third, 7)
+  }
+  return values[2]
+}`),
+      7,
+    )
+  }),
+)
+
+it.effect('reloads a local after a Silk callee writes through a *mut parameter', () =>
+  Effect.gen(function* () {
+    assert.strictEqual(
+      yield* run(`import silk.pointer as Pointer
+fn bump(target: *mut i32) -> () {
+  unsafe { Pointer.write(target, 42) }
+  return ()
+}
+pub fn main() -> i32 {
+  let mut value = 5
+  let pointer = Pointer.fromMutRef(&mut value)
+  bump(pointer)
+  return value
+}`),
+      42,
+    )
+  }),
+)
+
+it.effect('tests null and formed pointers with isNull', () =>
+  Effect.gen(function* () {
+    assert.strictEqual(
+      yield* run(`import silk.pointer as Pointer
+pub fn main() -> i32 {
+  let mut value = 1
+  let formed = Pointer.fromMutRef(&mut value)
+  let empty = Pointer.null<i32>()
+  if Pointer.isNull(formed) { return 1 }
+  if Pointer.isNull(empty) { return 0 }
+  return 2
+}`),
+      0,
+    )
+  }),
+)

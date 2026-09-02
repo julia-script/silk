@@ -530,6 +530,13 @@ scalars as a foreign function, carries no Silk-only contract, cannot suspend, is
 discovery root on native targets, and keeps its implementation under a private compiler symbol.
 _Avoid_: FFI export, public symbol, entry point
 
+**Raw pointer**:
+A `*const T` or `*mut T` value holding one machine address with no ownership, loan, or validity
+guarantee. It is Copy and may be null; forming one from a reference or slice is safe and ends no
+loan, while offsetting and dereferencing through `silk/pointer` require an unsafe boundary. It is
+admitted by the C ABI for any pointee, so it is the value a foreign signature means by a pointer.
+_Avoid_: reference, unsafe reference, handle, `RawBuffer`
+
 **Allocation requirement**:
 A typed capability in a function signature indicating that the function may perform dynamic
 allocation through a selected nominal service role. Allocation requirements propagate through

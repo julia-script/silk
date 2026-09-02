@@ -29,6 +29,8 @@ language author; the proposal remains Draft until its whole-language review is a
   native code linked into the artifact under a named symbol.
 - A **native export** is an `export "C" fn` declaration with a body that native code may call
   through a generated thunk under a named symbol.
+- A **raw pointer** is a `*const T` or `*mut T` value holding one machine address with no
+  ownership, loan, or validity guarantee; forming one is safe and dereferencing one is unsafe.
 
 ## Safety outcomes
 
@@ -851,29 +853,44 @@ distinct from Silk type compatibility. The admitted subset is:
 
 - `()` as the result only;
 - `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64` as exact-width integers;
-- `isize` and `usize` as pointer-width integers of the selected target; and
-- `f32` and `f64` as the C `float` and `double` classes.
+- `isize` and `usize` as pointer-width integers of the selected target;
+- `f32` and `f64` as the C `float` and `double` classes; and
+- `*const T` and `*mut T` for any pointee `T` as the C pointer class, without requiring the
+  pointee itself to be admitted.
+
+```silk,ignore
+struct Opaque {}
+
+unsafe extern "C" fn malloc(size: usize) -> *mut u8
+unsafe extern "C" fn free(pointer: *mut u8) -> ()
+unsafe extern "C" fn use(handle: *mut Opaque) -> i32
+```
 
 Parameters are passed by value. Every other type is rejected: `bool`, `char`, `string`,
 references, slices, fixed arrays, structs, unions, enums, callable types, and type parameters.
 
 Admission is judged on the type spelling alone, so a foreign header is admitted or rejected once
-per module, independent of the target. The C classification of `isize` and `usize` takes the
-selected target's pointer width when the executable is realized for that target.
+per module, independent of the target. The C classification of `isize`, `usize`, and pointers
+takes the selected target's pointer width when the executable is realized for that target.
 
 **Boundary:** A type being representable in C does not admit it. `bool` has a C-compatible
 layout on every supported target and is still outside the subset, because admission is a closed
-relation this change defines, not a layout query. Pointers and C-layout records are separate
-proposals and are not admitted today.
+relation, not a layout query. Admitting `*mut Opaque` says nothing about the pointee: native code
+reading the fields of a Silk struct through a pointer is undefined until C-layout records exist,
+which are a separate proposal. Pointer values themselves are defined by
+[PTR-001](values-and-types.md#ptr-001--a-raw-pointer-is-one-un-owned-machine-address).
 
 **Diagnostics:** A parameter or result outside the subset reports `SEM0187` at the offending
 type, naming the type and the ABI. One declaration with several offending types reports one
 diagnostic per type. A rejected header publishes no callable.
 
-**Current compiler:** Aligned. `CAbi.admit` judges the spelling; `CAbi.classify` and
-`CAbi.signature` derive the target-specific C signature used by MIR, verification, and the backend.
+**Current compiler:** Aligned. `CAbi.admit` judges the spelling and accepts a pointer without
+examining its pointee; `CAbi.classify` and `CAbi.signature` derive the target-specific C signature
+used by MIR, verification, and the backend, with pointer mutability part of the signature key so
+`*const u8` and `*mut u8` redeclarations disagree.
 
 **Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
+[pointer admission](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-foreign-functions/spec.md),
 [C ABI classification](../../../../packages/compiler/src/CAbi.ts),
 [declaration completion](../../../../packages/compiler/src/DeclarationCompletion.ts).
 
@@ -954,7 +971,10 @@ agreement is checked when the executable origin collects reachable foreign calls
 A call to a foreign function lowers to one direct native call under the target's C calling
 convention with the classified signature. The artifact contains the symbol as an undefined
 external reference that the system linker resolves from the program's link inputs. The compiler
-introduces no runtime symbol lookup, cache, indirection, or compiler-owned adapter.
+introduces no runtime symbol lookup, cache, indirection, or compiler-owned adapter. A raw pointer
+crosses the boundary as one address lane, and every place a pointer was formed from is reloaded
+after the call, so a native write through the pointer is observed by later Silk reads under
+[PTR-003](values-and-types.md#ptr-003--formation-ends-no-loan-and-validity-is-the-callers-obligation).
 
 Link inputs are the program object, the toolchain shim, and the libraries the project manifest
 names. The optional `[build]` table's `native-libraries` list reaches the link command as `-l`
@@ -1049,8 +1069,8 @@ symbol, and a `pub` function without `export` is not.
 **Boundary:** Renaming with `as` creates no declaration under the symbol's spelling; `add` above
 defines no native symbol named `add`. Exports live in executables in this change; a native
 executable still requires `main` and its exports are additional symbols beside the entry. Library
-artifacts, generated C headers, pointers, records, callbacks, and data symbols are separate
-proposals. There is no `unsafe export`: unsafety is a caller-side Silk contract that a C caller
+artifacts, generated C headers, records, callbacks, and data symbols are separate proposals;
+pointer parameters and results are forwarded through the thunk unchanged. There is no `unsafe export`: unsafety is a caller-side Silk contract that a C caller
 cannot acknowledge.
 
 **Diagnostics:** An ABI string other than `"C"` reports `SEM0185` at the string and publishes no
@@ -1072,8 +1092,8 @@ export that forwards its scalar lanes to the implementation.
 Each parameter and the result of an exported function passes the same V1 foreign-ABI admission
 relation as a foreign function under
 [FFI-003](#ffi-003--foreign-signatures-admit-only-the-c-compatible-scalar-subset): `()` as the
-result only, exact-width integers, target-width `isize` and `usize`, and `f32` and `f64`, all by
-value. An exported function cannot declare type parameters, a `where` clause, a failure row, a
+result only, exact-width integers, target-width `isize` and `usize`, `f32` and `f64`, and raw
+pointers, all by value. An exported function cannot declare type parameters, a `where` clause, a failure row, a
 requirement row, the `effect` kind, the `static` phase, or the `unsafe` qualifier, and its body
 cannot suspend.
 

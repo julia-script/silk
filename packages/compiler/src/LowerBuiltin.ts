@@ -688,6 +688,110 @@ export const lowerBuiltinExpression = (
     )
     return finishBuiltin(destination)
   }
+  if (expression.operation === 'PointerNull') {
+    const type = fn.type(expression.type)
+    if (type?._tag !== 'Pointer') return undefined
+    const destination = fn.alloc(type)
+    fn.emit(
+      Object.freeze({
+        _tag: 'PointerNull' as const,
+        destination,
+        type,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
+  if (expression.operation === 'PointerIsNull') {
+    const [pointer] = argumentLocals
+    if (pointer === undefined) return undefined
+    const destination = fn.alloc(Object.freeze({ _tag: 'bool' as const }))
+    fn.emit(
+      Object.freeze({
+        _tag: 'PointerIsNull' as const,
+        destination,
+        pointer,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
+  if (
+    expression.operation === 'PointerFromRef' ||
+    expression.operation === 'PointerFromMutRef' ||
+    expression.operation === 'PointerFromSlice' ||
+    expression.operation === 'PointerFromMutSlice'
+  ) {
+    const [source] = argumentLocals
+    const type = fn.type(expression.type)
+    if (source === undefined || type?._tag !== 'Pointer') return undefined
+    const destination = fn.alloc(type)
+    fn.emit(
+      Object.freeze({
+        _tag: 'PointerFromReference' as const,
+        destination,
+        source,
+        type,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
+  if (expression.operation === 'PointerOffset' || expression.operation === 'PointerOffsetMut') {
+    const [pointer, count] = argumentLocals
+    const type = fn.type(expression.type)
+    if (pointer === undefined || count === undefined || type?._tag !== 'Pointer') return undefined
+    const destination = fn.alloc(type)
+    fn.emit(
+      Object.freeze({
+        _tag: 'PointerOffset' as const,
+        destination,
+        pointer,
+        count,
+        type,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
+  if (expression.operation === 'PointerRead') {
+    const [pointer] = argumentLocals
+    const type = fn.type(expression.type)
+    if (pointer === undefined || type === undefined) return undefined
+    const destination = fn.alloc(type)
+    fn.emit(
+      Object.freeze({
+        _tag: 'PointerRead' as const,
+        destination,
+        pointer,
+        type,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
+  if (expression.operation === 'PointerWrite') {
+    const [pointer, value] = argumentLocals
+    const type = fn.type(expression.type)
+    if (
+      pointer === undefined ||
+      value === undefined ||
+      type?._tag !== 'Nominal' ||
+      !Type.equals(type.type, Type.unit)
+    )
+      return undefined
+    const destination = fn.alloc(type)
+    fn.emit(
+      Object.freeze({
+        _tag: 'PointerWrite' as const,
+        destination,
+        pointer,
+        value,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
   if (expression.operation === 'SlotWrite') {
     const [slot, value] = argumentLocals
     const slotArgument = expression.arguments.at(0)

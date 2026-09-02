@@ -130,6 +130,18 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = raw-buffer-copy ${localText(operation.buffer)} offset=${localText(operation.offset)} source=${localText(operation.source)} length=${localText(operation.length)} element=${SilkType.encode(operation.element)} stride=${operation.stride} retains-source=${operation.retainsSource} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferFill':
       return `${localText(operation.destination)} = raw-buffer-fill ${localText(operation.buffer)} offset=${localText(operation.offset)} length=${localText(operation.length)} value=${localText(operation.value)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'PointerNull':
+      return `${localText(operation.destination)} = pointer-null : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'PointerIsNull':
+      return `${localText(operation.destination)} = pointer-is-null ${localText(operation.pointer)} : bool ${provenanceText(operation.provenance)}`
+    case 'PointerFromReference':
+      return `${localText(operation.destination)} = pointer-from-reference ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'PointerOffset':
+      return `${localText(operation.destination)} = pointer-offset ${localText(operation.pointer)} count=${localText(operation.count)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'PointerRead':
+      return `${localText(operation.destination)} = pointer-read ${localText(operation.pointer)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'PointerWrite':
+      return `${localText(operation.destination)} = pointer-write ${localText(operation.pointer)}, ${localText(operation.value)} : () ${provenanceText(operation.provenance)}`
     case 'SlotWrite':
       return `${localText(operation.destination)} = slot-write ${localText(operation.slot)}, ${localText(operation.value)} element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'SlotTake':

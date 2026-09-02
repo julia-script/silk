@@ -1270,3 +1270,33 @@ pub fn main() -> i32 {
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
   }),
 )
+
+it.effect('infers T from pointer arguments and widens *mut to *const only at a boundary', () =>
+  Effect.gen(function* () {
+    const program = (body: string) =>
+      Analysis.ofSourceRealized(
+        'generics/pointer-boundary',
+        new TextEncoder().encode(`fn identity<T>(value: T) -> T { return move value }
+fn readOnly(value: *const u8) -> i32 { return 0 }
+fn nested(value: *mut *const u8) -> i32 { return 0 }
+fn writable(value: *mut u8) -> i32 { return 0 }
+fn caller(pointer: *mut u8, shared: *const u8, deep: *mut *mut u8) -> i32 { ${body} }
+pub fn main() -> i32 { return 0 }`),
+      )
+    const codes = (snapshot: Analysis.FrontendSnapshot) =>
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)
+
+    const accepted = yield* program('let copy = identity(pointer) return readOnly(copy)')
+    assert.deepEqual(codes(accepted), [])
+    const first = Analysis.declarationIndex(accepted)
+      .modules.at(0)
+      ?.declarations.find((declaration) => declaration.parameterCount === 3)
+      ?.parameters.at(0)?.declaredType
+    assert.strictEqual(
+      first?._tag === 'Resolved' ? Type.encode(first.type) : first?._tag,
+      '*mut u8',
+    )
+    assert.deepEqual(codes(yield* program('return writable(shared)')), ['SEM0012'])
+    assert.deepEqual(codes(yield* program('return nested(deep)')), ['SEM0012'])
+  }),
+)
