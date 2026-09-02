@@ -82,6 +82,13 @@ candidates:
       consequence_if_ignored
       uncertainty
     evidence
+    current_snippet_if_useful:
+      path_and_symbol
+      exact_excerpt
+      observed_behavior
+    provisional_desired_snippet_if_useful:
+      concrete_example
+      intended_observable_difference
     draft_acceptance_if_obvious
     triage_questions
     possible_overlap
@@ -147,8 +154,11 @@ sweep as part of discovery.
 After the final remote-main freshness check succeeds, the coordinator writes sequentially after
 fan-in. New issues enter Backlog with no priority or estimate. For an existing issue, add only new
 evidence as a dated comment. Every new description includes a visible `## Why this matters`
-section plus Source and Review baselines. Read every write back and confirm that the sections
-survived rendering. Discovery evidence added to an existing issue does not advance its Review
+section plus Source and Review baselines. When a short code, configuration, diagnostic, or API
+example materially clarifies the lead, also include the exact current-baseline snippet and a
+concrete provisional desired-behavior snippet under the shape and safeguards in `WORKFLOW.md`.
+Read every write back and confirm that the sections and fenced code survived rendering. Discovery
+evidence added to an existing issue does not advance its Review
 baseline because discovery does not perform the issue's technical triage. A touched legacy issue
 may receive the mechanical Source-to-Review migration from `REVIEW_BASELINE.md` without claiming a
 new review.

@@ -31,8 +31,11 @@ provides them. Do not invent missing detail or require a person's name when a ro
    `Stage: demand intake` and `Outcome: intake only`. Preserve Julia's stated reason in
    `## Why this matters`.
    If no reason was supplied, say that the request is direct demand and list the missing impact as
-   a triage question instead of inventing one. Use `Feature`, `Bug`, or `Improvement` only when the
-   request clearly fits; otherwise omit the label.
+   a triage question instead of inventing one. When Julia's request or the current repository gives
+   enough evidence, add the short paired current/desired snippets described in `WORKFLOW.md`. Copy
+   current code exactly and keep a user-supplied desired example faithful; otherwise omit the
+   uncertain side and make it a triage question rather than inventing code. Use `Feature`, `Bug`,
+   or `Improvement` only when the request clearly fits; otherwise omit the label.
 6. Read the issue back and report its identifier, title, link, requester, captured outcome, and
    Review baseline commit and stage.
 

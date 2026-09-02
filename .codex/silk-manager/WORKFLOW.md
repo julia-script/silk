@@ -134,6 +134,18 @@ and state material uncertainty.>
 
 - <current, reproducible evidence with paths, symbols, commands, or links>
 
+## Current state
+
+<When code, configuration, diagnostics, or an API example makes the gap clearer: cite the path and
+symbol, then include a short fenced snippet copied from the reviewed baseline. Explain what the
+snippet currently does.>
+
+## Desired behavior
+
+<When the intended outcome can be expressed concretely: include a short fenced snippet showing the
+target call site, API shape, configuration, diagnostic, or result. Explain the observable
+difference.>
+
 ## Triage questions
 
 - <Uncertainty that triage must resolve. Omit when none.>
@@ -169,6 +181,23 @@ we do nothing?** Do not satisfy it with generic adjectives such as “complex,�
 “difficult to maintain.” Name the affected change path, user behavior, correctness property,
 operational task, or repeated effort. Evidence proves that the condition exists; this section
 explains why the condition deserves attention.
+
+Use paired `Current state` and `Desired behavior` snippets whenever they make the issue materially
+easier to understand. This normally applies to API-shape changes, incorrect lowering or generated
+output, duplicated implementations, stale documentation examples, configuration changes, and
+diagnostic behavior. The current snippet must be an exact, minimal excerpt from the stated Review
+baseline and name its path and symbol. The desired snippet must be concrete and syntactically valid
+when practical; prefer a public call site, input/output example, or externally observable result
+over prescribing internal implementation details. Label a discovery-stage desired snippet as
+provisional when triage has not selected the mechanism.
+
+Do not manufacture code merely to fill the sections. Omit snippets for requests with no relevant
+code yet, pure prioritization or research work, broad structural concerns that a snippet would
+misrepresent, and deletions whose desired state is simply absence. Never paste large functions,
+generated files, secrets, unrelated setup, or an invented API. If only one side benefits from a
+snippet, include that side and explain the other in prose. Triage verifies or replaces intake
+snippets, and every later technical review refreshes or removes snippets made stale by the reviewed
+commit delta.
 
 `Source baseline` remains the issue's origin. `Review baseline` tells the next agent exactly which
 commit and repository context last supported the current issue state. The advancement rules in

@@ -57,6 +57,13 @@ recommended_shape:
     causal_chain
     consequence_if_ignored
   evidence
+  current_state_snippet_if_useful:
+    path_and_symbol
+    exact_excerpt
+    observed_behavior
+  desired_behavior_snippet_if_useful:
+    concrete_example
+    intended_observable_difference
   acceptance
   gate
   priority
@@ -76,6 +83,8 @@ grouping_review:
   - merge, split, keep separate, or no concern
 acceptance_gaps:
   - condition that is vague, solution-prescriptive, or cannot falsify completion
+snippet_gaps:
+  - missing, stale, inaccurate, oversized, or unnecessarily implementation-prescriptive example
 justification_gaps:
   - missing evidence, broken causal link, generic rationale, or consequence not established
 recommended_verdict: todo | duplicate | canceled | needs-more-investigation
@@ -94,9 +103,13 @@ The coordinator must preserve the lead's `Why this matters` rationale when it su
 replace it with the more precise rationale supported by investigation. Do not promote a
 solution-only issue. A Todo description must make the causal chain from current condition to cost
 or risk understandable without reading discovery comments, subagent reports, or conversation
-history. If the condition is real but no concrete consequence can be established, it is not yet
-worthwhile: leave it in Backlog for named evidence or cancel it when further investigation is not
-justified.
+history. When paired current and desired snippets would clarify the verified gap, the coordinator
+must include them under `WORKFLOW.md`: the current excerpt is exact at the triage baseline and the
+desired example expresses the accepted observable outcome without locking in an unnecessary
+implementation. Replace provisional, inaccurate, or stale intake snippets rather than preserving
+them as historical text. If the condition is real but no concrete consequence can be established,
+it is not yet worthwhile: leave it in Backlog for named evidence or cancel it when further
+investigation is not justified.
 
 Unless Julia states a different current priority, rank validated stabilization issues above
 features. Within stabilization, correctness and safety come first, then broken documentation or

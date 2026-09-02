@@ -46,6 +46,10 @@ says otherwise, choose stabilization leads before feature leads for the default 
    Preserve the discovery rationale when verified or replace it with the stronger rationale from
    investigation. Include a concrete `## Why this matters` section that names the present cost or
    risk, affected workflow or system property, causal chain, and consequence of doing nothing.
+   Whenever a short example materially clarifies the verified gap, include paired `## Current
+state` and `## Desired behavior` snippets under `WORKFLOW.md`. Verify the current excerpt against
+   the exact triage baseline, make the desired example express the accepted observable behavior,
+   and replace or remove stale intake snippets.
    Never leave Todo with only an outcome, scope, and acceptance list. Make every acceptance item
    observable. Assign priority, estimate, and a broad existing label. Move it to Todo.
    Then update Review baseline to the exact triage commit with `Stage: triage` and either
