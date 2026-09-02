@@ -433,6 +433,96 @@ const nominalSubject = (type: Type.Type | undefined): Type.Nominal | undefined =
   return undefined
 }
 
+const parameterSubjectOf = (type: Type.Type | undefined): Type.Parameter | undefined => {
+  if (type === undefined) return undefined
+  if (Type.isParameter(type)) return type
+  if (Type.isReference(type)) return parameterSubjectOf(type.target)
+  return undefined
+}
+
+/**
+ * The receiver methods a value of one nominal type can call, presented receiver-bound: parameter
+ * zero is the value itself. Associated functions are not value members and are left out.
+ */
+const receiverMethodCandidates = (
+  index: DeclarationIndex.Index,
+  type: Type.Nominal | undefined,
+  module: string,
+  scope: NameResolution.ModuleScope | undefined,
+): ReadonlyArray<Candidate> => {
+  // The subject's own arguments fix the owner binders each method presents.
+  if (type === undefined) return Object.freeze([])
+  const owner = DeclarationFacts.byCanonical(
+    index,
+    Object.freeze({ _tag: 'CanonicalDeclarationId', module: type.module, name: type.name }),
+  )
+  if (owner === undefined) return Object.freeze([])
+  return Object.freeze(
+    inherentCandidates(index, owner, module).flatMap((member) => {
+      if (member.kind !== 'Method' || member.identity._tag !== 'SemanticCandidate') return []
+      const identity = member.identity.identity
+      const declaration =
+        identity._tag === 'DeclarationIdentity' && identity.id._tag === 'CanonicalDeclarationId'
+          ? DeclarationFacts.byCanonical(index, identity.id)
+          : undefined
+      return declaration?._tag === 'FunctionDeclaration'
+        ? [
+            candidate({
+              identity: member.identity,
+              kind: 'Method',
+              label: member.label,
+              detail: PresentationRenderer.receiverMethod(
+                declaration,
+                PresentationRenderer.receiverSubstitution(declaration, type),
+                module,
+                scope,
+              ),
+              sortGroup: 1,
+            }),
+          ]
+        : []
+    }),
+  )
+}
+
+/** The receiver operations a generic value obtains from its parameter's declared bounds. */
+const boundOperationCandidates = (
+  fn: Elaboration.FunctionFact | undefined,
+  type: Type.Parameter | undefined,
+): ReadonlyArray<Candidate> => {
+  if (fn === undefined || type === undefined) return Object.freeze([])
+  const parameter = fn.declaration.typeParameters.find((candidate) =>
+    Type.equals(candidate.type, type),
+  )
+  if (parameter === undefined) return Object.freeze([])
+  return Object.freeze(
+    parameter.bounds.flatMap((bound) =>
+      bound._tag !== 'ResolvedBound'
+        ? []
+        : bound.application.operations.flatMap((operation) =>
+            operation.receiverAccess === 'Unavailable' ||
+            operation.declaration.name._tag !== 'Present' ||
+            operation.declaration.state._tag !== 'Unique'
+              ? []
+              : [
+                  candidate({
+                    identity: semantic(
+                      Object.freeze({
+                        _tag: 'ServiceOperationIdentity',
+                        id: operation.declaration.state.id,
+                      }),
+                    ),
+                    kind: 'Method',
+                    label: operation.declaration.name.spelling,
+                    detail: PresentationRenderer.receiverOperation(operation),
+                    sortGroup: 1,
+                  }),
+                ],
+          ),
+    ),
+  )
+}
+
 const fieldCandidates = (
   index: DeclarationIndex.Index,
   type: Type.Nominal | undefined,
@@ -727,14 +817,20 @@ export const complete = (options: {
         : valueLookup(qualifier, options.result, fn, options.offset)
     if (value.found) {
       const subject = nominalSubject(value.type)
+      const parameterSubject = parameterSubjectOf(value.type)
       return Object.freeze({
         _tag: 'CompletionResult',
         context: Object.freeze({
           _tag: 'ValueMemberContext',
-          state: subject === undefined ? 'Unavailable' : 'Available',
+          state:
+            subject === undefined && parameterSubject === undefined ? 'Unavailable' : 'Available',
         }),
         replacement: replacement.span,
-        candidates: stable(fieldCandidates(options.index, subject, options.module)),
+        candidates: stable([
+          ...fieldCandidates(options.index, subject, options.module),
+          ...receiverMethodCandidates(options.index, subject, options.module, scope),
+          ...boundOperationCandidates(fn, parameterSubject),
+        ]),
       })
     }
     const lookup =

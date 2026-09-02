@@ -1,0 +1,71 @@
+pub union Option<T> { None, Some { pub value: T } }
+impl<T> Option<T> {
+  pub fn some(value: T) -> Self { return Option.Some { value: move value } }
+  pub fn map<U>(self: Self, transform: once fn(T) -> U) -> Option<U> {
+    return match move self {
+      Option<T>.Some { value } => Option.Some { value: transform(move value) }
+      Option<T>.None => Option<U>.None
+    }
+  }
+  pub fn unwrapOr(self: Self, fallback: T) -> T {
+    return match move self {
+      Option<T>.Some { value } => keep<T>(move value, move fallback)
+      Option<T>.None => move fallback
+    }
+  }
+}
+fn keep<T>(present: T, unused: T) -> T {
+  drop unused
+  return move present
+}
+fn addOne(value: i32) -> i32 { return value + 1 }
+
+pub struct Counter { value: i32 }
+impl Counter {
+  pub fn zero() -> Self { return Counter { value: 0 } }
+  pub fn read(self: &Self) -> i32 { return self.value }
+  pub fn bump(self: &mut Self) -> i32 {
+    self.value = self.value + 1
+    return self.value
+  }
+  pub fn add(self: &Self, other: &Self) -> i32 { return self.value + other.value }
+  pub fn take(self: Self) -> i32 { return self.value }
+}
+
+pub struct Runner<F: fn(i32) -> i32> { pub apply: F }
+fn double(value: i32) -> i32 { return value * 2 }
+
+interface Printable { fn print(value: &Self) -> i32 }
+struct Document { size: i32 }
+impl Printable for Document { fn print(value: &Self) -> i32 { return value.size } }
+fn show<T: Printable>(value: &T) -> i32 { return value.print() }
+fn through(value: &Counter) -> i32 { return value.read() }
+
+pub fn main() -> i32 {
+  // Three spellings of one member.
+  let direct = Option.unwrapOr(Option.some<i32>(1), 0)
+  let piped = Option.some<i32>(1) |> Option.unwrapOr(0)
+  let method = Option.some<i32>(1).unwrapOr(0)
+  // A one-argument call of a two-parameter method is a call, and an rvalue chains.
+  let mapped = Option.some<i32>(4).map(addOne).unwrapOr(0)
+  // Field precedence.
+  let runner = Runner { apply: double }
+  let applied = runner.apply(2)
+  // Receiver modes.
+  let shared = Counter { value: 3 }
+  let read = shared.read() + shared.read()
+  let mut exclusive = Counter { value: 0 }
+  let first = exclusive.bump()
+  let second = exclusive.bump()
+  let left = Counter { value: 5 }
+  let right = Counter { value: 6 }
+  let added = left.add(&right)
+  let consumed = Counter { value: 2 }.take()
+  let passed = through(&Counter { value: 1 })
+  // A shadowing local is a value, and a bounded generic receiver reaches its bound.
+  let Counter = Counter { value: 1 }
+  let shadowed = Counter.read()
+  let document = Document { size: 2 }
+  let shown = show(&document)
+  return direct + piped + method + mapped + applied + read + first + second + added + consumed + passed + shadowed + shown
+}

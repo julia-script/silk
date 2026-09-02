@@ -16,11 +16,11 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | `LEX`  | Lexical   | 12    |
 | `PAR`  | Parser    | 5     |
 | `MOD`  | Module    | 3     |
-| `SEM`  | Semantic  | 189   |
+| `SEM`  | Semantic  | 192   |
 | `OWN`  | Ownership | 16    |
 | `LAY`  | Layout    | 1     |
 
-There are 226 codes in total.
+There are 229 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -250,6 +250,9 @@ There are 226 codes in total.
 | `SEM0195` | Stable code for an inherent impl member that cannot be an associated member.                                 | `impl <owner> cannot map <member> to another declaration; only a conformance maps operations`<br>`impl <owner> cannot declare a drop hook; declare impl Drop for <owner> instead`<br>`<owner>.<member> collides with the <collidesWithexistingitem> <member> of <owner>`                                                                                                                                                                                                   |
 | `SEM0196` | Stable code for two inherent members of one owner sharing a name.                                            | `<owner>.<member> is declared more than once; one owner has at most one member of each name`                                                                                                                                                                                                                                                                                                                                                                               |
 | `SEM0197` | Stable code for a selective import naming an inherent member as if it were a root declaration.               | `<module> has no root declaration <member>; it is a member of <owner>, so import <owner> and write <owner>.<member>`                                                                                                                                                                                                                                                                                                                                                       |
+| `SEM0198` | Stable code for an associated function called on a value as though it had a receiver.                        | `<owner>.<member> is an associated function without a receiver; call it as <owner>.<member>(...)`                                                                                                                                                                                                                                                                                                                                                                          |
+| `SEM0199` | Stable code for a receiver method named on a value without being called.                                     | `<owner>.<member> is a receiver method and must be called; write value.<member>(...)`                                                                                                                                                                                                                                                                                                                                                                                      |
+| `SEM0200` | Stable code for a receiver operation declared by more than one bound of one type parameter.                  | `<member> is declared by more than one bound of <parameter> (<join>); call it through the bound, as <at0Bound>.<member>(...)`                                                                                                                                                                                                                                                                                                                                              |
 
 ## Ownership (`OWN`)
 

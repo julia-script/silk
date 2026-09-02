@@ -40,7 +40,7 @@ import * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
 import type * as SourceSpan from './SourceSpan.js'
-import type * as SyntaxTree from './SyntaxTree.js'
+import * as SyntaxTree from './SyntaxTree.js'
 import * as Target from './Target.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
@@ -477,6 +477,62 @@ const nominalDeclarationType = (
 const declaredType = (fact: DeclarationFacts.DeclaredTypeFact): Type.Type | undefined =>
   fact._tag === 'Resolved' ? fact.type : undefined
 
+/** The static type of the receiver whose member token starts at one offset, when it is known. */
+const receiverTypeAt = (
+  self: FrontendSnapshot,
+  module: string,
+  memberStart: number,
+): Type.Type | undefined => {
+  const root = self.results.get(module)?.syntax.root
+  if (root === undefined) return undefined
+  let subject: SyntaxTree.Node | undefined
+  const visit = (node: SyntaxTree.Node): void => {
+    if (subject !== undefined) return
+    if (node.kind === 'FieldProjectionExpression') {
+      const member = SyntaxTree.directToken(node, 'Identifier')
+      const candidate = node.children.find(SyntaxTree.isNode)
+      if (member?.span.start === memberStart && candidate !== undefined) {
+        subject = candidate
+        return
+      }
+    }
+    for (const child of node.children) if (SyntaxTree.isNode(child)) visit(child)
+  }
+  visit(root)
+  return subject === undefined
+    ? undefined
+    : anonymousExpressionAt(self, module, subject.span.start)?.type
+}
+
+/** The receiver-bound presentation of a member reached through receiver syntax. */
+const receiverMethodPresentation = (
+  self: FrontendSnapshot,
+  module: string,
+  occurrence: SemanticOccurrence.SemanticOccurrence,
+  identity: SemanticOccurrence.Identity,
+): HoverPresentation | undefined => {
+  if (identity._tag !== 'DeclarationIdentity') return undefined
+  const declaration = declarationForIdentity(self, identity)
+  if (
+    declaration?._tag !== 'FunctionDeclaration' ||
+    declaration.associatedMember?.receiver !== true
+  )
+    return undefined
+  const substitution = Presentation.receiverSubstitution(
+    declaration,
+    receiverTypeAt(self, module, occurrence.span.start),
+  )
+  return hoverPresentation(
+    Presentation.receiverMethod(
+      declaration,
+      substitution,
+      module,
+      NameResolution.scopeOf(self.resolution, module),
+    ),
+    declaredType(declaration.returnType),
+  )
+}
+
 const presentationOfIdentity = (
   self: FrontendSnapshot,
   module: string,
@@ -758,7 +814,9 @@ export const hoverSubjectAt = (
   if (occurrence !== undefined) {
     const answer =
       occurrence.resolution._tag === 'Available'
-        ? presentationOfIdentity(self, module, occurrence.resolution.identity)
+        ? ((occurrence.role === 'Method'
+            ? receiverMethodPresentation(self, module, occurrence, occurrence.resolution.identity)
+            : undefined) ?? presentationOfIdentity(self, module, occurrence.resolution.identity))
         : undefined
     return answer === undefined
       ? undefined

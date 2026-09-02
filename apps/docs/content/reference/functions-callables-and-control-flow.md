@@ -184,6 +184,52 @@ corresponding `OWN` diagnostic.
 [callable specification](../../../../openspec/specs/bootstrap-callable-values/spec.md),
 [parameter ownership](ownership-and-borrowing.md#call-001--parameter-types-determine-ownership-transfer-or-borrowing).
 
+### CALL-003 — A method call is the receiver-first spelling of one member
+
+**Status:** Confirmed
+
+`receiver.member(args)` calls the inherent receiver method `member` of the receiver's nominal
+type. It names the same statically selected member as `Type.member(receiver, args)` and
+`receiver |> Type.member(args)`: no callable value is created, nothing is dispatched at run time,
+and the three spellings share one contract, one declaration, and one rename.
+
+```silk
+pub struct Counter { value: i32 }
+
+impl Counter {
+  pub fn read(self: &Self) -> i32 { return self.value }
+  pub fn take(self: Self) -> i32 { return self.value }
+}
+
+pub fn main() -> i32 {
+  let value = Counter { value: 14 }
+  let direct = Counter.read(&value)
+  let piped = &value |> Counter.read
+  let method = value.read()
+  return direct + piped + method
+}
+```
+
+The declared parameter zero decides how the receiver is passed: `self: &Self` takes a shared loan of
+the receiver place, `self: &mut Self` an exclusive loan that requires a `mut` binding, and
+`self: Self` consumes the place or takes an rvalue as it is. Nothing is written in front of the
+receiver; the explicit spellings `Type.member(&value, ...)` and `Type.member(move value, ...)`
+remain available. A callable field of the same name is applied instead, and an rvalue chains:
+`Counter { value: 42 }.take()` consumes the temporary.
+
+**Boundary:** A receiver is never dereferenced or coerced: `boxed.read()` on a `Box<Counter>` does
+not reach `Counter.read`. An associated function without a receiver is not a value member, and a
+receiver method is not a value: `value.read` without a call is rejected. A receiver of a generic
+parameter type resolves only through the parameter's bounds (INTF-007).
+
+**Diagnostics:** Calling an associated function on a value reports `SEM0198`. Naming a receiver
+method without calling it reports `SEM0199`. An unknown member keeps the field diagnostic
+`SEM0027`. Receiver ownership uses the ordinary loan and move diagnostics (`SEM0057`, `OWN0001`).
+
+**Evidence:** [method call semantics](../../../../packages/compiler/src/ExpressionAnalysis.ts),
+[method-call specification](../../../../openspec/specs/bootstrap-method-calls/spec.md),
+[inherent members](modules-names-and-visibility.md#name-005--a-nominal-qualifier-exposes-only-its-associated-items).
+
 ### RETURN-001 — `return` exits with a value compatible with the declared result
 
 **Status:** Confirmed

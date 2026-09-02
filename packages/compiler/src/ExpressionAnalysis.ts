@@ -11,6 +11,7 @@ import * as Diagnostic from './Diagnostic.js'
 import type {
   ArgumentFact,
   ArgumentsResult,
+  ReferencePathFact,
   ArrayElementFact,
   ArrayLiteralState,
   BindingDeclarationFact,
@@ -1023,6 +1024,23 @@ export const analyzeBorrow = (
       Diagnostic.invalidBorrowPosition(node.span),
     )
   }
+  return borrowSubject(node, subjectNode, subjectResult, access, expected, declaration)
+}
+
+/**
+ * Forms one borrow of an already analyzed subject: the written `&`/`&mut` form after its
+ * position check, and a receiver synthesized for a method call whose parameter zero is a reference.
+ */
+export const borrowSubject = (
+  node: SyntaxTree.Node,
+  subjectNode: SyntaxTree.Node | undefined,
+  subjectResult: ExpressionResult | undefined,
+  access: Type.BorrowAccess,
+  expected: SemanticType | undefined,
+  declaration: DeclarationFact,
+): ExpressionResult => {
+  const subject = subjectResult?.fact ?? unavailableExpression(node)
+  const diagnostics = subjectResult?.diagnostics ?? Object.freeze([])
   const sourceType = subjectResult?.type
   const root =
     borrowRoot(subject) ??
@@ -3799,11 +3817,13 @@ export const analyzeProjection = (
               : AggregateIdentity.ordinal(ordinal),
           )
     if (lookup?._tag !== 'Resolved') {
-      const diagnostic = Diagnostic.unknownProjectedField(
-        Type.display(nominal),
-        fieldName,
-        fieldToken.span,
-      )
+      // A receiver method is not a value: naming it without calling it is its own diagnostic, so
+      // the reader is pointed at the call rather than at a field that does not exist.
+      const method = receiverMethodOf(nominal, fieldName, resolution)
+      const diagnostic =
+        method === undefined
+          ? Diagnostic.unknownProjectedField(Type.display(nominal), fieldName, fieldToken.span)
+          : Diagnostic.receiverMethodRequiresCall(method.ownerSpelling, fieldName, fieldToken.span)
       diagnostics.push(diagnostic)
       state = Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) })
     } else if (lookup.field.visibility === 'Private' && nominal.module !== source.id) {
@@ -6288,6 +6308,520 @@ const appliedMemberParts = (
     : Object.freeze({ owner, member })
 }
 
+/** One inherent receiver method of a nominal owner, when the owner declares it. */
+const receiverMethodOf = (
+  nominal: Type.Nominal,
+  member: string,
+  resolution: ResolutionContext,
+): { readonly declaration: DeclarationFact; readonly ownerSpelling: string } | undefined => {
+  const owner = DeclarationFacts.byCanonical(resolution.index, {
+    _tag: 'CanonicalDeclarationId',
+    module: nominal.module,
+    name: nominal.name,
+  })
+  if (owner === undefined) return undefined
+  const associated = NameResolution.lookupAssociated(
+    resolution.index,
+    owner,
+    member,
+    resolution.scope.module,
+  )
+  if (associated._tag !== 'Inherent' || associated.declaration._tag !== 'FunctionDeclaration')
+    return undefined
+  const fact = associated.declaration.associatedMember
+  return fact === undefined || !fact.receiver
+    ? undefined
+    : Object.freeze({ declaration: associated.declaration, ownerSpelling: fact.ownerSpelling })
+}
+
+type MethodCandidate =
+  | {
+      readonly _tag: 'Inherent'
+      readonly declaration: DeclarationFact
+      readonly ownerSpelling: string
+    }
+  | {
+      readonly _tag: 'NoReceiver'
+      readonly declaration: DeclarationFact
+      readonly ownerSpelling: string
+    }
+  | {
+      readonly _tag: 'Unavailable'
+      readonly reference: Extract<CallReferenceFact, { readonly _tag: 'Missing' }>
+      readonly diagnostic?: Diagnostic.Diagnostic
+    }
+  | {
+      readonly _tag: 'Bound'
+      readonly reference: Extract<
+        CallReferenceFact,
+        { readonly _tag: 'ResolvedInterfaceOperation' }
+      >
+    }
+  | {
+      readonly _tag: 'AmbiguousBound'
+      readonly parameter: string
+      readonly interfaces: ReadonlyArray<string>
+    }
+  | { readonly _tag: 'Missing' }
+
+/**
+ * Resolves the member a value-side spelling `receiver.member(...)` names, mirroring the type-side
+ * `lookupAssociated`: an inherent member of a nominal receiver, or the unique receiver operation
+ * among a type parameter's declared bounds. A concrete receiver never reaches interface operations.
+ */
+export const resolveMethodCandidate = (
+  subjectType: SemanticType,
+  member: string,
+  memberToken: Token.Token,
+  caller: DeclarationFact,
+  resolution: ResolutionContext,
+): MethodCandidate => {
+  if (Type.isNominal(subjectType)) {
+    const owner = DeclarationFacts.byCanonical(resolution.index, {
+      _tag: 'CanonicalDeclarationId',
+      module: subjectType.module,
+      name: subjectType.name,
+    })
+    if (owner === undefined) return Object.freeze({ _tag: 'Missing' })
+    const associated = NameResolution.lookupAssociated(
+      resolution.index,
+      owner,
+      member,
+      resolution.scope.module,
+    )
+    if (associated._tag === 'Inherent') {
+      const fact =
+        associated.declaration._tag === 'FunctionDeclaration'
+          ? associated.declaration.associatedMember
+          : undefined
+      if (fact === undefined) return Object.freeze({ _tag: 'Missing' })
+      return fact.receiver
+        ? Object.freeze({
+            _tag: 'Inherent',
+            declaration: associated.declaration,
+            ownerSpelling: fact.ownerSpelling,
+          })
+        : Object.freeze({
+            _tag: 'NoReceiver',
+            declaration: associated.declaration,
+            ownerSpelling: fact.ownerSpelling,
+          })
+    }
+    if (associated._tag === 'Inaccessible') {
+      const diagnostic = Diagnostic.inaccessibleImportedMember(
+        associated.declaration.canonical._tag === 'Canonical'
+          ? associated.declaration.canonical.id.module
+          : subjectType.name,
+        member,
+        memberToken.span,
+      )
+      return Object.freeze({
+        _tag: 'Unavailable',
+        reference: Object.freeze({
+          _tag: 'Missing',
+          spelling: `${subjectType.name}.${member}`,
+          token: memberToken,
+          cause: Diagnostic.identity(diagnostic),
+        }),
+        diagnostic,
+      })
+    }
+    if (associated._tag === 'Duplicate')
+      return Object.freeze({
+        _tag: 'Unavailable',
+        reference: Object.freeze({
+          _tag: 'Missing',
+          spelling: `${subjectType.name}.${member}`,
+          token: memberToken,
+          cause: associated.cause,
+        }),
+      })
+    return Object.freeze({ _tag: 'Missing' })
+  }
+  if (!Type.isParameter(subjectType)) return Object.freeze({ _tag: 'Missing' })
+  const parameter = caller.typeParameters.find((candidate) =>
+    Type.equals(candidate.type, subjectType),
+  )
+  if (parameter === undefined) return Object.freeze({ _tag: 'Missing' })
+  const candidates = parameter.bounds.flatMap((bound) =>
+    bound._tag === 'ResolvedBound'
+      ? bound.application.operations.flatMap((operation) =>
+          operation.declaration.name._tag === 'Present' &&
+          operation.declaration.name.spelling === member &&
+          operation.receiverAccess !== 'Unavailable'
+            ? [Object.freeze({ bound, operation })]
+            : [],
+        )
+      : [],
+  )
+  const parameterName =
+    parameter.name._tag === 'Present' ? parameter.name.spelling : Type.encode(parameter.type)
+  if (candidates.length === 0) return Object.freeze({ _tag: 'Missing' })
+  if (candidates.length > 1)
+    return Object.freeze({
+      _tag: 'AmbiguousBound',
+      parameter: parameterName,
+      interfaces: Object.freeze(candidates.map(({ bound }) => bound.spelling)),
+    })
+  const selected = candidates.at(0)
+  if (selected === undefined) return Object.freeze({ _tag: 'Missing' })
+  const contract = interfaceOperationContract(selected.operation)
+  if (contract === undefined) return Object.freeze({ _tag: 'Missing' })
+  return Object.freeze({
+    _tag: 'Bound',
+    reference: Object.freeze({
+      _tag: 'ResolvedInterfaceOperation' as const,
+      spelling: `${parameterName}.${member}`,
+      token: memberToken,
+      capability: selected.bound.application.capability,
+      provider: parameter.type,
+      operation: member,
+      declaration: contract.declaration,
+      interfaceContract: contract.contract,
+      parameters: contract.parameters,
+      result: contract.result,
+    }),
+  })
+}
+
+/**
+ * Prepends the owner binders a receiver's static type fixes to an explicit type-argument list, so
+ * `value.map<i64>(f)` binds `i64` to the member's own `U` while `T` comes from `value: Option<i32>`.
+ * Owner binders the receiver leaves open are not prepended, and the list then binds as written.
+ */
+const withReceiverOwnerArguments = (
+  declaration: DeclarationFact,
+  receiverType: SemanticType | undefined,
+  explicit: CallTypeArgumentsResult,
+  memberToken: Token.Token,
+  node: SyntaxTree.Node,
+): CallTypeArgumentsResult => {
+  const parameterZero = declaration.parameters.at(0)
+  if (receiverType === undefined || parameterZero?.declaredType._tag !== 'Resolved') return explicit
+  const pattern = parameterZero.declaredType.type
+  const declared = Type.isReference(pattern) ? pattern.target : pattern
+  const actual = Type.isReference(receiverType) ? receiverType.target : receiverType
+  const inferred = new Map<string, Type.GenericArgument>()
+  if (!TypeInference.infer(declared, actual, inferred)) return explicit
+  const leading: Array<SemanticType> = []
+  for (const parameter of declaration.typeParameters) {
+    const bound = inferred.get(Type.key(parameter.type))
+    if (bound === undefined || !Type.isTypeArgument(bound)) break
+    leading.push(bound)
+  }
+  if (leading.length === 0) return explicit
+  const facts = [
+    ...leading.map((type, ordinal) =>
+      Object.freeze({
+        _tag: 'TypeArgument' as const,
+        ordinal,
+        syntax: node,
+        declared: Object.freeze({
+          _tag: 'Resolved' as const,
+          type,
+          spelling: Type.display(type),
+          token: memberToken,
+          syntax: node,
+        }),
+        type,
+      }),
+    ),
+    ...explicit.facts.map((fact, ordinal) =>
+      Object.freeze({ ...fact, ordinal: leading.length + ordinal }),
+    ),
+  ]
+  const types = facts.map((fact) => fact.type)
+  return Object.freeze({
+    explicit: true,
+    facts: Object.freeze(facts),
+    ...(types.every((type) => type !== undefined)
+      ? { types: Object.freeze(types.filter((type): type is SemanticType => type !== undefined)) }
+      : {}),
+    diagnostics: explicit.diagnostics,
+  })
+}
+
+/**
+ * Adapts the receiver to parameter zero: a reference parameter borrows a place (or passes a
+ * reference through), and a by-value parameter consumes a place or takes an rvalue as it is. The
+ * declaration decides the ownership, so nothing is written in front of the receiver.
+ */
+const synthesizeReceiver = (
+  subjectNode: SyntaxTree.Node,
+  subjectResult: ExpressionResult,
+  parameterType: SemanticType | undefined,
+  declaration: DeclarationFact,
+): ExpressionResult => {
+  const subjectType = subjectResult.type
+  if (parameterType !== undefined && Type.isReference(parameterType)) {
+    // A reference receiver of the declared access passes through; any other reference reborrows
+    // through the ordinary rules, so `&mut` reaches a `&Self` method and `&` never reaches `&mut`.
+    if (
+      subjectType !== undefined &&
+      Type.isReference(subjectType) &&
+      subjectType.access === parameterType.access
+    )
+      return subjectResult
+    return borrowSubject(
+      subjectNode,
+      subjectNode,
+      subjectResult,
+      parameterType.access,
+      parameterType,
+      declaration,
+    )
+  }
+  if (borrowRoot(subjectResult.fact) === undefined) return subjectResult
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'Move',
+      subject: subjectResult.fact,
+      type: subjectResult.fact.type,
+      syntax: subjectNode,
+    }),
+    diagnostics: subjectResult.diagnostics,
+    type: subjectResult.type,
+  })
+}
+
+const declaredParameterType = (parameter: ParameterFact | undefined): SemanticType | undefined =>
+  parameter?.declaredType._tag === 'Resolved' ? parameter.declaredType.type : undefined
+
+/**
+ * Analyzes `receiver.member(args)` as the statically selected member the explicit forms name,
+ * or returns nothing so the ordinary callee path runs: a type qualifier, a callable field, or an
+ * unknown member all keep their existing analysis.
+ */
+const analyzeMethodCall = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+): ExpressionResult | undefined => {
+  const calleeNode = callCallee(node)
+  if (calleeNode.kind !== 'FieldProjectionExpression') return undefined
+  const subjectNode = calleeNode.children.find(isExpressionNode)
+  const memberToken = directToken(calleeNode, 'Identifier')
+  if (subjectNode === undefined || memberToken === undefined) return undefined
+  if (subjectNode.kind === 'IdentifierExpression') {
+    // Only a value of the enclosing scope is a receiver; a declaration or namespace qualifier
+    // keeps the type-side path, and a local that shadows a type name is a value.
+    const value = analyzeIdentifier(source, subjectNode, scope)
+    if (
+      value.fact._tag !== 'Identifier' ||
+      (value.fact.reference._tag !== 'Resolved' &&
+        value.fact.reference._tag !== 'ResolvedBinding' &&
+        value.fact.reference._tag !== 'ResolvedPattern')
+    )
+      return undefined
+  }
+  const member = spelling(source, memberToken)
+  // The receiver is argument zero, so a written borrow is as valid here as in an argument list.
+  const subjectResult = analyzeExpression(
+    source,
+    subjectNode,
+    declarations,
+    declaration,
+    scope,
+    resolution,
+    undefined,
+    true,
+  )
+  if (subjectResult === undefined) return undefined
+  const argumentList = childNode(node, 'ArgumentList')
+  const argumentNodes = argumentList.children.filter(isRecursiveArgumentNode)
+  const callTypeArguments = analyzeCallTypeArguments(source, node, declaration, resolution)
+  const path: ReferencePathFact = Object.freeze({ _tag: 'ReferencePath', member: memberToken })
+  const withSubjectDiagnostics = (finished: ExpressionResult): ExpressionResult =>
+    Object.freeze({
+      ...finished,
+      diagnostics: Object.freeze([...subjectResult.diagnostics, ...finished.diagnostics]),
+    })
+  const rejected = (
+    reference: Extract<CallReferenceFact, { readonly _tag: 'Missing' }>,
+    diagnostic: Diagnostic.Diagnostic | undefined,
+  ): ExpressionResult => {
+    const written = analyzeArgumentNodes(
+      source,
+      node,
+      argumentNodes,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+    )
+    return withSubjectDiagnostics(
+      finishDeclarationCall(
+        node,
+        reference,
+        Object.freeze({
+          facts: Object.freeze([
+            argumentFact(declaration, node.span, subjectResult.fact, 0),
+            ...written.facts.map((argument, ordinal) =>
+              argumentFact(declaration, node.span, argument.expression, ordinal + 1),
+            ),
+          ]),
+          diagnostics: written.diagnostics,
+        }),
+        callTypeArguments,
+        diagnostic,
+        declaration,
+        resolution,
+        path,
+      ),
+    )
+  }
+  const subjectType = subjectResult.type
+  if (subjectType === undefined) {
+    // The receiver already failed: report it once and give the call no target.
+    const cause = subjectResult.diagnostics.at(0)
+    if (cause === undefined) return undefined
+    return rejected(
+      Object.freeze({
+        _tag: 'Missing',
+        spelling: member,
+        token: memberToken,
+        cause: Diagnostic.identity(cause),
+      }),
+      undefined,
+    )
+  }
+  const target = Type.isReference(subjectType) ? subjectType.target : subjectType
+  // A callable field wins over every member, and an unknown name stays the field diagnostic: both
+  // are the ordinary application of the projected callee, never a type-side lookup of the value.
+  const applyField = (): ExpressionResult => {
+    const written = analyzeArgumentNodes(
+      source,
+      node,
+      argumentNodes,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+    )
+    return finishCallableApplication(
+      node,
+      analyzeProjection(source, calleeNode, declarations, declaration, scope, resolution),
+      written,
+      callTypeArguments,
+      undefined,
+      resolution,
+      declaration,
+    )
+  }
+  if (Type.isNominal(target)) {
+    const aggregate = aggregateByNominal(resolution, target)
+    const field =
+      aggregate === undefined
+        ? undefined
+        : DeclarationFacts.lookupAggregateMember(
+            aggregate.fields,
+            AggregateIdentity.labeled(member),
+          )
+    if (field?._tag === 'Resolved') return applyField()
+  }
+  const candidate = resolveMethodCandidate(target, member, memberToken, declaration, resolution)
+  if (candidate._tag === 'Missing') return applyField()
+  if (candidate._tag === 'Unavailable') return rejected(candidate.reference, candidate.diagnostic)
+  if (candidate._tag === 'NoReceiver') {
+    const diagnostic = Diagnostic.associatedFunctionOnValue(
+      candidate.ownerSpelling,
+      member,
+      memberToken.span,
+    )
+    return rejected(
+      Object.freeze({
+        _tag: 'Missing',
+        spelling: `${candidate.ownerSpelling}.${member}`,
+        token: memberToken,
+        cause: Diagnostic.identity(diagnostic),
+      }),
+      diagnostic,
+    )
+  }
+  if (candidate._tag === 'AmbiguousBound') {
+    const diagnostic = Diagnostic.ambiguousReceiverOperation(
+      candidate.parameter,
+      member,
+      candidate.interfaces,
+      memberToken.span,
+    )
+    return rejected(
+      Object.freeze({
+        _tag: 'Missing',
+        spelling: `${candidate.parameter}.${member}`,
+        token: memberToken,
+        cause: Diagnostic.identity(diagnostic),
+      }),
+      diagnostic,
+    )
+  }
+  const parameterTypes: ReadonlyArray<SemanticType | undefined> =
+    candidate._tag === 'Inherent'
+      ? candidate.declaration.parameters.map(declaredParameterType)
+      : candidate.reference.parameters
+  const receiver = synthesizeReceiver(subjectNode, subjectResult, parameterTypes.at(0), declaration)
+  // An explicit list binds the member's own binders: the receiver already fixes the owner's, so
+  // they are prepended from the receiver's type exactly as an applied qualifier would supply them.
+  const typeArguments =
+    candidate._tag === 'Inherent' && callTypeArguments.explicit
+      ? withReceiverOwnerArguments(
+          candidate.declaration,
+          subjectResult.type,
+          callTypeArguments,
+          memberToken,
+          node,
+        )
+      : callTypeArguments
+  const written = analyzeArgumentNodes(
+    source,
+    node,
+    argumentNodes,
+    declarations,
+    declaration,
+    scope,
+    resolution,
+    parameterTypes.slice(1),
+  )
+  const argumentsResult: ArgumentsResult = Object.freeze({
+    facts: Object.freeze([
+      argumentFact(declaration, node.span, receiver.fact, 0),
+      ...written.facts.map((argument, ordinal) =>
+        argumentFact(declaration, node.span, argument.expression, ordinal + 1),
+      ),
+    ]),
+    diagnostics: Object.freeze([...receiver.diagnostics, ...written.diagnostics]),
+  })
+  if (candidate._tag === 'Bound')
+    return finishInterfaceOperationCall(
+      node,
+      candidate.reference,
+      argumentsResult,
+      typeArguments,
+      resolution,
+      node,
+      undefined,
+      path,
+    )
+  return finishDeclarationCall(
+    node,
+    Object.freeze({
+      _tag: 'Resolved',
+      spelling: `${candidate.ownerSpelling}.${member}`,
+      token: memberToken,
+      declaration: candidate.declaration,
+    }),
+    argumentsResult,
+    typeArguments,
+    undefined,
+    declaration,
+    resolution,
+    path,
+  )
+}
+
 /** Whether a call's applied qualifier names an inherent member of a nominal owner. */
 const appliedInherentMember = (
   source: SourceFile.SourceFile,
@@ -7717,6 +8251,11 @@ export function analyzeExpression(
 
   if (node.kind !== 'CallExpression') return undefined
 
+  // `receiver.member(...)` is the value-side spelling of one statically selected member; it is
+  // recognized before any argument pass so the receiver and the arguments are analyzed once.
+  const methodCall = analyzeMethodCall(source, node, declarations, declaration, scope, resolution)
+  if (methodCall !== undefined) return methodCall
+
   // `Owner<Args>.member(...)` on an inherent member is the bare form with the owner arguments
   // prepended to the explicit generic prefix; it never reaches the interface-operation path.
   const appliedInherent = appliedInherentMember(source, node, resolution)
@@ -8168,6 +8707,7 @@ export const finishDeclarationCall = (
   diagnostic: Diagnostic.Diagnostic | undefined,
   caller: DeclarationFact,
   resolution: ResolutionContext,
+  path: ReferencePathFact = referencePath(node),
 ): ExpressionResult => {
   if (
     reference._tag === 'Resolved' &&
@@ -8316,7 +8856,7 @@ export const finishDeclarationCall = (
   const fact: Extract<ExpressionFact, { readonly _tag: 'Call' }> = Object.freeze({
     _tag: 'Call',
     reference,
-    path: referencePath(node),
+    path,
     typeArguments: callTypeArguments.facts,
     arguments: argumentsResult.facts,
     staticArguments: staticArguments.values,
@@ -8376,6 +8916,7 @@ export const finishInterfaceOperationCall = (
   resolution: ResolutionContext,
   effectSiteNode: SyntaxTree.Node = node,
   interfaceApplication?: DeclarationFacts.DeclaredTypeFact,
+  path: ReferencePathFact = referencePath(node),
 ): ExpressionResult => {
   const syntaxAvailable =
     node.kind === 'PipelineExpression' ? isAvailableSyntax(node) : hasAvailableCallSyntax(node)
@@ -8406,7 +8947,7 @@ export const finishInterfaceOperationCall = (
     fact: Object.freeze({
       _tag: 'Call',
       reference,
-      path: referencePath(node),
+      path,
       ...(interfaceApplication === undefined ? {} : { interfaceApplication }),
       typeArguments: callTypeArguments.facts,
       arguments: argumentsResult.facts,

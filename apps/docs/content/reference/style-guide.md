@@ -78,11 +78,12 @@ impl Counter {
 pub fn main() -> i32 {
   let direct = Counter.increment(Counter { value: 40 }, 1)
   let piped = Counter { value: 40 } |> Counter.increment(1)
-  return direct.value + piped.value - 40
+  let method = Counter { value: 40 }.increment(1)
+  return direct.value + piped.value + method.value - 81
 }
 ```
 
-The direct and pipeline forms share one contract. `Counter.increment` is an ordinary function whose
+The direct, pipeline, and method forms share one contract. `Counter.increment` is an ordinary function whose
 parameter zero is the receiver, so supplying a non-empty trailing suffix of its arguments creates a
 callable waiting for that receiver. This is not special treatment for Effect APIs: `Effect.provide`
 is an inherent member of the `Effect` struct and has the same shape:

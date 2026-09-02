@@ -1891,6 +1891,7 @@ const occurrenceTokenType = (
     case 'Actor':
       return SemanticTokenTypes.namespace
     case 'Operation':
+    case 'Method':
       return SemanticTokenTypes.method
     default:
       return SemanticTokenTypes.variable
