@@ -130,7 +130,7 @@ pub fn pick(shape: Shape) -> i32 { return 0 }`
     const { document, snapshot } = yield* open(source)
     const hover = Document.hover(document, snapshot, positionOf(source, 'Shape) -> i32'))
     assert.isDefined(hover)
-    const text = typeof hover?.contents === 'string' ? hover.contents : hover?.contents.value
+    const text = JSON.stringify(hover?.contents)
     assert.include(text, 'Circle')
     assert.include(text, 'Square')
   }),
