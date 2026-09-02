@@ -411,8 +411,6 @@ export const duplicateInherentMemberCode = 'SEM0196' as const
 export const importedInherentMemberCode = 'SEM0197' as const
 /** Stable code for an associated function called on a value as though it had a receiver. */
 export const associatedFunctionOnValueCode = 'SEM0198' as const
-/** Stable code for a receiver method named on a value without being called. */
-export const receiverMethodRequiresCallCode = 'SEM0199' as const
 /** Stable code for a receiver operation declared by more than one bound of one type parameter. */
 export const ambiguousReceiverOperationCode = 'SEM0200' as const
 /** Stable code for an `export "C"` function whose body may suspend. */
@@ -657,7 +655,6 @@ export type Code =
   | typeof duplicateInherentMemberCode
   | typeof importedInherentMemberCode
   | typeof associatedFunctionOnValueCode
-  | typeof receiverMethodRequiresCallCode
   | typeof ambiguousReceiverOperationCode
   | typeof exportSuspendsCode
   | typeof useAfterMoveCode
@@ -1357,11 +1354,6 @@ export type Reason =
     }
   | {
       readonly _tag: 'AssociatedFunctionOnValue'
-      readonly owner: string
-      readonly member: string
-    }
-  | {
-      readonly _tag: 'ReceiverMethodRequiresCall'
       readonly owner: string
       readonly member: string
     }
@@ -2660,22 +2652,6 @@ export const associatedFunctionOnValue = (
     severity: 'error',
     message: `${owner}.${member} is an associated function without a receiver; call it as ${owner}.${member}(...)`,
     reason: Object.freeze({ _tag: 'AssociatedFunctionOnValue', owner, member }),
-    span,
-  })
-
-/** Rejects `value.member` outside callee position: a receiver method is not a value. */
-export const receiverMethodRequiresCall = (
-  owner: string,
-  member: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: receiverMethodRequiresCallCode,
-    severity: 'error',
-    message: `${owner}.${member} is a receiver method and must be called; write value.${member}(...)`,
-    reason: Object.freeze({ _tag: 'ReceiverMethodRequiresCall', owner, member }),
     span,
   })
 

@@ -88,22 +88,24 @@ const applyCallable = Effect.fnUntraced(function* (
   context: Context,
   local: { readonly _tag: 'Local'; readonly ordinal: number },
   typeArguments: ReadonlyArray<SilkType.GenericArgument>,
-  arguments_: ReadonlyArray<Value.Input>,
+  arguments_: ReadonlyArray<ReadonlyArray<Value.Input>>,
   tag: string,
 ) {
   const { type, target } = targetForCallable(context, local, typeArguments)
   const values = NativeStorage.readLocal(context.storage, local)
   let cursor = 0
-  const captures = (type.environment?.fields ?? [])
-    .map((field) => {
-      const lanes = Layout.callableFieldLanes(context.program.layout, field)
-      const selected = values.slice(cursor, cursor + lanes.length)
-      cursor += lanes.length
-      return Object.freeze({ parameterOrdinal: field.parameterOrdinal, values: selected })
-    })
-    .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
-    .flatMap((capture) => [...capture.values])
-  return yield* NativeCall.callValues(context.call, target, [...arguments_, ...captures], tag)
+  const captures = (type.environment?.fields ?? []).map((field) => {
+    const lanes = Layout.callableFieldLanes(context.program.layout, field)
+    const selected = values.slice(cursor, cursor + lanes.length)
+    cursor += lanes.length
+    return Object.freeze({ parameterOrdinal: field.parameterOrdinal, items: selected })
+  })
+  return yield* NativeCall.callValues(
+    context.call,
+    target,
+    Mir.applyOperands(captures, arguments_),
+    tag,
+  )
 })
 
 const storePackageValue = Effect.fnUntraced(function* (
@@ -365,7 +367,7 @@ const notifyReady = Effect.fnUntraced(function* (
     throw new RangeError('LLVM readiness notification lost its exact package callback authority')
   const captures: Array<{
     readonly parameterOrdinal: number
-    readonly values: ReadonlyArray<Value.Input>
+    readonly items: ReadonlyArray<Value.Input>
   }> = []
   for (const field of environment?.fields ?? []) {
     const values: Array<Value.Input> = []
@@ -396,26 +398,17 @@ const notifyReady = Effect.fnUntraced(function* (
       )
     }
     captures.push(
-      Object.freeze({ parameterOrdinal: field.parameterOrdinal, values: Object.freeze(values) }),
+      Object.freeze({ parameterOrdinal: field.parameterOrdinal, items: Object.freeze(values) }),
     )
   }
-  yield* NativeCall.callValues(
-    context.call,
-    target,
-    [
-      yield* NativeLanePointer.lanePointer(
-        context.lanePointers,
-        context.body,
-        base,
-        endpointOffset ?? 0,
-        `${tag}_endpoint`,
-      ),
-      ...captures
-        .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
-        .flatMap((capture) => capture.values),
-    ],
-    tag,
+  const endpoint = yield* NativeLanePointer.lanePointer(
+    context.lanePointers,
+    context.body,
+    base,
+    endpointOffset ?? 0,
+    `${tag}_endpoint`,
   )
+  yield* NativeCall.callValues(context.call, target, Mir.applyOperands(captures, [[endpoint]]), tag)
 })
 
 const releasePackage = Effect.fnUntraced(function* (
@@ -1408,7 +1401,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         context,
         operation.register,
         operation.registrationTypeArguments,
-        [base],
+        [[base]],
         `park${operation.destination.ordinal}_register`,
       )
       storage.locals.set(operation.guard.ordinal, guard)
@@ -1669,7 +1662,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             context,
             operation.onComplete,
             operation.completionTypeArguments,
-            [...NativeStorage.readLocal(storage, operation.branch), ...resultValues],
+            [NativeStorage.readLocal(storage, operation.branch), resultValues],
             `drive${operation.destination.ordinal}_direct_on_complete`,
           ),
         )
@@ -2174,7 +2167,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             context,
             operation.onComplete,
             operation.completionTypeArguments,
-            [...NativeStorage.readLocal(storage, operation.branch), ...resultValues],
+            [NativeStorage.readLocal(storage, operation.branch), resultValues],
             `drive${operation.destination.ordinal}_on_complete`,
           ),
         )
@@ -2225,7 +2218,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           context,
           operation.onSuspend,
           operation.suspensionTypeArguments,
-          [...NativeStorage.readLocal(storage, operation.branch), base],
+          [NativeStorage.readLocal(storage, operation.branch), [base]],
           `drive${operation.destination.ordinal}_on_suspend`,
         )
         const controlOffset = componentOffset(package_, 'WakeControl')

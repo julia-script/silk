@@ -217,14 +217,42 @@ receiver; the explicit spellings `Type.member(&value, ...)` and `Type.member(mov
 remain available. A callable field of the same name is applied instead, and an rvalue chains:
 `Counter { value: 42 }.take()` consumes the temporary.
 
-**Boundary:** A receiver is never dereferenced or coerced: `boxed.read()` on a `Box<Counter>` does
-not reach `Counter.read`. An associated function without a receiver is not a value member, and a
-receiver method is not a value: `value.read` without a call is rejected. A receiver of a generic
-parameter type resolves only through the parameter's bounds (INTF-007).
+A receiver method named without a call is a bound method value: the section whose only capture is
+the receiver, taken under the same declared mode, awaiting the member's parameters after `self`.
 
-**Diagnostics:** Calling an associated function on a value reports `SEM0198`. Naming a receiver
-method without calling it reports `SEM0199`. An unknown member keeps the field diagnostic
-`SEM0027`. Receiver ownership uses the ordinary loan and move diagnostics (`SEM0057`, `OWN0001`).
+```silk
+pub struct Counter { value: i32 }
+
+impl Counter {
+  pub fn read(self: &Self) -> i32 { return self.value }
+  pub fn add(self: &Self, other: &Self) -> i32 { return self.value + other.value }
+}
+
+pub fn main() -> i32 {
+  let value = Counter { value: 40 }
+  let other = Counter { value: 2 }
+  let read = value.read
+  let add = value.add
+  return read() + add(&other) - 40
+}
+```
+
+`read` has type `fn() -> i32` and holds a shared loan of `value` until its last use; `add` has type
+`fn(&Counter) -> i32`. A `&mut Self` receiver binds a `mut fn` that needs a `mut` binding and an
+exclusive loan, and a `Self` receiver moves the place into a `once fn` that drops the receiver if it
+is never invoked. The bound value lowers and executes as `Counter.read` sectioned over its first
+parameter would.
+
+**Boundary:** A receiver is never dereferenced or coerced: `boxed.read()` on a `Box<Counter>` does
+not reach `Counter.read`. An associated function without a receiver is not a value member, called or
+not: `value.zero()` and `value.zero` are rejected. A borrowed receiver of a bound value must be a
+place: `Counter { value: 1 }.read` without a call is rejected because the section would outlive
+the temporary. A receiver of a generic parameter type resolves only through the parameter's bounds
+(INTF-007) and does not bind: `value.print` without a call is rejected.
+
+**Diagnostics:** Calling or naming an associated function on a value reports `SEM0198`. An unknown
+member keeps the field diagnostic `SEM0027`. Receiver ownership uses the ordinary loan and move
+diagnostics (`SEM0057`, `OWN0001`); binding a borrowed temporary reports `SEM0056`.
 
 **Evidence:** [method call semantics](../../../../packages/compiler/src/ExpressionAnalysis.ts),
 [method-call specification](../../../../openspec/specs/bootstrap-method-calls/spec.md),
@@ -378,7 +406,8 @@ fn staged() -> i32 {
 
 `combine(3)(2)(1)` invokes `combine(1, 2, 3)` and produces `6`. Every stage captures one contiguous
 trailing suffix; sections do not leave holes, reorder parameters, or bind a leading parameter while
-omitting a later one.
+omitting a later one. The one leading capture is a bound method value (CALL-003), which captures
+parameter zero and awaits the rest.
 
 **Boundary:** Supplying all parameters invokes the function. Supplying none denotes no application;
 use the function name as a callable value. Supplying more than the remaining arity is invalid.

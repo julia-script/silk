@@ -208,7 +208,7 @@ pub fn main() -> i32 { return 0 }`)
   }),
 )
 
-it.effect('rejects associated functions on values and members used as values', () =>
+it.effect('rejects associated functions on values and binds receiver methods as values', () =>
   Effect.gen(function* () {
     const noReceiver = yield* analyze(`${counter}
 pub fn main() -> i32 {
@@ -217,14 +217,95 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(codes(noReceiver), ['SEM0198'])
     assert.include(described(noReceiver).at(0) ?? '', 'Counter.zero')
-    const asValue = yield* analyze(`${counter}
+    const bareAssociated = yield* analyze(`${counter}
 pub fn main() -> i32 {
   let value = Counter { value: 1 }
-  let reader = value.read
+  let zero = value.zero
   return 0
 }`)
-    assert.deepEqual(codes(asValue), ['SEM0199'])
-    assert.include(described(asValue).at(0) ?? '', 'Counter.read')
+    assert.deepEqual(codes(bareAssociated), ['SEM0198'])
+    // A bound method is the section capturing parameter zero under the declared receiver mode.
+    // Every engine runs the `bound-method-values` corpus program; here the claims are the
+    // value-side identity and presentation, and the ownership rejections.
+    const source = `${counter}
+pub fn main() -> i32 {
+  let value = Counter { value: 41 }
+  let read = value.read
+  let add = value.add
+  return read() + add(&Counter { value: 1 }) - 41
+}`
+    const bound = yield* analyze(source)
+    assert.strictEqual(evaluated(bound), 42n)
+    assert.strictEqual(identityAt(bound, source, 'read\n', 0), 'declaration:main.Counter.read')
+    const hover = (spelling: string) =>
+      Analysis.hoverSubjectAt(bound, 'main', source.indexOf(spelling) + 6)?.presentation.text
+    assert.strictEqual(hover('value.read'), 'fn() -> i32')
+    assert.strictEqual(hover('value.add'), 'fn(other: &Counter) -> i32')
+    // A consumed receiver fixes the owner's binder, and the remaining parameter is typed by its
+    // own ordinal (`fallback: i32`), not by the receiver's type. A member whose own binder is
+    // fixed only at application (`map<U>`) is left open exactly as a trailing section leaves it.
+    const consumed = yield* analyze(`${option}
+pub fn main() -> i32 {
+  let value = Option.some<i32>(42)
+  let unwrap = value.unwrapOr
+  return unwrap(0)
+}`)
+    assert.strictEqual(evaluated(consumed), 42n)
+    const moved = yield* analyze(`${counter}
+pub fn main() -> i32 {
+  let value = Counter { value: 1 }
+  let take = value.take
+  return take() + value.read()
+}`)
+    assert.deepEqual(codes(moved), ['OWN0001'])
+    // An uninvoked consuming binding still owns its receiver: exactly one exit releases it, through
+    // the section's single owned slot at parameter zero.
+    const uninvoked = yield* analyze(`${counter}
+pub fn main() -> i32 {
+  let token = Counter { value: 1 }
+  let taker = token.take
+  return 0
+}`)
+    assert.deepEqual(described(uninvoked), [])
+    const entry = uninvoked.ownership
+      .get('main')
+      ?.functions.find(
+        (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'main',
+      )
+    const releases = (entry?.exits ?? []).flatMap((exit) =>
+      exit.releases.filter((release) => release.binding.name === 'taker'),
+    )
+    const cleanup = releases.at(0)?.cleanup
+    assert.strictEqual(releases.length, 1)
+    assert.strictEqual(cleanup?._tag, 'CallableCleanup')
+    assert.deepEqual(
+      cleanup?._tag === 'CallableCleanup'
+        ? cleanup.slots.map((slot) => [slot.ordinal, slot.cleanup._tag])
+        : [],
+      [[0, 'StructCleanup']],
+    )
+    const conflicting = yield* analyze(`${counter}
+pub fn main() -> i32 {
+  let mut value = Counter { value: 1 }
+  let shared = &value
+  let mut bump = value.bump
+  return bump() + shared.value
+}`)
+    assert.deepEqual(codes(conflicting), ['OWN0010'])
+    const immutable = yield* analyze(`${counter}
+pub fn main() -> i32 {
+  let value = Counter { value: 1 }
+  let mut bump = value.bump
+  return bump()
+}`)
+    assert.deepEqual(codes(immutable), ['SEM0057'])
+    // A section outlives its statement, so a borrowed receiver must be a place.
+    const temporary = yield* analyze(`${counter}
+pub fn main() -> i32 {
+  let read = Counter { value: 1 }.read
+  return read()
+}`)
+    assert.deepEqual(codes(temporary), ['SEM0056'])
   }),
 )
 
@@ -271,6 +352,14 @@ pub fn main() -> i32 {
   return document.print()
 }`)
     assert.deepEqual(codes(concrete), ['SEM0027'])
+    // A bound operation has no first-class form, so a generic receiver does not bind it.
+    const unbound = yield* analyze(`${printable}
+fn show<T: Printable>(value: &T) -> i32 {
+  let print = value.print
+  return 0
+}
+pub fn main() -> i32 { return 0 }`)
+    assert.deepEqual(codes(unbound), ['SEM0026'])
   }),
 )
 

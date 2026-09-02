@@ -115,16 +115,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           )
         }
       }
-      const captureValues = [...captureGroups]
-        .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
-        .flatMap((capture) => [...capture.values])
+      const operands = Mir.applyOperands(
+        captureGroups.map((capture) =>
+          Object.freeze({ parameterOrdinal: capture.parameterOrdinal, items: capture.values }),
+        ),
+        operation.arguments.map((argument) => NativeStorage.readLocal(nativeStorage, argument)),
+      )
       if (target._tag === 'BuiltinCallableTarget') {
-        const supplied = Object.freeze([
-          ...operation.arguments.flatMap((argument) => [
-            ...NativeStorage.readLocal(nativeStorage, argument),
-          ]),
-          ...captureValues,
-        ])
+        const supplied = operands
         const first = supplied.at(0)
         const firstLocal = operation.arguments.at(0)
         const firstType =
@@ -309,12 +307,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const result = yield* NativeCall.callValues(
         call,
         callableTarget,
-        Object.freeze([
-          ...operation.arguments.flatMap((argument) => [
-            ...NativeStorage.readLocal(nativeStorage, argument),
-          ]),
-          ...captureValues,
-        ]),
+        operands,
         `callable${operation.destination.ordinal}`,
       )
       nativeStorage.locals.set(operation.destination.ordinal, result)

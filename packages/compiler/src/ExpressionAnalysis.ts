@@ -3817,13 +3817,47 @@ export const analyzeProjection = (
               : AggregateIdentity.ordinal(ordinal),
           )
     if (lookup?._tag !== 'Resolved') {
-      // A receiver method is not a value: naming it without calling it is its own diagnostic, so
-      // the reader is pointed at the call rather than at a field that does not exist.
-      const method = receiverMethodOf(nominal, fieldName, resolution)
-      const diagnostic =
-        method === undefined
-          ? Diagnostic.unknownProjectedField(Type.display(nominal), fieldName, fieldToken.span)
-          : Diagnostic.receiverMethodRequiresCall(method.ownerSpelling, fieldName, fieldToken.span)
+      // A receiver method named through a value binds that value as parameter zero, unless a
+      // borrowed receiver is a temporary the section would outlive.
+      const candidate = resolveMethodCandidate(
+        nominal,
+        fieldName,
+        fieldToken,
+        declaration,
+        resolution,
+      )
+      const temporaryReceiver =
+        candidate._tag === 'Inherent' && borrowsTemporary(candidate.declaration, subject)
+      if (candidate._tag === 'Inherent' && !temporaryReceiver)
+        return finishBoundMethod(
+          source,
+          node,
+          subjectNode,
+          subject,
+          candidate,
+          fieldName,
+          fieldToken,
+          declaration,
+          resolution,
+        )
+      let diagnostic: Diagnostic.Diagnostic
+      if (temporaryReceiver) {
+        diagnostic = Diagnostic.invalidBorrowOperand(subjectNode.span)
+      } else if (candidate._tag === 'NoReceiver') {
+        diagnostic = Diagnostic.associatedFunctionOnValue(
+          candidate.ownerSpelling,
+          fieldName,
+          fieldToken.span,
+        )
+      } else if (candidate._tag === 'Unavailable' && candidate.diagnostic !== undefined) {
+        diagnostic = candidate.diagnostic
+      } else {
+        diagnostic = Diagnostic.unknownProjectedField(
+          Type.display(nominal),
+          fieldName,
+          fieldToken.span,
+        )
+      }
       diagnostics.push(diagnostic)
       state = Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) })
     } else if (lookup.field.visibility === 'Private' && nominal.module !== source.id) {
@@ -6309,31 +6343,6 @@ const appliedMemberParts = (
 }
 
 /** One inherent receiver method of a nominal owner, when the owner declares it. */
-const receiverMethodOf = (
-  nominal: Type.Nominal,
-  member: string,
-  resolution: ResolutionContext,
-): { readonly declaration: DeclarationFact; readonly ownerSpelling: string } | undefined => {
-  const owner = DeclarationFacts.byCanonical(resolution.index, {
-    _tag: 'CanonicalDeclarationId',
-    module: nominal.module,
-    name: nominal.name,
-  })
-  if (owner === undefined) return undefined
-  const associated = NameResolution.lookupAssociated(
-    resolution.index,
-    owner,
-    member,
-    resolution.scope.module,
-  )
-  if (associated._tag !== 'Inherent' || associated.declaration._tag !== 'FunctionDeclaration')
-    return undefined
-  const fact = associated.declaration.associatedMember
-  return fact === undefined || !fact.receiver
-    ? undefined
-    : Object.freeze({ declaration: associated.declaration, ownerSpelling: fact.ownerSpelling })
-}
-
 type MethodCandidate =
   | {
       readonly _tag: 'Inherent'
@@ -6586,6 +6595,62 @@ const synthesizeReceiver = (
 
 const declaredParameterType = (parameter: ParameterFact | undefined): SemanticType | undefined =>
   parameter?.declaredType._tag === 'Resolved' ? parameter.declaredType.type : undefined
+
+/**
+ * Whether binding `member` to `subject` would loan a temporary: a section outlives the statement
+ * that built it, so a borrowed receiver must be a place or an existing reference.
+ */
+const borrowsTemporary = (member: DeclarationFact, subject: ExpressionResult): boolean => {
+  const parameterType = declaredParameterType(member.parameters.at(0))
+  return (
+    parameterType !== undefined &&
+    Type.isReference(parameterType) &&
+    borrowRoot(subject.fact) === undefined &&
+    (subject.type === undefined || !Type.isReference(subject.type))
+  )
+}
+
+/**
+ * Binds `subject.member` as the section of an inherent receiver method: the receiver is captured
+ * as parameter zero under the declared mode and the remaining parameters stay open, so the value
+ * lowers and executes exactly as a trailing section of `Owner.member` does.
+ */
+const finishBoundMethod = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  subjectNode: SyntaxTree.Node,
+  subject: ExpressionResult,
+  candidate: Extract<MethodCandidate, { readonly _tag: 'Inherent' }>,
+  member: string,
+  memberToken: Token.Token,
+  declaration: DeclarationFact,
+  resolution: ResolutionContext,
+): ExpressionResult => {
+  const receiver = synthesizeReceiver(
+    subjectNode,
+    subject,
+    declaredParameterType(candidate.declaration.parameters.at(0)),
+    declaration,
+  )
+  return finishCallableSection(
+    node,
+    Object.freeze({
+      _tag: 'Resolved',
+      spelling: `${candidate.ownerSpelling}.${member}`,
+      token: memberToken,
+      declaration: candidate.declaration,
+    }),
+    Object.freeze({
+      facts: Object.freeze([argumentFact(declaration, node.span, receiver.fact, 0)]),
+      diagnostics: receiver.diagnostics,
+    }),
+    analyzeCallTypeArguments(source, node, declaration, resolution),
+    resolution,
+    declaration,
+    Object.freeze([0]),
+    Object.freeze({ _tag: 'ReferencePath', member: memberToken }),
+  )
+}
 
 /**
  * Analyzes `receiver.member(args)` as the statically selected member the explicit forms name,
