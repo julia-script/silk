@@ -1,6 +1,7 @@
 # bootstrap-foreign-functions Specification
 
 ## Purpose
+
 Define how Silk source declares a function implemented by separately compiled native code: the
 `extern "C"` declaration, its native symbol and ABI identities, the C-compatible type subset it may
 use, and the linkage and availability rules of calling it.

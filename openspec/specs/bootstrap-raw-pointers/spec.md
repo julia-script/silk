@@ -1,6 +1,7 @@
 # bootstrap-raw-pointers Specification
 
 ## Purpose
+
 Define raw pointers: the `*const T` and `*mut T` types that hold one machine address with no
 ownership, borrow, or validity guarantee, the sealed primitives that form and dereference them, and
 the rules that make native writes through them observable.
