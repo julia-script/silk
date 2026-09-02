@@ -1755,13 +1755,21 @@ export const make = (operations: Operations) => {
       results,
       index,
       resolving: new Set<string>(),
-      recordResolvedCall: record,
+      recordResolvedCall: (expression, target) => {
+        if (expression._tag === 'CallableApply') {
+          if (
+            Type.isEffect(expression.type) ||
+            target.typeArguments.some(Type.isHiddenExecutableArgument)
+          )
+            record(expression, target)
+          return
+        }
+        if (carriesHiddenIdentity(expression, substitution)) record(expression, target)
+      },
     }
     expressions.forEach((expression) => {
-      if (expression._tag === 'CallableApply' && Type.isEffect(expression.type)) {
-        const target = targetKeyOfCallableApply(expression, context)
-        if (target === undefined) return
-        record(expression, target)
+      if (expression._tag === 'CallableApply') {
+        targetKeyOfCallableApply(expression, context)
         return
       }
       if (expression._tag !== 'Call' && expression._tag !== 'EffectConstruct') return
@@ -1769,8 +1777,7 @@ export const make = (operations: Operations) => {
       // finite-specialization path. Resolving them here as well would bypass its
       // polymorphic-recursion guard.
       if (!carriesHiddenIdentity(expression, substitution)) return
-      const target = targetKeyOfCall(expression, context)
-      if (target !== undefined) record(expression, target)
+      targetKeyOfCall(expression, context)
     })
     return Object.freeze(
       [...calls.values()]

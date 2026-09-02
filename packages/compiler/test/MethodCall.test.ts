@@ -3,6 +3,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Analysis from '../src/Analysis.js'
+import * as Hir from '../src/Hir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SemanticOccurrence from '../src/SemanticOccurrence.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -92,8 +94,6 @@ impl Counter {
 
 it.effect('resolves the three spellings of one member to one target', () =>
   Effect.gen(function* () {
-    // The pipeline spelling captures no callable here: a section capturing a callable argument is
-    // a separately tracked lowering gap, unrelated to receiver syntax.
     const source = `${option}
 pub fn main() -> i32 {
   let direct = Option.unwrapOr(Option.some<i32>(13), 0)
@@ -115,6 +115,77 @@ pub fn main() -> i32 {
     const receiverKey = identityAt(self, source, 'value.map', 0)
     assert.isDefined(receiverKey)
     assert.isTrue(receiverKey?.startsWith('binding:'), receiverKey)
+  }),
+)
+
+it.effect('preserves callable captures in root and associated-member pipeline sections', () =>
+  Effect.gen(function* () {
+    const source = `${option}
+fn add(value: i32, amount: i32) -> i32 { return value + amount }
+fn apply(value: i32, transform: once fn(i32) -> i32) -> i32 {
+  return transform(value)
+}
+fn observe(value: i32, trace: &mut [i32]) -> i32 {
+  trace[0] = trace[0] * 10 + 2
+  return value
+}
+fn first(trace: &mut [i32]) -> i32 {
+  trace[0] = trace[0] * 10 + 1
+  return 1
+}
+fn applyExclusive(value: i32, transform: mut fn(i32) -> i32) -> i32 {
+  return transform(value)
+}
+pub fn main() -> i32 {
+  let transform = addOne
+  let rootNamed = 1 |> apply(addOne)
+  let rootLocal = 1 |> apply(transform)
+  let rootCaptured = 1 |> apply(add(1))
+  let rootSection = apply(add(1))
+  let rootStored = rootSection(1)
+  let memberNamed = Option.some<i32>(1) |> Option.map(addOne)
+  let memberLocal = Option.some<i32>(1) |> Option.map(transform)
+  let memberCaptured = Option.some<i32>(1) |> Option.map(add(1))
+  let memberSection = Option.map(add(1))
+  let memberStored = memberSection(Option.some<i32>(1))
+  let directRoot = apply(1, addOne)
+  let directMember = Option.map(Option.some<i32>(1), addOne)
+  let mut trace = [0]
+  let ordered = first(&mut trace) |> applyExclusive(observe(&mut trace))
+  let directMemberValue = directMember.unwrapOr(0)
+  return rootNamed - directRoot + rootLocal - directRoot
+    + rootCaptured - rootStored
+    + memberNamed.unwrapOr(0) - directMemberValue
+    + memberLocal.unwrapOr(0) - directMemberValue
+    + memberCaptured.unwrapOr(0) - memberStored.unwrapOr(0)
+    + ordered + trace[0]
+}`
+    const self = yield* analyze(source)
+    const main = Analysis.rootAnalysis(self).hir.functions.find(
+      (fn) =>
+        fn.declaration.canonical._tag === 'Canonical' &&
+        fn.declaration.canonical.id.name === 'main',
+    )
+    const pipelines =
+      main === undefined
+        ? []
+        : main.statements
+            .flatMap(Hir.statementExpressions)
+            .flatMap(Hir.expressionTree)
+            .filter(
+              (expression) =>
+                expression._tag === 'CallableApply' && expression.evaluation === 'LeftThenCallable',
+            )
+    assert.strictEqual(pipelines.length, 7)
+    assert.isTrue(
+      pipelines.every(
+        (expression) =>
+          expression._tag === 'CallableApply' && expression.realization === 'DirectErasedSection',
+      ),
+    )
+    const lowered = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(lowered), [])
+    assert.strictEqual(evaluated(self), 13n)
   }),
 )
 
