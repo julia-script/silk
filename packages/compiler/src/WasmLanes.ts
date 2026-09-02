@@ -75,7 +75,7 @@ export const laneKindsOf = (
 
 /** Whether a MIR value carries an address into an address-taken caller frame root. */
 export const carriesBorrowAddress = (plan: LayoutPlan.Plan, type: Mir.Type): boolean => {
-  if (type._tag === 'EffectBorrow') return true
+  if (type._tag === 'EffectBorrow' || type._tag === 'Pointer') return true
   const lanes = laneKindsOf(plan, type)
   if (type._tag === 'EffectValue' || type._tag === 'CallableValue') {
     return lanes.some((lane) => typeof lane.type !== 'string')

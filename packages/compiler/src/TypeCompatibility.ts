@@ -44,6 +44,11 @@ export type Compatibility =
       readonly target: Type.Reference
     }
   | {
+      readonly _tag: 'PointerMutability'
+      readonly source: Type.Pointer
+      readonly target: Type.Pointer
+    }
+  | {
       readonly _tag: 'Bottom'
       readonly source: Type.Bottom
       readonly target: Type.Type
@@ -74,6 +79,15 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
     Type.equals(source.target, target.target)
   )
     return Object.freeze({ _tag: 'ReferenceAccess', source, target })
+  // `*mut T` widens to `*const T` only at this immediate boundary; pointees stay invariant.
+  if (
+    Type.isPointer(source) &&
+    Type.isPointer(target) &&
+    source.mutable &&
+    !target.mutable &&
+    Type.equals(source.pointee, target.pointee)
+  )
+    return Object.freeze({ _tag: 'PointerMutability', source, target })
   if (Type.isCallable(source) && Type.isCallable(target)) {
     if (
       (!source.unsafe || target.unsafe) &&

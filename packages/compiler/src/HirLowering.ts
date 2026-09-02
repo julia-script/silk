@@ -1596,7 +1596,8 @@ export const hirExpectedExpression = (
   if (
     compatibility._tag === 'CallableMode' ||
     compatibility._tag === 'EffectAccess' ||
-    compatibility._tag === 'ReferenceAccess'
+    compatibility._tag === 'ReferenceAccess' ||
+    compatibility._tag === 'PointerMutability'
   )
     return source
   if (compatibility._tag === 'Bottom') return source

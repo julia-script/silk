@@ -786,6 +786,8 @@ function encodeTypeNode(value: Type.Type): unknown {
     return { tag: 'Slice', access: value.access, element: encodeTypeNode(value.element) }
   if (Type.isReference(value))
     return { tag: 'Reference', access: value.access, target: encodeTypeNode(value.target) }
+  if (Type.isPointer(value))
+    return { tag: 'Pointer', mutable: value.mutable, pointee: encodeTypeNode(value.pointee) }
   if (Type.isCallable(value))
     return {
       tag: 'Callable',
@@ -1017,6 +1019,11 @@ function decodeTypeNode(value: unknown): Type.Type {
         throw new InvalidModuleSurfaceEncoding('reference access must be Shared or Exclusive')
       return Type.reference(access, decodeTypeNode(encoded.target))
     }
+    case 'Pointer':
+      return Type.pointer(
+        serializedBoolean(encoded.mutable, 'pointer mutability'),
+        decodeTypeNode(encoded.pointee),
+      )
     case 'Callable': {
       const mode = serializedString(encoded.mode, 'callable mode')
       if (mode !== 'Shared' && mode !== 'Exclusive' && mode !== 'Take')
@@ -1520,6 +1527,12 @@ const declaredType = (value: DeclarationFacts.DeclaredTypeFact): string => {
       return record('ReferenceType', [
         value.access,
         declaredType(value.target),
+        boolean(value.cause !== undefined),
+      ])
+    case 'Pointer':
+      return record('PointerType', [
+        boolean(value.mutable),
+        declaredType(value.pointee),
         boolean(value.cause !== undefined),
       ])
     case 'Callable':

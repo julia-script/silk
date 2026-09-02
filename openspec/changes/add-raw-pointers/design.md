@@ -90,19 +90,26 @@ of them after every call.
 
 ### Evaluator pointer values
 
-`PointerValue` is null, `{ frame, cell, selectors, indexes, offset }` for a pointer formed from a
-frame-backed borrow, or `{ ticket, offset }` for one formed from a raw-buffer-backed view.
-`fromRef` copies the `ReferenceValue` fields; `fromSlice` copies the `SliceValue` base or ticket as
-the offset; `offset`/`offsetMut` add elements; `read` and `write` resolve the cell through
-`selectStored`/`placeAccess` or the ticket path and produce the `Trap` blocked step when the frame
-is gone or the pointer is null. The evaluator therefore detects dangling pointers that native code
-cannot; the spec states this as permitted, not required, behavior for other surfaces.
+`PointerValue { address: PointerAddress | null }` with `PointerAddress` either `Frame { frame,
+cell, selectors, indexes, elements, offset }` for a pointer formed from a frame-backed borrow or
+`Ticket { ticket, offset }` for one formed from a raw-buffer-backed view. `elements` records
+whether the address walks a fixed array (slice-formed, or a reference to one element whose trailing
+element selector is hoisted into `offset`); a scalar reference uses offset zero. `fromRef` copies
+the `ReferenceValue` fields; `fromSlice` copies the `SliceValue` base or ticket as the offset;
+`offset` and `offsetMut` both lower to one `PointerOffset` operation that adds elements; `read`
+and `write` resolve the place through the existing place walkers or the ticket path and produce
+the `Trap` blocked step naming the primitive when the address is null, addresses storage that no
+longer exists, or belongs to a frame recorded in the evaluator's ended-frame set (kept separately
+from the active frames so pointers into parked execution frames stay valid). The evaluator
+therefore detects dangling pointers that native code cannot; the spec states this as permitted,
+not required, behavior for other surfaces.
 
 ### Foreign ABI admission adds one arm
 
 `CAbi.admit` accepts `PointerType` without examining the pointee; `classify` maps it to the LLVM
 pointer type and includes mutability in the signature key so `*const u8` and `*mut u8`
-redeclarations disagree. When `add-export-c-functions` has landed, export thunks forward the
+redeclarations disagree. The classified pointer arm also carries the pointee so the MIR verifier can
+require equal pointees at a foreign call site while the key stays pointee-blind. When `add-export-c-functions` has landed, export thunks forward the
 pointer lane unchanged.
 
 ### `*mut T` to `*const T` is an immediate-boundary conversion
@@ -112,8 +119,9 @@ site, applied only at immediate expected-type boundaries. Nothing else converts.
 
 ### Parsing
 
-`Parser/Type.ts` gains a prefix arm on `Star`: expect `ConstKeyword` or `MutKeyword`, then
-`parseType`. A bare `*` reports missing mutability and continues with the pointee. `Star` joins
+`Parser/Type.ts` gains a prefix arm on `Star`: expect `ConstKeyword` or `MutKeyword`, then the
+pointee as a primary type, exactly as `&T` does, so `*const A | B` is `(*const A) | B` and
+`*mut *const u8` nests. A bare `*` reports missing mutability and continues with the pointee. `Star` joins
 `Grammar.typeStarts` so `identity<*const i32>(x)` opens a generic argument list instead of a
 comparison; `x.*` referent projection is `Dot`-prefixed and unaffected. The formatter prints
 `*const T` / `*mut T`.

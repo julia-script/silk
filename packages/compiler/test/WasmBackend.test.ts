@@ -742,3 +742,76 @@ it.effect('throws when target validation lets a ForeignCall reach Wasm emission'
     if (Exit.isFailure(exit)) assert.instanceOf(Cause.squash(exit.cause), RangeError)
   }),
 )
+
+it.effect('rejects a closure export before the direct Wasm backend is constructed', () =>
+  Effect.gen(function* () {
+    const failure = yield* Effect.flip(
+      emit(`export "C" fn silk_test_double_v1(value: i32) -> i32 { return value * 2 }
+pub fn main() -> i32 { return 0 }`),
+    )
+    assert.strictEqual(failure._tag, 'CodegenUnavailable')
+    if (failure._tag === 'CodegenUnavailable')
+      assert.deepEqual(
+        failure.diagnostics.map((diagnostic) =>
+          diagnostic.reason._tag === 'ForeignFunctionTargetUnavailable'
+            ? `${diagnostic.code}:${diagnostic.reason.symbol}@${diagnostic.reason.surface}`
+            : diagnostic.code,
+        ),
+        ['SEM0193:silk_test_double_v1@Wasm'],
+      )
+  }),
+)
+
+it.effect('writes and reads through an offset slice pointer over a local array', () =>
+  Effect.gen(function* () {
+    assert.strictEqual(
+      yield* run(`import silk.pointer as Pointer
+pub fn main() -> i32 {
+  let mut values = [1, 2, 3, 4]
+  let pointer = Pointer.fromMutSlice(&mut values)
+  unsafe {
+    let third = Pointer.offsetMut(pointer, 2)
+    Pointer.write(third, 7)
+  }
+  return values[2]
+}`),
+      7,
+    )
+  }),
+)
+
+it.effect('reloads a local after a Silk callee writes through a *mut parameter', () =>
+  Effect.gen(function* () {
+    assert.strictEqual(
+      yield* run(`import silk.pointer as Pointer
+fn bump(target: *mut i32) -> () {
+  unsafe { Pointer.write(target, 42) }
+  return ()
+}
+pub fn main() -> i32 {
+  let mut value = 5
+  let pointer = Pointer.fromMutRef(&mut value)
+  bump(pointer)
+  return value
+}`),
+      42,
+    )
+  }),
+)
+
+it.effect('tests null and formed pointers with isNull', () =>
+  Effect.gen(function* () {
+    assert.strictEqual(
+      yield* run(`import silk.pointer as Pointer
+pub fn main() -> i32 {
+  let mut value = 1
+  let formed = Pointer.fromMutRef(&mut value)
+  let empty = Pointer.null<i32>()
+  if Pointer.isNull(formed) { return 1 }
+  if Pointer.isNull(empty) { return 0 }
+  return 2
+}`),
+      0,
+    )
+  }),
+)

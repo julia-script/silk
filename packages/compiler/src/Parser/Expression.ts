@@ -49,6 +49,7 @@ const overBudgetBoundaries: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'UnionKeyword',
   'TypeKeyword',
   'ExternKeyword',
+  'ExportKeyword',
   'FnKeyword',
   'EffectKeyword',
   'ImportKeyword',
@@ -205,7 +206,9 @@ export const hasCompleteAppliedPostfix = (
       token.kind !== 'Pipe' &&
       token.kind !== 'Ampersand' &&
       token.kind !== 'At' &&
-      token.kind !== 'MutKeyword'
+      token.kind !== 'MutKeyword' &&
+      token.kind !== 'Star' &&
+      token.kind !== 'ConstKeyword'
     )
       return false
     index += 1
@@ -521,6 +524,7 @@ export const primaryKind = (
       token.kind === 'UnionKeyword' ||
       token.kind === 'TypeKeyword' ||
       token.kind === 'ExternKeyword' ||
+      token.kind === 'ExportKeyword' ||
       token.kind === 'FnKeyword' ||
       token.kind === 'EffectKeyword' ||
       token.kind === 'ImportKeyword' ||
@@ -556,6 +560,7 @@ export const remainingRightParentheses = (state: State): number => {
       token.kind === 'UnionKeyword' ||
       token.kind === 'TypeKeyword' ||
       token.kind === 'ExternKeyword' ||
+      token.kind === 'ExportKeyword' ||
       token.kind === 'FnKeyword' ||
       token.kind === 'ImportKeyword' ||
       token.kind === 'LetKeyword' ||
@@ -604,6 +609,7 @@ export const expectCallRightParenthesis = (
     'UnionKeyword',
     'TypeKeyword',
     'ExternKeyword',
+    'ExportKeyword',
     'FnKeyword',
     'ImportKeyword',
     'LetKeyword',
@@ -635,6 +641,7 @@ export function parseArgumentList(
     'UnionKeyword',
     'TypeKeyword',
     'ExternKeyword',
+    'ExportKeyword',
     'FnKeyword',
     'ImportKeyword',
   ])
@@ -654,6 +661,7 @@ export function parseArgumentList(
     kind !== 'UnionKeyword' &&
     kind !== 'TypeKeyword' &&
     kind !== 'ExternKeyword' &&
+    kind !== 'ExportKeyword' &&
     kind !== 'FnKeyword' &&
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
@@ -677,6 +685,7 @@ export function parseArgumentList(
       kind === 'UnionKeyword' ||
       kind === 'TypeKeyword' ||
       kind === 'ExternKeyword' ||
+      kind === 'ExportKeyword' ||
       kind === 'FnKeyword' ||
       kind === 'ImportKeyword'
     )
@@ -694,6 +703,7 @@ export function parseArgumentList(
       'UnionKeyword',
       'TypeKeyword',
       'ExternKeyword',
+      'ExportKeyword',
       'FnKeyword',
       'ImportKeyword',
     ])
@@ -824,6 +834,7 @@ export function parseStructLiteralExpression(
     kind !== 'UnionKeyword' &&
     kind !== 'TypeKeyword' &&
     kind !== 'ExternKeyword' &&
+    kind !== 'ExportKeyword' &&
     kind !== 'FnKeyword' &&
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
@@ -1511,6 +1522,7 @@ export const reservedTemplateBoundaries: ReadonlyArray<Token.TokenKind> = Object
   'UnionKeyword',
   'TypeKeyword',
   'ExternKeyword',
+  'ExportKeyword',
   'FnKeyword',
   'ImportKeyword',
   'EndOfFile',

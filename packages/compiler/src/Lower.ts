@@ -54,6 +54,7 @@ export const mirType = (
     return Object.freeze({ _tag: 'FixedArray', type: specialized })
   if (Type.isSlice(specialized)) return Object.freeze({ _tag: 'Slice', type: specialized })
   if (Type.isReference(specialized)) return Object.freeze({ _tag: 'Reference', type: specialized })
+  if (Type.isPointer(specialized)) return Object.freeze({ _tag: 'Pointer', type: specialized })
   if (Type.isUnion(specialized)) return Object.freeze({ _tag: 'Union', type: specialized })
   if (Type.isEffect(specialized)) return Object.freeze({ _tag: 'EffectOutcome', type: specialized })
   return undefined
@@ -492,6 +493,7 @@ export const lowerProgram = (
       module: discovery.rootModule,
       intrinsics: discovery.intrinsics,
       foreignCalls: discovery.foreignCalls,
+      foreignExports: discovery.foreignExports,
       entry: Object.freeze({ _tag: 'UnavailableEntry', reason: discovery.entry.reason }),
       layout,
       staticData,
@@ -698,6 +700,7 @@ export const lowerProgram = (
     module: discovery.rootModule,
     intrinsics: discovery.intrinsics,
     foreignCalls: discovery.foreignCalls,
+    foreignExports: discovery.foreignExports,
     entry,
     layout,
     staticData,

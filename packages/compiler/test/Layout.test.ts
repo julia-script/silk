@@ -908,3 +908,39 @@ it.effect('reports malformed aggregate facts and divergence from the catalog', (
     )
   }),
 )
+
+it.effect('plans a raw pointer as one Copy address-width lane on every target', () =>
+  Effect.gen(function* () {
+    for (const [target, size, bits] of [
+      [Target.aarch64AppleDarwin, 8, 64],
+      [Target.wasm32UnknownUnknown, 4, 32],
+    ] as const) {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'layout/pointer',
+        ascii(`struct Opaque {}
+struct Handle { raw: *mut Opaque }
+pub fn main() -> i32 { return 42 }`),
+      )
+      const catalog = Layout.catalog(target, Analysis.declarationIndex(snapshot))
+      const pointer = Type.pointer(true, Type.nominal('layout/pointer', 'Opaque'))
+      const entry = Layout.catalogEntry(catalog, pointer)
+      assert.strictEqual(entry?._tag, 'LayoutEntry')
+      if (entry?._tag !== 'LayoutEntry') return
+      assert.deepEqual([entry.copy, entry.size, entry.alignment], [true, size, size])
+      const shape = Layout.callingShapes(target, [entry]).at(0)
+      assert.strictEqual(shape?.tree._tag, 'AddressShape')
+      assert.deepEqual(shape?.lanes, [
+        {
+          _tag: 'CallingLane',
+          path: [{ _tag: 'ReferenceAddressSelector' }],
+          type: { _tag: 'Address', element: Type.nominal('layout/pointer', 'Opaque'), bits },
+        },
+      ])
+      const handle = Layout.catalogEntry(catalog, Type.nominal('layout/pointer', 'Handle'))
+      assert.strictEqual(handle?._tag, 'LayoutEntry')
+      if (handle?._tag !== 'LayoutEntry') return
+      assert.deepEqual([handle.size, handle.alignment], [size, size])
+      assert.deepEqual(LayoutVerify.verifyCatalog(catalog), [])
+    }
+  }),
+)

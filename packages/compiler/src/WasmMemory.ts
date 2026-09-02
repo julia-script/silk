@@ -343,6 +343,13 @@ export const framePlan = (
         case 'RawBufferView':
           changed = include(operation.destination, [operation.buffer]) || changed
           break
+        case 'PointerFromReference':
+          changed = include(operation.destination, [operation.source]) || changed
+          break
+        case 'PointerOffset':
+        case 'PointerRead':
+          changed = include(operation.destination, [operation.pointer]) || changed
+          break
         default:
           break
       }

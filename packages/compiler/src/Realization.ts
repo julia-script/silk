@@ -282,6 +282,17 @@ function discoverAndLower(
   if (backend !== undefined) {
     if (targetLayout._tag !== 'Available' || program === undefined)
       throw new RangeError('Driver lowering reached an unavailable target after its gates')
+    const planning = ForeignPlanning.check(
+      program,
+      IntrinsicAvailability.backendTarget(backend.id),
+      targetLayout.target,
+    )
+    if (planning.length > 0)
+      return Object.freeze({
+        _tag: 'Rejected',
+        diagnostics: Diagnostic.merge(diagnostics, planning),
+        report: Object.freeze(report),
+      })
     return Object.freeze({
       _tag: 'Prepared',
       target: targetLayout.target,
@@ -347,6 +358,7 @@ import * as Diagnostic from './Diagnostic.js'
 import * as ExecutableProperty from './ExecutableProperty.js'
 import * as ExecutionBoundary from './ExecutionBoundary.js'
 import * as ForeignAvailability from './ForeignAvailability.js'
+import * as ForeignPlanning from './ForeignPlanning.js'
 import type { Frontend, Options } from './Frontend.js'
 import * as InstanceDiagnostics from './InstanceDiagnostics.js'
 import * as Instances from './Instances.js'

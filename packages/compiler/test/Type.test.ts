@@ -1090,3 +1090,47 @@ it('keeps a free parameter open when a nested callable schema binds the same par
   assert.deepEqual(Type.parameters(wrapped), [parameter])
   assert.strictEqual(Type.isConcrete(wrapped), false)
 })
+
+it('keys raw pointers by mutability and pointee and widens only *mut to *const at a boundary', () => {
+  const constI32 = Type.pointer(false, 'i32')
+  const mutI32 = Type.pointer(true, 'i32')
+  const constU32 = Type.pointer(false, 'u32')
+
+  assert.deepEqual([constI32, mutI32, constU32].map(Type.key), [
+    'pointer:const<builtin:i32>',
+    'pointer:mut<builtin:i32>',
+    'pointer:const<builtin:u32>',
+  ])
+  assert.deepEqual([constI32, mutI32, constU32].map(Type.encode), [
+    '*const i32',
+    '*mut i32',
+    '*const u32',
+  ])
+  assert.strictEqual(Type.isViewBorrow(mutI32), false)
+  assert.strictEqual(Type.containsBorrow(mutI32), false)
+  assert.strictEqual(Type.containsPositionRestrictedBorrow(mutI32), false)
+
+  const mutU8 = Type.pointer(true, 'u8')
+  const constU8 = Type.pointer(false, 'u8')
+  assert.strictEqual(TypeCompatibility.check(mutU8, constU8)._tag, 'PointerMutability')
+  assert.strictEqual(TypeCompatibility.check(constU8, mutU8)._tag, 'Incompatible')
+  assert.strictEqual(
+    TypeCompatibility.check(Type.pointer(true, mutU8), Type.pointer(true, constU8))._tag,
+    'Incompatible',
+  )
+
+  const parameter = Type.parameter({ module: 'test', name: 'identity' }, 0, 'T')
+  const inferred = new Map<string, Type.GenericArgument>()
+  assert.strictEqual(TypeInference.infer(Type.pointer(false, parameter), mutI32, inferred), true)
+  assert.strictEqual(
+    Type.genericArgumentKey(inferred.get(Type.key(parameter)) ?? 'never'),
+    'builtin:i32',
+  )
+  assert.strictEqual(TypeInference.infer(Type.pointer(true, parameter), constI32, new Map()), false)
+  assert.strictEqual(
+    Type.key(
+      Type.substitute(Type.pointer(true, parameter), new Map([[Type.key(parameter), 'u32']])),
+    ),
+    Type.key(Type.pointer(true, 'u32')),
+  )
+})

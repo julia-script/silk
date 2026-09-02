@@ -16,11 +16,11 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | `LEX`  | Lexical   | 12    |
 | `PAR`  | Parser    | 5     |
 | `MOD`  | Module    | 3     |
-| `SEM`  | Semantic  | 185   |
+| `SEM`  | Semantic  | 186   |
 | `OWN`  | Ownership | 16    |
 | `LAY`  | Layout    | 1     |
 
-There are 222 codes in total.
+There are 223 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -246,6 +246,7 @@ There are 222 codes in total.
 | `SEM0191` | Stable code for a native symbol the compiler reserves for its own runtime or entry.                          | `Native symbol <symbol> is reserved by the compiler runtime`                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `SEM0192` | Stable code for two reachable declarations of one symbol with different C signatures.                        | `Foreign symbol <symbol> is declared with a conflicting C signature`                                                                                                                                                                                                                                                                                                                                                                                           |
 | `SEM0193` | Stable code for one reachable foreign call unavailable on the requested execution surface.                   | `Foreign function <symbol> is unavailable for <surface>`                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `SEM0194` | Stable code for an `export "C"` function whose body may suspend.                                             | `Exported function <symbol> may suspend; a C-callable body must be synchronous`                                                                                                                                                                                                                                                                                                                                                                                |
 
 ## Ownership (`OWN`)
 

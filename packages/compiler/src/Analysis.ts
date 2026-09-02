@@ -20,6 +20,7 @@ import * as FrontendTooling from './FrontendTooling.js'
 import * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as ForeignAvailability from './ForeignAvailability.js'
+import * as ForeignPlanning from './ForeignPlanning.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Layout from './Layout.js'
 import * as LlvmBackend from './LlvmBackend.js'
@@ -1126,6 +1127,19 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
     })
   }
   if (self.mir._tag === 'Unavailable') return yield* self.mir.error
+  const planning = ForeignPlanning.check(
+    self.mir.value,
+    IntrinsicAvailability.backendTarget(selected.id),
+    self.mir.value.layout.target,
+  )
+  if (planning.length > 0) {
+    return yield* new CodegenUnavailable({
+      operation: 'Analysis.codegen',
+      message: `${selected.name} cannot emit a program with unplannable native exports`,
+      diagnostics: Diagnostic.merge(self.diagnostics, planning),
+      resolutionFailures: self.closure.resolutionFailures,
+    })
+  }
   return yield* Backend.emit(selected, self.mir.value, {
     ...request,
     sources:

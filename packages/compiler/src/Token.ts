@@ -33,6 +33,7 @@ export type TokenKind =
   | 'DropKeyword'
   | 'UnsafeKeyword'
   | 'ExternKeyword'
+  | 'ExportKeyword'
   | 'ImplKeyword'
   | 'ForKeyword'
   | 'ReturnKeyword'
@@ -121,6 +122,7 @@ const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
   DropKeyword: '`drop`',
   UnsafeKeyword: '`unsafe`',
   ExternKeyword: '`extern`',
+  ExportKeyword: '`export`',
   ImplKeyword: '`impl`',
   ForKeyword: '`for`',
   ReturnKeyword: '`return`',

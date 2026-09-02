@@ -78,6 +78,5 @@ thunk forwarding, on `add-export-c-functions`.
   the Wasm reload reachability.
 - **Intrinsic catalog.** New `Pointer` actor with all-target operations; `CAbi.classify` pointer arm.
 - **Stdlib.** `silk/pointer.silk` with documented wrappers and doctests; manifest entry.
-- **Tests.** Second native corpus: `malloc`, `free`, `memcmp`, `memcpy`, `strlen`, `read`, `write`,
-  `close`, plus a C fixture that mutates through a pointer.
+- **Tests.** Second native corpus: `malloc`, `free`, `memcmp`, `memcpy`, `strlen`, and `write`, plus a C fixture that mutates through a pointer.
 - **Docs.** `values-and-types.md` pointer section, FFI section update, glossary, stdlib reference.

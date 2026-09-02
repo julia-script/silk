@@ -169,6 +169,12 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'RawBufferView':
     case 'RawBufferCopy':
     case 'RawBufferFill':
+    case 'PointerNull':
+    case 'PointerIsNull':
+    case 'PointerFromReference':
+    case 'PointerOffset':
+    case 'PointerRead':
+    case 'PointerWrite':
     case 'SlotWrite':
     case 'SlotTake':
     case 'SlotCopy':

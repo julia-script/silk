@@ -51,6 +51,7 @@ export type Type =
   | { readonly _tag: 'String'; readonly type: SilkType.String }
   | { readonly _tag: 'Slice'; readonly type: SilkType.Slice }
   | { readonly _tag: 'Reference'; readonly type: SilkType.Reference }
+  | { readonly _tag: 'Pointer'; readonly type: SilkType.Pointer }
   | { readonly _tag: 'Union'; readonly type: SilkType.StructuralUnion }
   | {
       readonly _tag: 'EffectBorrow'
@@ -112,6 +113,7 @@ export const semanticType = (self: Type): DeclarationFacts.SemanticType => {
     self._tag === 'String' ||
     self._tag === 'Slice' ||
     self._tag === 'Reference' ||
+    self._tag === 'Pointer' ||
     self._tag === 'Union' ||
     self._tag === 'EffectBorrow' ||
     self._tag === 'EffectOutcome'
@@ -719,6 +721,56 @@ export type Operation =
       readonly length: LocalId
       readonly value: LocalId
       readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /** The null `*mut T` address. */
+      readonly _tag: 'PointerNull'
+      readonly destination: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'Pointer' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /** Tests one pointer lane against null into a `bool` destination. */
+      readonly _tag: 'PointerIsNull'
+      readonly destination: LocalId
+      readonly pointer: LocalId
+      readonly provenance: Provenance
+    }
+  | {
+      /**
+       * Forms a pointer from the address lane of a reference or slice local. Formation is an
+       * ordinary read of the borrow: the result holds no loan and keeps nothing alive.
+       */
+      readonly _tag: 'PointerFromReference'
+      readonly destination: LocalId
+      readonly source: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'Pointer' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /** Advances a pointer by `count` elements of the pointee; validity is the caller's obligation. */
+      readonly _tag: 'PointerOffset'
+      readonly destination: LocalId
+      readonly pointer: LocalId
+      readonly count: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'Pointer' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /** Copies the Copy pointee out of the addressed storage. */
+      readonly _tag: 'PointerRead'
+      readonly destination: LocalId
+      readonly pointer: LocalId
+      readonly type: Type
+      readonly provenance: Provenance
+    }
+  | {
+      /** Stores one Copy value through a `*mut` pointer into a unit destination. */
+      readonly _tag: 'PointerWrite'
+      readonly destination: LocalId
+      readonly pointer: LocalId
+      readonly value: LocalId
       readonly provenance: Provenance
     }
   | {
@@ -1466,6 +1518,8 @@ export interface Module {
   readonly intrinsics: ReadonlyArray<Instances.IntrinsicCall>
   /** Reachable foreign declarations copied from discovery; every availability site reads it. */
   readonly foreignCalls: ReadonlyArray<Instances.ForeignCall>
+  /** Native export roots with the C signature each thunk publishes. */
+  readonly foreignExports: ReadonlyArray<Instances.ForeignExport>
   readonly layout: Layout.Plan
   readonly staticData?: ReadonlyArray<StaticText.Data>
   readonly functions: ReadonlyArray<MirFunction>
@@ -1657,6 +1711,7 @@ export interface Violation {
     | 'InvalidOsOperation'
     | 'InvalidForeignCall'
     | 'InvalidRawStorageOperation'
+    | 'InvalidPointerOperation'
     | 'InvalidLocalSharedOperation'
     | 'InvalidExecutionOperation'
     | 'InvalidCallShape'

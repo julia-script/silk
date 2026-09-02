@@ -320,6 +320,7 @@ export const analyzeCallTypeArguments = (
         element.kind === 'FixedArrayType' ||
         element.kind === 'SliceType' ||
         element.kind === 'ReferenceType' ||
+        element.kind === 'PointerType' ||
         element.kind === 'CallableType' ||
         element.kind === 'ParenthesizedType' ||
         element.kind === 'UnionType'),

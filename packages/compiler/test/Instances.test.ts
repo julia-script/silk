@@ -9,6 +9,7 @@ import type * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
+import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -730,5 +731,64 @@ pub fn main() -> i32 {
           true,
         )
     }
+  }),
+)
+
+it.effect('discovers an uncalled native export after main and none for a Wasm target', () =>
+  Effect.gen(function* () {
+    const source = `export "C" fn silk_test_double_v1(value: i32) -> i32 { return value * 2 }
+pub fn main() -> i32 { return 0 }`
+    const native = Analysis.instancesOf(yield* snapshot(source))
+    assert.deepEqual(
+      native.instances.map((instance) => instance.key.declaration.name),
+      ['main', 'silk_test_double_v1'],
+    )
+    assert.deepEqual(
+      native.foreignExports.map((record) => [record.symbol, Instances.keyText(record.key)]),
+      [
+        [
+          'silk_test_double_v1',
+          Instances.keyText(
+            native.instances.at(1)?.key ?? unreachable('expected the export instance'),
+          ),
+        ],
+      ],
+    )
+    const wasm = Analysis.instancesOf(
+      yield* Analysis.ofSourceRealized('golden/program', ascii(source), 'wasm32-unknown-unknown'),
+    )
+    assert.deepEqual(
+      wasm.instances.map((instance) => instance.key.declaration.name),
+      ['main'],
+    )
+  }),
+)
+
+it.effect('keys pointer instances by pointee and mutability without reaching the pointee', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.vector { Vector }
+fn probe<T>(flag: bool) -> bool { return flag }
+fn hold(value: *mut Vector<i32>) -> i32 { return 0 }
+pub fn main() -> i32 {
+  let first = probe<*const i32>(true)
+  let second = probe<*mut i32>(true)
+  let third = probe<*mut Vector<i32>>(true)
+  return 0
+}`)
+
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    const discovery = Analysis.instancesOf(result)
+    assert.deepEqual(
+      discovery.instances.map((instance) => ({
+        name: instance.key.declaration.name,
+        arguments: instance.key.typeArguments.map(Type.encodeGenericArgument),
+      })),
+      [
+        { name: 'main', arguments: [] },
+        { name: 'probe', arguments: ['*const i32'] },
+        { name: 'probe', arguments: ['*mut i32'] },
+        { name: 'probe', arguments: ['*mut silk/vector.Vector<i32>'] },
+      ],
+    )
   }),
 )

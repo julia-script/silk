@@ -767,3 +767,145 @@ it('throws when target validation lets a ForeignCall reach the evaluator', () =>
   })
   assert.throws(() => BootstrapEvaluation.evaluate(discovery, program), RangeError)
 })
+
+it.effect('runs main and ignores an uncalled export root', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'memory/evaluation',
+      ascii(`export "C" fn silk_test_double_v1(value: i32) -> i32 { return value * 2 }
+pub fn main() -> i32 { return 42 }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag !== 'Completed') return
+    assert.deepEqual(outcome.result, { _tag: 'IntegerValue', type: 'i32', value: 42n })
+  }),
+)
+
+it.effect('writes and reads array elements through an offset slice pointer', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`import silk.pointer as Pointer
+pub fn main() -> i32 {
+  let mut values = [1, 2, 3, 4]
+  let pointer = Pointer.fromMutSlice(&mut values)
+  unsafe {
+    let third = Pointer.offsetMut(pointer, 2)
+    Pointer.write(third, 7)
+  }
+  return values[2]
+}`)
+
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 7n)
+  }),
+)
+
+it.effect('reads the second raw-buffer element through an offset ticket pointer', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`import silk.allocator { Allocator }
+import silk.effect { Effect }
+import silk.layout { Layout }
+import silk.pointer { Pointer }
+import silk.raw_buffer { RawBuffer }
+import silk.u8
+
+effect fn build() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let acquiring = Allocator.allocate(Layout.of<[u8; 3]>())
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let allocation = run acquiring
+  unsafe {
+    let mut buffer = RawBuffer.from<u8>(move allocation, 3)
+    let filled = RawBuffer.fill(&mut buffer, 0, 3, u8.toU8(14))
+    let marked = RawBuffer.fill(&mut buffer, 1, 1, u8.toU8(9))
+    let pointer = Pointer.fromSlice(RawBuffer.view<u8>(&buffer, 0, 3))
+    return u8.toI32(Pointer.read(Pointer.offset(pointer, 1)))
+  }
+  return 0
+}
+
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(build(), recover)
+}`)
+
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 9n)
+  }),
+)
+
+it.effect('writes a scalar through a pointer formed from an exclusive reference', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`import silk.pointer as Pointer
+pub fn main() -> i32 {
+  let mut x = 1
+  let pointer = Pointer.fromMutRef(&mut x)
+  unsafe {
+    Pointer.write(pointer, 7)
+  }
+  return x
+}`)
+
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 7n)
+  }),
+)
+
+it.effect('traps a dereference of a pointer to a returned frame as data', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`import silk.pointer as Pointer
+fn dangling() -> *const i32 {
+  let local = 5
+  return Pointer.fromRef(&local)
+}
+pub fn main() -> i32 {
+  let pointer = dangling()
+  unsafe {
+    return Pointer.read(pointer)
+  }
+}`)
+
+    assert.strictEqual(outcome._tag, 'Trap', Json.stringify(outcome, 2))
+    if (outcome._tag !== 'Trap') return
+    assert.strictEqual(outcome.reason, 'Pointer.read through a pointer whose frame has returned')
+  }),
+)
+
+it.effect('traps a write through the null pointer naming the primitive', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`import silk.pointer as Pointer
+pub fn main() -> i32 {
+  unsafe {
+    Pointer.write(Pointer.null<i32>(), 7)
+  }
+  return 0
+}`)
+
+    assert.strictEqual(outcome._tag, 'Trap', Json.stringify(outcome, 2))
+    if (outcome._tag !== 'Trap') return
+    assert.strictEqual(outcome.reason, 'Pointer.write through a null pointer')
+  }),
+)
+
+it.effect('distinguishes the null pointer from a formed one', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`import silk.pointer as Pointer
+pub fn main() -> i32 {
+  let x = 1
+  if Pointer.isNull(Pointer.fromRef(&x)) {
+    return 2
+  }
+  if Pointer.isNull(Pointer.null<i32>()) {
+    return 0
+  }
+  return 1
+}`)
+
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
+    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 0n)
+  }),
+)

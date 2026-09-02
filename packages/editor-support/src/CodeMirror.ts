@@ -58,6 +58,7 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
   DropKeyword: keyword,
   UnsafeKeyword: keyword,
   ExternKeyword: keyword,
+  ExportKeyword: keyword,
   ImplKeyword: keyword,
   ForKeyword: keyword,
   ReturnKeyword: keyword,
