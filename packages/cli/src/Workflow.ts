@@ -53,6 +53,7 @@ export interface CompileOptions {
   readonly profile: ToolchainPlan.OptimizationProfile
   readonly destination: string
   readonly toolchain: NativeToolchain.Toolchain
+  readonly nativeLibraries?: ReadonlyArray<string>
   readonly scopeName: string
   readonly saveTemps?: boolean
   readonly timings?: boolean
@@ -132,6 +133,9 @@ export const compile = Effect.fn('Workflow.compile')(function* (
       },
       backend: options.backend,
       toolchain: options.toolchain,
+      ...(options.nativeLibraries === undefined
+        ? {}
+        : { nativeLibraries: options.nativeLibraries }),
       profile: options.profile,
       destination: options.destination,
       scopeName: options.scopeName,
@@ -270,6 +274,7 @@ export const buildProject = Effect.fn('Workflow.buildProject')(function* (
         profile: plan.profile,
         destination: plan.destination,
         toolchain: plan.toolchain,
+        nativeLibraries: plan.nativeLibraries,
         scopeName: `${plan.project.name}-${plan.backend.id}-${plan.target.id}`,
       }),
     { concurrency: 1 },
@@ -563,6 +568,7 @@ export const run = Effect.fn('Workflow.run')(function* (
     profile: plan.profile,
     destination: plan.destination,
     toolchain: plan.toolchain,
+    nativeLibraries: plan.nativeLibraries,
     scopeName: plan.project.name,
   })
   if (attempted._tag === 'NotBuilt') return attempted.status

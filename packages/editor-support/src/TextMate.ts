@@ -26,6 +26,7 @@ export const keywords: Record<KeywordKind, string> = {
   FailKeyword: 'fail',
   DropKeyword: 'drop',
   UnsafeKeyword: 'unsafe',
+  ExternKeyword: 'extern',
   ImplKeyword: 'impl',
   ForKeyword: 'for',
   ReturnKeyword: 'return',

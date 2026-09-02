@@ -252,6 +252,21 @@ pub effect fn main() -> i32 {
   }),
 )
 
+it.effect('hovers a foreign function with its unsafe signature and native symbol', () =>
+  Effect.gen(function* () {
+    const source = `pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"
+pub fn main() -> i32 { return unsafe cAbs(-1) }`
+    const { document, snapshot } = yield* open(source)
+    const declaration = Document.hover(document, snapshot, positionOf(source, 'cAbs', 0))
+    const reference = Document.hover(document, snapshot, positionOf(source, 'cAbs', 1))
+    assert.deepEqual(declaration?.contents, {
+      kind: 'markdown',
+      value: '```silk\npub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"\n```',
+    })
+    assert.deepEqual(reference?.contents, declaration?.contents)
+  }),
+)
+
 it.effect('appends full declaration documentation to definition and reference hovers', () =>
   Effect.gen(function* () {
     const source = `/// Recovers a problem.
@@ -843,6 +858,7 @@ it.effect('lists constants, roles, functions, and structs with fields as documen
 pub role Primary
 pub type Answer = i32
 pub struct Box { answer: i32 }
+pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"
 pub fn main() -> i32 { return 42 }`
     const { document, snapshot } = yield* open(source)
     const symbols = Document.symbols(document, snapshot)
@@ -853,6 +869,7 @@ pub fn main() -> i32 { return 42 }`
         ['Primary', SymbolKind.Enum],
         ['Answer', SymbolKind.Interface],
         ['Box', SymbolKind.Struct],
+        ['cAbs', SymbolKind.Function],
         ['main', SymbolKind.Function],
       ],
     )

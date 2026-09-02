@@ -901,6 +901,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = ${Intrinsic.operationText(operation.operation)}(${operation.arguments.map(localText).join(', ')}) via ${localText(operation.success)}/${localText(operation.failure)}`
     case 'OsCall':
       return `${localText(operation.destination)} = ${Intrinsic.operationText(operation.operation)}(${operation.arguments.map(localText).join(', ')})`
+    case 'ForeignCall':
+      return `${localText(operation.destination)} = extern "C" ${operation.symbol}(${operation.arguments.map(localText).join(', ')})`
     case 'SharedFromAllocation':
       return `${localText(operation.destination)} = shared core from ${localText(operation.allocation)} with ${localText(operation.value)}`
     case 'ExecutionFromAllocation':
@@ -1470,6 +1472,8 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
     case 'MissingRandomHost':
       return 'missing RandomHost provider'
     case 'IntrinsicTargetUnavailable':
+      return reason.diagnostics.map((diagnostic) => diagnostic.message).join(' · ')
+    case 'ForeignTargetUnavailable':
       return reason.diagnostics.map((diagnostic) => diagnostic.message).join(' · ')
   }
 }

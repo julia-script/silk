@@ -71,6 +71,9 @@ export interface CorpusProgram {
   readonly nativeSource?: string
   readonly nativeImports?: Readonly<Record<string, string>>
   readonly nativeEnvironment?: Readonly<Record<string, string>>
+  /** C translation units compiled with `compileCObject` and linked through `nativeObjects`. */
+  readonly nativeCSources?: Readonly<Record<string, string>>
+  readonly nativeLibraries?: ReadonlyArray<string>
   readonly nativeStdout?: string
   readonly expected:
     | { readonly _tag: 'Completes'; readonly result: number }
@@ -2908,8 +2911,141 @@ pub fn main() -> i32 {
   return 42
 }`
 
+/**
+ * One C function per admitted foreign scalar class plus a void function observed through a second
+ * query, so the native leg exercises every C ABI lane shape the classifier can select.
+ */
+export const foreignScalarFixture = `#include <stdint.h>
+#include <stddef.h>
+int8_t silk_test_add_i8(int8_t a, int8_t b) { return (int8_t)(a + b); }
+uint8_t silk_test_add_u8(uint8_t a, uint8_t b) { return (uint8_t)(a + b); }
+int16_t silk_test_add_i16(int16_t a, int16_t b) { return (int16_t)(a + b); }
+uint16_t silk_test_add_u16(uint16_t a, uint16_t b) { return (uint16_t)(a + b); }
+int32_t silk_test_add_i32(int32_t a, int32_t b) { return a + b; }
+uint32_t silk_test_add_u32(uint32_t a, uint32_t b) { return a + b; }
+int64_t silk_test_add_i64(int64_t a, int64_t b) { return a + b; }
+uint64_t silk_test_add_u64(uint64_t a, uint64_t b) { return a + b; }
+intptr_t silk_test_add_isize(intptr_t a, intptr_t b) { return a + b; }
+size_t silk_test_add_usize(size_t a, size_t b) { return a + b; }
+float silk_test_scale_f32(float value, float factor) { return value * factor; }
+double silk_test_scale_f64(double value, double factor) { return value * factor; }
+static int32_t silk_test_counter = 0;
+void silk_test_touch(void) { silk_test_counter += 1; }
+int32_t silk_test_touched(void) { return silk_test_counter; }
+`
+
+/** The extern leg of the scalar fixture; `foreignScalarReference` computes the same checksum. */
+export const foreignScalarNative = `import silk.i8 as i8
+import silk.u8 as u8
+import silk.i16 as i16
+import silk.u16 as u16
+import silk.i32 as i32
+import silk.u32 as u32
+import silk.i64 as i64
+import silk.u64 as u64
+import silk.isize as isize
+import silk.usize as usize
+import silk.f32 as f32
+import silk.f64 as f64
+unsafe extern "C" fn silk_test_add_i8(a: i8, b: i8) -> i8
+unsafe extern "C" fn silk_test_add_u8(a: u8, b: u8) -> u8
+unsafe extern "C" fn silk_test_add_i16(a: i16, b: i16) -> i16
+unsafe extern "C" fn silk_test_add_u16(a: u16, b: u16) -> u16
+unsafe extern "C" fn silk_test_add_i32(a: i32, b: i32) -> i32
+unsafe extern "C" fn silk_test_add_u32(a: u32, b: u32) -> u32
+unsafe extern "C" fn silk_test_add_i64(a: i64, b: i64) -> i64
+unsafe extern "C" fn silk_test_add_u64(a: u64, b: u64) -> u64
+unsafe extern "C" fn silk_test_add_isize(a: isize, b: isize) -> isize
+unsafe extern "C" fn silk_test_add_usize(a: usize, b: usize) -> usize
+unsafe extern "C" fn silk_test_scale_f32(value: f32, factor: f32) -> f32
+unsafe extern "C" fn silk_test_scale_f64(value: f64, factor: f64) -> f64
+unsafe extern "C" fn silk_test_touch() -> ()
+unsafe extern "C" fn silk_test_touched() -> i32
+pub fn main() -> i32 {
+  let mut sum = 0
+  sum = sum + i8.toI32(unsafe silk_test_add_i8(i32.toI8(-7), i32.toI8(3)))
+  sum = sum + u8.toI32(unsafe silk_test_add_u8(i32.toU8(200), i32.toU8(5)))
+  sum = sum + i16.toI32(unsafe silk_test_add_i16(i32.toI16(-300), i32.toI16(50)))
+  sum = sum + u16.toI32(unsafe silk_test_add_u16(i32.toU16(60000), i32.toU16(7)))
+  sum = sum + unsafe silk_test_add_i32(-11, 4)
+  sum = sum + u32.toI32(unsafe silk_test_add_u32(i32.toU32(9), i32.toU32(13)))
+  sum = sum + i64.toI32(unsafe silk_test_add_i64(i32.toI64(-21), i32.toI64(6)))
+  sum = sum + u64.toI32(unsafe silk_test_add_u64(i32.toU64(17), i32.toU64(23)))
+  sum = sum + isize.toI32(unsafe silk_test_add_isize(i32.toIsize(-5), i32.toIsize(2)))
+  sum = sum + usize.toI32(unsafe silk_test_add_usize(i32.toUsize(8), i32.toUsize(9)))
+  sum = sum + f32.toI32(unsafe silk_test_scale_f32(i32.toF32(3), i32.toF32(7)))
+  sum = sum + f64.toI32(unsafe silk_test_scale_f64(i32.toF64(-4), i32.toF64(5)))
+  unsafe silk_test_touch()
+  unsafe silk_test_touch()
+  unsafe silk_test_touch()
+  sum = sum + unsafe silk_test_touched() * 10
+  return i32.remainder(sum, 256)
+}`
+
+/** Pure-Silk evaluator reference for `foreignScalarNative`: the same checksum without C. */
+export const foreignScalarReference = `import silk.i8 as i8
+import silk.u8 as u8
+import silk.i16 as i16
+import silk.u16 as u16
+import silk.i32 as i32
+import silk.u32 as u32
+import silk.i64 as i64
+import silk.u64 as u64
+import silk.isize as isize
+import silk.usize as usize
+import silk.f32 as f32
+import silk.f64 as f64
+fn addI8(a: i8, b: i8) -> i8 { return a + b }
+fn addU8(a: u8, b: u8) -> u8 { return a + b }
+fn addI16(a: i16, b: i16) -> i16 { return a + b }
+fn addU16(a: u16, b: u16) -> u16 { return a + b }
+fn addI32(a: i32, b: i32) -> i32 { return a + b }
+fn addU32(a: u32, b: u32) -> u32 { return a + b }
+fn addI64(a: i64, b: i64) -> i64 { return a + b }
+fn addU64(a: u64, b: u64) -> u64 { return a + b }
+fn addIsize(a: isize, b: isize) -> isize { return a + b }
+fn addUsize(a: usize, b: usize) -> usize { return a + b }
+fn scaleF32(value: f32, factor: f32) -> f32 { return value * factor }
+fn scaleF64(value: f64, factor: f64) -> f64 { return value * factor }
+pub fn main() -> i32 {
+  let mut sum = 0
+  sum = sum + i8.toI32(addI8(i32.toI8(-7), i32.toI8(3)))
+  sum = sum + u8.toI32(addU8(i32.toU8(200), i32.toU8(5)))
+  sum = sum + i16.toI32(addI16(i32.toI16(-300), i32.toI16(50)))
+  sum = sum + u16.toI32(addU16(i32.toU16(60000), i32.toU16(7)))
+  sum = sum + addI32(-11, 4)
+  sum = sum + u32.toI32(addU32(i32.toU32(9), i32.toU32(13)))
+  sum = sum + i64.toI32(addI64(i32.toI64(-21), i32.toI64(6)))
+  sum = sum + u64.toI32(addU64(i32.toU64(17), i32.toU64(23)))
+  sum = sum + isize.toI32(addIsize(i32.toIsize(-5), i32.toIsize(2)))
+  sum = sum + usize.toI32(addUsize(i32.toUsize(8), i32.toUsize(9)))
+  sum = sum + f32.toI32(scaleF32(i32.toF32(3), i32.toF32(7)))
+  sum = sum + f64.toI32(scaleF64(i32.toF64(-4), i32.toF64(5)))
+  let mut touched = 0
+  touched = touched + 1
+  touched = touched + 1
+  touched = touched + 1
+  sum = sum + touched * 10
+  return i32.remainder(sum, 256)
+}`
+
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   ...corpus,
+  {
+    name: 'foreign-scalar-fixture',
+    source: foreignScalarReference,
+    nativeSource: foreignScalarNative,
+    nativeCSources: { silk_test_foreign_scalars: foreignScalarFixture },
+    expected: { _tag: 'Completes', result: 139 },
+  },
+  {
+    name: 'foreign-libc-abs',
+    source: `fn magnitude(value: i32) -> i32 { if value < 0 { return 0 - value } return value }
+pub fn main() -> i32 { return magnitude(-42) }`,
+    nativeSource: `unsafe extern "C" fn abs(value: i32) -> i32
+pub fn main() -> i32 { return unsafe abs(-42) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   {
     name: 'recovered-provided-write',
     source: 'pub fn main() -> i32 { return 0 }',

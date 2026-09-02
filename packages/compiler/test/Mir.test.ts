@@ -2,9 +2,11 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as CAbi from '../src/CAbi.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
+import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
 import * as MirSamples from './support/mirSamples.js'
 
@@ -281,6 +283,7 @@ it('reports broken graphs deterministically as data', () => {
     _tag: 'MirModule',
     module: 'sample://broken.silk',
     intrinsics: straight?.intrinsics ?? raise('expected the sample intrinsic inventory'),
+    foreignCalls: Object.freeze([]),
     entry: straight?.entry ?? raise('expected the sample entry'),
     layout: straight?.layout ?? raise('expected the sample layout'),
     executionTransitions: straight?.executionTransitions ?? Object.freeze([]),
@@ -494,4 +497,62 @@ it('constructs and encodes byte-identically across repeated runs', () => {
 
   assert.deepEqual(first, second)
   assert.deepEqual(first.map(MirEncoding.encode), second.map(MirEncoding.encode))
+})
+
+it.effect('lowers a foreign call to one ForeignCall carrying the classified C signature', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'mir/foreign-call',
+      ascii(`unsafe extern "C" fn abs(value: i32) -> i32
+pub fn main() -> i32 { return unsafe abs(-42) }`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    const main = program.functions.find((fn) => fn.id.name === 'main') ?? raise('expected main')
+    const calls = main.regions.flatMap((region) =>
+      region._tag === 'OperationRegion'
+        ? region.operations.flatMap((operation) =>
+            operation._tag === 'ForeignCall' ? [operation] : [],
+          )
+        : [],
+    )
+    assert.deepEqual(
+      calls.map((call) => ({
+        symbol: call.symbol,
+        abi: call.abi,
+        signature: CAbi.signatureKey(call.signature),
+        arguments: call.arguments.map((local) => main.localTypes.at(local.ordinal)?._tag),
+        destination: main.localTypes.at(call.destination.ordinal)?._tag,
+      })),
+      [
+        {
+          symbol: 'abs',
+          abi: 'C',
+          signature: '(i32)->i32',
+          arguments: ['i32'],
+          destination: 'i32',
+        },
+      ],
+    )
+    assert.deepEqual(MirVerification.verify(program), [])
+    const encoded = MirEncoding.encode(program)
+    assert.include(
+      encoded,
+      'foreign abs abi=C signature=(i32)->i32 declaration=mir/foreign-call.abs',
+    )
+    assert.include(encoded, '= foreign-call abs abi=C signature=(i32)->i32(')
+    assert.strictEqual(MirEncoding.encode(program), encoded)
+  }),
+)
+
+it('verifies foreign call arity and C classes as structural violations', () => {
+  const valid = MirSamples.foreignCallSample(Target.aarch64AppleDarwin)
+  assert.deepEqual(MirVerification.verify(valid), [])
+  assert.strictEqual(MirEncoding.encode(valid), MirEncoding.encode(valid))
+  const arityMismatch = MirSamples.foreignCallSample(Target.aarch64AppleDarwin, [])
+  assert.deepEqual(
+    MirVerification.verify(arityMismatch).map((violation) => violation.rule),
+    ['InvalidForeignCall'],
+  )
 })

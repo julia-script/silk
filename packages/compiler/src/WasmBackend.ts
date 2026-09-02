@@ -7582,6 +7582,10 @@ const emitOperationWithContext = (
     case 'OsOpen':
     case 'OsCall':
       return emitOsCallOperation(operation, context)
+    case 'ForeignCall':
+      throw new RangeError(
+        `Target validation allowed a foreign call into Wasm: ${operation.symbol}`,
+      )
     case 'RawBufferFrom':
       return emitRawBufferFromOperation(operation, context)
     case 'SharedFromAllocation':
@@ -9919,6 +9923,7 @@ export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = O
       termination: Backend.terminationOf(program),
       nativeRuntimeSymbols: Object.freeze([]),
       runtimeFeatures: output.runtimeFeatures,
+      foreignImports: Object.freeze([]),
       control: controlProvenance(program),
       bytes: output.bitcode,
       wat: output.ir,

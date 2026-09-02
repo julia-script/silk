@@ -1757,6 +1757,11 @@ const declaration = (value: DeclarationFacts.DeclarationFact): string =>
     value.phase,
     value.functionKind,
     boolean(value.unsafe),
+    optional(
+      value.foreign === undefined
+        ? undefined
+        : record('Foreign', [value.foreign.abi, value.foreign.symbol]),
+    ),
     array(value.typeParameters.map(typeParameter)),
     number(value.parameterCount),
     array(value.parameters.map(parameter)),

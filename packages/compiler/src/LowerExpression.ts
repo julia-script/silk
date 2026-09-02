@@ -14,6 +14,7 @@ import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type { LoweredExpression } from './EffectLowering.js'
+import * as ExecutableOrigin from './ExecutableOrigin.js'
 import {
   borrowedWriteRoot,
   endLoans,
@@ -1983,6 +1984,26 @@ export function lowerExpressionInner(
         const lowered = lowerExpression(fn, argument, availableRequirements)
         if (lowered === undefined) return undefined
         argumentLocals.push(lowered.result)
+      }
+      // A foreign header has no instance: the call names a native symbol under its C signature.
+      const foreign = ExecutableOrigin.foreignFact(fn.index, expression.target)
+      if (foreign?.foreign !== undefined) {
+        const type = fn.type(expression.type)
+        if (type === undefined) return undefined
+        const destination = fn.alloc(type)
+        fn.emit(
+          Object.freeze({
+            _tag: 'ForeignCall',
+            destination,
+            symbol: foreign.foreign.symbol,
+            abi: 'C',
+            signature: ExecutableOrigin.foreignSignature(foreign, fn.layout.target),
+            arguments: Object.freeze(argumentLocals),
+            type,
+            provenance: Object.freeze({ span: expression.span, generated: false }),
+          }),
+        )
+        return Object.freeze({ result: destination })
       }
       const authoredTypeArguments = expression.typeArguments.map((argument) =>
         fn.semanticArgument(argument),

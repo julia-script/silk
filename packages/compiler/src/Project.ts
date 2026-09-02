@@ -26,6 +26,8 @@ export interface BuildConfiguration {
   readonly backend: Backend.Id
   readonly targets: ReadonlyArray<TargetSelector.TargetSelector>
   readonly outputDirectory: string
+  /** Library names the native link passes as `-l<name>`; ignored for WebAssembly targets. */
+  readonly nativeLibraries: ReadonlyArray<string>
 }
 
 export type ProjectErrorReason =
@@ -56,6 +58,12 @@ export const isPackageName = (name: string): boolean => packageNamePattern.test(
 
 /** Whether a package version is a complete Semantic Versioning 2.0.0 value. */
 export const isSemanticVersion = (version: string): boolean => semanticVersionPattern.test(version)
+
+const isLibraryName = (value: TomlValue): value is string =>
+  typeof value === 'string' &&
+  value.length > 0 &&
+  !value.startsWith('-') &&
+  !/[\s\0/\\]/.test(value)
 
 const isTable = (value: TomlValue | undefined): value is TomlTable =>
   typeof value === 'object' &&
@@ -152,6 +160,13 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
       'build.output-dir must be a non-empty manifest-relative directory that does not escape the project',
     )
   }
+  const nativeLibraries = buildTable?.['native-libraries'] ?? []
+  if (!Array.isArray(nativeLibraries) || !nativeLibraries.every(isLibraryName)) {
+    return yield* invalidManifest(
+      manifestPath,
+      'build.native-libraries must be an array of library names without path separators, whitespace, NUL, or a leading -',
+    )
+  }
   return {
     name,
     version,
@@ -160,6 +175,7 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
     backend,
     targets: Object.freeze([...targetsValue]) as ReadonlyArray<TargetSelector.TargetSelector>,
     outputDirectory,
+    nativeLibraries: Object.freeze([...nativeLibraries]),
   }
 })
 
@@ -251,6 +267,7 @@ export const load = Effect.fn('Project.load')(function* (
       backend: manifest.backend,
       targets: manifest.targets,
       outputDirectory: path.resolve(directory, manifest.outputDirectory),
+      nativeLibraries: manifest.nativeLibraries,
     }),
   })
 })

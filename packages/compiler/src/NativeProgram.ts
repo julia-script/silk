@@ -9,7 +9,7 @@ import * as LlvmType from '@silklang/llvm/Type'
 import * as Variable from '@silklang/llvm/Variable'
 import * as Verify from '@silklang/llvm/Verify'
 import * as Effect from 'effect/Effect'
-import type { CodegenRequest, RuntimeFeature, SymbolEntry } from './Backend.js'
+import type { CodegenRequest, ForeignImport, RuntimeFeature, SymbolEntry } from './Backend.js'
 import {
   BackendError,
   formatModuleViolations,
@@ -17,6 +17,7 @@ import {
   sanitize,
   suspensionPointKey,
 } from './Backend.js'
+import * as CAbi from './CAbi.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
 import * as CoroutineRuntime from './CoroutineRuntime.js'
 import * as Instances from './Instances.js'
@@ -27,6 +28,7 @@ import * as MirVerification from './MirVerification.js'
 import * as NativeCall from './NativeCall.js'
 import type * as NativeDebug from './NativeDebug.js'
 import * as NativeDeclare from './NativeDeclare.js'
+import type * as NativeForeignOperation from './NativeForeignOperation.js'
 import * as NativeFunction from './NativeFunction.js'
 import type * as NativeLanePointer from './NativeLanePointer.js'
 import * as NativeOperation from './NativeOperation.js'
@@ -42,6 +44,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     readonly symbols: ReadonlyArray<SymbolEntry>
     readonly nativeRuntimeSymbols: ReadonlyArray<string>
     readonly runtimeFeatures: ReadonlyArray<RuntimeFeature>
+    readonly foreignImports: ReadonlyArray<ForeignImport>
     /** Renders the textual IR on demand; most compiles never read it. */
     readonly renderIr: () => string
     readonly bitcode: Uint8Array
@@ -313,6 +316,46 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     )
   }
 
+  // Foreign symbols are declared once each under the default (C) calling convention with the
+  // LLVM types the classified C signature selects; agreeing redeclarations share one entry.
+  const foreignFunctions = new Map<string, NativeForeignOperation.Declaration>()
+  const cType = (type: CAbi.CAbiType): LlvmType.Type | undefined => {
+    switch (type._tag) {
+      case 'Void':
+        return undefined
+      case 'Float':
+        return type.bits === 32 ? f32 : f64
+      case 'Integer':
+        return integerTypes.get(type.bits)
+    }
+  }
+  for (const call of program.foreignCalls) {
+    if (foreignFunctions.has(call.symbol)) continue
+    const parameters = call.signature.parameters.map(cType)
+    if (parameters.some((type) => type === undefined))
+      throw new RangeError(`LLVM foreign function ${call.symbol} has a void parameter`)
+    const handle = yield* FunctionActor.declare(
+      builder,
+      call.symbol,
+      yield* LlvmType.functionType(
+        builder,
+        cType(call.signature.result) ?? voidType ?? (yield* LlvmType.voidType(builder)),
+        parameters.flatMap((type) => (type === undefined ? [] : [type])),
+      ),
+    ).pipe(
+      Effect.mapError(
+        (cause) =>
+          new BackendError({
+            operation: 'Backend.emit',
+            backend: 'LLVM',
+            message: `foreign function ${call.symbol} conflicts with the native runtime's own declaration of that symbol: ${cause.message}`,
+            reason: { _tag: 'ForeignSymbolConflict', symbol: call.symbol },
+          }),
+      ),
+    )
+    foreignFunctions.set(call.symbol, Object.freeze({ handle, signature: call.signature }))
+  }
+
   const functionDeclarations = yield* NativeDeclare.functions(
     Object.freeze({ builder, program, i32, pointer, lanesFor, laneType }),
   )
@@ -457,6 +500,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ...(memcmp === undefined ? {} : { memcmp }),
       ...(standardWrite === undefined ? {} : { standardWrite }),
       osRuntimes,
+      foreignFunctions,
       declared,
       originThunks,
       resumeThunks,
@@ -519,6 +563,17 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ...(suspensionEnabled ? CoroutineRuntime.symbols : []),
     ]),
     runtimeFeatures: Object.freeze([...runtimeFeatures].sort()),
+    foreignImports: Object.freeze(
+      [...foreignFunctions]
+        .sort(([left], [right]) => left.localeCompare(right, 'en'))
+        .map(([symbol, foreign]) =>
+          Object.freeze({
+            symbol,
+            parameters: Object.freeze(foreign.signature.parameters.map(CAbi.typeText)),
+            result: CAbi.typeText(foreign.signature.result),
+          }),
+        ),
+    ),
     renderIr: () => Effect.runSyncWith(context)(IrText.render(builder)),
     bitcode: yield* Bitcode.encode(builder),
   }

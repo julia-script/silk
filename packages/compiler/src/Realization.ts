@@ -107,6 +107,20 @@ function discoverAndLower(
       diagnostics: baseDiagnostics,
       report: Object.freeze(report),
     })
+  const foreignDiagnostics =
+    backend === undefined || targetSelection._tag === 'Unavailable'
+      ? Object.freeze([])
+      : ForeignAvailability.select(
+          instances.foreignCalls,
+          IntrinsicAvailability.backendTarget(backend.id),
+          targetSelection.target,
+        )
+  if (foreignDiagnostics.length > 0)
+    return Object.freeze({
+      _tag: 'Rejected',
+      diagnostics: Diagnostic.merge(baseDiagnostics, foreignDiagnostics),
+      report: Object.freeze(report),
+    })
   const analysisUnavailable = (() => {
     if (backend !== undefined) return undefined
     if (specializationInvalid || Diagnostic.hasGenericSpecializationErrors(baseDiagnostics))
@@ -332,6 +346,7 @@ import * as CoroutineFrame from './CoroutineFrame.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as ExecutableProperty from './ExecutableProperty.js'
 import * as ExecutionBoundary from './ExecutionBoundary.js'
+import * as ForeignAvailability from './ForeignAvailability.js'
 import type { Frontend, Options } from './Frontend.js'
 import * as InstanceDiagnostics from './InstanceDiagnostics.js'
 import * as Instances from './Instances.js'

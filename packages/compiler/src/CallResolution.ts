@@ -1871,8 +1871,13 @@ export const analyzeFunctionItem = (
         })
       : [],
   )
+  // A foreign function is callable only; the call path discards this item and resolves the
+  // declaration directly, so the diagnostic survives exactly at first-class uses.
+  const foreign = foreignFirstClassDiagnostic(reference, node)
   const type =
-    callable === undefined ? unavailableExpressionType : availableExpressionType(callable)
+    callable === undefined || foreign !== undefined
+      ? unavailableExpressionType
+      : availableExpressionType(callable)
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'FunctionItem',
@@ -1882,10 +1887,18 @@ export const analyzeFunctionItem = (
       type,
       syntax: node,
     }),
-    diagnostics: Object.freeze([]),
-    type: callable,
+    diagnostics: Object.freeze(foreign === undefined ? [] : [foreign]),
+    type: foreign === undefined ? callable : undefined,
   })
 }
+
+const foreignFirstClassDiagnostic = (
+  reference: CallReferenceFact,
+  node: SyntaxTree.Node,
+): Diagnostic.Diagnostic | undefined =>
+  reference._tag === 'Resolved' && reference.declaration.foreign !== undefined
+    ? Diagnostic.foreignFunctionNotFirstClass(reference.spelling, node.span)
+    : undefined
 
 export interface SectionContractResult {
   readonly substitution: Type.Substitution
@@ -2312,8 +2325,9 @@ export const finishCallableSection = (
     mode,
     argumentsResult.facts.length,
   )
+  const foreign = foreignFirstClassDiagnostic(reference, node)
   const type =
-    contract.valid && callable !== undefined
+    contract.valid && callable !== undefined && foreign === undefined
       ? availableExpressionType(callable)
       : unavailableExpressionType
   const environmentOwner = executableSpecializationOwner(resolution)
@@ -2345,6 +2359,7 @@ export const finishCallableSection = (
       ...argumentsResult.diagnostics,
       ...callTypeArguments.diagnostics,
       ...contract.diagnostics,
+      ...(foreign === undefined ? [] : [foreign]),
     ]),
     type: type._tag === 'Available' ? type.type : undefined,
   })

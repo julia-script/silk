@@ -1,11 +1,15 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as CAbi from '../src/CAbi.js'
+import * as ForeignAvailability from '../src/ForeignAvailability.js'
+import type * as Instances from '../src/Instances.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as SourceSpan from '../src/SourceSpan.js'
+import * as Target from '../src/Target.js'
 import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
 
 const encoder = new TextEncoder()
@@ -330,3 +334,231 @@ it('distinguishes unsupported target inventory from a missing promised runtime',
   if (result._tag === 'UnsupportedTarget')
     assert.deepEqual(result.operations, [unavailable.operation])
 })
+
+const foreignSource = `unsafe extern "C" fn abs(value: i32) -> i32
+pub fn main() -> i32 { return unsafe abs(-42) }`
+
+const foreignEntry = (
+  symbol: string,
+  parameters: ReadonlyArray<CAbi.CAbiType>,
+  sourceId: string,
+  start: number,
+): Instances.ForeignCall => {
+  const span = SourceSpan.fromOffsets(sourceId, start, start + 3)
+  if (span === undefined) throw new Error('expected a span')
+  return Object.freeze({
+    _tag: 'ReachableForeignCall',
+    symbol,
+    signature: Object.freeze({ parameters, result: Object.freeze({ _tag: 'Void' }) }),
+    declaration: Object.freeze({ _tag: 'CanonicalDeclarationId', module: sourceId, name: symbol }),
+    declarationSpan: span,
+    callSpan: span,
+  })
+}
+
+it('rejects foreign calls off native LLVM and conflicting signatures per pair', () => {
+  const i32 = Object.freeze({ _tag: 'Integer' as const, bits: 32 as const, signed: true })
+  const i64 = Object.freeze({ _tag: 'Integer' as const, bits: 64 as const, signed: true })
+  const exit = foreignEntry('exit', [i32], 'availability/a', 40)
+  const calls = [
+    foreignEntry('abs', [i32], 'availability/a', 0),
+    foreignEntry('abs', [i64], 'availability/b', 10),
+    exit,
+  ]
+  const codes = (target: Intrinsic.ExecutionTarget, selected: Target.Target) =>
+    ForeignAvailability.select(calls, target, selected).map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.reason._tag === 'ForeignFunctionTargetUnavailable'
+        ? `${diagnostic.reason.symbol}@${diagnostic.reason.surface}`
+        : diagnostic.relatedSpans?.map((related) => related.span.sourceId).join(','),
+    ])
+  assert.deepEqual(codes('LLVM', Target.aarch64AppleDarwin), [['SEM0192', 'availability/a']])
+  assert.deepEqual(codes('Evaluator', Target.aarch64AppleDarwin), [
+    ['SEM0193', 'abs@Evaluator'],
+    ['SEM0193', 'exit@Evaluator'],
+    ['SEM0192', 'availability/a'],
+  ])
+  assert.deepEqual(codes('Wasm', Target.wasm32UnknownUnknown), [
+    ['SEM0193', 'abs@Wasm'],
+    ['SEM0193', 'exit@Wasm'],
+    ['SEM0192', 'availability/a'],
+  ])
+  assert.deepEqual(codes('LLVM', Target.wasm32UnknownUnknown), [
+    ['SEM0193', 'abs@wasm32-unknown-unknown'],
+    ['SEM0193', 'exit@wasm32-unknown-unknown'],
+    ['SEM0192', 'availability/a'],
+  ])
+  assert.deepEqual(ForeignAvailability.select([exit], 'LLVM', Target.x8664UnknownLinuxGnu), [])
+  assert.deepEqual(ForeignAvailability.select([], 'Wasm', Target.wasm32UnknownUnknown), [])
+})
+
+it.effect('keeps an uncalled foreign declaration out of the inventory and off Wasm gates', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(
+      foreignSource.replace('return unsafe abs(-42)', 'return 0'),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(self.instances.foreignCalls, [])
+    assert.strictEqual(Analysis.evaluate(self)._tag, 'Completed')
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    assert.notInclude(wasm.wat, 'abs')
+  }),
+)
+
+it.effect('classifies a reachable foreign call for the selected target', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`unsafe extern "C" fn count(value: usize) -> usize
+fn size() -> usize { return unsafe count(1) }
+pub fn main() -> i32 { let n = size()
+  drop n
+  return 0 }`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(
+      self.instances.foreignCalls.map((call) => ({
+        symbol: call.symbol,
+        signature: CAbi.signatureKey(call.signature),
+        declaration: call.declaration.name,
+        callSource: call.callSpan.sourceId,
+      })),
+      [
+        {
+          symbol: 'count',
+          signature: '(u64)->u64',
+          declaration: 'count',
+          callSource: 'availability/main',
+        },
+      ],
+    )
+    const program = Analysis.loweredMir(self)
+    assert.deepEqual(program.foreignCalls, self.instances.foreignCalls)
+  }),
+)
+
+it.effect(
+  'rejects a reachable foreign call under the evaluator, direct Wasm, and LLVM wasm32',
+  () =>
+    Effect.gen(function* () {
+      const native = yield* snapshot(foreignSource)
+      assert.deepEqual(Analysis.diagnostics(native), [])
+      const evaluated = Analysis.evaluate(native)
+      assert.strictEqual(evaluated._tag, 'Blocked')
+      if (evaluated._tag === 'Blocked' && evaluated.reason._tag === 'ForeignTargetUnavailable')
+        assert.deepEqual(
+          evaluated.reason.diagnostics.map((diagnostic) => [
+            diagnostic.code,
+            diagnostic.reason._tag,
+          ]),
+          [['SEM0193', 'ForeignFunctionTargetUnavailable']],
+        )
+      else assert.fail('expected the evaluator to be blocked by foreign availability')
+
+      const wasm = yield* snapshot(foreignSource, 'wasm32-unknown-unknown')
+      const direct = yield* Effect.flip(Analysis.codegenWasm(wasm, { mode: 'release' }))
+      assert.strictEqual(direct._tag, 'CodegenUnavailable')
+      if (direct._tag === 'CodegenUnavailable')
+        assert.deepEqual(
+          direct.diagnostics.map((diagnostic) => diagnostic.code),
+          ['SEM0193'],
+        )
+      const llvm = yield* Effect.flip(Analysis.codegen(wasm, { mode: 'release' }))
+      assert.strictEqual(llvm._tag, 'CodegenUnavailable')
+      if (llvm._tag === 'CodegenUnavailable')
+        assert.deepEqual(
+          llvm.diagnostics.map((diagnostic) =>
+            diagnostic.reason._tag === 'ForeignFunctionTargetUnavailable'
+              ? diagnostic.reason.surface
+              : diagnostic.code,
+          ),
+          ['wasm32-unknown-unknown'],
+        )
+    }),
+)
+
+it.effect('lets a static if arm hide a foreign call from the closure', () =>
+  Effect.gen(function* () {
+    const program = (selected: boolean) => `unsafe extern "C" fn abs(value: i32) -> i32
+fn choose(static selected: bool) -> i32 {
+  static if selected { return unsafe abs(-42) } else { return 0 }
+}
+pub fn main() -> i32 { return choose(${selected}) }`
+    const inactive = yield* snapshot(program(false), 'wasm32-unknown-unknown')
+    const active = yield* snapshot(program(true), 'wasm32-unknown-unknown')
+    assert.deepEqual(Analysis.diagnostics(inactive), [])
+    assert.deepEqual(Analysis.diagnostics(active), [])
+    assert.deepEqual(inactive.instances.foreignCalls, [])
+    assert.deepEqual(
+      active.instances.foreignCalls.map((call) => call.symbol),
+      ['abs'],
+    )
+    assert.strictEqual(Analysis.evaluate(inactive)._tag, 'Completed')
+  }),
+)
+
+const twoModules = (dependencyAbs: string) =>
+  Analysis.makeRealized({
+    root: SourceFile.make(
+      'availability/foreign-root',
+      encoder.encode(`import foreign_dep as Dep
+unsafe extern "C" fn abs(value: i32) -> i32
+pub fn main() -> i32 { return unsafe abs(-2) + Dep.viaDep() }`),
+    ),
+  }).pipe(
+    Effect.provide(
+      SourceResolver.memory(
+        new Map([
+          [
+            'foreign_dep',
+            encoder.encode(`${dependencyAbs}
+pub fn viaDep() -> i32 { let wide = unsafe abs(-1)
+  drop wide
+  return 0 }`),
+          ] as const,
+        ]),
+      ),
+    ),
+  )
+
+it.effect('accepts agreeing redeclarations of one symbol across two modules', () =>
+  Effect.gen(function* () {
+    const self = yield* twoModules('unsafe extern "C" fn abs(value: i32) -> i32')
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(
+      self.instances.foreignCalls.map((call) => [
+        call.declaration.module,
+        CAbi.signatureKey(call.signature),
+      ]),
+      [
+        ['availability/foreign-root', '(i32)->i32'],
+        ['foreign_dep', '(i32)->i32'],
+      ],
+    )
+    if (self.target._tag !== 'Resolved') return assert.fail('expected a resolved target')
+    assert.deepEqual(
+      ForeignAvailability.select(self.instances.foreignCalls, 'LLVM', self.target.target),
+      [],
+    )
+    const artifact = yield* Analysis.codegen(self, { mode: 'release' })
+    assert.deepEqual(artifact.foreignImports, [
+      { symbol: 'abs', parameters: ['i32'], result: 'i32' },
+    ])
+  }),
+)
+
+it.effect('rejects a conflicting redeclaration relating both declarations', () =>
+  Effect.gen(function* () {
+    const self = yield* twoModules('unsafe extern "C" fn abs(value: i64) -> i64 as "abs"')
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const failure = yield* Effect.flip(Analysis.codegen(self, { mode: 'release' }))
+    assert.strictEqual(failure._tag, 'CodegenUnavailable')
+    if (failure._tag !== 'CodegenUnavailable') return
+    assert.deepEqual(
+      failure.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.sourceId,
+        diagnostic.relatedSpans?.map((related) => related.span.sourceId),
+      ]),
+      [['SEM0192', 'foreign_dep', ['availability/foreign-root']]],
+    )
+  }),
+)

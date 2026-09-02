@@ -42,6 +42,7 @@ export const samples = (): ReadonlyArray<Module> => {
     _tag: 'MirModule',
     module: source.id,
     intrinsics: Object.freeze([]),
+    foreignCalls: Object.freeze([]),
     entry: Object.freeze({
       _tag: 'OrdinaryEntry',
       target: instance(canonical(source.id, 'answer')),
@@ -85,6 +86,7 @@ export const samples = (): ReadonlyArray<Module> => {
     _tag: 'MirModule',
     module: source.id,
     intrinsics: Object.freeze([]),
+    foreignCalls: Object.freeze([]),
     entry: Object.freeze({
       _tag: 'OrdinaryEntry',
       target: instance(canonical(source.id, 'choose')),
@@ -143,4 +145,82 @@ export const samples = (): ReadonlyArray<Module> => {
     ]),
   })
   return Object.freeze([straight, conditional])
+}
+
+/**
+ * `answer` returning `abs(42)` through one foreign call; `arguments_` lets a test break arity.
+ * The module carries an empty foreign inventory so availability lets the operation through.
+ */
+export const foreignCallSample = (
+  target: Target.Target,
+  arguments_: ReadonlyArray<LocalId> = [local(0)],
+): Module => {
+  const source = SourceFile.make(
+    'sample://foreign.silk',
+    Uint8Array.from('pub fn answer() -> i32 { return unsafe abs(42) }', (char) =>
+      char.charCodeAt(0),
+    ),
+  )
+  const provenance = (start: number, end: number): Provenance =>
+    Object.freeze({ span: sampleSpan(source, start, end), generated: false })
+  const signature = Object.freeze({
+    parameters: Object.freeze([
+      Object.freeze({ _tag: 'Integer' as const, bits: 32 as const, signed: true }),
+    ]),
+    result: Object.freeze({ _tag: 'Integer' as const, bits: 32 as const, signed: true }),
+  })
+  return Object.freeze({
+    _tag: 'MirModule',
+    module: source.id,
+    intrinsics: Object.freeze([]),
+    foreignCalls: Object.freeze([]),
+    entry: Object.freeze({
+      _tag: 'OrdinaryEntry',
+      target: instance(canonical(source.id, 'answer')),
+      machine: instance(canonical(source.id, 'answer')),
+    }),
+    layout: Layout.make(target, ['i32']),
+    executionTransitions: Object.freeze([]),
+    functions: Object.freeze([
+      Object.freeze({
+        _tag: 'MirFunction' as const,
+        id: canonical(source.id, 'answer'),
+        instance: instance(canonical(source.id, 'answer')),
+        parameterCount: 0,
+        localTypes: Object.freeze([i32, i32]),
+        result: i32,
+        entry: region(0),
+        regions: Object.freeze([
+          Object.freeze({
+            _tag: 'OperationRegion' as const,
+            id: region(0),
+            operations: Object.freeze([
+              Object.freeze({
+                _tag: 'Literal' as const,
+                destination: local(0),
+                type: i32,
+                value: 42,
+                provenance: provenance(43, 45),
+              }),
+              Object.freeze({
+                _tag: 'ForeignCall' as const,
+                destination: local(1),
+                symbol: 'abs',
+                abi: 'C' as const,
+                signature,
+                arguments: Object.freeze([...arguments_]),
+                type: i32,
+                provenance: provenance(32, 46),
+              }),
+            ]),
+            outcome: Object.freeze({
+              _tag: 'Return' as const,
+              value: local(1),
+              provenance: provenance(25, 46),
+            }),
+          }),
+        ]),
+      }),
+    ]),
+  })
 }

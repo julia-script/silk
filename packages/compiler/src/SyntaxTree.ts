@@ -48,6 +48,7 @@ export type NodeKind =
   | 'ParenthesizedType'
   | 'UnionType'
   | 'FunctionDeclaration'
+  | 'ForeignFunctionDeclaration'
   | 'FailureRow'
   | 'RequirementRow'
   | 'Requirement'

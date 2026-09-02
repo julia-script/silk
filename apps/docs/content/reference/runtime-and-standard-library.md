@@ -469,10 +469,11 @@ helper structure beneath them may be compiler-versioned and may change whenever 
 contracts, or target support changes.
 
 Silk does not treat those implementation details as forbidden knowledge or permanently inaccessible
-machinery. When the language gains explicit low-level linking and FFI, a developer may deliberately
-name a target symbol or ABI that the selected toolchain happens to expose. Doing so is unsafe,
-target-specific, toolchain-version-specific, and outside the compatibility guarantee: the developer
-must satisfy the real ABI and accept that another build may rename, replace, inline, or omit it.
+machinery. `extern "C"` ([FFI-001](unsafe-intrinsics-and-targets.md#ffi-001--extern-c-declares-a-native-symbol-under-an-explicit-abi))
+is that explicit linking facility: a developer may deliberately name a target symbol that the
+selected toolchain happens to expose. Doing so is unsafe, target-specific, toolchain-version-specific,
+and outside the compatibility guarantee: the developer must satisfy the real ABI and accept that
+another build may rename, replace, inline, or omit it.
 
 The runtime must implement the canonical observable contract exactly. It cannot add hidden
 recoverable failures, retain a Silk borrow beyond its declared lifetime, invoke arbitrary source
@@ -717,7 +718,8 @@ The following are deliberately outside the first stable model:
 - target-conditional source and module-level availability annotations;
 - compiler-selected or overridable default service providers;
 - optional service requirements, including absence, selection, and entry-closure semantics;
-- public FFI, stable ABI, dynamic linking, and user-selected runtime implementations;
+- foreign pointers, records, and exports, a stable ABI, dynamic linking, and user-selected runtime
+  implementations;
 - runtime suspension, concurrency, scheduler/executor selection, async I/O, streams, networking,
   entropy, and wall-clock facilities;
 - alternative standard-library profiles or “no-stdlib” project configuration in the official

@@ -81,6 +81,8 @@ pub unsafe fn unchecked(value: i32) -> i32 {
   return value
 }
 
+pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"
+
 fn inspect(event: Token | End) -> i32 {
   return match &mut event {
     Token {span: Span {start: offset, ..}, ..} if true => offset

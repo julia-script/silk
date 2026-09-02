@@ -3,6 +3,7 @@ import * as Effect from 'effect/Effect'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Instances from './Instances.js'
+import * as ForeignAvailability from './ForeignAvailability.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
@@ -57,6 +58,16 @@ export type RuntimeFeature =
   | 'NestedSuspensionRuntime'
   | 'ReadinessNotification'
 
+/**
+ * One reachable foreign (`extern "C"`) symbol the artifact expects the link step to resolve, with
+ * its classified C signature spelled as C class names (`i32`, `u64`, `f64`, `void`, ...).
+ */
+export interface ForeignImport {
+  readonly symbol: string
+  readonly parameters: ReadonlyArray<string>
+  readonly result: string
+}
+
 interface ArtifactBase {
   readonly module: string
   readonly backend: Id
@@ -65,6 +76,8 @@ interface ArtifactBase {
   readonly termination: Termination
   readonly nativeRuntimeSymbols: ReadonlyArray<string>
   readonly runtimeFeatures: ReadonlyArray<RuntimeFeature>
+  /** Reachable foreign symbols sorted by symbol; empty for direct WebAssembly. */
+  readonly foreignImports: ReadonlyArray<ForeignImport>
   readonly control: ReadonlyArray<ControlProvenance>
 }
 
@@ -117,6 +130,11 @@ export class BackendError extends Data.TaggedError('BackendError')<{
         readonly _tag: 'UnsupportedIntrinsic'
         readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
       }
+    | {
+        readonly _tag: 'UnsupportedForeignFunction'
+        readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+      }
+    | { readonly _tag: 'ForeignSymbolConflict'; readonly symbol: string }
     | { readonly _tag: 'WrappedFailure'; readonly cause: unknown }
 }> {}
 
@@ -144,6 +162,19 @@ export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
       backend: self.name,
       message: `${self.name} cannot emit a program with unavailable intrinsics`,
       reason: { _tag: 'UnsupportedIntrinsic', diagnostics: availability.diagnostics },
+    })
+  }
+  const foreign = ForeignAvailability.select(
+    program.foreignCalls,
+    IntrinsicAvailability.backendTarget(self.id),
+    program.layout.target,
+  )
+  if (foreign.length > 0) {
+    return yield* new BackendError({
+      operation: 'Backend.emit',
+      backend: self.name,
+      message: `${self.name} cannot emit a program with unavailable foreign functions`,
+      reason: { _tag: 'UnsupportedForeignFunction', diagnostics: foreign },
     })
   }
   const violations = MirVerification.verify(program)

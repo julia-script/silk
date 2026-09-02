@@ -6,6 +6,7 @@ import type { LinearOperation } from './MirLinearization.js'
 import * as NativeCallOperation from './NativeCallOperation.js'
 import * as NativeEffectOperation from './NativeEffectOperation.js'
 import * as NativeExecutionOperation from './NativeExecutionOperation.js'
+import * as NativeForeignOperation from './NativeForeignOperation.js'
 import * as NativeLocalSharedOperation from './NativeLocalSharedOperation.js'
 import * as NativeMemoryOperation from './NativeMemoryOperation.js'
 import type * as NativeOperationContext from './NativeOperationContext.js'
@@ -132,5 +133,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'ApplyCallable':
     case 'Call':
       return yield* NativeCallOperation.emit(context.call, operation)
+    case 'ForeignCall':
+      return yield* NativeForeignOperation.emit(context.call, operation)
   }
 })

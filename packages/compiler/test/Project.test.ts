@@ -35,6 +35,7 @@ it.effect('loads the minimal manifest and defaults the source root to the entry 
       backend: 'llvm',
       targets: ['host'],
       outputDirectory: `${root}/build`,
+      nativeLibraries: [],
     })
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
@@ -136,13 +137,14 @@ it.effect('materializes explicit build configuration and wasm defaults', () =>
     yield* writeFile(`${root}/src/Main.silk`, source)
     yield* writeFile(
       `${root}/silk.toml`,
-      '[package]\nname = "configured"\nversion = "1.2.3-beta.1+build.7"\nroot = "src/Main.silk"\n\n[build]\nbackend = "llvm"\ntargets = ["host", "wasm32-unknown-unknown"]\noutput-dir = "artifacts"\n',
+      '[package]\nname = "configured"\nversion = "1.2.3-beta.1+build.7"\nroot = "src/Main.silk"\n\n[build]\nbackend = "llvm"\ntargets = ["host", "wasm32-unknown-unknown"]\noutput-dir = "artifacts"\nnative-libraries = ["c", "m"]\n',
     )
     const configured = yield* Project.load({ workingDirectory: root })
     assert.deepStrictEqual(configured.build, {
       backend: 'llvm',
       targets: ['host', 'wasm32-unknown-unknown'],
       outputDirectory: `${root}/artifacts`,
+      nativeLibraries: ['c', 'm'],
     })
 
     yield* writeFile(
@@ -163,11 +165,16 @@ it.effect('rejects malformed build metadata before loading the entry', () =>
       '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\ntargets = []\n',
       '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nbackend = "native"\n',
       '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\noutput-dir = "../outside"\n',
+      '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nnative-libraries = ["-Wl,--export-dynamic"]\n',
+      '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nnative-libraries = ["lib/m"]\n',
+      '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nnative-libraries = "m"\n',
     ]
     for (const manifest of invalid) {
       yield* writeFile(`${root}/silk.toml`, manifest)
       const error = yield* Effect.flip(Project.load({ workingDirectory: root }))
       assert.strictEqual(error.reason._tag, 'InvalidManifest')
+      if (error.reason._tag === 'InvalidManifest' && manifest.includes('native-libraries'))
+        assert.include(error.reason.detail, 'build.native-libraries')
     }
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )

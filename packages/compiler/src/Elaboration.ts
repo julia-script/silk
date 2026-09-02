@@ -2172,9 +2172,12 @@ export const elaborateModule = (input: Input): Result => {
   const { syntax, headers, scope, index } = input
   const source = syntax.source
   const declarations = headers.declarations
-  const analyzed = declarations.map((declaration) =>
-    analyzeFunctionBody(source, declaration, declarations, Object.freeze({ scope, index })),
-  )
+  // A foreign header has a native body: it is indexed and callable but never analyzed here.
+  const analyzed = declarations
+    .filter((declaration) => declaration.foreign === undefined)
+    .map((declaration) =>
+      analyzeFunctionBody(source, declaration, declarations, Object.freeze({ scope, index })),
+    )
   const constantDiagnostics = headers.constants.flatMap((constant) =>
     constant.name._tag === 'Present'
       ? analyzeConstant(constant, constant.name.token, constant.initializer, true).diagnostics

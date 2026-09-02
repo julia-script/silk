@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
@@ -81,6 +89,23 @@ it('plans fixed profile arguments against the canonical target id', () => {
     '-o',
     'out.o',
   ])
+  const link = ToolchainPlan.linkCommand(
+    clang,
+    target,
+    ['program.o', 'silk_shim.o', 'extra.o'],
+    ['m', 'c'],
+    'out',
+  )
+  assert.deepEqual(link.arguments, [
+    '--target=aarch64-apple-darwin',
+    'program.o',
+    'silk_shim.o',
+    'extra.o',
+    '-lm',
+    '-lc',
+    '-o',
+    'out',
+  ])
 })
 
 it('generates effect-reporting shims from byte arrays with closed status handling', () => {
@@ -121,6 +146,36 @@ it.effect('includes the selected native clock runtime in the artifact cache iden
       )
     }
     assert.strictEqual(new Set(keys).size, selected.length)
+  }),
+)
+
+it.effect('covers request-supplied object bytes and the ordered library list in the key', () =>
+  Effect.gen(function* () {
+    const target = yield* NativeToolchain.hostTarget()
+    const objectA = join(testRoot, 'key-a.o')
+    const objectB = join(testRoot, 'key-b.o')
+    writeFileSync(objectA, Uint8Array.from([1, 2, 3]))
+    writeFileSync(objectB, Uint8Array.from([1, 2, 4]))
+    const keyFor = (nativeObjects: ReadonlyArray<string>, nativeLibraries: ReadonlyArray<string>) =>
+      NativeToolchain.artifactCacheKey(
+        toolchain,
+        'NativeExecutable',
+        target,
+        'release',
+        Uint8Array.from([0, 1, 2, 3]),
+        ToolchainPlan.shimSource(termination()),
+        { nativeObjects, nativeLibraries },
+      )
+    const keys = [
+      yield* keyFor([], []),
+      yield* keyFor([objectA], []),
+      yield* keyFor([objectB], []),
+      yield* keyFor([objectA], ['c']),
+      yield* keyFor([objectA], ['c', 'm']),
+      yield* keyFor([objectA], ['m', 'c']),
+    ]
+    assert.strictEqual(new Set(keys).size, keys.length)
+    assert.strictEqual(yield* keyFor([objectA], ['c']), keys[3])
   }),
 )
 
@@ -482,6 +537,16 @@ it.effect(
             target,
             artifact.termination,
           )
+          assert.deepEqual(shim.planned.arguments, [
+            `--target=${target.id}`,
+            '-c',
+            '-x',
+            'c',
+            join(scope.root, 'silk_shim.c'),
+            '-O2',
+            '-o',
+            join(scope.root, 'silk_shim.o'),
+          ])
           return yield* NativeToolchain.ClangLinker.link(
             toolchain,
             scope,

@@ -1,3 +1,4 @@
+import type * as CAbi from './CAbi.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as Constraint from './Constraint.js'
@@ -153,6 +154,17 @@ export interface IntrinsicCall {
   readonly span: Hir.Expression['span']
 }
 
+/** One reachable foreign (`extern "C"`) declaration, classified for the selected target. */
+export interface ForeignCall {
+  readonly _tag: 'ReachableForeignCall'
+  readonly symbol: string
+  readonly signature: CAbi.CAbiSignature
+  readonly declaration: DeclarationFacts.CanonicalId
+  readonly declarationSpan: SourceSpan.SourceSpan
+  /** The first reachable call in canonical order; availability diagnostics point here. */
+  readonly callSpan: SourceSpan.SourceSpan
+}
+
 /** One normalized owned failure retained by an effectful user entry. */
 export interface EntryFailure {
   readonly type: Type.Type
@@ -210,6 +222,8 @@ export interface Discovery {
   readonly effects: ReadonlyArray<EffectInstance>
   readonly calls: ReadonlyArray<CallInstance>
   readonly intrinsics: ReadonlyArray<IntrinsicCall>
+  /** Reachable foreign declarations in canonical order; native-only availability reads it. */
+  readonly foreignCalls: ReadonlyArray<ForeignCall>
   readonly constants: ReadonlyArray<SelectedConstant>
   /** Exact direct/nested/external-park summaries in canonical subject order. */
   readonly suspension: ReadonlyArray<SuspensionFact>
@@ -306,6 +320,7 @@ export const invalid = (rootModule: string): Discovery =>
     effects: Object.freeze([]),
     calls: Object.freeze([]),
     intrinsics: Object.freeze([]),
+    foreignCalls: Object.freeze([]),
     constants: Object.freeze([]),
     suspension: Object.freeze([]),
     residualizationDiagnostics: Object.freeze([]),
@@ -984,6 +999,7 @@ export const discover = (
       effects: Object.freeze([]),
       calls: Object.freeze([]),
       intrinsics: Object.freeze([]),
+      foreignCalls: Object.freeze([]),
       constants: Object.freeze([]),
       suspension: Object.freeze([]),
       residualizationDiagnostics: Object.freeze([]),
@@ -1516,6 +1532,7 @@ export const discover = (
     ),
     calls: callInstances,
     intrinsics: ExecutableOrigin.reachableIntrinsics(instances, index),
+    foreignCalls: ExecutableOrigin.reachableForeignCalls(instances, index, target),
     constants: Object.freeze(selectedConstants),
     suspension: Object.freeze([
       ...instances

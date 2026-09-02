@@ -1,3 +1,4 @@
+import * as CAbi from './CAbi.js'
 import type * as CleanupPlan from './CleanupPlan.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
@@ -708,6 +709,7 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         operation.failure,
       ]
     case 'OsCall':
+    case 'ForeignCall':
       return [operation.destination, ...operation.arguments]
     case 'RawBufferFrom':
       return [operation.destination, operation.allocation, operation.count]
@@ -1573,6 +1575,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
     case 'Allocate':
     case 'HostWrite':
     case 'OsCall':
+    case 'ForeignCall':
     case 'Project':
     case 'ReadPlace':
     case 'CheckPlace':
@@ -1845,6 +1848,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'OsOpen':
       return [...operation.arguments, operation.success, operation.failure]
     case 'OsCall':
+    case 'ForeignCall':
       return operation.arguments
     case 'RawBufferFrom':
       return [operation.allocation, operation.count]
@@ -3588,6 +3592,42 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 function: fn.id,
                 region: region.id,
                 detail: 'OS open does not match its affine carrier signature',
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'ForeignCall') {
+          const target = self.layout.target
+          const classKey = (
+            type: Type | undefined,
+            position: CAbi.Position,
+          ): string | undefined => {
+            if (type === undefined) return undefined
+            const semantic = semanticType(type)
+            return CAbi.admit(semantic, position)._tag === 'Admitted'
+              ? CAbi.typeText(CAbi.classify(semantic, target, position))
+              : undefined
+          }
+          const resultKey = CAbi.typeText(operation.signature.result)
+          const argumentsValid =
+            operation.signature.parameters.length === operation.arguments.length &&
+            operation.signature.parameters.every((parameter, ordinal) => {
+              const argument = operation.arguments.at(ordinal)
+              const actual = argument === undefined ? undefined : fn.localTypes.at(argument.ordinal)
+              return classKey(actual, 'Parameter') === CAbi.typeText(parameter)
+            })
+          if (
+            !argumentsValid ||
+            classKey(fn.localTypes.at(operation.destination.ordinal), 'Result') !== resultKey ||
+            classKey(operation.type, 'Result') !== resultKey
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidForeignCall',
+                function: fn.id,
+                region: region.id,
+                detail: `Foreign call ${operation.symbol} does not match its classified C signature ${CAbi.signatureKey(operation.signature)}`,
               }),
             )
           }

@@ -1,3 +1,4 @@
+import * as CAbi from './CAbi.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as LayoutEncode from './LayoutEncode.js'
@@ -97,6 +98,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = os-open ${operation.operation.actor}.${operation.operation.name}(${operation.arguments.map(localText).join(', ')}) success=${localText(operation.success)} failure=${localText(operation.failure)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'OsCall':
       return `${localText(operation.destination)} = os-call ${operation.operation.actor}.${operation.operation.name}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'ForeignCall':
+      return `${localText(operation.destination)} = foreign-call ${operation.symbol} abi=${operation.abi} signature=${CAbi.signatureKey(operation.signature)}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferFrom':
       return `${localText(operation.destination)} = raw-buffer-from ${localText(operation.allocation)} count=${localText(operation.count)} element=${SilkType.encode(operation.element)} stride=${operation.stride} align=${operation.elementAlignment} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'SharedFromAllocation':
@@ -397,6 +400,10 @@ export const encode = (self: Module): string => {
   return [
     `mir-module ${self.module}`,
     entry,
+    ...self.foreignCalls.map(
+      (call) =>
+        `foreign ${call.symbol} abi=C signature=${CAbi.signatureKey(call.signature)} declaration=${targetText(call.declaration)} ${spanText(call.callSpan)}`,
+    ),
     ...(self.staticData ?? []).map(
       (data) =>
         `static ${data.id} kind=${data.kind.toLowerCase()} utf8=${data.utf8} bytes=${data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')}`,

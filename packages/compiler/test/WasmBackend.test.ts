@@ -1,13 +1,17 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
+import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
+import * as Target from '../src/Target.js'
 import * as WasmBackend from '../src/WasmBackend.js'
 import { corpus, scalarEnumLaneAcceptance } from './support/corpus.js'
+import * as MirSamples from './support/mirSamples.js'
 import * as WasmMain from './support/WasmMain.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -712,4 +716,29 @@ it.effect(
       assert.deepEqual(mismatches, [])
     }),
   15_000,
+)
+
+it.effect('rejects a reachable foreign call before the direct Wasm backend is constructed', () =>
+  Effect.gen(function* () {
+    const failure = yield* Effect.flip(
+      emit(`unsafe extern "C" fn abs(value: i32) -> i32
+pub fn main() -> i32 { return unsafe abs(-42) }`),
+    )
+    assert.strictEqual(failure._tag, 'CodegenUnavailable')
+    if (failure._tag === 'CodegenUnavailable')
+      assert.deepEqual(
+        failure.diagnostics.map((diagnostic) => diagnostic.code),
+        ['SEM0193'],
+      )
+  }),
+)
+
+it.effect('throws when target validation lets a ForeignCall reach Wasm emission', () =>
+  Effect.gen(function* () {
+    const program = MirSamples.foreignCallSample(Target.wasm32UnknownUnknown)
+    assert.deepEqual(MirVerification.verify(program), [])
+    const exit = yield* Effect.exit(WasmBackend.WasmBackend.emit(program, { mode: 'release' }))
+    assert.isTrue(Exit.isFailure(exit))
+    if (Exit.isFailure(exit)) assert.instanceOf(Cause.squash(exit.cause), RangeError)
+  }),
 )
