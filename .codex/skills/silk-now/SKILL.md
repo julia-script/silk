@@ -49,7 +49,7 @@ status for the same requested outcome and affected surface.
 - Reuse one clear match and record the new direct demand as a dated comment. Do not create a second
   issue merely because the existing title or wording differs.
 - When several issues plausibly match, stop before writing and ask Julia to choose.
-- When no issue matches, create one Backlog issue under the `silk-demand` contract, with no priority
+- When no issue matches, create one Triage issue under the `silk-demand` contract, with no priority
   or estimate, a faithful requested outcome, `## Why this matters`, evidence, draft acceptance, and
   a repository baseline. Read it back.
 - Follow a confirmed Duplicate to its canonical survivor. Do not reopen a Canceled issue unless the
@@ -62,7 +62,7 @@ The resulting issue or canonical survivor is the sole subject of the remaining f
 
 ## 2. Triage the selected issue
 
-Run the complete `silk-triage` process on this issue even when it was previously Todo. Triage MUST
+Run the complete `silk-triage` process on this issue even when it was previously Backlog or Todo. Triage MUST
 use subagents and remains read-only with respect to repository files:
 
 1. Give one investigator the full issue, previous Review baseline, current triage commit,
@@ -76,7 +76,9 @@ correct. Preserve Julia's desired outcome while allowing triage to replace a pro
 with the clean bounded design that actually satisfies it. Require a concrete `## Why this matters`,
 observable acceptance, priority, estimate, and any genuine gate.
 
-Do not implement unless the final issue is read back in unblocked Todo. If triage concludes
+Do not implement unless the final issue is read back as an unblocked Backlog or Todo issue with
+`Triage disposition: queue-ready`. Normal triage admission goes to Backlog; this explicit named
+immediate flow may claim it directly without adding it to Julia's Todo queue. If triage concludes
 Duplicate, continue only through the canonical survivor after the final survivor itself receives
 both required independent triage passes, unless current evidence on that exact issue already records
 equivalent investigator and skeptic coverage. If the verdict is Canceled or needs more

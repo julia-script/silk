@@ -25,10 +25,10 @@ Each issue receives two independent passes:
 2. **Skeptical review** — a different agent tries to refute the proposed verdict, find an existing
    owner or simpler framing, and challenge the proposed grouping and acceptance.
 
-Every selected issue must receive its investigation from a subagent. Every proposed Todo,
+Every selected issue must receive its investigation from a subagent. Every proposed Backlog,
 Duplicate, or Canceled verdict must then receive skeptical review from a different subagent. The
 coordinator adjudicates the two passes against primary evidence but does not substitute for either
-one. For an unresolved issue that remains Backlog, the coordinator may stop after investigation
+one. For an unresolved issue that remains in Triage, the coordinator may stop after investigation
 only when the investigator identifies the exact missing evidence and no verdict is proposed.
 
 ## Investigator return
@@ -52,6 +52,7 @@ recommended_shape:
   title
   pitch
   area_label: Docs | Standard library | Compiler | LSP | none
+  triage_disposition: queue-ready
   why_it_matters:
     current_cost_or_risk
     affected_workflow_or_property
@@ -69,7 +70,7 @@ recommended_shape:
   gate
   priority
   estimate
-decision: todo | duplicate | canceled | needs-more-investigation
+decision: backlog | duplicate | canceled | needs-more-investigation
 out_of_scope:
   - concrete observation deliberately excluded
 ```
@@ -84,13 +85,15 @@ grouping_review:
   - merge, split, keep separate, or no concern
 area_label_review:
   - correct, replace with one named Area, or clear because none has primary ownership
+triage_disposition_review:
+  - queue-ready only when all five claims hold; otherwise needs-more-investigation or terminal
 acceptance_gaps:
   - condition that is vague, solution-prescriptive, or cannot falsify completion
 snippet_gaps:
   - missing, stale, inaccurate, oversized, or unnecessarily implementation-prescriptive example
 justification_gaps:
   - missing evidence, broken causal link, generic rationale, or consequence not established
-recommended_verdict: todo | duplicate | canceled | needs-more-investigation
+recommended_verdict: backlog | duplicate | canceled | needs-more-investigation
 ```
 
 Zero challenges is valid. Do not manufacture objections.
@@ -98,31 +101,36 @@ Zero challenges is valid. Do not manufacture objections.
 ## Fan-in
 
 Resolve disagreements against primary evidence. Uncertainty is not success: leave the issue in
-Backlog with a focused investigation comment when the available evidence cannot support Todo,
-Duplicate, or Canceled. Triage may organize multiple leads into one survivor, split a broad lead,
-or discard weak leads. Preserve useful evidence and native Linear relations.
+Triage with `Triage disposition: needs-more-investigation` and a focused investigation comment when
+the available evidence cannot support Backlog, Duplicate, or Canceled. A queue-ready verdict writes
+`Triage disposition: queue-ready` before admission to Backlog; Duplicate and Canceled write
+`Triage disposition: terminal`. Triage may organize multiple leads into one survivor, split a broad
+lead, or discard weak leads. Preserve useful evidence and native Linear relations.
 
 The coordinator must preserve the lead's `Why this matters` rationale when it survives review or
 replace it with the more precise rationale supported by investigation. Do not promote a
-solution-only issue. A Todo description must make the causal chain from current condition to cost
-or risk understandable without reading discovery comments, subagent reports, or conversation
+solution-only issue. A triaged Backlog description must make the causal chain from current
+condition to cost or risk understandable without reading discovery comments, subagent reports, or
+conversation
 history. When paired current and desired snippets would clarify the verified gap, the coordinator
 must include them under `WORKFLOW.md`: the current excerpt is exact at the triage baseline and the
 desired example expresses the accepted observable outcome without locking in an unnecessary
 implementation. Replace provisional, inaccurate, or stale intake snippets rather than preserving
 them as historical text. If the condition is real but no concrete consequence can be established,
-it is not yet worthwhile: leave it in Backlog for named evidence or cancel it when further
+it is not yet worthwhile: leave it in Triage for named evidence or cancel it when further
 investigation is not justified.
 
 Unless Julia states a different current priority, rank validated stabilization issues above
-features. Within stabilization, correctness and safety come first, then broken documentation or
-public contracts, then simplification, dead code, and other debt. Concrete urgency can override
-this ordering, but novelty alone cannot.
+features within the entire triaged Backlog. Within stabilization, correctness and safety come first,
+then broken documentation or public contracts, then simplification, dead code, and other debt.
+Concrete urgency can override this ordering, but novelty alone cannot. Treat Todo as Julia's
+read-only manual tier; do not move issues into it or change it while normalizing Backlog.
 
 Write sequentially only after the batch verdicts and relative priority are coherent. Read every
-changed issue back before reporting. Every Todo, Duplicate, Canceled, or deliberately retained
-Backlog issue that completed technical review receives `Stage: triage` and the appropriate Outcome
+changed issue back before reporting. Every Backlog, explicitly re-reviewed Todo, Duplicate,
+Canceled, or deliberately retained Triage issue that completed technical review receives
+`Stage: triage` and the appropriate Outcome
 in Review baseline. Apply the verdict or revised specification first; advance the baseline only
 after the issue reflects the conclusion. If the commit range could not be reviewed, retain the old
-baseline and leave the issue in Backlog with the exact missing evidence, except for the explicit
+baseline and leave the issue in Triage with the exact missing evidence, except for the explicit
 from-scratch legacy recovery in `REVIEW_BASELINE.md`.

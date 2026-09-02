@@ -7,6 +7,7 @@ Linear is the only ticket store for the `silk-*` workflow.
 - Team name: `Juliaortiz`
 - Team key: `JUL`
 - Team id: `3ad57020-24ab-4422-bb1a-f33314882e2f`
+- Native Triage status id: `e46e2b85-b03f-4504-b1a6-c1ae410b4a1b`
 - Canonical project id: `077633f0-eb65-4d72-a034-a70615821203`
 - Current project name: `Silk`
 - Repository: `julia-script/silk`
@@ -23,8 +24,9 @@ administration is outside issue discovery, demand, triage, work, and synchroniza
 
 | Linear status | Workflow meaning                                              |
 | ------------- | ------------------------------------------------------------- |
-| Backlog       | Captured but not triaged.                                     |
-| Todo          | Triaged and ready, unless it carries the `Blocked` label.     |
+| Triage        | Captured intake that has not passed technical triage.         |
+| Backlog       | Triaged, prioritized fallback queue for agent-selected work.  |
+| Todo          | Julia's manually curated immediate queue of triaged work.     |
 | In Progress   | Claimed by an active implementation task.                     |
 | In Review     | Implementation is ready for human or PR review.               |
 | Done          | The accepted change is merged or otherwise delivered.         |
@@ -62,9 +64,28 @@ scope. A later technical review does the same when the issue's primary ownership
 
 Restrict every listing, deduplication pass, and count to canonical project ID
 `077633f0-eb65-4d72-a034-a70615821203` unless the
-task explicitly needs a workspace-wide duplicate search. For the next work item, select Todo issues
-without `Blocked`, ordered by priority and then oldest creation time. An explicitly named issue
-overrides automatic selection.
+task explicitly needs a workspace-wide duplicate search.
+
+For automatic work selection, first consider unblocked Todo issues, ordered by priority and then
+oldest creation time. Todo is Julia's explicit queue and always outranks Backlog. Fall back to
+Backlog only when Todo contains zero issues, not merely zero unblocked issues. If Todo is nonempty
+but every issue is blocked, stop and report that the manual queue has no eligible item. When Todo is
+empty, select unblocked Backlog issues ordered the same way. A Backlog issue is eligible only when
+its description records `Triage disposition: queue-ready`; this durable marker survives later Review
+baseline stages and prevents legacy or accidentally misplaced intake from bypassing triage. An
+explicitly named queue-ready Backlog issue or a Todo issue overrides automatic selection. A named
+Triage issue must pass `silk-triage` before `silk-work` may claim it.
+
+Triage places validated work in Backlog and never promotes it to Todo. Only Julia manually curates
+Todo, except that an already-Todo issue may be restored there after an interrupted implementation.
+When work claimed from Backlog must return to a queue, return it to Backlog. Recover the pre-claim
+queue tier from Linear history; if it is unavailable, use Backlog rather than filling Todo
+automatically.
+
+The native Triage inbox became the intake boundary on 2026-09-02. Before selecting from Backlog,
+move any preexisting issue whose `Triage disposition` is missing, `intake`, or
+`needs-more-investigation` into Triage. Preserve existing Todo as Julia's curated queue; its manual
+placement is sufficient for selection even before the durable field is added during a later review.
 
 ## Mutations
 

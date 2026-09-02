@@ -12,9 +12,13 @@ acting. Then read the repository `AGENTS.md` and every specialized skill require
 Subagents are authorized for investigation, bounded non-overlapping implementation, and review.
 Keep one coordinator responsible for the Linear issue and do not let agents edit overlapping files.
 
-Input is an explicit Linear issue or, when absent, the highest-priority oldest Todo issue in the
-canonical project ID from `LINEAR.md` without the `Blocked` label. Fetch and verify that project by
-ID; never recreate it from its display name. A named issue overrides automatic selection.
+Input is an explicit Linear issue or an automatic queue selection under `LINEAR.md`. Fetch and
+verify the canonical project by ID; never recreate it from its display name. For automatic
+selection, first read all Todo issues. If Todo is nonempty, choose its highest-priority oldest
+unblocked issue; when every Todo issue is blocked, stop rather than falling back. Only when Todo is
+literally empty, fall back to the highest-priority oldest unblocked Backlog issue whose description
+records `Triage disposition: queue-ready`. A named queue-ready Backlog issue or a Todo issue
+overrides automatic selection; never claim an issue still in Triage.
 
 ## Admission and claim
 
@@ -22,12 +26,17 @@ Before automatic selection, show existing In Progress issues and In Review issue
 need Julia. Do not automatically start a third attention-bearing item. A named issue is an explicit
 override of this soft cap.
 
+Record whether the selected issue came from Todo or Backlog before claiming it. This pre-claim tier
+controls where interrupted or blocked work returns; agents never promote fallback work into Julia's
+Todo queue.
+
 Re-read the selected issue and its Review baseline. Resolve the exact verified work-base commit and
 inspect the changed relevant paths from the previous review commit under `REVIEW_BASELINE.md`.
 Revalidate whether the work is still wanted, already delivered, outdated, superseded, or incorrectly
 specified before claiming it. If it is already delivered or invalid, apply the truthful Linear state
-and then update Review baseline at the work-base commit with the corresponding Outcome; select the
-next issue only when selection was automatic. If the delta cannot be reviewed, do not claim or
+and, for a Canceled or Duplicate result, set `Triage disposition: terminal`; then update Review
+baseline at the work-base commit with the corresponding Outcome. Select the next issue only when
+selection was automatic. If the delta cannot be reviewed, do not claim or
 advance an established baseline. A legacy unresolved or unknown baseline requires the full
 current-state recovery review from `REVIEW_BASELINE.md` before claiming. Otherwise update the issue
 specification if needed, including refreshing or removing current/desired snippets invalidated by
@@ -98,5 +107,9 @@ If committing, pushing, or creating or confirming the draft PR fails, do not cla
 do not move the issue to In Review. Preserve the work and report the exact blocker.
 
 If blocked before handoff, do not hide partial work. Add or update `## Gate`, apply `Blocked`, return
-the issue to Todo, and comment with what completed and exactly what unblocks it. If implementation
-fails without a real external gate, leave it In Progress and report the failure honestly.
+the issue to its pre-claim queue tier, and comment with what completed and exactly what unblocks it.
+Use Backlog when the prior tier cannot be established; never fill Todo by inference. If
+implementation fails without a real external gate, leave it In Progress only while this task
+remains the active owner and will continue the same implementation. If the run is ending or
+abandoned with no live owner, restore the pre-claim tier, do not apply `Blocked`, and comment with
+the completed work and unresolved failure.

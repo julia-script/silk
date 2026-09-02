@@ -26,11 +26,17 @@ new maintenance issues.
    identifier in a branch or PR. Never match by title alone when more than one issue is plausible.
 4. Apply high-confidence corrections directly:
 
+   - legacy Backlog intake with missing, `intake`, or `needs-more-investigation` Triage disposition
+     -> Triage, preserving its baseline;
+   - issue with `Triage disposition: queue-ready` accidentally left in Triage -> Backlog unless
+     Julia already curated it into Todo;
    - merged PR or otherwise proven delivery -> Done;
    - open PR with matching work -> In Review;
-   - closed unmerged PR with unfinished work -> Todo, with a comment;
+   - unambiguously abandoned In Progress work with no live task, branch, or PR owner -> its
+     pre-claim Todo or Backlog tier from issue history, defaulting to Backlog when unknown;
+   - closed unmerged PR with unfinished work -> its pre-claim Todo or Backlog tier, with a comment;
    - issue proven owned by another issue -> Duplicate with a native relation;
-   - resolved `## Gate` -> remove `Blocked` and keep or return to Todo;
+   - resolved `## Gate` -> remove `Blocked` without changing its existing Backlog or Todo tier;
    - Backlog or Todo claim already implemented on the recorded baseline -> Done when delivery is
      proven, otherwise Canceled with evidence.
 
@@ -40,8 +46,8 @@ new maintenance issues.
    baseline to the exact supporting commit with `Stage: sync`. During that review, also reconcile
    the optional Area label and description line under `LINEAR.md` when primary ownership changed;
    leave the Linear Area field empty and record `none` when no Area applies. Use
-   `Outcome: delivered` or `Outcome: terminal` for final states and the accurate nonterminal Outcome otherwise. If the
-   old-to-new delta for an established baseline cannot be inspected, retain it and report the gap.
+   `Outcome: delivered` or `Outcome: terminal` for final states and the accurate nonterminal Outcome
+   otherwise. If the old-to-new delta for an established baseline cannot be inspected, retain it and report the gap.
    A legacy unresolved or unknown baseline may advance only after the full current-state recovery
    review in `REVIEW_BASELINE.md`.
 6. Report but do not automatically reset ambiguous stale In Progress work, In Review issues without

@@ -19,15 +19,17 @@ provides them. Do not invent missing detail or require a person's name when a ro
 2. Search canonical-project issues in every state for the same requested outcome and affected
    surface.
 3. When one issue clearly matches, append the demand as a dated comment. Preserve its status,
-   priority, estimate, and specification. A Canceled issue may return to Backlog only when the new
-   demand directly changes the value judgment that caused cancellation; technical invalidation
-   remains canceled until triage. Demand capture alone is not a technical review and does not
-   advance Review baseline. If the issue is legacy and lacks that section, mechanically seed it from
-   a trustworthy Source baseline under `REVIEW_BASELINE.md` rather than using the current commit.
+   priority, estimate, and specification. A Canceled issue may return to Triage with
+   `Triage disposition: intake` only when the new demand directly changes the value judgment that
+   caused cancellation; technical invalidation remains canceled until triage. Demand capture alone
+   is not a technical review and does not advance Review baseline. If the issue is legacy and lacks
+   that section, mechanically seed it from a trustworthy Source baseline under `REVIEW_BASELINE.md`
+   rather than using the current commit.
 4. When several issues plausibly match, make no write and ask Julia to choose among their links.
-5. When no issue matches, create one Backlog issue with no priority or estimate. Use the issue shape
-   in `WORKFLOW.md`, `Origin: direct demand`, the faithful request as evidence, draft acceptance,
-   an immutable Source baseline, and an initial Review baseline at the same full commit with
+5. When no issue matches, create one issue in the native Triage inbox with no priority or estimate.
+   Use the issue shape in `WORKFLOW.md`, `Origin: direct demand`, `Triage disposition: intake`, the
+   faithful request as evidence, draft acceptance, an immutable Source baseline, and an initial
+   Review baseline at the same full commit with
    `Stage: demand intake` and `Outcome: intake only`. Preserve Julia's stated reason in
    `## Why this matters`.
    If no reason was supplied, say that the request is direct demand and list the missing impact as
@@ -41,5 +43,5 @@ provides them. Do not invent missing detail or require a person's name when a ro
 6. Read the issue back and report its identifier, title, link, requester, captured outcome, and
    Review baseline commit and stage.
 
-This skill records demand. It does not decide that the requested solution is correct, move the
-issue to Todo, create an OpenSpec change, edit code, or create a PR.
+This skill records demand. It does not decide that the requested solution is correct, admit the
+issue to Backlog or Todo, create an OpenSpec change, edit code, or create a PR.

@@ -1,6 +1,6 @@
 ---
 name: silk-discover
-description: Verify the checkout is exactly current remote main, then run a deep parallel Silk sweep for stabilization, documentation drift, simplification, dead-code, and technical-debt leads and file every lead passing the Backlog intake bar in Linear. Use only when Julia explicitly invokes this skill or asks for a Silk maintenance sweep.
+description: Verify the checkout is exactly current remote main, then run a deep parallel Silk sweep for stabilization, documentation drift, simplification, dead-code, and technical-debt leads and file every lead passing the Triage intake bar in Linear. Use only when Julia explicitly invokes this skill or asks for a Silk maintenance sweep.
 ---
 
 # Discover Silk maintenance work
@@ -43,13 +43,15 @@ cap the result or stop after the first strong finding.
    skeptical review, debatable consolidation, worth judgment, sizing, or prioritization. Run the
    required second pass when the first pass yields fewer than five novel investigable leads or any
    material coverage area remains weak or unchecked.
-6. Apply the Backlog intake bar from `WORKFLOW.md`. Immediately before the first Linear write,
+6. Apply the Triage intake bar from `WORKFLOW.md`. Immediately before the first Linear write,
    re-run the remote-main freshness gate once more and stop if it moved. File every distinct
-   investigable lead with its honest confidence, a visible `## Why this matters` section, and
+   investigable lead into the native Triage inbox with its honest confidence, a visible
+   `## Why this matters` section, and
    triage questions, including low-confidence leads with a specific starting point. The rationale
    must connect the observation to a concrete affected workflow or system property and a possible
    consequence if ignored; distinguish evidence from inference. Record the verified remote-main SHA
-   as both Source baseline and the `discovery intake` Review baseline. Use no priority or estimate.
+   as both Source baseline and the `discovery intake` Review baseline. Record
+   `Triage disposition: intake`. Use no priority or estimate.
    When code or an example clarifies the lead, include the exact current-baseline excerpt and a
    concrete provisional desired-behavior snippet under `WORKFLOW.md`; do not invent a target API
    merely to make the pair complete.
@@ -63,7 +65,7 @@ cap the result or stop after the first strong finding.
    to exact duplicates, clearly owned active work, or observations too vague to investigate. Also
    report scout completion, the full coverage ledger, commands run, and material gaps.
 
-Every new issue must meet the Backlog intake bar in `WORKFLOW.md`, include concrete breadcrumbs,
+Every new issue must meet the Triage intake bar in `WORKFLOW.md`, include concrete breadcrumbs,
 an explicit causal justification, useful current/desired snippets when applicable, triage
 questions, an explicit Area-label decision, and both baseline sections. Draft acceptance is optional
 because triage owns the final specification. One excellent issue is not evidence of a thorough

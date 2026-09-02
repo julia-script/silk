@@ -99,7 +99,7 @@ not_checked:
   - area and reason
 ```
 
-High-, medium-, and low-confidence leads can all be valid Backlog material when they identify a
+High-, medium-, and low-confidence leads can all be valid Triage material when they identify a
 specific investigable subject and state the open question honestly. Confidence guides triage; it
 is not a discovery gate. The justification may be a hypothesis, but it must connect the observed
 condition to a concrete possible consequence rather than restating that the code is large,
@@ -136,7 +136,7 @@ suspicion a concrete starting point. Continue until every material ledger area h
 check or an explicit unavailable-source reason.
 
 There is no target quota and no maximum issue count. File every distinct lead that passes the
-Backlog intake bar. The expected result of a broad sweep is often several issues; zero or one is
+Triage intake bar. The expected result of a broad sweep is often several issues; zero or one is
 credible only after the second pass and a coverage ledger that shows where the search found no
 additional investigable lead.
 
@@ -154,11 +154,12 @@ sweep as part of discovery.
 ## Linear write phase
 
 After the final remote-main freshness check succeeds, the coordinator writes sequentially after
-fan-in. New issues enter Backlog with no priority or estimate. For an existing issue, add only new
-evidence as a dated comment. Every new description includes a visible `## Why this matters`
-section plus Source and Review baselines. When a short code, configuration, diagnostic, or API
-example materially clarifies the lead, also include the exact current-baseline snippet and a
-concrete provisional desired-behavior snippet under the shape and safeguards in `WORKFLOW.md`.
+fan-in. New issues enter the native Triage inbox with no priority or estimate. For an existing
+issue, add only new evidence as a dated comment. Every new description includes a visible
+`## Why this matters` section, `Triage disposition: intake`, plus Source and Review baselines. When
+a short code, configuration, diagnostic, or API example materially clarifies the lead, also include
+the exact current-baseline snippet and a concrete provisional desired-behavior snippet under the
+shape and safeguards in `WORKFLOW.md`.
 Read every write back and confirm that the sections and fenced code survived rendering. Discovery
 evidence added to an existing issue does not advance its Review
 baseline because discovery does not perform the issue's technical triage. A touched legacy issue

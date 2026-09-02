@@ -8,9 +8,10 @@ This reference is shared by the `silk-*` project skills. Repository instructions
 Keep a steady, useful stream of maintenance work without building a second project-management
 system beside Linear. The lifecycle is:
 
-1. `silk-demand` or `silk-discover` creates or enriches a Linear Backlog issue.
-2. `silk-triage` validates the issue and moves it to Todo, Duplicate, or Canceled.
-3. `silk-work` claims one Todo issue, implements it, and moves verified work to In Review.
+1. `silk-demand` or `silk-discover` creates or enriches an issue in Linear's native Triage inbox.
+2. `silk-triage` validates the issue and moves it to Backlog, Duplicate, or Canceled.
+3. `silk-work` claims Julia's next Todo issue, or falls back to triaged Backlog when Todo is empty,
+   implements it, and moves verified work to In Review.
 4. `silk-sync` periodically reconciles issue state with the repository and GitHub.
 
 For one direct request that Julia wants implemented immediately, `silk-now` composes demand,
@@ -87,9 +88,9 @@ work. Every issue must name a concrete cost or risk, explain how the observed co
 and give a bounded way to prove completion. A proposed refactor, outcome, or acceptance list is not
 a justification by itself.
 
-## Backlog intake bar
+## Triage intake bar
 
-Discovery is broad intake, not final triage. Favor recall over certainty. A Backlog issue needs:
+Discovery is broad intake, not final triage. Favor recall over certainty. A Triage issue needs:
 
 - a specific lead anchored to paths, symbols, output, a documentation passage, or a structural
   query result;
@@ -124,11 +125,12 @@ description uses this shape, omitting empty sections:
 - Origin: discovery | direct demand
 - Scope: <package, app, docs area, or repository-wide>
 - Area label: Docs | Standard library | Compiler | LSP | none
+- Triage disposition: intake | needs-more-investigation | queue-ready | terminal
 
 ## Why this matters
 
 <The concrete current cost or risk, who or what pays it, and the causal chain from the observed
-condition to that consequence. For Backlog leads, distinguish observed facts from the hypothesis
+condition to that consequence. For Triage leads, distinguish observed facts from the hypothesis
 and state material uncertainty.>
 
 ## Evidence
@@ -209,6 +211,12 @@ the actual label. Follow `LINEAR.md` and use exactly one only for a clear primar
 Write `none` and leave the Linear Area field empty when none applies. Triage and later technical
 reviews keep the line and Linear label synchronized with the current scope.
 
+`Triage disposition` is the durable admission marker, independent of the moving Review baseline.
+Demand and discovery write `intake`; an inconclusive triage writes `needs-more-investigation`; a
+validated issue writes `queue-ready`; and a Duplicate or Canceled verdict writes `terminal`. Later
+work-admission and sync reviews preserve `queue-ready` while advancing the Review baseline. Only a
+Backlog issue with `Triage disposition: queue-ready` is eligible for automatic work selection.
+
 Use Linear comments for dated discovery additions, implementation reports, and reconciliation
 history. Keep the description as the current specification rather than an activity log.
 
@@ -240,14 +248,16 @@ Use Linear priority as the queue order:
   documentation.
 - Medium: recurring developer friction, strong simplification, or debt on an active path.
 - Low: bounded cleanup with demonstrated value but little current risk.
-- No priority: untriaged only.
+- No priority: untriaged Triage intake, or a Todo issue Julia deliberately leaves unranked.
 
 Unless Julia explicitly gives a different current priority, validated stabilization work ranks
-above feature work. Encode that default in Linear: stabilization is at least Medium and ordinary
-feature work is at most Low. Within stabilization, prefer correctness and safety, then broken
-documentation or public contracts, then simplification, dead code, and other debt. A feature may
-outrank stabilization only when Julia names it as the current focus or its concrete urgency is
-greater. Do not reprioritize work already In Progress or In Review merely to normalize the queue.
+above feature work within the triaged Backlog. Encode that default in Linear: stabilization is at
+least Medium and ordinary feature work is at most Low. Within stabilization, prefer correctness and
+safety, then broken documentation or public contracts, then simplification, dead code, and other
+debt. A feature may outrank stabilization only when Julia names it as the current focus or its
+concrete urgency is greater. Todo is a separate manual tier and always outranks Backlog; do not
+change Todo priorities or membership to normalize the automated queue. Do not reprioritize work
+already In Progress or In Review merely to normalize the queue.
 
 Use estimates as relative size: `1` small and mechanical, `2` or `3` medium, `5` or `8` large.
 Split an issue when independently useful slices can ship separately. Do not split merely to make
