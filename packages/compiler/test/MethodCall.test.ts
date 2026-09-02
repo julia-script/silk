@@ -279,6 +279,59 @@ pub fn main() -> i32 { return 0 }`)
   }),
 )
 
+it.effect('preserves call-scoped borrow identity through grouping', () =>
+  Effect.gen(function* () {
+    const source = `${counter}
+pub fn main() -> i32 {
+  let mut value = Counter { value: 40 }
+  let ungrouped = Counter.read(&value)
+  let grouped = Counter.read((&value))
+  let doubleGrouped = Counter.read(((&value)))
+  let receiver = (&value).read()
+  let bumped = Counter.bump(((&mut value)))
+  let after = value.read()
+  return ungrouped + grouped + doubleGrouped + receiver + bumped + after
+}`
+    const self = yield* analyze(source)
+    assert.deepEqual(codes(self), [])
+    const main = Analysis.rootAnalysis(self).hir.functions.find(
+      (fn) =>
+        fn.declaration.canonical._tag === 'Canonical' &&
+        fn.declaration.canonical.id.name === 'main',
+    )
+    assert.strictEqual(main === undefined ? undefined : Hir.firstUnavailable(main), undefined)
+    const calls =
+      main?.statements
+        .flatMap(Hir.statementExpressions)
+        .filter((expression) => expression._tag === 'Call') ?? []
+    assert.deepEqual(
+      calls.map((call) => call.target.name),
+      [
+        'Counter.read',
+        'Counter.read',
+        'Counter.read',
+        'Counter.read',
+        'Counter.bump',
+        'Counter.read',
+      ],
+    )
+    for (const call of calls) {
+      const argument = call.arguments.at(0)
+      assert.strictEqual(argument?._tag, 'ValueBorrow')
+      if (argument?._tag === 'ValueBorrow') assert.deepEqual(call.loanEnds, [argument.borrow])
+    }
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.strictEqual(evaluated(self), 242n)
+    const unsupported = yield* analyze(`${counter}
+fn consume(value: Counter) -> i32 { return value.value }
+pub fn main() -> i32 {
+  let value = Counter { value: 42 }
+  return consume((&value))
+}`)
+    assert.deepEqual(codes(unsupported), ['SEM0012'])
+  }),
+)
+
 it.effect('discovers calls inside compiler-owned temporary borrow roots', () =>
   Effect.gen(function* () {
     const source = `${counter}
@@ -705,14 +758,6 @@ it.effect(
   'accepts explicit borrows, reference receivers, chains, and explicit type arguments',
   () =>
     Effect.gen(function* () {
-      // A written borrow of the receiver analyzes as the reference receiver it is; the grouped
-      // borrow's lowering is a separately tracked gap shared with `Counter.read((&value))`.
-      const explicitBorrow = yield* analyze(`${counter}
-pub fn main() -> i32 {
-  let value = Counter { value: 42 }
-  return (&value).read()
-}`)
-      assert.deepEqual(described(explicitBorrow), [])
       // A `&mut` reference reborrows for a `&Self` method, inside and outside the owner.
       const reborrow = yield* analyze(`pub struct Counter { value: i32 }
 impl Counter {

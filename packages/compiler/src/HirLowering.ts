@@ -442,8 +442,10 @@ export const hirCallableTarget = (reference: CallReferenceFact): Hir.CallableTar
 export const argumentBorrowId = (
   argument: ArgumentFact,
   ordinal: number,
-): Hir.BorrowId | undefined =>
-  argument.expression._tag === 'Borrow' && argument.expression.formation._tag !== 'Unavailable'
+): Hir.BorrowId | undefined => {
+  let expression = argument.expression
+  while (expression._tag === 'Grouped') expression = expression.expression
+  return expression._tag === 'Borrow' && expression.formation._tag !== 'Unavailable'
     ? Object.freeze({
         _tag: 'BorrowId',
         function: argument.id.function,
@@ -451,6 +453,7 @@ export const argumentBorrowId = (
         ordinal,
       })
     : undefined
+}
 
 export const loanEndsOf = (
   arguments_: ReadonlyArray<ArgumentFact>,
@@ -1179,7 +1182,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       span: fact.syntax.span,
     })
   }
-  if (fact._tag === 'Grouped') return hirExpression(fact.expression)
+  if (fact._tag === 'Grouped') return hirExpression(fact.expression, borrow)
   if (fact._tag === 'FunctionItem') {
     const target = hirCallableTarget(fact.reference)
     if (target === undefined || fact.type._tag !== 'Available' || !Type.isCallable(fact.type.type))
