@@ -106,6 +106,7 @@ const declarationKind = (
     case 'RoleDeclaration':
     case 'EnumDeclaration':
     case 'UnionDeclaration':
+    case 'AliasDeclaration':
       return 'Type'
     case 'StructDeclaration':
       return aggregateKind
@@ -129,6 +130,8 @@ const declarationDetail = (declaration: DeclarationFacts.MemberFact): Presentati
       return PresentationRenderer.structDeclaration(declaration)
     case 'UnionDeclaration':
       return PresentationRenderer.unionDeclaration(declaration)
+    case 'AliasDeclaration':
+      return PresentationRenderer.aliasDeclaration(declaration)
   }
 }
 

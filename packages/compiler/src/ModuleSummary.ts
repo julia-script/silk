@@ -9,7 +9,14 @@ import * as SyntaxTree from './SyntaxTree.js'
 export type Namespace = 'Value' | 'Type' | 'ValueAndType'
 
 /** A top-level declaration kind that can be named by a selected-member import. */
-export type DeclarationKind = 'Function' | 'Constant' | 'Struct' | 'Union' | 'Service' | 'Interface'
+export type DeclarationKind =
+  | 'Function'
+  | 'Constant'
+  | 'Struct'
+  | 'Union'
+  | 'Service'
+  | 'Interface'
+  | 'Alias'
 
 /** One compact public declaration header retained for exact-name candidate lookup. */
 export interface Export {
@@ -46,6 +53,8 @@ const declarationKind = (
       return { declarationKind: 'Service', namespace: 'Type' }
     case 'InterfaceDeclaration':
       return { declarationKind: 'Interface', namespace: 'Type' }
+    case 'TypeAliasDeclaration':
+      return { declarationKind: 'Alias', namespace: 'Type' }
     default:
       return undefined
   }

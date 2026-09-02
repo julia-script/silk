@@ -13,7 +13,6 @@ import * as NameResolution from './NameResolution.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as Ownership from './Ownership.js'
 import * as PhaseReport from './PhaseReport.js'
-import * as ResolutionSeams from './ResolutionSeams.js'
 import type * as SemanticInvalidation from './SemanticInvalidation.js'
 import type * as SourceResolver from './SourceResolver.js'
 
@@ -74,12 +73,7 @@ const analyzeHeaders = Effect.fnUntraced(function* (
     collected.modules.length,
     () => {
       const preliminary = NameResolution.resolve(closure, collected)
-      const resolvers = ResolutionSeams.make(
-        (module: string, path: DeclarationFacts.TypePathFact) =>
-          NameResolution.resolveType(preliminary, collected, module, path),
-        (module: string, path: DeclarationFacts.TypePathFact) =>
-          NameResolution.resolveItem(preliminary, collected, module, path),
-      )
+      const resolvers = NameResolution.makeResolvers(preliminary, collected)
       return DeclarationCompletion.complete(collected, resolvers)
     },
     (value) => value.modules.reduce((sum, module) => sum + module.members.length, 0),

@@ -23,6 +23,7 @@ const documentableKinds: ReadonlySet<SyntaxTree.NodeKind> = new Set([
   'InterfaceDeclaration',
   'RoleDeclaration',
   'ConstantDeclaration',
+  'TypeAliasDeclaration',
   'ImplDeclaration',
   'FunctionDeclaration',
   'StructField',

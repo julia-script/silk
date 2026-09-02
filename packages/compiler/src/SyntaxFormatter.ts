@@ -620,6 +620,32 @@ const printServiceDeclaration = (
   )
 }
 
+const printTypeAliasDeclaration = (
+  context: Context,
+  node: SyntaxTree.Node,
+  prefix: FormatDocument.Document,
+): FormatDocument.Document => {
+  const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
+  const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
+  const target = directNodes(node).at(-1)
+  return FormatDocument.concat(
+    ...(publicKeyword === undefined
+      ? []
+      : [printToken(context, publicKeyword, prefix), FormatDocument.text(' ')]),
+    printToken(
+      context,
+      tokenOf(node, 'TypeKeyword'),
+      publicKeyword === undefined ? prefix : FormatDocument.empty,
+    ),
+    printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+    ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
+    printToken(context, tokenOf(node, 'Equals'), FormatDocument.text(' ')),
+    ...(target === undefined || target === typeParameters
+      ? []
+      : [printNode(context, target, FormatDocument.text(' '))]),
+  )
+}
+
 const printConstantDeclaration = (
   context: Context,
   node: SyntaxTree.Node,
@@ -962,6 +988,8 @@ const printNode = (
       throw new SyntaxFormatterImplementationError(
         'Damaged service member reached the syntax printer',
       )
+    case 'TypeAliasDeclaration':
+      return printTypeAliasDeclaration(context, node, prefix)
     case 'ConstantDeclaration':
       return printConstantDeclaration(context, node, prefix)
     case 'ImplDeclaration':

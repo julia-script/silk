@@ -198,6 +198,8 @@ export const resolveDeclaredType = (
   if (fact._tag === 'Unresolved') {
     const resolved = resolvers.type(module, fact.path)
     if (resolved.fact._tag !== 'Resolved' || !Type.isNominal(resolved.fact.type)) return resolved
+    // A nominal that already carries arguments came through an alias, which applied them.
+    if (resolved.fact.type.arguments.length > 0) return resolved
     const declaration = memberByNominal(modules, resolved.fact.type)
     const expected =
       declaration?.typeParameters.length ?? Type.intrinsicNominalArity(resolved.fact.type)
@@ -427,8 +429,11 @@ export const resolveDeclaredType = (
     ]
     if (target.fact._tag === 'Resolved' && Type.isNominal(target.fact.type)) {
       const declaration = memberByNominal(modules, target.fact.type)
+      // An alias to an applied nominal accepts no further arguments.
       const expected =
-        declaration?.typeParameters.length ?? Type.intrinsicNominalArity(target.fact.type)
+        target.fact.type.arguments.length > 0
+          ? 0
+          : (declaration?.typeParameters.length ?? Type.intrinsicNominalArity(target.fact.type))
       const declaredParameters = declaration?.typeParameters.map((parameter) => parameter.type)
       const valueArguments = arguments_.map(
         (argument, ordinal): Type.GenericArgument | undefined => {
@@ -1456,6 +1461,16 @@ export const resolveConstraintFacts = (
   return Object.freeze({ facts: Object.freeze(facts), diagnostics: Object.freeze(diagnostics) })
 }
 
+/**
+ * One declared member contributes each structural-union member separately, so a row spelled
+ * through a union alias is the row its members would spell directly. A nominal union is one
+ * nominal type and stays one atomic member.
+ */
+const failureRowLeaves = (member: Type.Type): ReadonlyArray<Type.Type> => {
+  if (Type.isNever(member)) return []
+  return Type.isUnion(member) ? member.members : [member]
+}
+
 const semanticFailureRow = (fact: RowExpressionFact): Type.FailureRow => {
   switch (fact._tag) {
     case 'EmptyRowExpression':
@@ -1473,7 +1488,7 @@ const semanticFailureRow = (fact: RowExpressionFact): Type.FailureRow => {
           fact.syntax.span,
         )
       return Type.isRuntimeConcrete(fact.member.type)
-        ? RowAlgebra.concrete(Type.failureRowPolicy(), [fact.member.type])
+        ? RowAlgebra.concrete(Type.failureRowPolicy(), failureRowLeaves(fact.member.type))
         : RowAlgebra.concrete(Type.failureRowPolicy(), [])
     case 'UnionRowExpression':
       return fact.operands.reduce<Type.FailureRow>(
@@ -1609,7 +1624,8 @@ export const resolveFailureRow = (
         )
       continue
     }
-    if (!Type.isParameter(member.type)) failures.set(Type.key(member.type), member.type)
+    if (!Type.isParameter(member.type))
+      for (const leaf of failureRowLeaves(member.type)) failures.set(Type.key(leaf), leaf)
   }
   return Object.freeze({
     fact: Object.freeze({

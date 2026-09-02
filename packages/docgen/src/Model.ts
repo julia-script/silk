@@ -27,6 +27,7 @@ export interface LinkTarget {
     | 'Interface'
     | 'Constant'
     | 'Role'
+    | 'Alias'
 }
 
 export type Inline =
@@ -116,6 +117,7 @@ export type ItemKind =
   | 'Interface'
   | 'Constant'
   | 'Role'
+  | 'Alias'
   | 'Parameter'
   | 'TypeParameter'
   | 'Field'
@@ -210,6 +212,7 @@ const linkKindOf = (value: unknown): LinkTarget['kind'] | undefined => {
     case 'Interface':
     case 'Constant':
     case 'Role':
+    case 'Alias':
       return value
     default:
       return undefined
@@ -427,6 +430,7 @@ const itemKindOf = (value: unknown): ItemKind | undefined => {
     case 'Interface':
     case 'Constant':
     case 'Role':
+    case 'Alias':
     case 'Parameter':
     case 'TypeParameter':
     case 'Field':

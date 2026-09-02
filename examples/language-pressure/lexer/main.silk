@@ -30,6 +30,7 @@ const tokenInvalidDurationLiteral: u8 = 80
 const tokenTuple: u8 = 81
 const tokenStatic: u8 = 82
 const tokenCompileError: u8 = 83
+const tokenType: u8 = 84
 
 struct Token {
   kind: u8
@@ -217,6 +218,7 @@ fn keywordKind(source: &[u8], start: usize, end: usize) -> u8 {
   if matches(source, start, end, b"role") { return tokenRole }
   if matches(source, start, end, b"enum") { return tokenEnum }
   if matches(source, start, end, b"union") { return tokenUnion }
+  if matches(source, start, end, b"type") { return tokenType }
   return tokenIdentifier
 }
 

@@ -312,6 +312,7 @@ const staticForBodyBoundary: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'TupleKeyword',
   'EnumKeyword',
   'UnionKeyword',
+  'TypeKeyword',
   'ServiceKeyword',
   'InterfaceKeyword',
   'RoleKeyword',
@@ -429,6 +430,7 @@ export const endsBlock = (state: State): boolean => {
     kind === 'TupleKeyword' ||
     kind === 'EnumKeyword' ||
     kind === 'UnionKeyword' ||
+    kind === 'TypeKeyword' ||
     kind === 'FnKeyword' ||
     kind === 'ImplKeyword' ||
     (kind === 'StaticKeyword' && peek(state, 1) === 'FnKeyword') ||
@@ -582,6 +584,7 @@ export function parseBlock(
     'TupleKeyword',
     'EnumKeyword',
     'UnionKeyword',
+    'TypeKeyword',
     'FnKeyword',
     'EffectKeyword',
     'ImportKeyword',

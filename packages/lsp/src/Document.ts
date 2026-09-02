@@ -1487,6 +1487,8 @@ export const completion = (
       case 'Service':
       case 'Interface':
         return CompletionItemKind.Interface
+      case 'Alias':
+        return CompletionItemKind.TypeParameter
     }
   }
   const partial = Option.getOrElse(SourceFile.spelling(syntax.source, result.replacement), () => '')
@@ -1606,6 +1608,16 @@ export const symbols = (
         {
           name: member.name.spelling,
           kind: SymbolKind.Constant,
+          range,
+          selectionRange,
+        },
+      ]
+    }
+    if (member._tag === 'AliasDeclaration') {
+      return [
+        {
+          name: member.name.spelling,
+          kind: SymbolKind.Interface,
           range,
           selectionRange,
         },

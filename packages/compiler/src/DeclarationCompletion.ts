@@ -86,6 +86,14 @@ export const complete = (
   const diagnostics: Array<Diagnostic.Diagnostic> = [...self.diagnostics]
   let modules = self.modules.map((module): ModuleHeaders => {
     const members = module.members.map((member): MemberFact => {
+      if (member._tag === 'AliasDeclaration') {
+        // The resolver memoizes each alias, so a use that already forced it reported its
+        // diagnostics; this forcing only guarantees every alias resolves at least once.
+        const resolved = resolvers.alias?.(member)
+        if (resolved === undefined) return member
+        diagnostics.push(...resolved.diagnostics)
+        return Object.freeze({ ...member, target: resolved.fact })
+      }
       if (member._tag === 'ConstantDeclaration') {
         const resolved = resolveDeclaredType(
           module.module,
@@ -1287,7 +1295,12 @@ export const complete = (
         }
         continue
       }
-      if (member._tag === 'RoleDeclaration' || member._tag === 'EnumDeclaration') continue
+      if (
+        member._tag === 'RoleDeclaration' ||
+        member._tag === 'EnumDeclaration' ||
+        member._tag === 'AliasDeclaration'
+      )
+        continue
       const fields =
         member._tag === 'UnionDeclaration'
           ? member.variants.flatMap((variant) => variant.fields)
@@ -1308,6 +1321,8 @@ export const complete = (
   modules = modules.map((module): ModuleHeaders => {
     const members = module.members.map((member): MemberFact => {
       if (member.visibility !== 'Public') return member
+      // The alias resolver attached exposure when it erased the target.
+      if (member._tag === 'AliasDeclaration') return member
       if (member._tag === 'ConstantDeclaration') {
         return Object.freeze({
           ...member,

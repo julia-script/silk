@@ -47,6 +47,7 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
   TupleKeyword: keyword,
   EnumKeyword: keyword,
   UnionKeyword: keyword,
+  TypeKeyword: keyword,
   ServiceKeyword: keyword,
   InterfaceKeyword: keyword,
   RoleKeyword: keyword,

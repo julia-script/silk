@@ -29,6 +29,7 @@ export type NodeKind =
   | 'OperatorMarker'
   | 'ServiceInvalidMember'
   | 'ConstantDeclaration'
+  | 'TypeAliasDeclaration'
   | 'StructField'
   | 'ImplDeclaration'
   | 'ImplOperation'

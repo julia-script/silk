@@ -682,6 +682,17 @@ it('recognizes union only as a complete keyword', () => {
   )
 })
 
+it('recognizes type only as a complete keyword', () => {
+  const result = Lexer.lex(
+    SourceFile.make('memory://type-keyword.silk', ascii('type typeName types')),
+  )
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['TypeKeyword', 'Identifier', 'Identifier', 'EndOfFile'],
+  )
+})
+
 it('recognizes the effect execution and failure keywords without prefix capture', () => {
   const result = Lexer.lex(
     SourceFile.make(

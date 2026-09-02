@@ -379,6 +379,10 @@ export const staticCallDepthLimitCode = 'SEM0180' as const
 export const staticRetainedValueLimitCode = 'SEM0181' as const
 /** Stable code for exhausting the static evaluator's residual-growth budget. */
 export const staticResidualGrowthLimitCode = 'SEM0182' as const
+/** Stable code for a type alias whose target resolves back through the alias itself. */
+export const cyclicTypeAliasCode = 'SEM0183' as const
+/** Stable code for a type alias that declares type parameters. */
+export const typeAliasParametersCode = 'SEM0184' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -603,6 +607,8 @@ export type Code =
   | typeof staticCallDepthLimitCode
   | typeof staticRetainedValueLimitCode
   | typeof staticResidualGrowthLimitCode
+  | typeof cyclicTypeAliasCode
+  | typeof typeAliasParametersCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -1053,6 +1059,8 @@ export type Reason =
   | { readonly _tag: 'ExpectedType'; readonly spelling: string }
   | { readonly _tag: 'PrivateTypeExposure'; readonly type: string }
   | { readonly _tag: 'InlineRecursiveAggregate'; readonly members: ReadonlyArray<string> }
+  | { readonly _tag: 'CyclicTypeAlias'; readonly aliases: ReadonlyArray<string> }
+  | { readonly _tag: 'TypeAliasParameters'; readonly alias: string }
   | { readonly _tag: 'InaccessibleStructConstruction'; readonly type: string }
   | { readonly _tag: 'UnknownStructField'; readonly type: string; readonly field: string }
   | {
@@ -2248,6 +2256,44 @@ export const inlineRecursiveAggregate = (
       _tag: 'InlineRecursiveAggregate',
       members: Object.freeze([...members]),
     }),
+    span,
+  })
+
+/** Reports one alias on a cycle, relating every other alias declaration on that cycle. */
+export const cyclicTypeAlias = (
+  alias: string,
+  aliases: ReadonlyArray<string>,
+  related: ReadonlyArray<SourceSpan.SourceSpan>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: cyclicTypeAliasCode,
+    severity: 'error',
+    message: `Type alias ${alias} is cyclic: ${[...aliases, aliases[0] ?? alias].join(' -> ')}`,
+    reason: Object.freeze({ _tag: 'CyclicTypeAlias', aliases: Object.freeze([...aliases]) }),
+    span,
+    ...(related.length === 0
+      ? {}
+      : {
+          relatedSpans: Object.freeze(
+            related.map((relatedSpan) =>
+              Object.freeze({ label: 'alias on the same cycle', span: relatedSpan }),
+            ),
+          ),
+        }),
+  })
+
+/** Rejects a type alias that declares type parameters. */
+export const typeAliasParameters = (alias: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: typeAliasParametersCode,
+    severity: 'error',
+    message: `Type alias ${alias} cannot declare type parameters; alias an applied type such as Point<i32> instead`,
+    reason: Object.freeze({ _tag: 'TypeAliasParameters', alias }),
     span,
   })
 

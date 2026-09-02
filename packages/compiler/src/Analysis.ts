@@ -514,6 +514,11 @@ const presentationOfIdentity = (
         Presentation.serviceDeclaration(declaration),
         nominalDeclarationType(declaration),
       )
+    if (declaration?._tag === 'AliasDeclaration')
+      return hoverPresentation(
+        Presentation.aliasDeclaration(declaration),
+        declaredType(declaration.target),
+      )
     return declaration?._tag === 'ConstantDeclaration'
       ? hoverPresentation(
           Presentation.constantDeclaration(declaration),

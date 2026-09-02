@@ -16,11 +16,11 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | `LEX`  | Lexical   | 12    |
 | `PAR`  | Parser    | 5     |
 | `MOD`  | Module    | 3     |
-| `SEM`  | Semantic  | 174   |
+| `SEM`  | Semantic  | 176   |
 | `OWN`  | Ownership | 16    |
 | `LAY`  | Layout    | 1     |
 
-There are 211 codes in total.
+There are 213 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -235,6 +235,8 @@ There are 211 codes in total.
 | `SEM0180` | Stable code for exhausting the static evaluator's logical call-depth budget.                                 | `Static evaluation exceeded its call-depth limit of <limit> for <target>`                                                                                                                                                                                                                                                                                                                                                                                      |
 | `SEM0181` | Stable code for exhausting the static evaluator's retained-value budget.                                     | `Static evaluation exceeded its retained-value limit of <limit> bytes for <target>`                                                                                                                                                                                                                                                                                                                                                                            |
 | `SEM0182` | Stable code for exhausting the static evaluator's residual-growth budget.                                    | `Static evaluation exceeded its residual-growth limit of <limit> nodes for <target>`                                                                                                                                                                                                                                                                                                                                                                           |
+| `SEM0183` | Stable code for a type alias whose target resolves back through the alias itself.                            | `Type alias <alias> is cyclic: <join>`                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `SEM0184` | Stable code for a type alias that declares type parameters.                                                  | `Type alias <alias> cannot declare type parameters; alias an applied type such as Point<i32> instead`                                                                                                                                                                                                                                                                                                                                                          |
 
 ## Ownership (`OWN`)
 

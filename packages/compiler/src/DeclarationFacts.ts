@@ -562,6 +562,20 @@ export interface ConstantFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** One transparent type alias header. Its target erases to a canonical type at resolution. */
+export interface AliasFact {
+  readonly _tag: 'AliasDeclaration'
+  readonly id: DeclarationId
+  readonly canonical: CanonicalState
+  readonly visibility: 'Public' | 'Private'
+  readonly typeParameters: ReadonlyArray<TypeParameterFact>
+  readonly name: DeclaredName
+  readonly target: DeclaredTypeFact
+  /** Retained only so semantic analysis can reject a parameterized alias at its exact span. */
+  readonly parameterList?: SyntaxTree.Node
+  readonly syntax: SyntaxTree.Node
+}
+
 /** One target-neutral static initializer retained with deterministic source-independent syntax. */
 export interface StaticExpressionTemplate {
   readonly _tag: 'StaticExpressionTemplate'
@@ -1460,6 +1474,7 @@ export type MemberFact =
   | InterfaceFact
   | ConstantFact
   | RoleFact
+  | AliasFact
 
 export type ParameterLookup =
   | { readonly _tag: 'Resolved'; readonly spelling: string; readonly parameter: ParameterFact }

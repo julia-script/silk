@@ -3,6 +3,7 @@ import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationCompletion from './DeclarationCompletion.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as DeclarationResolution from './DeclarationResolution.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as ImportPath from './ImportPath.js'
 import * as Intrinsic from './Intrinsic.js'
@@ -550,11 +551,44 @@ const typeUseSpan = (path: DeclarationFacts.TypePathFact): Token.Token['span'] =
   path.segments.at(-1)?.token.span ?? path.syntax.span
 
 /** Resolves one retained declaration type path through an immutable module scope. */
+const causeOf = (fact: DeclarationFacts.DeclaredTypeFact): Diagnostic.Identity | undefined =>
+  'cause' in fact ? fact.cause : undefined
+
+/**
+ * Erases one alias hit at a type path. During header completion the memoizing resolver from
+ * `makeResolvers` supplies the target; afterwards the completed alias fact already carries it.
+ */
+const resolveAliasUse = (
+  path: DeclarationFacts.TypePathFact,
+  declaration: DeclarationFacts.AliasFact,
+  alias: ResolutionSeams.AliasResolver | undefined,
+): DeclarationFacts.TypeResolution => {
+  const target =
+    alias === undefined
+      ? Object.freeze({
+          fact: declaration.target,
+          cause: causeOf(declaration.target),
+          diagnostics: Object.freeze([]),
+        })
+      : alias(declaration)
+  const base =
+    target.fact._tag === 'Resolved'
+      ? resolvedType(path, target.fact.type)
+      : unavailable(path, target.cause)
+  return target.diagnostics.length === 0
+    ? base
+    : Object.freeze({
+        fact: base.fact,
+        diagnostics: Object.freeze([...target.diagnostics, ...base.diagnostics]),
+      })
+}
+
 export const resolveType = (
   resolution: Resolution,
   index: DeclarationIndex.Index,
   module: string,
   path: DeclarationFacts.TypePathFact,
+  alias?: ResolutionSeams.AliasResolver,
 ): DeclarationFacts.TypeResolution => {
   const scope = scopeOf(resolution, module)
   const first = path.segments.at(0)
@@ -589,6 +623,8 @@ export const resolveType = (
     return unresolved(path, Diagnostic.expectedType(path.spelling, typeUseSpan(path)))
   }
   if (result._tag === 'Resolved') {
+    if (result.declaration._tag === 'AliasDeclaration')
+      return resolveAliasUse(path, result.declaration, alias)
     const nominal = nominalOf(result.declaration)
     if (nominal !== undefined) return resolvedType(path, nominal)
     return unresolved(path, Diagnostic.expectedType(path.spelling, typeUseSpan(path)))
@@ -667,18 +703,123 @@ export const resolveItem = (
   return Object.freeze({ _tag: 'Missing' })
 }
 
+const aliasKey = (declaration: DeclarationFacts.AliasFact): string | undefined =>
+  declaration.canonical._tag === 'Canonical'
+    ? `${declaration.canonical.id.module}::${declaration.canonical.id.name}`
+    : undefined
+
+const aliasSpelling = (declaration: DeclarationFacts.AliasFact): string =>
+  declaration.name._tag === 'Present' ? declaration.name.spelling : '_'
+
+const aliasSpan = (declaration: DeclarationFacts.AliasFact): Token.Token['span'] =>
+  declaration.name._tag === 'Present' ? declaration.name.token.span : declaration.syntax.span
+
+/**
+ * Builds the header-completion resolution boundaries over preliminary scopes.
+ *
+ * Alias targets resolve lazily on first demand, memoized per canonical alias, with an in-progress
+ * stack so a target that reaches its own declaration is reported once per alias on the cycle. A
+ * public alias whose erased target exposes a private nominal is unavailable for every use.
+ */
+export const makeResolvers = (
+  resolution: Resolution,
+  index: DeclarationIndex.Index,
+): ResolutionSeams.ResolutionSeams => {
+  const memo = new Map<string, ResolutionSeams.AliasResolution>()
+  const active: Array<DeclarationFacts.AliasFact> = []
+  const cycleCauses = new Map<string, Diagnostic.Identity>()
+  const unavailableAlias = (
+    declaration: DeclarationFacts.AliasFact,
+    cause: Diagnostic.Identity | undefined,
+    diagnostics: ReadonlyArray<Diagnostic.Diagnostic> = Object.freeze([]),
+  ): ResolutionSeams.AliasResolution =>
+    Object.freeze({
+      fact: Object.freeze({ _tag: 'Unavailable', syntax: declaration.syntax }),
+      ...(cause === undefined ? {} : { cause }),
+      diagnostics,
+    })
+  const resolveAlias: ResolutionSeams.AliasResolver = (declaration) => {
+    const key = aliasKey(declaration)
+    if (key === undefined || declaration.canonical._tag !== 'Canonical')
+      return unavailableAlias(declaration, undefined)
+    const cached = memo.get(key)
+    if (cached !== undefined) return Object.freeze({ ...cached, diagnostics: Object.freeze([]) })
+    const activeIndex = active.findIndex((candidate) => aliasKey(candidate) === key)
+    if (activeIndex >= 0) {
+      const cycle = active.slice(activeIndex)
+      const names = cycle.map(aliasSpelling)
+      const diagnostics = cycle.flatMap((member): ReadonlyArray<Diagnostic.Diagnostic> => {
+        const memberKey = aliasKey(member)
+        if (memberKey === undefined || cycleCauses.has(memberKey)) return []
+        const diagnostic = Diagnostic.cyclicTypeAlias(
+          aliasSpelling(member),
+          names,
+          cycle.filter((other) => other !== member).map(aliasSpan),
+          aliasSpan(member),
+        )
+        cycleCauses.set(memberKey, Diagnostic.identity(diagnostic))
+        return [diagnostic]
+      })
+      return unavailableAlias(declaration, cycleCauses.get(key), Object.freeze(diagnostics))
+    }
+    if (declaration.parameterList !== undefined) {
+      const diagnostic = Diagnostic.typeAliasParameters(
+        aliasSpelling(declaration),
+        declaration.parameterList.span,
+      )
+      const result = unavailableAlias(declaration, Diagnostic.identity(diagnostic))
+      memo.set(key, result)
+      return Object.freeze({ ...result, diagnostics: Object.freeze([diagnostic]) })
+    }
+    active.push(declaration)
+    const resolved = DeclarationResolution.resolveDeclaredType(
+      declaration.canonical.id.module,
+      declaration.target,
+      resolvers,
+      index.modules,
+    )
+    active.pop()
+    const diagnostics: Array<Diagnostic.Diagnostic> = [...resolved.diagnostics]
+    const cycleCause = cycleCauses.get(key)
+    let result: ResolutionSeams.AliasResolution
+    if (cycleCause !== undefined) result = unavailableAlias(declaration, cycleCause)
+    else if (resolved.fact._tag !== 'Resolved') {
+      const cause = causeOf(resolved.fact)
+      result = Object.freeze({
+        fact: resolved.fact,
+        ...(cause === undefined ? {} : { cause }),
+        diagnostics: Object.freeze([]),
+      })
+    } else {
+      const exposed =
+        declaration.visibility === 'Public'
+          ? DeclarationResolution.attachExposure(resolved.fact, index.modules, diagnostics)
+          : resolved.fact
+      result =
+        exposed._tag === 'Resolved' && exposed.exposureCause !== undefined
+          ? unavailableAlias(declaration, exposed.exposureCause)
+          : Object.freeze({ fact: exposed, diagnostics: Object.freeze([]) })
+    }
+    memo.set(key, result)
+    return Object.freeze({ ...result, diagnostics: Object.freeze(diagnostics) })
+  }
+  const resolvers: ResolutionSeams.ResolutionSeams = ResolutionSeams.make(
+    (module: string, path: DeclarationFacts.TypePathFact) =>
+      resolveType(resolution, index, module, path, resolveAlias),
+    (module: string, path: DeclarationFacts.TypePathFact) =>
+      resolveItem(resolution, index, module, path),
+    resolveAlias,
+  )
+  return resolvers
+}
+
 /** Runs identity collection, scope construction, and declared-type completion in phase order. */
 export const analyze = (
   closure: ModuleClosure.Facts,
 ): { readonly index: DeclarationIndex.Index; readonly resolution: Resolution } => {
   const collected = DeclarationCollection.collect(closure)
   const preliminary = resolve(closure, collected)
-  const resolvers = ResolutionSeams.make(
-    (module: string, path: DeclarationFacts.TypePathFact) =>
-      resolveType(preliminary, collected, module, path),
-    (module: string, path: DeclarationFacts.TypePathFact) =>
-      resolveItem(preliminary, collected, module, path),
-  )
+  const resolvers = makeResolvers(preliminary, collected)
   const index = DeclarationCompletion.complete(collected, resolvers)
   return Object.freeze({ index, resolution: resolve(closure, index) })
 }

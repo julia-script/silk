@@ -2015,6 +2015,15 @@ const member = (value: DeclarationFacts.MemberFact): string => {
         value.visibility,
         name(value.name),
       ])
+    case 'AliasDeclaration':
+      // The target is the erased canonical type, so two spellings of one type surface equally.
+      return record('AliasDeclaration', [
+        declarationIdOrdinal(value.id),
+        canonicalState(value.canonical),
+        value.visibility,
+        name(value.name),
+        declaredType(value.target),
+      ])
     default:
       return exhaustive(value)
   }

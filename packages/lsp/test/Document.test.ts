@@ -121,6 +121,21 @@ it.effect('hovers the type of the smallest enclosing expression', () =>
   }),
 )
 
+it.effect('hovers a type alias use with its erased target', () =>
+  Effect.gen(function* () {
+    const source = `pub struct Circle {}
+pub struct Square {}
+pub type Shape = Circle | Square
+pub fn pick(shape: Shape) -> i32 { return 0 }`
+    const { document, snapshot } = yield* open(source)
+    const hover = Document.hover(document, snapshot, positionOf(source, 'Shape) -> i32'))
+    assert.isDefined(hover)
+    const text = typeof hover?.contents === 'string' ? hover.contents : hover?.contents.value
+    assert.include(text, 'Circle')
+    assert.include(text, 'Square')
+  }),
+)
+
 it.effect('hovers the exact default float width', () =>
   Effect.gen(function* () {
     const source = 'fn value() -> f64 { return 1.25e2 }'
@@ -817,6 +832,7 @@ it.effect('lists constants, roles, functions, and structs with fields as documen
   Effect.gen(function* () {
     const source = `pub const defaultAnswer: i32 = 42
 pub role Primary
+pub type Answer = i32
 pub struct Box { answer: i32 }
 pub fn main() -> i32 { return 42 }`
     const { document, snapshot } = yield* open(source)
@@ -826,12 +842,13 @@ pub fn main() -> i32 { return 42 }`
       [
         ['defaultAnswer', SymbolKind.Constant],
         ['Primary', SymbolKind.Enum],
+        ['Answer', SymbolKind.Interface],
         ['Box', SymbolKind.Struct],
         ['main', SymbolKind.Function],
       ],
     )
     assert.deepEqual(
-      symbols[2]?.children?.map((child) => [child.name, child.kind]),
+      symbols[3]?.children?.map((child) => [child.name, child.kind]),
       [['answer', SymbolKind.Field]],
     )
   }),
