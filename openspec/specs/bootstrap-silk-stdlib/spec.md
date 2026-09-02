@@ -13,10 +13,11 @@ The standard library SHALL define `Option<T>` as an ordinary shipped nominal uni
 variant `None` and named-field variant `Some { pub value: T }`. The parent union SHALL be public, so
 its variants are externally selectable, and the payload field SHALL be public for direct construction
 and matching. Recoverable integer operations and every other optional-value consumer SHALL use this
-declaration without an Option-shaped compiler collection primitive. The ordinary `some` and `none`
-helper functions MAY remain as ergonomic constructors only when they construct the direct variants.
-The former transparent wrapper struct, detached `Some<T>` and `None` structs, compatibility aliases,
-and dual representations MUST NOT remain.
+declaration without an Option-shaped compiler collection primitive. The `none`, `some`, `map`,
+`flatMap`, and `unwrapOr` operations SHALL be inherent members declared in `impl<T> Option<T>`,
+reachable as `Option.member`, and MUST NOT be root declarations of the module. The former
+transparent wrapper struct, detached `Some<T>` and `None` structs, compatibility aliases, and dual
+representations MUST NOT remain.
 
 #### Scenario: Return checked success
 
@@ -32,6 +33,11 @@ and dual representations MUST NOT remain.
 
 - **WHEN** standard-library source, manifests, documentation, and tests are inspected after migration
 - **THEN** `Option<T>` is the direct nominal union and no detached `Some<T>`, detached `None`, wrapper `value` field, alias, or compatibility path remains
+
+#### Scenario: Reach Option operations as members
+
+- **WHEN** source imports `silk.option { Option }` and evaluates `Option.some(2) |> Option.map(addOne)`
+- **THEN** both operations resolve to inherent members of `Option` and `import silk.option { some }` reports an unknown root member
 
 ### Requirement: Standard-library modules resolve without vendoring
 
@@ -867,21 +873,22 @@ back to owned text.
 
 ### Requirement: Nonprimitive operation modules expose importable scope actors
 
-Each canonical nonprimitive standard-library operation module SHALL export an ordinary public
-zero-data actor under the qualifier used to present that module's complete operation surface when
-no existing declaration already provides that scope. Selecting the scope actor SHALL expose the
-same public module operations under that qualifier as a namespace import, without compiler
-privilege or a runtime representation.
+Each canonical nonprimitive standard-library operation module SHALL declare its public operations
+as inherent members of one public owner nominal: the module's principal data type when it has one,
+otherwise an ordinary public zero-data owner struct. Selecting the owner SHALL expose exactly its
+associated items under that qualifier, without compiler privilege, without a runtime
+representation, and without exposing any other root declaration of the module. Primitive modules
+SHALL remain intrinsic namespaces.
 
 #### Scenario: Select the RawBuffer scope actor
 
 - **WHEN** source imports `silk.raw_buffer { RawBuffer }` and calls `RawBuffer.from<T>`
-- **THEN** name resolution reaches the canonical ordinary-source `from` operation and reports no missing-member diagnostic
+- **THEN** name resolution reaches the inherent member `from` of `RawBuffer` and reports no missing-member diagnostic
 
 #### Scenario: Preserve an example qualifier
 
-- **WHEN** a documented example replaces a redundant namespace import with a selected scope-actor import
-- **THEN** every operation qualifier in the example remains unchanged and resolves to the same canonical module operation
+- **WHEN** a documented example that qualified operations through the owner is compiled after migration
+- **THEN** every `Owner.operation` qualifier in the example remains unchanged and resolves to the inherent member
 
 #### Scenario: Keep primitive modules as namespaces
 
@@ -890,5 +897,28 @@ privilege or a runtime representation.
 
 #### Scenario: Scope actors remain ordinary source
 
-- **WHEN** tooling navigates an imported standard-library scope actor
-- **THEN** it reaches a public zero-data declaration in canonical Silk source with no compiler-known actor or module-origin exception
+- **WHEN** tooling navigates an imported standard-library owner or one of its members
+- **THEN** it reaches a public declaration in canonical Silk source with no compiler-known actor or module-origin exception
+
+#### Scenario: Effect operations are members of Effect
+
+- **WHEN** source imports `silk.effect { Effect }` and evaluates `computation |> Effect.provide(&clock)`
+- **THEN** `provide` resolves to an inherent member of the `Effect` owner declared in `silk/effect`
+
+### Requirement: Standard-library membership is declared, not projected
+
+No standard-library module SHALL rely on its basename to expose operations through a type. Every
+public operation intended to be qualified by a type SHALL be declared inside that type's inherent
+impl, and every remaining public root function SHALL be reachable only unqualified, by selective
+import, or through a namespace import. Renaming a standard-library file SHALL NOT change which
+operations any type exposes.
+
+#### Scenario: Audit the shipped sources
+
+- **WHEN** the shipped standard-library sources are inspected after migration
+- **THEN** no module exposes an operation through a type without an inherent impl declaring it, and the source-table check passes
+
+#### Scenario: Rename a module without changing its API
+
+- **WHEN** a test copies a migrated module under a different file name and imports its owner type
+- **THEN** every `Owner.member` call resolves exactly as before

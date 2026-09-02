@@ -90,7 +90,7 @@ binders carry bounds. A rejected impl SHALL publish no members, and its members 
 - **WHEN** a module declares `type Maybe<T> = Option<T>` and `impl<T> Maybe<T> { ... }`
 - **THEN** the index reports an alias-owner diagnostic at the head and `Option` gains no member
 
-#### Scenario: Reject a bounded inherent head without a cascade
+#### Scenario: Reject a bounded inherent head
 
 - **WHEN** source declares `impl<T: Display> Option<T> { pub fn make(value: T) -> Self { ... } }`
 - **THEN** the index reports exactly the conditional-inherent-head diagnostic, publishes no member, and reports nothing about `Self`
