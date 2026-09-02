@@ -1840,6 +1840,7 @@ it('parses reserved import-path segments without changing their token kinds', ()
   const source = `import silk.effect as Effect
 import toolkit.effect.helpers as Helpers
 import silk.effect { map }
+import app.type as Types
 fn main() -> i32 { return 42 }`
   const result = parseText('fixture://reserved-import-paths.silk', source)
   const paths = SyntaxTree.directNodes(result.root, 'ImportDeclaration').map((declaration) =>
@@ -1853,6 +1854,7 @@ fn main() -> i32 { return 42 }`
       ['Identifier', 'EffectKeyword'],
       ['Identifier', 'EffectKeyword', 'Identifier'],
       ['Identifier', 'EffectKeyword'],
+      ['Identifier', 'TypeKeyword'],
     ],
   )
   assert.deepEqual(result.parserDiagnostics, [])

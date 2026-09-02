@@ -101,13 +101,8 @@ const aliasAtPath = (
   scope: NameResolution.ModuleScope | undefined,
   index: DeclarationIndex.Index,
 ): DeclarationFacts.AliasFact | undefined => {
-  const first = path?.segments.at(0)
-  const second = path?.segments.at(1)
-  if (path === undefined || scope === undefined || first === undefined) return undefined
-  const result =
-    second === undefined
-      ? NameResolution.lookup(scope, index, first.spelling)
-      : NameResolution.lookupQualified(scope, index, first.spelling, second.spelling, second.token)
+  if (path === undefined || scope === undefined) return undefined
+  const result = NameResolution.lookupPath(scope, index, path)
   return result._tag === 'Resolved' && result.declaration._tag === 'AliasDeclaration'
     ? result.declaration
     : undefined

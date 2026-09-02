@@ -660,6 +660,20 @@ export const resolveDeclaredType = (
         diagnostics: Object.freeze(diagnostics),
       })
     }
+    if (target.fact._tag === 'Resolved') {
+      // Only a nominal accepts arguments. An alias can resolve a path to any other type.
+      const diagnostic = Diagnostic.typeArgumentArity(
+        fact.spelling,
+        0,
+        fact.arguments.length,
+        fact.token.span,
+      )
+      diagnostics.push(diagnostic)
+      return Object.freeze({
+        fact: Object.freeze({ ...fact, cause: Diagnostic.identity(diagnostic) }),
+        diagnostics: Object.freeze(diagnostics),
+      })
+    }
     return Object.freeze({ fact, diagnostics: Object.freeze(diagnostics) })
   }
   if (fact._tag === 'Union') {
@@ -1461,16 +1475,6 @@ export const resolveConstraintFacts = (
   return Object.freeze({ facts: Object.freeze(facts), diagnostics: Object.freeze(diagnostics) })
 }
 
-/**
- * One declared member contributes each structural-union member separately, so a row spelled
- * through a union alias is the row its members would spell directly. A nominal union is one
- * nominal type and stays one atomic member.
- */
-const failureRowLeaves = (member: Type.Type): ReadonlyArray<Type.Type> => {
-  if (Type.isNever(member)) return []
-  return Type.isUnion(member) ? member.members : [member]
-}
-
 const semanticFailureRow = (fact: RowExpressionFact): Type.FailureRow => {
   switch (fact._tag) {
     case 'EmptyRowExpression':
@@ -1488,7 +1492,7 @@ const semanticFailureRow = (fact: RowExpressionFact): Type.FailureRow => {
           fact.syntax.span,
         )
       return Type.isRuntimeConcrete(fact.member.type)
-        ? RowAlgebra.concrete(Type.failureRowPolicy(), failureRowLeaves(fact.member.type))
+        ? RowAlgebra.concrete(Type.failureRowPolicy(), Type.failureLeaves(fact.member.type))
         : RowAlgebra.concrete(Type.failureRowPolicy(), [])
     case 'UnionRowExpression':
       return fact.operands.reduce<Type.FailureRow>(
@@ -1625,7 +1629,7 @@ export const resolveFailureRow = (
       continue
     }
     if (!Type.isParameter(member.type))
-      for (const leaf of failureRowLeaves(member.type)) failures.set(Type.key(leaf), leaf)
+      for (const leaf of Type.failureLeaves(member.type)) failures.set(Type.key(leaf), leaf)
   }
   return Object.freeze({
     fact: Object.freeze({

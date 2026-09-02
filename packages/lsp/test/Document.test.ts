@@ -130,7 +130,11 @@ pub fn pick(shape: Shape) -> i32 { return 0 }`
     const { document, snapshot } = yield* open(source)
     const hover = Document.hover(document, snapshot, positionOf(source, 'Shape) -> i32'))
     assert.isDefined(hover)
-    const text = JSON.stringify(hover?.contents)
+    const contents = hover?.contents
+    const entries = Array.isArray(contents) ? contents : [contents]
+    const text = entries
+      .map((entry) => (typeof entry === 'string' ? entry : (entry?.value ?? '')))
+      .join('\n')
     assert.include(text, 'Circle')
     assert.include(text, 'Square')
   }),
@@ -671,15 +675,20 @@ pub fn main() -> i32 {
 it.effect('completes types in damaged parameter and generic-argument positions', () =>
   Effect.gen(function* () {
     const parameterSource = `struct Problem {}
+type Trouble = Problem
 fn identity<T>(value: ) -> i32 { return 0 }`
     const parameter = yield* open(parameterSource)
     const parameterCompletion = Document.completion(parameter.document, parameter.snapshot, {
-      line: 1,
+      line: 2,
       character: 'fn identity<T>(value: '.length,
     })
     assert.include(
       parameterCompletion.items.map((item) => item.label),
       'Problem',
+    )
+    assert.include(
+      parameterCompletion.items.map((item) => item.label),
+      'Trouble',
     )
     assert.notInclude(
       parameterCompletion.items.map((item) => item.label),

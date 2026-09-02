@@ -135,6 +135,37 @@ pub fn main() -> i32 { return describe(make(false)) }`)
   }),
 )
 
+it.effect('constructs through an applied alias with the alias arguments, not inferred ones', () =>
+  Effect.gen(function* () {
+    const program = (head: string) => `struct Point<T> { x: T y: T }
+type PointI32 = Point<i32>
+pub fn main() -> i32 {
+  let point = ${head} { x: true, y: false }
+  return 0
+}`
+    const aliased = yield* analyze(program('PointI32'))
+    const direct = yield* analyze(program('Point<i32>'))
+    assert.deepEqual(codes(aliased), codes(direct))
+    assert.include(codes(aliased), Diagnostic.typeArgumentConflictCode)
+  }),
+)
+
+it.effect('rejects type arguments applied to an alias of a non-nominal type', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`struct Circle {}
+struct Square {}
+type Shape = Circle | Square
+type Meters = i32
+fn shape(value: Shape<i32>) -> i32 { return 0 }
+fn meters(value: Meters<bool>) -> i32 { return 0 }
+pub fn main() -> i32 { return 0 }`)
+    assert.deepEqual(codes(self), [
+      Diagnostic.typeArgumentArityCode,
+      Diagnostic.typeArgumentArityCode,
+    ])
+  }),
+)
+
 it.effect('presents the erased target and not the alias name in diagnostics', () =>
   Effect.gen(function* () {
     const self = yield* analyze(`struct Circle {}
@@ -199,10 +230,21 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('rejects an alias name that collides with another declaration', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`struct Token {}
+    const source = `struct Token {}
 type Token = i32
-pub fn main() -> i32 { return 0 }`)
-    assert.include(codes(self), Diagnostic.duplicateDeclarationNameCode)
+pub fn main() -> i32 { return 0 }`
+    const self = yield* analyze(source)
+    const collision = Analysis.diagnostics(self).find(
+      (diagnostic) => diagnostic.code === Diagnostic.duplicateDeclarationNameCode,
+    )
+    assert.isDefined(collision)
+    assert.strictEqual(collision?.span.start, source.indexOf('Token = i32'))
+    assert.strictEqual(
+      collision?.reason._tag === 'DuplicateDeclarationName'
+        ? collision.reason.originalSpan.start
+        : undefined,
+      source.indexOf('Token {}'),
+    )
   }),
 )
 
@@ -245,7 +287,7 @@ it.effect('refuses an alias in value position', () =>
   Effect.gen(function* () {
     const self = yield* analyze(`type Count = i32
 pub fn main() -> i32 { return Count }`)
-    assert.notDeepEqual(codes(self), [])
+    assert.include(codes(self), Diagnostic.unknownValueReferenceCode)
     assert.notInclude(codes(self), Diagnostic.cyclicTypeAliasCode)
   }),
 )
@@ -324,8 +366,12 @@ pub fn main() -> i32 { return run done() }`
     )
     assert.strictEqual(failureMembers(aliased, 'root', 'residual').length, 1)
     // Lowering a catch over a nominal union beside a struct currently fails MIR verification for
-    // the direct spelling too; the alias contract is that both spellings behave identically.
-    assert.strictEqual(Analysis.evaluate(aliased)._tag, Analysis.evaluate(direct)._tag)
+    // the direct spelling too; the alias contract is that both spellings behave identically, so
+    // the complete outcomes, not just their tags, must agree.
+    assert.strictEqual(
+      Json.stringify(Analysis.evaluate(aliased)),
+      Json.stringify(Analysis.evaluate(direct)),
+    )
   }),
 )
 

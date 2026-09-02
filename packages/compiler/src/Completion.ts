@@ -472,6 +472,11 @@ const typeCandidates = (
     ...(index.modules.find((headers) => headers.module === module)?.enums ?? []),
     ...(index.modules.find((headers) => headers.module === module)?.services ?? []),
     ...(index.modules.find((headers) => headers.module === module)?.interfaces ?? []),
+    ...(index.modules
+      .find((headers) => headers.module === module)
+      ?.members.filter(
+        (member): member is DeclarationFacts.AliasFact => member._tag === 'AliasDeclaration',
+      ) ?? []),
   ])
     if (declaration.name._tag === 'Present')
       candidates.push(
@@ -502,7 +507,8 @@ const typeCandidates = (
       declaration?._tag !== 'UnionDeclaration' &&
       declaration?._tag !== 'EnumDeclaration' &&
       declaration?._tag !== 'ServiceDeclaration' &&
-      declaration?._tag !== 'InterfaceDeclaration'
+      declaration?._tag !== 'InterfaceDeclaration' &&
+      declaration?._tag !== 'AliasDeclaration'
     )
       continue
     candidates.push(
