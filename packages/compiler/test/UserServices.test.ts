@@ -252,11 +252,6 @@ effect fn scriptedNext(self: &mut Scripted) -> u64 {
 
 impl InsecureRandom for Scripted { nextU64: Scripted.scriptedNext }
 
-// The operation is provided at each call site from a local: a service effect provided from a
-// \`&mut\` parameter inside a section is blocked by the MIR verifier as an invalid call shape, a
-// pre-existing lowering hole that the deleted root wrapper used to mask (follow-up task "Fix silent
-// trap when a service effect is provided from a &mut parameter"; the characterization test below
-// pins it).
 effect fn next() -> u64 ? &mut InsecureRandom {
   return run InsecureRandom.nextU64()
 }
@@ -1064,35 +1059,65 @@ effect fn scriptedNext(self: &mut Scripted) -> u64 {
 
 impl InsecureRandom for Scripted { nextU64: Scripted.scriptedNext }
 
-fn next(provider: &mut Scripted) -> u64 {
+fn nextPiped(provider: &mut Scripted) -> u64 {
   return run InsecureRandom.nextU64() |> Effect.provideMut<InsecureRandom>(provider)
 }
 
+fn nextDirect(provider: &mut Scripted) -> u64 {
+  return run Effect.provideMut<InsecureRandom>(
+    InsecureRandom.nextU64(),
+    move provider,
+  )
+}
+
+fn nextLocal() -> u64 {
+  let mut provider = Scripted { first: 12, index: usize.ZERO }
+  let value = run InsecureRandom.nextU64()
+    |> Effect.provideMut<InsecureRandom>(&mut provider)
+  if provider.index != usize.ONE { return 0 }
+  return value
+}
+
 pub fn main() -> i32 {
-  let mut direct = Scripted { first: 21, index: usize.ZERO }
-  if next(&mut direct) + next(&mut direct) != 42 { return 1 }
+  let mut piped = Scripted { first: 10, index: usize.ZERO }
+  if nextPiped(&mut piped) != 10 { return 1 }
+  if piped.index != usize.ONE { return 2 }
+  let mut direct = Scripted { first: 20, index: usize.ZERO }
+  if nextDirect(&mut direct) != 20 { return 3 }
+  if direct.index != usize.ONE { return 4 }
+  if nextLocal() != 12 { return 5 }
   return 42
 }`
 
-it.effect('characterizes the trap of a service effect provided from a borrowed parameter', () =>
+it.effect('provides a service effect from a borrowed parameter', () =>
   Effect.gen(function* () {
-    // Known lowering hole, kept visible on purpose: analysis reports nothing, the provider's
-    // operation is lowered as an unavailable body, and the verifier blocks the run as an invalid
-    // call shape instead of completing with 42. Delete this case together with the hole.
     const self = yield* Analysis.ofSourceRealized(
       'user-services/parameter-provided',
       new TextEncoder().encode(parameterProvidedSource),
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
-    const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Blocked')
-    if (evaluated._tag !== 'Blocked') return
-    assert.strictEqual(evaluated.reason._tag, 'InvalidMir')
-    if (evaluated.reason._tag !== 'InvalidMir') return
-    // Both calls of `next` are refused for the same reason.
-    assert.deepEqual(
-      evaluated.reason.violations.map((violation) => violation.rule),
-      ['InvalidCallShape', 'InvalidCallShape'],
+    const mir = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(mir), [], MirEncoding.encode(mir))
+    const helpers = mir.functions.filter(
+      (fn) => fn.id.name === 'nextPiped' || fn.id.name === 'nextDirect',
     )
+    assert.lengthOf(helpers, 2)
+    for (const helper of helpers) {
+      assert.strictEqual(helper.parameterCount, 1)
+      const provider = helper.localTypes.at(0)
+      assert.strictEqual(provider?._tag, 'Reference')
+      if (provider?._tag === 'Reference') {
+        assert.strictEqual(provider.type.access, 'Exclusive')
+        assert.isTrue(Type.isNominal(provider.type.target))
+        if (Type.isNominal(provider.type.target)) {
+          assert.strictEqual(provider.type.target.name, 'Scripted')
+        }
+      }
+      assert.strictEqual(helper.result._tag, 'u64')
+    }
+    assert.notInclude(MirEncoding.encode(mir), 'unavailable body')
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
   }),
 )

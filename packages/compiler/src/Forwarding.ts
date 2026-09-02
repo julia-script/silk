@@ -160,6 +160,35 @@ export const forwardedCallableParameter = (
     : forwarded
 }
 
+const forwardedReferenceProvider = (
+  fn: FunctionLowering,
+  provider: Hir.Expression,
+  access: 'Shared' | 'Exclusive' | 'Take',
+  providerType: Type.Type,
+):
+  | {
+      readonly parameter: Extract<
+        Hir.Expression,
+        { readonly _tag: 'ParameterReference' }
+      >['parameter']
+      readonly captureAccess: 'Copy' | 'Take'
+    }
+  | undefined => {
+  const source = provider._tag === 'Move' ? provider.subject : provider
+  if (access !== 'Exclusive' || source._tag !== 'ParameterReference') return undefined
+  const type = fn.semantic(source.type)
+  if (
+    !Type.isReference(type) ||
+    type.access !== 'Exclusive' ||
+    !Type.equals(type.target, providerType)
+  )
+    return undefined
+  return Object.freeze({
+    parameter: source.parameter,
+    captureAccess: provider._tag === 'Move' ? 'Take' : 'Copy',
+  })
+}
+
 export const staticallyForwardedCallableRecipe = (
   fn: FunctionLowering,
   current: Hir.Expression,
@@ -464,8 +493,16 @@ export const inlineForwardedRequirement = (
     }
   }
   if (target === undefined || forwarded === undefined || proof === undefined) return undefined
+  const referenceProvider = forwardedReferenceProvider(
+    fn,
+    provider,
+    forwarded.provider.selectionAccess,
+    proof.provider,
+  )
   if (
-    (borrowedProvider === undefined && forwarded.provider.selectionAccess !== 'Take') ||
+    (borrowedProvider === undefined &&
+      referenceProvider === undefined &&
+      forwarded.provider.selectionAccess !== 'Take') ||
     borrowedProvider?.root._tag === 'PatternSliceRoot'
   )
     return undefined
@@ -493,6 +530,9 @@ export const inlineForwardedRequirement = (
         ...(borrowedProvider?.root._tag === 'ParameterSliceRoot'
           ? { parameter: borrowedProvider.root.parameter }
           : {}),
+        ...(referenceProvider?.parameter === undefined
+          ? {}
+          : { parameter: referenceProvider.parameter }),
         capability,
         selected: Type.requirementRowArgument([selected]).row,
         evidence: forwarded.provider.evidence,
@@ -500,7 +540,8 @@ export const inlineForwardedRequirement = (
         witness,
         role: selected.role,
         selectionAccess: forwarded.provider.selectionAccess,
-        captureAccess: borrowedProvider?.access ?? ('Take' as const),
+        captureAccess:
+          borrowedProvider?.access ?? referenceProvider?.captureAccess ?? ('Take' as const),
         span: provider.span,
       }),
       type,
