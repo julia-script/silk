@@ -121,9 +121,46 @@ export const lowerInstance = (
   }
 
   const contract = fn.contract
+  const callableEnvironment = Hir.isAnonymousCallableId(instance.key.declaration)
+    ? layout.callableEnvironments.find(
+        (
+          candidate,
+        ): candidate is Extract<
+          Layout.CallableEnvironment,
+          { readonly _tag: 'CallableEnvironment' }
+        > =>
+          candidate._tag === 'CallableEnvironment' &&
+          candidate.callable.target._tag === 'DeclarationCallableTarget' &&
+          candidate.callable.target.declaration.module === instance.key.declaration.module &&
+          candidate.callable.target.declaration.name === instance.key.declaration.name &&
+          candidate.callable.typeArguments.length === instance.key.typeArguments.length &&
+          candidate.callable.typeArguments.every((argument, ordinal) => {
+            const instanceArgument = instance.key.typeArguments.at(ordinal)
+            return (
+              instanceArgument !== undefined &&
+              Type.equalsGenericArgument(argument, instanceArgument)
+            )
+          }),
+      )
+    : undefined
   let parameterTypes: Mir.Type[]
   if (contract._tag === 'Contract') {
     parameterTypes = instance.specialization.parameters.flatMap((specialized, ordinal) => {
+      const borrowedCapture = callableEnvironment?.fields.find(
+        (field) => field.parameterOrdinal === ordinal && field.representation === 'Borrow',
+      )
+      if (
+        borrowedCapture !== undefined &&
+        (borrowedCapture.access === 'Shared' || borrowedCapture.access === 'Exclusive')
+      ) {
+        return [
+          Object.freeze({
+            _tag: 'EnvironmentBorrow' as const,
+            type: borrowedCapture.type,
+            access: borrowedCapture.access,
+          }),
+        ]
+      }
       const type = contract.parameters.at(ordinal) ?? specialized
       const representedEffect =
         Type.isRepresented(specialized) &&
@@ -311,7 +348,11 @@ const effectCaptureParameterTypes = (
       if (field.representation === 'Value') return [lowered]
       if (field.access !== 'Shared' && field.access !== 'Exclusive') return []
       return [
-        Object.freeze({ _tag: 'EffectBorrow' as const, type: field.type, access: field.access }),
+        Object.freeze({
+          _tag: 'EnvironmentBorrow' as const,
+          type: field.type,
+          access: field.access,
+        }),
       ]
     }),
   )

@@ -1174,6 +1174,55 @@ declared callable or Effect access contract report that contract mismatch at con
 **Evidence:** [callable specification](../../../../openspec/specs/bootstrap-callable-values/spec.md),
 [callable ownership tests](../../../../packages/compiler/test/Ownership.test.ts).
 
+### ANON-OWN-001 — Anonymous captures determine environment ownership and invocation mode
+
+**Status:** Confirmed
+
+An anonymous callable captures references to the nearest visible outer local or parameter
+implicitly. Its own parameters, locals, pattern bindings, module declarations, and type names are
+not captures. Each outer binding is captured once, in the order of its first reference in the body,
+even when later references use it again.
+
+The body operation determines both capture access and the callable's strongest invocation mode:
+
+| Body access to an outer binding       | Environment capture | Derived mode |
+| ------------------------------------- | ------------------- | ------------ |
+| Copy read or move of a Copy value     | Copy snapshot       | `fn`         |
+| Shared read through a borrowed value  | shared loan         | `fn`         |
+| Mutation or exclusive borrowed access | exclusive loan      | `mut fn`     |
+| Move of an affine owner               | ownership transfer  | `once fn`    |
+
+```silk
+struct Token { value: i32 }
+
+fn prepare(token: Token) -> once fn() -> Token {
+  return fn() -> Token { return move token }
+}
+```
+
+The source constructs the callable with `fn`, while the move of `token` derives the resulting
+`once fn() -> Token` type. There is no explicit anonymous `once fn` construction spelling.
+
+Construction acquires every capture exactly once in first-reference order. Borrowed captures keep
+their loans live for as long as the callable may still use them and cannot escape their roots.
+Dropping an uninvoked environment releases loans and cleans owned captures exactly once in reverse
+acquisition order. A consuming invocation transfers or cleans every owned capture exactly once; a
+second invocation cannot duplicate the environment.
+
+**Boundary:** Invocation mode describes access to the retained environment, not ownership of newly
+supplied arguments. Copy moves remain reusable. A shared anonymous callable may satisfy a `mut fn`
+or `once fn` requirement, and a `mut fn` may satisfy a `once fn` requirement; the reverse
+substitutions are invalid. Anonymous captures use the same escape, storage, and cleanup rules as
+other exact callable environments.
+
+**Diagnostics:** Conflicting access to a captured root reports the ordinary retained-loan
+diagnostic. A borrowed environment that escapes its root reports an ownership escape. Invoking a
+consuming anonymous callable twice reports use after move, and supplying a derived consuming or
+exclusive mode where shared reusable access is required reports a callable-contract mismatch.
+
+**Evidence:** [anonymous ownership specification](../../../../openspec/changes/add-anonymous-callable-expressions/specs/bootstrap-ownership/spec.md),
+[anonymous semantic-fact specification](../../../../openspec/changes/add-anonymous-callable-expressions/specs/bootstrap-semantic-facts/spec.md).
+
 ### CALLABLE-001 — Named functions support trailing partial application
 
 **Status:** Confirmed

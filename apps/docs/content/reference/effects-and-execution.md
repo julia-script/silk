@@ -290,6 +290,47 @@ both rather than stopping after the first category.
 **Evidence:** [flow specification](../../../../openspec/specs/bootstrap-flow-functions/spec.md),
 [run diagnostics](../../../../packages/compiler/test/Elaboration.test.ts).
 
+## ANON-EFF-001 — An effectful anonymous callable preserves two delayed boundaries
+
+**Status:** Confirmed
+
+Evaluating an `effect fn` anonymous expression acquires its implicit lexical captures and produces
+an exact callable value without entering the authored body. Invoking that callable evaluates its
+arguments and constructs an Effect with the written success, failure, and requirement channels,
+again without entering the body. Only `run` enters the body.
+
+```silk
+struct Failure {}
+
+fn recover(answer: i32) -> Effect<i32> {
+  let handler = effect fn(error: Failure) -> i32 {
+    return answer
+  }
+  return handler(Failure {})
+}
+
+pub fn main() -> i32 {
+  return run recover(42)
+}
+```
+
+Evaluating `handler` captures `answer`. Calling `handler(Failure {})` constructs the returned
+`Effect<i32>`. The body reads `answer` only when `main` runs that Effect.
+
+**Boundary:** `effect fn(...) -> ... { ... }` is an anonymous callable whose invocation returns an
+Effect. `effect { ... }` directly constructs an Effect and has no intervening callable-invocation
+boundary. An effectful anonymous callable that moves an affine capture derives `once fn`; its one
+invocation transfers the environment into the returned Effect, and constructing a second Effect
+from the consumed callable is invalid.
+
+**Diagnostics:** Using the callable result where its Effect success value is required receives the
+ordinary Effect type mismatch. Repeating a consuming invocation reports use after move. Invalid
+failure or requirement channels receive the same contract diagnostics as a named effect function.
+
+**Evidence:** [anonymous flow-function specification](../../../../openspec/changes/add-anonymous-callable-expressions/specs/bootstrap-flow-functions/spec.md),
+[anonymous callable value specification](../../../../openspec/changes/add-anonymous-callable-expressions/specs/bootstrap-callable-values/spec.md),
+[anonymous ownership specification](../../../../openspec/changes/add-anonymous-callable-expressions/specs/bootstrap-ownership/spec.md).
+
 ## Related Effect rules
 
 The confirmed rules above define construction, one-layer execution, nested success values, the

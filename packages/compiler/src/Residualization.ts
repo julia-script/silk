@@ -684,9 +684,12 @@ const containsSyntaxKind = (node: SyntaxTree.Node, kind: SyntaxTree.NodeKind): b
 export const requiresSelection = (self: Coordinator, key: ApplicationKey): boolean => {
   const declaration = declarationOf(self, key.declaration)
   const input = declaration === undefined ? undefined : moduleInput(self, declaration)
-  const fact = input?.result.functions.find(
-    (candidate) => candidate.declaration.id.ordinal === declaration?.id.ordinal,
-  )
+  const fact =
+    input === undefined
+      ? undefined
+      : Elaboration.executableFunctions(input.result).find(
+          (candidate) => candidate.declaration.id.ordinal === declaration?.id.ordinal,
+        )
   if (declaration === undefined) return true
   if (
     key.staticArguments.length > 0 ||
@@ -752,7 +755,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
     return Object.freeze({ _tag: 'StaticFailure', failure, diagnostics: Object.freeze([]) })
   }
   if (!requiresSelection(self, key)) {
-    const fact = input.result.functions.find(
+    const fact = Elaboration.executableFunctions(input.result).find(
       (candidate) => candidate.declaration.id.ordinal === declaration.id.ordinal,
     )
     const fn = input.result.hir.functions.find(

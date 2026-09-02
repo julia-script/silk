@@ -20,7 +20,7 @@ const storageOf = (
   program: Mir.Module,
   slot: Mir.CoroutineFrameSlot,
 ): { readonly size: number; readonly alignment: number } | undefined => {
-  if (slot.access._tag === 'BorrowedDependency' || slot.type._tag === 'EffectBorrow')
+  if (slot.access._tag === 'BorrowedDependency' || slot.type._tag === 'EnvironmentBorrow')
     return Object.freeze({
       size: program.layout.target.pointerSize,
       alignment: program.layout.target.pointerAlignment,

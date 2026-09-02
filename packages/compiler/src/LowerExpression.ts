@@ -418,7 +418,7 @@ export function lowerExpressionInner(
     }
     case 'CallableSection': {
       const type = callableValueType(fn, expression)
-      if (type === undefined || type.environment === undefined) return undefined
+      if (type === undefined) return undefined
       const captures: Array<{
         readonly ordinal: number
         readonly parameterOrdinal: number
@@ -443,7 +443,10 @@ export function lowerExpressionInner(
           _tag: 'MakeCallable',
           destination,
           target: expression.target,
-          typeArguments: Object.freeze([...Layout.callableTargetArguments(type.environment)]),
+          typeArguments:
+            type.environment === undefined
+              ? (type.typeArguments ?? Object.freeze([]))
+              : Object.freeze([...Layout.callableTargetArguments(type.environment)]),
           captures: Object.freeze(captures),
           type,
           provenance: authored(expression.span),

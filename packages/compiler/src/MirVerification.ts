@@ -387,7 +387,7 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
         (argumentType.type.access === runtimeAccess ||
           (runtimeAccess === 'Shared' && argumentType.type.access === 'Exclusive')) &&
         SilkType.equals(argumentType.type.target, provider.providerType)) ||
-      (argumentType?._tag === 'EffectBorrow' &&
+      (argumentType?._tag === 'EnvironmentBorrow' &&
         (argumentType.access === runtimeAccess ||
           (runtimeAccess === 'Shared' && argumentType.access === 'Exclusive')) &&
         SilkType.equals(argumentType.type, provider.providerType))
@@ -600,7 +600,7 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
         accessValid =
           slot.type._tag === 'Reference' ||
           slot.type._tag === 'Slice' ||
-          slot.type._tag === 'EffectBorrow'
+          slot.type._tag === 'EnvironmentBorrow'
       } else {
         accessValid = !isCopy(layout, semanticType(slot.type))
       }
@@ -2372,7 +2372,7 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
           const slot = state.slots.at(ordinal)
           if (slot === undefined) return false
           let physical: { readonly size: number; readonly alignment: number } | undefined
-          if (slot.access._tag === 'BorrowedDependency' || slot.type._tag === 'EffectBorrow') {
+          if (slot.access._tag === 'BorrowedDependency' || slot.type._tag === 'EnvironmentBorrow') {
             physical = Object.freeze({ size: wordSize, alignment: wordAlignment })
           } else if (slot.type._tag === 'EffectValue') {
             physical = slot.type.environment

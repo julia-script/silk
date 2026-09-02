@@ -435,10 +435,10 @@ export const endsBlock = (state: State): boolean => {
     kind === 'TypeKeyword' ||
     kind === 'ExternKeyword' ||
     kind === 'ExportKeyword' ||
-    kind === 'FnKeyword' ||
+    (kind === 'FnKeyword' && peek(state, 1) === 'Identifier') ||
     kind === 'ImplKeyword' ||
     (kind === 'StaticKeyword' && peek(state, 1) === 'FnKeyword') ||
-    (kind === 'EffectKeyword' && peek(state, 1) === 'FnKeyword')
+    (kind === 'EffectKeyword' && peek(state, 1) === 'FnKeyword' && peek(state, 2) === 'Identifier')
   )
 }
 

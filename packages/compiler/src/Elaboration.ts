@@ -840,6 +840,15 @@ export interface CallableCaptureFact {
   readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
 }
 
+/** One implicit lexical capture retained by an anonymous callable construction. */
+export interface AnonymousCaptureFact {
+  readonly _tag: 'AnonymousCapture'
+  readonly reference: BindingDeclarationFact | ParameterFact | PatternBindingFact
+  readonly access: CallableCaptureFact['access']
+  readonly span: SourceSpan.SourceSpan
+  readonly expression: IdentifierExpressionFact
+}
+
 /** One hidden concrete section construction awaiting an ordered leading parameter prefix. */
 export interface CallableSectionExpressionFact {
   readonly _tag: 'CallableSection'
@@ -855,6 +864,11 @@ export interface CallableSectionExpressionFact {
   readonly mode: Type.CallableMode
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
+  /** Source-only provenance for a section whose target is an anonymous callable body. */
+  readonly anonymous?: {
+    readonly functionKind: 'Ordinary' | 'Effect'
+    readonly captures: ReadonlyArray<AnonymousCaptureFact>
+  }
 }
 
 /** One ordinary invocation through a first-class callable expression. */
@@ -889,6 +903,8 @@ export interface EffectCaptureFact {
   readonly reference: BindingDeclarationFact | ParameterFact
   readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
   readonly span: SourceSpan.SourceSpan
+  /** First lexical identifier occurrence retained for anonymous environment construction. */
+  readonly expression?: IdentifierExpressionFact
 }
 
 /** One existing provider retained by an Effect provision wrapper. */
@@ -1360,11 +1376,17 @@ export interface Result {
   readonly _tag: 'Elaboration'
   readonly syntax: SyntaxFile.SyntaxFile
   readonly functions: ReadonlyArray<FunctionFact>
+  /** Compiler-private executable bodies that never participate in source declaration lookup. */
+  readonly hiddenFunctions: ReadonlyArray<FunctionFact>
   readonly generatedAggregates: ReadonlyArray<DeclarationFacts.StructFact>
   readonly lexicalScopes: ReadonlyArray<LexicalScopeFact>
   readonly hir: Hir.Module
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
+
+/** All executable semantic bodies, including compiler-private anonymous targets. */
+export const executableFunctions = (self: Result): ReadonlyArray<FunctionFact> =>
+  Object.freeze([...self.functions, ...self.hiddenFunctions])
 
 export const compatible: ReturnCompatibility = Object.freeze({ _tag: 'Compatible' })
 export const unavailableCompatibility: ReturnCompatibility = Object.freeze({ _tag: 'Unavailable' })
@@ -1522,6 +1544,7 @@ export const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.fr
   'PipelineExpression',
   'RunExpression',
   'UnsafeExpression',
+  'AnonymousCallableExpression',
 ])
 
 export const isExpressionNode = (element: SyntaxTree.Element): element is SyntaxTree.Node =>
@@ -2172,11 +2195,17 @@ export const elaborateModule = (input: Input): Result => {
   const { syntax, headers, scope, index } = input
   const source = syntax.source
   const declarations = headers.declarations
+  const hiddenFunctions: Array<FunctionFact> = []
   // A foreign header has a native body: it is indexed and callable but never analyzed here.
   const analyzed = declarations
     .filter((declaration) => declaration.foreign === undefined)
     .map((declaration) =>
-      analyzeFunctionBody(source, declaration, declarations, Object.freeze({ scope, index })),
+      analyzeFunctionBody(
+        source,
+        declaration,
+        declarations,
+        Object.freeze({ scope, index, hiddenFunctions }),
+      ),
     )
   const constantDiagnostics = headers.constants.flatMap((constant) =>
     constant.name._tag === 'Present'
@@ -2184,6 +2213,7 @@ export const elaborateModule = (input: Input): Result => {
       : [],
   )
   const functions = Object.freeze(analyzed.map((result) => result.fact))
+  const allRuntimeFunctions = Object.freeze([...functions, ...hiddenFunctions])
   const diagnostics = [
     ...headers.diagnostics,
     ...constantDiagnostics,
@@ -2194,7 +2224,7 @@ export const elaborateModule = (input: Input): Result => {
     _tag: 'HirModule',
     module: source.id,
     functions: Object.freeze(
-      functions.flatMap((fact) =>
+      allRuntimeFunctions.flatMap((fact) =>
         fact.declaration.phase === 'Static' ? [] : [runtimeHirFunction(fact, index)],
       ),
     ),
@@ -2204,8 +2234,11 @@ export const elaborateModule = (input: Input): Result => {
     _tag: 'Elaboration',
     syntax,
     functions,
-    generatedAggregates: Object.freeze(functions.flatMap((fact) => fact.generatedAggregates)),
-    lexicalScopes: lexicalScopesOf(syntax.source, functions),
+    hiddenFunctions: Object.freeze([...hiddenFunctions]),
+    generatedAggregates: Object.freeze(
+      allRuntimeFunctions.flatMap((fact) => fact.generatedAggregates),
+    ),
+    lexicalScopes: lexicalScopesOf(syntax.source, allRuntimeFunctions),
     hir,
     diagnostics: Object.freeze(diagnostics),
   })

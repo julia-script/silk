@@ -546,7 +546,21 @@ export const callableValueType = (
       (!Type.isRuntimeConcrete(expected) || Type.equals(candidate.callable.type, expected)),
   )
   const environment = candidates.length === 1 ? candidates.at(0) : undefined
-  if (environment === undefined) return undefined
+  if (environment === undefined) {
+    return section.captures.length === 0 &&
+      Type.isCallable(expected) &&
+      Type.isRuntimeConcrete(expected)
+      ? Object.freeze({
+          _tag: 'CallableValue',
+          type: expected,
+          target: section.target,
+          site: section.site,
+          typeArguments: Object.freeze(
+            section.typeArguments.map((argument) => fn.semanticArgument(argument)),
+          ),
+        })
+      : undefined
+  }
   return Object.freeze({
     _tag: 'CallableValue',
     type: environment.callable.type,

@@ -725,6 +725,39 @@ const printFunctionDeclaration = (
   )
 }
 
+const printAnonymousCallableExpression = (
+  context: Context,
+  node: SyntaxTree.Node,
+  prefix: FormatDocument.Document,
+): FormatDocument.Document => {
+  const effectKeyword = directTokens(node).find((token) => token.kind === 'EffectKeyword')
+  const failureRow = directNodes(node).find((child) => child.kind === 'FailureRow')
+  const requirementRow = directNodes(node).find((child) => child.kind === 'RequirementRow')
+  return FormatDocument.concat(
+    ...(effectKeyword === undefined
+      ? []
+      : [printToken(context, effectKeyword, prefix), FormatDocument.text(' ')]),
+    printToken(
+      context,
+      tokenOf(node, 'FnKeyword'),
+      effectKeyword === undefined ? prefix : FormatDocument.empty,
+    ),
+    printNode(context, nodeOf(node, 'ParameterList')),
+    printNode(context, nodeOf(node, 'ReturnType'), FormatDocument.text(' ')),
+    FormatDocument.group(
+      FormatDocument.concat(
+        ...(failureRow === undefined
+          ? []
+          : [printNode(context, failureRow, FormatDocument.softLine)]),
+        ...(requirementRow === undefined
+          ? []
+          : [printNode(context, requirementRow, FormatDocument.softLine)]),
+      ),
+    ),
+    printNode(context, nodeOf(node, 'Block'), FormatDocument.text(' ')),
+  )
+}
+
 const printImplDeclaration = (
   context: Context,
   node: SyntaxTree.Node,
@@ -1531,6 +1564,8 @@ const printNode = (
           FormatDocument.text(' '),
         ),
       )
+    case 'AnonymousCallableExpression':
+      return printAnonymousCallableExpression(context, node, prefix)
     case 'EffectExpression':
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'EffectKeyword'), prefix, preserveBlank),

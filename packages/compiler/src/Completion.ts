@@ -1,7 +1,7 @@
 import * as Option from 'effect/Option'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
-import type * as Elaboration from './Elaboration.js'
+import * as Elaboration from './Elaboration.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as NameResolution from './NameResolution.js'
 import type * as Presentation from './Presentation.js'
@@ -170,9 +170,18 @@ const enclosingFunction = (
   result: Elaboration.Result,
   offset: number,
 ): Elaboration.FunctionFact | undefined =>
-  result.functions.find(
-    (fn) => fn.declaration.syntax.span.start <= offset && offset <= fn.declaration.syntax.span.end,
-  )
+  Elaboration.executableFunctions(result)
+    .filter(
+      (fn) =>
+        fn.declaration.syntax.span.start <= offset && offset <= fn.declaration.syntax.span.end,
+    )
+    .sort(
+      (left, right) =>
+        left.declaration.syntax.span.end -
+        left.declaration.syntax.span.start -
+        (right.declaration.syntax.span.end - right.declaration.syntax.span.start),
+    )
+    .at(0)
 
 const sameDeclaration = (
   left: Elaboration.DeclarationId,
@@ -758,7 +767,7 @@ const expressionCandidates = (
         sortGroup: 4,
       }),
     )
-  for (const keyword of ['true', 'false', 'effect', 'move', 'run', 'match'])
+  for (const keyword of ['true', 'false', 'effect', 'fn', 'move', 'run', 'match'])
     candidates.push(
       candidate({ identity: syntax(keyword), kind: 'Keyword', label: keyword, sortGroup: 5 }),
     )
@@ -962,8 +971,8 @@ export const complete = (options: {
     _tag: 'CompletionResult',
     context: Object.freeze({ _tag: 'ExpressionContext' }),
     replacement: replacement.span,
-    candidates: stable(
-      expressionCandidates(
+    candidates: stable([
+      ...expressionCandidates(
         options.module,
         options.index,
         scope,
@@ -971,6 +980,9 @@ export const complete = (options: {
         fn,
         options.offset,
       ),
-    ),
+      ...(/\beffect\s*$/.test(before)
+        ? [candidate({ identity: syntax('{'), kind: 'Keyword', label: '{', sortGroup: 5 })]
+        : []),
+    ]),
   })
 }

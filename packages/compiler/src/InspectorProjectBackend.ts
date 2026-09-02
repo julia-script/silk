@@ -1188,14 +1188,12 @@ const valueText = (value: BootstrapEvaluation.Value): string => {
       return `${typeText(value.type)} <${typeText(value.member)} ${valueText(value.payload)}>`
     case 'EffectOutcomeValue':
       return `${typeText(value.type)} tag=${value.tag} payload=${valueText(value.payload)}`
-    case 'EffectBorrowValue':
+    case 'EnvironmentBorrowValue':
       return `${value.access.toLowerCase()} borrow f${value.frame}.c${value.cell}`
     case 'EffectValue':
       return `${typeText(value.type)} recipe ${value.runner.name}`
     case 'EffectCompositeValue':
       return `effect choice #${value.alternative} ${valueText(value.effect)}`
-    case 'CallableBorrowValue':
-      return `${value.access.toLowerCase()} callable borrow f${value.frame}.c${value.cell}`
     case 'CallableValue':
       return `${typeText(value.type)} callable #${value.ticket} · ${value.captures.length} capture${value.captures.length === 1 ? '' : 's'}`
     case 'AllocationValue':

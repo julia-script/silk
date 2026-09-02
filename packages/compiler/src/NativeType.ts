@@ -45,7 +45,7 @@ export const lanesFor = (
       ),
     ])
   }
-  if (type._tag === 'EffectBorrow')
+  if (type._tag === 'EnvironmentBorrow')
     return Object.freeze([
       Object.freeze({
         _tag: 'CallingLane' as const,
@@ -80,12 +80,12 @@ export const lanesFor = (
   return shape.lanes
 }
 
-/** Resolves value lanes when an EffectBorrow is loaded rather than passed by address. */
+/** Resolves value lanes when an EnvironmentBorrow is loaded rather than passed by address. */
 export const valueLanesFor = (
   context: LoweringContext,
   type: Mir.Type,
 ): ReadonlyArray<Layout.CallingLane> => {
-  if (type._tag !== 'EffectBorrow') return lanesFor(context, type)
+  if (type._tag !== 'EnvironmentBorrow') return lanesFor(context, type)
   const shape = Layout.callingShape(context.program.layout, type.type)
   if (shape === undefined)
     throw new RangeError(

@@ -2250,6 +2250,7 @@ export const executableSites = (root: SyntaxTree.Node): ReadonlyMap<SyntaxTree.N
     if (
       node.kind === 'CallExpression' ||
       node.kind === 'EffectExpression' ||
+      node.kind === 'AnonymousCallableExpression' ||
       isAppliedInterfacePipeline(node)
     )
       sites.set(node, sites.size)

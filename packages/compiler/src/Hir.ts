@@ -186,6 +186,21 @@ export const effectRunnerId = (
     name: `${owner.name}$effect$${site.ordinal}`,
   })
 
+/** Derives the private executable declaration owned by one anonymous callable site. */
+export const anonymousCallableId = (
+  owner: DeclarationFacts.CanonicalId,
+  site: CallableSiteId,
+): DeclarationFacts.CanonicalId =>
+  Object.freeze({
+    _tag: 'CanonicalDeclarationId',
+    module: owner.module,
+    name: `${owner.name}$callable$${site.ordinal}`,
+  })
+
+/** Tests whether a canonical declaration is owned by an anonymous callable expression site. */
+export const isAnonymousCallableId = (self: DeclarationFacts.CanonicalId): boolean =>
+  /\$callable\$\d+$/.test(self.name)
+
 export type CallableTarget =
   | {
       readonly _tag: 'DeclarationCallableTarget'

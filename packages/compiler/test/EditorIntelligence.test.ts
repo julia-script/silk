@@ -40,6 +40,128 @@ const occurrenceAt = (
   return Analysis.semanticOccurrenceAt(snapshot, 'main', offset)
 }
 
+it.effect('presents anonymous contracts and resolves their nested lexical facts', () => {
+  const source = `struct Failure {}
+struct Token { value: i32 }
+pub fn main() -> i32 {
+  let offset = 2
+  let value = 100
+  let add = fn(value: i32) -> i32 {
+    let local = value + offset
+    return local
+  }
+  let shared = Token { value: 1 }
+  let mut counter = 0
+  let mut adjust = fn(delta: i32) -> i32 {
+    counter = counter + delta
+    return counter + shared.value
+  }
+  let recover = effect fn(error: Failure) -> i32 { return 42 }
+  return add(40) + adjust(0) - 1
+}`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const ordinaryFn = source.indexOf('fn(value')
+      const exclusiveFn = source.indexOf('fn(delta')
+      const effectFn = source.indexOf('fn(error')
+      assert.strictEqual(
+        Analysis.hoverSubjectAt(snapshot, 'main', ordinaryFn)?.presentation.text,
+        'fn(value: i32) -> i32\nmode: fn\ncaptures: offset (Copy)',
+      )
+      assert.strictEqual(
+        Analysis.hoverSubjectAt(snapshot, 'main', exclusiveFn)?.presentation.text,
+        'fn(delta: i32) -> i32\nmode: mut fn\ncaptures: counter (exclusive), shared (shared)',
+      )
+      assert.strictEqual(
+        Analysis.hoverSubjectAt(snapshot, 'main', effectFn)?.presentation.text,
+        'effect fn(error: Failure) -> i32\nmode: fn\ncaptures: none',
+      )
+
+      const parameterDeclaration = Analysis.semanticOccurrenceAt(
+        snapshot,
+        'main',
+        source.indexOf('value: i32', ordinaryFn),
+      )
+      const parameterUse = Analysis.semanticOccurrenceAt(
+        snapshot,
+        'main',
+        source.indexOf('value +'),
+      )
+      assert.strictEqual(parameterDeclaration?.role, 'Declaration')
+      assert.deepEqual(parameterUse?.resolution, parameterDeclaration?.resolution)
+
+      const outerDeclaration = Analysis.semanticOccurrenceAt(
+        snapshot,
+        'main',
+        source.indexOf('offset ='),
+      )
+      const capturedUse = Analysis.semanticOccurrenceAt(
+        snapshot,
+        'main',
+        source.indexOf('offset\n'),
+      )
+      assert.deepEqual(capturedUse?.resolution, outerDeclaration?.resolution)
+
+      const completion = Analysis.completionAt(snapshot, 'main', source.indexOf('return local'))
+      const labels = completion?.candidates.map((candidate) => candidate.label) ?? []
+      assert.includeMembers(labels, ['value', 'offset', 'local'])
+      assert.isFalse(labels.some((label) => label.includes('$callable$')))
+      assert.isFalse(
+        snapshot.index.modules
+          .flatMap((module) => module.members)
+          .some(
+            (member) =>
+              member.name._tag === 'Present' && member.name.spelling.includes('$callable$'),
+          ),
+      )
+      return undefined
+    }),
+  )
+})
+
+it.effect('completes anonymous callable starts without construction modifiers', () => {
+  const source = `struct Failure {}
+fn complete<T>(outer: T) -> i32 {
+  let local = 1
+  let transform = fn(value: ) -> i32 { return local }
+  return 42
+}
+pub fn main() -> i32 {
+  let handler = effect fn(error: Failure) -> i32 { return 42 }
+  return 42
+}`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const expressionOffset = source.indexOf('effect fn')
+      const afterEffectOffset = expressionOffset + 'effect '.length
+      const parameterTypeOffset = source.indexOf('value: ') + 'value: '.length
+      const expressionLabels =
+        Analysis.completionAt(snapshot, 'main', expressionOffset)?.candidates.map(
+          (candidate) => candidate.label,
+        ) ?? []
+      const afterEffectLabels =
+        Analysis.completionAt(snapshot, 'main', afterEffectOffset)?.candidates.map(
+          (candidate) => candidate.label,
+        ) ?? []
+      const parameterTypeLabels =
+        Analysis.completionAt(snapshot, 'main', parameterTypeOffset)?.candidates.map(
+          (candidate) => candidate.label,
+        ) ?? []
+      assert.include(expressionLabels, 'fn')
+      assert.includeMembers(afterEffectLabels, ['fn', '{'])
+      assert.notInclude(expressionLabels, 'mut')
+      assert.notInclude(expressionLabels, 'once')
+      assert.notInclude(afterEffectLabels, 'mut')
+      assert.notInclude(afterEffectLabels, 'once')
+      assert.includeMembers(parameterTypeLabels, ['T', 'i32'])
+      assert.notInclude(parameterTypeLabels, 'local')
+      assert.notInclude(parameterTypeLabels, 'outer')
+      return undefined
+    }),
+  )
+})
+
 it.effect('indexes allocator tokens as source binding, actor, and function identities', () =>
   Analysis.ofSourceRealized('main', encoder.encode(allocatorSource)).pipe(
     Effect.map((snapshot) => {

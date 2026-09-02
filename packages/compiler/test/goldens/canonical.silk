@@ -138,6 +138,12 @@ fn execute(problem: Token, borrowed: &End) -> i32 {
   let local = effect {
     return 2
   }
+  let ordinary = fn(value: i32) -> i32 {
+    return value
+  }
+  let recover = effect fn(error: Token) -> i32 ! Token {
+    return 42
+  }
   drop local
   let pending = delayed(move problem)
   let timed = timed()

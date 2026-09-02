@@ -13,7 +13,7 @@ import * as Completion from './Completion.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as DocBlock from './DocBlock.js'
-import type * as Elaboration from './Elaboration.js'
+import * as Elaboration from './Elaboration.js'
 import * as ExecutableProperty from './ExecutableProperty.js'
 import * as Frontend from './Frontend.js'
 import * as FrontendTooling from './FrontendTooling.js'
@@ -103,6 +103,7 @@ export interface Snapshot extends SingleRootFrontendSnapshot {
 export interface AnonymousExpression {
   readonly span: ModuleTooling.AnonymousExpression['span']
   readonly type: ModuleTooling.AnonymousExpression['type']
+  readonly presentation?: ModuleTooling.AnonymousExpression['presentation']
 }
 
 /** The occurrence-first semantic subject selected for a hover request. */
@@ -638,7 +639,7 @@ const presentationOfIdentity = (
   }
   if (identity._tag === 'BindingIdentity') {
     for (const result of self.results.values())
-      for (const fn of result.functions) {
+      for (const fn of Elaboration.executableFunctions(result)) {
         const binding = fn.bindings.find(
           (candidate) =>
             candidate.id.function.sourceId === identity.id.function.sourceId &&
@@ -683,7 +684,7 @@ const presentationOfIdentity = (
       return undefined
     }
     for (const result of self.results.values())
-      for (const fn of result.functions) {
+      for (const fn of Elaboration.executableFunctions(result)) {
         const statementBinding = findStatementBinding(fn.statements)
         if (statementBinding !== undefined)
           return hoverPresentation(
@@ -692,7 +693,7 @@ const presentationOfIdentity = (
           )
       }
     for (const result of self.results.values())
-      for (const fn of result.functions)
+      for (const fn of Elaboration.executableFunctions(result))
         for (const statement of fn.statements)
           for (const expression of ModuleTooling.statementExpressions(statement))
             if (expression._tag === 'Match')
@@ -833,11 +834,13 @@ export const hoverSubjectAt = (
   return Object.freeze({
     _tag: 'ExpressionHoverSubject',
     expression,
-    presentation: Presentation.expressionType(
-      expression.type,
-      module,
-      NameResolution.scopeOf(self.resolution, module),
-    ),
+    presentation:
+      expression.presentation ??
+      Presentation.expressionType(
+        expression.type,
+        module,
+        NameResolution.scopeOf(self.resolution, module),
+      ),
     implementedContracts: implementedContractPresentations(self, module, expression.type),
   })
 }

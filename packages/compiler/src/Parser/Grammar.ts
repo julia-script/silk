@@ -45,6 +45,7 @@ export const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'CharLiteral',
   'InvalidStaticLiteral',
   'CompileErrorKeyword',
+  'FnKeyword',
   'Identifier',
   'LeftBrace',
   'Dot',

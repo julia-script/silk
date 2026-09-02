@@ -80,6 +80,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'AppliedType',
   'ArgumentList',
   'ArrayLiteralExpression',
+  'AnonymousCallableExpression',
   'AssignmentStatement',
   'BindingPattern',
   'BindingStatement',
@@ -881,6 +882,25 @@ it.effect('formats effect blocks and Copy failure transfer canonically', () =>
   }),
 )
 
+it.effect('formats ordinary and effectful anonymous callables canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source =
+      'fn main()->(){let ordinary=fn(value:i32)->i32{return value} let recover=effect fn(error:ExtremelyLongFailure,input:ExtremelyLongInput)->ExtremelyLongSuccess!ExtremelyLongFailure?&ExtremelyLongLogger{return 42}}'
+    const first = yield* SyntaxFormatter.format(
+      parse('memory://anonymous-callable-format.silk', source),
+    )
+    const text = formattedText(first)
+    assert.include(text, 'let ordinary = fn(value: i32) -> i32 {')
+    assert.include(text, 'let recover = effect fn(')
+    assert.include(text, '! ExtremelyLongFailure')
+    assert.include(text, '? &ExtremelyLongLogger {')
+    const reparsed = parse('memory://anonymous-callable-format.silk', text)
+    assert.deepEqual(reparsed.parserDiagnostics, [])
+    const second = yield* SyntaxFormatter.format(reparsed)
+    assert.strictEqual(formattedText(second), text)
+  }),
+)
+
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
@@ -1240,6 +1260,8 @@ effect fn delayed(problem: Token) -> i32 ! Token {
 effect fn timed() -> i32 ? &End at Clock { return 1 }
 fn execute(problem: Token, borrowed: &End) -> i32 {
   let local = effect { return 2 }
+  let ordinary = fn(value:i32)->i32{return value}
+  let recover = effect fn(error:Token)->i32!Token{return 42}
   drop local
   let pending = delayed(move problem)
   let timed = timed() |> End.provide<End at Clock>(&local)

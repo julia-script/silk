@@ -411,6 +411,8 @@ export const duplicateInherentMemberCode = 'SEM0196' as const
 export const importedInherentMemberCode = 'SEM0197' as const
 /** Stable code for an associated function called on a value as though it had a receiver. */
 export const associatedFunctionOnValueCode = 'SEM0198' as const
+/** Stable code for nesting one anonymous callable body inside another in the first language slice. */
+export const nestedAnonymousCallableCode = 'SEM0199' as const
 /** Stable code for a receiver operation declared by more than one bound of one type parameter. */
 export const ambiguousReceiverOperationCode = 'SEM0200' as const
 /** Stable code for an `export "C"` function whose body may suspend. */
@@ -439,6 +441,8 @@ export const storedEffectRunAccessCode = 'OWN0015' as const
 export const localSharedAccessEscapeCode = 'OWN0016' as const
 /** Stable code for an owner consumed in only some arms of a branch merge. */
 export const incompatibleArmMergeCode = 'OWN0017' as const
+/** Stable code for returning a callable that borrows storage owned by the returning function. */
+export const callableBorrowEscapeCode = 'OWN0018' as const
 
 /** Stable code for an exact `usize` magnitude outside the selected target word. */
 export const usizeTargetOutOfRangeCode = 'LAY0001' as const
@@ -655,6 +659,7 @@ export type Code =
   | typeof duplicateInherentMemberCode
   | typeof importedInherentMemberCode
   | typeof associatedFunctionOnValueCode
+  | typeof nestedAnonymousCallableCode
   | typeof ambiguousReceiverOperationCode
   | typeof exportSuspendsCode
   | typeof useAfterMoveCode
@@ -673,6 +678,7 @@ export type Code =
   | typeof storedEffectRunAccessCode
   | typeof localSharedAccessEscapeCode
   | typeof incompatibleArmMergeCode
+  | typeof callableBorrowEscapeCode
   | typeof usizeTargetOutOfRangeCode
 
 /** A semantic declaration identity carried structurally to avoid a module cycle. */
@@ -821,6 +827,7 @@ export type Reason =
   | { readonly _tag: 'UnknownOwnedCallableReturn' }
   | { readonly _tag: 'MissingUnsafeBoundary'; readonly operation: string }
   | { readonly _tag: 'MisplacedUnsafeAcknowledgement' }
+  | { readonly _tag: 'NestedAnonymousCallable' }
   | {
       readonly _tag: 'LocalSharedLayoutMismatch'
       readonly expected: string
@@ -1313,6 +1320,11 @@ export type Reason =
   | { readonly _tag: 'IncompatibleLoopHeader'; readonly loop: number }
   | { readonly _tag: 'IncompatibleArmMerge'; readonly spelling: string }
   | { readonly _tag: 'MatchBorrowEscape'; readonly spelling: string }
+  | {
+      readonly _tag: 'CallableBorrowEscape'
+      readonly spelling: string
+      readonly access: 'Shared' | 'Exclusive'
+    }
   | { readonly _tag: 'ExclusiveMatchRequiresMutable'; readonly spelling: string }
   | { readonly _tag: 'GuardConsumesPattern'; readonly spelling: string }
   | { readonly _tag: 'InvalidMatchScrutineePlace'; readonly access: 'Move' | 'Exclusive' }
@@ -4669,6 +4681,18 @@ export const misplacedUnsafeAcknowledgement = (span: SourceSpan.SourceSpan): Dia
     span,
   })
 
+/** Rejects nested anonymous bodies until transitive capture lifting has a language contract. */
+export const nestedAnonymousCallable = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: nestedAnonymousCallableCode,
+    severity: 'error',
+    message: 'Anonymous callable bodies cannot be nested in this language slice',
+    reason: Object.freeze({ _tag: 'NestedAnonymousCallable' }),
+    span,
+  })
+
 export const invalidConformance = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
@@ -5295,6 +5319,26 @@ export const matchBorrowEscape = (spelling: string, span: SourceSpan.SourceSpan)
     message: `Borrowed pattern binding ${spelling} cannot escape its match arm`,
     reason: Object.freeze({ _tag: 'MatchBorrowEscape', spelling }),
     span,
+  })
+
+/** Rejects a callable environment whose borrowed root ends when its creating function returns. */
+export const callableBorrowEscape = (
+  spelling: string,
+  access: 'Shared' | 'Exclusive',
+  span: SourceSpan.SourceSpan,
+  returnSpan: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: callableBorrowEscapeCode,
+    severity: 'error',
+    message: `Callable cannot escape with a ${access.toLowerCase()} borrow of local ${spelling}`,
+    reason: Object.freeze({ _tag: 'CallableBorrowEscape', spelling, access }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'callable escapes here', span: returnSpan }),
+    ]),
   })
 
 export const exclusiveMatchRequiresMutable = (

@@ -21,7 +21,7 @@ those forms compose into expressions and how operator syntax behaves.
 - A **deferred expression** constructs a value that describes work without performing that work at
   construction time.
 - A **primary expression** is a literal, name, grouped expression, aggregate construction, `match`,
-  Effect block, borrow, `move`, or `run` before postfix operations are applied.
+  Effect block, anonymous callable, borrow, `move`, or `run` before postfix operations are applied.
 - A **postfix operation** is a field projection, index projection, or call applied after its subject.
 - An **operand** is a child supplied to a prefix or infix operator.
 - A **place** is storage that assignment may replace: a mutable binding or a field or index rooted
@@ -312,6 +312,49 @@ produces one diagnostic; a later independent over-budget expression may produce 
 [bounded expression parser](../../../../packages/compiler/src/Parser/Expression.ts),
 [diagnostic catalog](../language/diagnostics.md#parser-par),
 [bootstrap syntax specification](../../../../openspec/specs/bootstrap-syntax/spec.md).
+
+### ANON-SYNTAX-001 — Anonymous callable expressions write a complete callable contract
+
+**Status:** Confirmed
+
+An ordinary anonymous callable expression has this form:
+
+```silk
+fn(value: i32) -> i32 { return value + 1 }
+```
+
+An effectful anonymous callable prefixes the same form with `effect` and may declare failure and
+requirement channels after its success type:
+
+```silk
+effect fn(error: Failure) -> i32 ! RecoveryError ? &Logger { return 42 }
+```
+
+The parameter list, `->`, result or success type, and braced body are mandatory. The failure and
+requirement rows are optional and have the same spelling and fixed empty meanings as a named effect
+function. Whitespace, comments, punctuation, and source spans remain part of the lossless syntax.
+
+**Boundary:** `effect fn(` begins an effectful anonymous callable, while `effect {` begins a direct
+Effect block. Anonymous construction has no name, type-parameter list, declaration modifier,
+capture list, or explicit `mut` or `once` modifier. The syntax parser retains a nested anonymous
+body for recovery and formatting, but semantic analysis rejects that nesting in this language
+slice.
+
+```silk,ignore
+fn invalidForms() {
+  let missingParameterType = fn(value) -> i32 { return value }
+  let missingResult = fn(value: i32) { return value }
+  let explicitMode = mut fn(value: i32) -> i32 { return value }
+  let namedExpression = fn named(value: i32) -> i32 { return value }
+}
+```
+
+**Diagnostics:** A missing parameter type, result arrow or type, delimiter, or body receives a
+local parser diagnostic. Recovery remains bounded to the anonymous expression so later arguments,
+statements, and declarations remain independently parseable.
+
+**Evidence:** [anonymous callable syntax specification](../../../../openspec/changes/add-anonymous-callable-expressions/specs/bootstrap-syntax/spec.md),
+[anonymous formatting specification](../../../../openspec/changes/add-anonymous-callable-expressions/specs/silk-source-formatting/spec.md).
 
 ## Operator precedence and dispatch
 
