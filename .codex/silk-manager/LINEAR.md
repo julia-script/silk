@@ -49,6 +49,11 @@ overrides automatic selection.
 Re-read an issue immediately before changing its state or specification. Preserve fields unrelated
 to the current workflow decision. After a write, read the issue back and verify the intended state.
 
+Follow `REVIEW_BASELINE.md` for issue provenance and currentness. Every newly created issue has a
+Source baseline and Review baseline. Every completed technical review updates Review baseline only
+after the old-to-new commit delta has been inspected and its conclusion is reflected in the issue.
+A field-only mutation, intake comment, or observation of a newer SHA does not advance it.
+
 Do not delete issues. Mark confirmed duplicates as Duplicate and link the survivor. Mark failed
 triage as Canceled with a short comment naming the failed claim and the evidence that would reopen
 it.

@@ -10,6 +10,7 @@ Read these project-local references completely before acting:
 - `../../silk-manager/WORKFLOW.md`
 - `../../silk-manager/LINEAR.md`
 - `../../silk-manager/DISCOVERY.md`
+- `../../silk-manager/REVIEW_BASELINE.md`
 
 This is an inspection and intake skill. It may create or enrich Linear issues. It must not edit
 repository source, change GitHub state, switch branches, fetch, or clean the working tree.
@@ -47,16 +48,18 @@ cap the result or stop after the first strong finding.
    investigable lead with its honest confidence, a visible `## Why this matters` section, and
    triage questions, including low-confidence leads with a specific starting point. The rationale
    must connect the observation to a concrete affected workflow or system property and a possible
-   consequence if ignored; distinguish evidence from inference. Use no priority or estimate. Use
-   `Bug` only for directly demonstrated defects; otherwise use `Improvement` or no broad label.
+   consequence if ignored; distinguish evidence from inference. Record the verified remote-main SHA
+   as both Source baseline and the `discovery intake` Review baseline. Use no priority or estimate.
+   Use `Bug` only for directly demonstrated defects; otherwise use `Improvement` or no broad label.
 7. For an existing issue, add only genuinely new evidence as a dated comment. Do not reopen,
-   reprioritize, or rewrite a triaged issue during discovery.
+   reprioritize, rewrite a triaged issue, or advance its Review baseline during discovery. A
+   mechanical legacy migration from its Source baseline is allowed.
 8. Read every changed issue back. Report new issues, enriched issues, and intake exclusions limited
    to exact duplicates, clearly owned active work, or observations too vague to investigate. Also
    report scout completion, the full coverage ledger, commands run, and material gaps.
 
 Every new issue must meet the Backlog intake bar in `WORKFLOW.md`, include concrete breadcrumbs,
-an explicit causal justification, triage questions, and the source baseline. Draft acceptance is
-optional because triage owns the final specification. One excellent issue is not evidence of a
-thorough sweep; breadth is demonstrated by completed scout assignments, coverage, and the
-second-pass rule.
+an explicit causal justification, triage questions, and both baseline sections. Draft acceptance
+is optional because triage owns the final specification. One excellent issue is not evidence of a
+thorough sweep; breadth is demonstrated by completed scout assignments, coverage, and the second-pass
+rule.

@@ -10,6 +10,7 @@ Read these files completely before acting:
 - `../../silk-manager/WORKFLOW.md`
 - `../../silk-manager/LINEAR.md`
 - `../../silk-manager/TRIAGE.md`
+- `../../silk-manager/REVIEW_BASELINE.md`
 - `../../silk-manager/TEST_REVIEW.md`
 - `../silk-demand/SKILL.md`
 - `../silk-triage/SKILL.md`
@@ -64,8 +65,9 @@ The resulting issue or canonical survivor is the sole subject of the remaining f
 Run the complete `silk-triage` process on this issue even when it was previously Todo. Triage MUST
 use subagents and remains read-only with respect to repository files:
 
-1. Give one investigator the full issue, baseline, relevant paths, and suspected overlaps. Require
-   evidence for all five triage claims and a queue-ready shape.
+1. Give one investigator the full issue, previous Review baseline, current triage commit,
+   old-to-new changed relevant paths, and suspected overlaps. Require evidence for all five triage
+   claims and a queue-ready shape.
 2. Give a different subagent the issue and proposed verdict for independent skeptical review.
 3. Adjudicate both passes against primary repository, Linear, OpenSpec, and GitHub evidence.
 
@@ -89,8 +91,11 @@ into a behavioral change merely to keep the one-call flow moving.
 
 ## 3. Claim and implement
 
-Re-read the admitted issue, move it to In Progress, and read it back before editing. Follow the full
-`silk-work` implementation contract:
+Run `silk-work`'s Admission and claim block before changing status: re-read the admitted issue,
+resolve the verified work-base commit, inspect the delta from its previous Review baseline, apply
+any resulting specification or state correction, and set the `work admission` Review baseline.
+Only after that review succeeds, move the issue to In Progress and read it back before editing.
+Then follow the full `silk-work` implementation contract:
 
 - create or preserve a non-`main`, `julia/`-prefixed branch before source edits;
 - preserve unrelated and uncommitted work, stopping when overlap cannot be handled safely;
@@ -141,7 +146,8 @@ Finish exactly as `silk-work` requires:
 6. Read the PR back and confirm its URL, verified base, expected head branch, draft state, and
    issue-scoped diff.
 7. Comment on Linear with the PR and verification evidence, move the issue to In Review, and read it
-   back.
+   back. The description must now carry the exact committed PR-head SHA as its
+   `implementation handoff` Review baseline.
 
 The run succeeds only when the draft PR and In Review handoff are confirmed. Follow `silk-work`'s
 truthful blocked and failure states when any earlier phase cannot complete; never skip ahead or mark

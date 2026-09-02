@@ -12,9 +12,11 @@ If collaboration tools are unavailable or no subagent can be started, report tri
 and stop before changing issues. Solo triage does not satisfy this skill.
 
 Use up to three parallel investigators in waves. Give each investigator one issue at a time when
-possible, including its full description, links, baseline, suspected overlaps, and relevant repo
-paths. For larger batches, reuse completed agents with follow-up assignments rather than making one
-agent shallowly process many unrelated issues.
+possible. Before assignment, read its Source and Review baselines, resolve the exact triage commit,
+and inspect the old-to-new changed relevant paths under `REVIEW_BASELINE.md`. Include the full
+description, links, previous review commit, current triage commit, changed paths, suspected overlaps,
+and relevant repo paths. For larger batches, reuse completed agents with follow-up assignments
+rather than making one agent shallowly process many unrelated issues.
 
 Each issue receives two independent passes:
 
@@ -33,6 +35,11 @@ only when the investigator identifies the exact missing evidence and no verdict 
 
 ```text
 issue: JUL-N
+review_delta:
+  previous_review_commit
+  current_review_commit
+  changed_relevant_paths
+  effect_on_currentness_and_scope
 verdicts:
   real: {result: true|false|uncertain, evidence}
   current: {result: true|false|uncertain, evidence}
@@ -97,4 +104,9 @@ public contracts, then simplification, dead code, and other debt. Concrete urgen
 this ordering, but novelty alone cannot.
 
 Write sequentially only after the batch verdicts and relative priority are coherent. Read every
-changed issue back before reporting.
+changed issue back before reporting. Every Todo, Duplicate, Canceled, or deliberately retained
+Backlog issue that completed technical review receives `Stage: triage` and the appropriate Outcome
+in Review baseline. Apply the verdict or revised specification first; advance the baseline only
+after the issue reflects the conclusion. If the commit range could not be reviewed, retain the old
+baseline and leave the issue in Backlog with the exact missing evidence, except for the explicit
+from-scratch legacy recovery in `REVIEW_BASELINE.md`.

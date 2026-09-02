@@ -25,12 +25,16 @@ its scoped Linear writes. It does not authorize unrelated repository, GitHub, or
 
 Except for discovery, use this repository and its current checkout as the working truth. Discovery
 uses the current remote `main` commit and follows the exact freshness gate in `DISCOVERY.md`.
-Record:
+Follow `REVIEW_BASELINE.md` whenever creating or technically reviewing an issue. Record:
 
 - the full `HEAD` commit;
 - whether the working tree was dirty;
 - the exact relevant paths;
 - the observation time when it affects the finding.
+
+The Source baseline is immutable provenance. The Review baseline is the moving currentness marker.
+Advance it only after comparing the previous reviewed commit with the new context and revalidating
+the issue; merely seeing a newer commit is not a review.
 
 Do not fetch, switch branches, discard changes, or edit source during discovery or triage. Discovery
 queries the remote ref with `git ls-remote`; that is a read, not a fetch. Treat
@@ -145,6 +149,16 @@ and state material uncertainty.>
 - Relevant paths: `<paths or repository-wide>`
 - Checked at: `<ISO-8601 timestamp>`
 
+## Review baseline
+
+- Commit: `<full SHA>` | unknown (legacy only)
+- Context: remote main | checkout HEAD | PR `<number>` head | merged commit | legacy source (unresolved) | legacy source (unknown)
+- Stage: legacy source (depth unknown) | demand intake | discovery intake | triage | work admission | implementation handoff | sync
+- Outcome: intake only | confirmed current | specification revised | implementation ready | implementation complete | delivered | terminal
+- Working tree: clean | dirty | not applicable | unknown (legacy only)
+- Relevant paths: `<paths or repository-wide>`
+- Reviewed at: `<ISO-8601 timestamp>` | unknown (legacy only)
+
 ## Gate
 
 <Only when the issue cannot currently be completed.>
@@ -155,6 +169,10 @@ we do nothing?** Do not satisfy it with generic adjectives such as “complex,�
 “difficult to maintain.” Name the affected change path, user behavior, correctness property,
 operational task, or repeated effort. Evidence proves that the condition exists; this section
 explains why the condition deserves attention.
+
+`Source baseline` remains the issue's origin. `Review baseline` tells the next agent exactly which
+commit and repository context last supported the current issue state. The advancement rules in
+`REVIEW_BASELINE.md` are part of the issue quality bar.
 
 Use Linear comments for dated discovery additions, implementation reports, and reconciliation
 history. Keep the description as the current specification rather than an activity log.

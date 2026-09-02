@@ -5,9 +5,9 @@ description: Claim and implement one triaged Silk Linear issue, follow repositor
 
 # Work a Silk issue
 
-Read `../../silk-manager/WORKFLOW.md`, `../../silk-manager/LINEAR.md`, and
-`../../silk-manager/TEST_REVIEW.md` completely before acting. Then read the repository `AGENTS.md`
-and every specialized skill required by the issue.
+Read `../../silk-manager/WORKFLOW.md`, `../../silk-manager/LINEAR.md`,
+`../../silk-manager/REVIEW_BASELINE.md`, and `../../silk-manager/TEST_REVIEW.md` completely before
+acting. Then read the repository `AGENTS.md` and every specialized skill required by the issue.
 
 Subagents are authorized for investigation, bounded non-overlapping implementation, and review.
 Keep one coordinator responsible for the Linear issue and do not let agents edit overlapping files.
@@ -22,9 +22,16 @@ Before automatic selection, show existing In Progress issues and In Review issue
 need Julia. Do not automatically start a third attention-bearing item. A named issue is an explicit
 override of this soft cap.
 
-Re-read the selected issue and verify that its problem is still current. If it is already delivered
-or invalid, update Linear with evidence and select the next issue only when selection was automatic.
-Otherwise set it to In Progress and read it back before editing.
+Re-read the selected issue and its Review baseline. Resolve the exact verified work-base commit and
+inspect the changed relevant paths from the previous review commit under `REVIEW_BASELINE.md`.
+Revalidate whether the work is still wanted, already delivered, outdated, superseded, or incorrectly
+specified before claiming it. If it is already delivered or invalid, apply the truthful Linear state
+and then update Review baseline at the work-base commit with the corresponding Outcome; select the
+next issue only when selection was automatic. If the delta cannot be reviewed, do not claim or
+advance an established baseline. A legacy unresolved or unknown baseline requires the full
+current-state recovery review from `REVIEW_BASELINE.md` before claiming. Otherwise update the issue
+specification if needed, set Review baseline to `Stage: work admission` and
+`Outcome: implementation ready`, then set it to In Progress and read it back before editing.
 
 ## Implementation
 
@@ -79,8 +86,10 @@ verification and review:
 5. If the branch already has an open PR, reuse it rather than creating a duplicate and ensure it is
    still a draft. Never mark the PR ready for review as part of this skill.
 6. Read the PR back and require both its URL and draft state before treating the run as complete.
-7. Add the confirmed draft PR link and the same verification evidence to Linear, then move the
-   issue to In Review and read it back.
+7. Add the confirmed draft PR link and the same verification evidence to Linear. Update Review
+   baseline to the exact committed PR-head SHA with `Context: PR <number> head`,
+   `Stage: implementation handoff`, and `Outcome: implementation complete`; then move the issue to In
+   Review and read it back.
 
 Draft-PR creation is a required delivery step, not an optional action requiring a separate prompt.
 If committing, pushing, or creating or confirming the draft PR fails, do not claim completion and

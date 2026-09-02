@@ -16,10 +16,12 @@ or update the checkout. If the remote query fails, returns an ambiguous result, 
 `HEAD`, stop immediately before Linear reads, fan-out, or writes. Report the local and remote SHAs
 when known and say that discovery requires a checkout at the latest remote `main`.
 
-Record the verified remote SHA as the discovery source baseline and give it to every scout. Re-run
-the same remote query after the first scout fan-in, before any second pass, and once more immediately
-before the first Linear write. If remote `main` changed at either checkpoint, stop without filing or
-enriching issues. Never publish leads from a superseded baseline.
+Record the verified remote SHA as both the immutable Source baseline and the initial Review baseline
+for every new lead, with `Stage: discovery intake`, `Outcome: intake only`, and `Context: remote
+main`. Give it to every scout. Re-run the same remote query after the first scout fan-in, before any
+second pass, and once more immediately before the first Linear write. If remote `main` changed at
+either checkpoint, stop without filing or enriching issues. Never publish leads from a superseded
+baseline.
 
 ## Required fan-out
 
@@ -145,7 +147,11 @@ sweep as part of discovery.
 After the final remote-main freshness check succeeds, the coordinator writes sequentially after
 fan-in. New issues enter Backlog with no priority or estimate. For an existing issue, add only new
 evidence as a dated comment. Every new description includes a visible `## Why this matters`
-section. Read every write back and confirm that the section survived rendering.
+section plus Source and Review baselines. Read every write back and confirm that the sections
+survived rendering. Discovery evidence added to an existing issue does not advance its Review
+baseline because discovery does not perform the issue's technical triage. A touched legacy issue
+may receive the mechanical Source-to-Review migration from `REVIEW_BASELINE.md` without claiming a
+new review.
 
 The final report includes:
 
