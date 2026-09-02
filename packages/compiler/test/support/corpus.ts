@@ -891,6 +891,84 @@ effect fn program() -> i32 ! OutOfMemoryError {
 effect fn recover(error: OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
+/**
+ * The outer suspension frame retains a never-driven Execution whose package owns continuation
+ * storage. Native cleanup emission used to re-expand the module's frame inventory for that
+ * retained handle until the compiler exhausted its heap; the handle is released on the frame's
+ * ordinary completion path.
+ */
+export const frameRetainedExecutionCompletion = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
+
+fn ready(state: &()) -> () { return () }
+
+effect fn child() -> i32 {
+  return run Effect.suspend(effect { return 42 })
+}
+
+effect fn holdAcrossSuspension() -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let execution = run Execution.make(child(), (), ready)
+  let result = run Effect.suspend(effect { return 0 })
+  drop execution
+  return result
+}
+
+effect fn program() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run holdAcrossSuspension()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(program(), recover)
+}`
+
+/**
+ * An eligible outer Execution is dropped while its parked frame still retains an inner Execution,
+ * so frame cleanup must release the nested package through the runtime cleanup path.
+ */
+export const frameRetainedExecutionAbandonedFrame = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
+struct Empty {}
+struct Stored { execution: Intrinsic.Execution<i32> }
+struct Owner { slot: Empty | Stored }
+struct Guard {}
+fn register(wake: Intrinsic.Wake) -> Guard { Intrinsic.wake(move wake) return Guard {} }
+fn ready(state: &()) -> () { return () }
+effect fn child() -> i32 { return run Effect.suspend(effect { return 42 }) }
+effect fn holder(execution: Intrinsic.Execution<i32>) -> i32 {
+  run Execution.park(register)
+  drop execution
+  return 1
+}
+fn complete(owner: &mut Owner, result: i32) -> () { return () }
+fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
+  let previous = Intrinsic.replace(owner.slot, Stored { execution: move execution })
+  drop previous
+  return ()
+}
+effect fn drive(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
+  return run Execution.drive(move execution, move owner, complete, suspend)
+}
+effect fn program() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut owner = Owner { slot: Empty {} }
+  let retained = run Execution.make(child(), (), ready)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let outer = run Execution.make(holder(move retained), (), ready)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run drive(move outer, &mut owner)
+  let selected = Intrinsic.replace(owner.slot, Empty {})
+  drop selected
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return -2 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
+
 export const constrainedCallableForwarding = `import silk.effect { Effect }
 service Counter {
   effect fn get() -> i32 ? &Counter
@@ -3423,6 +3501,16 @@ pub fn main() -> i32 { return unsafe abs(-42) }`,
   {
     name: 'independent-execution-parked-typed-failure',
     source: independentExecutionParkedTypedFailure,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'frame-retained-execution-completion',
+    source: frameRetainedExecutionCompletion,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'frame-retained-execution-abandoned-frame',
+    source: frameRetainedExecutionAbandonedFrame,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

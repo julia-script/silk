@@ -34,6 +34,7 @@ import * as MirVerification from './MirVerification.js'
 import * as NativeCall from './NativeCall.js'
 import type * as NativeDebug from './NativeDebug.js'
 import * as NativeDeclare from './NativeDeclare.js'
+import * as NativeExecutionOperation from './NativeExecutionOperation.js'
 import type * as NativeForeignOperation from './NativeForeignOperation.js'
 import * as NativeFunction from './NativeFunction.js'
 import type * as NativeLanePointer from './NativeLanePointer.js'
@@ -370,6 +371,12 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   )
   const declared = functionDeclarations.declared
   if (functionDeclarations.voidType !== undefined) voidType = functionDeclarations.voidType
+  const executionRelease = yield* NativeExecutionOperation.declareReleaseHelper(
+    builder,
+    program,
+    pointer,
+    voidType,
+  )
   yield* NativeDeclare.exportThunks(Object.freeze({ builder, program, declared, cType }))
   const childThunkType = suspensionEnabled
     ? yield* LlvmType.functionType(builder, i32, [pointer])
@@ -507,6 +514,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ...(free === undefined ? {} : { free }),
       ...(coroutineFramePush === undefined ? {} : { coroutineFramePush }),
       ...(coroutineFramePop === undefined ? {} : { coroutineFramePop }),
+      ...(executionRelease === undefined ? {} : { executionRelease: executionRelease.handle }),
       ...(memcmp === undefined ? {} : { memcmp }),
       ...(standardWrite === undefined ? {} : { standardWrite }),
       osRuntimes,
@@ -521,6 +529,25 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       debugContext,
     }),
   )
+
+  if (executionRelease !== undefined)
+    yield* NativeExecutionOperation.emitReleaseHelper(
+      Object.freeze({
+        builder,
+        program,
+        i8,
+        i32,
+        pointer,
+        ...(usizeType === undefined ? {} : { usizeType }),
+        ...(free === undefined ? {} : { free }),
+        ...(coroutineFramePop === undefined ? {} : { coroutineFramePop }),
+        resumeThunks,
+        declared,
+        types: typeContext,
+        lanePointers,
+        helper: executionRelease,
+      }),
+    )
 
   yield* NativeSuspension.emitThunks(
     Object.freeze({

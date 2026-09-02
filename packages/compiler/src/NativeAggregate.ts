@@ -169,6 +169,8 @@ export interface Context {
   readonly call: NativeCall.Context
   readonly arith: NativeArith.LaneContext
   readonly storage: NativeStorage.Context
+  /** The module's out-of-line Execution release; see `NativeExecutionOperation.emitReleaseHelper`. */
+  readonly executionRelease?: FunctionActor.Function
 }
 
 /**
@@ -210,8 +212,20 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
     case 'NoCleanup':
     case 'ParameterCleanup':
       return
-    case 'ExecutionCleanup':
-      return yield* NativeExecutionOperation.dropExecution(context, values, tag)
+    case 'ExecutionCleanup': {
+      const base = values.at(0)
+      if (base === undefined || context.executionRelease === undefined)
+        throw new RangeError('LLVM Execution cleanup lost its release helper')
+      // A synchronous call, not a bare `callDirect`: the helper may run user drop hooks, so the
+      // caller's address-taken roots reload exactly as they did for the former inline expansion.
+      yield* NativeCall.callSynchronous(
+        call.synchronous,
+        { handle: context.executionRelease, resultLaneCount: 0, suspendable: false },
+        [base],
+        `${tag}_release`,
+      )
+      return
+    }
     case 'WakeCleanup':
       return yield* NativeExecutionOperation.dropWake(context, values, tag)
     case 'CallableCleanup': {
