@@ -411,6 +411,8 @@ export const duplicateInherentMemberCode = 'SEM0196' as const
 export const importedInherentMemberCode = 'SEM0197' as const
 /** Stable code for an associated function called on a value as though it had a receiver. */
 export const associatedFunctionOnValueCode = 'SEM0198' as const
+/** Stable code for nesting one anonymous callable body inside another in the first language slice. */
+export const nestedAnonymousCallableCode = 'SEM0199' as const
 /** Stable code for a receiver operation declared by more than one bound of one type parameter. */
 export const ambiguousReceiverOperationCode = 'SEM0200' as const
 /** Stable code for an `export "C"` function whose body may suspend. */
@@ -655,6 +657,7 @@ export type Code =
   | typeof duplicateInherentMemberCode
   | typeof importedInherentMemberCode
   | typeof associatedFunctionOnValueCode
+  | typeof nestedAnonymousCallableCode
   | typeof ambiguousReceiverOperationCode
   | typeof exportSuspendsCode
   | typeof useAfterMoveCode
@@ -821,6 +824,7 @@ export type Reason =
   | { readonly _tag: 'UnknownOwnedCallableReturn' }
   | { readonly _tag: 'MissingUnsafeBoundary'; readonly operation: string }
   | { readonly _tag: 'MisplacedUnsafeAcknowledgement' }
+  | { readonly _tag: 'NestedAnonymousCallable' }
   | {
       readonly _tag: 'LocalSharedLayoutMismatch'
       readonly expected: string
@@ -4666,6 +4670,18 @@ export const misplacedUnsafeAcknowledgement = (span: SourceSpan.SourceSpan): Dia
     severity: 'error',
     message: '`unsafe` must acknowledge a complete unsafe invocation',
     reason: Object.freeze({ _tag: 'MisplacedUnsafeAcknowledgement' }),
+    span,
+  })
+
+/** Rejects nested anonymous bodies until transitive capture lifting has a language contract. */
+export const nestedAnonymousCallable = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: nestedAnonymousCallableCode,
+    severity: 'error',
+    message: 'Anonymous callable bodies cannot be nested in this language slice',
+    reason: Object.freeze({ _tag: 'NestedAnonymousCallable' }),
     span,
   })
 

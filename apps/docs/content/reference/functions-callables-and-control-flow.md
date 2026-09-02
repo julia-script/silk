@@ -1,9 +1,9 @@
 # Functions, callables, and control flow
 
 Silk functions have locally readable contracts, evaluate calls in a fixed order, and use explicit
-control transfers. Named functions are first-class callable values. `if`, `while`, and `match`
-provide structured selection and repetition without truthiness, implicit exception flow, or hidden
-ownership transfers.
+control transfers. Named functions and anonymous callable expressions produce first-class callable
+values. `if`, `while`, and `match` provide structured selection and repetition without truthiness,
+implicit exception flow, or hidden ownership transfers.
 
 Effect construction, execution, and channels are defined by [effects and execution](effects-and-execution.md)
 and [Effect contracts](effect-contracts.md). This page describes the ordinary function and
@@ -14,6 +14,8 @@ defined by [ownership and borrowing](ownership-and-borrowing.md).
 
 - A **named function** is a module-level `fn` or `effect fn` declaration.
 - A **function item** is the callable value denoted by naming a function without calling it.
+- An **anonymous callable expression** defines a callable body at its expression site without
+  declaring an importable name.
 - A **callable** is a value that may be invoked with an ordered list of arguments.
 - A callable's **invocation mode** is shared reusable `fn`, exclusive reusable `mut fn`, or
   consuming `once fn` access to its captured environment.
@@ -452,6 +454,55 @@ use ownership diagnostic `OWN0014` for the same access violation.
 
 **Evidence:** [callable ownership](ownership-and-borrowing.md#callable-002--invocation-mode-derives-from-access-to-the-callable-environment),
 [callable specification](../../../../openspec/specs/bootstrap-callable-values/spec.md).
+
+### ANON-CALLABLE-001 — An anonymous callable has one exact source identity and explicit contract
+
+**Status:** Confirmed
+
+An anonymous callable defines its parameters, result, and body at an expression site. Parameter and
+result types are mandatory. An effectful anonymous callable also declares any failure and
+requirement channels in the ordinary Effect-contract positions.
+
+```silk
+fn apply(transform: fn(i32) -> i32, value: i32) -> i32 {
+  return transform(value)
+}
+
+fn addOffset(offset: i32) -> i32 {
+  return apply(fn(value: i32) -> i32 { return value + offset }, 40)
+}
+```
+
+The anonymous expression in `addOffset` captures `offset` and has the visible contract
+`fn(i32) -> i32`. Every accepted occurrence retains its own deterministic source identity and one
+finite environment containing its implicit captures in first-reference order. Two textually
+identical occurrences remain distinct, including when neither captures a value. An occurrence may
+use type and row parameters declared by its enclosing function; each enclosing specialization
+produces a corresponding finite anonymous target.
+
+The source identity is not a declaration name. Anonymous callables do not enter module lookup,
+imports, overload sets, or documentation as named functions. Writing a structural callable type
+does not merge distinct occurrences or erase their targets and environments into a universal
+closure representation or ABI.
+
+**Boundary:** The callable's written contract must be complete. An expected callable type may check
+compatibility and contribute ordinary surrounding generic constraints, but it does not infer a
+missing parameter, result, failure, or requirement annotation and does not rewrite a conflicting
+annotation. Anonymous callables cannot declare independent type parameters, name themselves, refer
+to themselves recursively, carry declaration modifiers, or participate in overloads. An anonymous
+body nested inside another anonymous body is unsupported in this language slice. Invocation mode is
+derived from captures under
+[ANON-OWN-001](ownership-and-borrowing.md#anon-own-001--anonymous-captures-determine-environment-ownership-and-invocation-mode);
+source does not spell `mut fn` or `once fn` when constructing the value.
+
+**Diagnostics:** An incomplete written contract receives a syntax or type diagnostic at the missing
+or incompatible contract part. A nested body, self-reference, independent type parameter,
+declaration modifier, or overload use receives a semantic diagnostic at that unsupported construct.
+
+**Evidence:** [anonymous callable value specification](../../../../openspec/changes/add-anonymous-callable-expressions/specs/bootstrap-callable-values/spec.md),
+[anonymous semantic-fact specification](../../../../openspec/changes/add-anonymous-callable-expressions/specs/bootstrap-semantic-facts/spec.md),
+[anonymous generic-contract specification](../../../../openspec/changes/add-anonymous-callable-expressions/specs/bootstrap-type-generics/spec.md),
+[anonymous backend specification](../../../../openspec/changes/add-anonymous-callable-expressions/specs/bootstrap-backend/spec.md).
 
 ### PIPE-001 — A pipeline invokes one unary callable after evaluating its left value
 

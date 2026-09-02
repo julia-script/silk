@@ -45,4 +45,3 @@ the existing callable substitution order without an authored construction modifi
 
 - **WHEN** a moved-affine anonymous callable is required where `fn(A) -> B` is expected
 - **THEN** analysis reports the incompatible consuming mode before lowering
-

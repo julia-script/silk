@@ -24,4 +24,3 @@ explicitly unavailable rather than publishing a partial executable target.
 
 - **WHEN** the same module is elaborated repeatedly
 - **THEN** anonymous target identities, capture order, body traversal, and encoded HIR bytes remain stable
-

@@ -18,4 +18,3 @@ dedicated anonymous syntax and SHALL be idempotent.
 
 - **WHEN** complete source contains an over-width effectful anonymous callable with failure and requirement rows
 - **THEN** formatting breaks its signature and body by the existing canonical policies while preserving `effect fn` and every authored contract
-

@@ -24,4 +24,3 @@ ABI, runtime target table, or heap-allocation requirement from anonymous callabl
 
 - **WHEN** layout receives only an anonymous callable's structural `fn(A) -> B` contract without its hidden concrete identity
 - **THEN** it remains unavailable rather than choosing an erased closure representation
-

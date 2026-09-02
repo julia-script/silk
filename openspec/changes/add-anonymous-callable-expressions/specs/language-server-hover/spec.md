@@ -18,4 +18,3 @@ the existing token-specific facts for parameters, outer lexical references, type
 
 - **WHEN** hover selects `effect fn(error: Failure) -> i32 { return 42 }`
 - **THEN** hover preserves the effectful source contract, reports no captures, and does not reduce it to an importable named function
-

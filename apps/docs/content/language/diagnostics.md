@@ -16,11 +16,11 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | `LEX`  | Lexical   | 12    |
 | `PAR`  | Parser    | 5     |
 | `MOD`  | Module    | 3     |
-| `SEM`  | Semantic  | 192   |
+| `SEM`  | Semantic  | 193   |
 | `OWN`  | Ownership | 16    |
 | `LAY`  | Layout    | 1     |
 
-There are 229 codes in total.
+There are 230 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -251,6 +251,7 @@ There are 229 codes in total.
 | `SEM0196` | Stable code for two inherent members of one owner sharing a name.                                            | `<owner>.<member> is declared more than once; one owner has at most one member of each name`                                                                                                                                                                                                                                                                                                                                                                               |
 | `SEM0197` | Stable code for a selective import naming an inherent member as if it were a root declaration.               | `<module> has no root declaration <member>; it is a member of <owner>, so import <owner> and write <owner>.<member>`                                                                                                                                                                                                                                                                                                                                                       |
 | `SEM0198` | Stable code for an associated function called on a value as though it had a receiver.                        | `<owner>.<member> is an associated function without a receiver; call it as <owner>.<member>(...)`                                                                                                                                                                                                                                                                                                                                                                          |
+| `SEM0199` | Stable code for nesting one anonymous callable body inside another in the first language slice.              | `Anonymous callable bodies cannot be nested in this language slice`                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `SEM0200` | Stable code for a receiver operation declared by more than one bound of one type parameter.                  | `<member> is declared by more than one bound of <parameter> (<join>); call it through the bound, as <at0Bound>.<member>(...)`                                                                                                                                                                                                                                                                                                                                              |
 | `SEM0201` | Stable code for an `export "C"` function whose body may suspend.                                             | `Exported function <symbol> may suspend; a C-callable body must be synchronous`                                                                                                                                                                                                                                                                                                                                                                                            |
 

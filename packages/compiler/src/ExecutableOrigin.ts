@@ -817,13 +817,16 @@ export const make = (operations: Operations) => {
       const typeArguments = expression.typeArguments.map((argument) =>
         Type.substituteGenericArgument(argument, context.substitution),
       )
-      const environment = Hir.callableEnvironmentIdentity(expression.site, {
-        declaration: Object.freeze({
-          module: context.owner.declaration.module,
-          name: context.owner.declaration.name,
-        }),
-        typeArguments: context.owner.typeArguments,
-      })
+      const environment =
+        expression.captures.length === 0
+          ? undefined
+          : Hir.callableEnvironmentIdentity(expression.site, {
+              declaration: Object.freeze({
+                module: context.owner.declaration.module,
+                name: context.owner.declaration.name,
+              }),
+              typeArguments: context.owner.typeArguments,
+            })
       const target = Hir.callableTargetIdentity(expression.target)
       const identity =
         target._tag === 'Declaration'

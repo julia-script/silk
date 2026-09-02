@@ -1685,6 +1685,7 @@ export const analyzeFunctionBody = (
   declarations: ReadonlyArray<DeclarationFact>,
   resolution: ResolutionContext,
   staticContext?: BodyContext['staticContext'],
+  initialScope?: Scope,
 ): FunctionAnalysis => {
   const returnType =
     declaration.returnType._tag === 'Resolved'
@@ -1758,7 +1759,8 @@ export const analyzeFunctionBody = (
   const statements = analyzeStatements(
     context,
     blockNode,
-    Object.freeze({ parameters: declaration.parameters, bindings: [], patternBindings: [] }),
+    initialScope ??
+      Object.freeze({ parameters: declaration.parameters, bindings: [], patternBindings: [] }),
   )
   const containsDeferredStaticControl = (node: SyntaxTree.Node): boolean =>
     node.kind === 'StaticConditionalStatement' ||

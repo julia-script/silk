@@ -1182,6 +1182,87 @@ const analyzeParameter = (
   })
 }
 
+/** Collects the declaration-shaped contract owned by one anonymous callable occurrence. */
+export const collectAnonymousCallableDeclaration = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  id: DeclarationId,
+  canonical: CanonicalId,
+  inheritedTypeParameters: ReadonlyArray<TypeParameterFact>,
+): {
+  readonly fact: DeclarationFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  const environment = new Map(
+    inheritedTypeParameters.flatMap((parameter) =>
+      parameter.name._tag === 'Present' ? [[parameter.name.spelling, parameter.type] as const] : [],
+    ),
+  )
+  const parameterList = childNode(node, 'ParameterList')
+  const parameters = SyntaxTree.directNodes(parameterList, 'ParameterDeclaration').map(
+    (parameter, ordinal) => analyzeParameter(source, parameter, id, ordinal, environment),
+  )
+  const returnSyntax = SyntaxTree.directNode(node, 'ReturnType')
+  const returnType =
+    returnSyntax === undefined
+      ? Object.freeze({
+          fact: Object.freeze({ _tag: 'Unavailable' as const, syntax: node }),
+          diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
+        })
+      : collectReturnType(source, returnSyntax, canonical.name, inheritedTypeParameters)
+  const failureRow = collectFailureRow(source, node, environment)
+  const requirementRow = collectRequirementRow(source, node, environment)
+  const parameterFacts = Object.freeze(parameters.map((parameter) => parameter.fact))
+  const diagnostics = Object.freeze([
+    ...parameters.flatMap((parameter) => parameter.diagnostics),
+    ...duplicateParameterDiagnostics(parameterFacts),
+    ...returnType.diagnostics,
+    ...failureRow.diagnostics,
+    ...requirementRow.diagnostics,
+    ...(SyntaxTree.directToken(node, 'EffectKeyword') === undefined &&
+    failureRow.fact.syntax !== undefined
+      ? [Diagnostic.failureChannelOnOrdinary(failureRow.fact.syntax.span)]
+      : []),
+  ])
+  const fnToken = SyntaxTree.directToken(node, 'FnKeyword')
+  const name: DeclaredName =
+    fnToken === undefined
+      ? Object.freeze({ _tag: 'Unavailable', syntax: node })
+      : Object.freeze({
+          _tag: 'Present',
+          spelling: canonical.name,
+          token: fnToken,
+        })
+  const retainedBody = bodyTemplate(source, node)
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'FunctionDeclaration',
+      id,
+      canonical: Object.freeze({ _tag: 'Canonical', id: canonical }),
+      visibility: 'Private',
+      phase: 'Runtime',
+      functionKind:
+        SyntaxTree.directToken(node, 'EffectKeyword') === undefined ? 'Ordinary' : 'Effect',
+      unsafe: false,
+      typeParameters: Object.freeze([...inheritedTypeParameters]),
+      parameterCount: parameterFacts.length,
+      parameters: parameterFacts,
+      name,
+      returnType: returnType.fact,
+      ...('opaqueResult' in returnType && returnType.opaqueResult !== undefined
+        ? { opaqueResult: returnType.opaqueResult }
+        : {}),
+      failureRow: failureRow.fact,
+      requirementRow: requirementRow.fact,
+      constraints: Object.freeze([]),
+      constraintContracts: Object.freeze([]),
+      ...(retainedBody === undefined ? {} : { bodyTemplate: retainedBody }),
+      syntax: node,
+    }),
+    diagnostics,
+  })
+}
+
 const duplicateParameterDiagnostics = (parameters: ReadonlyArray<ParameterFact>) => {
   const first = new Map<string, ReturnType<typeof presentParameterEntries>[number]>()
   const diagnostics: Array<Diagnostic.Diagnostic> = []

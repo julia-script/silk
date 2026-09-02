@@ -24,4 +24,3 @@ SHALL be an applicable keyword; after an expression-position `effect`, completio
 
 - **WHEN** completion is requested at an expression start or immediately after `effect`
 - **THEN** it offers the valid anonymous `fn` continuation from compiler grammar facts without inventing `mut fn` or `once fn` construction
-

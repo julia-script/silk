@@ -25,4 +25,3 @@ make bounded progress, and later arguments, statements, and declarations SHALL r
 
 - **WHEN** an anonymous callable omits a parameter type, arrow result, delimiter, or body before a following call argument or declaration
 - **THEN** the damage remains inside the anonymous node with stable diagnostics and parsing resumes without non-termination
-

@@ -3541,11 +3541,16 @@ export const checkModule = (
   index: DeclarationIndex.Index,
   accessBoundaryPlan: LocalSharedAccessBoundaryPlan,
 ): ModuleOwnership => {
-  const checked = result.hir.functions.map((fn, ordinal) =>
+  const executableFacts = Elaboration.executableFunctions(result)
+  const checked = result.hir.functions.map((fn) =>
     checkFunction(
       fn,
       index,
-      result.functions.at(ordinal),
+      executableFacts.find(
+        (fact) =>
+          fact.declaration.id.sourceId === fn.declaration.id.sourceId &&
+          fact.declaration.id.ordinal === fn.declaration.id.ordinal,
+      ),
       fn.declaration.canonical._tag === 'Canonical'
         ? (accessBoundaryPlan.boundaries.get(localSharedTargetKey(fn.declaration.canonical.id)) ??
             Object.freeze([]))

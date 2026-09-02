@@ -514,6 +514,98 @@ it('parses an effect block as a primary lazy expression and retains Copy fail sy
   assert.deepEqual(Array.from(reconstructedBytes(result)), result.source.bytes)
 })
 
+it('parses ordinary and effectful anonymous callables distinctly and losslessly', () => {
+  const source = `fn make() -> () {
+  let ordinary = fn(value: i32) -> i32 { return value }
+  let effectful = effect fn(error: Failure) -> i32 ! Failure ? &Logger { return 42 }
+  let pending = effect { return 1 }
+}`
+  const result = parseText('memory://anonymous-callables.silk', source)
+  const nodes = descendants(result.root).filter(SyntaxTree.isNode)
+  const callables = nodes.filter((node) => node.kind === 'AnonymousCallableExpression')
+
+  assert.strictEqual(callables.length, 2)
+  assert.strictEqual(
+    SyntaxTree.directToken(callables[0] ?? result.root, 'EffectKeyword'),
+    undefined,
+  )
+  assert.notStrictEqual(
+    SyntaxTree.directToken(callables[1] ?? result.root, 'EffectKeyword'),
+    undefined,
+  )
+  assert.notStrictEqual(SyntaxTree.directNode(callables[1] ?? result.root, 'FailureRow'), undefined)
+  assert.notStrictEqual(
+    SyntaxTree.directNode(callables[1] ?? result.root, 'RequirementRow'),
+    undefined,
+  )
+  assert.strictEqual(nodes.filter((node) => node.kind === 'EffectExpression').length, 1)
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('bounds anonymous callable recovery and keeps modifiers outside the callable node', () => {
+  const damaged = [
+    'fn make() -> i32 { return accept(fn -> i32 { return 1 }, 42) }',
+    'fn make() -> i32 { return accept(fn(value:) -> i32 { return 1 }, 42) }',
+    'fn make() -> i32 { return accept(fn() { return 1 }, 42) }',
+    'fn make() -> i32 { return accept(fn() ->, 42) }',
+    'fn make() -> i32 { return accept(fn(), 42) }',
+    'fn make() -> i32 { return accept(effect fn() -> i32 ! { return 1 }, 42) }',
+    'fn make() -> i32 { return accept(fn() -> i32, 42) }',
+  ]
+
+  for (const [ordinal, source] of damaged.entries()) {
+    const result = parseText(`memory://damaged-anonymous-${ordinal}.silk`, source)
+    const callables = descendants(result.root).filter(
+      (element): element is SyntaxTree.Node =>
+        SyntaxTree.isNode(element) && element.kind === 'AnonymousCallableExpression',
+    )
+    assert.strictEqual(callables.length, 1, source)
+    assert.isAbove(result.parserDiagnostics.length, 0)
+    assert.strictEqual(
+      result.tokens.some(
+        (token) => token.kind === 'DecimalInteger' && token.span.start === source.indexOf('42'),
+      ),
+      true,
+    )
+    assertOriginalTokenTraversal(result)
+    assert.deepEqual(reconstructedBytes(result), ascii(source))
+  }
+
+  const modifiedSource =
+    'fn make() -> () { let invalid = mut fn(value: i32) -> i32 { return value } }'
+  const modified = parseText('memory://modified-anonymous.silk', modifiedSource)
+  const callable = descendants(modified.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'AnonymousCallableExpression',
+  )
+  assert.notStrictEqual(callable, undefined)
+  assert.strictEqual(
+    callable === undefined ? undefined : SyntaxTree.directToken(callable, 'MutKeyword'),
+    undefined,
+  )
+  assert.isAbove(modified.parserDiagnostics.length, 0)
+  assertOriginalTokenTraversal(modified)
+  assert.deepEqual(reconstructedBytes(modified), ascii(modifiedSource))
+
+  const declarationSource =
+    'fn make() -> () { let handler = fn() -> () } fn after() -> i32 { return 42 }'
+  const beforeDeclaration = parseText(
+    'memory://anonymous-before-declaration.silk',
+    declarationSource,
+  )
+  assert.strictEqual(directFunctionDeclarations(beforeDeclaration.root).length, 2)
+  assert.strictEqual(
+    descendants(beforeDeclaration.root).filter(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'AnonymousCallableExpression',
+    ).length,
+    1,
+  )
+  assertOriginalTokenTraversal(beforeDeclaration)
+  assert.deepEqual(reconstructedBytes(beforeDeclaration), ascii(declarationSource))
+})
+
 it('bounds damaged effect-block recovery before the following declaration', () => {
   const result = parseText(
     'memory://damaged-effect-expression.silk',

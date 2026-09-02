@@ -40,4 +40,3 @@ callables SHALL retain their existing contracts and identities.
 
 - **WHEN** a capture-free anonymous callable is passed where `once fn(i32) -> i32` is required
 - **THEN** the existing stronger-to-weaker callable substitution accepts it
-

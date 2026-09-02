@@ -488,8 +488,10 @@ export function parseType(
     : Object.freeze({ state, node: syntaxNode(state, 'UnionType', children) })
 }
 
-export const parseReturnType = (initial: State): NodeResult => {
-  const following: ReadonlyArray<Token.TokenKind> = Object.freeze(['Bang', 'Question', 'LeftBrace'])
+export const parseReturnType = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind> = ['Bang', 'Question', 'LeftBrace'],
+): NodeResult => {
   const arrow = expect(initial, 'Arrow', [...typeStarts, ...following])
   if (isOpaqueResultStart(arrow.state)) {
     const keyword = expect(arrow.state, 'Identifier', ['Less', ...following])

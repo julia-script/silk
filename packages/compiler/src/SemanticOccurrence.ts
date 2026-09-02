@@ -1,7 +1,7 @@
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
-import type * as Elaboration from './Elaboration.js'
+import * as Elaboration from './Elaboration.js'
 import type * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
 import type * as Match from './Match.js'
@@ -1026,7 +1026,28 @@ const collectExpression = (
       collectCallReference(expression.reference, expression.path, index, scope, pending)
       return
     case 'CallableSection':
-      collectCallReference(expression.reference, expression.path, index, scope, pending)
+      if (expression.anonymous === undefined) {
+        collectCallReference(expression.reference, expression.path, index, scope, pending)
+      } else if (expression.reference._tag === 'Resolved') {
+        const declaration = expression.reference.declaration
+        for (const parameter of declaration.parameters.slice(
+          0,
+          expression.remainingParameters.length,
+        )) {
+          if (parameter.name._tag === 'Present')
+            push(
+              pending,
+              parameter.name.token.span,
+              'Declaration',
+              available(Object.freeze({ _tag: 'ParameterIdentity', id: parameter.id })),
+              locationOfParameter(parameter),
+            )
+          collectDeclaredType(parameter.declaredType, index, scope, pending)
+        }
+        collectDeclaredType(declaration.returnType, index, scope, pending)
+        collectRowExpression(declaration.failureRow.expression, index, scope, pending)
+        collectRowExpression(declaration.requirementRow.expression, index, scope, pending)
+      }
       for (const capture of expression.captures)
         collectExpression(capture.expression, index, scope, pending)
       return
@@ -1483,7 +1504,7 @@ export const makeModule = (
   const headers = index.modules.find((candidate) => candidate.module === module)
   for (const member of headers?.members ?? []) collectMember(member, index, scope, pending)
   for (const head of headers?.inherentImpls ?? []) collectInherentImpl(head, index, scope, pending)
-  for (const fn of result.functions)
+  for (const fn of Elaboration.executableFunctions(result))
     for (const statement of fn.statements) collectStatement(statement, index, scope, pending)
   collectImports(scope, index, pending)
   pending.sort(

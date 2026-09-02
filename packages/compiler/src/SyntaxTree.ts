@@ -88,6 +88,7 @@ export type NodeKind =
   | 'BooleanLiteralExpression'
   | 'IdentifierExpression'
   | 'MoveExpression'
+  | 'AnonymousCallableExpression'
   | 'EffectExpression'
   | 'RunExpression'
   | 'BorrowExpression'

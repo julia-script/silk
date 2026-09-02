@@ -14,6 +14,7 @@ import type {
   ReferencePathFact,
   ArrayElementFact,
   ArrayLiteralState,
+  AnonymousCaptureFact,
   BindingDeclarationFact,
   BorrowRootFact,
   BoundsFact,
@@ -102,6 +103,7 @@ import * as Scalar from './Scalar.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
 import {
+  analyzeFunctionBody,
   analyzeStatements,
   reachableCallableWrites,
   unsafeCallDiagnostic,
@@ -2893,6 +2895,8 @@ export function representationOfExpression(
   if (expression._tag === 'CallableSection' && expression.type._tag === 'Available') {
     const contract = expression.type.type
     if (!Type.isCallable(contract)) return undefined
+    if (expression.captures.length === 0)
+      return exactCallableRepresentation(expression.reference, contract, expression.typeArguments)
     if (expression.environmentOwner === undefined) return undefined
     const environment = Hir.callableEnvironmentIdentity(
       expression.site,
@@ -7481,6 +7485,17 @@ export const effectCaptureFacts = (
   firstLocalBinding: number,
   index?: DeclarationIndex.Index,
   assumptions: ReadonlySet<string> = new Set(),
+  options: {
+    readonly localFunction?: DeclarationId
+    readonly order?: 'Reference' | 'FirstUse'
+    readonly onPattern?: (
+      reference: PatternBindingFact,
+      requested: EffectCaptureFact['access'],
+      span: SourceSpan.SourceSpan,
+      copy: boolean,
+      expression: IdentifierExpressionFact,
+    ) => void
+  } = {},
 ): ReadonlyArray<EffectCaptureFact> => {
   const captures = new Map<string, EffectCaptureFact>()
   const rank = (access: EffectCaptureFact['access']): number => {
@@ -7500,16 +7515,48 @@ export const effectCaptureFacts = (
     requested: EffectCaptureFact['access'],
     span: SourceSpan.SourceSpan,
     copy: boolean,
+    expression?: IdentifierExpressionFact,
   ): void => {
     if (reference === undefined) return
     if (reference.phase === 'Static') return
-    if (reference._tag === 'BindingFact' && reference.id.ordinal >= firstLocalBinding) return
+    if (
+      reference._tag === 'BindingFact' &&
+      reference.id.ordinal >= firstLocalBinding &&
+      (options.localFunction === undefined ||
+        (reference.id.function.sourceId === options.localFunction.sourceId &&
+          reference.id.function.ordinal === options.localFunction.ordinal))
+    )
+      return
+    if (
+      reference._tag === 'ParameterDeclaration' &&
+      options.localFunction !== undefined &&
+      reference.id.function.sourceId === options.localFunction.sourceId &&
+      reference.id.function.ordinal === options.localFunction.ordinal
+    )
+      return
     const key = `${reference._tag}:${reference.id.ordinal}`
-    const access = requested === 'Shared' && copy ? 'Copy' : requested
+    const access = requested !== 'Exclusive' && copy ? 'Copy' : requested
     const prior = captures.get(key)
-    if (prior === undefined || rank(access) > rank(prior.access)) {
-      captures.set(key, Object.freeze({ _tag: 'EffectCapture', reference, access, span }))
-    }
+    if (prior === undefined)
+      captures.set(
+        key,
+        Object.freeze({
+          _tag: 'EffectCapture',
+          reference,
+          access,
+          span,
+          ...(expression === undefined ? {} : { expression }),
+        }),
+      )
+    else if (rank(access) > rank(prior.access))
+      captures.set(
+        key,
+        Object.freeze({
+          ...prior,
+          access,
+          ...(options.order === 'FirstUse' ? {} : { span }),
+        }),
+      )
   }
   const record = (fact: IdentifierExpressionFact, requested: EffectCaptureFact['access']): void => {
     let reference: DeclarationFacts.ParameterFact | BindingDeclarationFact | undefined
@@ -7520,16 +7567,23 @@ export const effectCaptureFacts = (
     } else {
       reference = undefined
     }
-    recordReference(
-      reference,
-      requested,
-      fact.syntax.span,
+    const copy =
       fact.type._tag === 'Available' &&
-        !Type.containsViewBorrow(fact.type.type) &&
-        (index === undefined
-          ? typeof fact.type.type === 'string'
-          : ConformanceProof.copyType(index, fact.type.type, assumptions)),
-    )
+      !Type.containsViewBorrow(fact.type.type) &&
+      (index === undefined
+        ? typeof fact.type.type === 'string'
+        : ConformanceProof.copyType(index, fact.type.type, assumptions))
+    if (fact.reference._tag === 'ResolvedPattern') {
+      const owner = fact.reference.binding.id.arm.match.function
+      if (
+        options.localFunction === undefined ||
+        owner.sourceId !== options.localFunction.sourceId ||
+        owner.ordinal !== options.localFunction.ordinal
+      )
+        options.onPattern?.(fact.reference.binding, requested, fact.syntax.span, copy, fact)
+      return
+    }
+    recordReference(reference, requested, fact.syntax.span, copy, fact)
   }
   const expression = (
     fact: ExpressionFact,
@@ -7680,13 +7734,372 @@ export const effectCaptureFacts = (
     }
   }
   visit(statements)
+  const values = [...captures.values()]
   return Object.freeze(
-    [...captures.values()].sort(
-      (left, right) =>
-        left.reference.id.ordinal - right.reference.id.ordinal ||
-        left.span.start - right.span.start,
+    options.order === 'FirstUse'
+      ? values
+      : values.sort(
+          (left, right) =>
+            left.reference.id.ordinal - right.reference.id.ordinal ||
+            left.span.start - right.span.start,
+        ),
+  )
+}
+
+const anonymousCaptureMode = (captures: ReadonlyArray<AnonymousCaptureFact>): Type.CallableMode => {
+  if (captures.some((capture) => capture.access === 'Take')) return 'Take'
+  if (captures.some((capture) => capture.access === 'Exclusive')) return 'Exclusive'
+  return 'Shared'
+}
+
+const anonymousCapturedType = (capture: AnonymousCaptureFact): Type.Type | undefined => {
+  if (capture.reference._tag === 'BindingFact')
+    return capture.reference.inferredType._tag === 'Available'
+      ? capture.reference.inferredType.type
+      : undefined
+  if (capture.reference._tag === 'PatternBinding')
+    return capture.reference.type._tag === 'Available' ? capture.reference.type.type : undefined
+  return capture.reference.declaredType._tag === 'Resolved'
+    ? capture.reference.declaredType.type
+    : undefined
+}
+
+const anonymousOuterScope = (authored: ReadonlyArray<ParameterFact>, outer: Scope): Scope => {
+  const shadowed = new Set(
+    authored.flatMap((parameter) =>
+      parameter.name._tag === 'Present' ? [parameter.name.spelling] : [],
     ),
   )
+  const visible = <A extends { readonly name: DeclaredName }>(values: ReadonlyArray<A>) =>
+    values.filter((value) => value.name._tag !== 'Present' || !shadowed.has(value.name.spelling))
+  return Object.freeze({
+    parameters: Object.freeze([...visible(outer.parameters), ...authored]),
+    bindings: Object.freeze(visible(outer.bindings)),
+    patternBindings: Object.freeze(visible(outer.patternBindings)),
+  })
+}
+
+const analyzeAnonymousCallable = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+): ExpressionResult => {
+  if ((resolution.anonymousDepth ?? 0) > 0) {
+    const diagnostic = Diagnostic.nestedAnonymousCallable(node.span)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'CallableSection',
+        site: executableSite('CallableSiteId', resolution, node),
+        reference: Object.freeze({
+          _tag: 'Unavailable',
+          syntax: unavailableSyntax(node, 'Identifier'),
+        }),
+        path: referencePath(node),
+        remainingParameters: Object.freeze([]),
+        captures: Object.freeze([]),
+        retainedDependencies: Object.freeze([]),
+        typeArguments: Object.freeze([]),
+        substitution: new Map(),
+        mode: 'Shared',
+        type: unavailableExpressionType,
+        syntax: node,
+        anonymous: Object.freeze({
+          functionKind:
+            SyntaxTree.directToken(node, 'EffectKeyword') === undefined ? 'Ordinary' : 'Effect',
+          captures: Object.freeze([]),
+        }),
+      }),
+      diagnostics: Object.freeze([diagnostic]),
+      type: undefined,
+    })
+  }
+  const owner = resolution.executableOwner
+  const function_ = resolution.executableFunction
+  const site = executableSite('CallableSiteId', resolution, node)
+  if (owner === undefined || function_ === undefined) {
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'CallableSection',
+        site,
+        reference: Object.freeze({
+          _tag: 'Unavailable',
+          syntax: unavailableSyntax(node, 'Identifier'),
+        }),
+        path: referencePath(node),
+        remainingParameters: Object.freeze([]),
+        captures: Object.freeze([]),
+        retainedDependencies: Object.freeze([]),
+        typeArguments: Object.freeze([]),
+        substitution: new Map(),
+        mode: 'Shared',
+        type: unavailableExpressionType,
+        syntax: node,
+        anonymous: Object.freeze({
+          functionKind:
+            SyntaxTree.directToken(node, 'EffectKeyword') === undefined ? 'Ordinary' : 'Effect',
+          captures: Object.freeze([]),
+        }),
+      }),
+      diagnostics: Object.freeze([]),
+      type: undefined,
+    })
+  }
+  const hiddenId: DeclarationId = Object.freeze({
+    _tag: 'DeclarationId',
+    sourceId: source.id,
+    ordinal: 0x70000000 + node.span.start,
+  })
+  const canonical = Hir.anonymousCallableId(owner, site)
+  const collected = DeclarationCollection.collectAnonymousCallableDeclaration(
+    source,
+    node,
+    hiddenId,
+    canonical,
+    declaration.typeParameters,
+  )
+  const nameResolution: NameResolution.Resolution = Object.freeze({
+    _tag: 'NameResolution',
+    modules: Object.freeze([resolution.scope]),
+    diagnostics: Object.freeze([]),
+  })
+  const resolvers = NameResolution.makeResolvers(nameResolution, resolution.index)
+  const resolveType = (fact: DeclarationFacts.DeclaredTypeFact) =>
+    DeclarationResolution.resolveTypeFact(resolution.index, source.id, fact, resolvers.type)
+  const typeDiagnostics: Array<Diagnostic.Diagnostic> = []
+  const authoredParameters = Object.freeze(
+    collected.fact.parameters.map((parameter) => {
+      const resolved = resolveType(parameter.declaredType)
+      typeDiagnostics.push(...resolved.diagnostics)
+      return Object.freeze({ ...parameter, declaredType: resolved.fact })
+    }),
+  )
+  const returnType = resolveType(collected.fact.returnType)
+  typeDiagnostics.push(...returnType.diagnostics)
+  const failureRow = DeclarationResolution.resolveFailureRow(
+    source.id,
+    collected.fact.failureRow,
+    resolvers,
+    resolution.index.modules,
+  )
+  const requirementRow = DeclarationResolution.resolveRequirementRow(
+    source.id,
+    collected.fact.requirementRow,
+    resolvers,
+    resolution.index.modules,
+  )
+  typeDiagnostics.push(...failureRow.diagnostics, ...requirementRow.diagnostics)
+  const preliminaryDeclaration: DeclarationFact = Object.freeze({
+    ...collected.fact,
+    parameters: authoredParameters,
+    parameterCount: authoredParameters.length,
+    returnType: returnType.fact,
+    failureRow: failureRow.fact,
+    requirementRow: requirementRow.fact,
+  })
+  const { hiddenFunctions: _hiddenFunctions, ...preliminaryResolution } = resolution
+  const preliminary = analyzeFunctionBody(
+    source,
+    preliminaryDeclaration,
+    declarations,
+    Object.freeze({ ...preliminaryResolution, anonymousDepth: 1 }),
+    undefined,
+    anonymousOuterScope(authoredParameters, scope),
+  )
+  const firstLocalBinding = 0
+  const patternCaptures = new Map<string, AnonymousCaptureFact>()
+  const captureRank = (access: AnonymousCaptureFact['access']): number => {
+    if (access === 'Take') return 3
+    if (access === 'Exclusive') return 2
+    if (access === 'Shared') return 1
+    return 0
+  }
+  const ordinaryCaptures = effectCaptureFacts(
+    preliminary.fact.statements,
+    firstLocalBinding,
+    resolution.index,
+    copyAssumptionsOf(declaration),
+    Object.freeze({
+      localFunction: hiddenId,
+      order: 'FirstUse',
+      onPattern: (reference, requested, span, copy, expression) => {
+        const access = requested !== 'Exclusive' && copy ? 'Copy' : requested
+        const key = `${reference.id.arm.match.function.sourceId}:${reference.id.arm.match.function.ordinal}:${reference.id.arm.match.span.start}:${reference.id.arm.ordinal}:${reference.id.ordinal}`
+        const prior = patternCaptures.get(key)
+        if (prior === undefined)
+          patternCaptures.set(
+            key,
+            Object.freeze({
+              _tag: 'AnonymousCapture',
+              reference,
+              access,
+              span,
+              expression,
+            }),
+          )
+        else if (captureRank(access) > captureRank(prior.access))
+          patternCaptures.set(key, Object.freeze({ ...prior, access }))
+      },
+    }),
+  )
+  const captures = Object.freeze(
+    [
+      ...ordinaryCaptures.flatMap((capture): ReadonlyArray<AnonymousCaptureFact> =>
+        capture.expression === undefined
+          ? []
+          : [
+              Object.freeze({
+                _tag: 'AnonymousCapture',
+                reference: capture.reference,
+                access: capture.access,
+                span: capture.span,
+                expression: capture.expression,
+              }),
+            ],
+      ),
+      ...patternCaptures.values(),
+    ]
+      .filter(
+        (capture) =>
+          anonymousCapturedType(capture) !== undefined &&
+          capture.reference.name._tag === 'Present' &&
+          directToken(capture.expression.syntax, 'Identifier') !== undefined,
+      )
+      .sort((left, right) => left.span.start - right.span.start),
+  )
+  const captureParameters = Object.freeze(
+    captures.map((capture, ordinal): ParameterFact => {
+      const type = anonymousCapturedType(capture)
+      if (type === undefined) throw new RangeError('Anonymous capture lost its resolved type')
+      const token = directToken(capture.expression.syntax, 'Identifier')
+      if (token === undefined) throw new RangeError('Anonymous capture lost its identifier token')
+      const name: DeclaredName = Object.freeze({
+        _tag: 'Present',
+        spelling: spelling(source, token),
+        token,
+      })
+      return Object.freeze({
+        _tag: 'ParameterDeclaration',
+        id: Object.freeze({
+          _tag: 'ParameterId',
+          function: hiddenId,
+          ordinal: authoredParameters.length + ordinal,
+        }),
+        name,
+        phase: 'Runtime',
+        bindingMutability: capture.access === 'Exclusive' ? 'Mutable' : 'Immutable',
+        declaredType: Object.freeze({
+          _tag: 'Resolved',
+          type,
+          spelling: Type.encode(type),
+          token,
+          syntax: capture.reference.syntax,
+        }),
+        syntax: capture.reference.syntax,
+      })
+    }),
+  )
+  const hiddenDeclaration: DeclarationFact = Object.freeze({
+    ...preliminaryDeclaration,
+    parameters: Object.freeze([...authoredParameters, ...captureParameters]),
+    parameterCount: authoredParameters.length + captureParameters.length,
+  })
+  const hidden = analyzeFunctionBody(
+    source,
+    hiddenDeclaration,
+    declarations,
+    Object.freeze({ ...preliminaryResolution, anonymousDepth: 1 }),
+    undefined,
+    anonymousOuterScope(hiddenDeclaration.parameters, scope),
+  )
+  resolution.hiddenFunctions?.push(hidden.fact)
+  const mode = anonymousCaptureMode(captures)
+  let result: Type.Type | undefined =
+    hiddenDeclaration.returnType._tag === 'Resolved' ? hiddenDeclaration.returnType.type : undefined
+  if (result !== undefined && hiddenDeclaration.functionKind === 'Effect') {
+    const effectCaptures = effectCaptureFacts(
+      hidden.fact.statements,
+      0,
+      resolution.index,
+      copyAssumptionsOf(hiddenDeclaration),
+    )
+    result = Type.effectWithRows(
+      result,
+      hiddenDeclaration.failureRow.row,
+      strongestEffectAccess(
+        ...effectCaptures.flatMap((capture) => (capture.access === 'Copy' ? [] : [capture.access])),
+      ),
+      hiddenDeclaration.requirementRow.row,
+    )
+  }
+  const parameterTypes = authoredParameters.flatMap((parameter) =>
+    parameter.declaredType._tag === 'Resolved' ? [parameter.declaredType.type] : [],
+  )
+  const complete = result !== undefined && parameterTypes.length === authoredParameters.length
+  const callable =
+    complete && result !== undefined ? Type.callable(parameterTypes, result, mode) : undefined
+  const token = directToken(node, 'FnKeyword')
+  const reference: CallReferenceFact =
+    token === undefined
+      ? Object.freeze({ _tag: 'Unavailable', syntax: unavailableSyntax(node, 'Identifier') })
+      : Object.freeze({
+          _tag: 'Resolved',
+          spelling: canonical.name,
+          token,
+          declaration: hiddenDeclaration,
+        })
+  const environmentOwner = executableSpecializationOwner(resolution)
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'CallableSection',
+      site,
+      reference,
+      path:
+        token === undefined
+          ? referencePath(node)
+          : Object.freeze({ _tag: 'ReferencePath', member: token }),
+      remainingParameters: Object.freeze(authoredParameters.map((_, ordinal) => ordinal)),
+      captures: Object.freeze(
+        captures.map((capture, ordinal) => {
+          const expression: ExpressionFact =
+            capture.access === 'Take'
+              ? Object.freeze({
+                  _tag: 'Move',
+                  subject: capture.expression,
+                  type: capture.expression.type,
+                  syntax: capture.expression.syntax,
+                })
+              : capture.expression
+          return Object.freeze({
+            _tag: 'CallableCapture',
+            ordinal,
+            parameterOrdinal: authoredParameters.length + ordinal,
+            expression,
+            access: capture.access,
+          })
+        }),
+      ),
+      retainedDependencies: Object.freeze([]),
+      typeArguments: Object.freeze(declaration.typeParameters.map((parameter) => parameter.type)),
+      ...(environmentOwner === undefined ? {} : { environmentOwner }),
+      substitution: new Map(),
+      mode,
+      type: callable === undefined ? unavailableExpressionType : availableExpressionType(callable),
+      syntax: node,
+      anonymous: Object.freeze({
+        functionKind: hiddenDeclaration.functionKind,
+        captures: Object.freeze(captures),
+      }),
+    }),
+    diagnostics: Object.freeze([
+      ...collected.diagnostics,
+      ...typeDiagnostics,
+      ...hidden.diagnostics,
+    ]),
+    type: callable,
+  })
 }
 
 export function analyzeExpression(
@@ -7699,6 +8112,8 @@ export function analyzeExpression(
   expected?: SemanticType,
   borrowAllowed = false,
 ): ExpressionResult | undefined {
+  if (node.kind === 'AnonymousCallableExpression')
+    return analyzeAnonymousCallable(source, node, declarations, declaration, scope, resolution)
   if (node.kind === 'UnsafeExpression') {
     const call = SyntaxTree.directNode(node, 'CallExpression')
     if (call === undefined) return undefined
@@ -9149,6 +9564,10 @@ export interface ResolutionContext {
   readonly staticContext?: StaticAnalysisContext
   /** Static calls under ordinary control in a static function execute only after branch selection. */
   readonly deferStaticCalls?: true
+  /** Hidden anonymous bodies discovered while analyzing the current source declaration. */
+  readonly hiddenFunctions?: Array<FunctionFact>
+  /** Anonymous bodies are parsed recursively but only the outermost body is admitted in slice one. */
+  readonly anonymousDepth?: number
 }
 
 const aggregateKey = (nominal: Type.Nominal): string => `${nominal.module}:${nominal.name}`

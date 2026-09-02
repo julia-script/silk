@@ -98,10 +98,12 @@ documentation continue to search only source declarations. Instance discovery, r
 ownership, and dependency traversal can then specialize and validate anonymous bodies through their
 existing paths instead of being bypassed by a lower-only generation queue.
 
-Each hidden function has capture parameters followed by authored parameters. Capture facts retain
-the corresponding hidden `parameterOrdinal`, while the source-facing `Type.Callable` exposes only
-authored parameters. Elaboration remaps free outer binding references in the body to those hidden
-capture parameter identities. Every discovered target therefore emits an ordinary monomorphic
+Each hidden function keeps authored parameters at their source ordinals and appends capture
+parameters after them. Capture facts retain the corresponding appended `parameterOrdinal`, while
+the source-facing `Type.Callable` exposes only authored parameters. This preserves the existing
+authored parameter identities and lets the ordinary `ApplyCallable` operand assembler place both
+groups by ordinal without a second remapping table. Elaboration remaps free outer binding references
+in the body to those hidden capture parameter identities. Every discovered target therefore emits an ordinary monomorphic
 `MirFunction`; expression lowering emits the existing exact `MakeCallable`, and invocation continues
 through the existing `ApplyCallable` operand assembler. The MIR verifier validates the target,
 environment, mode, ownership transfers, and signature from those facts.

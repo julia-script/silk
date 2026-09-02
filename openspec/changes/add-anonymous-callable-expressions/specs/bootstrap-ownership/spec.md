@@ -30,4 +30,3 @@ rejected before it can duplicate an owner.
 
 - **WHEN** an anonymous callable captures a local borrow and is returned beyond that borrow's valid region
 - **THEN** ownership rejects the escape under the same region rules as other stored callable environments
-

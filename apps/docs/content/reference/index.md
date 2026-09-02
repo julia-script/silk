@@ -66,7 +66,7 @@ not belong in a language rule unless a program can observe them.
 - [Statements and discarded values](statements-and-discarding.md) — which expression results may be
   ignored and how `drop` makes intentional discard explicit.
 - [Effects and execution](effects-and-execution.md) — effect construction, success values, `run`,
-  and nested Effects.
+  nested Effects, and the two delayed boundaries of effectful anonymous callables.
 - [Effect suspension and stack-safe recursion](effect-suspension.md) — the explicit suspension
   boundary, covered recursive cycles, exact channel preservation, ownership and cleanup, logical
   depth, cross-engine parity, pay-for-use, and the boundary with future async execution.
@@ -88,13 +88,13 @@ not belong in a language rule unless a program can observe them.
 - [Doc comment style guide](documentation-style-guide.md) — required public comment coverage,
   standard sections, complete examples, symbol links, and ASD-STE100 writing rules.
 - [Ownership and borrowing](ownership-and-borrowing.md) — Copy and affine values, moves, borrows,
-  mutation, captures, cleanup, allocation lifecycles, and returned views.
+  mutation, anonymous capture modes, cleanup, allocation lifecycles, and returned views.
 - [Allocation-backed local shared ownership](local-shared-ownership.md) — `Shared<T>` construction,
   affine strong handles, callback-scoped access, conflict traps, exact last-handle cleanup, and the
   explicit cycle and thread-transfer boundaries.
-- [Functions, callables, and control flow](functions-callables-and-control-flow.md) — named function
-  contracts, Effect-block terminal inference, ordered calls, returns, callable sections, pipelines,
-  conditionals, loops, and matches.
+- [Functions, callables, and control flow](functions-callables-and-control-flow.md) — named and
+  anonymous callable contracts, exact callable identities, Effect-block terminal inference, ordered
+  calls, returns, callable sections, pipelines, conditionals, loops, and matches.
 - [Static evaluation](static-evaluation.md) — static functions, parameters, bindings, statement-only
   selection, compile errors, value and mutation limits, deterministic diagnostics, target values,
   and the residual runtime boundary.
@@ -104,9 +104,9 @@ not belong in a language rule unless a program can observe them.
 - [Values and types](values-and-types.md) — foundational scalars, duration literals, nominal structs, fixed
   arrays, lexical views, nominal and structural unions, scalar enums, precise inference, and
   compatibility.
-- [Expressions and operators](expressions-and-operators.md) — deterministic evaluation, expression
-  composition, scalar and explicitly declared custom operators, scalar enum equality,
-  short-circuiting, assignment, atomic replacement, and explicit conversion.
+- [Expressions and operators](expressions-and-operators.md) — deterministic evaluation, anonymous
+  callable syntax, expression composition, scalar and explicitly declared custom operators, scalar
+  enum equality, short-circuiting, assignment, atomic replacement, and explicit conversion.
 - [Modules, names, and visibility](modules-names-and-visibility.md) — path-derived module identity,
   source-root lookup, contextual import-path segments, static imports, cycles, namespace bindings,
   aliases, collisions, nominal qualifiers and associated items, public declaration boundaries,

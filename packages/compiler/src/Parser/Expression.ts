@@ -23,7 +23,14 @@ import type * as Token from '../Token.js'
 import * as ExpressionNesting from './ExpressionNesting.js'
 import { expressionFollowing, expressionStarts, typeStarts } from './Grammar.js'
 import { parseBlock } from './Statement.js'
-import { parseTypeArgumentList, parseTypePrimary } from './Type.js'
+import {
+  parseFailureRow,
+  parseParameterList,
+  parseRequirementRow,
+  parseReturnType,
+  parseTypeArgumentList,
+  parseTypePrimary,
+} from './Type.js'
 
 const overBudgetBoundaries: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'Comma',
@@ -440,6 +447,7 @@ export const primaryKind = (
   | 'Boolean'
   | 'Identifier'
   | 'Move'
+  | 'AnonymousCallable'
   | 'Effect'
   | 'Run'
   | 'Borrow'
@@ -478,6 +486,19 @@ export const primaryKind = (
     if (token.kind === 'Bang' || token.kind === 'Tilde') return 'Prefix'
     if (token.kind === 'TrueKeyword' || token.kind === 'FalseKeyword') return 'Boolean'
     if (token.kind === 'MoveKeyword') return 'Move'
+    if (
+      token.kind === 'FnKeyword' &&
+      peek(state, 1) !== 'Identifier' &&
+      peek(state, 1) !== 'DropKeyword'
+    )
+      return 'AnonymousCallable'
+    if (
+      token.kind === 'EffectKeyword' &&
+      peek(state, 1) === 'FnKeyword' &&
+      peek(state, 2) !== 'Identifier' &&
+      peek(state, 2) !== 'DropKeyword'
+    )
+      return 'AnonymousCallable'
     if (token.kind === 'EffectKeyword' && peek(state, 1) === 'LeftBrace') return 'Effect'
     if (token.kind === 'RunKeyword') return 'Run'
     if (token.kind === 'Ampersand') return 'Borrow'
@@ -525,7 +546,6 @@ export const primaryKind = (
       token.kind === 'TypeKeyword' ||
       token.kind === 'ExternKeyword' ||
       token.kind === 'ExportKeyword' ||
-      token.kind === 'FnKeyword' ||
       token.kind === 'EffectKeyword' ||
       token.kind === 'ImportKeyword' ||
       token.kind === 'WhileKeyword' ||
@@ -549,6 +569,14 @@ export const remainingRightParentheses = (state: State): number => {
   for (let index = state.index; index < state.lexical.tokens.length; index += 1) {
     const token = state.lexical.tokens.at(index)
     if (token === undefined) break
+    let followingIndex = index + 1
+    let following = state.lexical.tokens.at(followingIndex)
+    while (following !== undefined && isTrivia(following.kind)) {
+      followingIndex += 1
+      following = state.lexical.tokens.at(followingIndex)
+    }
+    const anonymousCallableStart =
+      token.kind === 'FnKeyword' && following?.kind === 'LeftParenthesis'
     if (token.kind === 'RightParenthesis') count += 1
     if (
       token.kind === 'RightBrace' ||
@@ -561,7 +589,7 @@ export const remainingRightParentheses = (state: State): number => {
       token.kind === 'TypeKeyword' ||
       token.kind === 'ExternKeyword' ||
       token.kind === 'ExportKeyword' ||
-      token.kind === 'FnKeyword' ||
+      (token.kind === 'FnKeyword' && !anonymousCallableStart) ||
       token.kind === 'ImportKeyword' ||
       token.kind === 'LetKeyword' ||
       token.kind === 'ReturnKeyword' ||
@@ -662,7 +690,12 @@ export function parseArgumentList(
     kind !== 'TypeKeyword' &&
     kind !== 'ExternKeyword' &&
     kind !== 'ExportKeyword' &&
-    kind !== 'FnKeyword' &&
+    !(kind === 'FnKeyword' && peek(state, 1) === 'Identifier') &&
+    !(
+      kind === 'EffectKeyword' &&
+      peek(state, 1) === 'FnKeyword' &&
+      peek(state, 2) === 'Identifier'
+    ) &&
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
   ) {
@@ -686,7 +719,10 @@ export function parseArgumentList(
       kind === 'TypeKeyword' ||
       kind === 'ExternKeyword' ||
       kind === 'ExportKeyword' ||
-      kind === 'FnKeyword' ||
+      (kind === 'FnKeyword' && peek(state, 1) === 'Identifier') ||
+      (kind === 'EffectKeyword' &&
+        peek(state, 1) === 'FnKeyword' &&
+        peek(state, 2) === 'Identifier') ||
       kind === 'ImportKeyword'
     )
       break
@@ -1586,6 +1622,71 @@ export const parseEffectExpression = (initial: State): NodeResult => {
   })
 }
 
+const anonymousCallableFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
+  'Comma',
+  'RightParenthesis',
+  'RightBracket',
+  'RightBrace',
+  ...expressionFollowing,
+  'EndOfFile',
+])
+
+const parseMissingAnonymousCallableBlock = (initial: State): NodeResult => {
+  const leftBrace = expect(initial, 'LeftBrace', anonymousCallableFollowing)
+  return Object.freeze({
+    state: leftBrace.state,
+    node: syntaxNode(leftBrace.state, 'Block', leftBrace.elements),
+  })
+}
+
+/** Parses an ordinary or effectful anonymous callable with an explicit source contract. */
+export const parseAnonymousCallableExpression = (initial: State): NodeResult => {
+  const effectKeyword =
+    nextSignificantKind(initial) === 'EffectKeyword'
+      ? expect(initial, 'EffectKeyword', ['FnKeyword', ...anonymousCallableFollowing])
+      : undefined
+  const fnKeyword = expect(effectKeyword?.state ?? initial, 'FnKeyword', [
+    'LeftParenthesis',
+    ...anonymousCallableFollowing,
+  ])
+  const parameters = parseParameterList(fnKeyword.state)
+  const returnType = parseReturnType(parameters.state, [
+    'Bang',
+    'Question',
+    'LeftBrace',
+    ...anonymousCallableFollowing,
+  ])
+  const failureRow =
+    nextSignificantKind(returnType.state) === 'Bang'
+      ? parseFailureRow(returnType.state, ['Question', 'LeftBrace', ...anonymousCallableFollowing])
+      : undefined
+  const requirementRow =
+    nextSignificantKind(failureRow?.state ?? returnType.state) === 'Question'
+      ? parseRequirementRow(failureRow?.state ?? returnType.state, [
+          'LeftBrace',
+          ...anonymousCallableFollowing,
+        ])
+      : undefined
+  const afterContract = requirementRow?.state ?? failureRow?.state ?? returnType.state
+  const unitResult = SyntaxTree.directNode(returnType.node, 'UnitType') !== undefined
+  const block =
+    nextSignificantKind(afterContract) === 'LeftBrace'
+      ? parseBlock(afterContract, !unitResult, unitResult)
+      : parseMissingAnonymousCallableBlock(afterContract)
+  return Object.freeze({
+    state: block.state,
+    node: syntaxNode(block.state, 'AnonymousCallableExpression', [
+      ...(effectKeyword?.elements ?? []),
+      ...fnKeyword.elements,
+      parameters.node,
+      returnType.node,
+      ...(failureRow === undefined ? [] : [failureRow.node]),
+      ...(requirementRow === undefined ? [] : [requirementRow.node]),
+      block.node,
+    ]),
+  })
+}
+
 export const parseCompileErrorExpression = (
   initial: State,
   reservedForEnclosingCalls: number,
@@ -1652,6 +1753,7 @@ export function parsePrimaryExpression(
   if (kind === 'ArrayLiteral')
     return parseArrayLiteralExpression(initial, reservedForEnclosingCalls, depth)
   if (kind === 'Match') return parseMatchExpression(initial, reservedForEnclosingCalls, depth)
+  if (kind === 'AnonymousCallable') return parseAnonymousCallableExpression(initial)
   if (kind === 'Effect') return parseEffectExpression(initial)
   if (kind === 'Unsafe') return parseUnsafeExpression(initial, reservedForEnclosingCalls, depth)
   if (kind === 'Run') {

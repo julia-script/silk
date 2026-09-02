@@ -40,6 +40,95 @@ const occurrenceAt = (
   return Analysis.semanticOccurrenceAt(snapshot, 'main', offset)
 }
 
+it.effect('presents anonymous contracts and resolves their nested lexical facts', () => {
+  const source = `struct Failure {}
+pub fn main() -> i32 {
+  let offset = 2
+  let value = 100
+  let add = fn(value: i32) -> i32 {
+    let local = value + offset
+    return local
+  }
+  let recover = effect fn(error: Failure) -> i32 { return 42 }
+  return add(40)
+}`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const ordinaryFn = source.indexOf('fn(value')
+      const effectFn = source.indexOf('fn(error')
+      assert.strictEqual(
+        Analysis.hoverSubjectAt(snapshot, 'main', ordinaryFn)?.presentation.text,
+        'fn(value: i32) -> i32\nmode: fn\ncaptures: offset (Copy)',
+      )
+      assert.strictEqual(
+        Analysis.hoverSubjectAt(snapshot, 'main', effectFn)?.presentation.text,
+        'effect fn(error: Failure) -> i32\nmode: fn\ncaptures: none',
+      )
+
+      const parameterDeclaration = Analysis.semanticOccurrenceAt(
+        snapshot,
+        'main',
+        source.indexOf('value: i32'),
+      )
+      const parameterUse = Analysis.semanticOccurrenceAt(
+        snapshot,
+        'main',
+        source.indexOf('value +'),
+      )
+      assert.strictEqual(parameterDeclaration?.role, 'Declaration')
+      assert.deepEqual(parameterUse?.resolution, parameterDeclaration?.resolution)
+
+      const outerDeclaration = Analysis.semanticOccurrenceAt(
+        snapshot,
+        'main',
+        source.indexOf('offset ='),
+      )
+      const capturedUse = Analysis.semanticOccurrenceAt(
+        snapshot,
+        'main',
+        source.indexOf('offset\n'),
+      )
+      assert.deepEqual(capturedUse?.resolution, outerDeclaration?.resolution)
+
+      const completion = Analysis.completionAt(snapshot, 'main', source.indexOf('return local'))
+      const labels = completion?.candidates.map((candidate) => candidate.label) ?? []
+      assert.includeMembers(labels, ['value', 'offset', 'local'])
+      assert.isFalse(labels.some((label) => label.includes('$callable$')))
+      assert.isFalse(
+        snapshot.index.modules
+          .flatMap((module) => module.members)
+          .some(
+            (member) =>
+              member.name._tag === 'Present' && member.name.spelling.includes('$callable$'),
+          ),
+      )
+      return undefined
+    }),
+  )
+})
+
+it.effect('completes anonymous callable starts without construction modifiers', () => {
+  const source = `struct Failure {}
+pub fn main() -> i32 {
+  let handler = effect fn(error: Failure) -> i32 { return 42 }
+  return 42
+}`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const offset = source.indexOf('effect ') + 'effect '.length
+      const labels =
+        Analysis.completionAt(snapshot, 'main', offset)?.candidates.map(
+          (candidate) => candidate.label,
+        ) ?? []
+      assert.includeMembers(labels, ['fn', '{'])
+      assert.notInclude(labels, 'mut')
+      assert.notInclude(labels, 'once')
+      return undefined
+    }),
+  )
+})
+
 it.effect('indexes allocator tokens as source binding, actor, and function identities', () =>
   Analysis.ofSourceRealized('main', encoder.encode(allocatorSource)).pipe(
     Effect.map((snapshot) => {

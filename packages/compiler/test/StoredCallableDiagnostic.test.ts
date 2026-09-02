@@ -23,7 +23,7 @@ const ascii = (value: string): Uint8Array =>
 const analyzed = (name: string, source: string) =>
   Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
 
-const codes = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
+const codes = (snapshot: Analysis.FrontendSnapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)
 
 const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
@@ -275,5 +275,48 @@ pub fn main() -> i32 { return apply(i32.add(40), 2) }`
     assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
+  }),
+)
+
+it.effect('rejects a nested anonymous body without publishing an inner executable', () =>
+  Effect.gen(function* () {
+    const source = `pub fn main() -> i32 {
+  let outer = fn() -> i32 {
+    let nested = fn() -> i32 { return 1 }
+    return 42
+  }
+  return outer()
+}`
+    const snapshot = yield* Analysis.ofSource('stored-callable/nested-anonymous', ascii(source))
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0199'],
+    )
+    assert.strictEqual(
+      snapshot.results.get('stored-callable/nested-anonymous')?.hiddenFunctions.length,
+      1,
+    )
+  }),
+)
+
+it.effect('checks explicit anonymous contracts and derived modes against context', () =>
+  Effect.gen(function* () {
+    const resultMismatch = yield* Analysis.ofSource(
+      'stored-callable/anonymous-result-mismatch',
+      ascii(`fn accept(step: fn() -> i32) -> i32 { return step() }
+pub fn main() -> i32 { return accept(fn() -> bool { return true }) }`),
+    )
+    const consumingMismatch = yield* Analysis.ofSource(
+      'stored-callable/anonymous-mode-mismatch',
+      ascii(`struct Token { value: i32 }
+fn consume(token: Token) -> i32 { return token.value }
+fn reusable(step: fn() -> i32) -> i32 { return step() }
+pub fn main() -> i32 {
+  let token = Token { value: 42 }
+  return reusable(fn() -> i32 { return consume(move token) })
+}`),
+    )
+    assert.deepEqual(codes(resultMismatch), ['SEM0076'])
+    assert.deepEqual(codes(consumingMismatch), ['SEM0076'])
   }),
 )

@@ -2,6 +2,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Elaboration from './Elaboration.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as NameResolution from './NameResolution.js'
+import * as Presentation from './Presentation.js'
 import * as SemanticOccurrence from './SemanticOccurrence.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as SyntaxTree from './SyntaxTree.js'
@@ -11,6 +12,7 @@ import type * as Type from './Type.js'
 export interface AnonymousExpression {
   readonly span: SourceSpan.SourceSpan
   readonly type: Type.Type
+  readonly presentation?: Presentation.Presentation
 }
 
 /** One module's immutable editor indexes and their exact semantic input. */
@@ -43,7 +45,16 @@ export const anonymousExpressionIndex = (
       for (const expression of statementExpressions(statement)) {
         if (expression.type._tag !== 'Available') continue
         const span = SyntaxTree.span(expression.syntax)
-        found.set(`${span.start}:${span.end}`, Object.freeze({ span, type: expression.type.type }))
+        found.set(
+          `${span.start}:${span.end}`,
+          Object.freeze({
+            span,
+            type: expression.type.type,
+            ...(expression._tag === 'CallableSection' && expression.anonymous !== undefined
+              ? { presentation: Presentation.anonymousCallable(expression, expression.anonymous) }
+              : {}),
+          }),
+        )
       }
   return Object.freeze(
     [...found.values()].sort(

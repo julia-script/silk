@@ -38,6 +38,7 @@ export type Presentation =
       readonly name: string
       readonly mutability: Elaboration.BindingDeclarationFact['mutability']
     })
+  | (Base & { readonly _tag: 'AnonymousCallablePresentation' })
   | (Base & { readonly _tag: 'ImportPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'IntrinsicActorPresentation'; readonly name: string })
   | (Base & {
@@ -101,6 +102,53 @@ const constraint = (fact: DeclarationFacts.ConstraintFact): string => {
 
 const constraints = (facts: ReadonlyArray<DeclarationFacts.ConstraintFact>): string =>
   facts.length === 0 ? '' : ` where ${facts.map(constraint).join(', ')}`
+
+const callableMode = (mode: Type.CallableMode): string => {
+  if (mode === 'Exclusive') return 'mut fn'
+  if (mode === 'Take') return 'once fn'
+  return 'fn'
+}
+
+const captureAccess = (access: Elaboration.EffectCaptureFact['access']): string => {
+  if (access === 'Copy') return 'Copy'
+  if (access === 'Exclusive') return 'exclusive'
+  if (access === 'Take') return 'moved'
+  return 'shared'
+}
+
+/** Renders an anonymous contract and its derived environment without a synthetic declaration. */
+export const anonymousCallable = (
+  self: Elaboration.CallableSectionExpressionFact,
+  anonymous: NonNullable<Elaboration.CallableSectionExpressionFact['anonymous']>,
+): Presentation => {
+  const declaration = self.reference._tag === 'Resolved' ? self.reference.declaration : undefined
+  let parameters: ReadonlyArray<string>
+  let result: string
+  if (declaration !== undefined) {
+    parameters = declaration.parameters
+      .slice(0, self.remainingParameters.length)
+      .map((parameter) => {
+        const name = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
+        return `${name}: ${declaredType(parameter.declaredType)}`
+      })
+    result = `${declaredType(declaration.returnType)}${failureRow(declaration.failureRow)}${requirementRow(declaration.requirementRow)}`
+  } else if (self.type._tag === 'Available' && Type.isCallable(self.type.type)) {
+    parameters = self.type.type.parameters.map(Type.encode)
+    result = Type.encode(self.type.type.result)
+  } else {
+    parameters = []
+    result = '_'
+  }
+  const captures = anonymous.captures.map((capture) => {
+    const name = capture.reference.name._tag === 'Present' ? capture.reference.name.spelling : '_'
+    return `${name} (${captureAccess(capture.access)})`
+  })
+  const contract = `${anonymous.functionKind === 'Effect' ? 'effect ' : ''}fn(${parameters.join(', ')}) -> ${result}`
+  return Object.freeze({
+    _tag: 'AnonymousCallablePresentation',
+    text: `${contract}\nmode: ${callableMode(self.mode)}\ncaptures: ${captures.length === 0 ? 'none' : captures.join(', ')}`,
+  })
+}
 
 const typeParameterName = (parameter: DeclarationFacts.TypeParameterFact): string => {
   const name = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'

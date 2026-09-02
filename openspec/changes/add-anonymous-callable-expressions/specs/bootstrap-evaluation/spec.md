@@ -23,4 +23,3 @@ anonymous body SHALL perform its effect work only when that Effect is run.
 
 - **WHEN** a failing Effect is recovered by `effect fn(error: Failure) -> i32 { return 42 }`
 - **THEN** handler invocation constructs a lazy Effect and running the composition completes with `42` in deterministic trace order
-

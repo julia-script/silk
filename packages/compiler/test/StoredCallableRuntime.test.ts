@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as CleanupPlan from '../src/CleanupPlan.js'
+import * as Elaboration from '../src/Elaboration.js'
 import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
@@ -136,6 +137,55 @@ fn apply<T>(marker: T, value: i32) -> i32 {
   return holder.step(value)
 }
 pub fn main() -> i32 { return apply<i32>(0, 20) + apply<bool>(true, 20) }`
+
+const anonymousCaptureModes = `struct Token { value: i32 }
+fn consume(token: Token) -> i32 { return token.value }
+pub fn main() -> i32 {
+  let copied = 2
+  let extra = 40
+  let shared = Token { value: 10 }
+  let mut counter = 0
+  let owned = Token { value: 29 }
+  let copyStep = fn(base: i32) -> i32 { return base + extra + move copied - 40 }
+  let sharedStep = fn() -> i32 { return shared.value }
+  let mut mutateStep = fn() -> i32 {
+    counter = counter + 1
+    return counter
+  }
+  let consumeStep = fn() -> i32 { return consume(move owned) }
+  return copyStep(0) + sharedStep() + mutateStep() + consumeStep()
+}`
+
+const anonymousEffectHandler = `import silk.effect { Effect }
+struct Failure {}
+effect fn failNow() -> i32 ! Failure { fail Failure {} }
+pub fn main() -> i32 {
+  return run Effect.catchAll(failNow(), effect fn(error: Failure) -> i32 { return 42 })
+}`
+
+const anonymousOuterSubstitution = `fn apply<T>(transform: once fn(T) -> T, value: T) -> T {
+  return transform(move value)
+}
+fn relay<T>(value: T) -> T {
+  return apply<T>(fn(input: T) -> T { return move input }, move value)
+}
+pub fn main() -> i32 { return relay<i32>(42) }`
+
+const anonymousPatternCapture = `struct Boxed { value: i32 }
+pub fn main() -> i32 {
+  let boxed = Boxed { value: 42 }
+  let Boxed { value } = move boxed
+  let read = fn() -> i32 { return value }
+  return read()
+}`
+
+const anonymousDroppedCapture = `struct Token { value: i32 }
+fn consume(token: Token) -> i32 { return token.value }
+pub fn main() -> i32 {
+  let token = Token { value: 1 }
+  let unused = fn() -> i32 { return consume(move token) }
+  return 42
+}`
 
 const borrowedCallableLoopExits = `struct Cell { value: i32 }
 fn read(value: i32, cell: &Cell) -> i32 { return value + cell.value }
@@ -315,6 +365,94 @@ it.effect('executes the stored-callable matrix in evaluator and direct Wasm', ()
       assert.strictEqual(artifact._tag, 'WebAssemblyModuleArtifact')
       if (artifact._tag !== 'WebAssemblyModuleArtifact') return
       assert.strictEqual(yield* runWasm(artifact.bytes), 42, `runtime matrix case ${ordinal}`)
+      assert.notInclude(artifact.wat, 'call_indirect')
+      assert.notInclude(artifact.wat, '(table ')
+    }
+  }),
+)
+
+it.effect('executes anonymous callables and constructs anonymous effects lazily', () =>
+  Effect.gen(function* () {
+    for (const [name, source] of [
+      ['capture-modes', anonymousCaptureModes],
+      ['effect-handler', anonymousEffectHandler],
+      ['outer-substitution', anonymousOuterSubstitution],
+      ['pattern-capture', anonymousPatternCapture],
+      ['dropped-capture', anonymousDroppedCapture],
+    ] as const) {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        `stored-callable-runtime/anonymous-${name}`,
+        ascii(source),
+        Target.wasm32UnknownUnknown.id,
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [], name)
+      if (name === 'capture-modes') {
+        const result = snapshot.results.get(`stored-callable-runtime/anonymous-${name}`)
+        assert.isDefined(result)
+        if (result === undefined) return
+        const anonymous: Array<Elaboration.CallableSectionExpressionFact> = []
+        for (const fn of result.functions)
+          Elaboration.visitStatementFacts(fn.statements, {
+            expression: (expression) => {
+              if (expression._tag === 'CallableSection' && expression.anonymous !== undefined)
+                anonymous.push(expression)
+            },
+          })
+        assert.deepEqual(
+          anonymous.map((expression) => [
+            expression.mode,
+            expression.captures.map((capture) => capture.access),
+          ]),
+          [
+            ['Shared', ['Copy', 'Copy']],
+            ['Shared', ['Shared']],
+            ['Exclusive', ['Exclusive']],
+            ['Take', ['Take']],
+          ],
+        )
+        assert.deepEqual(
+          anonymous
+            .at(0)
+            ?.anonymous?.captures.map((capture) =>
+              capture.reference.name._tag === 'Present' ? capture.reference.name.spelling : '_',
+            ),
+          ['extra', 'copied'],
+        )
+        assert.strictEqual(result.hiddenFunctions.length, 4)
+        const identities = result.hiddenFunctions.flatMap((fn) =>
+          fn.declaration.canonical._tag === 'Canonical' ? [fn.declaration.canonical.id.name] : [],
+        )
+        assert.strictEqual(new Set(identities).size, 4, identities.join(', '))
+      }
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [], name)
+      const evaluated = Analysis.evaluate(snapshot)
+      let evaluationState: string = evaluated._tag
+      if (evaluated._tag === 'Trap') evaluationState = evaluated.reason
+      else if (evaluated._tag === 'Blocked') evaluationState = evaluated.reason._tag
+      assert.strictEqual(evaluated._tag, 'Completed', `${name}: ${evaluationState}`)
+      assert.strictEqual(completedValue(evaluated), 42, name)
+      if (name === 'dropped-capture') {
+        assert.strictEqual(
+          evaluated.trace.filter((event) => event._tag === 'CallableCleanup').length,
+          1,
+        )
+        assert.strictEqual(
+          evaluated.trace.filter((event) => event._tag === 'CallableApply').length,
+          0,
+        )
+      }
+      if (name === 'effect-handler') {
+        const constructed = evaluated.trace.findIndex((event) => event._tag === 'CallableConstruct')
+        const applied = evaluated.trace.findIndex((event) => event._tag === 'CallableApply')
+        const enteredBody = evaluated.trace.findIndex(
+          (event) => event._tag === 'Call' && event.target.name.includes('$callable$'),
+        )
+        assert.isAtLeast(constructed, 0)
+        assert.isAbove(applied, constructed)
+        assert.isAbove(enteredBody, applied)
+      }
+      const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      assert.strictEqual(yield* runWasm(artifact.bytes), 42, name)
       assert.notInclude(artifact.wat, 'call_indirect')
       assert.notInclude(artifact.wat, '(table ')
     }
