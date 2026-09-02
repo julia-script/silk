@@ -101,13 +101,13 @@ const program = (cases: ReadonlyArray<Case>): string => `import silk.allocator {
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.u8 as u8
 import silk.usize as usize
 import silk.result { Result }
-import silk.string { String, InvalidUtf8, fromUtf8, ownedUtf8Bytes }
-import silk.unicode { normalizeNfc, normalizeNfd }
-import silk.vector { Vector, make as vectorMake, append as vectorAppend, asSlice as vectorAsSlice }
+import silk.string { String, InvalidUtf8 }
+import silk.unicode { Unicode }
+import silk.vector { Vector }
 
 /// Copies one length-prefixed field out of the corpus so it can be validated into text.
 effect fn field(
@@ -115,10 +115,10 @@ effect fn field(
   start: usize,
   count: usize,
 ) -> Vector<u8> ! OutOfMemoryError ? &mut Allocator {
-  let mut buffer = vectorMake<u8>()
+  let mut buffer = Vector.make<u8>()
   let mut index = usize.ZERO
   while index < count {
-    let appended = run vectorAppend<u8>(&mut buffer, data[start + index])
+    let appended = run Vector.append<u8>(&mut buffer, data[start + index])
     index = index + usize.ONE
   }
   return move buffer
@@ -146,10 +146,10 @@ effect fn checkFrom(
   nfd: &[u8],
 ) -> i32 ! OutOfMemoryError ? &mut Allocator {
   let mut failures = 0
-  let composed = run normalizeNfc(text)
-  if same(ownedUtf8Bytes(&composed), nfc) {} else { failures = failures + 1 }
-  let decomposed = run normalizeNfd(text)
-  if same(ownedUtf8Bytes(&decomposed), nfd) {} else { failures = failures + 1 }
+  let composed = run Unicode.normalizeNfc(text)
+  if same(String.ownedUtf8Bytes(&composed), nfc) {} else { failures = failures + 1 }
+  let decomposed = run Unicode.normalizeNfd(text)
+  if same(String.ownedUtf8Bytes(&decomposed), nfd) {} else { failures = failures + 1 }
   return failures
 }
 
@@ -172,32 +172,32 @@ effect fn build() -> i32 ! OutOfMemoryError {
     let nfdBytes = run field(data, offset + usize.ONE, nfdLength)
       |> Effect.provideMut(&mut allocator)
     offset = offset + usize.ONE + nfdLength
-    let sourceText = match move fromUtf8(vectorAsSlice<u8>(&sourceBytes)) {
+    let sourceText = match move String.fromUtf8(Vector.asSlice<u8>(&sourceBytes)) {
         Result<string, InvalidUtf8>.Success { value } => value
         Result<string, InvalidUtf8>.Failure { error } => ""
     }
     let fromSource = run checkFrom(
       sourceText,
-      vectorAsSlice<u8>(&nfcBytes),
-      vectorAsSlice<u8>(&nfdBytes),
+      Vector.asSlice<u8>(&nfcBytes),
+      Vector.asSlice<u8>(&nfdBytes),
     ) |> Effect.provideMut(&mut allocator)
-    let nfcText = match move fromUtf8(vectorAsSlice<u8>(&nfcBytes)) {
+    let nfcText = match move String.fromUtf8(Vector.asSlice<u8>(&nfcBytes)) {
         Result<string, InvalidUtf8>.Success { value } => value
         Result<string, InvalidUtf8>.Failure { error } => ""
     }
     let fromNfc = run checkFrom(
       nfcText,
-      vectorAsSlice<u8>(&nfcBytes),
-      vectorAsSlice<u8>(&nfdBytes),
+      Vector.asSlice<u8>(&nfcBytes),
+      Vector.asSlice<u8>(&nfdBytes),
     ) |> Effect.provideMut(&mut allocator)
-    let nfdText = match move fromUtf8(vectorAsSlice<u8>(&nfdBytes)) {
+    let nfdText = match move String.fromUtf8(Vector.asSlice<u8>(&nfdBytes)) {
         Result<string, InvalidUtf8>.Success { value } => value
         Result<string, InvalidUtf8>.Failure { error } => ""
     }
     let fromNfd = run checkFrom(
       nfdText,
-      vectorAsSlice<u8>(&nfcBytes),
-      vectorAsSlice<u8>(&nfdBytes),
+      Vector.asSlice<u8>(&nfcBytes),
+      Vector.asSlice<u8>(&nfdBytes),
     ) |> Effect.provideMut(&mut allocator)
     failures = failures + fromSource + fromNfc + fromNfd
     remaining = remaining - usize.ONE

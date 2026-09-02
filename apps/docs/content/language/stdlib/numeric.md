@@ -35,7 +35,7 @@ pub fn main() -> i32 {
 
 Import as `Integer` with `import silk.numeric { Integer }`.
 
-Public declarations: 3.
+Public declarations: 2.
 
 <a id="declaration-73696c6b2f6e756d657269633a3a4e756d65726963"></a>
 
@@ -45,13 +45,27 @@ Public declarations: 3.
 pub struct Numeric
 ```
 
-The importable name of the `silk.numeric` module scope.
+The owner of the generic numeric helpers.
 
 ### Details
 
-This struct carries no data and is never constructed by the library. Importing it as
-`import silk.numeric { Numeric }` names the module scope, so generic numeric helpers resolve
-through `Numeric` without renaming the [`Integer`](#declaration-73696c6b2f6e756d657269633a3a496e7465676572) interface.
+This struct carries no data and is never constructed by the library. The helpers are inherent
+members declared in `impl Numeric`, reached through `import silk.numeric { Numeric }`, and
+leave the [`Integer`](#declaration-73696c6b2f6e756d657269633a3a496e7465676572) interface's name to the interface.
+
+<a id="declaration-73696c6b2f6e756d657269633a3a4e756d657269632e616464"></a>
+
+### Associated function `Numeric.add`
+
+```silk
+pub fn add<T>(left: T, right: T) -> T
+```
+
+Adds two values and traps if the selected integer type cannot represent the result.
+
+#### When to use
+
+Use this function to call ordinary integer addition from generic code.
 
 <a id="declaration-73696c6b2f6e756d657269633a3a496e7465676572"></a>
 
@@ -241,17 +255,3 @@ impl Integer for isize
 ```silk
 add = Intrinsic.isizeAdd
 ```
-
-<a id="declaration-73696c6b2f6e756d657269633a3a616464"></a>
-
-## `add`
-
-```silk
-pub fn add<T>(left: T, right: T) -> T
-```
-
-Adds two values and traps if the selected integer type cannot represent the result.
-
-### When to use
-
-Use this function to call ordinary integer addition from generic code.

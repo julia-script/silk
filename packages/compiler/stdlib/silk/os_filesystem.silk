@@ -6,8 +6,8 @@
 //!
 //! # Details
 //! Portable `/` denotes the provider root rather than the host filesystem root. The native boundary
-//! rejects malformed paths, root escape, and symlink traversal outside that confinement. Whole-file
-//! reads and writes own or commit complete contents, directory listings retry oversized entries and
+//! rejects malformed paths, root escape, and symlink traversal outside that confinement. Whole-FileSystem.file
+//! reads and writes own or commit complete contents, FileSystem.directory listings retry oversized entries and
 //! sort complete child paths deterministically. Low-level failures become portable [`FileError`]
 //! values with retained native codes.
 //!
@@ -28,14 +28,14 @@
 //! ## Construct a provider without accessing the filesystem
 //!
 //! ```silk
-//! import silk.allocator { Allocator }
+//! import silk.allocator { Allocator, OutOfMemoryError }
 //!
 //! import silk.effect { Effect }
 //!
 //! import silk.os_filesystem { OsFileSystem }
 //!
 //! effect fn program() -> i32
-//! ! Allocator.OutOfMemoryError {
+//! ! OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
 //!   let provider = run OsFileSystem.make("/tmp")
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -43,7 +43,7 @@
 //!   return 42
 //! }
 //!
-//! effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+//! effect fn recover(error: OutOfMemoryError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -54,66 +54,18 @@
 
 import silk.bool as bool
 import silk.effect { Effect }
-import silk.bytes {
-  Bytes,
-  append as bytesAppend,
-  asMutSlice as bytesMutSlice,
-  asSlice as bytesSlice,
-  copy as bytesCopy,
-  make as bytesMake,
-  zeroed as bytesZeroed
-}
-import silk.allocator { Allocator }
+import silk.bytes { Bytes }
+import silk.allocator { Allocator, OutOfMemoryError }
 import silk.allocator { OutOfMemoryError }
-import silk.filesystem {
-  DirectoryEntry,
-  DirectoryInfo,
-  FileError,
-  FileInfo,
-  FileOperation,
-  FileReason,
-  FileSystem,
-  Path,
-  alreadyExists,
-  createDirectoryOperation,
-  createTemporaryDirectoryOperation,
-  directory,
-  directoryEntry,
-  directoryInfo,
-  errorWithCode,
-  file,
-  fileInfo,
-  invalidPath,
-  listDirectoryOperation,
-  noSpace,
-  notEmpty,
-  notFound,
-  other,
-  permissionDenied,
-  readFileOperation,
-  removeDirectoryOperation,
-  removeFileOperation,
-  statOperation,
-  tooLarge,
-  unsupported,
-  writeFileOperation,
-  wrongType,
-  joinUtf8 as pathJoinUtf8,
-  view as pathView
-}
+import silk.filesystem { DirectoryEntry, DirectoryInfo, FileError, FileInfo, FileOperation, FileReason, FileSystem, Path }
 import silk.i32 as i32
-import silk.option { Option, none, some }
+import silk.option { Option }
 import silk.result { Result }
-import silk.string { utf8Bytes as stringUtf8Bytes }
+import silk.string { String }
 import silk.u32 as u32
 import silk.u8 as u8
 import silk.usize as usize
-import silk.vector {
-  Vector,
-  asSlice as vectorSlice,
-  insert as vectorInsert,
-  make as vectorMake
-}
+import silk.vector { Vector }
 
 /// A native [`FileSystem`] provider confined beneath one independently owned platform root.
 ///
@@ -125,66 +77,200 @@ pub struct OsFileSystem {
   root: Bytes
 }
 
-/// Copies one absolute native root and creates a confined filesystem provider.
-///
-/// # When to use
-///
-/// Use this function at a native application edge. Provide the result as `&mut FileSystem` to code
-/// that uses the portable filesystem service.
-///
-/// # Details
-///
-/// Construction owns the root bytes but does not open the directory. Portable `/` then denotes
-/// this provider root instead of the host filesystem root.
-///
-/// # Gotchas
-///
-/// `root` must be non-empty, absolute, and NUL-free. A value that violates this precondition traps.
-/// Allocation failure leaves no provider value.
-pub effect fn make(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
-  let rootBytes = stringUtf8Bytes(root)
-  if rootBytes.length == usize.ZERO { let invalid = 1 / 0 }
-  if rootBytes[usize.ZERO] != u8.toU8(47) { let invalid = 1 / 0 }
-  let mut index = usize.ZERO
-  while index < rootBytes.length {
-    if rootBytes[index] == u8.toU8(0) { let invalid = 1 / 0 }
-    index = index + usize.ONE
+impl OsFileSystem {
+  effect fn readFile(
+    self: &mut Self,
+    path: &Path
+  ) -> Bytes ! FileError | OutOfMemoryError ? &mut Allocator {
+    let mut handle = run openFile(move self, path, 0, FileSystem.readFileOperation())
+    let attempted = run Effect.result(readLoop(&mut handle))
+    let closed = run Effect.result(close(move handle, FileSystem.readFileOperation()))
+    return match move attempted {
+      Result<Bytes, FileError | OutOfMemoryError>.Success { value: bytes } => match move closed {
+        Result<(), FileError>.Success { value: completed } => move bytes
+        Result<(), FileError>.Failure { error: closeFailure } => run discardThenReroute<Bytes>(move bytes, move closeFailure)
+      }
+      Result<Bytes, FileError | OutOfMemoryError>.Failure { error: primary } => match move primary {
+        FileError failure => run preserveFile(move failure, move closed)
+        OutOfMemoryError exhausted => run preserveOutOfMemory(move exhausted, move closed)
+      }
+    }
   }
-  let owned = run bytesCopy(rootBytes)
-  return OsFileSystem { root: move owned }
+
+  effect fn writeFile(self: &mut Self, path: &Path, bytes: &[u8]) -> () ! FileError {
+    let mut handle = run openFile(move self, path, 1, FileSystem.writeFileOperation())
+    let attempted = run Effect.result(writeLoop(&mut handle, bytes))
+    let closed = run Effect.result(close(move handle, FileSystem.writeFileOperation()))
+    return match move attempted {
+      Result<(), FileError>.Success { value: completed } => match move closed {
+        Result<(), FileError>.Success { value: closedValue } => ()
+        Result<(), FileError>.Failure { error: closeFailure } => run rerouteFile(move closeFailure)
+      }
+      Result<(), FileError>.Failure { error: primary } => run preserveFile(move primary, move closed)
+    }
+  }
+
+  effect fn stat(self: &mut Self, path: &Path) -> FileInfo | DirectoryInfo ! FileError {
+    let mut kind = 0
+    let mut byteLength = usize.ZERO
+    let mut lowReason = 0
+    let mut nativeCode = u32.toU32(0)
+    let inspected = run rawInspect(Bytes.asSlice(&self.root), pathBytes(path), &mut kind, &mut byteLength, &mut lowReason, &mut nativeCode)
+    if inspected == false { return run raise(FileSystem.statOperation(), lowReason, nativeCode) }
+    if kind == 0 { return FileSystem.fileInfo(byteLength) }
+    return FileSystem.directoryInfo()
+  }
+
+  effect fn listDirectory(
+    self: &mut Self,
+    path: &Path
+  ) -> Vector<DirectoryEntry> ! FileError | OutOfMemoryError ? &mut Allocator {
+    let mut handle = run openDirectory(move self, path, FileSystem.listDirectoryOperation())
+    let attempted = run Effect.result(listLoop(&mut handle, path))
+    let closed = run Effect.result(close(move handle, FileSystem.listDirectoryOperation()))
+    return match move attempted {
+      Result<Vector<DirectoryEntry>, FileError | OutOfMemoryError>.Success { value: entries } => match move closed {
+        Result<(), FileError>.Success { value: completed } => move entries
+        Result<(), FileError>.Failure { error: closeFailure } => run discardThenReroute<Vector<DirectoryEntry>>(move entries, move closeFailure)
+      }
+      Result<Vector<DirectoryEntry>, FileError | OutOfMemoryError>.Failure { error: primary } => match move primary {
+        FileError failure => run preserveFile(move failure, move closed)
+        OutOfMemoryError exhausted => run preserveOutOfMemory(move exhausted, move closed)
+      }
+    }
+  }
+
+  /// Creates one uniquely named FileSystem.directory under `parent` and returns its complete Path.
+  ///
+  /// The provider chooses the name's unique part, so the created name comes back rather than going
+  /// in. A buffer too small for that name creates nothing and reports the capacity it needs, which
+  /// is why the retry below is safe to take.
+  effect fn createTemporaryDirectory(
+    self: &mut Self,
+    parent: &Path,
+    prefix: &[u8]
+  ) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
+    let mut buffer = run Bytes.zeroed(64)
+    let mut created = Option.none<Path>()
+    let mut complete = false
+    while complete == false {
+      let mut required = usize.ZERO
+      let mut lowReason = 0
+      let mut nativeCode = u32.toU32(0)
+      let mut output = Bytes.asMutSlice(&mut buffer)
+      let mut length = usize.ZERO
+      let chosen = run rawCreateUnique(
+        Bytes.asSlice(&self.root),
+        pathBytes(parent),
+        prefix,
+        move output,
+        &mut length,
+        &mut required,
+        &mut lowReason,
+        &mut nativeCode
+      )
+      if chosen == false {
+        if lowReason == 8 {
+          let resized = Bytes.zeroed(required)
+          buffer = run resized
+        } else {
+          return run raise(FileSystem.createTemporaryDirectoryOperation(), lowReason, nativeCode)
+        }
+      } else {
+        let view = Bytes.asSlice(&buffer)
+        let mut name = Bytes.make()
+        let mut index = usize.ZERO
+        while index < length {
+          let one = [view[index]]
+          let appended = run Bytes.append(&mut name, &one)
+          index = index + usize.ONE
+        }
+        let child = run Path.joinUtf8(parent, Bytes.asSlice(&name))
+        created = Option.some<Path>(move child)
+        complete = true
+      }
+    }
+    return match move created {
+      Option<Path>.Some { value: path } => move path
+      Option<Path>.None => run raise(FileSystem.createTemporaryDirectoryOperation(), 10, u32.toU32(0))
+    }
+  }
+
+  effect fn createDirectory(self: &mut Self, path: &Path) -> () ! FileError {
+    return run command(move self, path, FileSystem.createDirectoryOperation(), 0)
+  }
+
+  effect fn removeFile(self: &mut Self, path: &Path) -> () ! FileError {
+    return run command(move self, path, FileSystem.removeFileOperation(), 1)
+  }
+
+  effect fn removeDirectory(self: &mut Self, path: &Path) -> () ! FileError {
+    return run command(move self, path, FileSystem.removeDirectoryOperation(), 2)
+  }
+}
+
+impl OsFileSystem {
+  /// Copies one absolute native root and creates a confined filesystem provider.
+  ///
+  /// # When to use
+  ///
+  /// Use this function at a native application edge. Provide the result as `&mut FileSystem` to code
+  /// that uses the portable filesystem service.
+  ///
+  /// # Details
+  ///
+  /// Construction owns the root bytes but does not open the FileSystem.directory. Portable `/` then denotes
+  /// this provider root instead of the host filesystem root.
+  ///
+  /// # Gotchas
+  ///
+  /// `root` must be non-empty, absolute, and NUL-free. A value that violates this precondition traps.
+  /// Allocation failure leaves no provider value.
+  pub effect fn make(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
+    let rootBytes = String.utf8Bytes(root)
+    if rootBytes.length == usize.ZERO { let invalid = 1 / 0 }
+    if rootBytes[usize.ZERO] != u8.toU8(47) { let invalid = 1 / 0 }
+    let mut index = usize.ZERO
+    while index < rootBytes.length {
+      if rootBytes[index] == u8.toU8(0) { let invalid = 1 / 0 }
+      index = index + usize.ONE
+    }
+    let owned = run Bytes.copy(rootBytes)
+    return OsFileSystem { root: move owned }
+  }
 }
 
 fn pathBytes(path: &Path) -> &[u8] {
-  return stringUtf8Bytes(pathView(path))
+  return String.utf8Bytes(Path.view(path))
 }
 
 fn reason(value: i32) -> FileReason {
-  if value == 0 { return notFound() }
-  if value == 1 { return alreadyExists() }
-  if value == 2 { return permissionDenied() }
-  if value == 3 { return invalidPath() }
-  if value == 4 { return wrongType() }
-  if value == 5 { return notEmpty() }
-  if value == 6 { return noSpace() }
-  if value == 7 { return tooLarge() }
-  if value == 9 { return unsupported() }
-  return other()
+  if value == 0 { return FileSystem.notFound() }
+  if value == 1 { return FileSystem.alreadyExists() }
+  if value == 2 { return FileSystem.permissionDenied() }
+  if value == 3 { return FileSystem.invalidPath() }
+  if value == 4 { return FileSystem.wrongType() }
+  if value == 5 { return FileSystem.notEmpty() }
+  if value == 6 { return FileSystem.noSpace() }
+  if value == 7 { return FileSystem.tooLarge() }
+  if value == 9 { return FileSystem.unsupported() }
+  return FileSystem.other()
 }
 
 effect fn raise(operation: FileOperation, lowReason: i32, nativeCode: u32) -> never ! FileError {
-  fail errorWithCode(move operation, reason(lowReason), u32.toI32(nativeCode))
+  fail FileSystem.errorWithCode(move operation, reason(lowReason), u32.toI32(nativeCode))
 }
 
 effect fn rawFileOpen(root: &[u8], path: &[u8], mode: i32, lowReason: &mut i32, nativeCode: &mut u32) -> Option<OsHandle> {
-  unsafe { return run Intrinsic.osFileOpen<Option<OsHandle>>(root, path, mode, lowReason, nativeCode, some, none) }
+  unsafe { return run Intrinsic.osFileOpen<Option<OsHandle>>(root, path, mode, lowReason, nativeCode, Option.some, Option.none) }
   let impossible = 1 / 0
-  return none<OsHandle>()
+  return Option.none<OsHandle>()
 }
 
 effect fn rawDirectoryOpen(root: &[u8], path: &[u8], lowReason: &mut i32, nativeCode: &mut u32) -> Option<OsHandle> {
-  unsafe { return run Intrinsic.osDirectoryOpen<Option<OsHandle>>(root, path, lowReason, nativeCode, some, none) }
+  unsafe { return run Intrinsic.osDirectoryOpen<Option<OsHandle>>(root, path, lowReason, nativeCode, Option.some, Option.none) }
   let impossible = 1 / 0
-  return none<OsHandle>()
+  return Option.none<OsHandle>()
 }
 
 effect fn rawClose(handle: OsHandle, lowReason: &mut i32, nativeCode: &mut u32) -> bool {
@@ -218,7 +304,7 @@ effect fn openFile(
 ) -> OsHandle ! FileError {
   let mut lowReason = 0
   let mut nativeCode = u32.toU32(0)
-  let opened = run rawFileOpen(bytesSlice(&self.root), pathBytes(path), mode, &mut lowReason, &mut nativeCode)
+  let opened = run rawFileOpen(Bytes.asSlice(&self.root), pathBytes(path), mode, &mut lowReason, &mut nativeCode)
   return match move opened {
     Option<OsHandle>.Some { value: handle } => move handle
     Option<OsHandle>.None => run raise(move operation, lowReason, nativeCode)
@@ -232,7 +318,7 @@ effect fn openDirectory(
 ) -> OsHandle ! FileError {
   let mut lowReason = 0
   let mut nativeCode = u32.toU32(0)
-  let opened = run rawDirectoryOpen(bytesSlice(&self.root), pathBytes(path), &mut lowReason, &mut nativeCode)
+  let opened = run rawDirectoryOpen(Bytes.asSlice(&self.root), pathBytes(path), &mut lowReason, &mut nativeCode)
   return match move opened {
     Option<OsHandle>.Some { value: handle } => move handle
     Option<OsHandle>.None => run raise(move operation, lowReason, nativeCode)
@@ -276,13 +362,13 @@ effect fn preserveOutOfMemory(
 }
 
 effect fn readLoop(handle: &mut OsHandle) -> Bytes ! FileError | OutOfMemoryError ? &mut Allocator {
-  let mut result = bytesMake()
-  let mut buffer = run bytesZeroed(256)
+  let mut result = Bytes.make()
+  let mut buffer = run Bytes.zeroed(256)
   let mut complete = false
   while complete == false {
     let mut lowReason = 0
     let mut nativeCode = u32.toU32(0)
-    let mut output = bytesMutSlice(&mut buffer)
+    let mut output = Bytes.asMutSlice(&mut buffer)
     let mut length = usize.ZERO
     let mut received = false
     unsafe {
@@ -294,39 +380,20 @@ effect fn readLoop(handle: &mut OsHandle) -> Bytes ! FileError | OutOfMemoryErro
         &mut nativeCode
       )
     }
-    if received == false { return run raise(readFileOperation(), lowReason, nativeCode) }
+    if received == false { return run raise(FileSystem.readFileOperation(), lowReason, nativeCode) }
     if length == usize.ZERO {
       complete = true
     } else {
-      let view = bytesSlice(&buffer)
+      let view = Bytes.asSlice(&buffer)
       let mut index = usize.ZERO
       while index < length {
         let one = [view[index]]
-        let appended = run bytesAppend(&mut result, &one)
+        let appended = run Bytes.append(&mut result, &one)
         index = index + usize.ONE
       }
     }
   }
   return move result
-}
-
-effect fn readFile(
-  self: &mut OsFileSystem,
-  path: &Path
-) -> Bytes ! FileError | OutOfMemoryError ? &mut Allocator {
-  let mut handle = run openFile(move self, path, 0, readFileOperation())
-  let attempted = run Effect.result(readLoop(&mut handle))
-  let closed = run Effect.result(close(move handle, readFileOperation()))
-  return match move attempted {
-    Result<Bytes, FileError | OutOfMemoryError>.Success { value: bytes } => match move closed {
-      Result<(), FileError>.Success { value: completed } => move bytes
-      Result<(), FileError>.Failure { error: closeFailure } => run discardThenReroute<Bytes>(move bytes, move closeFailure)
-    }
-    Result<Bytes, FileError | OutOfMemoryError>.Failure { error: primary } => match move primary {
-      FileError failure => run preserveFile(move failure, move closed)
-      OutOfMemoryError exhausted => run preserveOutOfMemory(move exhausted, move closed)
-    }
-  }
 }
 
 effect fn writeLoop(handle: &mut OsHandle, bytes: &[u8]) -> () ! FileError {
@@ -347,43 +414,19 @@ effect fn writeLoop(handle: &mut OsHandle, bytes: &[u8]) -> () ! FileError {
         &mut nativeCode
       )
     }
-    if written == false { return run raise(writeFileOperation(), lowReason, nativeCode) }
-    if length == usize.ZERO { return run raise(writeFileOperation(), 10, u32.toU32(0)) }
+    if written == false { return run raise(FileSystem.writeFileOperation(), lowReason, nativeCode) }
+    if length == usize.ZERO { return run raise(FileSystem.writeFileOperation(), 10, u32.toU32(0)) }
     offset = offset + length
   }
   return ()
-}
-
-effect fn writeFile(self: &mut OsFileSystem, path: &Path, bytes: &[u8]) -> () ! FileError {
-  let mut handle = run openFile(move self, path, 1, writeFileOperation())
-  let attempted = run Effect.result(writeLoop(&mut handle, bytes))
-  let closed = run Effect.result(close(move handle, writeFileOperation()))
-  return match move attempted {
-    Result<(), FileError>.Success { value: completed } => match move closed {
-      Result<(), FileError>.Success { value: closedValue } => ()
-      Result<(), FileError>.Failure { error: closeFailure } => run rerouteFile(move closeFailure)
-    }
-    Result<(), FileError>.Failure { error: primary } => run preserveFile(move primary, move closed)
-  }
-}
-
-effect fn stat(self: &mut OsFileSystem, path: &Path) -> FileInfo | DirectoryInfo ! FileError {
-  let mut kind = 0
-  let mut byteLength = usize.ZERO
-  let mut lowReason = 0
-  let mut nativeCode = u32.toU32(0)
-  let inspected = run rawInspect(bytesSlice(&self.root), pathBytes(path), &mut kind, &mut byteLength, &mut lowReason, &mut nativeCode)
-  if inspected == false { return run raise(statOperation(), lowReason, nativeCode) }
-  if kind == 0 { return fileInfo(byteLength) }
-  return directoryInfo()
 }
 
 effect fn listLoop(
   handle: &mut OsHandle,
   parent: &Path
 ) -> Vector<DirectoryEntry> ! FileError | OutOfMemoryError ? &mut Allocator {
-  let mut entries = vectorMake<DirectoryEntry>()
-  let initialBuffer = bytesZeroed(64)
+  let mut entries = Vector.make<DirectoryEntry>()
+  let initialBuffer = Bytes.zeroed(64)
   let mut buffer = run initialBuffer
   let mut complete = false
   while complete == false {
@@ -391,7 +434,7 @@ effect fn listLoop(
     let mut required = usize.ZERO
     let mut lowReason = 0
     let mut nativeCode = u32.toU32(0)
-    let mut output = bytesMutSlice(&mut buffer)
+    let mut output = Bytes.asMutSlice(&mut buffer)
     let mut length = usize.ZERO
     let mut next = false
     unsafe {
@@ -407,31 +450,31 @@ effect fn listLoop(
     }
     if next == false {
       if lowReason == 8 {
-        let resized = bytesZeroed(required)
+        let resized = Bytes.zeroed(required)
         buffer = run resized
       } else {
-        return run raise(listDirectoryOperation(), lowReason, nativeCode)
+        return run raise(FileSystem.listDirectoryOperation(), lowReason, nativeCode)
       }
     } else {
       if length == usize.ZERO {
         complete = true
       } else {
-        let view = bytesSlice(&buffer)
-        let mut name = bytesMake()
+        let view = Bytes.asSlice(&buffer)
+        let mut name = Bytes.make()
         let mut index = usize.ZERO
         while index < length {
           let one = [view[index]]
-          let appended = run bytesAppend(&mut name, &one)
+          let appended = run Bytes.append(&mut name, &one)
           index = index + usize.ONE
         }
-        let child = run pathJoinUtf8(parent, bytesSlice(&name))
-        let mut entryKind = directory()
-        if kind == 0 { entryKind = file() }
-        let insertion = insertionFor(&child, vectorSlice<DirectoryEntry>(&entries))
-        let inserted = run vectorInsert<DirectoryEntry>(
+        let child = run Path.joinUtf8(parent, Bytes.asSlice(&name))
+        let mut entryKind = FileSystem.directory()
+        if kind == 0 { entryKind = FileSystem.file() }
+        let insertion = insertionFor(&child, Vector.asSlice<DirectoryEntry>(&entries))
+        let inserted = run Vector.insert<DirectoryEntry>(
           &mut entries,
           insertion,
-          directoryEntry(move child, move entryKind)
+          FileSystem.directoryEntry(move child, move entryKind)
         )
       }
     }
@@ -465,25 +508,6 @@ fn pathLess(left: &Path, right: &Path) -> bool {
   return false
 }
 
-effect fn listDirectory(
-  self: &mut OsFileSystem,
-  path: &Path
-) -> Vector<DirectoryEntry> ! FileError | OutOfMemoryError ? &mut Allocator {
-  let mut handle = run openDirectory(move self, path, listDirectoryOperation())
-  let attempted = run Effect.result(listLoop(&mut handle, path))
-  let closed = run Effect.result(close(move handle, listDirectoryOperation()))
-  return match move attempted {
-    Result<Vector<DirectoryEntry>, FileError | OutOfMemoryError>.Success { value: entries } => match move closed {
-      Result<(), FileError>.Success { value: completed } => move entries
-      Result<(), FileError>.Failure { error: closeFailure } => run discardThenReroute<Vector<DirectoryEntry>>(move entries, move closeFailure)
-    }
-    Result<Vector<DirectoryEntry>, FileError | OutOfMemoryError>.Failure { error: primary } => match move primary {
-      FileError failure => run preserveFile(move failure, move closed)
-      OutOfMemoryError exhausted => run preserveOutOfMemory(move exhausted, move closed)
-    }
-  }
-}
-
 effect fn command(
   self: &mut OsFileSystem,
   path: &Path,
@@ -494,12 +518,12 @@ effect fn command(
   let mut nativeCode = u32.toU32(0)
   let mut completed = false
   if selector == 0 {
-    completed = run rawCreate(bytesSlice(&self.root), pathBytes(path), &mut lowReason, &mut nativeCode)
+    completed = run rawCreate(Bytes.asSlice(&self.root), pathBytes(path), &mut lowReason, &mut nativeCode)
   } else {
     if selector == 1 {
-      completed = run rawRemoveFile(bytesSlice(&self.root), pathBytes(path), &mut lowReason, &mut nativeCode)
+      completed = run rawRemoveFile(Bytes.asSlice(&self.root), pathBytes(path), &mut lowReason, &mut nativeCode)
     } else {
-      completed = run rawRemoveDirectory(bytesSlice(&self.root), pathBytes(path), &mut lowReason, &mut nativeCode)
+      completed = run rawRemoveDirectory(Bytes.asSlice(&self.root), pathBytes(path), &mut lowReason, &mut nativeCode)
     }
   }
   if completed == false { return run raise(move operation, lowReason, nativeCode) }
@@ -529,72 +553,6 @@ effect fn rawCreateUnique(
     )
   }
   return false
-}
-
-/// Creates one uniquely named directory under `parent` and returns its complete Path.
-///
-/// The provider chooses the name's unique part, so the created name comes back rather than going
-/// in. A buffer too small for that name creates nothing and reports the capacity it needs, which
-/// is why the retry below is safe to take.
-effect fn createTemporaryDirectory(
-  self: &mut OsFileSystem,
-  parent: &Path,
-  prefix: &[u8]
-) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
-  let mut buffer = run bytesZeroed(64)
-  let mut created = none<Path>()
-  let mut complete = false
-  while complete == false {
-    let mut required = usize.ZERO
-    let mut lowReason = 0
-    let mut nativeCode = u32.toU32(0)
-    let mut output = bytesMutSlice(&mut buffer)
-    let mut length = usize.ZERO
-    let chosen = run rawCreateUnique(
-      bytesSlice(&self.root),
-      pathBytes(parent),
-      prefix,
-      move output,
-      &mut length,
-      &mut required,
-      &mut lowReason,
-      &mut nativeCode
-    )
-    if chosen == false {
-      if lowReason == 8 {
-        let resized = bytesZeroed(required)
-        buffer = run resized
-      } else {
-        return run raise(createTemporaryDirectoryOperation(), lowReason, nativeCode)
-      }
-    } else {
-      let view = bytesSlice(&buffer)
-      let mut name = bytesMake()
-      let mut index = usize.ZERO
-      while index < length {
-        let one = [view[index]]
-        let appended = run bytesAppend(&mut name, &one)
-        index = index + usize.ONE
-      }
-      let child = run pathJoinUtf8(parent, bytesSlice(&name))
-      created = some<Path>(move child)
-      complete = true
-    }
-  }
-  return match move created {
-    Option<Path>.Some { value: path } => move path
-    Option<Path>.None => run raise(createTemporaryDirectoryOperation(), 10, u32.toU32(0))
-  }
-}
-
-effect fn createDirectory(self: &mut OsFileSystem, path: &Path) -> () ! FileError {
-  return run command(move self, path, createDirectoryOperation(), 0)
-}
-effect fn removeFile(self: &mut OsFileSystem, path: &Path) -> () ! FileError {
-  return run command(move self, path, removeFileOperation(), 1)
-}
-effect fn removeDirectory(self: &mut OsFileSystem, path: &Path) -> () ! FileError {
-  return run command(move self, path, removeDirectoryOperation(), 2)
 }
 
 impl FileSystem for OsFileSystem {

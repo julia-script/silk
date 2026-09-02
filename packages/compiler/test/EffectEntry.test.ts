@@ -24,7 +24,7 @@ const cleanupSource = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 pub struct SomeError { storage: Allocation }
 impl Drop for SomeError {
@@ -51,7 +51,7 @@ const evaluateFailureSource = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 pub struct SomeError {}
 pub struct Guard { storage: Allocation }
@@ -69,7 +69,7 @@ pub effect fn main() -> () ! SomeError | OutOfMemoryError {
   return ()
 }`
 
-const providedMapSource = `import silk.effect as Effect
+const providedMapSource = `import silk.effect { Effect }
 service Clock {}
 struct FixedClock {}
 impl Clock for FixedClock {}
@@ -174,7 +174,7 @@ it.effect('retains an earlier failure as causal history when its handler fails',
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'effect-entry/causal',
-      ascii(`import silk.effect as Effect
+      ascii(`import silk.effect { Effect }
 pub struct FirstError {}
 pub struct SecondError {}
 effect fn first() -> i32 ! FirstError { fail FirstError {} }

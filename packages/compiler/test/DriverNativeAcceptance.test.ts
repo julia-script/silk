@@ -211,11 +211,11 @@ it.effect(
     Effect.gen(function* () {
       const outcome = yield* compileSource(
         'native-clocks',
-        `import silk.effect as Effect
-import silk.monotonic_clock as MonotonicClock
-import silk.os_monotonic_clock as OsMonotonicClock
-import silk.os_system_clock as OsSystemClock
-import silk.system_clock as SystemClock
+        `import silk.effect { Effect }
+import silk.monotonic_clock { MonotonicClock }
+import silk.os_monotonic_clock { OsMonotonicClock }
+import silk.os_system_clock { OsSystemClock }
+import silk.system_clock { SystemClock }
 pub fn main() -> i32 {
   let mut system = OsSystemClock.make()
   let systemNow = run Effect.provideMut(SystemClock.now(), &mut system)

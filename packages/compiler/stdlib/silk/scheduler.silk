@@ -5,7 +5,7 @@
 //! uses Fiber operations instead of this provider protocol.
 //!
 //! # Details
-//! [`prepare`] allocates and prepares one child but does not publish it. The returned
+//! `Scheduler.prepare` allocates and prepares one child but does not publish it. The returned
 //! [`PendingPublication`] owns the complete task submission, response channel, and eventual affine
 //! Fiber. `Fiber.forkChild` registers that data after the exclusive service dispatch has ended.
 //!
@@ -14,11 +14,11 @@
 //! the complete pending value and returns no Fiber.
 
 import silk.allocator { OutOfMemoryError }
-import silk.fiber as Fiber
-import silk.hash as Hash
+import silk.fiber { Fiber, CompletionCanceller }
+import silk.hash { Hash }
 import silk.hash { HashKey, HashSeed }
-import silk.monotonic_clock as MonotonicClock
-import silk.shared as Shared
+import silk.monotonic_clock { MonotonicClock }
+import silk.shared { Shared }
 import silk.u64 as u64
 
 /// A task identity that is unique within one Scheduler execution.
@@ -80,7 +80,7 @@ pub struct TaskMailbox {
   /// The request currently visible to the Scheduler driver.
   pub request: NoRequest | PendingRequest
   /// The response cell written before the request Wake is consumed.
-  pub response: Shared.Shared<PublicationResponse>
+  pub response: Shared<PublicationResponse>
 }
 
 /// A submission slot contains no prepared child.
@@ -112,11 +112,11 @@ pub struct PreparedTask {
   /// The unpublished child Execution.
   pub execution: Intrinsic.Execution<()>
   /// The type-erased endpoint used if the task is cancelled.
-  pub canceller: Fiber.CompletionCanceller
+  pub canceller: CompletionCanceller
   /// The child's own publication-request mailbox.
-  pub mailbox: Shared.Shared<TaskMailbox>
+  pub mailbox: Shared<TaskMailbox>
   /// The child's own publication-submission slot.
-  pub submission: Shared.Shared<SubmissionSlot>
+  pub submission: Shared<SubmissionSlot>
 }
 
 /// A prepared child Fiber and the canonical data required for atomic publication.
@@ -128,41 +128,15 @@ pub struct PreparedTask {
 /// boundary.
 pub struct PendingPublication<A, E> {
   /// The affine result handle returned only after successful publication.
-  pub fiber: Fiber.Fiber<A, E>
+  pub fiber: Fiber<A, E>
   /// The mailbox owned by the parent task.
-  pub parentMailbox: Shared.Shared<TaskMailbox>
+  pub parentMailbox: Shared<TaskMailbox>
   /// The submission slot owned by the parent task.
-  pub parentSubmission: Shared.Shared<SubmissionSlot>
+  pub parentSubmission: Shared<SubmissionSlot>
   /// The response observed after the parent resumes.
-  pub response: Shared.Shared<PublicationResponse>
+  pub response: Shared<PublicationResponse>
   /// The complete unpublished child task.
   pub task: PreparedTask
-}
-
-/// Creates one canonical pending publication from its prepared data.
-///
-/// # When to use
-///
-/// Use this provider operation after all child task storage and endpoints have been prepared.
-///
-/// # Details
-///
-/// The parent mailbox, submission slot, and response must belong to the calling task. The prepared
-/// task remains unpublished and must not have received initial readiness.
-pub fn pending<A, E>(
-  fiber: Fiber.Fiber<A, E>,
-  parentMailbox: Shared.Shared<TaskMailbox>,
-  parentSubmission: Shared.Shared<SubmissionSlot>,
-  response: Shared.Shared<PublicationResponse>,
-  task: PreparedTask,
-) -> PendingPublication<A, E> {
-  return PendingPublication<A, E> {
-    fiber: move fiber,
-    parentMailbox: move parentMailbox,
-    parentSubmission: move parentSubmission,
-    response: move response,
-    task: move task,
-  }
 }
 
 /// A mutable service that prepares one child task for later atomic publication.
@@ -183,27 +157,38 @@ pub service Scheduler {
     child: once Effect<
       A
       ! E
-      ? &mut Scheduler | &mut MonotonicClock.MonotonicClock
+      ? &mut Scheduler | &mut MonotonicClock
     >
   ) -> PendingPublication<A, E>
   ! OutOfMemoryError | TaskIdExhaustedError
   ? &mut Scheduler
 }
 
-/// Prepares one lazy child task through the active Scheduler provider.
-///
-/// # Details
-///
-/// This operation only prepares the task. `Fiber.forkChild` registers the returned data after the
-/// service call ends, then obtains the affine Fiber only after the Scheduler accepts the child.
-pub effect fn prepare<A, E>(
-  child: once Effect<
-    A
-    ! E
-    ? &mut Scheduler | &mut MonotonicClock.MonotonicClock
-  >
-) -> PendingPublication<A, E>
-! OutOfMemoryError | TaskIdExhaustedError
-? &mut Scheduler {
-  return run Scheduler.prepare<A, E>(move child)
+impl Scheduler {
+  /// Creates one canonical pending publication from its prepared data.
+  ///
+  /// # When to use
+  ///
+  /// Use this provider operation after all child task storage and endpoints have been prepared.
+  ///
+  /// # Details
+  ///
+  /// The parent mailbox, submission slot, and response must belong to the calling task. The prepared
+  /// task remains unpublished and must not have received initial readiness.
+  pub fn pending<A, E>(
+    fiber: Fiber<A, E>,
+    parentMailbox: Shared<TaskMailbox>,
+    parentSubmission: Shared<SubmissionSlot>,
+    response: Shared<PublicationResponse>,
+    task: PreparedTask,
+  ) -> PendingPublication<A, E> {
+    return PendingPublication<A, E> {
+      fiber: move fiber,
+      parentMailbox: move parentMailbox,
+      parentSubmission: move parentSubmission,
+      response: move response,
+      task: move task,
+    }
+  }
 }
+

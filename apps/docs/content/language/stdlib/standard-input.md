@@ -31,7 +31,7 @@ available input from end-of-input.
 ```silk
 import silk.effect { Effect }
 
-import silk.standard_input { StandardInput as Input }
+import silk.standard_input { StandardInput as Input, ReadOutcome, StreamReadError }
 
 import silk.u8
 
@@ -41,8 +41,8 @@ struct OneByte {
   complete: bool
 }
 
-effect fn read(self: &mut OneByte, buffer: &mut [u8]) -> Input.ReadOutcome
-! Input.StreamReadError {
+effect fn read(self: &mut OneByte, buffer: &mut [u8]) -> ReadOutcome
+! StreamReadError {
   if self.complete {
     return Input.endOfInput()
   }
@@ -51,28 +51,28 @@ effect fn read(self: &mut OneByte, buffer: &mut [u8]) -> Input.ReadOutcome
   return Input.filled(usize.ONE)
 }
 
-impl Input.StandardInput for OneByte {
+impl Input for OneByte {
   read: OneByte.read
 }
 
 effect fn program() -> i32
-! Input.StreamReadError {
+! StreamReadError {
   let mut provider = OneByte {complete: false}
   let mut buffer = [u8.toU8(0)]
   let first = run Input.receive(&mut buffer)
-    |> Effect.provideMut<Input.StandardInput>(&mut provider)
+    |> Effect.provideMut<Input>(&mut provider)
   if Input.count(&first) != usize.ONE {
     return 1
   }
   let second = run Input.receive(&mut buffer)
-    |> Effect.provideMut<Input.StandardInput>(&mut provider)
+    |> Effect.provideMut<Input>(&mut provider)
   if Input.isEndOfInput(&second) == false {
     return 2
   }
   return u8.toI32(buffer[usize.ZERO])
 }
 
-effect fn recover(error: Input.StreamReadError) -> i32 {
+effect fn recover(error: StreamReadError) -> i32 {
   return 0
 }
 
@@ -83,7 +83,7 @@ pub fn main() -> i32 {
 
 Import as `StandardInput` with `import silk.standard_input { StandardInput }`.
 
-Public declarations: 11.
+Public declarations: 5.
 
 <a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644572726f72"></a>
 
@@ -94,16 +94,6 @@ pub struct StreamReadError
 ```
 
 A typed failure from a standard-input provider that could not complete one read.
-
-<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a726561644661696c757265"></a>
-
-## `readFailure`
-
-```silk
-pub fn readFailure() -> StreamReadError
-```
-
-Creates a standard-input failure for a provider that cannot complete one read.
 
 <a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a46696c6c6564"></a>
 
@@ -202,9 +192,19 @@ Bytes after a [`Filled`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a
 `buffer` must be non-empty. A native provider cannot distinguish a zero-capacity read from
 end-of-input.
 
-<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a66696c6c6564"></a>
+<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e7075742e726561644661696c757265"></a>
 
-## `filled`
+### Associated function `StandardInput.readFailure`
+
+```silk
+pub fn readFailure() -> StreamReadError
+```
+
+Creates a standard-input failure for a provider that cannot complete one read.
+
+<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e7075742e66696c6c6564"></a>
+
+### Associated function `StandardInput.filled`
 
 ```silk
 pub fn filled(count: usize) -> ReadOutcome
@@ -212,13 +212,13 @@ pub fn filled(count: usize) -> ReadOutcome
 
 Creates an outcome for a read that committed exactly `count` leading bytes.
 
-### Gotchas
+#### Gotchas
 
 A provider must not use a count greater than the buffer length passed to its read operation.
 
-<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a656e644f66496e707574"></a>
+<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e7075742e656e644f66496e707574"></a>
 
-## `endOfInput`
+### Associated function `StandardInput.endOfInput`
 
 ```silk
 pub fn endOfInput() -> ReadOutcome
@@ -226,9 +226,9 @@ pub fn endOfInput() -> ReadOutcome
 
 Creates an outcome that reports permanent end-of-input after a valid non-empty read.
 
-<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a636f756e74"></a>
+<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e7075742e636f756e74"></a>
 
-## `count`
+### Associated function `StandardInput.count`
 
 ```silk
 pub fn count(outcome: &silk/standard_input.ReadOutcome) -> usize
@@ -236,14 +236,14 @@ pub fn count(outcome: &silk/standard_input.ReadOutcome) -> usize
 
 Returns the committed byte count, or zero for end-of-input.
 
-### Gotchas
+#### Gotchas
 
-A zero count does not by itself identify end-of-input. Use [`isEndOfInput`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a6973456e644f66496e707574) when that
+A zero count does not by itself identify end-of-input. Use [`isEndOfInput`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e7075742e6973456e644f66496e707574) when that
 distinction controls another read.
 
-<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a6973456e644f66496e707574"></a>
+<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e7075742e6973456e644f66496e707574"></a>
 
-## `isEndOfInput`
+### Associated function `StandardInput.isEndOfInput`
 
 ```silk
 pub fn isEndOfInput(outcome: &silk/standard_input.ReadOutcome) -> bool
@@ -251,9 +251,9 @@ pub fn isEndOfInput(outcome: &silk/standard_input.ReadOutcome) -> bool
 
 Reports whether the outcome guarantees that no later read produces bytes.
 
-<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a72656365697665"></a>
+<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e7075742e72656365697665"></a>
 
-## `receive`
+### Associated function `StandardInput.receive`
 
 ```silk
 pub effect fn receive(buffer: &mut [u8]) -> ReadOutcome ! StreamReadError ? &mut StandardInput
@@ -261,12 +261,12 @@ pub effect fn receive(buffer: &mut [u8]) -> ReadOutcome ! StreamReadError ? &mut
 
 Reads through the active [`StandardInput`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e707574) provider into a mutable buffer.
 
-### Details
+#### Details
 
 This wrapper preserves partial-read behavior and the exclusive provider requirement. Inspect
-[`count`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a636f756e74) before reading buffer bytes. Use [`isEndOfInput`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a6973456e644f66496e707574) to decide when draining is complete.
+[`count`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e7075742e636f756e74) before reading buffer bytes. Use [`isEndOfInput`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e7075742e6973456e644f66496e707574) to decide when draining is complete.
 
-### Gotchas
+#### Gotchas
 
 `buffer` must be non-empty. A native provider can otherwise report end-of-input while bytes are
 still available.

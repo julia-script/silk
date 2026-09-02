@@ -23,7 +23,7 @@ const prelude = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 import silk.effect { Pair, Triple }
 
@@ -97,7 +97,7 @@ fn combineTriple(triple: Triple<i32, i32, i32>) -> i32 {
 effect fn recover(problem: Problem) -> i32 { return problem.code }`
 
 /** Both operands succeed: the pair carries both values and the trace carries the order. */
-const zipping = `import silk.effect as Effect
+const zipping = `import silk.effect { Effect }
 ${prelude}
 
 pub fn main() -> i32 {
@@ -106,7 +106,7 @@ pub fn main() -> i32 {
 }`
 
 /** The first operand fails, so the second never runs and contributes no events. */
-const zipShortCircuiting = `import silk.effect as Effect
+const zipShortCircuiting = `import silk.effect { Effect }
 ${prelude}
 
 pub fn main() -> i32 {
@@ -115,7 +115,7 @@ pub fn main() -> i32 {
 }`
 
 /** The second operand fails, so the pair's own construction never happens either. */
-const zipFailingSecond = `import silk.effect as Effect
+const zipFailingSecond = `import silk.effect { Effect }
 ${prelude}
 
 pub fn main() -> i32 {
@@ -124,7 +124,7 @@ pub fn main() -> i32 {
 }`
 
 /** All three operands succeed, in declaration order. */
-const zipping3 = `import silk.effect as Effect
+const zipping3 = `import silk.effect { Effect }
 ${prelude}
 
 pub fn main() -> i32 {
@@ -133,7 +133,7 @@ pub fn main() -> i32 {
 }`
 
 /** The middle operand fails, so the third never runs. */
-const zip3ShortCircuiting = `import silk.effect as Effect
+const zip3ShortCircuiting = `import silk.effect { Effect }
 ${prelude}
 
 pub fn main() -> i32 {
@@ -142,7 +142,7 @@ pub fn main() -> i32 {
 }`
 
 /** The piped form resolves to the same declaration and produces the same result. */
-const zipPiped = `import silk.effect as Effect
+const zipPiped = `import silk.effect { Effect }
 ${prelude}
 
 pub fn main() -> i32 {
@@ -151,7 +151,7 @@ pub fn main() -> i32 {
 }`
 
 /** Distinct failure rows and distinct requirement rows on each operand, so both unions show. */
-const zipRowsSource = `import silk.effect as Effect
+const zipRowsSource = `import silk.effect { Effect }
 struct Left { code: i32 }
 struct Right { code: i32 }
 service Clock {}
@@ -163,7 +163,7 @@ pub fn main() -> i32 {
   return 0
 }`
 
-const zip3RowsSource = `import silk.effect as Effect
+const zip3RowsSource = `import silk.effect { Effect }
 struct Left { code: i32 }
 struct Middle { code: i32 }
 struct Right { code: i32 }
@@ -184,7 +184,7 @@ pub fn main() -> i32 {
  * allocating body already fails on this shape without any zip in it, so holding zip to it would be
  * asserting a pre-existing backend limitation rather than anything about this combinator.
  */
-const parity = `import silk.effect as Effect
+const parity = `import silk.effect { Effect }
 import silk.effect { Pair, Triple }
 effect fn left() -> i32 { return 40 }
 effect fn middle() -> i32 { return 2 }

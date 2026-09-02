@@ -11,7 +11,7 @@ uses Fiber operations instead of this provider protocol.
 
 ## Details
 
-[`prepare`](#declaration-73696c6b2f7363686564756c65723a3a70726570617265) allocates and prepares one child but does not publish it. The returned
+`Scheduler.prepare` allocates and prepares one child but does not publish it. The returned
 [`PendingPublication`](#declaration-73696c6b2f7363686564756c65723a3a50656e64696e675075626c69636174696f6e) owns the complete task submission, response channel, and eventual affine
 Fiber. `Fiber.forkChild` registers that data after the exclusive service dispatch has ended.
 
@@ -22,7 +22,7 @@ the complete pending value and returns no Fiber.
 
 Import as `Scheduler` with `import silk.scheduler { Scheduler }`.
 
-Public declarations: 17.
+Public declarations: 15.
 
 <a id="declaration-73696c6b2f7363686564756c65723a3a5461736b4964"></a>
 
@@ -305,7 +305,7 @@ The unpublished child Execution.
 ### Field `canceller`
 
 ```silk
-pub canceller: Fiber.CompletionCanceller
+pub canceller: CompletionCanceller
 ```
 
 The type-erased endpoint used if the task is cancelled.
@@ -396,25 +396,6 @@ pub task: PreparedTask
 
 The complete unpublished child task.
 
-<a id="declaration-73696c6b2f7363686564756c65723a3a70656e64696e67"></a>
-
-## `pending`
-
-```silk
-pub fn pending<A, E>(fiber: silk/fiber.Fiber<A, E>, parentMailbox: silk/shared.Shared<silk/scheduler.TaskMailbox>, parentSubmission: silk/shared.Shared<silk/scheduler.SubmissionSlot>, response: silk/shared.Shared<silk/scheduler.PublicationResponse>, task: PreparedTask) -> silk/scheduler.PendingPublication<A, E>
-```
-
-Creates one canonical pending publication from its prepared data.
-
-### When to use
-
-Use this provider operation after all child task storage and endpoints have been prepared.
-
-### Details
-
-The parent mailbox, submission slot, and response must belong to the calling task. The prepared
-task remains unpublished and must not have received initial readiness.
-
 <a id="declaration-73696c6b2f7363686564756c65723a3a5363686564756c6572"></a>
 
 ## `Scheduler`
@@ -446,17 +427,21 @@ The child can require only its owned Scheduler and MonotonicClock providers. Pre
 reserves all child endpoints and one task identity before it returns. It does not activate
 the child.
 
-<a id="declaration-73696c6b2f7363686564756c65723a3a70726570617265"></a>
+<a id="declaration-73696c6b2f7363686564756c65723a3a5363686564756c65722e70656e64696e67"></a>
 
-## `prepare`
+### Associated function `Scheduler.pending`
 
 ```silk
-pub effect fn prepare<A, E>(child: once Effect<A ! E ? &mut silk/monotonic_clock.MonotonicClock | &mut silk/scheduler.Scheduler>) -> silk/scheduler.PendingPublication<A, E> ! OutOfMemoryError | TaskIdExhaustedError ? &mut Scheduler
+pub fn pending<A, E>(fiber: silk/fiber.Fiber<A, E>, parentMailbox: silk/shared.Shared<silk/scheduler.TaskMailbox>, parentSubmission: silk/shared.Shared<silk/scheduler.SubmissionSlot>, response: silk/shared.Shared<silk/scheduler.PublicationResponse>, task: PreparedTask) -> silk/scheduler.PendingPublication<A, E>
 ```
 
-Prepares one lazy child task through the active Scheduler provider.
+Creates one canonical pending publication from its prepared data.
 
-### Details
+#### When to use
 
-This operation only prepares the task. `Fiber.forkChild` registers the returned data after the
-service call ends, then obtains the affine Fiber only after the Scheduler accepts the child.
+Use this provider operation after all child task storage and endpoints have been prepared.
+
+#### Details
+
+The parent mailbox, submission slot, and response must belong to the calling task. The prepared
+task remains unpublished and must not have received initial readiness.

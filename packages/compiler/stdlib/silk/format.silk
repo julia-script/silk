@@ -21,13 +21,13 @@
 //! This program writes `42..+42` to standard output and returns zero.
 //!
 //! ```silk
-//! import silk.effect {Effect}
+//! import silk.effect { Effect }
 //!
-//! import silk.format {Alignment, Format, FormatOptions, Sign}
+//! import silk.format { Alignment, Format, FormatOptions, Sign }
 //!
-//! import silk.option {Option}
+//! import silk.option { Option }
 //!
-//! import silk.writer {Writer, WriterError}
+//! import silk.writer { Writer, WriterError }
 //!
 //! effect fn render() -> () ! WriterError ? &mut Writer {
 //!   let value = 42
@@ -68,12 +68,12 @@ import silk.i32 as i32
 import silk.i64 as i64
 import silk.i8 as i8
 import silk.isize as isize
-import silk.option { Option, none }
+import silk.option { Option }
 import silk.reflect as Reflect
-import silk.result { Result, failResult, succeed }
+import silk.result { Result }
 import silk.static_sequence as StaticSequence
 import silk.static_text as StaticText
-import silk.string { utf8Bytes as stringUtf8Bytes }
+import silk.string { String }
 import silk.u16 as u16
 import silk.u32 as u32
 import silk.u64 as u64
@@ -81,14 +81,451 @@ import silk.u8 as u8
 import silk.usize as usize
 import silk.writer { Writer, WriterError }
 
-/// The importable name of the `silk.format` module scope.
+/// The owner of the parsing and rendering operations.
 ///
 /// # Details
 ///
-/// This struct carries no data and is never constructed by the library. Importing it as
-/// `import silk.format { Format }` names the module scope, so parsing and rendering operations
-/// resolve through `Format`.
+/// This struct carries no data and is never constructed by the library. Every operation is an
+/// inherent member declared in `impl Format`, reached through `import silk.format { Format }`.
 pub struct Format {}
+
+impl Format {
+  /// Returns the canonical formatting defaults.
+  ///
+  /// # Details
+  ///
+  /// The result has no width, default alignment, a space fill, negative-only signs, no alternate
+  /// form, no zero padding, no precision, and no color permission.
+  pub fn defaultOptions() -> FormatOptions {
+    return FormatOptions {
+      width: Option.none<usize>(),
+      alignment: Alignment.Default,
+      fill: ' ',
+      sign: Sign.NegativeOnly,
+      alternate: false,
+      zeroPad: false,
+      precision: Option.none<usize>(),
+      color: false,
+    }
+  }
+
+  /// Starts a Formatter session with explicit options.
+  pub fn make(options: FormatOptions) -> Formatter {
+    return Formatter { options: move options }
+  }
+
+  /// Starts a Formatter session with [`defaultOptions`].
+  pub fn makeDefault() -> Formatter { return Format.make(Format.defaultOptions()) }
+
+  /// Reports whether a minimum width was supplied.
+  pub fn hasWidth(self: &Formatter) -> bool {
+    return match &self.options.width {
+      Option<usize>.Some { value } => true
+      Option<usize>.None => false
+    }
+  }
+
+  /// Returns the requested minimum width in Unicode scalars, not UTF-8 bytes or terminal cells, or
+  /// zero when no width was supplied.
+  pub fn width(self: &Formatter) -> usize {
+    return match &self.options.width {
+      Option<usize>.Some { value } => value
+      Option<usize>.None => usize.ZERO
+    }
+  }
+
+  /// Returns the requested alignment.
+  pub fn alignment(self: &Formatter) -> Alignment { return self.options.alignment }
+
+  /// Returns the requested fill scalar.
+  pub fn fill(self: &Formatter) -> char { return self.options.fill }
+
+  /// Returns the requested sign policy.
+  pub fn sign(self: &Formatter) -> Sign { return self.options.sign }
+
+  /// Reports whether alternate presentation is requested.
+  pub fn alternate(self: &Formatter) -> bool { return self.options.alternate }
+
+  /// Reports whether width-driven integer zero padding is requested. A supplied precision disables
+  /// that padding when presenting an integer.
+  pub fn zeroPad(self: &Formatter) -> bool { return self.options.zeroPad }
+
+  /// Reports whether a numeric precision was supplied.
+  pub fn hasPrecision(self: &Formatter) -> bool {
+    return match &self.options.precision {
+      Option<usize>.Some { value } => true
+      Option<usize>.None => false
+    }
+  }
+
+  /// Returns the requested minimum digit count, or zero when no numeric precision was supplied. For
+  /// integers, a supplied precision disables width-driven zero padding.
+  pub fn precision(self: &Formatter) -> usize {
+    return match &self.options.precision {
+      Option<usize>.Some { value } => value
+      Option<usize>.None => usize.ZERO
+    }
+  }
+
+  /// Reports whether a presentation may emit balanced ANSI styling.
+  pub fn color(self: &Formatter) -> bool { return self.options.color }
+
+  /// Writes one byte sequence through the ambient Writer.
+  ///
+  /// # Gotchas
+  ///
+  /// If Writer fails, this returns the original `WriterError`; any prefix accepted before the failure
+  /// remains written.
+  pub effect fn write(
+    self: &mut Formatter,
+    bytes: &[u8]
+  ) -> () ! WriterError ? &mut Writer {
+    return run Writer.writeAll(bytes)
+  }
+
+  /// Writes valid UTF-8 content without applying width policy.
+  ///
+  /// # Gotchas
+  ///
+  /// If Writer fails, this returns the original `WriterError`; any prefix accepted before the failure
+  /// remains written.
+  pub effect fn writeText(
+    self: &mut Formatter,
+    text: string
+  ) -> () ! WriterError ? &mut Writer {
+    return run Format.write(&mut self, String.utf8Bytes(text))
+  }
+
+  /// Writes `count` copies of the session's fill scalar in bounded chunks.
+  ///
+  /// # Gotchas
+  ///
+  /// If Writer fails, this returns the original `WriterError`; any fill accepted before the failure
+  /// remains written.
+  pub effect fn writePadding(
+    self: &mut Formatter,
+    count: usize
+  ) -> () ! WriterError ? &mut Writer {
+    let encoded = encodeFill(self.options.fill)
+    let mut remaining = count
+    while 4 <= remaining {
+      run writeFillGroup(&mut self, &encoded, 4)
+      remaining = remaining - 4
+    }
+    return run writeFillGroup(&mut self, &encoded, remaining)
+  }
+
+  /// Returns the number of fill scalars before content with this visible width.
+  ///
+  /// # Details
+  ///
+  /// A user-defined Display can use this together with [`writeLeadingPadding`] and
+  /// [`writeTrailingPadding`] so ANSI control bytes never count toward the visible content width.
+  /// `Alignment.Default` and `Alignment.Right` put all extra fill before the content;
+  /// `Alignment.Left` puts Option.none there. `Alignment.Center` puts half there, rounding an odd extra
+  /// scalar down so the trailing side receives the remainder. No padding is returned when the
+  /// requested width does not exceed `contentWidth`.
+  pub fn leadingPadding(self: &Formatter, contentWidth: usize) -> usize {
+    let requested = Format.width(&self)
+    if requested <= contentWidth { return usize.ZERO }
+    let extra = requested - contentWidth
+    if self.options.alignment == Alignment.Left { return usize.ZERO }
+    if self.options.alignment == Alignment.Center { return extra / 2 }
+    return extra
+  }
+
+  /// Returns the number of fill scalars after content with this visible width.
+  ///
+  /// # Details
+  ///
+  /// `Alignment.Default` and `Alignment.Right` put no extra fill after the content;
+  /// `Alignment.Left` puts all extra fill there. `Alignment.Center` puts half there, rounding an odd
+  /// extra scalar up. No padding is returned when the requested width does not exceed
+  /// `contentWidth`.
+  pub fn trailingPadding(self: &Formatter, contentWidth: usize) -> usize {
+    let requested = Format.width(&self)
+    if requested <= contentWidth { return usize.ZERO }
+    let extra = requested - contentWidth
+    if self.options.alignment == Alignment.Left { return extra }
+    if self.options.alignment == Alignment.Center { return extra - extra / 2 }
+    return usize.ZERO
+  }
+
+  /// Emits all fill required before content whose width is the supplied Unicode-scalar count, not a
+  /// byte or terminal-cell count.
+  ///
+  /// # Gotchas
+  ///
+  /// If Writer fails, this returns the original `WriterError`; any leading fill accepted before the
+  /// failure remains written.
+  pub effect fn writeLeadingPadding(
+    self: &mut Formatter,
+    contentWidth: usize
+  ) -> () ! WriterError ? &mut Writer {
+    let count = Format.leadingPadding(&self, contentWidth)
+    return run Format.writePadding(&mut self, count)
+  }
+
+  /// Emits all fill required after content whose width is the supplied Unicode-scalar count, not a
+  /// byte or terminal-cell count.
+  ///
+  /// # Gotchas
+  ///
+  /// If Writer fails, this returns the original `WriterError`; any trailing fill accepted before the
+  /// failure remains written.
+  pub effect fn writeTrailingPadding(
+    self: &mut Formatter,
+    contentWidth: usize
+  ) -> () ! WriterError ? &mut Writer {
+    let count = Format.trailingPadding(&self, contentWidth)
+    return run Format.writePadding(&mut self, count)
+  }
+
+  /// Displays one value with canonical defaults through the ambient mutable Writer.
+  ///
+  /// # Details
+  ///
+  /// This operation uses [`defaultOptions`] and does not require Allocator. If Writer fails, an
+  /// accepted prefix remains written and the original `WriterError` is preserved.
+  pub effect fn display<T: Display>(value: &T) -> () ! WriterError ? &mut Writer {
+    let mut formatter = Format.makeDefault()
+    return run Display.display(&value, &mut formatter)
+  }
+
+  /// Displays one value with explicit options through the ambient mutable Writer.
+  ///
+  /// # Details
+  ///
+  /// Width counts Unicode scalars. For integers, precision disables width-driven zero padding.
+  /// Alternate form and color do not change integer output. This operation does not require
+  /// Allocator. If Writer fails, an accepted prefix remains written and the original `WriterError`
+  /// is preserved.
+  pub effect fn displayWith<T: Display>(
+    value: &T,
+    options: FormatOptions
+  ) -> () ! WriterError ? &mut Writer {
+    let mut formatter = Format.make(move options)
+    return run Display.display(&value, &mut formatter)
+  }
+
+  /// Writes a statically validated template with values from one borrowed tuple or record.
+  ///
+  /// # When to use
+  ///
+  /// Use when the template is static and each replacement value has a `Display` implementation.
+  ///
+  /// # Details
+  ///
+  /// `{}` selects tuple fields in order. `{name}` selects visible record fields. `{{` and `}}`
+  /// write literal braces. The operation borrows `args` and does not allocate an intermediate
+  /// `String`.
+  ///
+  /// # Gotchas
+  ///
+  /// A template cannot mix positional and named placeholders. A positional template must use every
+  /// tuple field one time. Malformed templates and unavailable fields stop compilation. A Writer
+  /// failure preserves the prefix that the provider accepted.
+  ///
+  /// # Examples
+  ///
+  /// ## Write a named argument pack
+  ///
+  /// This program writes `Hello, Julia. Age: 31` to standard output.
+  ///
+  /// ```silk
+  /// import silk.effect { Effect }
+  ///
+  /// import silk.format { Format }
+  ///
+  /// import silk.writer { Writer, WriterError, StdoutWriter }
+  ///
+  /// import silk.writer { Writer, WriterError }
+  ///
+  /// effect fn render() -> () ! WriterError ? &mut Writer {
+  ///   let args = .{name: "Julia", age: 31}
+  ///   return run Format.format("Hello, {name}. Age: {age}", &args)
+  /// }
+  ///
+  /// effect fn writeExample() -> () ! WriterError {
+  ///   let mut writer = Writer.stdoutWriterProvider()
+  ///   return run render()
+  ///     |> Effect.provideMut<Writer>(&mut writer)
+  /// }
+  ///
+  /// effect fn ignoreWriteFailure(error: WriterError) -> () {
+  ///   return ()
+  /// }
+  ///
+  /// pub fn main() -> i32 {
+  ///   run Effect.catchAll(writeExample(), ignoreWriteFailure)
+  ///   return 0
+  /// }
+  /// ```
+  pub effect fn format<Args>(
+    static template: string,
+    args: &Args
+  ) -> () ! WriterError ? &mut Writer {
+    let mut formatter = Format.makeDefault()
+    static for part in validatedTemplate<Args>(template) {
+      static if part.mode == PartMode.Literal {
+        run Format.writeText(&mut formatter, part.text)
+      } else {
+        static for field in Reflect.fields<Args>() {
+          static if part.mode == PartMode.Positional {
+            static if Reflect.fieldKind(field) == Reflect.positionalFieldKind {
+              static if Reflect.fieldOrdinal(field) == part.ordinal {
+                let value = Intrinsic.borrowField(args, field)
+                run Format.display(value)
+              }
+            }
+          } else {
+            static if Reflect.fieldKind(field) == Reflect.labeledFieldKind {
+              static if Reflect.fieldLabel(field) == part.text {
+                let value = Intrinsic.borrowField(args, field)
+                run Format.display(value)
+              }
+            }
+          }
+        }
+      }
+    }
+    return ()
+  }
+
+  /// Reads complete decimal text as an unsigned value.
+  ///
+  /// # Details
+  ///
+  /// Empty text, a leading sign, and any byte outside `0`–`9` are `NotANumber` at the offset that
+  /// stopped the read. A value above `u64.MAX` is `OutOfRange`, detected before the overflow rather
+  /// than after it.
+  pub fn unsignedValue(text: string) -> Result<u64, ParseError> {
+    let bytes = String.utf8Bytes(text)
+    if bytes.length == usize.ZERO { return notANumber<u64>(usize.ZERO) }
+    let mut index = usize.ZERO
+    let mut total = ZERO
+    while index < bytes.length {
+      let digit = digitValue(bytes[index])
+      if digit < 0 { return notANumber<u64>(index) }
+      if u64.MAX / TEN < total { return outOfRange<u64>() }
+      total = total * TEN
+      let addend = i32.toU64(digit)
+      if u64.MAX - addend < total { return outOfRange<u64>() }
+      total = total + addend
+      index = index + usize.ONE
+    }
+    return Result.succeed<u64, ParseError>(total)
+  }
+
+  /// Reads complete decimal text as a signed value, accepting one leading `-`.
+  ///
+  /// # Details
+  ///
+  /// Digits accumulate negatively, so text naming `i64.MIN` reads like any other value. A leading `+`
+  /// is not accepted. A value outside `i64.MIN`–`i64.MAX` is `OutOfRange`.
+  pub fn signedValue(text: string) -> Result<i64, ParseError> {
+    let bytes = String.utf8Bytes(text)
+    let mut index = usize.ZERO
+    let mut negative = false
+    if usize.ZERO < bytes.length {
+      if bytes[usize.ZERO] == ASCII_MINUS {
+        negative = true
+        index = usize.ONE
+      }
+    }
+    if index == bytes.length { return notANumber<i64>(index) }
+    let mut total = SIGNED_ZERO
+    while index < bytes.length {
+      let digit = digitValue(bytes[index])
+      if digit < 0 { return notANumber<i64>(index) }
+      if total < i64.MIN / SIGNED_TEN { return outOfRange<i64>() }
+      total = total * SIGNED_TEN
+      let subtrahend = i32.toI64(digit)
+      if total < i64.MIN + subtrahend { return outOfRange<i64>() }
+      total = total - subtrahend
+      index = index + usize.ONE
+    }
+    if negative { return Result.succeed<i64, ParseError>(total) }
+    if total < SIGNED_ZERO - i64.MAX { return outOfRange<i64>() }
+    return Result.succeed<i64, ParseError>(SIGNED_ZERO - total)
+  }
+
+  /// Reads complete decimal text as a `u8`, rejecting a value above `u8.MAX`.
+  pub fn u8Value(text: string) -> Result<u8, ParseError> {
+    return match move Format.unsignedValue(text) {
+      Result<u64, ParseError>.Success { value } => narrowU8(value)
+      Result<u64, ParseError>.Failure { error } => Result.failResult<u8, ParseError>(move error)
+    }
+  }
+
+  /// Reads complete decimal text as a `u16`, rejecting a value above `u16.MAX`.
+  pub fn u16Value(text: string) -> Result<u16, ParseError> {
+    return match move Format.unsignedValue(text) {
+      Result<u64, ParseError>.Success { value } => narrowU16(value)
+      Result<u64, ParseError>.Failure { error } => Result.failResult<u16, ParseError>(move error)
+    }
+  }
+
+  /// Reads complete decimal text as a `u32`, rejecting a value above `u32.MAX`.
+  pub fn u32Value(text: string) -> Result<u32, ParseError> {
+    return match move Format.unsignedValue(text) {
+      Result<u64, ParseError>.Success { value } => narrowU32(value)
+      Result<u64, ParseError>.Failure { error } => Result.failResult<u32, ParseError>(move error)
+    }
+  }
+
+  /// Reads complete decimal text as a `u64`, rejecting a value above `u64.MAX`.
+  pub fn u64Value(text: string) -> Result<u64, ParseError> {
+    return Format.unsignedValue(text)
+  }
+
+  /// Reads complete decimal text as a `usize`, rejecting a value the target's pointer width cannot
+  /// hold.
+  pub fn usizeValue(text: string) -> Result<usize, ParseError> {
+    return match move Format.unsignedValue(text) {
+      Result<u64, ParseError>.Success { value } => narrowUsize(value)
+      Result<u64, ParseError>.Failure { error } => Result.failResult<usize, ParseError>(move error)
+    }
+  }
+
+  /// Reads complete decimal text as an `i8`, rejecting a value outside `i8.MIN`–`i8.MAX`.
+  pub fn i8Value(text: string) -> Result<i8, ParseError> {
+    return match move Format.signedValue(text) {
+      Result<i64, ParseError>.Success { value } => narrowI8(value)
+      Result<i64, ParseError>.Failure { error } => Result.failResult<i8, ParseError>(move error)
+    }
+  }
+
+  /// Reads complete decimal text as an `i16`, rejecting a value outside `i16.MIN`–`i16.MAX`.
+  pub fn i16Value(text: string) -> Result<i16, ParseError> {
+    return match move Format.signedValue(text) {
+      Result<i64, ParseError>.Success { value } => narrowI16(value)
+      Result<i64, ParseError>.Failure { error } => Result.failResult<i16, ParseError>(move error)
+    }
+  }
+
+  /// Reads complete decimal text as an `i32`, rejecting a value outside `i32.MIN`–`i32.MAX`.
+  pub fn i32Value(text: string) -> Result<i32, ParseError> {
+    return match move Format.signedValue(text) {
+      Result<i64, ParseError>.Success { value } => narrowI32(value)
+      Result<i64, ParseError>.Failure { error } => Result.failResult<i32, ParseError>(move error)
+    }
+  }
+
+  /// Reads complete decimal text as an `i64`, rejecting a value outside `i64.MIN`–`i64.MAX`.
+  pub fn i64Value(text: string) -> Result<i64, ParseError> {
+    return Format.signedValue(text)
+  }
+
+  /// Reads complete decimal text as an `isize`, rejecting a value the target's pointer width cannot
+  /// hold.
+  pub fn isizeValue(text: string) -> Result<isize, ParseError> {
+    return match move Format.signedValue(text) {
+      Result<i64, ParseError>.Success { value } => narrowIsize(value)
+      Result<i64, ParseError>.Failure { error } => Result.failResult<isize, ParseError>(move error)
+    }
+  }
+}
 
 enum PartMode {
   Literal,
@@ -271,7 +708,7 @@ static fn visibleNamedFields<Args>() -> string {
       first = false
     }
   }
-  if first { return "<none>" }
+  if first { return "<Option.none>" }
   return labels
 }
 
@@ -405,112 +842,6 @@ pub interface Display {
   ) -> () ! WriterError ? &mut Writer
 }
 
-/// Returns the canonical formatting defaults.
-///
-/// # Details
-///
-/// The result has no width, default alignment, a space fill, negative-only signs, no alternate
-/// form, no zero padding, no precision, and no color permission.
-pub fn defaultOptions() -> FormatOptions {
-  return FormatOptions {
-    width: none<usize>(),
-    alignment: Alignment.Default,
-    fill: ' ',
-    sign: Sign.NegativeOnly,
-    alternate: false,
-    zeroPad: false,
-    precision: none<usize>(),
-    color: false,
-  }
-}
-
-/// Starts a Formatter session with explicit options.
-pub fn make(options: FormatOptions) -> Formatter {
-  return Formatter { options: move options }
-}
-
-/// Starts a Formatter session with [`defaultOptions`].
-pub fn makeDefault() -> Formatter { return make(defaultOptions()) }
-
-/// Reports whether a minimum width was supplied.
-pub fn hasWidth(self: &Formatter) -> bool {
-  return match &self.options.width {
-    Option<usize>.Some { value } => true
-    Option<usize>.None => false
-  }
-}
-
-/// Returns the requested minimum width in Unicode scalars, not UTF-8 bytes or terminal cells, or
-/// zero when no width was supplied.
-pub fn width(self: &Formatter) -> usize {
-  return match &self.options.width {
-    Option<usize>.Some { value } => value
-    Option<usize>.None => usize.ZERO
-  }
-}
-
-/// Returns the requested alignment.
-pub fn alignment(self: &Formatter) -> Alignment { return self.options.alignment }
-
-/// Returns the requested fill scalar.
-pub fn fill(self: &Formatter) -> char { return self.options.fill }
-
-/// Returns the requested sign policy.
-pub fn sign(self: &Formatter) -> Sign { return self.options.sign }
-
-/// Reports whether alternate presentation is requested.
-pub fn alternate(self: &Formatter) -> bool { return self.options.alternate }
-
-/// Reports whether width-driven integer zero padding is requested. A supplied precision disables
-/// that padding when presenting an integer.
-pub fn zeroPad(self: &Formatter) -> bool { return self.options.zeroPad }
-
-/// Reports whether a numeric precision was supplied.
-pub fn hasPrecision(self: &Formatter) -> bool {
-  return match &self.options.precision {
-    Option<usize>.Some { value } => true
-    Option<usize>.None => false
-  }
-}
-
-/// Returns the requested minimum digit count, or zero when no numeric precision was supplied. For
-/// integers, a supplied precision disables width-driven zero padding.
-pub fn precision(self: &Formatter) -> usize {
-  return match &self.options.precision {
-    Option<usize>.Some { value } => value
-    Option<usize>.None => usize.ZERO
-  }
-}
-
-/// Reports whether a presentation may emit balanced ANSI styling.
-pub fn color(self: &Formatter) -> bool { return self.options.color }
-
-/// Writes one byte sequence through the ambient Writer.
-///
-/// # Gotchas
-///
-/// If Writer fails, this returns the original `WriterError`; any prefix accepted before the failure
-/// remains written.
-pub effect fn write(
-  self: &mut Formatter,
-  bytes: &[u8]
-) -> () ! WriterError ? &mut Writer {
-  return run Writer.writeAll(bytes)
-}
-
-/// Writes valid UTF-8 content without applying width policy.
-///
-/// # Gotchas
-///
-/// If Writer fails, this returns the original `WriterError`; any prefix accepted before the failure
-/// remains written.
-pub effect fn writeText(
-  self: &mut Formatter,
-  text: string
-) -> () ! WriterError ? &mut Writer {
-  return run write(&mut self, stringUtf8Bytes(text))
-}
-
 struct FillEncoding {
   bytes: [u8; 4]
   width: usize
@@ -564,242 +895,46 @@ effect fn writeFillGroup(
 ) -> () ! WriterError ? &mut Writer {
   if count == usize.ZERO { return () }
   if encoded.width == usize.ONE {
-    if count == usize.ONE { let bytes = [encoded.bytes[0]] return run write(&mut formatter, &bytes) }
-    if count == 2 { let bytes = [encoded.bytes[0], encoded.bytes[0]] return run write(&mut formatter, &bytes) }
-    if count == 3 { let bytes = [encoded.bytes[0], encoded.bytes[0], encoded.bytes[0]] return run write(&mut formatter, &bytes) }
+    if count == usize.ONE { let bytes = [encoded.bytes[0]] return run Format.write(&mut formatter, &bytes) }
+    if count == 2 { let bytes = [encoded.bytes[0], encoded.bytes[0]] return run Format.write(&mut formatter, &bytes) }
+    if count == 3 { let bytes = [encoded.bytes[0], encoded.bytes[0], encoded.bytes[0]] return run Format.write(&mut formatter, &bytes) }
     let bytes = [encoded.bytes[0], encoded.bytes[0], encoded.bytes[0], encoded.bytes[0]]
-    return run write(&mut formatter, &bytes)
+    return run Format.write(&mut formatter, &bytes)
   }
   if encoded.width == 2 {
-    if count == usize.ONE { let bytes = [encoded.bytes[0], encoded.bytes[1]] return run write(&mut formatter, &bytes) }
-    if count == 2 { let bytes = [encoded.bytes[0], encoded.bytes[1], encoded.bytes[0], encoded.bytes[1]] return run write(&mut formatter, &bytes) }
+    if count == usize.ONE { let bytes = [encoded.bytes[0], encoded.bytes[1]] return run Format.write(&mut formatter, &bytes) }
+    if count == 2 { let bytes = [encoded.bytes[0], encoded.bytes[1], encoded.bytes[0], encoded.bytes[1]] return run Format.write(&mut formatter, &bytes) }
     if count == 3 {
       let bytes = [encoded.bytes[0], encoded.bytes[1], encoded.bytes[0], encoded.bytes[1], encoded.bytes[0], encoded.bytes[1]]
-      return run write(&mut formatter, &bytes)
+      return run Format.write(&mut formatter, &bytes)
     }
     let bytes = [encoded.bytes[0], encoded.bytes[1], encoded.bytes[0], encoded.bytes[1], encoded.bytes[0], encoded.bytes[1], encoded.bytes[0], encoded.bytes[1]]
-    return run write(&mut formatter, &bytes)
+    return run Format.write(&mut formatter, &bytes)
   }
   if encoded.width == 3 {
-    if count == usize.ONE { let bytes = [encoded.bytes[0], encoded.bytes[1], encoded.bytes[2]] return run write(&mut formatter, &bytes) }
+    if count == usize.ONE { let bytes = [encoded.bytes[0], encoded.bytes[1], encoded.bytes[2]] return run Format.write(&mut formatter, &bytes) }
     if count == 2 {
       let bytes = [encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[0], encoded.bytes[1], encoded.bytes[2]]
-      return run write(&mut formatter, &bytes)
+      return run Format.write(&mut formatter, &bytes)
     }
     if count == 3 {
       let bytes = [encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[0], encoded.bytes[1], encoded.bytes[2]]
-      return run write(&mut formatter, &bytes)
+      return run Format.write(&mut formatter, &bytes)
     }
     let bytes = [encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[0], encoded.bytes[1], encoded.bytes[2]]
-    return run write(&mut formatter, &bytes)
+    return run Format.write(&mut formatter, &bytes)
   }
-  if count == usize.ONE { let bytes = [encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[3]] return run write(&mut formatter, &bytes) }
+  if count == usize.ONE { let bytes = [encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[3]] return run Format.write(&mut formatter, &bytes) }
   if count == 2 {
     let bytes = [encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[3], encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[3]]
-    return run write(&mut formatter, &bytes)
+    return run Format.write(&mut formatter, &bytes)
   }
   if count == 3 {
     let bytes = [encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[3], encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[3], encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[3]]
-    return run write(&mut formatter, &bytes)
+    return run Format.write(&mut formatter, &bytes)
   }
   let bytes = [encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[3], encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[3], encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[3], encoded.bytes[0], encoded.bytes[1], encoded.bytes[2], encoded.bytes[3]]
-  return run write(&mut formatter, &bytes)
-}
-
-/// Writes `count` copies of the session's fill scalar in bounded chunks.
-///
-/// # Gotchas
-///
-/// If Writer fails, this returns the original `WriterError`; any fill accepted before the failure
-/// remains written.
-pub effect fn writePadding(
-  self: &mut Formatter,
-  count: usize
-) -> () ! WriterError ? &mut Writer {
-  let encoded = encodeFill(self.options.fill)
-  let mut remaining = count
-  while 4 <= remaining {
-    run writeFillGroup(&mut self, &encoded, 4)
-    remaining = remaining - 4
-  }
-  return run writeFillGroup(&mut self, &encoded, remaining)
-}
-
-/// Returns the number of fill scalars before content with this visible width.
-///
-/// # Details
-///
-/// A user-defined Display can use this together with [`writeLeadingPadding`] and
-/// [`writeTrailingPadding`] so ANSI control bytes never count toward the visible content width.
-/// `Alignment.Default` and `Alignment.Right` put all extra fill before the content;
-/// `Alignment.Left` puts none there. `Alignment.Center` puts half there, rounding an odd extra
-/// scalar down so the trailing side receives the remainder. No padding is returned when the
-/// requested width does not exceed `contentWidth`.
-pub fn leadingPadding(self: &Formatter, contentWidth: usize) -> usize {
-  let requested = width(&self)
-  if requested <= contentWidth { return usize.ZERO }
-  let extra = requested - contentWidth
-  if self.options.alignment == Alignment.Left { return usize.ZERO }
-  if self.options.alignment == Alignment.Center { return extra / 2 }
-  return extra
-}
-
-/// Returns the number of fill scalars after content with this visible width.
-///
-/// # Details
-///
-/// `Alignment.Default` and `Alignment.Right` put no extra fill after the content;
-/// `Alignment.Left` puts all extra fill there. `Alignment.Center` puts half there, rounding an odd
-/// extra scalar up. No padding is returned when the requested width does not exceed
-/// `contentWidth`.
-pub fn trailingPadding(self: &Formatter, contentWidth: usize) -> usize {
-  let requested = width(&self)
-  if requested <= contentWidth { return usize.ZERO }
-  let extra = requested - contentWidth
-  if self.options.alignment == Alignment.Left { return extra }
-  if self.options.alignment == Alignment.Center { return extra - extra / 2 }
-  return usize.ZERO
-}
-
-/// Emits all fill required before content whose width is the supplied Unicode-scalar count, not a
-/// byte or terminal-cell count.
-///
-/// # Gotchas
-///
-/// If Writer fails, this returns the original `WriterError`; any leading fill accepted before the
-/// failure remains written.
-pub effect fn writeLeadingPadding(
-  self: &mut Formatter,
-  contentWidth: usize
-) -> () ! WriterError ? &mut Writer {
-  let count = leadingPadding(&self, contentWidth)
-  return run writePadding(&mut self, count)
-}
-
-/// Emits all fill required after content whose width is the supplied Unicode-scalar count, not a
-/// byte or terminal-cell count.
-///
-/// # Gotchas
-///
-/// If Writer fails, this returns the original `WriterError`; any trailing fill accepted before the
-/// failure remains written.
-pub effect fn writeTrailingPadding(
-  self: &mut Formatter,
-  contentWidth: usize
-) -> () ! WriterError ? &mut Writer {
-  let count = trailingPadding(&self, contentWidth)
-  return run writePadding(&mut self, count)
-}
-
-/// Displays one value with canonical defaults through the ambient mutable Writer.
-///
-/// # Details
-///
-/// This operation uses [`defaultOptions`] and does not require Allocator. If Writer fails, an
-/// accepted prefix remains written and the original `WriterError` is preserved.
-pub effect fn display<T: Display>(value: &T) -> () ! WriterError ? &mut Writer {
-  let mut formatter = makeDefault()
-  return run Display.display(&value, &mut formatter)
-}
-
-/// Displays one value with explicit options through the ambient mutable Writer.
-///
-/// # Details
-///
-/// Width counts Unicode scalars. For integers, precision disables width-driven zero padding.
-/// Alternate form and color do not change integer output. This operation does not require
-/// Allocator. If Writer fails, an accepted prefix remains written and the original `WriterError`
-/// is preserved.
-pub effect fn displayWith<T: Display>(
-  value: &T,
-  options: FormatOptions
-) -> () ! WriterError ? &mut Writer {
-  let mut formatter = make(move options)
-  return run Display.display(&value, &mut formatter)
-}
-
-/// Writes a statically validated template with values from one borrowed tuple or record.
-///
-/// # When to use
-///
-/// Use when the template is static and each replacement value has a `Display` implementation.
-///
-/// # Details
-///
-/// `{}` selects tuple fields in order. `{name}` selects visible record fields. `{{` and `}}`
-/// write literal braces. The operation borrows `args` and does not allocate an intermediate
-/// `String`.
-///
-/// # Gotchas
-///
-/// A template cannot mix positional and named placeholders. A positional template must use every
-/// tuple field one time. Malformed templates and unavailable fields stop compilation. A Writer
-/// failure preserves the prefix that the provider accepted.
-///
-/// # Examples
-///
-/// ## Write a named argument pack
-///
-/// This program writes `Hello, Julia. Age: 31` to standard output.
-///
-/// ```silk
-/// import silk.effect as Effect
-///
-/// import silk.format as Format
-///
-/// import silk.writer as WriterActor
-///
-/// import silk.writer {Writer, WriterError}
-///
-/// effect fn render() -> () ! WriterError ? &mut Writer {
-///   let args = .{name: "Julia", age: 31}
-///   return run Format.format("Hello, {name}. Age: {age}", &args)
-/// }
-///
-/// effect fn writeExample() -> () ! WriterError {
-///   let mut writer = WriterActor.stdoutWriterProvider()
-///   return run render()
-///     |> Effect.provideMut<Writer>(&mut writer)
-/// }
-///
-/// effect fn ignoreWriteFailure(error: WriterError) -> () {
-///   return ()
-/// }
-///
-/// pub fn main() -> i32 {
-///   run Effect.catchAll(writeExample(), ignoreWriteFailure)
-///   return 0
-/// }
-/// ```
-pub effect fn format<Args>(
-  static template: string,
-  args: &Args
-) -> () ! WriterError ? &mut Writer {
-  let mut formatter = makeDefault()
-  static for part in validatedTemplate<Args>(template) {
-    static if part.mode == PartMode.Literal {
-      run writeText(&mut formatter, part.text)
-    } else {
-      static for field in Reflect.fields<Args>() {
-        static if part.mode == PartMode.Positional {
-          static if Reflect.fieldKind(field) == Reflect.positionalFieldKind {
-            static if Reflect.fieldOrdinal(field) == part.ordinal {
-              let value = Intrinsic.borrowField(args, field)
-              run display(value)
-            }
-          }
-        } else {
-          static if Reflect.fieldKind(field) == Reflect.labeledFieldKind {
-            static if Reflect.fieldLabel(field) == part.text {
-              let value = Intrinsic.borrowField(args, field)
-              run display(value)
-            }
-          }
-        }
-      }
-    }
-  }
-  return ()
+  return run Format.write(&mut formatter, &bytes)
 }
 
 const ZERO: u64 = 0
@@ -829,7 +964,7 @@ pub struct ParseError {
 }
 
 fn reject<A>(reason: NotANumber | OutOfRange) -> Result<A, ParseError> {
-  return failResult<A, ParseError>(ParseError { reason: move reason })
+  return Result.failResult<A, ParseError>(ParseError { reason: move reason })
 }
 
 fn notANumber<A>(offset: usize) -> Result<A, ParseError> {
@@ -860,27 +995,27 @@ effect fn writeDigits(
   start: usize,
   count: usize
 ) -> () ! WriterError ? &mut Writer {
-  if count == usize.ONE { let bytes = [digits[start]] return run write(&mut formatter, &bytes) }
-  if count == 2 { let bytes = [digits[start], digits[start + 1]] return run write(&mut formatter, &bytes) }
-  if count == 3 { let bytes = [digits[start], digits[start + 1], digits[start + 2]] return run write(&mut formatter, &bytes) }
-  if count == 4 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3]] return run write(&mut formatter, &bytes) }
-  if count == 5 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4]] return run write(&mut formatter, &bytes) }
-  if count == 6 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5]] return run write(&mut formatter, &bytes) }
-  if count == 7 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6]] return run write(&mut formatter, &bytes) }
-  if count == 8 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7]] return run write(&mut formatter, &bytes) }
-  if count == 9 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8]] return run write(&mut formatter, &bytes) }
-  if count == 10 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9]] return run write(&mut formatter, &bytes) }
-  if count == 11 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10]] return run write(&mut formatter, &bytes) }
-  if count == 12 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11]] return run write(&mut formatter, &bytes) }
-  if count == 13 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11], digits[start + 12]] return run write(&mut formatter, &bytes) }
-  if count == 14 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11], digits[start + 12], digits[start + 13]] return run write(&mut formatter, &bytes) }
-  if count == 15 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11], digits[start + 12], digits[start + 13], digits[start + 14]] return run write(&mut formatter, &bytes) }
-  if count == 16 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11], digits[start + 12], digits[start + 13], digits[start + 14], digits[start + 15]] return run write(&mut formatter, &bytes) }
-  if count == 17 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11], digits[start + 12], digits[start + 13], digits[start + 14], digits[start + 15], digits[start + 16]] return run write(&mut formatter, &bytes) }
-  if count == 18 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11], digits[start + 12], digits[start + 13], digits[start + 14], digits[start + 15], digits[start + 16], digits[start + 17]] return run write(&mut formatter, &bytes) }
-  if count == 19 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11], digits[start + 12], digits[start + 13], digits[start + 14], digits[start + 15], digits[start + 16], digits[start + 17], digits[start + 18]] return run write(&mut formatter, &bytes) }
+  if count == usize.ONE { let bytes = [digits[start]] return run Format.write(&mut formatter, &bytes) }
+  if count == 2 { let bytes = [digits[start], digits[start + 1]] return run Format.write(&mut formatter, &bytes) }
+  if count == 3 { let bytes = [digits[start], digits[start + 1], digits[start + 2]] return run Format.write(&mut formatter, &bytes) }
+  if count == 4 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3]] return run Format.write(&mut formatter, &bytes) }
+  if count == 5 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4]] return run Format.write(&mut formatter, &bytes) }
+  if count == 6 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5]] return run Format.write(&mut formatter, &bytes) }
+  if count == 7 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6]] return run Format.write(&mut formatter, &bytes) }
+  if count == 8 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7]] return run Format.write(&mut formatter, &bytes) }
+  if count == 9 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8]] return run Format.write(&mut formatter, &bytes) }
+  if count == 10 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9]] return run Format.write(&mut formatter, &bytes) }
+  if count == 11 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10]] return run Format.write(&mut formatter, &bytes) }
+  if count == 12 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11]] return run Format.write(&mut formatter, &bytes) }
+  if count == 13 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11], digits[start + 12]] return run Format.write(&mut formatter, &bytes) }
+  if count == 14 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11], digits[start + 12], digits[start + 13]] return run Format.write(&mut formatter, &bytes) }
+  if count == 15 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11], digits[start + 12], digits[start + 13], digits[start + 14]] return run Format.write(&mut formatter, &bytes) }
+  if count == 16 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11], digits[start + 12], digits[start + 13], digits[start + 14], digits[start + 15]] return run Format.write(&mut formatter, &bytes) }
+  if count == 17 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11], digits[start + 12], digits[start + 13], digits[start + 14], digits[start + 15], digits[start + 16]] return run Format.write(&mut formatter, &bytes) }
+  if count == 18 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11], digits[start + 12], digits[start + 13], digits[start + 14], digits[start + 15], digits[start + 16], digits[start + 17]] return run Format.write(&mut formatter, &bytes) }
+  if count == 19 { let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11], digits[start + 12], digits[start + 13], digits[start + 14], digits[start + 15], digits[start + 16], digits[start + 17], digits[start + 18]] return run Format.write(&mut formatter, &bytes) }
   let bytes = [digits[start], digits[start + 1], digits[start + 2], digits[start + 3], digits[start + 4], digits[start + 5], digits[start + 6], digits[start + 7], digits[start + 8], digits[start + 9], digits[start + 10], digits[start + 11], digits[start + 12], digits[start + 13], digits[start + 14], digits[start + 15], digits[start + 16], digits[start + 17], digits[start + 18], digits[start + 19]]
-  return run write(&mut formatter, &bytes)
+  return run Format.write(&mut formatter, &bytes)
 }
 
 effect fn writeZeroes(
@@ -889,12 +1024,12 @@ effect fn writeZeroes(
 ) -> () ! WriterError ? &mut Writer {
   let mut remaining = count
   while 4 <= remaining {
-    run write(&mut formatter, b"0000")
+    run Format.write(&mut formatter, b"0000")
     remaining = remaining - 4
   }
-  if remaining == 3 { return run write(&mut formatter, b"000") }
-  if remaining == 2 { return run write(&mut formatter, b"00") }
-  if remaining == usize.ONE { return run write(&mut formatter, b"0") }
+  if remaining == 3 { return run Format.write(&mut formatter, b"000") }
+  if remaining == 2 { return run Format.write(&mut formatter, b"00") }
+  if remaining == usize.ONE { return run Format.write(&mut formatter, b"0") }
   return ()
 }
 
@@ -908,23 +1043,23 @@ effect fn writeSign(
   formatter: &mut Formatter,
   negative: bool
 ) -> () ! WriterError ? &mut Writer {
-  if negative { return run write(&mut formatter, b"-") }
-  if formatter.options.sign == Sign.Always { return run write(&mut formatter, b"+") }
-  if formatter.options.sign == Sign.Space { return run write(&mut formatter, b" ") }
+  if negative { return run Format.write(&mut formatter, b"-") }
+  if formatter.options.sign == Sign.Always { return run Format.write(&mut formatter, b"+") }
+  if formatter.options.sign == Sign.Space { return run Format.write(&mut formatter, b" ") }
   return ()
 }
 
 fn precisionZeroes(formatter: &Formatter, digitCount: usize) -> usize {
-  if !hasPrecision(&formatter) { return usize.ZERO }
-  let requested = precision(&formatter)
+  if !Format.hasPrecision(&formatter) { return usize.ZERO }
+  let requested = Format.precision(&formatter)
   if requested <= digitCount { return usize.ZERO }
   return requested - digitCount
 }
 
 fn widthZeroes(formatter: &Formatter, contentWidth: usize) -> usize {
-  if hasPrecision(&formatter) { return usize.ZERO }
+  if Format.hasPrecision(&formatter) { return usize.ZERO }
   if !formatter.options.zeroPad { return usize.ZERO }
-  let requested = width(&formatter)
+  let requested = Format.width(&formatter)
   if requested <= contentWidth { return usize.ZERO }
   return requested - contentWidth
 }
@@ -941,11 +1076,11 @@ effect fn emitInteger(
   let coreWidth = signCount + precisionCount + digitCount
   let zeroCount = widthZeroes(&formatter, coreWidth)
   let paddedWidth = coreWidth + zeroCount
-  run writeLeadingPadding(&mut formatter, paddedWidth)
+  run Format.writeLeadingPadding(&mut formatter, paddedWidth)
   run writeSign(&mut formatter, negative)
   run writeZeroes(&mut formatter, precisionCount + zeroCount)
   run writeDigits(&mut formatter, digits, start, digitCount)
-  return run writeTrailingPadding(&mut formatter, paddedWidth)
+  return run Format.writeTrailingPadding(&mut formatter, paddedWidth)
 }
 
 effect fn unsignedDisplay(
@@ -1050,66 +1185,8 @@ impl Display for string {
   /// This operation borrows the string and does not allocate an intermediate `String`. If Writer
   /// fails, an accepted prefix remains written and the original `WriterError` is preserved.
   effect fn display(self: &Self, formatter: &mut Formatter) -> () ! WriterError ? &mut Writer {
-    return run writeText(&mut formatter, self.*)
+    return run Format.writeText(&mut formatter, self.*)
   }
-}
-
-/// Reads complete decimal text as an unsigned value.
-///
-/// # Details
-///
-/// Empty text, a leading sign, and any byte outside `0`–`9` are `NotANumber` at the offset that
-/// stopped the read. A value above `u64.MAX` is `OutOfRange`, detected before the overflow rather
-/// than after it.
-pub fn unsignedValue(text: string) -> Result<u64, ParseError> {
-  let bytes = stringUtf8Bytes(text)
-  if bytes.length == usize.ZERO { return notANumber<u64>(usize.ZERO) }
-  let mut index = usize.ZERO
-  let mut total = ZERO
-  while index < bytes.length {
-    let digit = digitValue(bytes[index])
-    if digit < 0 { return notANumber<u64>(index) }
-    if u64.MAX / TEN < total { return outOfRange<u64>() }
-    total = total * TEN
-    let addend = i32.toU64(digit)
-    if u64.MAX - addend < total { return outOfRange<u64>() }
-    total = total + addend
-    index = index + usize.ONE
-  }
-  return succeed<u64, ParseError>(total)
-}
-
-/// Reads complete decimal text as a signed value, accepting one leading `-`.
-///
-/// # Details
-///
-/// Digits accumulate negatively, so text naming `i64.MIN` reads like any other value. A leading `+`
-/// is not accepted. A value outside `i64.MIN`–`i64.MAX` is `OutOfRange`.
-pub fn signedValue(text: string) -> Result<i64, ParseError> {
-  let bytes = stringUtf8Bytes(text)
-  let mut index = usize.ZERO
-  let mut negative = false
-  if usize.ZERO < bytes.length {
-    if bytes[usize.ZERO] == ASCII_MINUS {
-      negative = true
-      index = usize.ONE
-    }
-  }
-  if index == bytes.length { return notANumber<i64>(index) }
-  let mut total = SIGNED_ZERO
-  while index < bytes.length {
-    let digit = digitValue(bytes[index])
-    if digit < 0 { return notANumber<i64>(index) }
-    if total < i64.MIN / SIGNED_TEN { return outOfRange<i64>() }
-    total = total * SIGNED_TEN
-    let subtrahend = i32.toI64(digit)
-    if total < i64.MIN + subtrahend { return outOfRange<i64>() }
-    total = total - subtrahend
-    index = index + usize.ONE
-  }
-  if negative { return succeed<i64, ParseError>(total) }
-  if total < SIGNED_ZERO - i64.MAX { return outOfRange<i64>() }
-  return succeed<i64, ParseError>(SIGNED_ZERO - total)
 }
 
 // Narrowing is the checked conversion rather than a comparison against the target's MAX, so every
@@ -1120,131 +1197,56 @@ pub fn signedValue(text: string) -> Result<i64, ParseError> {
 fn narrowU8(value: u64) -> Result<u8, ParseError> {
   return match move u64.checkedToU8(value) {
     Option<u8>.None => outOfRange<u8>()
-    Option<u8>.Some { value: narrowed } => succeed<u8, ParseError>(narrowed)
+    Option<u8>.Some { value: narrowed } => Result.succeed<u8, ParseError>(narrowed)
   }
 }
 
 fn narrowU16(value: u64) -> Result<u16, ParseError> {
   return match move u64.checkedToU16(value) {
     Option<u16>.None => outOfRange<u16>()
-    Option<u16>.Some { value: narrowed } => succeed<u16, ParseError>(narrowed)
+    Option<u16>.Some { value: narrowed } => Result.succeed<u16, ParseError>(narrowed)
   }
 }
 
 fn narrowU32(value: u64) -> Result<u32, ParseError> {
   return match move u64.checkedToU32(value) {
     Option<u32>.None => outOfRange<u32>()
-    Option<u32>.Some { value: narrowed } => succeed<u32, ParseError>(narrowed)
+    Option<u32>.Some { value: narrowed } => Result.succeed<u32, ParseError>(narrowed)
   }
 }
 
 fn narrowUsize(value: u64) -> Result<usize, ParseError> {
   return match move u64.checkedToUsize(value) {
     Option<usize>.None => outOfRange<usize>()
-    Option<usize>.Some { value: narrowed } => succeed<usize, ParseError>(narrowed)
+    Option<usize>.Some { value: narrowed } => Result.succeed<usize, ParseError>(narrowed)
   }
 }
 
 fn narrowI8(value: i64) -> Result<i8, ParseError> {
   return match move i64.checkedToI8(value) {
     Option<i8>.None => outOfRange<i8>()
-    Option<i8>.Some { value: narrowed } => succeed<i8, ParseError>(narrowed)
+    Option<i8>.Some { value: narrowed } => Result.succeed<i8, ParseError>(narrowed)
   }
 }
 
 fn narrowI16(value: i64) -> Result<i16, ParseError> {
   return match move i64.checkedToI16(value) {
     Option<i16>.None => outOfRange<i16>()
-    Option<i16>.Some { value: narrowed } => succeed<i16, ParseError>(narrowed)
+    Option<i16>.Some { value: narrowed } => Result.succeed<i16, ParseError>(narrowed)
   }
 }
 
 fn narrowI32(value: i64) -> Result<i32, ParseError> {
   return match move i64.checkedToI32(value) {
     Option<i32>.None => outOfRange<i32>()
-    Option<i32>.Some { value: narrowed } => succeed<i32, ParseError>(narrowed)
+    Option<i32>.Some { value: narrowed } => Result.succeed<i32, ParseError>(narrowed)
   }
 }
 
 fn narrowIsize(value: i64) -> Result<isize, ParseError> {
   return match move i64.checkedToIsize(value) {
     Option<isize>.None => outOfRange<isize>()
-    Option<isize>.Some { value: narrowed } => succeed<isize, ParseError>(narrowed)
+    Option<isize>.Some { value: narrowed } => Result.succeed<isize, ParseError>(narrowed)
   }
 }
 
-/// Reads complete decimal text as a `u8`, rejecting a value above `u8.MAX`.
-pub fn u8Value(text: string) -> Result<u8, ParseError> {
-  return match move unsignedValue(text) {
-    Result<u64, ParseError>.Success { value } => narrowU8(value)
-    Result<u64, ParseError>.Failure { error } => failResult<u8, ParseError>(move error)
-  }
-}
-
-/// Reads complete decimal text as a `u16`, rejecting a value above `u16.MAX`.
-pub fn u16Value(text: string) -> Result<u16, ParseError> {
-  return match move unsignedValue(text) {
-    Result<u64, ParseError>.Success { value } => narrowU16(value)
-    Result<u64, ParseError>.Failure { error } => failResult<u16, ParseError>(move error)
-  }
-}
-
-/// Reads complete decimal text as a `u32`, rejecting a value above `u32.MAX`.
-pub fn u32Value(text: string) -> Result<u32, ParseError> {
-  return match move unsignedValue(text) {
-    Result<u64, ParseError>.Success { value } => narrowU32(value)
-    Result<u64, ParseError>.Failure { error } => failResult<u32, ParseError>(move error)
-  }
-}
-
-/// Reads complete decimal text as a `u64`, rejecting a value above `u64.MAX`.
-pub fn u64Value(text: string) -> Result<u64, ParseError> {
-  return unsignedValue(text)
-}
-
-/// Reads complete decimal text as a `usize`, rejecting a value the target's pointer width cannot
-/// hold.
-pub fn usizeValue(text: string) -> Result<usize, ParseError> {
-  return match move unsignedValue(text) {
-    Result<u64, ParseError>.Success { value } => narrowUsize(value)
-    Result<u64, ParseError>.Failure { error } => failResult<usize, ParseError>(move error)
-  }
-}
-
-/// Reads complete decimal text as an `i8`, rejecting a value outside `i8.MIN`–`i8.MAX`.
-pub fn i8Value(text: string) -> Result<i8, ParseError> {
-  return match move signedValue(text) {
-    Result<i64, ParseError>.Success { value } => narrowI8(value)
-    Result<i64, ParseError>.Failure { error } => failResult<i8, ParseError>(move error)
-  }
-}
-
-/// Reads complete decimal text as an `i16`, rejecting a value outside `i16.MIN`–`i16.MAX`.
-pub fn i16Value(text: string) -> Result<i16, ParseError> {
-  return match move signedValue(text) {
-    Result<i64, ParseError>.Success { value } => narrowI16(value)
-    Result<i64, ParseError>.Failure { error } => failResult<i16, ParseError>(move error)
-  }
-}
-
-/// Reads complete decimal text as an `i32`, rejecting a value outside `i32.MIN`–`i32.MAX`.
-pub fn i32Value(text: string) -> Result<i32, ParseError> {
-  return match move signedValue(text) {
-    Result<i64, ParseError>.Success { value } => narrowI32(value)
-    Result<i64, ParseError>.Failure { error } => failResult<i32, ParseError>(move error)
-  }
-}
-
-/// Reads complete decimal text as an `i64`, rejecting a value outside `i64.MIN`–`i64.MAX`.
-pub fn i64Value(text: string) -> Result<i64, ParseError> {
-  return signedValue(text)
-}
-
-/// Reads complete decimal text as an `isize`, rejecting a value the target's pointer width cannot
-/// hold.
-pub fn isizeValue(text: string) -> Result<isize, ParseError> {
-  return match move signedValue(text) {
-    Result<i64, ParseError>.Success { value } => narrowIsize(value)
-    Result<i64, ParseError>.Failure { error } => failResult<isize, ParseError>(move error)
-  }
-}

@@ -41,11 +41,11 @@ const layoutExtract = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 import silk.layout { LayoutOverflow }
-import silk.raw_buffer as RawBuffer
-import silk.slot as Slot
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
 effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let element = Layout.of<i32>()
@@ -77,7 +77,7 @@ const affineExtract = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct Empty {}
 struct Full { storage: Allocation }

@@ -49,9 +49,11 @@ const selectiveReady = readFileSync(
   'utf8',
 )
 
-const explicitPayUseSource = (body: string): string => `import silk.allocator { Allocator }
-import silk.effect as Effect
-import silk.execution as Execution
+const explicitPayUseSource = (
+  body: string,
+): string => `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
 struct Empty {}
 struct Stored { execution: Intrinsic.Execution<i32> }
 struct Owner { slot: Empty | Stored result: i32 }
@@ -68,7 +70,7 @@ fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
 effect fn drive(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
   return run Execution.drive(move execution, move owner, complete, suspend)
 }
-effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+effect fn program() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let execution = run Execution.make(body(true), (), ready)
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -76,15 +78,17 @@ effect fn program() -> i32 ! Allocator.OutOfMemoryError {
   run drive(move execution, &mut owner)
   return owner.result
 }
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
-const sharedPayUseSource = (nested: boolean): string => `import silk.allocator { Allocator }
-import silk.effect as Effect
-import silk.shared as Shared
+const sharedPayUseSource = (
+  nested: boolean,
+): string => `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
 struct State { value: i32 }
 fn read(self: &State) -> i32 { return self.value }
-effect fn body(state: Shared.Shared<State>) -> i32 {
+effect fn body(state: Shared<State>) -> i32 {
   ${
     nested
       ? 'let value = run Effect.suspend(effect { return Shared.with<State, i32>(&state, read) })'
@@ -93,18 +97,18 @@ effect fn body(state: Shared.Shared<State>) -> i32 {
   drop state
   return value
 }
-effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+effect fn program() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let state = run Shared.make<State>(State { value: 42 })
     |> Effect.provideMut<Allocator>(&mut allocator)
   return run body(move state)
 }
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
 const payUseSources = {
   direct: 'pub fn main() -> i32 { return 42 }',
-  nested: `import silk.effect as Effect
+  nested: `import silk.effect { Effect }
 effect fn body() -> i32 { return run Effect.suspend(effect { return 42 }) }
 pub fn main() -> i32 { return run body() }`,
   explicitDirect: explicitPayUseSource('return 42'),
@@ -691,21 +695,21 @@ it.effect('publishes one task identity without scanning and consumes a stale rea
 
 it.effect('rejects a nested owner child that retains Scheduler and Allocator requirements', () =>
   Effect.gen(function* () {
-    const source = `import silk.allocator { Allocator }
-import silk.allocator { Allocator }
-import silk.effect as Effect
+    const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
 import silk.layout { Layout }
 service Scheduler { effect fn join() -> i32 ? &Scheduler }
 struct LocalScheduler {}
 effect fn join(self: &LocalScheduler) -> i32 { return 42 }
 impl Scheduler for LocalScheduler { join: LocalScheduler.join }
-effect fn nested() -> i32 ! Allocator.OutOfMemoryError ? &Scheduler | &mut Allocator {
+effect fn nested() -> i32 ! OutOfMemoryError ? &Scheduler | &mut Allocator {
   let value = run Scheduler.join()
   let storage = run Allocator.allocate(Layout.of<i32>())
   drop storage
   return value
 }
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 fn schedule<F: once Effect<i32> + Intrinsic.Detached>(child: F) -> () {
   drop child
   return ()
@@ -751,7 +755,7 @@ pub fn main() -> () {
 
 it.effect('diagnoses an unowned park-capable complete entry at the explicit boundary', () =>
   Effect.gen(function* () {
-    const source = `import silk.execution as Execution
+    const source = `import silk.execution { Execution }
 struct Guard {}
 fn register(wake: Intrinsic.Wake) -> Guard { drop wake return Guard {} }
 pub fn main() -> () { return run Execution.park(register) }`

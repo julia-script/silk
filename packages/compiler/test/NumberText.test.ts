@@ -53,9 +53,9 @@ const imports = Scalar.integers()
   .join('\n')
 
 const defaultRenderingProgram = `${imports}
-import silk.effect as Effect
-import silk.format as Format
-import silk.writer as WriterActor
+import silk.effect { Effect }
+import silk.format { Format }
+import silk.writer { Writer, WriterError, StdoutWriter }
 import silk.writer { Writer, WriterError }
 
 effect fn render() -> () ! WriterError ? &mut Writer {
@@ -70,7 +70,7 @@ ${defaultCases
 }
 
 effect fn build() -> i32 ! WriterError {
-  let mut writer = WriterActor.stdoutWriterProvider()
+  let mut writer = Writer.stdoutWriterProvider()
   run render() |> Effect.provideMut<Writer>(&mut writer)
   return 42
 }
@@ -122,9 +122,9 @@ it.effect('streams every integer bound through Display without allocating', () =
   }),
 )
 
-const stringRenderingProgram = `import silk.effect as Effect
-import silk.format as Format
-import silk.writer as WriterActor
+const stringRenderingProgram = `import silk.effect { Effect }
+import silk.format { Format }
+import silk.writer { Writer, WriterError, StdoutWriter }
 import silk.writer { Writer, WriterError }
 
 effect fn render() -> () ! WriterError ? &mut Writer {
@@ -134,7 +134,7 @@ effect fn render() -> () ! WriterError ? &mut Writer {
 }
 
 pub effect fn main() -> () ! WriterError {
-  let mut writer = WriterActor.stdoutWriterProvider()
+  let mut writer = Writer.stdoutWriterProvider()
   return run render() |> Effect.provideMut<Writer>(&mut writer)
 }`
 
@@ -177,9 +177,9 @@ it.effect('streams borrowed strings through Display and preserves the accepted W
   }),
 )
 
-const templateFormattingProgram = `import silk.effect as Effect
-import silk.format as Format
-import silk.writer as WriterActor
+const templateFormattingProgram = `import silk.effect { Effect }
+import silk.format { Format }
+import silk.writer { Writer, WriterError, StdoutWriter }
 import silk.writer { Writer, WriterError }
 
 struct Person { pub name: string pub age: i32 }
@@ -201,7 +201,7 @@ effect fn render() -> () ! WriterError ? &mut Writer {
 }
 
 pub effect fn main() -> () ! WriterError {
-  let mut writer = WriterActor.stdoutWriterProvider()
+  let mut writer = Writer.stdoutWriterProvider()
   return run render() |> Effect.provideMut<Writer>(&mut writer)
 }`
 
@@ -264,7 +264,7 @@ it.effect('formats borrowed positional and named aggregate packs without runtime
     const formatInstances = Analysis.instancesOf(snapshot).instances.filter(
       (instance) =>
         instance.key.declaration.module === 'silk/format' &&
-        instance.key.declaration.name === 'format',
+        instance.key.declaration.name === 'Format.format',
     )
     assert.strictEqual(formatInstances.length, 4)
     assert.strictEqual(
@@ -360,9 +360,9 @@ it.effect('formats borrowed positional and named aggregate packs without runtime
   }),
 )
 
-const formattingFailureProgram = (body: string): string => `import silk.effect as Effect
-import silk.format as Format
-import silk.writer as WriterActor
+const formattingFailureProgram = (body: string): string => `import silk.effect { Effect }
+import silk.format { Format }
+import silk.writer { Writer, WriterError, StdoutWriter }
 import silk.writer { Writer, WriterError }
 
 effect fn render() -> () ! WriterError ? &mut Writer {
@@ -370,7 +370,7 @@ ${body}
 }
 
 pub effect fn main() -> () ! WriterError {
-  let mut writer = WriterActor.stdoutWriterProvider()
+  let mut writer = Writer.stdoutWriterProvider()
   return run render() |> Effect.provideMut<Writer>(&mut writer)
 }`
 
@@ -455,7 +455,7 @@ it.effect('keeps unreachable invalid templates unevaluated and missing Display o
   Effect.gen(function* () {
     const unreachable = yield* Analysis.ofSourceRealized(
       'number-text/template-unreachable',
-      encoder.encode(`import silk.format as Format
+      encoder.encode(`import silk.format { Format }
 import silk.writer { Writer, WriterError }
 effect fn ignored() -> () ! WriterError ? &mut Writer {
   return run Format.format("unclosed {", &(1, 2))
@@ -484,9 +484,9 @@ it.effect('does not expose private fields as named formatting candidates', () =>
   Effect.gen(function* () {
     const module = 'number-text/template-private-field'
     const source = `import model.Person as Model
-import silk.effect as Effect
-import silk.format as Format
-import silk.writer as WriterActor
+import silk.effect { Effect }
+import silk.format { Format }
+import silk.writer { Writer, WriterError, StdoutWriter }
 import silk.writer { Writer, WriterError }
 
 effect fn render() -> () ! WriterError ? &mut Writer {
@@ -495,7 +495,7 @@ effect fn render() -> () ! WriterError ? &mut Writer {
 }
 
 pub effect fn main() -> () ! WriterError {
-  let mut writer = WriterActor.stdoutWriterProvider()
+  let mut writer = Writer.stdoutWriterProvider()
   return run render() |> Effect.provideMut<Writer>(&mut writer)
 }`
     const snapshot = yield* Analysis.makeRealized({
@@ -531,15 +531,15 @@ pub fn make() -> Person { return Person { name: "Julia", token: 42 } }`),
   }),
 )
 
-const optionRenderingProgram = `import silk.effect as Effect
-import silk.format as Format
+const optionRenderingProgram = `import silk.effect { Effect }
+import silk.format { Format }
 import silk.format { Alignment, FormatOptions, Sign }
-import silk.option as Option
+import silk.option { Option }
 import silk.usize as usize
-import silk.writer as WriterActor
+import silk.writer { Writer, WriterError, StdoutWriter }
 import silk.writer { Writer, WriterError }
 
-fn options(width: usize, alignment: Alignment, fill: char, sign: Sign, zeroPad: bool, precision: Option.Option<usize>) -> FormatOptions {
+fn options(width: usize, alignment: Alignment, fill: char, sign: Sign, zeroPad: bool, precision: Option<usize>) -> FormatOptions {
   return FormatOptions {
     width: Option.some<usize>(width), alignment: alignment, fill: fill, sign: sign,
     alternate: true, zeroPad: zeroPad, precision: move precision, color: true,
@@ -592,7 +592,7 @@ effect fn render() -> () ! WriterError ? &mut Writer {
 
 effect fn build() -> i32 ! WriterError {
   if !accessorsHold() { return 2 }
-  let mut writer = WriterActor.stdoutWriterProvider()
+  let mut writer = Writer.stdoutWriterProvider()
   run render() |> Effect.provideMut<Writer>(&mut writer)
   return 42
 }
@@ -714,7 +714,7 @@ it('declares inline Display witnesses without a second string-writing route', ()
     `impl Display for string {
   /// Writes the string's UTF-8 bytes through the ambient mutable Writer.`,
   )
-  assert.include(source, 'return run writeText(&mut formatter, self.*)')
+  assert.include(source, 'return run Format.writeText(&mut formatter, self.*)')
   assert.notInclude(source, 'unsignedText(')
   assert.notInclude(source, 'signedText(')
   assert.notInclude(source, 'OutOfMemoryError')

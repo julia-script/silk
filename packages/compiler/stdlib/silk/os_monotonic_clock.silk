@@ -17,8 +17,8 @@
 //! ambient implementation.
 
 import silk.i64 as i64
-import silk.monotonic_clock as MonotonicClock
-import silk.system_clock as SystemClock
+import silk.monotonic_clock { MonotonicClock }
+import silk.system_clock { SystemClock }
 import silk.system_clock { Instant }
 import silk.u64 as u64
 
@@ -30,9 +30,37 @@ import silk.u64 as u64
 /// reachable operation on this provider.
 pub struct OsMonotonicClock {}
 
-/// Creates a native monotonic-clock provider without reading the clock or installing a default.
-pub fn make() -> OsMonotonicClock {
-  return OsMonotonicClock {}
+impl OsMonotonicClock {
+  effect fn now(self: &mut Self) -> Instant {
+    return run readInstant()
+  }
+
+  effect fn getResolution(self: &mut Self) -> u64 {
+    let mut nanoseconds = u64.MIN
+    let succeeded = run readResolution(&mut nanoseconds)
+    if succeeded {
+      if nanoseconds > u64.MIN { return nanoseconds }
+    }
+    let invalid = 1 / 0
+    return nanoseconds
+  }
+
+  effect fn waitUntil(self: &mut Self, when: Instant) -> () {
+    return run waitDeadline(move when)
+  }
+
+  effect fn waitFor(self: &mut Self, howLong: u64) -> () {
+    let start = run readInstant()
+    let deadline = MonotonicClock.deadlineAfter(&start, howLong)
+    return run waitDeadline(move deadline)
+  }
+}
+
+impl OsMonotonicClock {
+  /// Creates a native monotonic-clock provider without reading the clock or installing a default.
+  pub fn make() -> OsMonotonicClock {
+    return OsMonotonicClock {}
+  }
 }
 
 effect fn read(seconds: &mut i64, nanoseconds: &mut i64) -> bool {
@@ -59,20 +87,6 @@ effect fn readInstant() -> Instant {
   return SystemClock.make(seconds, nanoseconds)
 }
 
-effect fn now(self: &mut OsMonotonicClock) -> Instant {
-  return run readInstant()
-}
-
-effect fn getResolution(self: &mut OsMonotonicClock) -> u64 {
-  let mut nanoseconds = u64.MIN
-  let succeeded = run readResolution(&mut nanoseconds)
-  if succeeded {
-    if nanoseconds > u64.MIN { return nanoseconds }
-  }
-  let invalid = 1 / 0
-  return nanoseconds
-}
-
 effect fn waitDeadline(when: Instant) -> () {
   let mut deadline = move when
   let seconds = SystemClock.seconds(&deadline)
@@ -83,17 +97,7 @@ effect fn waitDeadline(when: Instant) -> () {
   return ()
 }
 
-effect fn waitUntil(self: &mut OsMonotonicClock, when: Instant) -> () {
-  return run waitDeadline(move when)
-}
-
-effect fn waitFor(self: &mut OsMonotonicClock, howLong: u64) -> () {
-  let start = run readInstant()
-  let deadline = MonotonicClock.deadlineAfter(&start, howLong)
-  return run waitDeadline(move deadline)
-}
-
-impl MonotonicClock.MonotonicClock for OsMonotonicClock {
+impl MonotonicClock for OsMonotonicClock {
   now: OsMonotonicClock.now
   getResolution: OsMonotonicClock.getResolution
   waitUntil: OsMonotonicClock.waitUntil

@@ -37,7 +37,7 @@ fn recordPayloadCleanup(self: &mut ReadyInbox) -> i32 {
 
 struct Payload {
   value: i32
-  inbox: Shared.Shared<ReadyInbox>
+  inbox: Shared<ReadyInbox>
 }
 
 impl Drop for Payload {
@@ -48,7 +48,7 @@ impl Drop for Payload {
   }
 }
 
-fn enqueue(payload: i32, inbox: Shared.Shared<ReadyInbox>, identifier: i32) -> i32 {
+fn enqueue(payload: i32, inbox: Shared<ReadyInbox>, identifier: i32) -> i32 {
   let pushed = Shared.withMut<ReadyInbox, i32>(&inbox, pushNoGrow(identifier))
   drop inbox
   return payload + pushed - identifier
@@ -59,7 +59,7 @@ struct Stored<F: once fn(i32) -> i32> {
 }
 
 pub struct CallbackCapture {
-  inbox: Shared.Shared<ReadyInbox>
+  inbox: Shared<ReadyInbox>
   identifier: i32
 }
 
@@ -96,11 +96,11 @@ struct DeferredState<A, F: once fn(i32) -> i32> {
 }
 
 struct Producer<F: once fn(i32) -> i32> {
-  state: Shared.Shared<DeferredState<Payload, F>>
+  state: Shared<DeferredState<Payload, F>>
 }
 
 struct Waiter<T> {
-  state: Shared.Shared<T>
+  state: Shared<T>
 }
 
 struct Extracted<F: once fn(i32) -> i32> {
@@ -191,7 +191,7 @@ fn lifecycleFingerprint(self: &ReadyInbox) -> i32 {
   return self.cleanupFingerprint
 }
 
-fn observeOwnedInbox(inbox: Shared.Shared<ReadyInbox>) -> i32 {
+fn observeOwnedInbox(inbox: Shared<ReadyInbox>) -> i32 {
   let result = Shared.with<ReadyInbox, i32>(&inbox, inboxFingerprint)
   drop inbox
   return result
@@ -210,8 +210,8 @@ effect fn reject(
 impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.reject }
 
 fn connected(
-  inbox: &Shared.Shared<ReadyInbox>,
-  state: &Shared.Shared<DeferredState<Payload, typeof(notifyReady)>>,
+  inbox: &Shared<ReadyInbox>,
+  state: &Shared<DeferredState<Payload, typeof(notifyReady)>>,
   unusedPayload: Payload,
   firstCallback: ReadyCallback<typeof(notifyReady)>,
   secondCallback: ReadyCallback<typeof(notifyReady)>,

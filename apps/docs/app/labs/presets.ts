@@ -422,16 +422,16 @@ import silk.logger {LogError}
 
 import silk.u8
 
-import silk.logger {length, messageByteAt}
+import silk.logger {Logger}
 
 effect fn program() -> i32 ! LogError {
   let mut logger = Logger.inMemoryProvider()
   let first = run Effect.provideMut(Effect.log("ready"), &mut logger)
   let second = run Effect.provideMut(Effect.logWarning("second\\nline"), &mut logger)
-  if length(&logger) != 2 {
+  if Logger.length(&logger) != 2 {
     return 0
   }
-  return u8.toI32(messageByteAt(&logger, 1, 6)) + 32
+  return u8.toI32(Logger.messageByteAt(&logger, 1, 6)) + 32
 }
 
 effect fn recover(error: LogError) -> i32 {
@@ -3326,7 +3326,7 @@ import silk.i32
 
 import silk.u64
 
-import silk.hash {HashKey, HashSeed, mix, seed}
+import silk.hash {HashKey, HashSeed, Hash}
 
 pub struct Word {
   pub value: u64
@@ -3337,7 +3337,7 @@ fn wordEquals(left: &Word, right: &Word) -> bool {
 }
 
 fn wordHash(value: &Word, key: &HashSeed) -> u64 {
-  return mix(key, value.value)
+  return Hash.mix(key, value.value)
 }
 
 impl HashKey for Word {
@@ -3353,7 +3353,7 @@ fn agree<T: HashKey>(left: &T, right: &T, key: &HashSeed) -> bool {
 }
 
 pub fn main() -> i32 {
-  let key = seed(7)
+  let key = Hash.seed(7)
   let left = Word {value: 3}
   let right = Word {value: 3}
   if agree(&left, &right, &key) {

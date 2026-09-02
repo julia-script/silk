@@ -15,11 +15,11 @@ install a global scheduler or infer one at `main`:
 ```silk
 import silk.allocator { OutOfMemoryError }
 import silk.effect { Effect }
-import silk.fiber { Fiber }
-import silk.local_scheduler { LocalScheduler }
-import silk.monotonic_clock as MonotonicClock
-import silk.scheduler { Scheduler }
-import silk.system_clock as SystemClock
+import silk.fiber { Fiber, Cancelled, Outcome }
+import silk.local_scheduler { LocalScheduler, StalledError }
+import silk.monotonic_clock { MonotonicClock }
+import silk.scheduler { Scheduler, TaskIdExhaustedError }
+import silk.system_clock { SystemClock }
 import silk.system_clock { Instant }
 
 struct ParentClock {
@@ -45,7 +45,7 @@ effect fn parentWaitFor(self: &mut ParentClock, duration: u64) -> () {
   return run parentWaitUntil(move self, move deadline)
 }
 
-impl MonotonicClock.MonotonicClock for ParentClock {
+impl MonotonicClock for ParentClock {
   now: ParentClock.parentNow
   getResolution: ParentClock.parentResolution
   waitUntil: ParentClock.parentWaitUntil
@@ -57,17 +57,17 @@ effect fn work() -> i32 {
 }
 
 effect fn program() -> i32
-! OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
-? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+! OutOfMemoryError | TaskIdExhaustedError | Cancelled
+? &mut Scheduler | &mut MonotonicClock {
   let child = run Fiber.forkChild<i32, never>(work())
   return run Fiber.join<i32, never>(move child)
 }
 
 effect fn recover(
   error: OutOfMemoryError
-    | Scheduler.TaskIdExhaustedError
-    | Fiber.Cancelled
-    | LocalScheduler.StalledError,
+    | TaskIdExhaustedError
+    | Cancelled
+    | StalledError,
 ) -> i32 {
   drop error
   return -1
@@ -79,7 +79,7 @@ pub fn main() -> i32 {
   let scheduled = Effect.catchAll(
     LocalScheduler.execute(&mut scheduler, program()),
     recover,
-  ) |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+  ) |> Effect.provideMut<MonotonicClock>(&mut clock)
   return run move scheduled
 }
 ```
@@ -94,9 +94,9 @@ loop itself.
 The complete error row is deliberate:
 
 - `OutOfMemoryError` reports task-storage allocation refusal;
-- `Scheduler.TaskIdExhaustedError` reports exhausted task identities;
-- `Fiber.Cancelled` is the join result of structured cancellation; and
-- `LocalScheduler.StalledError` means the root is incomplete with no ready task or active event
+- `TaskIdExhaustedError` reports exhausted task identities;
+- `Cancelled` is the join result of structured cancellation; and
+- `StalledError` means the root is incomplete with no ready task or active event
   registration remaining.
 
 Fatal traps remain outside this typed recovery path.
@@ -132,10 +132,10 @@ outside a scheduler-owned task clock, still blocks the calling host thread.
 
 Both observation operations consume the Fiber:
 
-| Operation     | Result                                                                   |
-| ------------- | ------------------------------------------------------------------------ |
-| `Fiber.await` | `Fiber.Outcome<A, E>` containing success, typed failure, or cancellation |
-| `Fiber.join`  | `A`, with the child's `E` and `Fiber.Cancelled` in the failure channel   |
+| Operation     | Result                                                             |
+| ------------- | ------------------------------------------------------------------ |
+| `Fiber.await` | `Outcome<A, E>` containing success, typed failure, or cancellation |
+| `Fiber.join`  | `A`, with the child's `E` and `Cancelled` in the failure channel   |
 
 If the child is complete, observation returns immediately. Otherwise the current task parks until
 completion wakes it. Reusing the consumed handle reports the ordinary ownership diagnostic

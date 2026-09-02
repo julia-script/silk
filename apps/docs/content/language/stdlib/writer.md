@@ -18,7 +18,7 @@ tests can replace the provider for one lexical operation. Provider failure produ
 
 ## Gotchas
 
-The native providers require a host standard-stream boundary. [`ignoreError`](#declaration-73696c6b2f7772697465723a3a69676e6f72654572726f72) removes the typed
+The native providers require a host standard-stream boundary. [`ignoreError`](#declaration-73696c6b2f7772697465723a3a5772697465722e69676e6f72654572726f72) removes the typed
 failure value and returns unit for a failed Effect.
 
 ## Examples
@@ -28,16 +28,16 @@ failure value and returns unit for a failed Effect.
 ```silk
 import silk.effect { Effect }
 
-import silk.writer { Writer }
+import silk.writer { Writer, WriterError }
 
 effect fn writeMessage() -> ()
-! Writer.WriterError {
+! WriterError {
   let mut writer = Writer.stdoutWriterProvider()
   return run Writer.writeAll(b"Silk\n")
     |> Effect.provideMut<Writer>(&mut writer)
 }
 
-effect fn ignoreWriteFailure(error: Writer.WriterError) -> () {
+effect fn ignoreWriteFailure(error: WriterError) -> () {
   return ()
 }
 
@@ -49,7 +49,7 @@ pub fn main() -> i32 {
 
 Import as `Writer` with `import silk.writer { Writer }`.
 
-Public declarations: 8.
+Public declarations: 4.
 
 <a id="declaration-73696c6b2f7772697465723a3a5772697465724572726f72"></a>
 
@@ -91,6 +91,51 @@ effect fn flush() -> () ! WriterError ? &mut Writer
 
 Requests that the active Writer provider commit its buffered output.
 
+<a id="declaration-73696c6b2f7772697465723a3a5772697465722e7374646f757457726974657250726f7669646572"></a>
+
+### Associated function `Writer.stdoutWriterProvider`
+
+```silk
+pub fn stdoutWriterProvider() -> StdoutWriter
+```
+
+Creates a process-backed Writer provider for standard output.
+
+<a id="declaration-73696c6b2f7772697465723a3a5772697465722e73746465727257726974657250726f7669646572"></a>
+
+### Associated function `Writer.stderrWriterProvider`
+
+```silk
+pub fn stderrWriterProvider() -> StderrWriter
+```
+
+Creates a process-backed Writer provider for standard error.
+
+<a id="declaration-73696c6b2f7772697465723a3a5772697465722e69676e6f72654572726f72"></a>
+
+### Associated function `Writer.ignoreError`
+
+```silk
+pub effect fn ignoreError<A, E, ?R>(self: once Effect<A ! E ? R>) -> () | A ? R
+```
+
+Runs one Effect and converts its typed failure to unit while it preserves a successful value.
+
+#### Details
+
+This function consumes `self` one time and preserves its provider requirements. It discards the
+error value when the Effect fails.
+
+<a id="declaration-73696c6b2f7772697465723a3a5772697465722e7772697465537472696e67"></a>
+
+### Associated function `Writer.writeString`
+
+```silk
+pub effect fn writeString(val: string) -> () ! WriterError ? &mut Writer
+```
+
+Writes the UTF-8 bytes of `val` through the active Writer provider.
+
 <a id="declaration-73696c6b2f7772697465723a3a5374646f7574577269746572"></a>
 
 ## `StdoutWriter`
@@ -110,41 +155,6 @@ pub struct StderrWriter
 ```
 
 A Writer provider that writes to process standard error.
-
-<a id="declaration-73696c6b2f7772697465723a3a7374646f757457726974657250726f7669646572"></a>
-
-## `stdoutWriterProvider`
-
-```silk
-pub fn stdoutWriterProvider() -> StdoutWriter
-```
-
-Creates a process-backed Writer provider for standard output.
-
-<a id="declaration-73696c6b2f7772697465723a3a73746465727257726974657250726f7669646572"></a>
-
-## `stderrWriterProvider`
-
-```silk
-pub fn stderrWriterProvider() -> StderrWriter
-```
-
-Creates a process-backed Writer provider for standard error.
-
-<a id="declaration-73696c6b2f7772697465723a3a69676e6f72654572726f72"></a>
-
-## `ignoreError`
-
-```silk
-pub effect fn ignoreError<A, E, ?R>(self: once Effect<A ! E ? R>) -> () | A ? R
-```
-
-Runs one Effect and converts its typed failure to unit while it preserves a successful value.
-
-### Details
-
-This function consumes `self` one time and preserves its provider requirements. It discards the
-error value when the Effect fails.
 
 <a id="declaration-73696c6b2f7772697465723a3a696d706c656d656e746174696f6e3a30"></a>
 
@@ -193,13 +203,3 @@ writeAll = StderrWriter.impl@1.writeAll
 ```silk
 flush = StderrWriter.impl@1.flush
 ```
-
-<a id="declaration-73696c6b2f7772697465723a3a7772697465537472696e67"></a>
-
-## `writeString`
-
-```silk
-pub effect fn writeString(val: string) -> () ! Writer.WriterError ? &mut Writer
-```
-
-Writes the UTF-8 bytes of `val` through the active Writer provider.

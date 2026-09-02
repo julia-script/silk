@@ -34,23 +34,23 @@ const assertRunsEverywhere = Effect.fnUntraced(function* (
  * out of its body entirely, so a regular expression or a Windows path needs no doubled backslash.
  */
 const escapePolicy = `import silk.usize as usize
-import silk.string { byteLength, utf8Bytes }
+import silk.string { String }
 
 pub fn main() -> i32 {
   let raw = r"\\n"
   let escaped = "\\n"
-  if usize.toI32(byteLength(raw)) == 2 {} else { return 1 }
-  if usize.toI32(byteLength(escaped)) == 1 {} else { return 2 }
+  if usize.toI32(String.byteLength(raw)) == 2 {} else { return 1 }
+  if usize.toI32(String.byteLength(escaped)) == 1 {} else { return 2 }
 
-  let rawBytes = utf8Bytes(raw)
+  let rawBytes = String.utf8Bytes(raw)
   if rawBytes[usize.ZERO] == 92 {} else { return 3 }
   if rawBytes[usize.add(1, 0)] == 110 {} else { return 4 }
-  if utf8Bytes(escaped)[usize.ZERO] == 10 {} else { return 5 }
+  if String.utf8Bytes(escaped)[usize.ZERO] == 10 {} else { return 5 }
 
   let decimalPattern = r"\\d+\\.\\d+"
   let windowsPath = r"C:\\Users\\build"
-  if usize.toI32(byteLength(decimalPattern)) == 8 {} else { return 6 }
-  if usize.toI32(byteLength(windowsPath)) == 14 {} else { return 7 }
+  if usize.toI32(String.byteLength(decimalPattern)) == 8 {} else { return 6 }
+  if usize.toI32(String.byteLength(windowsPath)) == 14 {} else { return 7 }
   return 42
 }`
 
@@ -62,18 +62,18 @@ it.effect(
 
 /** The triple-delimited raw form takes the same body policy as its single-delimited form. */
 const multiline = `import silk.usize as usize
-import silk.string { byteLength, utf8Bytes }
+import silk.string { String }
 
 pub fn main() -> i32 {
   let helpText = r"""
 Usage: silk build
   --target \\path\\to\\dir
 """
-  let bytes = utf8Bytes(helpText)
+  let bytes = String.utf8Bytes(helpText)
   if bytes[usize.ZERO] == 10 {} else { return 1 }
   // A backslash inside the body is content, exactly as in the single-delimited form.
   if bytes[usize.add(30, 0)] == 92 {} else { return 2 }
-  if usize.toI32(byteLength(helpText)) == 43 {} else { return 3 }
+  if usize.toI32(String.byteLength(helpText)) == 43 {} else { return 3 }
   return 42
 }`
 
@@ -87,9 +87,9 @@ it.effect('gives a raw literal the string type, so it passes where a text litera
   Effect.gen(function* () {
     // `byteLength` accepts `string` only, so accepting this call is the type evidence.
     const source = `import silk.usize as usize
-import silk.string { byteLength }
+import silk.string { String }
 
-fn measure(value: string) -> usize { return byteLength(value) }
+fn measure(value: string) -> usize { return String.byteLength(value) }
 
 pub fn main() -> i32 {
   return usize.toI32(measure(r"\\d")) + usize.toI32(measure("d"))

@@ -18,7 +18,7 @@
 //! # Examples
 //! ## Make canonically equivalent text compare equal
 //! ```silk
-//! import silk.allocator { Allocator }
+//! import silk.allocator { Allocator, OutOfMemoryError }
 //!
 //! import silk.effect { Effect }
 //!
@@ -27,7 +27,7 @@
 //! import silk.unicode { Unicode }
 //!
 //! effect fn normalize() -> i32
-//! ! Allocator.OutOfMemoryError {
+//! ! OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
 //!   let composing = Unicode.normalizeNfc("e\u{301}")
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -44,7 +44,7 @@
 //!   return 42
 //! }
 //!
-//! effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+//! effect fn recover(error: OutOfMemoryError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -52,7 +52,6 @@
 //!   return run Effect.catchAll(normalize(), recover)
 //! }
 //! ```
-
 
 // Unicode policy lives here rather than in the compiler, and it is explicitly invoked. Nothing on
 // this path runs unless a program calls it: ordinary `string` equality still compares exact bytes,
@@ -68,40 +67,81 @@
 // and handed along.
 
 import silk.bool as bool
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 import silk.allocator { OutOfMemoryError }
 import silk.result { Result }
-import silk.string { String, InvalidUtf8, copyUtf8, make as stringMake, utf8Bytes }
+import silk.string { String, InvalidUtf8 }
 import silk.u32 as u32
 import silk.u8 as u8
-import silk.unicode_tables {
-  Decomposition,
-  canonicalComposition,
-  canonicalDecomposition,
-  combiningClass,
-  dataVersion as tableDataVersion,
-  maximumDecompositionLength
-}
+import silk.unicode_tables { Decomposition, UnicodeTables }
 import silk.usize as usize
-import silk.vector {
-  Vector,
-  make as vectorMake,
-  append as vectorAppend,
-  asSlice as vectorAsSlice,
-  get as vectorGet,
-  length as vectorLength,
-  set as vectorSet,
-  truncate as vectorTruncate
-}
+import silk.vector { Vector }
 
-/// The importable name of the `silk.unicode` module scope.
+/// The owner of the normalization and Unicode-data operations.
 ///
 /// # Details
 ///
-/// This struct carries no data and is never constructed by the library. Importing it as
-/// `import silk.unicode { Unicode }` names the module scope, so normalization and Unicode-data
-/// operations resolve through `Unicode`.
+/// This struct carries no data and is never constructed by the library. Every operation is an
+/// inherent member declared in `impl Unicode`, reached through `import silk.unicode { Unicode }`.
 pub struct Unicode {}
+
+impl Unicode {
+  /// Returns the Unicode version that defines this module's normalization results.
+  ///
+  /// # Details
+  ///
+  /// The version is data, not identity: a later database changes what this returns and what the
+  /// tables contain, and changes neither a compiler type nor a target ABI.
+  pub fn dataVersion() -> string {
+    return UnicodeTables.dataVersion()
+  }
+
+  /// Returns the longest full canonical decomposition of one scalar in the active Unicode data.
+  pub fn longestDecomposition() -> usize {
+    return UnicodeTables.maximumDecompositionLength()
+  }
+
+  /// Returns a Unicode scalar's canonical combining class, or zero for a starter or unknown value.
+  pub fn canonicalCombiningClass(
+    /// Unicode scalar value represented as its unsigned code point.
+    scalar: u32,
+  ) -> u32 {
+    return UnicodeTables.combiningClass(scalar)
+  }
+
+  /// Returns the Normalization Form D of text: fully decomposed, in canonical order.
+  ///
+  /// # When to use
+  ///
+  /// Use this function when consumers require decomposed scalars in canonical combining-class order.
+  /// Use [`normalizeNfc`] for ordinary normalized storage and comparison.
+  ///
+  /// # Details
+  ///
+  /// The function does not change `value`. It returns freshly owned UTF-8 text and can allocate.
+  /// Canonically equivalent inputs produce equal NFD text under the same Unicode data version.
+  pub effect fn normalizeNfd(value: string) -> String ! OutOfMemoryError ? &mut Allocator {
+    let scalars = run decomposedScalars(value)
+    return run encodeOwned(move scalars)
+  }
+
+  /// Returns the Normalization Form C of text: decomposed, canonically ordered, then recomposed.
+  ///
+  /// # When to use
+  ///
+  /// Use this function for ordinary normalized storage and canonical-equivalence comparison. Use
+  /// [`normalizeNfd`] when a consumer requires decomposed scalars.
+  ///
+  /// # Details
+  ///
+  /// The function does not change `value`. It returns freshly owned UTF-8 text and can allocate.
+  /// Canonically equivalent inputs produce equal NFC text under the same Unicode data version.
+  pub effect fn normalizeNfc(value: string) -> String ! OutOfMemoryError ? &mut Allocator {
+    let scalars = run decomposedScalars(value)
+    let composed = composeInPlace(move scalars)
+    return run encodeOwned(move composed)
+  }
+}
 
 /// Hangul syllables decompose and compose arithmetically rather than through a table, so UAX #15
 /// names these constants instead of tabulating eleven thousand rows.
@@ -125,29 +165,6 @@ const NO_COMBINING_CLASS: u32 = 256
 /// loudly rather than silently overrunning.
 const PENDING_CAPACITY: usize = 4
 
-/// Returns the Unicode version that defines this module's normalization results.
-///
-/// # Details
-///
-/// The version is data, not identity: a later database changes what this returns and what the
-/// tables contain, and changes neither a compiler type nor a target ABI.
-pub fn dataVersion() -> string {
-  return tableDataVersion()
-}
-
-/// Returns the longest full canonical decomposition of one scalar in the active Unicode data.
-pub fn longestDecomposition() -> usize {
-  return maximumDecompositionLength()
-}
-
-/// Returns a Unicode scalar's canonical combining class, or zero for a starter or unknown value.
-pub fn canonicalCombiningClass(
-  /// Unicode scalar value represented as its unsigned code point.
-  scalar: u32,
-) -> u32 {
-  return combiningClass(scalar)
-}
-
 fn isHangulSyllable(scalar: u32) -> bool {
   if scalar < HANGUL_SYLLABLE_BASE { return false }
   return scalar < HANGUL_SYLLABLE_BASE + HANGUL_SYLLABLE_COUNT
@@ -162,17 +179,17 @@ effect fn appendOrdered(
   scalar: u32,
 ) -> Vector<u32> ! OutOfMemoryError ? &mut Allocator {
   let mut ordered = move buffer
-  let appended = run vectorAppend<u32>(&mut ordered, scalar)
-  let class = combiningClass(scalar)
+  let appended = run Vector.append<u32>(&mut ordered, scalar)
+  let class = UnicodeTables.combiningClass(scalar)
   if class == 0 { return move ordered }
-  let mut index = vectorLength<u32>(&ordered) - usize.ONE
+  let mut index = Vector.length<u32>(&ordered) - usize.ONE
   while usize.ZERO < index {
-    let previous = vectorGet<u32>(&ordered, index - usize.ONE)
-    let previousClass = combiningClass(previous)
+    let previous = Vector.get<u32>(&ordered, index - usize.ONE)
+    let previousClass = UnicodeTables.combiningClass(previous)
     if previousClass == 0 { return move ordered }
     if previousClass <= class { return move ordered }
-    vectorSet<u32>(&mut ordered, index - usize.ONE, scalar)
-    vectorSet<u32>(&mut ordered, index, previous)
+    Vector.set<u32>(&mut ordered, index - usize.ONE, scalar)
+    Vector.set<u32>(&mut ordered, index, previous)
     index = index - usize.ONE
   }
   return move ordered
@@ -208,7 +225,7 @@ effect fn decomposeInto(
   let mut depth = usize.ZERO
   let mut current = scalar
   while true {
-    let mapping = canonicalDecomposition(current)
+    let mapping = UnicodeTables.canonicalDecomposition(current)
     if mapping.first == 0 { break }
     if mapping.second != 0 {
       pending[depth] = mapping.second
@@ -248,7 +265,7 @@ fn composePair(starter: u32, following: u32) -> u32 {
       }
     }
   }
-  return canonicalComposition(starter, following)
+  return UnicodeTables.canonicalComposition(starter, following)
 }
 
 /// Rewrites a canonically ordered buffer as its canonical composition.
@@ -257,16 +274,16 @@ fn composePair(starter: u32, following: u32) -> u32 {
 /// and a scalar blocked from its starter by an equal or higher combining class is kept as written.
 fn composeInPlace(buffer: Vector<u32>) -> Vector<u32> {
   let mut composed = move buffer
-  if vectorLength<u32>(&composed) == usize.ZERO { return move composed }
+  if Vector.length<u32>(&composed) == usize.ZERO { return move composed }
   let mut starterIndex = usize.ZERO
-  let mut starter = vectorGet<u32>(&composed, usize.ZERO)
+  let mut starter = Vector.get<u32>(&composed, usize.ZERO)
   let mut written = usize.ONE
-  let mut lastClass = combiningClass(starter)
+  let mut lastClass = UnicodeTables.combiningClass(starter)
   if lastClass != 0 { lastClass = NO_COMBINING_CLASS }
   let mut index = usize.ONE
-  while index < vectorLength<u32>(&composed) {
-    let scalar = vectorGet<u32>(&composed, index)
-    let class = combiningClass(scalar)
+  while index < Vector.length<u32>(&composed) {
+    let scalar = Vector.get<u32>(&composed, index)
+    let class = UnicodeTables.combiningClass(scalar)
     let composite = composePair(starter, scalar)
     let mut absorbed = false
     if composite != 0 {
@@ -274,7 +291,7 @@ fn composeInPlace(buffer: Vector<u32>) -> Vector<u32> {
       if lastClass == 0 { absorbed = true }
     }
     if absorbed {
-      vectorSet<u32>(&mut composed, starterIndex, composite)
+      Vector.set<u32>(&mut composed, starterIndex, composite)
       starter = composite
     } else {
       if class == 0 {
@@ -282,12 +299,12 @@ fn composeInPlace(buffer: Vector<u32>) -> Vector<u32> {
         starter = scalar
       }
       lastClass = class
-      vectorSet<u32>(&mut composed, written, scalar)
+      Vector.set<u32>(&mut composed, written, scalar)
       written = written + usize.ONE
     }
     index = index + usize.ONE
   }
-  vectorTruncate<u32>(&mut composed, written)
+  Vector.truncate<u32>(&mut composed, written)
   return move composed
 }
 
@@ -302,8 +319,8 @@ fn composeInPlace(buffer: Vector<u32>) -> Vector<u32> {
 /// The input is a `string`, so it is already valid UTF-8 and the decode needs no validation; the
 /// safe validating decoder is `silk/string`'s `fromUtf8`.
 effect fn decomposedScalars(value: string) -> Vector<u32> ! OutOfMemoryError ? &mut Allocator {
-  let bytes = utf8Bytes(value)
-  let mut buffer = vectorMake<u32>()
+  let bytes = String.utf8Bytes(value)
+  let mut buffer = Vector.make<u32>()
   let mut offset = usize.ZERO
   while offset < bytes.length {
     let first = u8.toU32(bytes[offset])
@@ -337,72 +354,40 @@ effect fn decomposedScalars(value: string) -> Vector<u32> ! OutOfMemoryError ? &
 
 /// Copies a scalar sequence into owned text.
 ///
-/// The encoder only ever writes well-formed UTF-8, so the validation inside `copyUtf8` cannot fail
+/// The encoder only ever writes well-formed UTF-8, so the validation inside `String.copyUtf8` cannot fail
 /// here; the failing arm returns empty text because this module has no reason to reach for the
 /// unchecked constructor to save a scan it is not paying much for.
 effect fn encodeOwned(scalars: Vector<u32>) -> String ! OutOfMemoryError ? &mut Allocator {
   let source = move scalars
-  let mut bytes = vectorMake<u8>()
+  let mut bytes = Vector.make<u8>()
   let mut index = usize.ZERO
-  while index < vectorLength<u32>(&source) {
-    let scalar = vectorGet<u32>(&source, index)
+  while index < Vector.length<u32>(&source) {
+    let scalar = Vector.get<u32>(&source, index)
     if scalar < 128 {
-      let only = run vectorAppend<u8>(&mut bytes, u32.toU8(scalar))
+      let only = run Vector.append<u8>(&mut bytes, u32.toU8(scalar))
     } else {
       if scalar < 2048 {
-        let lead = run vectorAppend<u8>(&mut bytes, u32.toU8(192 + scalar / 64))
-        let last = run vectorAppend<u8>(&mut bytes, u32.toU8(128 + scalar % 64))
+        let lead = run Vector.append<u8>(&mut bytes, u32.toU8(192 + scalar / 64))
+        let last = run Vector.append<u8>(&mut bytes, u32.toU8(128 + scalar % 64))
       } else {
         if scalar < 65536 {
-          let lead = run vectorAppend<u8>(&mut bytes, u32.toU8(224 + scalar / 4096))
-          let middle = run vectorAppend<u8>(&mut bytes, u32.toU8(128 + (scalar / 64) % 64))
-          let last = run vectorAppend<u8>(&mut bytes, u32.toU8(128 + scalar % 64))
+          let lead = run Vector.append<u8>(&mut bytes, u32.toU8(224 + scalar / 4096))
+          let middle = run Vector.append<u8>(&mut bytes, u32.toU8(128 + (scalar / 64) % 64))
+          let last = run Vector.append<u8>(&mut bytes, u32.toU8(128 + scalar % 64))
         } else {
-          let lead = run vectorAppend<u8>(&mut bytes, u32.toU8(240 + scalar / 262144))
-          let second = run vectorAppend<u8>(&mut bytes, u32.toU8(128 + (scalar / 4096) % 64))
-          let third = run vectorAppend<u8>(&mut bytes, u32.toU8(128 + (scalar / 64) % 64))
-          let last = run vectorAppend<u8>(&mut bytes, u32.toU8(128 + scalar % 64))
+          let lead = run Vector.append<u8>(&mut bytes, u32.toU8(240 + scalar / 262144))
+          let second = run Vector.append<u8>(&mut bytes, u32.toU8(128 + (scalar / 4096) % 64))
+          let third = run Vector.append<u8>(&mut bytes, u32.toU8(128 + (scalar / 64) % 64))
+          let last = run Vector.append<u8>(&mut bytes, u32.toU8(128 + scalar % 64))
         }
       }
     }
     index = index + usize.ONE
   }
-  let owned = run copyUtf8(vectorAsSlice<u8>(&bytes))
+  let owned = run String.copyUtf8(Vector.asSlice<u8>(&bytes))
   return match move owned {
     Result<String, InvalidUtf8>.Success { value } => move value
-    Result<String, InvalidUtf8>.Failure { error } => stringMake()
+    Result<String, InvalidUtf8>.Failure { error } => String.make()
   }
 }
 
-/// Returns the Normalization Form D of text: fully decomposed, in canonical order.
-///
-/// # When to use
-///
-/// Use this function when consumers require decomposed scalars in canonical combining-class order.
-/// Use [`normalizeNfc`] for ordinary normalized storage and comparison.
-///
-/// # Details
-///
-/// The function does not change `value`. It returns freshly owned UTF-8 text and can allocate.
-/// Canonically equivalent inputs produce equal NFD text under the same Unicode data version.
-pub effect fn normalizeNfd(value: string) -> String ! OutOfMemoryError ? &mut Allocator {
-  let scalars = run decomposedScalars(value)
-  return run encodeOwned(move scalars)
-}
-
-/// Returns the Normalization Form C of text: decomposed, canonically ordered, then recomposed.
-///
-/// # When to use
-///
-/// Use this function for ordinary normalized storage and canonical-equivalence comparison. Use
-/// [`normalizeNfd`] when a consumer requires decomposed scalars.
-///
-/// # Details
-///
-/// The function does not change `value`. It returns freshly owned UTF-8 text and can allocate.
-/// Canonically equivalent inputs produce equal NFC text under the same Unicode data version.
-pub effect fn normalizeNfc(value: string) -> String ! OutOfMemoryError ? &mut Allocator {
-  let scalars = run decomposedScalars(value)
-  let composed = composeInPlace(move scalars)
-  return run encodeOwned(move composed)
-}

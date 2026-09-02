@@ -14,7 +14,7 @@ const provider = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 service Clock { effect fn value() -> i32 ? &mut Clock }
 struct FixedClock { storage: Allocation }
@@ -31,7 +31,7 @@ effect fn openClock() -> FixedClock ! OutOfMemoryError {
 
 /** Two executions of one provided Effect: each must acquire and release its own provider. */
 const twoExecutions = `import silk.allocator { OutOfMemoryError }
-import silk.effect as Effect
+import silk.effect { Effect }
 ${provider}
 
 effect fn read() -> i32 ! OutOfMemoryError ? &mut Clock { return 21 }
@@ -53,7 +53,7 @@ pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
  * releasing it, so the retry is also the regression test for the typed-failure release.
  */
 const threeAttempts = `import silk.allocator { OutOfMemoryError }
-import silk.effect as Effect
+import silk.effect { Effect }
 ${provider}
 
 effect fn read() -> i32 ! OutOfMemoryError ? &mut Clock { fail OutOfMemoryError {} }

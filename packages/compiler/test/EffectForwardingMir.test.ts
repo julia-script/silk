@@ -12,7 +12,7 @@ it.effect('retains the runner of an Effect returned through a lazy forwarding wr
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(
       'effect-forwarding/nested-lazy-wrapper',
-      encoder.encode(`import silk.effect as Effect
+      encoder.encode(`import silk.effect { Effect }
 effect fn nested(program: once Effect<i32>) -> i32 {
   return run program
 }
@@ -88,7 +88,7 @@ it.effect('retains two call sites for the same bound service implementation', ()
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(
       'effect-forwarding/two-service-call-sites',
-      encoder.encode(`import silk.effect as Effect
+      encoder.encode(`import silk.effect { Effect }
 service Counter {
   effect fn next() -> i32 ? &mut Counter
 }
@@ -132,7 +132,7 @@ it.effect('terminates direct recursion discovered through a bound service implem
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(
       'effect-forwarding/direct-service-recursion',
-      encoder.encode(`import silk.effect as Effect
+      encoder.encode(`import silk.effect { Effect }
 service Loop {
   effect fn next() -> i32 ? &mut Loop
 }
@@ -164,8 +164,8 @@ it.effect('retains a provided Effect runner transferred into an independent Exec
       'effect-forwarding/provided-independent-execution',
       encoder.encode(`import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
-import silk.effect as Effect
-import silk.execution as Execution
+import silk.effect { Effect }
+import silk.execution { Execution }
 service Value {
   effect fn get() -> i32 ? &mut Value
 }
@@ -233,7 +233,7 @@ it.effect('retains an exact Effect argument forwarded through a service operatio
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(
       'effect-forwarding/service-operation',
-      encoder.encode(`import silk.effect as Effect
+      encoder.encode(`import silk.effect { Effect }
 service Scheduler {
   effect fn prepare<A>(program: once Effect<A>) -> A ? &mut Scheduler
 }
@@ -275,7 +275,7 @@ it.effect('retains every provider target forwarded through reachable Effect bran
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(
       'effect-forwarding/service-branches',
-      encoder.encode(`import silk.effect as Effect
+      encoder.encode(`import silk.effect { Effect }
 service Choice {
   effect fn left() -> i32 ? &mut Choice
   effect fn right() -> i32 ? &mut Choice

@@ -148,10 +148,10 @@ pub fn main() -> i32 { return sum(20, 22) }`)
 
 it.effect('keeps the single-operation Integer bound working unchanged', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`import silk.numeric { add }
+    const { self, outcome } = yield* evaluate(`import silk.numeric { Numeric }
 pub fn main() -> i32 {
-  let narrow = add<u8>(1, 2)
-  return add<i32>(40, 2)
+  let narrow = Numeric.add<u8>(1, 2)
+  return Numeric.add<i32>(40, 2)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
@@ -308,9 +308,9 @@ pub fn main() -> i32 {
 )
 
 /**
- * `Integer.add` names both the bound's operation and a public function of `silk/numeric`. Inside a
- * body bounded by `Integer` the bound takes the spelling; the module function stays reachable
- * everywhere else, including through its own module namespace.
+ * `Integer.add` names the bound's operation while `Numeric.add` is the public function of
+ * `silk/numeric`. Inside a body bounded by `Integer` the bound takes the spelling; the module
+ * function stays reachable everywhere else through its owner `Numeric`.
  */
 it.effect('prefers the bound operation over a same-named module function', () =>
   Effect.gen(function* () {
@@ -327,8 +327,8 @@ pub fn main() -> i32 { return sum(20, 22) }`)
 
 it.effect('keeps the module function reachable where no bound claims the name', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`import silk.numeric { Integer }
-pub fn main() -> i32 { return Integer.add(40, 2) }`)
+    const { self, outcome } = yield* evaluate(`import silk.numeric { Numeric }
+pub fn main() -> i32 { return Numeric.add(40, 2) }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)

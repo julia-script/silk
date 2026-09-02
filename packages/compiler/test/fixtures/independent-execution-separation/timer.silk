@@ -1,14 +1,14 @@
 // Compiler fixture: same-thread Timer/Scheduler pressure, not a canonical public API.
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect as Effect
-import silk.execution as Execution
+import silk.effect { Effect }
+import silk.execution { Execution }
 import silk.layout { Layout }
-import silk.shared as Shared
+import silk.shared { Shared }
 
 struct Empty {}
 struct Armed { wake: Intrinsic.Wake }
 struct TimerReactor { slot: Empty | Armed fires: i32 }
-struct TimerGuard { reactor: Shared.Shared<TimerReactor> }
+struct TimerGuard { reactor: Shared<TimerReactor> }
 struct ChildResult { value: i32 }
 fn install(self: &mut TimerReactor, wake: Intrinsic.Wake) -> () {
   let previous = Intrinsic.replace(self.slot, Armed { wake: move wake })
@@ -19,16 +19,16 @@ fn extract(self: &mut TimerReactor) -> Empty | Armed {
   self.fires = self.fires + 1
   return Intrinsic.replace(self.slot, Empty {})
 }
-fn registerTimer(wake: Intrinsic.Wake, reactor: Shared.Shared<TimerReactor>) -> TimerGuard {
+fn registerTimer(wake: Intrinsic.Wake, reactor: Shared<TimerReactor>) -> TimerGuard {
   let installed = Shared.withMut(&reactor, install(move wake))
   return TimerGuard { reactor: move reactor }
 }
-effect fn timerChild(reactor: Shared.Shared<TimerReactor>) -> ChildResult {
+effect fn timerChild(reactor: Shared<TimerReactor>) -> ChildResult {
   let registration = registerTimer(move reactor)
   run Execution.park(move registration)
   return ChildResult { value: 40 }
 }
-fn poll(reactor: &Shared.Shared<TimerReactor>) -> () {
+fn poll(reactor: &Shared<TimerReactor>) -> () {
   let selected = Shared.withMut(reactor, extract)
   return match move selected {
     Empty {} => ()
@@ -39,8 +39,8 @@ fn poll(reactor: &Shared.Shared<TimerReactor>) -> () {
 struct OuterEmpty {}
 struct OuterArmed { wake: Intrinsic.Wake }
 struct WakeSlot { slot: OuterEmpty | OuterArmed childSignals: i32 }
-struct SchedulerEndpoint { wakeSlot: Shared.Shared<WakeSlot> }
-struct SchedulerGuard { wakeSlot: Shared.Shared<WakeSlot> }
+struct SchedulerEndpoint { wakeSlot: Shared<WakeSlot> }
+struct SchedulerGuard { wakeSlot: Shared<WakeSlot> }
 fn installOuter(self: &mut WakeSlot, wake: Intrinsic.Wake) -> () {
   let previous = Intrinsic.replace(self.slot, OuterArmed { wake: move wake })
   drop previous
@@ -57,7 +57,7 @@ fn childReady(endpoint: &SchedulerEndpoint) -> () {
     OuterArmed { wake } => Intrinsic.wake(move wake)
   }
 }
-fn registerOuter(wake: Intrinsic.Wake, wakeSlot: Shared.Shared<WakeSlot>) -> SchedulerGuard {
+fn registerOuter(wake: Intrinsic.Wake, wakeSlot: Shared<WakeSlot>) -> SchedulerGuard {
   let installed = Shared.withMut(&wakeSlot, installOuter(move wake))
   return SchedulerGuard { wakeSlot: move wakeSlot }
 }
@@ -66,7 +66,7 @@ struct SchedulerState {
   child: Empty | ChildStored
   result: i32
   sibling: i32
-  wakeSlot: Shared.Shared<WakeSlot>
+  wakeSlot: Shared<WakeSlot>
 }
 fn childComplete(owner: &mut SchedulerState, result: ChildResult) -> () {
   let ChildResult { value } = move result
@@ -81,11 +81,11 @@ fn childSuspend(
   drop previous
   return ()
 }
-fn completeShared(owner: &mut Shared.Shared<SchedulerState>, result: ChildResult) -> () {
+fn completeShared(owner: &mut Shared<SchedulerState>, result: ChildResult) -> () {
   return Shared.withMut(move owner, childComplete(move result))
 }
 fn suspendShared(
-  owner: &mut Shared.Shared<SchedulerState>,
+  owner: &mut Shared<SchedulerState>,
   execution: Intrinsic.Execution<ChildResult>
 ) -> () {
   return Shared.withMut(move owner, childSuspend(move execution))
@@ -95,19 +95,19 @@ fn takeChild(owner: &mut SchedulerState) -> Empty | ChildStored {
 }
 fn progressSibling(owner: &mut SchedulerState) -> () { owner.sibling = 2 return () }
 fn readScheduler(owner: &SchedulerState) -> i32 { return owner.result + owner.sibling }
-effect fn finishScheduler(owner: Shared.Shared<SchedulerState>, result: i32) -> i32 {
+effect fn finishScheduler(owner: Shared<SchedulerState>, result: i32) -> i32 {
   drop owner
   return result
 }
 effect fn driveChild(
   execution: Intrinsic.Execution<ChildResult>,
-  owner: &mut Shared.Shared<SchedulerState>
+  owner: &mut Shared<SchedulerState>
 ) -> () {
   return run Execution.drive(move execution, move owner, completeShared, suspendShared)
 }
 effect fn driveSelected(
   selected: Empty | ChildStored,
-  owner: &mut Shared.Shared<SchedulerState>
+  owner: &mut Shared<SchedulerState>
 ) -> () {
   return match move selected {
     Empty {} => ()
@@ -115,8 +115,8 @@ effect fn driveSelected(
   }
 }
 effect fn schedulerOuter(
-  scheduler: Shared.Shared<SchedulerState>,
-  wakeSlot: Shared.Shared<WakeSlot>
+  scheduler: Shared<SchedulerState>,
+  wakeSlot: Shared<WakeSlot>
 ) -> i32 {
   let mut state = move scheduler
   let progressed = Shared.withMut(&state, progressSibling)
@@ -131,7 +131,7 @@ fn markOuterReady(self: &mut OuterReady) -> () {
   self.notifications = self.notifications + 1
   return ()
 }
-fn outerReady(state: &Shared.Shared<OuterReady>) -> () {
+fn outerReady(state: &Shared<OuterReady>) -> () {
   return Shared.withMut(state, markOuterReady)
 }
 fn readOuterReady(self: &OuterReady) -> i32 { return self.notifications }
@@ -159,10 +159,10 @@ effect fn driveOuterStored(selected: Empty | OuterStored, owner: &mut ResultOwne
 }
 
 struct Prepared {
-  reactor: Shared.Shared<TimerReactor>
-  wakeSlot: Shared.Shared<WakeSlot>
-  readiness: Shared.Shared<OuterReady>
-  scheduler: Shared.Shared<SchedulerState>
+  reactor: Shared<TimerReactor>
+  wakeSlot: Shared<WakeSlot>
+  readiness: Shared<OuterReady>
+  scheduler: Shared<SchedulerState>
   outer: Intrinsic.Execution<i32>
 }
 effect fn prepare() -> Prepared ! OutOfMemoryError {
@@ -210,10 +210,10 @@ effect fn successfulTimer() -> i32 ! OutOfMemoryError {
   }
 }
 effect fn successfulPrepared(
-  reactor: Shared.Shared<TimerReactor>,
-  wakeSlot: Shared.Shared<WakeSlot>,
-  readiness: Shared.Shared<OuterReady>,
-  scheduler: Shared.Shared<SchedulerState>,
+  reactor: Shared<TimerReactor>,
+  wakeSlot: Shared<WakeSlot>,
+  readiness: Shared<OuterReady>,
+  scheduler: Shared<SchedulerState>,
   outer: Intrinsic.Execution<i32>
 ) -> i32 {
   let mut owner = ResultOwner { slot: Empty {}, result: 0 }
@@ -244,10 +244,10 @@ effect fn cancelledTimer() -> i32 ! OutOfMemoryError {
   }
 }
 effect fn cancelledPrepared(
-  reactor: Shared.Shared<TimerReactor>,
-  wakeSlot: Shared.Shared<WakeSlot>,
-  readiness: Shared.Shared<OuterReady>,
-  scheduler: Shared.Shared<SchedulerState>,
+  reactor: Shared<TimerReactor>,
+  wakeSlot: Shared<WakeSlot>,
+  readiness: Shared<OuterReady>,
+  scheduler: Shared<SchedulerState>,
   outer: Intrinsic.Execution<i32>
 ) -> i32 {
   let mut owner = ResultOwner { slot: Empty {}, result: 0 }

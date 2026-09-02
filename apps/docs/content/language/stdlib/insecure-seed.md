@@ -7,11 +7,11 @@ One provider-stable 128-bit value for initialization-time hash-flood hardening.
 ## When to use
 
 Read [`InsecureSeed`](#declaration-73696c6b2f696e7365637572655f736565643a3a496e73656375726553656564) once while initializing a language runtime or application data structure.
-Use [`fixed`](#declaration-73696c6b2f696e7365637572655f736565643a3a6669786564) in deterministic environments or [`fromRandom`](#declaration-73696c6b2f696e7365637572655f736565643a3a66726f6d52616e646f6d) when secure randomness is present.
+Use [`fixed`](#declaration-73696c6b2f696e7365637572655f736565643a3a496e736563757265536565642e6669786564) in deterministic environments or [`fromRandom`](#declaration-73696c6b2f696e7365637572655f736565643a3a496e736563757265536565642e66726f6d52616e646f6d) when secure randomness is present.
 
 ## Details
 
-A provider returns the same copyable [`Seed`](#declaration-73696c6b2f696e7365637572655f736565643a3a53656564) on every shared read. [`fromRandom`](#declaration-73696c6b2f696e7365637572655f736565643a3a66726f6d52616e646f6d) consumes two
+A provider returns the same copyable [`Seed`](#declaration-73696c6b2f696e7365637572655f736565643a3a53656564) on every shared read. [`fromRandom`](#declaration-73696c6b2f696e7365637572655f736565643a3a496e736563757265536565642e66726f6d52616e646f6d) consumes two
 secure words exactly once and stores them in an immutable provider.
 
 ## Gotchas
@@ -30,7 +30,7 @@ import silk.insecure_seed { InsecureSeed }
 pub fn main() -> i32 {
   let provider = InsecureSeed.fixed(20, 22)
   let seed = run InsecureSeed.get()
-    |> Effect.provide<InsecureSeed.InsecureSeed>(&provider)
+    |> Effect.provide<InsecureSeed>(&provider)
   if InsecureSeed.first(&seed) + InsecureSeed.second(&seed) != 42 { return 0 }
   return 42
 }
@@ -38,7 +38,7 @@ pub fn main() -> i32 {
 
 Import as `InsecureSeed` with `import silk.insecure_seed { InsecureSeed }`.
 
-Public declarations: 8.
+Public declarations: 3.
 
 <a id="declaration-73696c6b2f696e7365637572655f736565643a3a53656564"></a>
 
@@ -57,26 +57,6 @@ A copyable pair of initialization seed words with private representation.
 ```silk
 impl Copy for Seed
 ```
-
-<a id="declaration-73696c6b2f696e7365637572655f736565643a3a6669727374"></a>
-
-## `first`
-
-```silk
-pub fn first(seed: &silk/insecure_seed.Seed) -> u64
-```
-
-Returns the first word of `seed`.
-
-<a id="declaration-73696c6b2f696e7365637572655f736565643a3a7365636f6e64"></a>
-
-## `second`
-
-```silk
-pub fn second(seed: &silk/insecure_seed.Seed) -> u64
-```
-
-Returns the second word of `seed`.
 
 <a id="declaration-73696c6b2f696e7365637572655f736565643a3a496e73656375726553656564"></a>
 
@@ -98,6 +78,46 @@ effect fn get() -> Seed ? &InsecureSeed
 
 Returns a copy of the provider's stable seed.
 
+<a id="declaration-73696c6b2f696e7365637572655f736565643a3a496e736563757265536565642e6669727374"></a>
+
+### Associated function `InsecureSeed.first`
+
+```silk
+pub fn first(seed: &silk/insecure_seed.Seed) -> u64
+```
+
+Returns the first word of `seed`.
+
+<a id="declaration-73696c6b2f696e7365637572655f736565643a3a496e736563757265536565642e7365636f6e64"></a>
+
+### Associated function `InsecureSeed.second`
+
+```silk
+pub fn second(seed: &silk/insecure_seed.Seed) -> u64
+```
+
+Returns the second word of `seed`.
+
+<a id="declaration-73696c6b2f696e7365637572655f736565643a3a496e736563757265536565642e6669786564"></a>
+
+### Associated function `InsecureSeed.fixed`
+
+```silk
+pub fn fixed(first: u64, second: u64) -> FixedInsecureSeed
+```
+
+Creates a deterministic provider from two explicit words without requiring secure randomness.
+
+<a id="declaration-73696c6b2f696e7365637572655f736565643a3a496e736563757265536565642e66726f6d52616e646f6d"></a>
+
+### Associated function `InsecureSeed.fromRandom`
+
+```silk
+pub effect fn fromRandom() -> FixedInsecureSeed ? &mut Random
+```
+
+Samples two secure words once and returns an immutable seed provider.
+
 <a id="declaration-73696c6b2f696e7365637572655f736565643a3a4669786564496e73656375726553656564"></a>
 
 ## `FixedInsecureSeed`
@@ -107,26 +127,6 @@ pub struct FixedInsecureSeed
 ```
 
 An immutable provider containing one fixed seed.
-
-<a id="declaration-73696c6b2f696e7365637572655f736565643a3a6669786564"></a>
-
-## `fixed`
-
-```silk
-pub fn fixed(first: u64, second: u64) -> FixedInsecureSeed
-```
-
-Creates a deterministic provider from two explicit words without requiring secure randomness.
-
-<a id="declaration-73696c6b2f696e7365637572655f736565643a3a66726f6d52616e646f6d"></a>
-
-## `fromRandom`
-
-```silk
-pub effect fn fromRandom() -> FixedInsecureSeed ? &mut Random.Random
-```
-
-Samples two secure words once and returns an immutable seed provider.
 
 <a id="declaration-73696c6b2f696e7365637572655f736565643a3a696d706c656d656e746174696f6e3a31"></a>
 
@@ -143,13 +143,3 @@ impl InsecureSeed for FixedInsecureSeed
 ```silk
 get = FixedInsecureSeed.fixedGet
 ```
-
-<a id="declaration-73696c6b2f696e7365637572655f736565643a3a676574"></a>
-
-## `get`
-
-```silk
-pub effect fn get() -> Seed ? &InsecureSeed
-```
-
-Returns a copy of the active provider's stable seed.

@@ -11,8 +11,8 @@ should prefer an initialized collection, which maintains the slot state on the c
 
 ## Details
 
-[`write`](#declaration-73696c6b2f736c6f743a3a7772697465) changes an uninitialized slot to initialized. [`take`](#declaration-73696c6b2f736c6f743a3a74616b65) and [`dropValue`](#declaration-73696c6b2f736c6f743a3a64726f7056616c7565) change it
-back to uninitialized, while [`copy`](#declaration-73696c6b2f736c6f743a3a636f7079) leaves an initialized `Copy` value in place. Consuming a
+[`write`](#declaration-73696c6b2f736c6f743a3a536c6f742e7772697465) changes an uninitialized slot to initialized. [`take`](#declaration-73696c6b2f736c6f743a3a536c6f742e74616b65) and [`dropValue`](#declaration-73696c6b2f736c6f743a3a536c6f742e64726f7056616c7565) change it
+back to uninitialized, while [`copy`](#declaration-73696c6b2f736c6f743a3a536c6f742e636f7079) leaves an initialized `Copy` value in place. Consuming a
 `Slot<T>` prevents reusing the same selection accidentally, but the container must still keep
 its own initialization map.
 
@@ -27,7 +27,7 @@ on a runtime check.
 ### Copy and then take one initialized value
 
 ```silk
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.effect { Effect }
 
@@ -38,7 +38,7 @@ import silk.raw_buffer { RawBuffer }
 import silk.slot { Slot }
 
 effect fn build() -> i32
-! Allocator.OutOfMemoryError {
+! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let acquiring = Allocator.allocate(Layout.of<i32>())
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -53,7 +53,7 @@ effect fn build() -> i32
   return 0
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -64,7 +64,7 @@ pub fn main() -> i32 {
 
 Import as `Slot` with `import silk.slot { Slot }`.
 
-Public declarations: 5.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f736c6f743a3a536c6f74"></a>
 
@@ -74,17 +74,17 @@ Public declarations: 5.
 pub struct Slot
 ```
 
-The importable name of the `silk.slot` module scope.
+The owner of the slot operations.
 
 ### Details
 
-This struct carries no data and is never constructed by the library. Importing it as
-`import silk.slot { Slot }` names the module scope, so `Slot.write(...)` and the other slot
-operations resolve through it. It is unrelated to the builtin `Slot<T>` place type.
+This struct carries no data and is never constructed by the library. Every operation is an
+inherent member declared in `impl Slot`, so `import silk.slot { Slot }` is the one import that
+reaches `Slot.write(...)` and the rest. It is unrelated to the builtin `Slot<T>` place type.
 
-<a id="declaration-73696c6b2f736c6f743a3a7772697465"></a>
+<a id="declaration-73696c6b2f736c6f743a3a536c6f742e7772697465"></a>
 
-## `write`
+### Associated function `Slot.write`
 
 ```silk
 pub fn write<T>(slot: silk/core.Slot<T>, value: T) -> ()
@@ -92,14 +92,14 @@ pub fn write<T>(slot: silk/core.Slot<T>, value: T) -> ()
 
 Moves one value into a selected uninitialized raw slot.
 
-### Gotchas
+#### Gotchas
 
 The slot must be in bounds and uninitialized. A second write without a state transition is
 invalid.
 
-<a id="declaration-73696c6b2f736c6f743a3a74616b65"></a>
+<a id="declaration-73696c6b2f736c6f743a3a536c6f742e74616b65"></a>
 
-## `take`
+### Associated function `Slot.take`
 
 ```silk
 pub fn take<T>(slot: silk/core.Slot<T>) -> T
@@ -107,13 +107,13 @@ pub fn take<T>(slot: silk/core.Slot<T>) -> T
 
 Moves a value out of a selected initialized raw slot and leaves the slot uninitialized.
 
-### Gotchas
+#### Gotchas
 
 The slot must be in bounds and initialized.
 
-<a id="declaration-73696c6b2f736c6f743a3a636f7079"></a>
+<a id="declaration-73696c6b2f736c6f743a3a536c6f742e636f7079"></a>
 
-## `copy`
+### Associated function `Slot.copy`
 
 ```silk
 pub fn copy<T>(slot: silk/core.Slot<T>) -> T
@@ -121,13 +121,13 @@ pub fn copy<T>(slot: silk/core.Slot<T>) -> T
 
 Copies a `Copy` value from a selected initialized raw slot without changing its state.
 
-### Gotchas
+#### Gotchas
 
 The slot must be in bounds and initialized.
 
-<a id="declaration-73696c6b2f736c6f743a3a64726f7056616c7565"></a>
+<a id="declaration-73696c6b2f736c6f743a3a536c6f742e64726f7056616c7565"></a>
 
-## `dropValue`
+### Associated function `Slot.dropValue`
 
 ```silk
 pub fn dropValue<T>(slot: silk/core.Slot<T>) -> ()
@@ -135,6 +135,6 @@ pub fn dropValue<T>(slot: silk/core.Slot<T>) -> ()
 
 Drops a value in a selected initialized raw slot and leaves the slot uninitialized.
 
-### Gotchas
+#### Gotchas
 
 The slot must be in bounds and initialized.

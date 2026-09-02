@@ -32,32 +32,22 @@ const assertRunsEverywhere = Effect.fnUntraced(function* (
 const ownedAndScalars = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.u32 as u32
-import silk.string {
-  ScalarCursor,
-  ScalarStep,
-  copy,
-  append,
-  view,
-  scalarCursor,
-  nextScalar,
-  scalarValue,
-  nextCursor
-}
+import silk.string { ScalarCursor, ScalarStep, String }
 import silk.option { Option }
 import silk.char { toU32 as charToU32 }
 
 fn scalarSum(value: string, cursor: ScalarCursor) -> u32 {
-  return match move nextScalar(value, move cursor) {
+  return match move String.nextScalar(value, move cursor) {
     Option<ScalarStep>.Some { value: step } => continueSum(value, move step)
     Option<ScalarStep>.None => u32.toU32(0)
   }
 }
 
 fn continueSum(value: string, step: ScalarStep) -> u32 {
-  let scalar = charToU32(scalarValue(&step))
-  let cursor = nextCursor(move step)
+  let scalar = charToU32(String.scalarValue(&step))
+  let cursor = String.nextCursor(move step)
   return scalar + scalarSum(value, move cursor)
 }
 
@@ -67,14 +57,14 @@ effect fn build() -> i32 ! OutOfMemoryError {
   if literal != "A\\u{a3}" {} else { return 2 }
 
   let mut allocator = Allocator.systemAllocatorProvider()
-  let copying = copy(literal) |> Effect.provideMut(&mut allocator)
+  let copying = String.copy(literal) |> Effect.provideMut(&mut allocator)
   let mut owned = run copying
-  let appending = append(&mut owned, "\\u{20ac}\\u{10348}")
+  let appending = String.append(&mut owned, "\\u{20ac}\\u{10348}")
     |> Effect.provideMut(&mut allocator)
   let appended = run appending
-  let borrowed = view(&owned)
+  let borrowed = String.view(&owned)
   if borrowed == "A\\u{a2}\\u{20ac}\\u{10348}" {} else { return 3 }
-  if scalarSum(borrowed, scalarCursor()) == u32.toU32(74967) {} else { return 4 }
+  if scalarSum(borrowed, String.scalarCursor()) == u32.toU32(74967) {} else { return 4 }
   return 42
 }
 
@@ -89,13 +79,13 @@ it.effect(
 )
 
 const validation = `import silk.usize as usize
-import silk.string { InvalidUtf8, fromUtf8, byteLength }
+import silk.string { InvalidUtf8, String }
 import silk.result { Result }
 
 fn inspect(bytes: &[u8]) -> i32 {
-  let result = fromUtf8(bytes)
+  let result = String.fromUtf8(bytes)
   return match move result {
-      Result<string, InvalidUtf8>.Success { value } => usize.toI32(byteLength(value))
+      Result<string, InvalidUtf8>.Success { value } => usize.toI32(String.byteLength(value))
       Result<string, InvalidUtf8>.Failure { error } => usize.toI32(error.offset) + 40
   }
 }
@@ -114,9 +104,9 @@ const allocationFailure = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
-import silk.string { copy, append, view, ownedByteLength }
+import silk.string { String }
 
 struct QuotaAllocator { remaining: i32 }
 
@@ -134,17 +124,17 @@ effect fn ignore(error: OutOfMemoryError) -> () { return () }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  // One allocation, spent by the copy. Appending grows the copied storage in place rather than
-  // copying it into fresh storage first, so starving the append takes one fewer than it used to.
+  // One allocation, spent by the String.copy. Appending grows the copied storage in place rather than
+  // copying it into fresh storage first, so starving the String.append takes one fewer than it used to.
   let mut allocator = QuotaAllocator { remaining: 1 }
-  let copying = copy("ok") |> Effect.provideMut(&mut allocator)
+  let copying = String.copy("ok") |> Effect.provideMut(&mut allocator)
   let mut value = run copying
   let recovered = run Effect.catchAll(
-    append(&mut value, "\\u{1f642}") |> Effect.provideMut(&mut allocator),
+    String.append(&mut value, "\\u{1f642}") |> Effect.provideMut(&mut allocator),
     ignore
   )
-  if view(&value) == "ok" {} else { return 1 }
-  if ownedByteLength(&value) == 2 {} else { return 2 }
+  if String.view(&value) == "ok" {} else { return 1 }
+  if String.ownedByteLength(&value) == 2 {} else { return 2 }
   return 42
 }
 

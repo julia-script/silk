@@ -157,7 +157,7 @@ it.effect('replaces the caught failure row with the handler row canonically', ()
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'effect://catch-algebra',
-      `import silk.effect as Effect
+      `import silk.effect { Effect }
 struct First {}
 struct HandlerProblem {}
 effect fn risky() -> i32 ! First { fail move First {} }
@@ -294,7 +294,7 @@ it.effect('rejects retry for a take-once Effect', () =>
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'effect://take-retry',
-      `import silk.effect as Effect
+      `import silk.effect { Effect }
 struct Payload {}
 effect fn consume(value: Payload) -> i32 { return 1 }
 fn main() -> i32 {
@@ -311,7 +311,7 @@ it.effect('derives take-once mapped Effect access and rejects retrying it', () =
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'effect://take-callback-retry',
-      `import silk.effect as Effect
+      `import silk.effect { Effect }
 struct Payload { value: i32 }
 effect fn succeed(value: i32) -> i32 { return value }
 fn consume(value: i32, payload: Payload) -> i32 { return value + payload.value }
@@ -342,7 +342,7 @@ it.effect(
     Effect.gen(function* () {
       const result = yield* analyzeWithStdlib(
         'effect://logger-tap',
-        `import silk.effect as Effect
+        `import silk.effect { Effect }
 service TapLogger {}
 effect fn succeed(value: i32) -> i32 { return value }
 effect fn log(value: i32) -> i32 ? &TapLogger { return value }
@@ -449,7 +449,7 @@ it.effect('requires an explicit role when the same capability has multiple requi
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'effect://ambiguous-provide-role',
-      `import silk.effect as Effect
+      `import silk.effect { Effect }
 service Clock {}
 role Left
 role Right
@@ -519,7 +519,7 @@ it.effect('rejects a concrete provideMut provider without the required capabilit
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'effect/provide-mut-conformance',
-      new TextEncoder().encode(`import silk.effect as Effect
+      new TextEncoder().encode(`import silk.effect { Effect }
 service Clock {}
 struct Wrong {}
 effect fn read() -> i32 ? &mut Clock { return 42 }
@@ -542,7 +542,7 @@ it.effect('type-checks provideMut for a custom service', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'effect/provide-mut-custom-capability',
-      new TextEncoder().encode(`import silk.effect as Effect
+      new TextEncoder().encode(`import silk.effect { Effect }
 service Clock {}
 struct FixedClock {}
 impl Clock for FixedClock {}
@@ -692,7 +692,7 @@ it.effect('keeps per-run provider acquisition distinct and composes its contract
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'effect://provide-with',
-      `import silk.effect as Effect
+      `import silk.effect { Effect }
 service Clock {}
 struct FixedClock {}
 impl Clock for FixedClock {}
@@ -772,7 +772,7 @@ it.effect('provides Allocator through nominal system and user-authored witnesses
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 effect fn use(layout: Layout) -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -795,7 +795,7 @@ pub fn main() -> i32 { return 0 }`,
       'allocation://custom-provider',
       `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct TestAllocator { remaining: i32 }
 effect fn allocate(self: &mut TestAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
@@ -819,7 +819,7 @@ it.effect('rejects dynamically shaped or type-incompatible catch handlers', () =
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'effect://bad-handler',
-      `import silk.effect as Effect
+      `import silk.effect { Effect }
 struct Problem {}
 struct Other {}
 effect fn risky() -> i32 ! Problem { fail move Problem {} }
@@ -2244,7 +2244,7 @@ it.effect('runs the complete composed operand and preserves grouped one-layer ex
   Effect.gen(function* () {
     const ungrouped = yield* analyzeWithStdlib(
       'fixture://ungrouped-run-callable.silk',
-      `import silk.effect as Effect
+      `import silk.effect { Effect }
 effect fn work() -> i32 { return 1 }
 fn main() -> i32 { return run work() |> Effect.retry(2) }`,
     )

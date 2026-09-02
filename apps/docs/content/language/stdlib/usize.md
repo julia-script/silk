@@ -30,7 +30,7 @@ A value valid as usize on a 64-bit target can be out of range on a 32-bit target
 ### Keep a count within the target range
 
 ```silk
-import silk.option {Option}
+import silk.option { Option }
 
 import silk.usize
 

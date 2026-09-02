@@ -21,7 +21,10 @@ export const renameIndependentPolicy = (source: string): string => {
     source,
   )
   return policyRenamed
-    .replaceAll('import silk.execution as Execution', 'import silk.execution as ExecutionFacade')
+    .replace(
+      /import silk\.execution \{([^}]*)\bExecution\b([^}]*)\}/g,
+      'import silk.execution {$1Execution as ExecutionFacade$2}',
+    )
     .replace(/\bExecution\./g, 'ExecutionFacade.')
     .replace(/import silk\.allocator \{([^}]*)\}/g, (declaration) =>
       declaration

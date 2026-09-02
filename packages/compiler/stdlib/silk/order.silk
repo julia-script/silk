@@ -93,6 +93,79 @@ pub interface Order {
   operator < fn lessThan(left: &Self, right: &Self) -> bool
 }
 
+impl Order {
+  /// Compares two values three ways using the concrete comparison selected during specialization.
+  ///
+  /// # When to use
+  ///
+  /// Use this function when the caller needs to distinguish less, equal, and greater outcomes.
+  ///
+  /// # Details
+  ///
+  /// Calls the selected strict comparison with `left, right`. If that result is false, it calls the
+  /// comparison with `right, left`. The function then consumes both owned arguments.
+  ///
+  /// # Gotchas
+  ///
+  /// If neither comparison is true, this function returns [`Equal`]. The witness must not leave two
+  /// different values incomparable.
+  pub fn compare<T: Order>(left: T, right: T) -> Ordering {
+    if (&left) < (&right) {
+      return Ordering { value: Less {} }
+    }
+    if (&right) < (&left) {
+      return Ordering { value: Greater {} }
+    }
+    return Ordering { value: Equal {} }
+  }
+
+  /// Reports whether `left` orders strictly before `right` under the selected [`Order`] witness. The
+  /// function calls the witness once and then consumes both owned arguments.
+  pub fn less<T: Order>(left: T, right: T) -> bool {
+    return (&left) < (&right)
+  }
+
+  /// Reports whether neither value orders before the other under the selected [`Order`] witness. The
+  /// function calls the witness once or twice and then consumes both owned arguments.
+  ///
+  /// # Gotchas
+  ///
+  /// If the witness leaves different values incomparable, this function reports them as equal.
+  pub fn equal<T: Order>(left: T, right: T) -> bool {
+    if (&left) < (&right) {
+      return false
+    }
+    return !((&right) < (&left))
+  }
+
+  /// Reports whether an ordering is `Less`.
+  pub fn isLess(ordering: &Ordering) -> bool {
+    return match &ordering.value {
+      Less {} => true
+      Equal {} => false
+      Greater {} => false
+    }
+  }
+
+  /// Reports whether an ordering is `Equal`.
+  pub fn isEqual(ordering: &Ordering) -> bool {
+    return match &ordering.value {
+      Less {} => false
+      Equal {} => true
+      Greater {} => false
+    }
+  }
+
+  /// Reports whether an ordering is `Greater`.
+  pub fn isGreater(ordering: &Ordering) -> bool {
+    return match &ordering.value {
+      Less {} => false
+      Equal {} => false
+      Greater {} => true
+    }
+  }
+}
+
 impl Order for u8 { lessThan: Intrinsic.u8LessThan }
 impl Order for u16 { lessThan: Intrinsic.u16LessThan }
 impl Order for u32 { lessThan: Intrinsic.u32LessThan }
@@ -104,73 +177,3 @@ impl Order for i32 { lessThan: Intrinsic.i32LessThan }
 impl Order for i64 { lessThan: Intrinsic.i64LessThan }
 impl Order for isize { lessThan: Intrinsic.isizeLessThan }
 
-/// Compares two values three ways using the concrete comparison selected during specialization.
-///
-/// # When to use
-///
-/// Use this function when the caller needs to distinguish less, equal, and greater outcomes.
-///
-/// # Details
-///
-/// Calls the selected strict comparison with `left, right`. If that result is false, it calls the
-/// comparison with `right, left`. The function then consumes both owned arguments.
-///
-/// # Gotchas
-///
-/// If neither comparison is true, this function returns [`Equal`]. The witness must not leave two
-/// different values incomparable.
-pub fn compare<T: Order>(left: T, right: T) -> Ordering {
-  if (&left) < (&right) {
-    return Ordering { value: Less {} }
-  }
-  if (&right) < (&left) {
-    return Ordering { value: Greater {} }
-  }
-  return Ordering { value: Equal {} }
-}
-
-/// Reports whether `left` orders strictly before `right` under the selected [`Order`] witness. The
-/// function calls the witness once and then consumes both owned arguments.
-pub fn less<T: Order>(left: T, right: T) -> bool {
-  return (&left) < (&right)
-}
-
-/// Reports whether neither value orders before the other under the selected [`Order`] witness. The
-/// function calls the witness once or twice and then consumes both owned arguments.
-///
-/// # Gotchas
-///
-/// If the witness leaves different values incomparable, this function reports them as equal.
-pub fn equal<T: Order>(left: T, right: T) -> bool {
-  if (&left) < (&right) {
-    return false
-  }
-  return !((&right) < (&left))
-}
-
-/// Reports whether an ordering is `Less`.
-pub fn isLess(ordering: &Ordering) -> bool {
-  return match &ordering.value {
-    Less {} => true
-    Equal {} => false
-    Greater {} => false
-  }
-}
-
-/// Reports whether an ordering is `Equal`.
-pub fn isEqual(ordering: &Ordering) -> bool {
-  return match &ordering.value {
-    Less {} => false
-    Equal {} => true
-    Greater {} => false
-  }
-}
-
-/// Reports whether an ordering is `Greater`.
-pub fn isGreater(ordering: &Ordering) -> bool {
-  return match &ordering.value {
-    Less {} => false
-    Equal {} => false
-    Greater {} => true
-  }
-}

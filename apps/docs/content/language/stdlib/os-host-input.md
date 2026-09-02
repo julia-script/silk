@@ -42,7 +42,7 @@ pub fn main() -> i32 {
 
 Import as `OsHostInput` with `import silk.os_host_input { OsHostInput }`.
 
-Public declarations: 2.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a4f73486f7374496e707574"></a>
 
@@ -59,9 +59,9 @@ A stateless native [`HostInput`](./host-input.md#declaration-73696c6b2f686f73745
 The process owns the source values. Each successful byte lookup returns a new owned copy through
 the portable service.
 
-<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a6d616b65"></a>
+<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a4f73486f7374496e7075742e6d616b65"></a>
 
-## `make`
+### Associated function `OsHostInput.make`
 
 ```silk
 pub fn make() -> OsHostInput
@@ -69,12 +69,12 @@ pub fn make() -> OsHostInput
 
 Creates a stateless provider for native process input.
 
-### When to use
+#### When to use
 
 Use this function at a native application edge. Provide the result as `&mut HostInput` to
 portable lookup operations in `silk.host_input`.
 
-### Details
+#### Details
 
 Construction performs no lookup and cannot fail. Argument and environment absence remain
 ordinary `None` values when a later lookup runs.

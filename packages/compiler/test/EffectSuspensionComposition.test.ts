@@ -26,7 +26,7 @@ const assertCompleted = (self: Analysis.Snapshot, expected: number): void => {
 
 it.effect('composes through map and flatMap without suspension-specific channels', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 effect fn delayed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
@@ -54,7 +54,7 @@ pub fn main() -> i32 {
 
 it.effect('composes through recovery and retry using only declared failures', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 struct BoomError {}
 effect fn delayed(value: i32) -> i32 ! BoomError {
   return run Effect.suspend(effect {
@@ -77,7 +77,7 @@ pub fn main() -> i32 {
 
 it.effect('preserves provisioned requirements without adding an allocator requirement', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 service Counter {
   effect fn get() -> i32 ? &Counter
 }
@@ -112,7 +112,7 @@ pub fn main() -> i32 {
 
 it.effect('allows an equivalent user combinator to preserve exact channels', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 effect fn preserve<A, E, ?R>(
   self: once Effect<A ! E ? R>
 ) -> A ! E ? R {
@@ -128,7 +128,7 @@ pub fn main() -> i32 { return run preserve(delayed()) }`)
 
 it.effect('keeps nested Effect success nested until explicitly run again', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 effect fn nested() -> Effect<i32> {
   return run Effect.suspend(effect {
     return effect { return 42 }
@@ -148,7 +148,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('emits frame lifecycle traces without allocation transactions', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 effect fn delayed() -> i32 {
   return run Effect.suspend(effect { return 42 })
 }

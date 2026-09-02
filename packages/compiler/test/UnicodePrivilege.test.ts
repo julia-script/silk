@@ -99,16 +99,16 @@ const operationsOf = (module: Mir.Module): ReadonlyArray<Mir.Operation> =>
 const normalizing = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
-import silk.string { String, view }
-import silk.unicode { normalizeNfc, normalizeNfd }
+import silk.effect { Effect }
+import silk.string { String }
+import silk.unicode { Unicode }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let composed = run normalizeNfc("E\\u{304}\\u{300}") |> Effect.provideMut(&mut allocator)
-  if view(&composed) == "\\u{1e14}" {} else { return 1 }
-  let decomposed = run normalizeNfd("\\u{ac01}") |> Effect.provideMut(&mut allocator)
-  if view(&decomposed) == "\\u{1100}\\u{1161}\\u{11a8}" {} else { return 2 }
+  let composed = run Unicode.normalizeNfc("E\\u{304}\\u{300}") |> Effect.provideMut(&mut allocator)
+  if String.view(&composed) == "\\u{1e14}" {} else { return 1 }
+  let decomposed = run Unicode.normalizeNfd("\\u{ac01}") |> Effect.provideMut(&mut allocator)
+  if String.view(&decomposed) == "\\u{1100}\\u{1161}\\u{11a8}" {} else { return 2 }
   return 42
 }
 
@@ -160,11 +160,11 @@ it.effect('normalizes through ordinary Silk functions reached by ordinary calls'
     // lowered like any other Silk function — so they have bodies in the MIR rather than being names
     // a backend recognizes.
     const lowered = mir.value.functions.map((fn) => `${fn.id.module}.${fn.id.name}`)
-    assert.include(lowered, 'silk/unicode.normalizeNfc', `lowered: ${lowered.join(', ')}`)
-    assert.include(lowered, 'silk/unicode.normalizeNfd')
-    assert.include(lowered, 'silk/unicode_tables.canonicalDecomposition')
-    assert.include(lowered, 'silk/unicode_tables.canonicalComposition')
-    assert.include(lowered, 'silk/unicode_tables.combiningClass')
+    assert.include(lowered, 'silk/unicode.Unicode.normalizeNfc', `lowered: ${lowered.join(', ')}`)
+    assert.include(lowered, 'silk/unicode.Unicode.normalizeNfd')
+    assert.include(lowered, 'silk/unicode_tables.UnicodeTables.canonicalDecomposition')
+    assert.include(lowered, 'silk/unicode_tables.UnicodeTables.canonicalComposition')
+    assert.include(lowered, 'silk/unicode_tables.UnicodeTables.combiningClass')
 
     // And they are reached the ordinary way: a `Call` naming the declaration, not an operation of
     // its own. This is the positive half of the constraint — the policy exists, and it is Silk.
@@ -174,9 +174,13 @@ it.effect('normalizes through ordinary Silk functions reached by ordinary calls'
     const calls = operationsOf(mir.value).flatMap((operation) =>
       operation._tag === 'Call' ? [`${operation.target.module}.${operation.target.name}`] : [],
     )
-    assert.include(calls, 'silk/unicode_tables.combiningClass', `calls: ${calls.join(', ')}`)
-    assert.include(calls, 'silk/unicode_tables.canonicalDecomposition')
-    assert.include(calls, 'silk/unicode_tables.canonicalComposition')
+    assert.include(
+      calls,
+      'silk/unicode_tables.UnicodeTables.combiningClass',
+      `calls: ${calls.join(', ')}`,
+    )
+    assert.include(calls, 'silk/unicode_tables.UnicodeTables.canonicalDecomposition')
+    assert.include(calls, 'silk/unicode_tables.UnicodeTables.canonicalComposition')
     assert.include(calls, 'silk/unicode.composePair')
   }),
 )
@@ -192,7 +196,7 @@ it.effect('normalizes through ordinary Silk functions reached by ordinary calls'
 const ownTable = `import silk.u32 as u32
 import silk.u8 as u8
 import silk.usize as usize
-import silk.unicode { canonicalCombiningClass }
+import silk.unicode { Unicode }
 
 fn read3(data: &[u8], at: usize) -> u32 {
   return u8.toU32(data[at]) * 65536
@@ -221,7 +225,7 @@ fn mine(scalar: u32) -> u32 {
 }
 
 fn agrees(scalar: u32) -> bool {
-  return mine(scalar) == canonicalCombiningClass(scalar)
+  return mine(scalar) == Unicode.canonicalCombiningClass(scalar)
 }
 
 pub fn main() -> i32 {
@@ -232,9 +236,9 @@ pub fn main() -> i32 {
   // A starter, which neither table lists.
   if agrees(u32.toU32(101)) {} else { return 5 }
   // And the values are the real ones, not zero on both sides.
-  if canonicalCombiningClass(u32.toU32(768)) == 230 {} else { return 6 }
-  if canonicalCombiningClass(u32.toU32(803)) == 220 {} else { return 7 }
-  if canonicalCombiningClass(u32.toU32(101)) == 0 {} else { return 8 }
+  if Unicode.canonicalCombiningClass(u32.toU32(768)) == 230 {} else { return 6 }
+  if Unicode.canonicalCombiningClass(u32.toU32(803)) == 220 {} else { return 7 }
+  if Unicode.canonicalCombiningClass(u32.toU32(101)) == 0 {} else { return 8 }
   return 42
 }`
 

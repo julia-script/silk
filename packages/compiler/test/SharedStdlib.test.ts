@@ -14,8 +14,8 @@ const ascii = (value: string): Uint8Array =>
 
 const ordinaryUse = `import silk.allocator { Allocator }
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect as Effect
-import silk.shared as Shared
+import silk.effect { Effect }
+import silk.shared { Shared }
 struct Counter { value: i32 }
 fn increment(value: &mut Counter) -> i32 { value.value = value.value + 1 return value.value }
 fn read(value: &Counter) -> i32 { return value.value }
@@ -36,9 +36,9 @@ pub fn main() -> i32 { return run Effect.catchAll(useCell(), recover) }`
 
 const affineMovement = `import silk.allocator { Allocator }
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
-import silk.shared as Shared
+import silk.shared { Shared }
 struct Empty {}
 struct Token { storage: Allocation }
 struct Mailbox { state: Empty | Token }
@@ -68,9 +68,9 @@ pub fn main() -> i32 { return run Effect.catchAll(useCell(), recover) }`
 
 const exhaustedConstruction = `import silk.allocator { Allocator }
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
-import silk.shared as Shared
+import silk.shared { Shared }
 struct Token { storage: Allocation }
 struct Exhausted {}
 effect fn reject(self: &mut Exhausted, layout: Layout) -> Allocation ! OutOfMemoryError {
@@ -93,9 +93,9 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`
 
 const mixedAllocatorConstruction = `import silk.allocator { Allocator }
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
-import silk.shared as Shared
+import silk.shared { Shared }
 struct BadAllocator {}
 effect fn badAllocate(self: &mut BadAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   drop layout
@@ -125,16 +125,16 @@ effect fn both() -> i32 ! OutOfMemoryError {
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(both(), recover) }`
 
-const unrelatedCallbackShape = `import silk.shared as Shared
+const unrelatedCallbackShape = `import silk.shared { Shared }
 struct Box { value: i32 }
 fn delayed(value: &Box) -> Effect<i32> { return effect { return value.value } }
 fn unrelated(
-  shared: &Shared.Shared<Box>,
+  shared: &Shared<Box>,
   callback: once fn(&Box) -> Effect<i32>,
 ) -> Effect<i32> {
   return effect { return 0 }
 }
-fn probe(shared: &Shared.Shared<Box>) -> Effect<i32> {
+fn probe(shared: &Shared<Box>) -> Effect<i32> {
   return unrelated(shared, delayed)
 }
 pub fn main() -> i32 { return 0 }`
@@ -159,7 +159,7 @@ pub fn main() -> i32 { return 0 }`
 
 const renamedWrapper = `import silk.allocator { Allocator }
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 struct Other<T> { core: Intrinsic.SharedCore<T> }
 struct Counter { value: i32 }
 fn absurd<T>() -> T { let boom = 1 / 0 return absurd<T>() }
@@ -201,15 +201,15 @@ const nestedAccess = (outer: 'with' | 'withMut', inner: 'with' | 'withMut'): str
   const innerCallback = inner === 'with' ? 'read' : 'increment'
   return `import silk.allocator { Allocator }
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect as Effect
-import silk.shared as Shared
+import silk.effect { Effect }
+import silk.shared { Shared }
 struct Counter { value: i32 }
 fn read(value: &Counter) -> i32 { return value.value }
 fn increment(value: &mut Counter) -> i32 {
   value.value = value.value + 1
   return value.value
 }
-fn nested(value: ${outerReference}, alias: Shared.Shared<Counter>) -> i32 {
+fn nested(value: ${outerReference}, alias: Shared<Counter>) -> i32 {
   return Shared.${inner}<Counter, i32>(&alias, ${innerCallback})
 }
 effect fn conflictCase() -> i32 ! OutOfMemoryError {
@@ -223,8 +223,8 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(conflictCase(), recover) }`
 }
 
-const publicEscapeMatrix = `import silk.result as Result
-import silk.shared as Shared
+const publicEscapeMatrix = `import silk.result { Result }
+import silk.shared { Shared }
 struct Pair { first: i32 second: i32 }
 struct Box<A> { value: A }
 fn direct(value: &Pair) -> &Pair { return value }
@@ -237,10 +237,10 @@ fn aggregate(value: &Pair) -> Box<&Pair> { return Box<&Pair> { value: move value
 fn aggregateMut(value: &mut Pair) -> Box<&mut Pair> {
   return Box<&mut Pair> { value: move value }
 }
-fn failed(value: &Pair) -> Result.Result<i32, &Pair> {
+fn failed(value: &Pair) -> Result<i32, &Pair> {
   return Result.failResult<i32, &Pair>(move value)
 }
-fn failedMut(value: &mut Pair) -> Result.Result<i32, &mut Pair> {
+fn failedMut(value: &mut Pair) -> Result<i32, &mut Pair> {
   return Result.failResult<i32, &mut Pair>(move value)
 }
 fn delayed(value: &Pair) -> Effect<i32> { return effect { return value.first } }
@@ -252,49 +252,49 @@ effect fn read(value: &Pair) -> i32 { return value.first }
 effect fn readMut(value: &mut Pair) -> i32 { return value.first }
 fn suspended(value: &Pair) -> i32 { return run read(value) }
 fn suspendedMut(value: &mut Pair) -> i32 { return run readMut(value) }
-unsafe fn sharedDirect(self: &Shared.Shared<Pair>) -> &Pair {
+unsafe fn sharedDirect(self: &Shared<Pair>) -> &Pair {
   return Shared.with(self, direct)
 }
-unsafe fn mutDirect(self: &Shared.Shared<Pair>) -> &mut Pair {
+unsafe fn mutDirect(self: &Shared<Pair>) -> &mut Pair {
   return Shared.withMut(self, directMut)
 }
-unsafe fn mutNarrowed(self: &Shared.Shared<Pair>) -> &Pair {
+unsafe fn mutNarrowed(self: &Shared<Pair>) -> &Pair {
   return Shared.withMut(self, narrowedMut)
 }
-unsafe fn sharedGeneric(self: &Shared.Shared<Pair>) -> &Pair {
+unsafe fn sharedGeneric(self: &Shared<Pair>) -> &Pair {
   return Shared.with(self, viaGeneric)
 }
-unsafe fn mutGeneric(self: &Shared.Shared<Pair>) -> &mut Pair {
+unsafe fn mutGeneric(self: &Shared<Pair>) -> &mut Pair {
   return Shared.withMut(self, viaGenericMut)
 }
-unsafe fn sharedAggregate(self: &Shared.Shared<Pair>) -> Box<&Pair> {
+unsafe fn sharedAggregate(self: &Shared<Pair>) -> Box<&Pair> {
   return Shared.with(self, aggregate)
 }
-unsafe fn mutAggregate(self: &Shared.Shared<Pair>) -> Box<&mut Pair> {
+unsafe fn mutAggregate(self: &Shared<Pair>) -> Box<&mut Pair> {
   return Shared.withMut(self, aggregateMut)
 }
-fn sharedFailure(self: &Shared.Shared<Pair>) -> Result.Result<i32, &Pair> {
+fn sharedFailure(self: &Shared<Pair>) -> Result<i32, &Pair> {
   return Shared.with(self, failed)
 }
-fn mutFailure(self: &Shared.Shared<Pair>) -> Result.Result<i32, &mut Pair> {
+fn mutFailure(self: &Shared<Pair>) -> Result<i32, &mut Pair> {
   return Shared.withMut(self, failedMut)
 }
-fn sharedEffect(self: &Shared.Shared<Pair>) -> Effect<i32> {
+fn sharedEffect(self: &Shared<Pair>) -> Effect<i32> {
   return Shared.with(self, delayed)
 }
-fn mutEffect(self: &Shared.Shared<Pair>) -> Effect<i32> {
+fn mutEffect(self: &Shared<Pair>) -> Effect<i32> {
   return Shared.withMut(self, delayedMut)
 }
-fn sharedCallable(self: &Shared.Shared<Pair>) -> once fn(i32) -> i32 {
+fn sharedCallable(self: &Shared<Pair>) -> once fn(i32) -> i32 {
   return Shared.with(self, stored)
 }
-fn mutCallable(self: &Shared.Shared<Pair>) -> once fn(i32) -> i32 {
+fn mutCallable(self: &Shared<Pair>) -> once fn(i32) -> i32 {
   return Shared.withMut(self, storedMut)
 }
-fn sharedSuspension(self: &Shared.Shared<Pair>) -> i32 {
+fn sharedSuspension(self: &Shared<Pair>) -> i32 {
   return Shared.with(self, suspended)
 }
-fn mutSuspension(self: &Shared.Shared<Pair>) -> i32 {
+fn mutSuspension(self: &Shared<Pair>) -> i32 {
   return Shared.withMut(self, suspendedMut)
 }
 pub fn main() -> i32 { return 0 }`

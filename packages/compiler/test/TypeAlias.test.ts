@@ -295,7 +295,7 @@ pub fn main() -> i32 { return Count }`)
 it.effect('flattens a union alias into the declared failure row', () =>
   Effect.gen(function* () {
     const self = yield* analyze(
-      `import silk.effect as Effect
+      `import silk.effect { Effect }
 struct HttpError {}
 struct JsonError {}
 struct Timeout {}
@@ -339,7 +339,7 @@ pub fn main() -> i32 { return run done(true) }`,
 
 it.effect('keeps a nominal union atomic inside a failure row spelled through an alias', () =>
   Effect.gen(function* () {
-    const program = (row: string) => `import silk.effect as Effect
+    const program = (row: string) => `import silk.effect { Effect }
 union HttpError { NotFound, Timeout }
 struct JsonError {}
 type FetchError = HttpError | JsonError

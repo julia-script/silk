@@ -20,10 +20,10 @@ const allocated = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 import silk.usize as usize
-import silk.vector { Vector, make, append, length }
+import silk.vector { Vector }
 
 struct Step { pc: usize opcode: u8 depth: usize top: i32 }
 struct VmDiagnostic { pc: usize code: usize }
@@ -39,14 +39,14 @@ effect fn pushStep(
   values: &mut Vector<Step>,
   step: Step
 ) -> () ! OutOfMemoryError ? &mut Allocator {
-  return run append<Step>(move values, move step)
+  return run Vector.append<Step>(move values, move step)
 }
 
 effect fn pushDiagnostic(
   values: &mut Vector<VmDiagnostic>,
   diagnostic: VmDiagnostic
 ) -> () ! OutOfMemoryError ? &mut Allocator {
-  return run append<VmDiagnostic>(move values, move diagnostic)
+  return run Vector.append<VmDiagnostic>(move values, move diagnostic)
 }
 
 fn finish(
@@ -66,14 +66,14 @@ fn finish(
 effect fn build() -> Returned ! OutOfMemoryError ? &mut Allocator {
   let stepLayout = Layout.of<Step>()
   let diagnosticLayout = Layout.of<VmDiagnostic>()
-  let mut first = make<Step>()
+  let mut first = Vector.make<Step>()
   let mut index = usize.add(0, 0)
   while index < 6 {
     let step = Step { pc: index, opcode: 1, depth: index + 1, top: usize.toI32(index) }
     let firstAdded = run pushStep(&mut first, move step)
     index = index + 1
   }
-  let mut second = make<VmDiagnostic>()
+  let mut second = Vector.make<VmDiagnostic>()
   if index == 99 {
     let diagnostic = VmDiagnostic { pc: index, code: index }
     let diagnosticAdded = run pushDiagnostic(&mut second, move diagnostic)
@@ -90,8 +90,8 @@ fn observeValues(
   result: i32,
   fingerprint: i32
 ) -> i32 {
-  if length<Step>(&first) == 6 {} else { return 1 }
-  if length<VmDiagnostic>(&second) == 0 {} else { return 2 }
+  if Vector.length<Step>(&first) == 6 {} else { return 1 }
+  if Vector.length<VmDiagnostic>(&second) == 0 {} else { return 2 }
   return result + fingerprint + 30
 }
 
@@ -126,16 +126,16 @@ const stackVmWithSeparateVectors = readFileSync(
     'steps: &mut Vector<Step>,\n  pc: usize,\n  opcode:',
   )
   .replace(
-    'let added = run append<Step | VmDiagnostic>(move events, move step)',
-    'let added = run append<Step>(move steps, move step)',
+    'let added = run Vector.append<Step | VmDiagnostic>(move events, move step)',
+    'let added = run Vector.append<Step>(move steps, move step)',
   )
   .replace(
     'events: &mut Vector<Step | VmDiagnostic>,\n  pc: usize,\n  code:',
     'diagnostics: &mut Vector<VmDiagnostic>,\n  pc: usize,\n  code:',
   )
   .replace(
-    'let added = run append<Step | VmDiagnostic>(move events, move diagnostic)',
-    'let added = run append<VmDiagnostic>(move diagnostics, move diagnostic)',
+    'let added = run Vector.append<Step | VmDiagnostic>(move events, move diagnostic)',
+    'let added = run Vector.append<VmDiagnostic>(move diagnostics, move diagnostic)',
   )
   .replace(
     `fn finish(
@@ -152,8 +152,8 @@ const stackVmWithSeparateVectors = readFileSync(
   )
   .replace('    events: move events,', '    steps: move steps,\n    diagnostics: move diagnostics,')
   .replace(
-    '  let mut events = make<Step | VmDiagnostic>()',
-    '  let mut steps = make<Step>()\n  let mut diagnostics = make<VmDiagnostic>()',
+    '  let mut events = Vector.make<Step | VmDiagnostic>()',
+    '  let mut steps = Vector.make<Step>()\n  let mut diagnostics = Vector.make<VmDiagnostic>()',
   )
   .replaceAll('pushStep(&mut events', 'pushStep(&mut steps')
   .replaceAll('pushDiagnostic(&mut events', 'pushDiagnostic(&mut diagnostics')

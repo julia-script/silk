@@ -52,9 +52,9 @@ const onEveryEngine = (name: string, source: string, expected: number) =>
 const spelledTwoWays = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
-import silk.string { String, view }
-import silk.unicode { normalizeNfc }
+import silk.effect { Effect }
+import silk.string { String }
+import silk.unicode { Unicode }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -69,10 +69,10 @@ effect fn build() -> i32 ! OutOfMemoryError {
   // are equal to each other. Each owner is read before the next is built: a wasm backend defect
   // unrelated to Unicode invalidates the first of two live owned Strings, and the direct
   // owner-to-owner comparison is asserted below on the engines where it is sound.
-  let composedLeft = run normalizeNfc(precomposed) |> Effect.provideMut(&mut allocator)
-  if view(&composedLeft) == precomposed {} else { return 2 }
-  let composedRight = run normalizeNfc(decomposed) |> Effect.provideMut(&mut allocator)
-  if view(&composedRight) == precomposed {} else { return 3 }
+  let composedLeft = run Unicode.normalizeNfc(precomposed) |> Effect.provideMut(&mut allocator)
+  if String.view(&composedLeft) == precomposed {} else { return 2 }
+  let composedRight = run Unicode.normalizeNfc(decomposed) |> Effect.provideMut(&mut allocator)
+  if String.view(&composedRight) == precomposed {} else { return 3 }
   return 42
 }
 
@@ -99,15 +99,15 @@ it.effect(
 const comparedDirectly = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
-import silk.string { String, view }
-import silk.unicode { normalizeNfc }
+import silk.effect { Effect }
+import silk.string { String }
+import silk.unicode { Unicode }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let left = run normalizeNfc("\\u{e9}") |> Effect.provideMut(&mut allocator)
-  let right = run normalizeNfc("e\\u{301}") |> Effect.provideMut(&mut allocator)
-  if view(&left) == view(&right) {} else { return 1 }
+  let left = run Unicode.normalizeNfc("\\u{e9}") |> Effect.provideMut(&mut allocator)
+  let right = run Unicode.normalizeNfc("e\\u{301}") |> Effect.provideMut(&mut allocator)
+  if String.view(&left) == String.view(&right) {} else { return 1 }
   return 42
 }
 
@@ -133,30 +133,30 @@ it.effect(
 const decomposing = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
-import silk.string { String, view, ownedByteLength }
-import silk.unicode { normalizeNfd }
+import silk.effect { Effect }
+import silk.string { String }
+import silk.unicode { Unicode }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
 
   // A precomposed scalar becomes its base plus its combining mark.
-  let simple = run normalizeNfd("\\u{e9}") |> Effect.provideMut(&mut allocator)
-  if view(&simple) == "e\\u{301}" {} else { return 1 }
-  if ownedByteLength(&simple) == 3 {} else { return 2 }
+  let simple = run Unicode.normalizeNfd("\\u{e9}") |> Effect.provideMut(&mut allocator)
+  if String.view(&simple) == "e\\u{301}" {} else { return 1 }
+  if String.ownedByteLength(&simple) == 3 {} else { return 2 }
 
   // A scalar whose decomposition recurses: U+1E14 is E-macron-grave, and the macron form itself
   // decomposes, so the full form is three scalars rather than two.
-  let nested = run normalizeNfd("\\u{1e14}") |> Effect.provideMut(&mut allocator)
-  if view(&nested) == "E\\u{304}\\u{300}" {} else { return 3 }
+  let nested = run Unicode.normalizeNfd("\\u{1e14}") |> Effect.provideMut(&mut allocator)
+  if String.view(&nested) == "E\\u{304}\\u{300}" {} else { return 3 }
 
   // Two marks on one base come back in combining-class order regardless of how they were written.
-  let reordered = run normalizeNfd("q\\u{307}\\u{323}") |> Effect.provideMut(&mut allocator)
-  if view(&reordered) == "q\\u{323}\\u{307}" {} else { return 4 }
+  let reordered = run Unicode.normalizeNfd("q\\u{307}\\u{323}") |> Effect.provideMut(&mut allocator)
+  if String.view(&reordered) == "q\\u{323}\\u{307}" {} else { return 4 }
 
   // Hangul decomposes arithmetically rather than through the table.
-  let hangul = run normalizeNfd("\\u{ac01}") |> Effect.provideMut(&mut allocator)
-  if view(&hangul) == "\\u{1100}\\u{1161}\\u{11a8}" {} else { return 5 }
+  let hangul = run Unicode.normalizeNfd("\\u{ac01}") |> Effect.provideMut(&mut allocator)
+  if String.view(&hangul) == "\\u{1100}\\u{1161}\\u{11a8}" {} else { return 5 }
 
   return 42
 }
@@ -174,34 +174,34 @@ it.effect(
 const composing = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
-import silk.string { String, view }
-import silk.unicode { normalizeNfc }
+import silk.effect { Effect }
+import silk.string { String }
+import silk.unicode { Unicode }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
 
   // Recomposition puts a decomposed sequence back together.
-  let simple = run normalizeNfc("E\\u{304}\\u{300}") |> Effect.provideMut(&mut allocator)
-  if view(&simple) == "\\u{1e14}" {} else { return 1 }
+  let simple = run Unicode.normalizeNfc("E\\u{304}\\u{300}") |> Effect.provideMut(&mut allocator)
+  if String.view(&simple) == "\\u{1e14}" {} else { return 1 }
 
   // A composition exclusion stays decomposed: U+0958 has a canonical decomposition but is listed
   // in CompositionExclusions, so NFC must not rebuild it.
-  let excluded = run normalizeNfc("\\u{915}\\u{93c}") |> Effect.provideMut(&mut allocator)
-  if view(&excluded) == "\\u{915}\\u{93c}" {} else { return 2 }
+  let excluded = run Unicode.normalizeNfc("\\u{915}\\u{93c}") |> Effect.provideMut(&mut allocator)
+  if String.view(&excluded) == "\\u{915}\\u{93c}" {} else { return 2 }
 
   // A singleton decomposition is likewise never recomposed: U+212B ANGSTROM SIGN decomposes to
   // U+00C5 and NFC leaves it there.
-  let singleton = run normalizeNfc("\\u{212b}") |> Effect.provideMut(&mut allocator)
-  if view(&singleton) == "\\u{c5}" {} else { return 3 }
+  let singleton = run Unicode.normalizeNfc("\\u{212b}") |> Effect.provideMut(&mut allocator)
+  if String.view(&singleton) == "\\u{c5}" {} else { return 3 }
 
   // A mark blocked from its starter by an equal-or-higher combining class is not absorbed.
-  let blocked = run normalizeNfc("q\\u{323}\\u{307}") |> Effect.provideMut(&mut allocator)
-  if view(&blocked) == "q\\u{323}\\u{307}" {} else { return 4 }
+  let blocked = run Unicode.normalizeNfc("q\\u{323}\\u{307}") |> Effect.provideMut(&mut allocator)
+  if String.view(&blocked) == "q\\u{323}\\u{307}" {} else { return 4 }
 
   // Hangul composes arithmetically, jamo by jamo.
-  let hangul = run normalizeNfc("\\u{1100}\\u{1161}\\u{11a8}") |> Effect.provideMut(&mut allocator)
-  if view(&hangul) == "\\u{ac01}" {} else { return 5 }
+  let hangul = run Unicode.normalizeNfc("\\u{1100}\\u{1161}\\u{11a8}") |> Effect.provideMut(&mut allocator)
+  if String.view(&hangul) == "\\u{ac01}" {} else { return 5 }
 
   return 42
 }
@@ -251,12 +251,12 @@ it.effect(
 it.effect('names the Unicode data version and checks it on its own', () =>
   Effect.gen(function* () {
     const source = `import silk.usize as usize
-import silk.unicode { dataVersion }
-import silk.string { byteLength }
+import silk.unicode { Unicode }
+import silk.string { String }
 
 pub fn main() -> i32 {
-  if dataVersion() == "17.0.0" {} else { return 1 }
-  return usize.toI32(byteLength(dataVersion()))
+  if Unicode.dataVersion() == "17.0.0" {} else { return 1 }
+  return usize.toI32(String.byteLength(Unicode.dataVersion()))
 }`
     const snapshot = yield* Analysis.ofSourceRealized('unicode/data-version', ascii(source))
     assert.deepEqual(diagnosticSummary(snapshot), [])
@@ -280,10 +280,10 @@ pub fn main() -> i32 {
 it.effect('bounds the decomposition buffer against the generated tables', () =>
   Effect.gen(function* () {
     const source = `import silk.usize as usize
-import silk.unicode { longestDecomposition }
+import silk.unicode { Unicode }
 
 pub fn main() -> i32 {
-  return usize.toI32(longestDecomposition())
+  return usize.toI32(Unicode.longestDecomposition())
 }`
     const snapshot = yield* Analysis.ofSourceRealized('unicode/longest', ascii(source))
     assert.deepEqual(diagnosticSummary(snapshot), [])
@@ -312,10 +312,10 @@ const allocationFailure = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
-import silk.string { String, view }
-import silk.unicode { normalizeNfc }
+import silk.string { String }
+import silk.unicode { Unicode }
 
 struct QuotaAllocator { remaining: i32 }
 
@@ -331,7 +331,7 @@ impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = QuotaAllocator { remaining: 0 }
-  let composing = normalizeNfc("e\\u{301}") |> Effect.provideMut(&mut allocator)
+  let composing = Unicode.normalizeNfc("e\\u{301}") |> Effect.provideMut(&mut allocator)
   let composed = run composing
   return 1
 }

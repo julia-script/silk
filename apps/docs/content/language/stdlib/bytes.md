@@ -11,7 +11,7 @@ the value is known to be valid UTF-8 and callers need text operations.
 
 ## Details
 
-[`make`](#declaration-73696c6b2f62797465733a3a6d616b65) creates an empty value without allocating, while [`zeroed`](#declaration-73696c6b2f62797465733a3a7a65726f6564), [`copy`](#declaration-73696c6b2f62797465733a3a636f7079), and [`append`](#declaration-73696c6b2f62797465733a3a617070656e64)
+[`make`](#declaration-73696c6b2f62797465733a3a42797465732e6d616b65) creates an empty value without allocating, while [`zeroed`](#declaration-73696c6b2f62797465733a3a42797465732e7a65726f6564), [`copy`](#declaration-73696c6b2f62797465733a3a42797465732e636f7079), and [`append`](#declaration-73696c6b2f62797465733a3a42797465732e617070656e64)
 may require an [`Allocator`](./allocator.md#declaration-73696c6b2f616c6c6f6361746f723a3a416c6c6f6361746f72). Shared and exclusive views borrow only the initialized prefix;
 later appends can reallocate, so do not retain a view across a mutation.
 
@@ -22,14 +22,14 @@ later appends can reallocate, so do not retain a view across a mutation.
 ```silk
 import silk.bytes { Bytes }
 
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.effect { Effect }
 
 import silk.u8
 
 effect fn build() -> i32
-! Allocator.OutOfMemoryError {
+! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let source = b"AB"
   let copying = Bytes.copy(&source)
@@ -45,7 +45,7 @@ effect fn build() -> i32
   return u8.toI32(readable[0]) - u8.toI32(readable[1]) + u8.toI32(readable[2]) - 42
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -56,7 +56,7 @@ pub fn main() -> i32 {
 
 Import as `Bytes` with `import silk.bytes { Bytes }`.
 
-Public declarations: 8.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f62797465733a3a4279746573"></a>
 
@@ -71,11 +71,11 @@ An owned encoding-neutral sequence of arbitrary octets.
 ### Details
 
 A value owns its initialized bytes and releases their storage on drop. Its length can grow with
-[`append`](#declaration-73696c6b2f62797465733a3a617070656e64), and its capacity is not part of the public contract.
+[`append`](#declaration-73696c6b2f62797465733a3a42797465732e617070656e64), and its capacity is not part of the public contract.
 
-<a id="declaration-73696c6b2f62797465733a3a6d616b65"></a>
+<a id="declaration-73696c6b2f62797465733a3a42797465732e6d616b65"></a>
 
-## `make`
+### Associated function `Bytes.make`
 
 ```silk
 pub fn make() -> Bytes
@@ -83,9 +83,9 @@ pub fn make() -> Bytes
 
 Creates an empty `Bytes` value without allocating storage.
 
-<a id="declaration-73696c6b2f62797465733a3a7a65726f6564"></a>
+<a id="declaration-73696c6b2f62797465733a3a42797465732e7a65726f6564"></a>
 
-## `zeroed`
+### Associated function `Bytes.zeroed`
 
 ```silk
 pub effect fn zeroed(length: usize) -> Bytes ! OutOfMemoryError ? &mut Allocator
@@ -93,23 +93,23 @@ pub effect fn zeroed(length: usize) -> Bytes ! OutOfMemoryError ? &mut Allocator
 
 Allocates an owned initialized byte buffer of exactly `length` zero octets.
 
-### Details
+#### Details
 
 A zero length returns an empty value without an allocation.
 
-<a id="declaration-73696c6b2f62797465733a3a6c656e677468"></a>
+<a id="declaration-73696c6b2f62797465733a3a42797465732e6c656e677468"></a>
 
-## `length`
+### Method `Bytes.length`
 
 ```silk
-pub fn length(self: &silk/bytes.Bytes) -> usize
+pub fn length(self: &Bytes) -> usize
 ```
 
 Returns the initialized byte count.
 
-<a id="declaration-73696c6b2f62797465733a3a636f7079"></a>
+<a id="declaration-73696c6b2f62797465733a3a42797465732e636f7079"></a>
 
-## `copy`
+### Associated function `Bytes.copy`
 
 ```silk
 pub effect fn copy(values: &[u8]) -> Bytes ! OutOfMemoryError ? &mut Allocator
@@ -117,40 +117,40 @@ pub effect fn copy(values: &[u8]) -> Bytes ! OutOfMemoryError ? &mut Allocator
 
 Copies a complete borrowed byte sequence into independently owned storage.
 
-<a id="declaration-73696c6b2f62797465733a3a617070656e64"></a>
+<a id="declaration-73696c6b2f62797465733a3a42797465732e617070656e64"></a>
 
-## `append`
+### Method `Bytes.append`
 
 ```silk
-pub effect fn append(self: &mut silk/bytes.Bytes, values: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect fn append(self: &mut Bytes, values: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends a complete borrowed byte sequence in source order.
 
-### Details
+#### Details
 
 If growth fails, the original bytes and their length remain unchanged.
 
-<a id="declaration-73696c6b2f62797465733a3a6173536c696365"></a>
+<a id="declaration-73696c6b2f62797465733a3a42797465732e6173536c696365"></a>
 
-## `asSlice`
+### Method `Bytes.asSlice`
 
 ```silk
-pub fn asSlice(self: &silk/bytes.Bytes) -> &[u8]
+pub fn asSlice(self: &Bytes) -> &[u8]
 ```
 
 Borrows all initialized octets as one shared lexical slice.
 
-<a id="declaration-73696c6b2f62797465733a3a61734d7574536c696365"></a>
+<a id="declaration-73696c6b2f62797465733a3a42797465732e61734d7574536c696365"></a>
 
-## `asMutSlice`
+### Method `Bytes.asMutSlice`
 
 ```silk
-pub fn asMutSlice(self: &mut silk/bytes.Bytes) -> &mut [u8]
+pub fn asMutSlice(self: &mut Bytes) -> &mut [u8]
 ```
 
 Borrows all initialized octets as one exclusive lexical slice.
 
-### Gotchas
+#### Gotchas
 
-Do not retain this slice across [`append`](#declaration-73696c6b2f62797465733a3a617070656e64), because an append can replace the allocation.
+Do not retain this slice across [`append`](#declaration-73696c6b2f62797465733a3a42797465732e617070656e64), because an append can replace the allocation.

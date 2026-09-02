@@ -12,10 +12,10 @@ const copyRead = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
-import silk.raw_buffer as RawBuffer
-import silk.slot as Slot
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
 effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
@@ -42,10 +42,10 @@ const unionCopyRead = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
-import silk.raw_buffer as RawBuffer
-import silk.slot as Slot
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
 import silk.u8 as u8
 struct Left { value: i32 }
 impl Copy for Left {}
@@ -186,10 +186,10 @@ const nonCopy = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
-import silk.raw_buffer as RawBuffer
-import silk.slot as Slot
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
 struct Guard { storage: Allocation }
 effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()

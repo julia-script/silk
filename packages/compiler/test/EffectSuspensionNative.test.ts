@@ -28,13 +28,13 @@ afterAll(() => {
   rmSync(destinationRoot, { recursive: true, force: true })
 })
 
-const successSource = `import silk.effect as Effect
+const successSource = `import silk.effect { Effect }
 effect fn delayed() -> i32 {
   return run Effect.suspend(effect { return 2 })
 }
 pub fn main() -> i32 { return run delayed() }`
 
-const retryFailureSource = `import silk.effect as Effect
+const retryFailureSource = `import silk.effect { Effect }
 struct Problem {}
 effect fn attempt() -> i32 ! Problem {
   let resumed = run Effect.suspend(effect { return () })
@@ -48,7 +48,7 @@ pub fn main() -> i32 {
   )
 }`
 
-const recursiveSource = (depth: number): string => `import silk.effect as Effect
+const recursiveSource = (depth: number): string => `import silk.effect { Effect }
 struct Owner { value: i32 }
 effect fn count(value: i32) -> i32 {
   if value == 0 { return 0 }

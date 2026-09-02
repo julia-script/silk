@@ -208,14 +208,105 @@ import silk.u32 as u32
 import silk.u8 as u8
 import silk.usize as usize
 
-/// The importable name of the \`silk.unicode_tables\` module scope.
+/// The owner of the generated Unicode lookup operations.
 ///
 /// # Details
 ///
-/// This struct carries no data and is never constructed by the library. Importing it as
-/// \`import silk.unicode_tables { UnicodeTables }\` names the module scope, so generated lookup
-/// operations resolve through \`UnicodeTables\`.
+/// This struct carries no data and is never constructed by the library. Every generated lookup is
+/// an inherent member declared in \`impl UnicodeTables\`, reached through
+/// \`import silk.unicode_tables { UnicodeTables }\`.
 pub struct UnicodeTables {}
+
+impl UnicodeTables {
+  /// Returns the Unicode data version that defines all lookup results in this module.
+  pub fn dataVersion() -> string {
+    return "${version}"
+  }
+
+  /// Returns the longest full canonical decomposition of one scalar in these tables.
+  pub fn maximumDecompositionLength() -> usize {
+    return ${maximumDecomposition}
+  }
+
+  /// Returns a scalar's canonical combining class, or zero for a starter or unknown value.
+  pub fn combiningClass(scalar: u32) -> u32 {
+    let data = ${literal(combiningBytes)}
+    let mut low = usize.ZERO
+    let mut high = usize.add(0, ${runs.length})
+    while low < high {
+      let middle = low + (high - low) / 2
+      let at = middle * 5
+      let start = read3(data, at)
+      if scalar < start {
+        high = middle
+      } else {
+        let count = u8.toU32(data[at + 3]) + 1
+        if scalar < start + count { return u8.toU32(data[at + 4]) }
+        low = middle + usize.ONE
+      }
+    }
+    return 0
+  }
+
+  /// Returns the canonical decomposition of a scalar, or both components zero when it has none.
+  /// Hangul syllables decompose algorithmically and are absent from this table by design.
+  pub fn canonicalDecomposition(scalar: u32) -> Decomposition {
+    let singletons = ${literal(singletonBytes)}
+    let mut low = usize.ZERO
+    let mut high = usize.add(0, ${sortedSingletons.length})
+    while low < high {
+      let middle = low + (high - low) / 2
+      let at = middle * 6
+      let key = read3(singletons, at)
+      if scalar < key {
+        high = middle
+      } else {
+        if key < scalar {
+          low = middle + usize.ONE
+        } else {
+          return Decomposition { first: read3(singletons, at + 3), second: 0 }
+        }
+      }
+    }
+    let found = pairIndexOf(scalar)
+    if found == ${sortedPairs.length} { return Decomposition { first: 0, second: 0 } }
+    let record = pairRecord(found)
+    return Decomposition { first: record.first, second: record.second }
+  }
+
+  /// Composes a starter and a following scalar, or returns zero when the pair does not compose.
+  ///
+  /// # Details
+  ///
+  /// Excluded composition pairs are absent. A nonzero result is always a primary composite.
+  ///
+  /// # Gotchas
+  ///
+  /// Hangul composition is algorithmic and is not included in this lookup.
+  pub fn canonicalComposition(first: u32, second: u32) -> u32 {
+    let index = ${literal(compositionBytes)}
+    let mut low = usize.ZERO
+    let mut high = usize.add(0, ${composable.length})
+    while low < high {
+      let middle = low + (high - low) / 2
+      let record = pairRecord(read2(index, middle * 2) |> u32.toUsize)
+      if first < record.first {
+        high = middle
+      } else {
+        if record.first < first {
+          low = middle + usize.ONE
+        } else {
+          if second < record.second {
+            high = middle
+          } else {
+            if record.second < second { low = middle + usize.ONE } else { return record.composed }
+          }
+        }
+      }
+    }
+    return 0
+  }
+}
 
 /// One canonical decomposition with zero sentinels for an absent mapping or second scalar.
 pub struct Decomposition {
@@ -235,16 +326,6 @@ pub struct PairRecord {
   pub second: u32
 }
 
-/// Returns the Unicode data version that defines all lookup results in this module.
-pub fn dataVersion() -> string {
-  return "${version}"
-}
-
-/// Returns the longest full canonical decomposition of one scalar in these tables.
-pub fn maximumDecompositionLength() -> usize {
-  return ${maximumDecomposition}
-}
-
 fn read2(data: &[u8], at: usize) -> u32 {
   return u8.toU32(data[at]) * 256 + u8.toU32(data[at + usize.ONE])
 }
@@ -253,52 +334,6 @@ fn read3(data: &[u8], at: usize) -> u32 {
   return u8.toU32(data[at]) * 65536
     + u8.toU32(data[at + usize.ONE]) * 256
     + u8.toU32(data[at + 2])
-}
-
-/// Returns a scalar's canonical combining class, or zero for a starter or unknown value.
-pub fn combiningClass(scalar: u32) -> u32 {
-  let data = ${literal(combiningBytes)}
-  let mut low = usize.ZERO
-  let mut high = usize.add(0, ${runs.length})
-  while low < high {
-    let middle = low + (high - low) / 2
-    let at = middle * 5
-    let start = read3(data, at)
-    if scalar < start {
-      high = middle
-    } else {
-      let count = u8.toU32(data[at + 3]) + 1
-      if scalar < start + count { return u8.toU32(data[at + 4]) }
-      low = middle + usize.ONE
-    }
-  }
-  return 0
-}
-
-/// Returns the canonical decomposition of a scalar, or both components zero when it has none.
-/// Hangul syllables decompose algorithmically and are absent from this table by design.
-pub fn canonicalDecomposition(scalar: u32) -> Decomposition {
-  let singletons = ${literal(singletonBytes)}
-  let mut low = usize.ZERO
-  let mut high = usize.add(0, ${sortedSingletons.length})
-  while low < high {
-    let middle = low + (high - low) / 2
-    let at = middle * 6
-    let key = read3(singletons, at)
-    if scalar < key {
-      high = middle
-    } else {
-      if key < scalar {
-        low = middle + usize.ONE
-      } else {
-        return Decomposition { first: read3(singletons, at + 3), second: 0 }
-      }
-    }
-  }
-  let found = pairIndexOf(scalar)
-  if found == ${sortedPairs.length} { return Decomposition { first: 0, second: 0 } }
-  let record = pairRecord(found)
-  return Decomposition { first: record.first, second: record.second }
 }
 
 /// Returns the position of a scalar in the canonical pair table, or the table length when absent.
@@ -329,38 +364,6 @@ fn pairRecord(index: usize) -> PairRecord {
   }
 }
 
-/// Composes a starter and a following scalar, or returns zero when the pair does not compose.
-///
-/// # Details
-///
-/// Excluded composition pairs are absent. A nonzero result is always a primary composite.
-///
-/// # Gotchas
-///
-/// Hangul composition is algorithmic and is not included in this lookup.
-pub fn canonicalComposition(first: u32, second: u32) -> u32 {
-  let index = ${literal(compositionBytes)}
-  let mut low = usize.ZERO
-  let mut high = usize.add(0, ${composable.length})
-  while low < high {
-    let middle = low + (high - low) / 2
-    let record = pairRecord(read2(index, middle * 2) |> u32.toUsize)
-    if first < record.first {
-      high = middle
-    } else {
-      if record.first < first {
-        low = middle + usize.ONE
-      } else {
-        if second < record.second {
-          high = middle
-        } else {
-          if record.second < second { low = middle + usize.ONE } else { return record.composed }
-        }
-      }
-    }
-  }
-  return 0
-}
 `
 
 const generated = emit()

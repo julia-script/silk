@@ -82,7 +82,7 @@ it.effect('keeps exact rows compile-time-only and suspendability in the layout d
   Effect.gen(function* () {
     const { plan } = yield* storedLayout(
       'stored-effect-layout/suspending',
-      `import silk.effect as Effect
+      `import silk.effect { Effect }
 struct Deferred<F: Effect<i32>> { operation: F }
 effect fn delayed() -> i32 {
   return run Effect.suspend(effect { return 42 })

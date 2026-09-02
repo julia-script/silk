@@ -73,11 +73,11 @@ it('renders canonical module identities with Silk import-path spelling', () => {
   )
   assert.strictEqual(
     apply(
-      'import silk.vector { make }\nfn main() -> () {\n  Vector\n  return ()\n}',
+      'import silk.vector { appendBytes }\nfn main() -> () {\n  Vector\n  return ()\n}',
       'silk/vector',
       'Vector',
     ),
-    'import silk.vector { make, Vector }\nfn main() -> () {\n  Vector\n  return ()\n}',
+    'import silk.vector { appendBytes, Vector }\nfn main() -> () {\n  Vector\n  return ()\n}',
   )
 })
 

@@ -16,16 +16,9 @@ const provider = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
-import silk.metrics {
-  AllocationMetrics,
-  copy as copyMetrics,
-  live,
-  make as zeroedMetrics,
-  recordAcquire,
-  recordRelease
-}
+import silk.metrics { AllocationMetrics, Metrics }
 
 struct CountingAllocator {
   inner: SystemAllocator
@@ -35,14 +28,14 @@ struct CountingAllocator {
 effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut self.inner)
   let block = run pending
-  recordAcquire(&mut self.metrics)
+  Metrics.recordAcquire(&mut self.metrics)
   return move block
 }
 
 impl Allocator for CountingAllocator { allocate: CountingAllocator.allocate }
 
 fn published(self: &CountingAllocator) -> AllocationMetrics {
-  return copyMetrics(&self.metrics)
+  return Metrics.copy(&self.metrics)
 }
 `
 
@@ -54,13 +47,13 @@ const counted = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 ${provider}
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = CountingAllocator {
     inner: Allocator.systemAllocatorProvider(),
-    metrics: zeroedMetrics()
+    metrics: Metrics.make()
   }
   let firstLayout = Layout.of<[i32; 2]>()
   let firstPending = Allocator.allocate(move firstLayout) |> Effect.provideMut(&mut allocator)
@@ -73,21 +66,21 @@ effect fn build() -> i32 ! OutOfMemoryError {
   let third = run thirdPending
 
   let atPeak = published(&allocator)
-  if live(&atPeak) == 3 {} else { return 1 }
+  if Metrics.live(&atPeak) == 3 {} else { return 1 }
 
   drop third
-  recordRelease(&mut allocator.metrics)
+  Metrics.recordRelease(&mut allocator.metrics)
 
   let observed = published(&allocator)
   if observed.acquired == 3 {} else { return 2 }
   if observed.released == 1 {} else { return 3 }
-  if live(&observed) == 2 {} else { return 4 }
+  if Metrics.live(&observed) == 2 {} else { return 4 }
 
   // Reading the counts is a read, not a move: the provider still owns its own value, and the
   // snapshot the caller already holds is independent of the next one.
   let again = published(&allocator)
-  if live(&again) == 2 {} else { return 5 }
-  if live(&observed) == 2 {} else { return 6 }
+  if Metrics.live(&again) == 2 {} else { return 5 }
+  if Metrics.live(&observed) == 2 {} else { return 6 }
 
   return 42
 }
@@ -140,13 +133,13 @@ const peakSurvivesDrops = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 ${provider}
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = CountingAllocator {
     inner: Allocator.systemAllocatorProvider(),
-    metrics: zeroedMetrics()
+    metrics: Metrics.make()
   }
   let firstLayout = Layout.of<[i32; 2]>()
   let firstPending = Allocator.allocate(move firstLayout) |> Effect.provideMut(&mut allocator)
@@ -159,22 +152,22 @@ effect fn build() -> i32 ! OutOfMemoryError {
   if atPeak.peakLive == 2 {} else { return 1 }
 
   drop first
-  recordRelease(&mut allocator.metrics)
+  Metrics.recordRelease(&mut allocator.metrics)
   let afterFirst = published(&allocator)
-  if live(&afterFirst) == 1 {} else { return 2 }
+  if Metrics.live(&afterFirst) == 1 {} else { return 2 }
   if afterFirst.peakLive == 2 {} else { return 3 }
 
   drop second
-  recordRelease(&mut allocator.metrics)
+  Metrics.recordRelease(&mut allocator.metrics)
   let afterSecond = published(&allocator)
-  if live(&afterSecond) == 0 {} else { return 4 }
+  if Metrics.live(&afterSecond) == 0 {} else { return 4 }
   if afterSecond.peakLive == 2 {} else { return 5 }
 
   let thirdLayout = Layout.of<[i32; 2]>()
   let thirdPending = Allocator.allocate(move thirdLayout) |> Effect.provideMut(&mut allocator)
   let third = run thirdPending
   let afterThird = published(&allocator)
-  if live(&afterThird) == 1 {} else { return 6 }
+  if Metrics.live(&afterThird) == 1 {} else { return 6 }
   if afterThird.peakLive == 2 {} else { return 7 }
   drop third
 
@@ -217,7 +210,7 @@ const unmetered = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -276,7 +269,7 @@ it.effect('costs a program that never reads the metrics nothing at all', () =>
  */
 it.effect('declares metrics as a cleanup-free Copy value', () =>
   Effect.gen(function* () {
-    const droppable = `import silk.metrics { AllocationMetrics, make as zeroedMetrics }
+    const droppable = `import silk.metrics { AllocationMetrics, Metrics }
 
 struct Ledger { metrics: AllocationMetrics }
 
@@ -287,7 +280,7 @@ impl Drop for Ledger {
 }
 
 pub fn main() -> i32 {
-  let ledger = Ledger { metrics: zeroedMetrics() }
+  let ledger = Ledger { metrics: Metrics.make() }
   return 0
 }`
     const rejected = yield* Analysis.ofSourceRealized(
@@ -300,21 +293,15 @@ pub fn main() -> i32 {
       ['SEM0083'],
     )
 
-    const plain = `import silk.metrics {
-  copy as copyMetrics,
-  live,
-  make as zeroedMetrics,
-  recordAcquire,
-  recordRelease
-}
+    const plain = `import silk.metrics { Metrics }
 
 pub fn main() -> i32 {
-  let mut counts = zeroedMetrics()
-  recordAcquire(&mut counts)
-  recordAcquire(&mut counts)
-  recordRelease(&mut counts)
-  let published = copyMetrics(&counts)
-  if live(&published) == 1 {} else { return 1 }
+  let mut counts = Metrics.make()
+  Metrics.recordAcquire(&mut counts)
+  Metrics.recordAcquire(&mut counts)
+  Metrics.recordRelease(&mut counts)
+  let published = Metrics.copy(&counts)
+  if Metrics.live(&published) == 1 {} else { return 1 }
   if published.acquired == 2 {} else { return 2 }
   if published.released == 1 {} else { return 3 }
   if published.peakLive == 2 {} else { return 4 }

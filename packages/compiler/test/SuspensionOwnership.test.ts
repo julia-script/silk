@@ -31,7 +31,7 @@ const source = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct Owner { value: i32 }
 effect fn delayed(value: i32) -> i32 {

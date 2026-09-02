@@ -9,7 +9,7 @@ import * as MirVerification from '../src/MirVerification.js'
 
 const encoder = new TextEncoder()
 
-const suspended = `import silk.effect as Effect
+const suspended = `import silk.effect { Effect }
 effect fn delayed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }

@@ -7,11 +7,11 @@ Provider-replaceable deterministic words, booleans, bounded values, and byte fil
 ## When to use
 
 Require [`InsecureRandom`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a496e73656375726552616e646f6d) when a reproducible pseudorandom stream is needed. Use
-[`Xoshiro256StarStar`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a586f736869726f3235365374617253746172) with [`seeded`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a736565646564) for one stable cross-engine sequence.
+[`Xoshiro256StarStar`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a586f736869726f3235365374617253746172) with [`seeded`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a496e73656375726552616e646f6d2e736565646564) for one stable cross-engine sequence.
 
 ## Details
 
-[`nextU64`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a6e657874553634) obtains one word from the active provider. [`nextBool`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a6e657874426f6f6c), [`below`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a62656c6f77), and [`fillBytes`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a66696c6c4279746573)
+`InsecureRandom.nextU64` obtains one word from the active provider. [`nextBool`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a496e73656375726552616e646f6d2e6e657874426f6f6c), [`below`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a496e73656375726552616e646f6d2e62656c6f77), and [`fillBytes`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a496e73656375726552616e646f6d2e66696c6c4279746573)
 define one stable mapping from provider words to their results. Seed expansion uses SplitMix64.
 
 ## Gotchas
@@ -30,7 +30,7 @@ import silk.insecure_random { InsecureRandom }
 pub fn main() -> i32 {
   let mut provider = InsecureRandom.seeded(0)
   let first = run InsecureRandom.nextU64()
-    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut provider)
+    |> Effect.provideMut<InsecureRandom>(&mut provider)
   if first != 0x99ec5f36cb75f2b4 { return 0 }
   return 42
 }
@@ -38,7 +38,7 @@ pub fn main() -> i32 {
 
 Import as `InsecureRandom` with `import silk.insecure_random { InsecureRandom }`.
 
-Public declarations: 7.
+Public declarations: 2.
 
 <a id="declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a496e73656375726552616e646f6d"></a>
 
@@ -68,15 +68,57 @@ effect fn nextU64() -> u64 ? &mut InsecureRandom
 
 Returns the next deterministic word and advances the active provider once.
 
-<a id="declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a6e657874553634"></a>
+<a id="declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a496e73656375726552616e646f6d2e736565646564"></a>
 
-## `nextU64`
+### Associated function `InsecureRandom.seeded`
 
 ```silk
-pub effect fn nextU64() -> u64 ? &mut InsecureRandom
+pub fn seeded(seed: u64) -> Xoshiro256StarStar
 ```
 
-Returns one deterministic word from the active [`InsecureRandom`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a496e73656375726552616e646f6d) provider.
+Creates a reproducible [`Xoshiro256StarStar`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a586f736869726f3235365374617253746172) provider from one `u64` seed.
+
+#### Details
+
+Every seed, including zero, expands through four successive SplitMix64 steps.
+
+<a id="declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a496e73656375726552616e646f6d2e6e657874426f6f6c"></a>
+
+### Associated function `InsecureRandom.nextBool`
+
+```silk
+pub effect fn nextBool() -> bool ? &mut InsecureRandom
+```
+
+Returns whether bit 63 of the next deterministic provider word is set.
+
+<a id="declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a496e73656375726552616e646f6d2e62656c6f77"></a>
+
+### Associated function `InsecureRandom.below`
+
+```silk
+pub effect fn below(upperExclusive: u64) -> silk/option.Option<u64> ? &mut InsecureRandom
+```
+
+Returns a deterministic value below `upperExclusive`, or `None` when the bound is zero.
+
+#### Details
+
+Positive bounds use complete-word rejection sampling. Progress requires eventual acceptance.
+
+<a id="declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a496e73656375726552616e646f6d2e66696c6c4279746573"></a>
+
+### Associated function `InsecureRandom.fillBytes`
+
+```silk
+pub effect fn fillBytes(output: &mut [u8]) -> () ? &mut InsecureRandom
+```
+
+Fills `output` from deterministic provider words in least-significant-byte-first order.
+
+#### Details
+
+An empty slice consumes no word. A partial final group consumes one complete word.
 
 <a id="declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a586f736869726f3235365374617253746172"></a>
 
@@ -91,20 +133,6 @@ A deterministic xoshiro256\*\* provider with four private `u64` state words.
 ### Details
 
 The sequence is stable on every Silk engine and is not cryptographically secure.
-
-<a id="declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a736565646564"></a>
-
-## `seeded`
-
-```silk
-pub fn seeded(seed: u64) -> Xoshiro256StarStar
-```
-
-Creates a reproducible [`Xoshiro256StarStar`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a586f736869726f3235365374617253746172) provider from one `u64` seed.
-
-### Details
-
-Every seed, including zero, expands through four successive SplitMix64 steps.
 
 <a id="declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a696d706c656d656e746174696f6e3a30"></a>
 
@@ -121,41 +149,3 @@ impl InsecureRandom for Xoshiro256StarStar
 ```silk
 nextU64 = Xoshiro256StarStar.xoshiroNext
 ```
-
-<a id="declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a6e657874426f6f6c"></a>
-
-## `nextBool`
-
-```silk
-pub effect fn nextBool() -> bool ? &mut InsecureRandom
-```
-
-Returns whether bit 63 of the next deterministic provider word is set.
-
-<a id="declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a62656c6f77"></a>
-
-## `below`
-
-```silk
-pub effect fn below(upperExclusive: u64) -> silk/option.Option<u64> ? &mut InsecureRandom
-```
-
-Returns a deterministic value below `upperExclusive`, or `None` when the bound is zero.
-
-### Details
-
-Positive bounds use complete-word rejection sampling. Progress requires eventual acceptance.
-
-<a id="declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a66696c6c4279746573"></a>
-
-## `fillBytes`
-
-```silk
-pub effect fn fillBytes(output: &mut [u8]) -> () ? &mut InsecureRandom
-```
-
-Fills `output` from deterministic provider words in least-significant-byte-first order.
-
-### Details
-
-An empty slice consumes no word. A partial final group consumes one complete word.

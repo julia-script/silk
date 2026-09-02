@@ -12,12 +12,12 @@ code. Supply an in-memory [`FileSystem`](./filesystem.md#declaration-73696c6b2f6
 ## Details
 
 Portable `/` denotes the provider root rather than the host filesystem root. The native boundary
-rejects malformed paths, root escape, and symlink traversal outside that confinement. Whole-file
-reads and writes own or commit complete contents, directory listings retry oversized entries and
+rejects malformed paths, root escape, and symlink traversal outside that confinement. Whole-FileSystem.file
+reads and writes own or commit complete contents, FileSystem.directory listings retry oversized entries and
 sort complete child paths deterministically. Low-level failures become portable [`FileError`](./filesystem.md#declaration-73696c6b2f66696c6573797374656d3a3a46696c654572726f72)
 values with retained native codes.
 
-[`make`](#declaration-73696c6b2f6f735f66696c6573797374656d3a3a6d616b65) copies its root. The root must be an absolute, non-empty, NUL-free native path. A root
+[`make`](#declaration-73696c6b2f6f735f66696c6573797374656d3a3a4f7346696c6553797374656d2e6d616b65) copies its root. The root must be an absolute, non-empty, NUL-free native path. A root
 that violates this precondition traps. Open handles close on success and failure. If an
 operation and close both fail, the operation's original typed failure remains the reported
 result.
@@ -36,14 +36,14 @@ rather than inventing filesystem imports; evaluator execution requires an inject
 ### Construct a provider without accessing the filesystem
 
 ```silk
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.effect { Effect }
 
 import silk.os_filesystem { OsFileSystem }
 
 effect fn program() -> i32
-! Allocator.OutOfMemoryError {
+! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let provider = run OsFileSystem.make("/tmp")
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -51,7 +51,7 @@ effect fn program() -> i32
   return 42
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -62,7 +62,7 @@ pub fn main() -> i32 {
 
 Import as `OsFileSystem` with `import silk.os_filesystem { OsFileSystem }`.
 
-Public declarations: 2.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a4f7346696c6553797374656d"></a>
 
@@ -79,9 +79,9 @@ A native [`FileSystem`](./filesystem.md#declaration-73696c6b2f66696c657379737465
 Portable absolute paths resolve inside this root. The provider never exposes the root as a
 [`Path`](./filesystem.md#declaration-73696c6b2f66696c6573797374656d3a3a50617468), and operations reject lexical or symbolic-link escape from the root.
 
-<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a6d616b65"></a>
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a4f7346696c6553797374656d2e6d616b65"></a>
 
-## `make`
+### Associated function `OsFileSystem.make`
 
 ```silk
 pub effect fn make(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator
@@ -89,17 +89,17 @@ pub effect fn make(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Alloc
 
 Copies one absolute native root and creates a confined filesystem provider.
 
-### When to use
+#### When to use
 
 Use this function at a native application edge. Provide the result as `&mut FileSystem` to code
 that uses the portable filesystem service.
 
-### Details
+#### Details
 
-Construction owns the root bytes but does not open the directory. Portable `/` then denotes
+Construction owns the root bytes but does not open the FileSystem.directory. Portable `/` then denotes
 this provider root instead of the host filesystem root.
 
-### Gotchas
+#### Gotchas
 
 `root` must be non-empty, absolute, and NUL-free. A value that violates this precondition traps.
 Allocation failure leaves no provider value.

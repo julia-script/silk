@@ -3,7 +3,7 @@ import * as Analysis from '../../dist/Analysis.js'
 import * as Hir from '../../dist/Hir.js'
 import * as MirEncoding from '../../dist/MirEncoding.js'
 
-const source = `import silk.vector { Vector, length }
+const source = `import silk.vector { Vector }
 
 pub fn main() -> i32 {
   return 42

@@ -58,6 +58,11 @@ impl Allocator for SystemAllocator {
   /// Allocation operation.
   allocate: SystemAllocator.allocate
 }
+/// Inherent members of a problem.
+impl Problem {
+  /// Reads the numeric code.
+  pub fn code(self: &Self) -> i32 { return self.code }
+}
 `
   const syntax = parse(source)
 
@@ -91,6 +96,14 @@ impl Allocator for SystemAllocator {
   assert.deepEqual(
     spellings(DocBlock.ofNode(syntax, requiredNode(syntax, 'ImplOperation')), source),
     ['/// Allocation operation.'],
+  )
+  assert.deepEqual(
+    spellings(DocBlock.ofNode(syntax, requiredNode(syntax, 'ImplDeclaration', 1)), source),
+    ['/// Inherent members of a problem.'],
+  )
+  assert.deepEqual(
+    spellings(DocBlock.ofNode(syntax, requiredNode(syntax, 'FunctionDeclaration', 1)), source),
+    ['/// Reads the numeric code.'],
   )
 })
 

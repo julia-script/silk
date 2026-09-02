@@ -213,9 +213,9 @@ it.effect('points a stdlib construction reached through inference at the user ca
     // user's call, so the primary span is the user source and the stdlib construction is related
     // provenance.
     const source = `import silk.i32 as i32
-import silk.option { some }
+import silk.option { Option }
 pub fn main() -> i32 {
-  let optional = some(i32.add(1))
+  let optional = Option.some(i32.add(1))
   return 42
 }`
     const snapshot = yield* analyzed('stored-callable/stdlib-inference', source)

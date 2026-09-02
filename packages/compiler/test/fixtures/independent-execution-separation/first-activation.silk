@@ -1,8 +1,8 @@
 // Compiler fixture: one owner stores distinct exact bodies homogeneously before first drive.
-import silk.allocator { Allocator }
-import silk.effect as Effect
-import silk.execution as Execution
-import silk.shared as Shared
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
+import silk.shared { Shared }
 
 struct Marker { value: i32 callbacks: i32 }
 fn mark(self: &mut Marker, value: i32) -> () { self.value = value return () }
@@ -17,19 +17,19 @@ struct Empty {}
 struct Stored { execution: Intrinsic.Execution<TaskOutput> }
 struct Owner { first: Empty | Stored second: Empty | Stored }
 
-effect fn firstBody(marker: Shared.Shared<Marker>) -> TaskOutput {
+effect fn firstBody(marker: Shared<Marker>) -> TaskOutput {
   let changed = Shared.withMut(&marker, mark(1))
   drop marker
   return TaskOutput {}
 }
 
-effect fn secondBody(marker: Shared.Shared<Marker>, selected: i32) -> TaskOutput {
+effect fn secondBody(marker: Shared<Marker>, selected: i32) -> TaskOutput {
   let changed = Shared.withMut(&marker, mark(selected))
   drop marker
   return TaskOutput {}
 }
 
-fn ready(marker: &Shared.Shared<Marker>) -> () {
+fn ready(marker: &Shared<Marker>) -> () {
   return Shared.withMut(marker, recordCallback)
 }
 
@@ -54,7 +54,7 @@ fn notifySecond(owner: &mut Owner) -> () {
   }
 }
 
-effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+effect fn program() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let marker = run Shared.make<Marker>(Marker { value: 0, callbacks: 0 })
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -82,5 +82,5 @@ effect fn program() -> i32 ! Allocator.OutOfMemoryError {
   return observed
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }

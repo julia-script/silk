@@ -110,8 +110,8 @@ the `impl` focused on conformance, leaves the operation directly callable withou
 lets the actor function compose with ordinary higher-order functions and pipelines. An inline body
 is useful when the implementation exists only to satisfy that conformance and has no independent
 API value. Public libraries should follow the
-[data-first actor-function convention](style-guide.md#style-002--public-apis-prefer-qualified-data-first-functions)
-instead of accumulating their public behavior inside `impl` blocks.
+[receiver-first member convention](style-guide.md#style-002--operations-intrinsic-to-one-type-are-inherent-members-with-the-receiver-first)
+instead of accumulating their public behavior inside conformance bodies.
 
 **Boundary:** Every declared contract operation must have exactly one implementation. A member is
 invalid when its name is absent from the contract, when the same operation is supplied both inline

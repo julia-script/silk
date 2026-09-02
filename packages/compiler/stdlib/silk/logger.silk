@@ -21,13 +21,13 @@
 //! ```silk
 //! import silk.effect { Effect }
 //!
-//! import silk.logger { Logger }
+//! import silk.logger { Logger, LogError }
 //! import silk.logger { LogLevel }
 //!
 //! import silk.usize
 //!
 //! effect fn program() -> i32
-//! ! Logger.LogError {
+//! ! LogError {
 //!   let mut logger = Logger.inMemoryProvider()
 //!   let logged = run Effect.logWarning("cache miss")
 //!     |> Effect.provideMut(&mut logger)
@@ -40,7 +40,7 @@
 //!   return 42
 //! }
 //!
-//! effect fn recover(error: Logger.LogError) -> i32 {
+//! effect fn recover(error: LogError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -53,13 +53,8 @@ import silk.bool as bool
 import silk.effect { Effect }
 import silk.i32 as i32
 import silk.result { Result }
-import silk.writer {
-  StdoutWriter,
-  WriterError,
-  Writer,
-  stdoutWriterProvider as nativeStreams,
-}
-import silk.string { utf8Bytes as stringUtf8Bytes }
+import silk.writer { StdoutWriter, WriterError, Writer }
+import silk.string { String }
 import silk.u8 as u8
 import silk.usize as usize
 
@@ -86,14 +81,6 @@ pub enum LogLevel {
 pub struct LogError {
   code: i32
 }
-
-/// Returns the provider-defined failure code for diagnostics.
-///
-/// # Gotchas
-///
-/// Interpret this code only with knowledge of the selected provider. Different providers can use
-/// the same code for different failures.
-pub fn errorCode(error: LogError) -> i32 { return error.code }
 
 effect fn reject(code: i32) -> never ! LogError {
   fail LogError { code: code }
@@ -123,6 +110,114 @@ pub service Logger {
   ) -> () ! LogError ? &mut Logger
 }
 
+impl Logger {
+  /// Returns the provider-defined failure code for diagnostics.
+  ///
+  /// # Gotchas
+  ///
+  /// Interpret this code only with knowledge of the selected provider. Different providers can use
+  /// the same code for different failures.
+  pub fn errorCode(error: LogError) -> i32 { return error.code }
+
+  /// Creates a logger that forwards each complete message to process standard output.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must include a newline in `message` when line separation is required. A standard-
+  /// output write failure becomes a provider-defined [`LogError`].
+  pub fn stdoutProvider() -> StdoutLogger { return StdoutLogger {} }
+
+  /// Creates an empty in-memory logger with capacity for eight events and 64 message bytes.
+  ///
+  /// # Gotchas
+  ///
+  /// A call fails when eight events are already committed. A call also fails when its bytes exceed
+  /// the remaining 64-byte total. Neither failure commits the event.
+  pub fn inMemoryProvider() -> InMemoryLogger {
+    return InMemoryLogger {
+      levels: emptyLevels(),
+      offsets: emptyIndexes(),
+      lengths: emptyIndexes(),
+      messages: emptyMessages(),
+      count: usize.add(0, 0),
+      messageLength: usize.add(0, 0),
+      attempts: usize.add(0, 0),
+      failEnabled: false,
+      failAt: usize.add(0, 0),
+    }
+  }
+
+  /// Creates an in-memory logger that rejects one zero-based attempted-call ordinal.
+  ///
+  /// # Details
+  ///
+  /// The configured attempt increases [`attempts`] but does not increase [`length`] or consume
+  /// message capacity. Other attempts retain the eight-event and 64-byte limits of
+  /// [`inMemoryProvider`].
+  pub fn inMemoryProviderFailAt(failAt: usize) -> InMemoryLogger {
+    let mut logger = Logger.inMemoryProvider()
+    logger.failEnabled = true
+    logger.failAt = failAt
+    return move logger
+  }
+
+  /// Returns the number of events that the in-memory logger committed.
+  ///
+  /// # Details
+  ///
+  /// Failed attempts do not increase this count. Use [`attempts`] when rejected calls must also be
+  /// observed.
+  pub fn length(self: &InMemoryLogger) -> usize {
+    return self.count
+  }
+
+  /// Returns the severity of one committed event.
+  ///
+  /// # Gotchas
+  ///
+  /// `index` must be less than [`length`]. An unused index below eight returns the initial Trace
+  /// value instead of trapping. An index of eight or more traps.
+  pub fn levelAt(self: &InMemoryLogger, index: usize) -> LogLevel {
+    let levels = self.levels
+    return levels[index]
+  }
+
+  /// Returns the UTF-8 byte length of one committed message.
+  ///
+  /// # Gotchas
+  ///
+  /// `index` must be less than [`length`]. An unused index below eight returns zero instead of
+  /// trapping. An index of eight or more traps.
+  pub fn messageLengthAt(self: &InMemoryLogger, index: usize) -> usize {
+    let lengths = self.lengths
+    return lengths[index]
+  }
+
+  /// Returns one UTF-8 byte from a committed message.
+  ///
+  /// # Gotchas
+  ///
+  /// `eventIndex` must be less than [`length`]. `byteIndex` must be less than
+  /// [`messageLengthAt`] for that event. An unused event or invalid byte index traps. An event index
+  /// of eight or more also traps.
+  pub fn messageByteAt(
+    self: &InMemoryLogger,
+    eventIndex: usize,
+    byteIndex: usize
+  ) -> u8 {
+    let lengths = self.lengths
+    let length = lengths[eventIndex]
+    if length <= byteIndex { let boom = 1 / 0 }
+    let offsets = self.offsets
+    let offset = offsets[eventIndex]
+    let messages = self.messages
+    return i32.toU8(messages[offset + byteIndex])
+  }
+
+  /// Returns the number of calls attempted, including calls that produced [`LogError`].
+  pub fn attempts(self: &InMemoryLogger) -> usize { return self.attempts }
+}
+
 /// A [`Logger`] provider that writes each complete message to process standard output.
 ///
 /// # Details
@@ -131,33 +226,27 @@ pub service Logger {
 /// bytes. It adds no newline and performs no message allocation.
 pub struct StdoutLogger {}
 
-/// Creates a logger that forwards each complete message to process standard output.
-///
-/// # Gotchas
-///
-/// The caller must include a newline in `message` when line separation is required. A standard-
-/// output write failure becomes a provider-defined [`LogError`].
-pub fn stdoutProvider() -> StdoutLogger { return StdoutLogger {} }
+impl StdoutLogger {
+  effect fn writeStdout(
+    self: &mut Self,
+    level: LogLevel,
+    message: string
+  ) -> () ! LogError {
+    let mut streams = Writer.stdoutWriterProvider()
+    let bytes = String.utf8Bytes(message)
+    let completed = run Effect.result(writeStdoutBytes(&mut streams, bytes))
+    return match move completed {
+      Result<(), WriterError>.Success { value: _ } => ()
+      Result<(), WriterError>.Failure { error: _ } => run reject(3)
+    }
+  }
+}
 
 effect fn writeStdoutBytes(
   writer: &mut StdoutWriter,
   message: &[u8]
 ) -> () ! WriterError {
   run Intrinsic.bindRequirementMut(Writer.writeAll(message), writer)
-}
-
-effect fn writeStdout(
-  self: &mut StdoutLogger,
-  level: LogLevel,
-  message: string
-) -> () ! LogError {
-  let mut streams = nativeStreams()
-  let bytes = stringUtf8Bytes(message)
-  let completed = run Effect.result(writeStdoutBytes(&mut streams, bytes))
-  return match move completed {
-    Result<(), WriterError>.Success { value: _ } => ()
-    Result<(), WriterError>.Failure { error: _ } => run reject(3)
-  }
 }
 
 impl Logger for StdoutLogger {
@@ -188,6 +277,45 @@ pub struct InMemoryLogger {
   failAt: usize
 }
 
+impl InMemoryLogger {
+  effect fn record(
+    self: &mut Self,
+    level: LogLevel,
+    message: string
+  ) -> () ! LogError {
+    let values = String.utf8Bytes(message)
+    let ordinal = self.attempts
+    self.attempts = self.attempts + usize.add(0, 1)
+    if self.failEnabled {
+      if ordinal == self.failAt { return run reject(1) }
+    }
+
+    if self.count == usize.add(0, 8) { return run reject(2) }
+    if values.length > usize.add(0, 64) - self.messageLength { return run reject(2) }
+
+    let offset = self.messageLength
+    let mut messages = Intrinsic.replace(self.messages, emptyMessages())
+    let mut index = usize.add(0, 0)
+    while index < values.length {
+      messages[offset + index] = u8.toI32(values[index])
+      index = index + usize.add(0, 1)
+    }
+    let mut levels = Intrinsic.replace(self.levels, emptyLevels())
+    let mut offsets = Intrinsic.replace(self.offsets, emptyIndexes())
+    let mut lengths = Intrinsic.replace(self.lengths, emptyIndexes())
+    levels[self.count] = level
+    offsets[self.count] = offset
+    lengths[self.count] = values.length
+    self.messages = move messages
+    self.levels = move levels
+    self.offsets = move offsets
+    self.lengths = move lengths
+    self.count = self.count + usize.add(0, 1)
+    self.messageLength = self.messageLength + values.length
+    return ()
+  }
+}
+
 fn emptyLevels() -> [LogLevel; 8] {
   return [
     LogLevel.Trace,
@@ -216,133 +344,7 @@ fn emptyMessages() -> [i32; 64] {
   ]
 }
 
-/// Creates an empty in-memory logger with capacity for eight events and 64 message bytes.
-///
-/// # Gotchas
-///
-/// A call fails when eight events are already committed. A call also fails when its bytes exceed
-/// the remaining 64-byte total. Neither failure commits the event.
-pub fn inMemoryProvider() -> InMemoryLogger {
-  return InMemoryLogger {
-    levels: emptyLevels(),
-    offsets: emptyIndexes(),
-    lengths: emptyIndexes(),
-    messages: emptyMessages(),
-    count: usize.add(0, 0),
-    messageLength: usize.add(0, 0),
-    attempts: usize.add(0, 0),
-    failEnabled: false,
-    failAt: usize.add(0, 0),
-  }
-}
-
-/// Creates an in-memory logger that rejects one zero-based attempted-call ordinal.
-///
-/// # Details
-///
-/// The configured attempt increases [`attempts`] but does not increase [`length`] or consume
-/// message capacity. Other attempts retain the eight-event and 64-byte limits of
-/// [`inMemoryProvider`].
-pub fn inMemoryProviderFailAt(failAt: usize) -> InMemoryLogger {
-  let mut logger = inMemoryProvider()
-  logger.failEnabled = true
-  logger.failAt = failAt
-  return move logger
-}
-
-effect fn record(
-  self: &mut InMemoryLogger,
-  level: LogLevel,
-  message: string
-) -> () ! LogError {
-  let values = stringUtf8Bytes(message)
-  let ordinal = self.attempts
-  self.attempts = self.attempts + usize.add(0, 1)
-  if self.failEnabled {
-    if ordinal == self.failAt { return run reject(1) }
-  }
-
-  if self.count == usize.add(0, 8) { return run reject(2) }
-  if values.length > usize.add(0, 64) - self.messageLength { return run reject(2) }
-
-  let offset = self.messageLength
-  let mut messages = Intrinsic.replace(self.messages, emptyMessages())
-  let mut index = usize.add(0, 0)
-  while index < values.length {
-    messages[offset + index] = u8.toI32(values[index])
-    index = index + usize.add(0, 1)
-  }
-  let mut levels = Intrinsic.replace(self.levels, emptyLevels())
-  let mut offsets = Intrinsic.replace(self.offsets, emptyIndexes())
-  let mut lengths = Intrinsic.replace(self.lengths, emptyIndexes())
-  levels[self.count] = level
-  offsets[self.count] = offset
-  lengths[self.count] = values.length
-  self.messages = move messages
-  self.levels = move levels
-  self.offsets = move offsets
-  self.lengths = move lengths
-  self.count = self.count + usize.add(0, 1)
-  self.messageLength = self.messageLength + values.length
-  return ()
-}
-
 impl Logger for InMemoryLogger {
   log: InMemoryLogger.record
 }
 
-/// Returns the number of events that the in-memory logger committed.
-///
-/// # Details
-///
-/// Failed attempts do not increase this count. Use [`attempts`] when rejected calls must also be
-/// observed.
-pub fn length(self: &InMemoryLogger) -> usize {
-  return self.count
-}
-
-/// Returns the severity of one committed event.
-///
-/// # Gotchas
-///
-/// `index` must be less than [`length`]. An unused index below eight returns the initial Trace
-/// value instead of trapping. An index of eight or more traps.
-pub fn levelAt(self: &InMemoryLogger, index: usize) -> LogLevel {
-  let levels = self.levels
-  return levels[index]
-}
-
-/// Returns the UTF-8 byte length of one committed message.
-///
-/// # Gotchas
-///
-/// `index` must be less than [`length`]. An unused index below eight returns zero instead of
-/// trapping. An index of eight or more traps.
-pub fn messageLengthAt(self: &InMemoryLogger, index: usize) -> usize {
-  let lengths = self.lengths
-  return lengths[index]
-}
-
-/// Returns one UTF-8 byte from a committed message.
-///
-/// # Gotchas
-///
-/// `eventIndex` must be less than [`length`]. `byteIndex` must be less than
-/// [`messageLengthAt`] for that event. An unused event or invalid byte index traps. An event index
-/// of eight or more also traps.
-pub fn messageByteAt(
-  self: &InMemoryLogger,
-  eventIndex: usize,
-  byteIndex: usize
-) -> u8 {
-  let lengths = self.lengths
-  let length = lengths[eventIndex]
-  if length <= byteIndex { let boom = 1 / 0 }
-  let offsets = self.offsets
-  let offset = offsets[eventIndex]
-  let messages = self.messages
-  return i32.toU8(messages[offset + byteIndex])
-}
-
-/// Returns the number of calls attempted, including calls that produced [`LogError`].
-pub fn attempts(self: &InMemoryLogger) -> usize { return self.attempts }

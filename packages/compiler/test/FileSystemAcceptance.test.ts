@@ -15,51 +15,13 @@ const portableProvider = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.u8 as u8
 import silk.usize as usize
-import silk.filesystem {
-  Path,
-  DirectoryEntry,
-  DirectoryInfo,
-  FileError,
-  FileInfo,
-  FileSystem,
-  view as pathView,
-  createDirectoriesRecursively,
-  createDirectoryOperation,
-  createTemporaryDirectoryOperation,
-  directory,
-  directoryEntry,
-  directoryInfo,
-  error as fsError,
-  file,
-  fileInfo,
-  make as pathMake,
-  alreadyExists,
-  notEmpty,
-  notFound,
-  parent,
-  statOperation,
-  tooLarge,
-  readFileOperation,
-  removeDirectoryOperation,
-  removeFileOperation,
-  wrongType,
-  writeFileOperation,
-  writeFileWithParents,
-  exists,
-  unsupported
-}
-import silk.bytes { Bytes, asSlice as bytesSlice, copy as bytesCopy }
+import silk.filesystem { Path, DirectoryEntry, DirectoryInfo, FileError, FileInfo, FileSystem }
+import silk.bytes { Bytes }
 import silk.result { Result }
-import silk.vector {
-  Vector,
-  append as vectorAppend,
-  asSlice as vectorSlice,
-  length as vectorLength,
-  make as vectorMake
-}
+import silk.vector { Vector }
 
 struct MemoryFileSystem {
   contents: [u8; 4]
@@ -77,9 +39,9 @@ effect fn memoryRead(
   path: &Path
 ) -> Bytes ! FileError | OutOfMemoryError ? &mut Allocator {
   self.calls = self.calls + 1
-  if self.fileExists == false { fail fsError(readFileOperation(), notFound()) }
+  if self.fileExists == false { fail FileSystem.error(FileSystem.readFileOperation(), FileSystem.notFound()) }
   let contents = self.contents
-  return run bytesCopy(&contents)
+  return run Bytes.copy(&contents)
 }
 
 effect fn memoryWrite(
@@ -89,7 +51,7 @@ effect fn memoryWrite(
 ) -> () ! FileError {
   self.calls = self.calls + 1
   if bytes.length != usize.add(0, 4) {
-    fail fsError(writeFileOperation(), tooLarge())
+    fail FileSystem.error(FileSystem.writeFileOperation(), FileSystem.tooLarge())
   }
   let mut contents = Intrinsic.replace(self.contents, emptyContents())
   let mut index = usize.add(0, 0)
@@ -107,22 +69,22 @@ effect fn memoryStat(
   path: &Path
 ) -> FileInfo | DirectoryInfo ! FileError {
   self.calls = self.calls + 1
-  let value = pathView(path)
-  if value == "/" { return directoryInfo() }
-  if value == "/data" { return directoryInfo() }
-  if value == "/a" { return directoryInfo() }
+  let value = Path.view(path)
+  if value == "/" { return FileSystem.directoryInfo() }
+  if value == "/data" { return FileSystem.directoryInfo() }
+  if value == "/a" { return FileSystem.directoryInfo() }
   if value == "/a/b" {
-    if self.bExists { return directoryInfo() }
-    fail fsError(statOperation(), notFound())
+    if self.bExists { return FileSystem.directoryInfo() }
+    fail FileSystem.error(FileSystem.statOperation(), FileSystem.notFound())
   }
   if value == "/a/b/c" {
-    if self.cExists { return directoryInfo() }
-    fail fsError(statOperation(), notFound())
+    if self.cExists { return FileSystem.directoryInfo() }
+    fail FileSystem.error(FileSystem.statOperation(), FileSystem.notFound())
   }
-  if value == "/data/file" {
-    if self.fileExists { return fileInfo(usize.add(0, 4)) }
+  if value == "/data/FileSystem.file" {
+    if self.fileExists { return FileSystem.fileInfo(usize.add(0, 4)) }
   }
-  fail fsError(statOperation(), notFound())
+  fail FileSystem.error(FileSystem.statOperation(), FileSystem.notFound())
 }
 
 effect fn memoryList(
@@ -130,47 +92,47 @@ effect fn memoryList(
   path: &Path
 ) -> Vector<DirectoryEntry> ! FileError | OutOfMemoryError ? &mut Allocator {
   self.calls = self.calls + 1
-  return vectorMake<DirectoryEntry>()
+  return Vector.make<DirectoryEntry>()
 }
 
 effect fn memoryCreate(self: &mut MemoryFileSystem, path: &Path) -> () ! FileError {
   self.calls = self.calls + 1
-  let value = pathView(path)
+  let value = Path.view(path)
   if value == "/a/b" {
-    if self.bExists { fail fsError(createDirectoryOperation(), alreadyExists()) }
+    if self.bExists { fail FileSystem.error(FileSystem.createDirectoryOperation(), FileSystem.alreadyExists()) }
     self.bExists = true
     self.creates = self.creates + 1
     return ()
   }
   if value == "/a/b/c" {
-    if self.cExists { fail fsError(createDirectoryOperation(), alreadyExists()) }
+    if self.cExists { fail FileSystem.error(FileSystem.createDirectoryOperation(), FileSystem.alreadyExists()) }
     self.cExists = true
     self.creates = self.creates + 1
     return ()
   }
-  fail fsError(createDirectoryOperation(), wrongType())
+  fail FileSystem.error(FileSystem.createDirectoryOperation(), FileSystem.wrongType())
 }
 
 effect fn memoryRemoveFile(self: &mut MemoryFileSystem, path: &Path) -> () ! FileError {
   self.calls = self.calls + 1
-  if self.fileExists == false { fail fsError(removeFileOperation(), notFound()) }
+  if self.fileExists == false { fail FileSystem.error(FileSystem.removeFileOperation(), FileSystem.notFound()) }
   self.fileExists = false
   return ()
 }
 
 effect fn memoryRemoveDirectory(self: &mut MemoryFileSystem, path: &Path) -> () ! FileError {
   self.calls = self.calls + 1
-  if self.bExists { fail fsError(removeDirectoryOperation(), notEmpty()) }
+  if self.bExists { fail FileSystem.error(FileSystem.removeDirectoryOperation(), FileSystem.notEmpty()) }
   return ()
 }
 
-/// The in-memory provider has no namespace to make a unique name in.
+/// The in-memory provider has no namespace to Path.make a unique Path.name in.
 effect fn memoryCreateTemporary(
   self: &mut MemoryFileSystem,
   within: &Path,
   prefix: &[u8]
 ) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
-  fail fsError(createTemporaryDirectoryOperation(), unsupported())
+  fail FileSystem.error(FileSystem.createTemporaryDirectoryOperation(), FileSystem.unsupported())
 }
 
 impl FileSystem for MemoryFileSystem {
@@ -204,37 +166,37 @@ effect fn program() -> i32 ! FileError | OutOfMemoryError {
     calls: 0,
     creates: 0,
   }
-  let filePath = run pathMake("/data/file") |> Effect.provideMut(&mut allocator)
+  let filePath = run Path.make("/data/FileSystem.file") |> Effect.provideMut(&mut allocator)
   let input = [u8.toU8(1), u8.toU8(2), u8.toU8(3), u8.toU8(4)]
   let written = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(writeFileWithParents(&filePath, &input), &mut fs),
+    Intrinsic.bindRequirementMut(FileSystem.writeFileWithParents(&filePath, &input), &mut fs),
     &mut allocator
   )
   let owned = run Intrinsic.bindRequirementMut(
     Intrinsic.bindRequirementMut(FileSystem.readFile(&filePath), &mut fs),
     &mut allocator
   )
-  if checksum(bytesSlice(&owned)) != 10 { return 1 }
+  if checksum(Bytes.asSlice(&owned)) != 10 { return 1 }
 
-  if run Effect.provideMut(exists(&filePath), &mut fs) {} else { return 2 }
-  let nested = run pathMake("/a/b/c") |> Effect.provideMut(&mut allocator)
+  if run Effect.provideMut(FileSystem.exists(&filePath), &mut fs) {} else { return 2 }
+  let nested = run Path.make("/a/b/c") |> Effect.provideMut(&mut allocator)
   let created = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(createDirectoriesRecursively(&nested), &mut fs),
+    Intrinsic.bindRequirementMut(FileSystem.createDirectoriesRecursively(&nested), &mut fs),
     &mut allocator
   )
   if fs.creates != 2 { return 3 }
   if fs.bExists == false { return 4 }
   if fs.cExists == false { return 5 }
-  let dataPath = run pathMake("/data") |> Effect.provideMut(&mut allocator)
+  let dataPath = run Path.make("/data") |> Effect.provideMut(&mut allocator)
   let entries = run Intrinsic.bindRequirementMut(
     Intrinsic.bindRequirementMut(FileSystem.listDirectory(&dataPath), &mut fs),
     &mut allocator
   )
-  if vectorLength<DirectoryEntry>(&entries) != usize.add(0, 0) { return 6 }
-  let child = run pathMake("/data/child") |> Effect.provideMut(&mut allocator)
-  let entry = directoryEntry(move child, file())
+  if Vector.length<DirectoryEntry>(&entries) != usize.add(0, 0) { return 6 }
+  let child = run Path.make("/data/child") |> Effect.provideMut(&mut allocator)
+  let entry = FileSystem.directoryEntry(move child, FileSystem.file())
   let removed = run Effect.provideMut(FileSystem.removeFile(&filePath), &mut fs)
-  if run Effect.provideMut(exists(&filePath), &mut fs) { return 9 }
+  if run Effect.provideMut(FileSystem.exists(&filePath), &mut fs) { return 9 }
   return 42
 }
 
@@ -251,31 +213,31 @@ it.effect('constructs and resolves normalized provider-absolute Paths', () =>
     const source = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.filesystem { FileError }
-import silk.filesystem { Path, isRoot, make, name, parent, resolve, root, view }
+import silk.filesystem { Path }
 import silk.option { Option }
 import silk.result { Result }
 fn matchesParent(possible: Option<Path>, expected: string) -> bool {
   return match move possible {
     Option<Path>.None => false
-    Option<Path>.Some { value } => view(&value) == expected
+    Option<Path>.Some { value } => Path.view(&value) == expected
   }
 }
 
 effect fn check() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let canonicalRoot = run root() |> Effect.provideMut(&mut allocator)
-  if isRoot(&canonicalRoot) == false { return 3 }
-  if name(&canonicalRoot) != "" { return 4 }
-  let rootParent = run parent(&canonicalRoot) |> Effect.provideMut(&mut allocator)
+  let canonicalRoot = run Path.root() |> Effect.provideMut(&mut allocator)
+  if Path.isRoot(&canonicalRoot) == false { return 3 }
+  if Path.name(&canonicalRoot) != "" { return 4 }
+  let rootParent = run Path.parent(&canonicalRoot) |> Effect.provideMut(&mut allocator)
   if matchesParent(move rootParent, "/") { return 5 }
-  let base = run make("/project/src") |> Effect.provideMut(&mut allocator)
-  let resolved = run resolve(&base, "../assets/./logo.bin")
+  let base = run Path.make("/project/src") |> Effect.provideMut(&mut allocator)
+  let resolved = run Path.resolve(&base, "../assets/./logo.bin")
     |> Effect.provideMut(&mut allocator)
-  if view(&resolved) != "/project/assets/logo.bin" { return 1 }
-  if name(&resolved) != "logo.bin" { return 6 }
-  let ownedParent = run parent(&resolved) |> Effect.provideMut(&mut allocator)
+  if Path.view(&resolved) != "/project/assets/logo.bin" { return 1 }
+  if Path.name(&resolved) != "logo.bin" { return 6 }
+  let ownedParent = run Path.parent(&resolved) |> Effect.provideMut(&mut allocator)
   if matchesParent(move ownedParent, "/project/assets") { return 42 }
   return 7
 }
@@ -321,26 +283,26 @@ it.effect('rejects malformed paths and lexical root escape before service provis
   const source = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
-import silk.filesystem { FileError, joinUtf8, make, resolve }
+import silk.effect { Effect }
+import silk.filesystem { FileError, Path }
 
 effect fn construct(value: string) -> bool ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let path = run make(value) |> Effect.provideMut(&mut allocator)
+  let path = run Path.make(value) |> Effect.provideMut(&mut allocator)
   return false
 }
 
 effect fn resolveEscape() -> bool ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let base = run make("/a") |> Effect.provideMut(&mut allocator)
-  let escaped = run resolve(&base, "../../b") |> Effect.provideMut(&mut allocator)
+  let base = run Path.make("/a") |> Effect.provideMut(&mut allocator)
+  let escaped = run Path.resolve(&base, "../../b") |> Effect.provideMut(&mut allocator)
   return false
 }
 
 effect fn rejectProviderBytes() -> bool ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let base = run make("/a") |> Effect.provideMut(&mut allocator)
-  let invalid = run joinUtf8(&base, b"\\xff") |> Effect.provideMut(&mut allocator)
+  let base = run Path.make("/a") |> Effect.provideMut(&mut allocator)
+  let invalid = run Path.joinUtf8(&base, b"\\xff") |> Effect.provideMut(&mut allocator)
   return false
 }
 
@@ -351,7 +313,7 @@ pub fn main() -> i32 {
   if run Effect.catchAll(construct("/trailing/"), recovered) {} else { return 2 }
   if run Effect.catchAll(construct("/double//slash"), recovered) {} else { return 3 }
   if run Effect.catchAll(construct("/./dot"), recovered) {} else { return 4 }
-  if run Effect.catchAll(construct("/../parent"), recovered) {} else { return 5 }
+  if run Effect.catchAll(construct("/../Path.parent"), recovered) {} else { return 5 }
   if run Effect.catchAll(construct("/\\u{0}"), recovered) {} else { return 6 }
   if run Effect.catchAll(resolveEscape(), recovered) {} else { return 7 }
   if run Effect.catchAll(rejectProviderBytes(), recovered) {} else { return 8 }
@@ -385,10 +347,10 @@ it.effect('preserves Path allocation failure without publishing partial owned st
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.filesystem { FileError }
 import silk.layout { Layout }
-import silk.filesystem { make }
+import silk.filesystem { Path }
 
 struct QuotaAllocator { remaining: i32 }
 
@@ -403,7 +365,7 @@ impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
 
 effect fn build() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = QuotaAllocator { remaining: 0 }
-  let path = run make("/never-owned") |> Effect.provideMut(&mut allocator)
+  let path = run Path.make("/never-owned") |> Effect.provideMut(&mut allocator)
   return 1
 }
 
@@ -454,9 +416,9 @@ it.effect(
     Effect.gen(function* () {
       const source = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
-import silk.filesystem { FileError, FileSystem, root }
+import silk.filesystem { FileError, FileSystem, Path }
 pub effect fn main() -> i32 ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator {
-  let path = run root()
+  let path = run Path.root()
   let info = run FileSystem.stat(&path)
   return 42
 }`

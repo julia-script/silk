@@ -54,12 +54,7 @@ if (shape === 'box-build') boxAction = 'buildOnly()'
 else if (shape === 'box-walk') boxAction = 'walkOnly()'
 
 const boxSource = `import silk.allocator { Allocator, OutOfMemoryError }
-import silk.box {
-  Box,
-  make as boxMake,
-  get as boxGet,
-  into as boxInto
-}
+import silk.box { Box }
 
 pub struct End {}
 
@@ -75,7 +70,7 @@ pub struct Chain {
 effect fn recursiveBuild(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
   if depth == 0 { return Chain { step: End {}, value: 0 } }
   let inner = run recursiveBuild(depth - 1)
-  let boxed = run boxMake<Chain>(move inner)
+  let boxed = run Box.make<Chain>(move inner)
   return Chain { step: Link { next: move boxed }, value: 1 }
 }
 
@@ -83,7 +78,7 @@ effect fn iterativeBuild(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocato
   let mut current = Chain { step: End {}, value: 0 }
   let mut index = 0
   while index < depth {
-    let boxed = run boxMake<Chain>(move current)
+    let boxed = run Box.make<Chain>(move current)
     current = Chain { step: Link { next: move boxed }, value: 1 }
     index = index + 1
   }
@@ -110,7 +105,7 @@ fn consumeStep(current: &mut Chain) -> bool {
 }
 
 fn continueWith(current: &mut Chain, next: Box<Chain>) -> bool {
-  let mut replacement = boxInto<Chain>(move next)
+  let mut replacement = Box.into<Chain>(move next)
   let replacementStep = Intrinsic.replace(replacement.step, End {})
   let previousStep = Intrinsic.replace(current.step, move replacementStep)
   drop previousStep
@@ -122,7 +117,7 @@ fn continueWith(current: &mut Chain, next: Box<Chain>) -> bool {
 fn walk(self: &Chain) -> i32 {
   return self.value + match &self.step {
     End nothing => 0
-    Link { next } => walkBox(boxGet<Chain>(&next))
+    Link { next } => walkBox(Box.get<Chain>(&next))
   }
 }
 
@@ -130,7 +125,7 @@ fn walkBox(view: &[Chain]) -> i32 {
   return match &view[usize.ZERO] {
     Chain { step, value } => value + match &step {
       End nothing => 0
-      Link { next } => walkBox(boxGet<Chain>(&next))
+      Link { next } => walkBox(Box.get<Chain>(&next))
     }
   }
 }

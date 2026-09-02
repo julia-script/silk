@@ -188,7 +188,12 @@ export type NormalizationVerdict =
       readonly region: RegionId
       readonly local: LocalId
       readonly guards: ReadonlyArray<
-        'DirectTarget' | 'SingleRegion' | 'SingleUse' | 'Synchronous' | 'CopyOrShared'
+        | 'DirectTarget'
+        | 'SingleRegion'
+        | 'TrivialCleanup'
+        | 'SingleUse'
+        | 'Synchronous'
+        | 'CopyOrShared'
       >
       readonly provenance: Provenance
     }

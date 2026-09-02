@@ -471,18 +471,14 @@ const handledEffectEdit = (
   const leading = raw.slice(0, raw.length - trimmed.length)
   const operation = trimmed.slice('run '.length)
   const text = decoder.decode(SourceFile.toUint8Array(syntax.source))
-  const make = (
-    title: string,
-    imported: string,
-    localSpelling: string,
-    replacement: string,
-  ): ReadonlyArray<CodeAction> => {
+  // Every combinator is a member of `Effect`, so the one import the fix needs is the owner.
+  const make = (title: string, replacement: string): ReadonlyArray<CodeAction> => {
     const plan = Option.getOrUndefined(
       ImportPlan.make({
         syntax,
         module: 'silk/effect',
-        spelling: imported,
-        localSpelling,
+        spelling: 'Effect',
+        localSpelling: 'Effect',
       }),
     )
     if (plan === undefined) return []
@@ -512,12 +508,7 @@ const handledEffectEdit = (
     diagnostic.reason._tag === 'UnhandledEffectFailures' &&
     /\beffect\s+fn\s+recover\s*\(/.test(text)
   )
-    return make(
-      'Recover this Effect with recover',
-      'catchAll',
-      'effectCatchAll',
-      `run effectCatchAll(${operation}, recover)`,
-    )
+    return make('Recover this Effect with recover', `run Effect.catchAll(${operation}, recover)`)
   if (
     diagnostic.reason._tag === 'UnhandledEffectRequirements' &&
     diagnostic.reason.requirements.length === 1
@@ -530,16 +521,9 @@ const handledEffectEdit = (
     return mutable
       ? make(
           'Provide this Effect with provider',
-          'provideMut',
-          'effectProvideMut',
-          `run effectProvideMut(${operation}, &mut provider)`,
+          `run Effect.provideMut(${operation}, &mut provider)`,
         )
-      : make(
-          'Provide this Effect with provider',
-          'provide',
-          'effectProvide',
-          `run effectProvide(${operation}, &provider)`,
-        )
+      : make('Provide this Effect with provider', `run Effect.provide(${operation}, &provider)`)
   }
   return []
 }
@@ -1386,8 +1370,11 @@ const completionKind = (kind: string): CompletionItemKind => {
     case 'Parameter':
       return CompletionItemKind.Variable
     case 'Function':
+    case 'AssociatedFunction':
     case 'Operation':
       return CompletionItemKind.Function
+    case 'Method':
+      return CompletionItemKind.Method
     case 'Constructor':
       return CompletionItemKind.Constructor
     case 'Type':
@@ -1580,7 +1567,39 @@ export const completion = (
   return { isIncomplete: false, items: [...items, ...namespaces, ...catalog] }
 }
 
-/** Returns the document's top-level declarations as symbols. */
+/** Inherent impl heads as symbols, each nesting the members declared in its block. */
+const inherentImplSymbols = (
+  self: Document,
+  headers: DeclarationFacts.ModuleHeaders,
+): ReadonlyArray<DocumentSymbol> =>
+  headers.inherentImpls.map((impl) => {
+    const owner = SyntaxTree.tokens(impl.syntax).find((token) => token.kind === 'Identifier')
+    const range = LineIndex.rangeOf(self.index, SyntaxTree.span(impl.syntax))
+    const children = headers.members.flatMap((member): ReadonlyArray<DocumentSymbol> =>
+      member._tag === 'FunctionDeclaration' &&
+      member.associatedMember?.ordinal === impl.ordinal &&
+      member.name._tag === 'Present'
+        ? [
+            {
+              name: member.name.spelling,
+              detail: Presentation.functionDeclaration(member).text,
+              kind: member.associatedMember.receiver ? SymbolKind.Method : SymbolKind.Function,
+              range: LineIndex.rangeOf(self.index, SyntaxTree.span(member.syntax)),
+              selectionRange: LineIndex.rangeOf(self.index, member.name.token.span),
+            },
+          ]
+        : [],
+    )
+    return {
+      name: `impl ${impl.ownerSpelling}`,
+      kind: SymbolKind.Object,
+      range,
+      selectionRange: owner === undefined ? range : LineIndex.rangeOf(self.index, owner.span),
+      ...(children.length > 0 ? { children } : {}),
+    }
+  })
+
+/** Returns the document's top-level declarations as symbols, in source order. */
 export const symbols = (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
@@ -1589,8 +1608,10 @@ export const symbols = (
     (candidate) => candidate.module === self.module,
   )
   if (headers === undefined) return []
-  return headers.members.flatMap((member): ReadonlyArray<DocumentSymbol> => {
+  const members = headers.members.flatMap((member): ReadonlyArray<DocumentSymbol> => {
     if (member.name._tag !== 'Present') return []
+    // Inherent members are nested under their impl, never listed at module level.
+    if (member._tag === 'FunctionDeclaration' && member.associatedMember !== undefined) return []
     const range = LineIndex.rangeOf(self.index, SyntaxTree.span(member.syntax))
     const selectionRange = LineIndex.rangeOf(self.index, member.name.token.span)
     if (member._tag === 'FunctionDeclaration') {
@@ -1735,6 +1756,11 @@ export const symbols = (
       },
     ]
   })
+  return [...members, ...inherentImplSymbols(self, headers)].sort(
+    (left, right) =>
+      left.range.start.line - right.range.start.line ||
+      left.range.start.character - right.range.start.character,
+  )
 }
 
 /**
@@ -1865,6 +1891,7 @@ const occurrenceTokenType = (
     case 'Actor':
       return SemanticTokenTypes.namespace
     case 'Operation':
+    case 'Method':
       return SemanticTokenTypes.method
     default:
       return SemanticTokenTypes.variable
