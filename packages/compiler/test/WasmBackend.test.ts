@@ -742,3 +742,22 @@ it.effect('throws when target validation lets a ForeignCall reach Wasm emission'
     if (Exit.isFailure(exit)) assert.instanceOf(Cause.squash(exit.cause), RangeError)
   }),
 )
+
+it.effect('rejects a closure export before the direct Wasm backend is constructed', () =>
+  Effect.gen(function* () {
+    const failure = yield* Effect.flip(
+      emit(`export "C" fn silk_test_double_v1(value: i32) -> i32 { return value * 2 }
+pub fn main() -> i32 { return 0 }`),
+    )
+    assert.strictEqual(failure._tag, 'CodegenUnavailable')
+    if (failure._tag === 'CodegenUnavailable')
+      assert.deepEqual(
+        failure.diagnostics.map((diagnostic) =>
+          diagnostic.reason._tag === 'ForeignFunctionTargetUnavailable'
+            ? `${diagnostic.code}:${diagnostic.reason.symbol}@${diagnostic.reason.surface}`
+            : diagnostic.code,
+        ),
+        ['SEM0193:silk_test_double_v1@Wasm'],
+      )
+  }),
+)

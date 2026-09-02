@@ -9,7 +9,13 @@ import * as LlvmType from '@silklang/llvm/Type'
 import * as Variable from '@silklang/llvm/Variable'
 import * as Verify from '@silklang/llvm/Verify'
 import * as Effect from 'effect/Effect'
-import type { CodegenRequest, ForeignImport, RuntimeFeature, SymbolEntry } from './Backend.js'
+import type {
+  CodegenRequest,
+  ForeignExport,
+  ForeignImport,
+  RuntimeFeature,
+  SymbolEntry,
+} from './Backend.js'
 import {
   BackendError,
   formatModuleViolations,
@@ -45,6 +51,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     readonly nativeRuntimeSymbols: ReadonlyArray<string>
     readonly runtimeFeatures: ReadonlyArray<RuntimeFeature>
     readonly foreignImports: ReadonlyArray<ForeignImport>
+    readonly foreignExports: ReadonlyArray<ForeignExport>
     /** Renders the textual IR on demand; most compiles never read it. */
     readonly renderIr: () => string
     readonly bitcode: Uint8Array
@@ -361,6 +368,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   )
   const declared = functionDeclarations.declared
   if (functionDeclarations.voidType !== undefined) voidType = functionDeclarations.voidType
+  yield* NativeDeclare.exportThunks(Object.freeze({ builder, program, declared, cType }))
   const childThunkType = suspensionEnabled
     ? yield* LlvmType.functionType(builder, i32, [pointer])
     : undefined
@@ -571,6 +579,17 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
             symbol,
             parameters: Object.freeze(foreign.signature.parameters.map(CAbi.typeText)),
             result: CAbi.typeText(foreign.signature.result),
+          }),
+        ),
+    ),
+    foreignExports: Object.freeze(
+      [...program.foreignExports]
+        .sort((left, right) => left.symbol.localeCompare(right.symbol, 'en'))
+        .map((record) =>
+          Object.freeze({
+            symbol: record.symbol,
+            parameters: Object.freeze(record.signature.parameters.map(CAbi.typeText)),
+            result: CAbi.typeText(record.signature.result),
           }),
         ),
     ),

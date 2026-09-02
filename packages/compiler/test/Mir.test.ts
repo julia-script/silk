@@ -284,6 +284,7 @@ it('reports broken graphs deterministically as data', () => {
     module: 'sample://broken.silk',
     intrinsics: straight?.intrinsics ?? raise('expected the sample intrinsic inventory'),
     foreignCalls: Object.freeze([]),
+    foreignExports: Object.freeze([]),
     entry: straight?.entry ?? raise('expected the sample entry'),
     layout: straight?.layout ?? raise('expected the sample layout'),
     executionTransitions: straight?.executionTransitions ?? Object.freeze([]),

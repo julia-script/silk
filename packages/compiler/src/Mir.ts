@@ -1466,6 +1466,8 @@ export interface Module {
   readonly intrinsics: ReadonlyArray<Instances.IntrinsicCall>
   /** Reachable foreign declarations copied from discovery; every availability site reads it. */
   readonly foreignCalls: ReadonlyArray<Instances.ForeignCall>
+  /** Native export roots with the C signature each thunk publishes. */
+  readonly foreignExports: ReadonlyArray<Instances.ForeignExport>
   readonly layout: Layout.Plan
   readonly staticData?: ReadonlyArray<StaticText.Data>
   readonly functions: ReadonlyArray<MirFunction>

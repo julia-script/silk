@@ -83,6 +83,10 @@ pub unsafe fn unchecked(value: i32) -> i32 {
 
 pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"
 
+pub export "C" fn double(value: i32) -> i32 as "silk_test_double_v1" {
+  return value * 2
+}
+
 fn inspect(event: Token | End) -> i32 {
   return match &mut event {
     Token {span: Span {start: offset, ..}, ..} if true => offset

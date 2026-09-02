@@ -767,3 +767,18 @@ it('throws when target validation lets a ForeignCall reach the evaluator', () =>
   })
   assert.throws(() => BootstrapEvaluation.evaluate(discovery, program), RangeError)
 })
+
+it.effect('runs main and ignores an uncalled export root', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'memory/evaluation',
+      ascii(`export "C" fn silk_test_double_v1(value: i32) -> i32 { return value * 2 }
+pub fn main() -> i32 { return 42 }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag !== 'Completed') return
+    assert.deepEqual(outcome.result, { _tag: 'IntegerValue', type: 'i32', value: 42n })
+  }),
+)

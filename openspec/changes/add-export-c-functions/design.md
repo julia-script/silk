@@ -47,11 +47,13 @@ This mirrors the extern decision and keeps "one function fact" as the model.
 
 `Instances.discover` appends every `foreignExport` fact from every loaded module as a root after
 the entry, in canonical module then declaration order, when `target.kind === 'Native'`, and records
-`exports: ReadonlyArray<{ symbol, signature, key: InstanceKey, declaration }>` on `Discovery`.
+`foreignExports: ReadonlyArray<{ symbol, signature, key: InstanceKey, declaration }>` on
+`Discovery`.
 Roots are monomorphic by restriction, so specialization needs no arguments. The evaluator runs the
-same native discovery and therefore inherits the roots harmlessly: nothing reads `exports` there,
-and the extra instances are ordinary functions. For a WebAssembly target the list is empty and the
-availability helper reports the diagnostic for each export in the closure.
+same native discovery and therefore inherits the roots harmlessly: nothing reads `foreignExports` there,
+and the extra instances are ordinary functions. For a WebAssembly target no roots are seeded, but
+the export inventory is still recorded so the planning helper can report one diagnostic per export
+in the closure; an empty list could not name them.
 
 The alternative, adding an execution-surface parameter to `discover` so the evaluator can drop the
 roots, would touch every discovery caller for no observable benefit. Making exports the entry for a
@@ -67,12 +69,13 @@ declare thunks and to populate `foreignExports` on the artifact. The cached emis
 
 ### Planning checks live in one helper called from both gate sites
 
-A `ForeignPlanning.check(program, target, surface)` helper performs, over `Mir.Module`: the
-closure-wide symbol map over imports and exports (duplicate export symbols and export/import
+A `ForeignPlanning.check(program, executionTarget, target)` helper performs, over `Mir.Module`:
+the closure-wide symbol map over imports and exports (duplicate export symbols and export/import
 coincidences report the conflicting-foreign-symbol diagnostic relating both declarations), the
-Wasm-target export rejection, and the suspension check below. `Realization.discoverAndLower` and
-`Analysis.codegen` both call it before backend construction, next to the existing availability
-gate. Reserved-symbol and spelling rules stay the extern change's header checks.
+Wasm-target export rejection, and the suspension check below. `Realization.discoverAndLower`,
+`Analysis.codegen`, and `Backend.emit` all call it before backend construction, next to the
+existing foreign availability gate, so a hand-built module emitted directly obeys the same
+invariant. Reserved-symbol and spelling rules stay the extern change's header checks.
 
 ### Suspension is checked after MIR, against the optional classification
 
@@ -94,9 +97,9 @@ implementation is not suspendable, which the suspension check already guarantees
 ### `ModuleSummary.Export` becomes `PublicDeclaration`
 
 Pure rename of the interface, its `_tag`, and the `exports` field, done first so no code has two
-meanings of "export" while this change lands. Consumers: `ModuleSummary.ts`,
-`WorkspaceInventory.ts`, `AutoImport.ts`, the compiler `index.ts`, LSP `WorkspaceCatalog.ts` and
-`Document.ts`, and their tests.
+meanings of "export" while this change lands. `WorkspaceInventory.Candidate.exported` becomes
+`declaration` for the same reason. Consumers: `ModuleSummary.ts`, `WorkspaceInventory.ts`,
+`AutoImport.ts`, LSP `Document.ts`, and their tests.
 
 ### Parsing shares the marker slot and the `as` tail with `extern`
 

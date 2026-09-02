@@ -676,99 +676,15 @@ const printFunctionDeclaration = (
   node: SyntaxTree.Node,
   prefix: FormatDocument.Document,
 ): FormatDocument.Document => {
-  const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
-  const staticKeyword = directTokens(node).find((token) => token.kind === 'StaticKeyword')
-  const unsafeKeyword = directTokens(node).find((token) => token.kind === 'UnsafeKeyword')
-  const effectKeyword = directTokens(node).find((token) => token.kind === 'EffectKeyword')
-  const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
-  const failureRow = directNodes(node).find((child) => child.kind === 'FailureRow')
-  const requirementRow = directNodes(node).find((child) => child.kind === 'RequirementRow')
-  const whereClause = directNodes(node).find((child) => child.kind === 'WhereClause')
-  const name =
-    directTokens(node).find((token) => token.kind === 'Identifier') ??
-    directTokens(node).find((token) => token.kind === 'DropKeyword')
-  if (name === undefined)
-    throw new SyntaxFormatterImplementationError('FunctionDeclaration has no function name')
-  return FormatDocument.concat(
-    ...(publicKeyword === undefined
-      ? []
-      : [printToken(context, publicKeyword, prefix), FormatDocument.text(' ')]),
-    ...(staticKeyword === undefined
-      ? []
-      : [
-          printToken(
-            context,
-            staticKeyword,
-            publicKeyword === undefined ? prefix : FormatDocument.empty,
-          ),
-          FormatDocument.text(' '),
-        ]),
-    ...(unsafeKeyword === undefined
-      ? []
-      : [
-          printToken(
-            context,
-            unsafeKeyword,
-            publicKeyword === undefined && staticKeyword === undefined
-              ? prefix
-              : FormatDocument.empty,
-          ),
-          FormatDocument.text(' '),
-        ]),
-    ...(effectKeyword === undefined
-      ? []
-      : [
-          printToken(
-            context,
-            effectKeyword,
-            publicKeyword === undefined &&
-              staticKeyword === undefined &&
-              unsafeKeyword === undefined
-              ? prefix
-              : FormatDocument.empty,
-          ),
-          FormatDocument.text(' '),
-        ]),
-    printToken(
-      context,
-      tokenOf(node, 'FnKeyword'),
-      publicKeyword === undefined &&
-        staticKeyword === undefined &&
-        unsafeKeyword === undefined &&
-        effectKeyword === undefined
-        ? prefix
-        : FormatDocument.empty,
-    ),
-    printToken(context, name, FormatDocument.text(' ')),
-    ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
-    printNode(context, nodeOf(node, 'ParameterList')),
-    printNode(context, nodeOf(node, 'ReturnType'), FormatDocument.text(' ')),
-    FormatDocument.group(
-      FormatDocument.concat(
-        ...(failureRow === undefined
-          ? []
-          : [printNode(context, failureRow, FormatDocument.softLine)]),
-        ...(requirementRow === undefined
-          ? []
-          : [printNode(context, requirementRow, FormatDocument.softLine)]),
-        ...(whereClause === undefined
-          ? []
-          : [printNode(context, whereClause, FormatDocument.softLine)]),
-      ),
-    ),
-    printNode(context, nodeOf(node, 'Block'), FormatDocument.text(' ')),
-  )
-}
-
-const printForeignFunctionDeclaration = (
-  context: Context,
-  node: SyntaxTree.Node,
-  prefix: FormatDocument.Document,
-): FormatDocument.Document => {
   const tokens = directTokens(node)
   const nodes = directNodes(node)
-  // Every modifier through `fn`: `[pub] [static] [unsafe] extern "C" [effect] fn`.
+  // Every modifier through `fn`: `[pub] [static] [unsafe] [extern | export "C"] [effect] fn`.
   const head = tokens.slice(0, tokens.findIndex((token) => token.kind === 'FnKeyword') + 1)
+  const name =
+    tokens.find((token) => token.kind === 'Identifier') ??
+    tokens.find((token) => token.kind === 'DropKeyword')
+  if (name === undefined)
+    throw new SyntaxFormatterImplementationError('FunctionDeclaration has no function name')
   const asIndex = tokens.findIndex((token) => token.kind === 'AsKeyword')
   const asKeyword = tokens.at(asIndex)
   const symbol = asIndex < 0 ? undefined : tokens.at(asIndex + 1)
@@ -782,7 +698,7 @@ const printForeignFunctionDeclaration = (
     ...head.map((token, index) =>
       printToken(context, token, index === 0 ? prefix : FormatDocument.text(' ')),
     ),
-    printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+    printToken(context, name, FormatDocument.text(' ')),
     ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
     printNode(context, nodeOf(node, 'ParameterList')),
     ...(returnType === undefined ? [] : [printNode(context, returnType, FormatDocument.text(' '))]),
@@ -1260,9 +1176,8 @@ const printNode = (
       return FormatDocument.concat(...documents)
     }
     case 'FunctionDeclaration':
-      return printFunctionDeclaration(context, node, prefix)
     case 'ForeignFunctionDeclaration':
-      return printForeignFunctionDeclaration(context, node, prefix)
+      return printFunctionDeclaration(context, node, prefix)
     case 'ParameterList':
       return printDelimited(
         context,

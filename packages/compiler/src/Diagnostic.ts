@@ -401,6 +401,8 @@ export const reservedForeignSymbolCode = 'SEM0191' as const
 export const conflictingForeignSignatureCode = 'SEM0192' as const
 /** Stable code for one reachable foreign call unavailable on the requested execution surface. */
 export const foreignFunctionTargetUnavailableCode = 'SEM0193' as const
+/** Stable code for an `export "C"` function whose body may suspend. */
+export const exportSuspendsCode = 'SEM0194' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -636,6 +638,7 @@ export type Code =
   | typeof reservedForeignSymbolCode
   | typeof conflictingForeignSignatureCode
   | typeof foreignFunctionTargetUnavailableCode
+  | typeof exportSuspendsCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -1105,6 +1108,7 @@ export type Reason =
       readonly symbol: string
       readonly surface: string
     }
+  | { readonly _tag: 'ExportSuspends'; readonly symbol: string }
   | { readonly _tag: 'InaccessibleStructConstruction'; readonly type: string }
   | { readonly _tag: 'UnknownStructField'; readonly type: string; readonly field: string }
   | {
@@ -2467,6 +2471,29 @@ export const foreignFunctionTargetUnavailable = (
     message: `Foreign function ${symbol} is unavailable for ${surface}`,
     reason: Object.freeze({ _tag: 'ForeignFunctionTargetUnavailable', symbol, surface }),
     span,
+  })
+
+/** Rejects an exported C function whose MIR body may suspend, relating the suspending call. */
+export const exportSuspends = (
+  symbol: string,
+  span: SourceSpan.SourceSpan,
+  callSpan?: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: exportSuspendsCode,
+    severity: 'error',
+    message: `Exported function ${symbol} may suspend; a C-callable body must be synchronous`,
+    reason: Object.freeze({ _tag: 'ExportSuspends', symbol }),
+    span,
+    ...(callSpan === undefined
+      ? {}
+      : {
+          relatedSpans: Object.freeze([
+            Object.freeze({ label: 'suspending call', span: callSpan }),
+          ]),
+        }),
   })
 
 export const inaccessibleStructConstruction = (

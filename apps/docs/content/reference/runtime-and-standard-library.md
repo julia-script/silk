@@ -718,8 +718,8 @@ The following are deliberately outside the first stable model:
 - target-conditional source and module-level availability annotations;
 - compiler-selected or overridable default service providers;
 - optional service requirements, including absence, selection, and entry-closure semantics;
-- foreign pointers, records, and exports, a stable ABI, dynamic linking, and user-selected runtime
-  implementations;
+- foreign pointers and records, library artifacts, a stable ABI, dynamic linking, and user-selected
+  runtime implementations;
 - runtime suspension, concurrency, scheduler/executor selection, async I/O, streams, networking,
   entropy, and wall-clock facilities;
 - alternative standard-library profiles or “no-stdlib” project configuration in the official

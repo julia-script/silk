@@ -3782,3 +3782,98 @@ it('fixes the foreign modifier order and retains rejected modifiers', () => {
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
+
+it('parses a renamed public exported function declaration losslessly', () => {
+  const source =
+    'pub export "C" fn double(value: i32) -> i32 as "silk_test_double_v1" { return value * 2 }'
+  const result = parseText('memory/exported-function', source)
+  const declaration = SyntaxTree.directNode(result.root, 'FunctionDeclaration')
+
+  assert.notStrictEqual(declaration, undefined)
+  assert.deepEqual(significantShape(declaration ?? result.root), [
+    'PubKeyword',
+    'ExportKeyword',
+    'TextLiteral',
+    'FnKeyword',
+    'Identifier',
+    '{ParameterList}',
+    '{ReturnType}',
+    'AsKeyword',
+    'TextLiteral',
+    '{Block}',
+  ])
+  assert.strictEqual(
+    declaration === undefined
+      ? 0
+      : SyntaxTree.directNodes(
+          SyntaxTree.directNode(declaration, 'ParameterList') ?? declaration,
+          'ParameterDeclaration',
+        ).length,
+    1,
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('recovers an exported function without a body at the next declaration', () => {
+  const source = 'export "C" fn f() -> i32\nfn next() -> i32 { return 1 }'
+  const result = parseText('memory/exported-function-missing-body', source)
+  const [exported, next] = SyntaxTree.directNodes(result.root, 'FunctionDeclaration')
+
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  const [diagnostic] = result.parserDiagnostics
+  assert.strictEqual(
+    diagnostic !== undefined &&
+      exported !== undefined &&
+      next !== undefined &&
+      diagnostic.span.start >= exported.span.start &&
+      diagnostic.span.end <= exported.span.end &&
+      diagnostic.span.end <= next.span.start,
+    true,
+  )
+  assert.deepEqual(
+    missingLeaves(exported ?? result.root).map((missing) => missing.expected),
+    ['LeftBrace'],
+  )
+  assert.notStrictEqual(next, undefined)
+  assert.strictEqual(SyntaxTree.isAvailableSyntax(next ?? result.root), true)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('fixes the export modifier order and retains rejected modifiers', () => {
+  const source =
+    'pub static unsafe export "C" effect fn g<T>(value: T) -> i32 ! Problem as "g" { return 1 }\n' +
+    'export "C" unsafe fn h() -> i32 { return 1 }'
+  const result = parseText('memory/exported-function-modifiers', source)
+  const [ordered, disordered] = SyntaxTree.directNodes(result.root, 'FunctionDeclaration')
+
+  assert.deepEqual(significantShape(ordered ?? result.root), [
+    'PubKeyword',
+    'StaticKeyword',
+    'UnsafeKeyword',
+    'ExportKeyword',
+    'TextLiteral',
+    'EffectKeyword',
+    'FnKeyword',
+    'Identifier',
+    '{TypeParameterList}',
+    '{ParameterList}',
+    '{ReturnType}',
+    '{FailureRow}',
+    'AsKeyword',
+    'TextLiteral',
+    '{Block}',
+  ])
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0002'],
+  )
+  assert.strictEqual(errorNodes(disordered ?? result.root).length, 1)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})

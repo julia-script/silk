@@ -2599,6 +2599,17 @@ fn main() -> i32 { return apply(abs, 1) }`,
   }
 })
 
+it('calls an exported function from Silk as an ordinary function without acknowledgement', () => {
+  const result = analyzeText(
+    'fixture://export-ordinary-call.silk',
+    `export "C" fn double(value: i32) -> i32 as "silk_test_double_v1" { return value * 2 }
+fn main() -> i32 { return double(2) }`,
+  )
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(result.functions.length, 2)
+})
+
 it.effect('realizes a module holding an uncalled foreign declaration without a body error', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(

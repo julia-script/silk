@@ -66,6 +66,9 @@ fn helper() -> i32 { return 0 }
 
 /// Computes an absolute value through libc.
 pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"
+
+/// Doubles a value for C callers.
+pub export "C" fn double(value: i32) -> i32 as "silk_test_double_v1" { return value * 2 }
 `
 
 const rendered = Effect.fnUntraced(function* () {
@@ -85,9 +88,11 @@ it.effect('renders the complete public hierarchy in source order with accurate c
     const page = result.reference.files.find((file) => file.path === 'reference.md')?.contents
     assert.isDefined(page)
     assert.include(page, 'Import as `Recovery` with `import test.reference { Recovery }`.')
-    assert.include(page, 'Public declarations: 4.')
+    assert.include(page, 'Public declarations: 5.')
     assert.include(page, '## `cAbs`')
     assert.include(page, 'pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"')
+    assert.include(page, '## `double`')
+    assert.include(page, 'pub export "C" fn double(value: i32) -> i32 as "silk_test_double_v1"')
     assert.include(page, 'Computes an absolute value through libc.')
     assert.include(page, '### Operation `recover`')
     assert.include(page, '#### Parameter `problem`')

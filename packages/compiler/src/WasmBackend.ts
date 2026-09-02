@@ -9924,6 +9924,7 @@ export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = O
       nativeRuntimeSymbols: Object.freeze([]),
       runtimeFeatures: output.runtimeFeatures,
       foreignImports: Object.freeze([]),
+      foreignExports: Object.freeze([]),
       control: controlProvenance(program),
       bytes: output.bitcode,
       wat: output.ir,
