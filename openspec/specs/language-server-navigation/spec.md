@@ -260,3 +260,38 @@ SHALL navigate to the exact binding token; unavailable and out-of-scope uses SHA
 
 - **WHEN** definition is requested on a later use of a field-shorthand binding
 - **THEN** the target selection range is the shorthand token that declared the local
+
+### Requirement: Associated members have one semantic identity
+
+Definition, references, and rename SHALL treat an inherent member as one semantic identity across
+its declaration, its `Owner.member` call form, its function-item and section forms, and its applied
+`Owner<Args>.member` form. Definition from any of those occurrences SHALL land on the member's
+declared name inside its impl block, and rename SHALL rewrite every occurrence in one workspace
+edit while leaving same-named members of other owners and same-named root functions untouched.
+
+#### Scenario: Navigate from a section to the member
+
+- **WHEN** the cursor is on `map` in `value |> Option.map(addOne)`
+- **THEN** definition navigates to `map` inside `impl<T> Option<T>`
+
+#### Scenario: Rename a member across call forms
+
+- **WHEN** `Option.map` is renamed to `transform`
+- **THEN** the declaration, every `Option.map(...)` call, every section, and every applied-qualifier use are rewritten, and a root function named `map` in another module is untouched
+
+### Requirement: Receiver-syntax occurrences share the member identity
+
+Definition, references, and rename SHALL treat the member name in `receiver.member(args)` as an
+occurrence of the same identity as the member's declaration and its `Owner.member` forms. For an
+interface-backed member call, definition SHALL offer the interface operation and the selected
+conformance implementation as the same targets the explicit `Interface.op(...)` form offers.
+
+#### Scenario: Rename across receiver and explicit forms
+
+- **WHEN** `Option.map` is renamed to `transform`
+- **THEN** `option.map(addOne)` becomes `option.transform(addOne)` in the same workspace edit as the explicit and section forms
+
+#### Scenario: Navigate a bound method call
+
+- **WHEN** the cursor is on `print` in `value.print()` inside `fn show<T: Printable>(value: &T)`
+- **THEN** definition navigates to the `print` operation of `Printable`
