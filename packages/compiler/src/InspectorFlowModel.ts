@@ -29,6 +29,8 @@ const typeText = (type: Type.Type): string => {
       return `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
     case 'ReferenceType':
       return `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
+    case 'PointerType':
+      return `${type.mutable ? '*mut ' : '*const '}${typeText(type.pointee)}`
     case 'RepresentedType':
       return Type.encode(type)
     case 'StructuralUnionType':

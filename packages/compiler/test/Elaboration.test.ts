@@ -2623,3 +2623,66 @@ pub fn main() -> i32 { return 0 }`),
     assert.strictEqual(self.results.get('foreign/Idle')?.functions.length, 1)
   }),
 )
+
+it.effect('admits a pointer to an opaque nominal in a foreign signature', () =>
+  Effect.gen(function* () {
+    const result = yield* analyzeWithStdlib(
+      'foreign://opaque-pointer',
+      `struct Opaque {}
+unsafe extern "C" fn useHandle(handle: *mut Opaque) -> i32
+pub fn main() -> i32 { return 0 }`,
+    )
+
+    assert.deepEqual(result.diagnostics, [])
+  }),
+)
+
+it.effect('bounds Pointer.read and Pointer.write to a Copy pointee at the wrapper', () =>
+  Effect.gen(function* () {
+    const rejected = yield* analyzeWithStdlib(
+      'pointer://move-only-read',
+      `import silk.pointer as Pointer
+import silk.vector { Vector }
+fn read(pointer: *const Vector<i32>) -> Vector<i32> {
+  unsafe { return Pointer.read(pointer) }
+}`,
+    )
+    assert.deepEqual(
+      rejected.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0083'],
+    )
+    const accepted = yield* analyzeWithStdlib(
+      'pointer://copy-read',
+      `import silk.pointer as Pointer
+fn read(pointer: *const i32) -> i32 {
+  unsafe { return Pointer.read(pointer) }
+}`,
+    )
+    assert.deepEqual(accepted.diagnostics, [])
+  }),
+)
+
+it.effect('forms pointers in safe code and requires unsafe to dereference', () =>
+  Effect.gen(function* () {
+    const formed = yield* analyzeWithStdlib(
+      'pointer://safe-formation',
+      `import silk.pointer as Pointer
+fn form(value: &mut i32, values: &[u8]) -> *mut i32 {
+  let first = Pointer.fromSlice(values)
+  let missing = Pointer.isNull(first)
+  let empty = Pointer.null<i32>()
+  return Pointer.fromMutRef(value)
+}`,
+    )
+    assert.deepEqual(formed.diagnostics, [])
+    const rejected = yield* analyzeWithStdlib(
+      'pointer://safe-read',
+      `import silk.pointer as Pointer
+fn read(pointer: *const i32) -> i32 { return Pointer.read(pointer) }`,
+    )
+    assert.deepEqual(
+      rejected.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0082'],
+    )
+  }),
+)

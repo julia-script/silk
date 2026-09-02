@@ -52,6 +52,8 @@ const typeText = (type: Type.Type): string => {
       return `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
     case 'ReferenceType':
       return `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
+    case 'PointerType':
+      return `${type.mutable ? '*mut ' : '*const '}${typeText(type.pointee)}`
     case 'RepresentedType':
       return Type.encode(type)
     case 'StructuralUnionType':
@@ -933,6 +935,18 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = copy ${localText(operation.source)} into ${localText(operation.buffer)}[${localText(operation.offset)}..+${localText(operation.length)}]`
     case 'RawBufferFill':
       return `${localText(operation.destination)} = fill ${localText(operation.buffer)}[${localText(operation.offset)}..+${localText(operation.length)}] = ${localText(operation.value)}`
+    case 'PointerNull':
+      return `${localText(operation.destination)} = null pointer`
+    case 'PointerIsNull':
+      return `${localText(operation.destination)} = is null ${localText(operation.pointer)}`
+    case 'PointerFromReference':
+      return `${localText(operation.destination)} = pointer from ${localText(operation.source)}`
+    case 'PointerOffset':
+      return `${localText(operation.destination)} = offset ${localText(operation.pointer)} by ${localText(operation.count)}`
+    case 'PointerRead':
+      return `${localText(operation.destination)} = read pointer ${localText(operation.pointer)}`
+    case 'PointerWrite':
+      return `${localText(operation.destination)} = write pointer ${localText(operation.pointer)} = ${localText(operation.value)}`
     case 'SlotWrite':
       return `${localText(operation.destination)} = write ${localText(operation.slot)} = ${localText(operation.value)}`
     case 'SlotTake':
@@ -1198,6 +1212,12 @@ const valueText = (value: BootstrapEvaluation.Value): string => {
       return `${typeText(value.type)} package #${value.ticket} generation ${value.generation}`
     case 'ReferenceValue':
       return `borrow f${value.frame}.c${value.cell}`
+    case 'PointerValue': {
+      const address = value.address
+      if (address === null) return 'null pointer'
+      if (address._tag === 'Ticket') return `pointer ticket=${address.ticket}[${address.offset}]`
+      return `pointer f${address.frame}.c${address.cell}[${address.offset}]`
+    }
     case 'EnumValue':
       return `${value.enum.module}.${value.enum.name}.${value.member.name} = ${value.discriminant}`
     case 'AggregateValue':

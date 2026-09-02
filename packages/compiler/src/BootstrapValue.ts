@@ -122,6 +122,33 @@ export interface ReferenceValue {
   readonly indexes: ReadonlyArray<number>
 }
 
+/**
+ * One logical raw address. A frame address names the borrowed place; `elements` marks a place
+ * whose fixed array the pointer walks, so `offset` indexes it, while a pointer to one scalar place
+ * carries `elements: false` and must stay at offset zero. A ticket address walks raw-buffer storage.
+ */
+export type PointerAddress =
+  | {
+      readonly _tag: 'Frame'
+      readonly frame: number
+      readonly cell: number
+      readonly selectors: ReadonlyArray<Mir.PlaceSelector>
+      readonly indexes: ReadonlyArray<number>
+      readonly elements: boolean
+      readonly offset: number
+    }
+  | {
+      readonly _tag: 'Ticket'
+      readonly ticket: number
+      readonly offset: number
+    }
+
+/** A raw pointer: null or a logical address that holds no loan and keeps nothing alive. */
+export interface PointerValue {
+  readonly _tag: 'PointerValue'
+  readonly address: PointerAddress | null
+}
+
 export interface UnionValue {
   readonly _tag: 'UnionValue'
   readonly type: Type.StructuralUnion
@@ -265,6 +292,7 @@ export type Value =
   | StaticViewValue
   | StringValue
   | ReferenceValue
+  | PointerValue
   | UnionValue
   | EffectBorrowValue
   | CallableBorrowValue

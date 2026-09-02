@@ -1093,6 +1093,17 @@ const printNode = (
         ...(role === undefined ? [] : [printToken(context, role)]),
       )
     }
+    case 'PointerType': {
+      const mutability = directTokens(node).find(
+        (token) => token.kind === 'ConstKeyword' || token.kind === 'MutKeyword',
+      )
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Star'), prefix, preserveBlank),
+        ...(mutability === undefined ? [] : [printToken(context, mutability)]),
+        FormatDocument.text(' '),
+        printNode(context, directNodes(node)[0] ?? nodeOf(node, 'TypePath')),
+      )
+    }
     case 'CallableType': {
       const nodes = directNodes(node)
       const result = nodes.at(-1) ?? nodeOf(node, 'TypePath')

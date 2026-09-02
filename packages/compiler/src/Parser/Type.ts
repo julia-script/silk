@@ -355,6 +355,23 @@ export const parseTypePrimary = (
       ]),
     })
   }
+  if (nextSignificantKind(initial) === 'Star') {
+    const star = expect(initial, 'Star', ['ConstKeyword', ...typeStarts, ...following])
+    const mutability = expect(
+      star.state,
+      nextSignificantKind(star.state) === 'MutKeyword' ? 'MutKeyword' : 'ConstKeyword',
+      [...typeStarts, ...following],
+    )
+    const pointee = parseTypePrimary(mutability.state, following)
+    return Object.freeze({
+      state: pointee.state,
+      node: syntaxNode(pointee.state, 'PointerType', [
+        ...star.elements,
+        ...mutability.elements,
+        pointee.node,
+      ]),
+    })
+  }
   if (nextSignificantKind(initial) === 'Ampersand') {
     const ampersand = expect(initial, 'Ampersand', [
       'MutKeyword',

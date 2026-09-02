@@ -3877,3 +3877,99 @@ it('fixes the export modifier order and retains rejected modifiers', () => {
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
+
+const pointerTypes = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
+  descendants(node).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'PointerType',
+  )
+
+it('parses pointer types in parameter, return, field, and generic-argument positions', () => {
+  const source = `struct Cursor { position: *mut u8 }
+fn pointers(cursor: *mut *const u8, count: *const i32) -> *const u8 {
+  return identity<*const i32>(count)
+}`
+  const result = parseText('memory://pointer-types.silk', source)
+  const pointers = pointerTypes(result.root)
+
+  assert.strictEqual(pointers.length, 6)
+  const field = SyntaxTree.directNode(result.root, 'StructDeclaration')
+  assert.strictEqual(
+    SyntaxTree.directNode(
+      SyntaxTree.directNode(field ?? result.root, 'StructField') ?? result.root,
+      'PointerType',
+    )?.kind,
+    'PointerType',
+  )
+  const outer = pointers[1] ?? result.root
+  const inner = SyntaxTree.directNode(outer, 'PointerType') ?? result.root
+  assert.deepEqual(
+    [outer, inner].map((pointer) => [
+      SyntaxTree.directToken(pointer, 'Star')?.kind,
+      SyntaxTree.directToken(pointer, 'MutKeyword')?.kind,
+      SyntaxTree.directToken(pointer, 'ConstKeyword')?.kind,
+      SyntaxTree.directNode(pointer, 'TypePath')?.kind,
+    ]),
+    [
+      ['Star', 'MutKeyword', undefined, undefined],
+      ['Star', undefined, 'ConstKeyword', 'TypePath'],
+    ],
+  )
+  const returnType = descendants(result.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'ReturnType',
+  )
+  assert.strictEqual(
+    SyntaxTree.directNode(returnType ?? result.root, 'PointerType')?.kind,
+    'PointerType',
+  )
+  const typeArguments = descendants(result.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'CallTypeArgumentList',
+  )
+  assert.strictEqual(
+    SyntaxTree.directNode(typeArguments ?? result.root, 'PointerType')?.kind,
+    'PointerType',
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('recovers a bare star pointer type by inserting the missing mutability', () => {
+  const source = 'fn bare(value: *u8) -> i32 { return 0 }'
+  const result = parseText('memory://bare-pointer.silk', source)
+  const pointer = pointerTypes(result.root)[0] ?? result.root
+
+  assert.strictEqual(pointer.kind, 'PointerType')
+  assert.deepEqual(
+    missingLeaves(pointer).map((leaf) => leaf.expected),
+    ['ConstKeyword'],
+  )
+  assert.strictEqual(SyntaxTree.directNode(pointer, 'TypePath')?.kind, 'TypePath')
+  assert.deepEqual(
+    diagnosticView(result).map((diagnostic) => [diagnostic.code, diagnostic.reason]),
+    [['PAR0001', { _tag: 'MissingToken', expected: 'ConstKeyword' }]],
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('keeps a comparison against a star in expression position unchanged', () => {
+  const result = parseText(
+    'memory://star-comparison.silk',
+    'fn compare(a: i32, b: i32) -> bool { return a < *b }',
+  )
+  const infix = descendants(result.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'InfixExpression',
+  )
+
+  assert.strictEqual(SyntaxTree.directToken(infix ?? result.root, 'Less')?.kind, 'Less')
+  assert.deepEqual(pointerTypes(result.root), [])
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0002'],
+  )
+  assertOriginalTokenTraversal(result)
+})

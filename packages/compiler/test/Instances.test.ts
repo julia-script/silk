@@ -763,3 +763,32 @@ pub fn main() -> i32 { return 0 }`
     )
   }),
 )
+
+it.effect('keys pointer instances by pointee and mutability without reaching the pointee', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.vector { Vector }
+fn probe<T>(flag: bool) -> bool { return flag }
+fn hold(value: *mut Vector<i32>) -> i32 { return 0 }
+pub fn main() -> i32 {
+  let first = probe<*const i32>(true)
+  let second = probe<*mut i32>(true)
+  let third = probe<*mut Vector<i32>>(true)
+  return 0
+}`)
+
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    const discovery = Analysis.instancesOf(result)
+    assert.deepEqual(
+      discovery.instances.map((instance) => ({
+        name: instance.key.declaration.name,
+        arguments: instance.key.typeArguments.map(Type.encodeGenericArgument),
+      })),
+      [
+        { name: 'main', arguments: [] },
+        { name: 'probe', arguments: ['*const i32'] },
+        { name: 'probe', arguments: ['*mut i32'] },
+        { name: 'probe', arguments: ['*mut silk/vector.Vector<i32>'] },
+      ],
+    )
+  }),
+)

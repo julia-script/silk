@@ -181,6 +181,7 @@ export const isDeclaredTypeNode = (element: SyntaxTree.Element): element is Synt
     element.kind === 'FixedArrayType' ||
     element.kind === 'SliceType' ||
     element.kind === 'ReferenceType' ||
+    element.kind === 'PointerType' ||
     element.kind === 'CallableType' ||
     element.kind === 'UnitType' ||
     element.kind === 'ParenthesizedType' ||
@@ -657,6 +658,46 @@ export const analyzeDeclaredType = (
           : {}),
       }),
       diagnostics: target.diagnostics,
+    })
+  }
+  if (syntax.kind === 'PointerType') {
+    const token = SyntaxTree.directToken(syntax, 'Star')
+    const pointeeSyntax = syntax.children.find(isDeclaredTypeNode)
+    if (token === undefined || pointeeSyntax === undefined) {
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
+        diagnostics: Object.freeze([]),
+      })
+    }
+    const mutable = SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined
+    const pointee = analyzeDeclaredType(source, pointeeSyntax, typeParameters)
+    if (pointee.fact._tag === 'Resolved') {
+      const type = Type.pointer(mutable, pointee.fact.type)
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Resolved',
+          type,
+          spelling: Type.encode(type),
+          token,
+          syntax,
+          components: Object.freeze([pointee.fact]),
+        }),
+        diagnostics: pointee.diagnostics,
+      })
+    }
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Pointer',
+        mutable,
+        pointee: pointee.fact,
+        spelling: `${mutable ? '*mut ' : '*const '}unavailable`,
+        token,
+        syntax,
+        ...('cause' in pointee.fact && pointee.fact.cause !== undefined
+          ? { cause: pointee.fact.cause }
+          : {}),
+      }),
+      diagnostics: pointee.diagnostics,
     })
   }
   if (syntax.kind === 'FixedArrayType') {

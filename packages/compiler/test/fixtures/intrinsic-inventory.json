@@ -5373,6 +5373,90 @@
       "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
     },
     {
+      "operation": "Intrinsic.pointerNull",
+      "signature": "fn Intrinsic.pointerNull<T>() -> *mut T",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.null",
+      "identity": "PointerNull"
+    },
+    {
+      "operation": "Intrinsic.pointerIsNull",
+      "signature": "fn Intrinsic.pointerIsNull<T>(pointer: *const T) -> bool",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.isNull",
+      "identity": "PointerIsNull"
+    },
+    {
+      "operation": "Intrinsic.pointerFromRef",
+      "signature": "fn Intrinsic.pointerFromRef<T>(value: &T) -> *const T",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.fromRef",
+      "identity": "PointerFromRef"
+    },
+    {
+      "operation": "Intrinsic.pointerFromMutRef",
+      "signature": "fn Intrinsic.pointerFromMutRef<T>(value: &mut T) -> *mut T",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.fromMutRef",
+      "identity": "PointerFromMutRef"
+    },
+    {
+      "operation": "Intrinsic.pointerFromSlice",
+      "signature": "fn Intrinsic.pointerFromSlice<T>(values: &[T]) -> *const T",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.fromSlice",
+      "identity": "PointerFromSlice"
+    },
+    {
+      "operation": "Intrinsic.pointerFromMutSlice",
+      "signature": "fn Intrinsic.pointerFromMutSlice<T>(values: &mut [T]) -> *mut T",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.fromMutSlice",
+      "identity": "PointerFromMutSlice"
+    },
+    {
+      "operation": "Intrinsic.pointerOffset",
+      "signature": "unsafe fn Intrinsic.pointerOffset<T>(pointer: *const T, count: usize) -> *const T",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.offset",
+      "identity": "PointerOffset",
+      "invariant": "caller proves the pointer and the offset result address elements of one live allocation"
+    },
+    {
+      "operation": "Intrinsic.pointerOffsetMut",
+      "signature": "unsafe fn Intrinsic.pointerOffsetMut<T>(pointer: *mut T, count: usize) -> *mut T",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.offsetMut",
+      "identity": "PointerOffsetMut",
+      "invariant": "caller proves the pointer and the offset result address elements of one live allocation"
+    },
+    {
+      "operation": "Intrinsic.pointerRead",
+      "signature": "unsafe fn Intrinsic.pointerRead<T>(pointer: *const T) -> T",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.read",
+      "identity": "PointerRead",
+      "invariant": "caller proves the pointer is non-null, aligned, and addresses an initialized T"
+    },
+    {
+      "operation": "Intrinsic.pointerWrite",
+      "signature": "unsafe fn Intrinsic.pointerWrite<T>(pointer: *mut T, value: T) -> ()",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.write",
+      "identity": "PointerWrite",
+      "invariant": "caller proves the pointer is non-null, aligned, and addresses writable storage for T"
+    },
+    {
       "operation": "Intrinsic.slotWrite",
       "signature": "unsafe fn Intrinsic.slotWrite<T>(slot: Slot<T>, value: T) -> ()",
       "unsafe": true,

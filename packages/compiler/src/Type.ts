@@ -86,6 +86,16 @@ export interface Reference {
   readonly target: Type
 }
 
+/**
+ * A raw machine address of one `pointee` value. Copy, nullable, owning nothing and holding no loan;
+ * validity is the unsafe caller's obligation. `mutable` distinguishes `*mut T` from `*const T`.
+ */
+export interface Pointer {
+  readonly _tag: 'PointerType'
+  readonly mutable: boolean
+  readonly pointee: Type
+}
+
 /** How a callable environment may be accessed by one invocation. */
 export type CallableMode = 'Shared' | 'Exclusive' | 'Take'
 
@@ -230,6 +240,16 @@ const nonScalarBuiltinOperations = Object.freeze([
   'RawBufferViewMut',
   'RawBufferCopy',
   'RawBufferFill',
+  'PointerNull',
+  'PointerIsNull',
+  'PointerFromRef',
+  'PointerFromMutRef',
+  'PointerFromSlice',
+  'PointerFromMutSlice',
+  'PointerOffset',
+  'PointerOffsetMut',
+  'PointerRead',
+  'PointerWrite',
   'SlotWrite',
   'SlotTake',
   'SlotCopy',
@@ -418,6 +438,7 @@ export type Type =
   | FixedArray
   | Slice
   | Reference
+  | Pointer
   | Callable
   | Effect
   | Represented
@@ -686,6 +707,7 @@ export const containsStaticPhaseOnly = (self: Type): boolean => {
     )
   if (isFixedArray(self) || isSlice(self)) return containsStaticPhaseOnly(self.element)
   if (isReference(self)) return containsStaticPhaseOnly(self.target)
+  if (isPointer(self)) return containsStaticPhaseOnly(self.pointee)
   if (isCallable(self))
     return self.parameters.some(containsStaticPhaseOnly) || containsStaticPhaseOnly(self.result)
   if (isEffect(self))
@@ -780,6 +802,10 @@ export const slice = (access: Slice['access'], element: Type): Slice =>
 /** Constructs one canonical lexical whole-value reference. */
 export const reference = (access: Reference['access'], target: Type): Reference =>
   Object.freeze({ _tag: 'ReferenceType', access, target })
+
+/** Constructs one canonical raw pointer type. */
+export const pointer = (mutable: boolean, pointee: Type): Pointer =>
+  Object.freeze({ _tag: 'PointerType', mutable, pointee })
 
 /** Constructs one immutable canonical callable contract. */
 export const callable = (
@@ -1658,6 +1684,10 @@ export const isSlice = (self: Type): self is Slice =>
 export const isReference = (self: Type): self is Reference =>
   typeof self !== 'string' && self._tag === 'ReferenceType'
 
+/** Tests whether a semantic type is a raw pointer. */
+export const isPointer = (self: Type): self is Pointer =>
+  typeof self !== 'string' && self._tag === 'PointerType'
+
 /** Tests whether a semantic type is a structural callable contract. */
 export const isCallable = (self: Type): self is Callable =>
   typeof self !== 'string' && self._tag === 'CallableType'
@@ -1680,6 +1710,7 @@ const semanticTypeTags: ReadonlySet<string> = new Set([
   'FixedArrayType',
   'SliceType',
   'ReferenceType',
+  'PointerType',
   'CallableType',
   'EffectType',
   'RepresentedType',
@@ -1748,6 +1779,7 @@ const computeKey = (self: Type): string => {
   if (isFixedArray(self)) return `array:${self.length}<${key(self.element)}>`
   if (isSlice(self)) return `slice:${self.access}<${key(self.element)}>`
   if (isReference(self)) return `reference:${self.access}<${key(self.target)}>`
+  if (isPointer(self)) return `pointer:${self.mutable ? 'mut' : 'const'}<${key(self.pointee)}>`
   if (isCallable(self)) {
     const schema = self.schema
     const schemaKey =
@@ -1847,6 +1879,8 @@ export const firstRepresentationDivergence = (
     return firstRepresentationDivergence(left.element, right.element)
   if (isReference(left) && isReference(right))
     return firstRepresentationDivergence(left.target, right.target)
+  if (isPointer(left) && isPointer(right))
+    return firstRepresentationDivergence(left.pointee, right.pointee)
   if (isCallable(left) && isCallable(right)) {
     for (
       let ordinal = 0;
@@ -1993,6 +2027,13 @@ export const haveSameRepresentationShape = (left: Type, right: Type): boolean =>
       left.access === right.access &&
       haveSameRepresentationShape(left.target, right.target)
     )
+  if (isPointer(left) || isPointer(right))
+    return (
+      isPointer(left) &&
+      isPointer(right) &&
+      left.mutable === right.mutable &&
+      haveSameRepresentationShape(left.pointee, right.pointee)
+    )
   if (isCallable(left) || isCallable(right)) {
     if (!isCallable(left) || !isCallable(right)) return false
     return (
@@ -2098,6 +2139,8 @@ export const opaqueRepresentationEvidence = (
     return opaqueRepresentationEvidence(actual.element, expected.element, family)
   if (isReference(actual) && isReference(expected))
     return opaqueRepresentationEvidence(actual.target, expected.target, family)
+  if (isPointer(actual) && isPointer(expected))
+    return opaqueRepresentationEvidence(actual.pointee, expected.pointee, family)
   if (isCallable(actual) && isCallable(expected))
     return Object.freeze([
       ...expected.parameters.flatMap((parameter_, ordinal) => {
@@ -2265,6 +2308,7 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
       for (const argument of type.arguments) visitArgument(argument)
     } else if (isFixedArray(type) || isSlice(type)) visitType(type.element)
     else if (isReference(type)) visitType(type.target)
+    else if (isPointer(type)) visitType(type.pointee)
     else if (isCallable(type)) {
       if (type.schema !== undefined) pushBinders(type.schema.binders)
       for (const parameter_ of type.parameters) visitType(parameter_)
@@ -2349,6 +2393,7 @@ export const encode = (self: Type): string => {
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}[${encode(self.element)}]`
   if (isReference(self))
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}${encode(self.target)}`
+  if (isPointer(self)) return `${self.mutable ? '*mut ' : '*const '}${encode(self.pointee)}`
   if (isCallable(self)) {
     const mode = executableAccessPrefix(self.mode)
     return `${self.unsafe ? 'unsafe ' : ''}${mode}fn(${self.parameters.map(encode).join(', ')}) -> ${encode(self.result)}`
@@ -2603,6 +2648,7 @@ export function runtimeAvailable(self: Type): boolean {
   if (isNominal(self)) return self.arguments.every(runtimeAvailableGenericArgument)
   if (isFixedArray(self) || isSlice(self)) return runtimeAvailable(self.element)
   if (isReference(self)) return runtimeAvailable(self.target)
+  if (isPointer(self)) return runtimeAvailable(self.pointee)
   if (isCallable(self))
     return (
       self.parameters.every(runtimeAvailable) &&
@@ -2856,6 +2902,7 @@ export const substitute = (self: Type, substitution: Substitution): Type => {
   if (isFixedArray(self)) return fixedArray(substitute(self.element, substitution), self.length)
   if (isSlice(self)) return slice(self.access, substitute(self.element, substitution))
   if (isReference(self)) return reference(self.access, substitute(self.target, substitution))
+  if (isPointer(self)) return pointer(self.mutable, substitute(self.pointee, substitution))
   if (isCallable(self))
     return callable(
       self.parameters.map((parameter_) => substitute(parameter_, substitution)),
@@ -3089,6 +3136,7 @@ export const specializeExecutableOwner = (
     if (isFixedArray(type)) return fixedArray(specializeType(type.element), type.length)
     if (isSlice(type)) return slice(type.access, specializeType(type.element))
     if (isReference(type)) return reference(type.access, specializeType(type.target))
+    if (isPointer(type)) return pointer(type.mutable, specializeType(type.pointee))
     if (isCallable(type))
       return callable(
         type.parameters.map(specializeType),

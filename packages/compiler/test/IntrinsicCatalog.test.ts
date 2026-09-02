@@ -187,6 +187,22 @@ pub fn main() -> i32 {
   let acquiredValue = run acquired
   return retriedValue + handledValue + providedValue + acquiredValue
 }`,
+  `struct Opaque {}
+fn pointers(value: &mut i32, values: &mut [u8], shared: &i32, view: &[u8]) -> i32 {
+  let empty = Intrinsic.pointerNull<Opaque>()
+  let missing = Intrinsic.pointerIsNull<Opaque>(empty)
+  let constant = Intrinsic.pointerFromRef<i32>(shared)
+  let mutable = Intrinsic.pointerFromMutRef<i32>(value)
+  let first = Intrinsic.pointerFromSlice<u8>(view)
+  let firstMut = Intrinsic.pointerFromMutSlice<u8>(values)
+  unsafe {
+    let second = Intrinsic.pointerOffset<u8>(first, 1)
+    let secondMut = Intrinsic.pointerOffsetMut<u8>(firstMut, 1)
+    Intrinsic.pointerWrite<i32>(mutable, 7)
+    return Intrinsic.pointerRead<i32>(constant)
+  }
+  return 0
+}`,
   `struct Counter { value: i32 }
 fn replace(self: &mut Counter) -> i32 { return Intrinsic.replace(self.value, 42) }
 pub fn main() -> i32 {
@@ -479,6 +495,33 @@ pub fn main() -> i32 { return run (read() |> Effect.provideWith(acquire())) }`),
     )
   }),
 )
+
+it('admits the Pointer actor with one invariant per unsafe primitive', () => {
+  const pointer = Intrinsic.inventory().filter((entry) =>
+    entry.operation.startsWith('Intrinsic.pointer'),
+  )
+  assert.deepEqual(
+    pointer.map((entry) => [entry.operation, entry.unsafe, entry.invariant !== undefined]),
+    [
+      ['Intrinsic.pointerNull', false, false],
+      ['Intrinsic.pointerIsNull', false, false],
+      ['Intrinsic.pointerFromRef', false, false],
+      ['Intrinsic.pointerFromMutRef', false, false],
+      ['Intrinsic.pointerFromSlice', false, false],
+      ['Intrinsic.pointerFromMutSlice', false, false],
+      ['Intrinsic.pointerOffset', true, true],
+      ['Intrinsic.pointerOffsetMut', true, true],
+      ['Intrinsic.pointerRead', true, true],
+      ['Intrinsic.pointerWrite', true, true],
+    ],
+  )
+  assert.isTrue(pointer.every((entry) => entry.admission === 'Ownership'))
+  assert.isTrue(pointer.every((entry) => entry.targets.length === 3))
+  assert.strictEqual(
+    pointer.find((entry) => entry.operation === 'Intrinsic.pointerFromMutSlice')?.signature,
+    'fn Intrinsic.pointerFromMutSlice<T>(values: &mut [T]) -> *mut T',
+  )
+})
 
 it('keeps catalog ordering stable across fresh reads', () => {
   const first = Intrinsic.all().map((actor) => ({

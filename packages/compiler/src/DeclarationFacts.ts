@@ -299,6 +299,15 @@ export type DeclaredTypeFact =
       readonly cause?: Diagnostic.Identity
     }
   | {
+      readonly _tag: 'Pointer'
+      readonly mutable: boolean
+      readonly pointee: DeclaredTypeFact
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly syntax: SyntaxTree.Node
+      readonly cause?: Diagnostic.Identity
+    }
+  | {
       readonly _tag: 'Callable'
       readonly unsafe: boolean
       readonly mode: Type.CallableMode

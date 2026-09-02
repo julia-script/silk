@@ -396,6 +396,8 @@ export const type = (
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}[${type(self.element, module, scope)}]`
   if (Type.isReference(self))
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}${type(self.target, module, scope)}`
+  if (Type.isPointer(self))
+    return `${self.mutable ? '*mut ' : '*const '}${type(self.pointee, module, scope)}`
   if (Type.isCallable(self)) {
     let mode: string
     if (self.mode === 'Exclusive') {
