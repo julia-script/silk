@@ -13,19 +13,33 @@ Each source module SHALL publish one immutable module scope built from its local
 declarations and unconditional imports. `import compiler.Syntax` SHALL bind the namespace name
 `Syntax`; `as Tree` SHALL replace that default with `Tree`; a selective list SHALL bind each named
 public member under its declared name or explicit member alias; and a hybrid import SHALL create
-both its namespace binding and selected-member bindings. Each binding SHALL retain its import
-syntax, local spelling, binding kind, canonical target module, and resolved member identity when
-applicable. A source module MAY name a canonical target module in at most one import declaration.
+both its namespace binding and selected-member bindings. A final contextual path segment SHALL
+supply the default namespace name only when that segment is an ordinary identifier. An import whose
+final segment is reserved SHALL create bindings only through an explicit ordinary namespace alias
+or selected-member list. Each binding SHALL retain its import syntax, local spelling, binding kind,
+canonical target module, and resolved member identity when applicable. A source module MAY name a
+canonical target module in at most one import declaration. Distribution catalog namespace metadata
+MUST NOT itself create a module-scope binding.
 
 #### Scenario: Bind a default namespace
 
 - **WHEN** a module imports `compiler.Syntax`
 - **THEN** its scope contains one namespace binding named `Syntax` targeting canonical module `compiler/Syntax`
 
+#### Scenario: Bind a reserved module under an explicit alias
+
+- **WHEN** a module imports `silk.effect as Effect`
+- **THEN** its scope contains one ordinary namespace binding named `Effect` targeting canonical module `silk/effect`
+
 #### Scenario: Bind selected and aliased members
 
 - **WHEN** a module imports `compiler.Syntax { Node, parse, encode as encodeSyntax }`
 - **THEN** its scope binds the three public members as `Node`, `parse`, and `encodeSyntax` without binding a `Syntax` namespace
+
+#### Scenario: Select from a reserved final segment
+
+- **WHEN** a module imports `silk.effect { map }`
+- **THEN** its scope binds public member `map` without creating an implicit namespace named `effect`
 
 #### Scenario: Bind a hybrid import
 
@@ -36,6 +50,11 @@ applicable. A source module MAY name a canonical target module in at most one im
 
 - **WHEN** one source module contains two import declarations resolving to the same canonical target
 - **THEN** the later import is an explicit invalid import with a stable diagnostic and does not create a second set of bindings
+
+#### Scenario: Keep catalog namespaces out of scope
+
+- **WHEN** a catalog advertises preferred namespace `Effect` for `silk/effect` and the source has no corresponding import
+- **THEN** `Effect.map` does not resolve as a module operation namespace
 
 ### Requirement: Import aliases are explicit changes
 
@@ -88,34 +107,6 @@ explicitly unavailable with the collision diagnostic as their cause.
 
 - **WHEN** equivalent closures are supplied or traversed in different orders
 - **THEN** their ordered module scopes, conflicts, lookup outcomes, and diagnostics are identical
-
-### Requirement: A module's own bindings shadow the standard-library prelude
-
-A standard-library module that declares a manifest namespace SHALL be seeded into every other
-module's scope under that namespace, and those seeded bindings SHALL form a prelude tier beneath
-everything the module's own source establishes. Where a module's local declaration or import claims
-a spelling the prelude also claims, the module's binding SHALL take the spelling and the prelude
-entry SHALL be dropped, without a collision diagnostic and without regard to declaration kind. The
-shadowed standard-library module SHALL remain reachable through an ordinary import, including under
-an alias. Two prelude entries claiming one spelling SHALL still collide with each other, and a
-module's own bindings SHALL continue to collide among themselves under the flat-namespace rule
-above. Intrinsic actors and the sealed `Intrinsic` namespace are language bindings rather than a
-prelude and SHALL keep colliding.
-
-#### Scenario: Declare a name the prelude also claims
-
-- **WHEN** a module declares its own top-level `Result` while the standard library seeds a `Result` namespace
-- **THEN** the scope reports no collision and `Result` resolves to the module's own declaration
-
-#### Scenario: Reach a shadowed standard-library module anyway
-
-- **WHEN** a module that shadows `Result` imports the standard-library result module under an alias
-- **THEN** the alias resolves to the standard-library module and the local `Result` keeps its own meaning
-
-#### Scenario: Leave an unshadowed namespace seeded
-
-- **WHEN** a module declares no name that the prelude claims
-- **THEN** every seeded namespace remains bound and qualified use resolves without an import
 
 ### Requirement: Visibility governs cross-module member access
 

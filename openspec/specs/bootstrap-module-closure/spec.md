@@ -14,11 +14,12 @@ facts, and module-cycle facts, so every later phase operates over a known, repro
 A compilation request SHALL name one canonical root module, provide that root's exact source bytes,
 and resolve imported sources by canonical logical module identity through the source-resolution
 capability. Loading SHALL seed the closure with the explicit root, parse each loaded module into its
-`SyntaxFile`, convert each syntactic dotted import path to a slash-separated canonical identity, and
-follow resolved imports transitively until every reachable resolution has been attempted. Each
-reachable canonical module SHALL be resolved and parsed at most once, and modules not reachable
-from the root SHALL NOT be resolved or included. A request whose explicit root identity is not
-canonical SHALL be rejected as a caller error rather than producing a source diagnostic.
+`SyntaxFile`, convert every contextual segment of each syntactic dotted import path to a
+slash-separated canonical identity without filtering by retained token kind, and follow resolved
+imports transitively until every reachable resolution has been attempted. Each reachable canonical
+module SHALL be resolved and parsed at most once, and modules not reachable from the root SHALL NOT
+be resolved or included. A request whose explicit root identity is not canonical SHALL be rejected
+as a caller error rather than producing a source diagnostic.
 
 #### Scenario: Load a diamond closure
 
@@ -29,6 +30,11 @@ canonical SHALL be rejected as a caller error rather than producing a source dia
 
 - **WHEN** a root source imports `compiler.Syntax` and the resolver provides canonical module `compiler/Syntax`
 - **THEN** loading follows that exact canonical module and retains the dotted spelling in the import's source provenance
+
+#### Scenario: Follow a reserved path segment
+
+- **WHEN** a root imports `silk.effect as Effect` and the resolver provides canonical module `silk/effect`
+- **THEN** loading follows that exact module using the retained bytes of both path segments
 
 #### Scenario: Exclude unreachable modules
 

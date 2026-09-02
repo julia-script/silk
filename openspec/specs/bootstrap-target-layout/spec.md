@@ -139,8 +139,11 @@ selected by the compiler before MIR lowering and MUST NOT be recomputed or chang
 Struct layout SHALL follow canonical nominal type dependencies rather than source traversal order.
 An unavailable field type or inline-recursive dependency SHALL make only dependent struct layouts
 unavailable with their originating causes; unrelated scalar and struct layouts SHALL remain
-available. Identical target and declaration inputs SHALL produce byte-identical ordered entries and
-field offsets across fresh processes.
+available. The layout of a compiler-owned indirection SHALL be independent of the layout of the type
+it indirects, so an indirected element type SHALL NOT be a layout dependency of the struct holding
+the indirection, and a struct that reaches itself only through an indirection SHALL have a finite,
+available layout. Identical target and declaration inputs SHALL produce byte-identical ordered
+entries and field offsets across fresh processes.
 
 #### Scenario: Refuse an inline recursive layout
 
@@ -156,6 +159,16 @@ field offsets across fresh processes.
 
 - **WHEN** the same nested nominal types are planned repeatedly for one target
 - **THEN** their canonical entry order, sizes, alignments, field offsets, and encoding are byte-identical
+
+#### Scenario: Lay out a struct that reaches itself through indirection
+
+- **WHEN** a reachable struct holds an explicit heap indirection to its own type
+- **THEN** the catalog entry records a complete size, alignment, and field offsets, and planning terminates without visiting the struct a second time
+
+#### Scenario: Exclude an indirected element from layout dependencies
+
+- **WHEN** a struct holds a compiler-owned indirection over an element type
+- **THEN** the struct's catalog entry is computed from the indirection's own fixed representation and does not require the element's layout
 
 ### Requirement: Reachable struct values reuse catalog layouts
 

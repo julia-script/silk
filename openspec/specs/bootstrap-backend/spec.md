@@ -1193,3 +1193,52 @@ foreign call.
 
 - **WHEN** the pointer corpus program (form, offset, write, read over a local array) runs on the evaluator, LLVM, and direct Wasm
 - **THEN** all three report the same exit status
+
+### Requirement: A union member narrower than its payload slot survives the slot
+
+A structural union's payload slot is as wide as the widest member that occupies it, so a member
+whose own value is narrower is carried in a wider container. Every backend SHALL carry such a member
+into its slot and back out again unchanged, and SHALL agree with the evaluator on the result. A
+backend MUST NOT reject a program for this shape alone, and MUST NOT emit a sequence that loses or
+reinterprets the member's bits.
+
+Where a backend cannot release a member held in a wider slot, it SHALL refuse to emit rather than
+release nothing, so a missing release is a reported failure and never a silent leak.
+
+#### Scenario: Read back a narrow member from a wide slot
+
+- **WHEN** a program constructs a union member narrower than the union's payload slot and then matches it out
+- **THEN** every engine yields the member's original value
+
+#### Scenario: Read back the wide member that set the slot's width
+
+- **WHEN** a program constructs the union's widest member and then matches it out
+- **THEN** every engine yields the full value, with no bits lost to the narrower member's width
+
+### Requirement: Bulk raw-storage operations lower to bulk memory instructions
+
+The native backend SHALL lower the bulk copy to `llvm.memmove` and the bulk set to `llvm.memset`,
+and the WebAssembly backend SHALL lower them to `memory.copy` and `memory.fill`. Neither backend MAY
+lower the copy to a form that is undefined for overlapping ranges, and neither MAY expand a bulk
+operation into a per-element loop.
+
+#### Scenario: Emit overlap-defined native code
+
+- **WHEN** the native backend emits a bulk copy
+- **THEN** the emitted module calls `llvm.memmove` rather than `llvm.memcpy`
+
+#### Scenario: Emit Wasm bulk memory
+
+- **WHEN** the WebAssembly backend emits a bulk copy or a bulk set
+- **THEN** the emitted function body uses `memory.copy` or `memory.fill` over the module's private memory
+
+### Requirement: A bulk range that runs past its storage traps
+
+Every engine SHALL trap when a bulk operation's range runs past the destination buffer's element
+count or past the source range's length, matching the bounds behavior of the per-element raw-storage
+operations.
+
+#### Scenario: Reject an out-of-range destination
+
+- **WHEN** a copy's destination offset plus its length exceeds the destination buffer's count
+- **THEN** the evaluator, the native binary, and the WebAssembly module each trap

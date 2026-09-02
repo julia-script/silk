@@ -90,14 +90,17 @@ Explicit `drop` SHALL release at that statement.
 ### Requirement: Vector ordering is stable and deterministic
 
 `Vector<T>` SHALL support ordering its elements in place for any element type carrying an `Order`
-witness. The order SHALL be total and stable: two elements that compare equal SHALL keep their input
-order relative to one another. The order SHALL be deterministic — the same input SHALL always
-produce the same output, and the evaluator, LLVM, and Wasm SHALL agree on that output — because
-every comparison and every exchange is decided by run boundaries alone and never by an address, a
-capacity, or an engine detail. Ordering SHALL move each element at most once per exchange, so no
-element is duplicated, leaked, or dropped twice, and SHALL NOT require the element type to be `Copy`
-to move an element. Ordering allocates a scratch buffer and therefore SHALL carry the typed
-`OutOfMemoryError` failure and the allocator requirement.
+witness, whether that witness selects a compiler-known comparison or one of the element type's own
+functions. The order SHALL be total and stable: two elements that compare equal SHALL keep their
+input order relative to one another, and this SHALL hold for an element type whose equal elements
+stay distinguishable, so stability is observable rather than merely asserted. The order SHALL be
+deterministic — the same input SHALL always produce the same output, and the evaluator, LLVM, and
+Wasm SHALL agree on that output — because every comparison and every exchange is decided by run
+boundaries alone and never by an address, a capacity, or an engine detail. Ordering SHALL move each
+element at most once per exchange, so no element is duplicated, leaked, or dropped twice, and SHALL
+NOT require the element type to be `Copy` to move an element; comparing two elements SHALL NOT
+consume either, so an element type that owns a resource can be ordered. Ordering allocates a scratch
+buffer and therefore SHALL carry the typed `OutOfMemoryError` failure and the allocator requirement.
 
 `Vector<T>` SHALL support searching a sorted vector for an element through the same `Order` witness,
 returning an optional index that is present only when a matching element exists. The search SHALL
@@ -113,6 +116,16 @@ vector answer identically.
 
 - **WHEN** a vector holding several elements that compare equal is ordered
 - **THEN** those elements keep their input order relative to one another, and ordering the result again leaves it unchanged
+
+#### Scenario: Observe stability through a user element type
+
+- **WHEN** a vector of a user type that compares on one field and carries another the comparison never reads is ordered
+- **THEN** elements with equal comparison fields appear in their input order, distinguished by the field the comparison ignored
+
+#### Scenario: Order a move-only element type
+
+- **WHEN** a vector whose element type owns an allocation, and is therefore never `Copy`, is ordered and later released
+- **THEN** the elements are ordered by their witness and every allocation acquired is released exactly once
 
 #### Scenario: Ordering an empty or one-element vector
 

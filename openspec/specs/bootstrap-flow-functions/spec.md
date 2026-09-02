@@ -681,11 +681,11 @@ converted into typed `E` values.
 
 ### Requirement: Standard Effect combinators are library-defined
 
-`map`, `mapError`, `mapBoth`, `flatMap`, `tap`, `catch`, `retry`, `provide`, `provideMut`, and
-`provideEffect` SHALL resolve to canonical ordinary Silk declarations. The compiler MUST NOT select
-their semantics from their names, actors, library origin, or a dedicated combinator HIR/MIR
-operation. Equivalent user code using the compiler-owned Effect core SHALL receive the same typing,
-ownership, execution, and cleanup behavior.
+`map`, `mapError`, `mapBoth`, `flatMap`, `tap`, `catch`, `retry`, `ensuring`, `ifThenElse`, `zip`, `zip3`,
+`provide`, `provideMut`, and `provideEffect` SHALL resolve to canonical ordinary Silk declarations. The
+compiler MUST NOT select their semantics from their names, actors, library origin, or a dedicated
+combinator HIR/MIR operation. Equivalent user code using the compiler-owned Effect core SHALL
+receive the same typing, ownership, execution, and cleanup behavior.
 
 #### Scenario: Navigate and compile map as Silk
 
@@ -697,10 +697,25 @@ ownership, execution, and cleanup behavior.
 - **WHEN** a program calls either the data-first or piped form of `Effect.provideMut`
 - **THEN** the target is canonical shipped Silk source and both forms produce the same contract and execution behavior
 
+#### Scenario: Navigate and compile finalization as Silk
+
+- **WHEN** a program calls or navigates to `Effect.ensuring`
+- **THEN** the target is canonical shipped Silk source built from outcome reification and re-raise, with no combinator-specific compiler operation
+
+#### Scenario: Navigate and compile sequential collection as Silk
+
+- **WHEN** a program calls or navigates to `Effect.zip` or `Effect.zip3`, in either the data-first or the piped form
+- **THEN** the target is canonical shipped Silk source built from ordinary `run` statements, with no combinator-specific compiler operation and no intrinsic
+
 #### Scenario: Define an equivalent user combinator
 
 - **WHEN** user source defines the same generic success-channel transformation under another name
 - **THEN** it compiles and executes without intrinsic registration or a compiler-recognized operation identity
+
+#### Scenario: Navigate and compile the conditional as Silk
+
+- **WHEN** a program calls or navigates to `Effect.ifThenElse`
+- **THEN** the target is canonical shipped Silk source built from an ordinary `if` statement over suspended callable arms, with no combinator-specific compiler operation
 
 ### Requirement: Synchronous Effects retain a suspension-compatible abstraction
 
@@ -949,3 +964,155 @@ Capture analysis for effect blocks SHALL register a capture for every binding re
 
 - **WHEN** an effect block's body evaluates `Color.value(c)` for an outer binding `c`
 - **THEN** `c` appears in the effect's capture environment and the deferred runner reads the captured value
+
+### Requirement: Effects can be collected sequentially at a fixed arity
+
+`Effect.zip` and `Effect.zip3` SHALL run their operands in declaration order and collect every
+success value into ordinary public data — `Pair<A, B>` and `Triple<A, B, C>` respectively — whose
+fields are readable from any module that can see the type.
+
+Execution SHALL stop at the first typed failure. An operand that follows a failed one MUST NOT run,
+and it MUST be released by the ordinary local cleanup of the frame the failure propagates out of, so
+no unrun operand is stranded.
+
+The result SHALL carry the union of every operand's failure row and the union of every operand's
+requirement row, and MUST NOT add a failure or requirement of its own. Collecting the values MUST
+NOT allocate.
+
+Arity SHALL be extended by adding a parameter rather than by accepting a collection. Each operand is
+a distinct parameter, so no Effect value is stored in runtime-indexed storage and every one of them
+stays inside the hidden-identity specialization that erases it before lowering. Bootstrap MUST NOT
+promise a combinator that takes a runtime-sized collection of Effects; that requires Effect values
+to have a storable target layout, which they do not have.
+
+Both combinators SHALL be ordinary Silk declarations with no intrinsic, no dedicated HIR or MIR
+operation, and no compiler-side name recognition.
+
+#### Scenario: Collect two success values in order
+
+- **WHEN** two Effects that both succeed are combined with `Effect.zip`
+- **THEN** the first Effect runs before the second and the returned pair carries both success values in that order
+
+#### Scenario: Stop at a first-operand failure
+
+- **WHEN** the first operand of `Effect.zip` fails with a typed failure
+- **THEN** the second operand never runs, that same failure reaches the caller with its payload intact, and the unrun second operand is released exactly once
+
+#### Scenario: Propagate a later operand's failure
+
+- **WHEN** the second operand of `Effect.zip` fails after the first has succeeded
+- **THEN** the failure reaches the caller unchanged and no pair is constructed
+
+#### Scenario: Collect three success values in order
+
+- **WHEN** three Effects are combined with `Effect.zip3` and the middle one fails
+- **THEN** the first operand has already run, the third operand never runs, and the middle operand's failure reaches the caller
+
+#### Scenario: Union every operand's rows
+
+- **WHEN** operands with distinct failure rows and distinct requirement rows are combined
+- **THEN** the resulting Effect's failure row is the union of theirs and its requirement row is the union of theirs, with nothing added
+
+#### Scenario: Read the collected values from another module
+
+- **WHEN** a caller in another module projects `first` and `second` from the returned pair
+- **THEN** the projection is accepted, because the fields are public
+
+### Requirement: A conditional combinator selects one suspended branch and never builds the other
+
+`Effect.ifThenElse` SHALL take a `bool` condition and two suspended arms, each a
+`once fn() -> Effect<...>`, and SHALL invoke exactly the arm the condition selects. It MUST NOT
+invoke the other arm.
+
+Because an arm produces its branch rather than being one, the branch not taken SHALL never be
+constructed. This is stronger than the branch's effect not being performed: construction-time work
+inside an unselected arm SHALL NOT happen, and an arm whose body is only well-defined under the
+condition SHALL be safe to write. A form taking two pre-built `Effect` values would not satisfy
+this, because both branches would be evaluated at the call site before either was chosen.
+
+The arm that is not invoked SHALL be released exactly once. No arm can own a resource: a zero-arity
+callable is either a named function, which has no environment, or a section, and section
+construction supplies "exactly parameters one through the last" to produce "a unary callable
+awaiting parameter zero", so it always leaves arity 1 and never 0. A capturing value SHALL
+therefore be rejected against an arm's declared contract rather than accepted and leaked.
+
+The result's failure row SHALL be the union of the two arms' failure rows and its requirement row
+SHALL be the union of theirs, so a caller discharges whatever either branch could need without
+knowing which is selected. Both arms SHALL agree on the success type.
+
+The combinator SHALL be named `ifThenElse`. `if` is lexed unconditionally as a keyword and Silk has
+no raw-identifier form, so an `effect fn` named `if` cannot be declared at all — this is a
+constraint on the declaration, not one a qualified call spelling could avoid.
+
+#### Scenario: Perform none of the unselected branch's effects
+
+- **WHEN** two arms call a counting service a different number of times and `Effect.ifThenElse` selects one of them
+- **THEN** only the selected arm's service calls are observed, in either polarity
+
+#### Scenario: Never construct the unselected branch
+
+- **WHEN** the arms are ordinary functions that perform observable work at invocation before returning their Effects
+- **THEN** only the selected arm's construction-time work happens, in either polarity
+
+#### Scenario: Reject an arm that owns a resource
+
+- **WHEN** a value holding an owned resource is supplied where a zero-arity arm is required
+- **THEN** it is rejected, because a zero-arity arm has no environment to hold it and therefore nothing to leak
+
+#### Scenario: Union both arms' rows
+
+- **WHEN** the two arms declare different typed failures and different service requirements
+- **THEN** the result carries the union of both failure rows and both requirement rows, and either branch's selection is satisfied by discharging that union
+
+#### Scenario: Agree across engines
+
+- **WHEN** a program selecting either branch is run on the evaluator, on Wasm, and through the native toolchain
+- **THEN** the three engines produce the same result
+
+### Requirement: A finalizer runs on every Effect outcome without replacing it
+
+`Effect.ensuring` SHALL run its finalizer after the protected Effect completes with a success and
+after it completes with a typed failure, and SHALL then hand on that original success value or that
+original typed failure unchanged. It MUST NOT replace the outcome, add to the protected Effect's
+failure row, or let a recovering caller observe the outcome before the finalizer has run.
+
+The finalizer SHALL be typed `Effect<() ! never ? S>`, so a finalizer failure is unrepresentable
+rather than reconciled against the outcome being preserved. A caller whose release can fail SHALL
+recover it into that contract before composing it, and the resulting Effect's requirement row SHALL
+be the protected Effect's row widened by the finalizer's own.
+
+The protected Effect's local cleanup SHALL run before the finalizer. The finalizer is acquired
+outside the Effect it wraps, so the reverse-acquisition order that governs locals places it last.
+
+A trap SHALL bypass the finalizer, as it bypasses `Effect.catch` and every `Drop` hook. Bootstrap
+MUST NOT promise finalizer execution after a trap.
+
+#### Scenario: Finalize after a success
+
+- **WHEN** an Effect that succeeds is wrapped by `Effect.ensuring`
+- **THEN** the finalizer runs and the original success value reaches the caller unchanged
+
+#### Scenario: Finalize after a typed failure
+
+- **WHEN** an Effect that fails with a typed failure is wrapped by `Effect.ensuring` and then recovered
+- **THEN** the finalizer runs before recovery begins and the recovery handler receives that same failure with its payload intact
+
+#### Scenario: Order the finalizer after local cleanup
+
+- **WHEN** a protected Effect holding an owned local is wrapped by a finalizer that holds owned locals of its own
+- **THEN** the protected Effect's local is released first and the finalizer's locals are released afterwards in reverse acquisition order
+
+#### Scenario: Release an owner acquired inside the protected Effect
+
+- **WHEN** the protected Effect acquires an owner inside its own body and then fails with a typed failure
+- **THEN** that owner is released exactly once before the finalizer runs, and the finalizer's own owners are released exactly once after it
+
+#### Scenario: Compose a fallible release
+
+- **WHEN** a release that can fail is recovered into `() ! never` and passed as the finalizer
+- **THEN** the composition is accepted, the recovery decides what a failed release means, and the protected Effect's outcome is still preserved
+
+#### Scenario: Trap bypasses the finalizer
+
+- **WHEN** a protected Effect divides by zero
+- **THEN** execution traps without running the finalizer and without reporting structured cleanup completion

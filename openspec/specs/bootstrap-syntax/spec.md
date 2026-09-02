@@ -307,13 +307,18 @@ source mistakes.
 
 The parser SHALL accept the accepted unconditional top-level forms: `import <path>`, `import <path>
 as <namespace>`, `import <path> { <members> }`, and `import <path> as <namespace> { <members> }`.
-`<path>` SHALL contain one or more identifier segments separated by dots. `<members>` SHALL contain
-one or more comma-separated identifiers, each optionally followed by `as <local-name>`. The import
-declaration SHALL retain its keyword, ordered path segments and dots, optional namespace alias,
-optional selected-member list with aliases and separators, adjacent trivia, and exact source-owned
-span as one concrete branch. The concrete tree MUST NOT decide what any path, alias, or member
-resolves to. Missing segments, aliases, members, separators, and closing braces SHALL become
-explicit parser recovery data while following top-level declarations remain parseable.
+`<path>` SHALL contain one or more contextual path-name segments separated by dots. A contextual
+path-name segment MAY retain either an identifier token or a reserved-word token; this acceptance
+MUST NOT make a reserved word legal as an alias, selected member, declaration name, local binding,
+expression name, or type name. `<members>` SHALL contain one or more comma-separated identifiers,
+each optionally followed by `as <local-name>`. The import declaration SHALL retain its keyword,
+ordered path segments and dots, optional namespace alias, optional selected-member list with aliases
+and separators, adjacent trivia, and exact source-owned span as one concrete branch. The concrete
+tree MUST NOT decide what any path, alias, or member resolves to. Missing segments, aliases,
+members, separators, and closing braces SHALL become explicit parser recovery data while following
+top-level declarations remain parseable. An import whose final path segment is reserved and which
+has neither an explicit namespace alias nor a selected-member list SHALL receive one stable parser
+diagnostic because it cannot create a source-nameable implicit namespace binding.
 
 #### Scenario: Parse a namespace import
 
@@ -334,6 +339,26 @@ explicit parser recovery data while following top-level declarations remain pars
 
 - **WHEN** the source spells `import compiler.Syntax as Tree { Node, parse }`
 - **THEN** one import branch retains the complete path, namespace alias, and both selected members in concrete order
+
+#### Scenario: Parse a reserved path segment with an alias
+
+- **WHEN** the source spells `import silk.effect as Effect`
+- **THEN** the import path retains `effect` as its original reserved-word token and the import retains `Effect` as an ordinary explicit alias
+
+#### Scenario: Parse a reserved interior path segment
+
+- **WHEN** the source spells `import toolkit.effect.helpers as Helpers`
+- **THEN** all three path segments are retained in order and the final ordinary segment remains eligible for namespace binding
+
+#### Scenario: Reject an unusable implicit binding
+
+- **WHEN** the source spells `import silk.effect` without an alias or selected-member list
+- **THEN** the parser reports one stable diagnostic at the import and does not reinterpret `effect` as an ordinary identifier
+
+#### Scenario: Keep reserved words unavailable as bindings
+
+- **WHEN** `effect` is used as an import alias, selected member, parameter, or local binding
+- **THEN** ordinary parser recovery rejects it in that position even though the same token is accepted within the import path
 
 #### Scenario: Recover a missing path segment
 

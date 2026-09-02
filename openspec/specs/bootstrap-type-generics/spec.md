@@ -757,3 +757,171 @@ operand; the written arguments SHALL follow.
 
 - **WHEN** a generic body calls both `value.print()` and `Printable.print(value)` for `T: Printable`
 - **THEN** both record the same bound operation and one specialization per instantiation is emitted
+
+### Requirement: A bounded parameter specializes at a user type and reaches its witness
+
+Specialization SHALL admit a user-defined nominal type as the argument for a parameter bounded by an
+interface whenever that type's conformance covers the bound's whole contract, on the same terms as a
+built-in scalar. An operator on a bound-typed operand SHALL reach the operation the argument's
+conformance maps: the sealed operation when the mapping names an intrinsic, and an ordinary static
+call to the provider's own function when it names one, with each operand passed by shared borrow.
+The redirected call SHALL be reachable from instance discovery even though no ordinary call names
+it, SHALL remain fully static — no requirement row, no provider slot, and no runtime dispatch — and
+SHALL NOT consume either operand.
+
+An operand read that serves only such a call SHALL be permitted to observe a non-`Copy` place: a
+place read whose value is never accessed as an owner and is borrowed shared claims nothing, so it
+can be neither moved, dropped, nor written through.
+
+#### Scenario: Specialize a two-operation bound at a user struct
+
+- **WHEN** a user struct maps both operations of an interface declaring `add` and `lessThan`, and a generic bounded by it is specialized at that struct
+- **THEN** the specialization is admitted and each operator reaches the struct's own mapped function
+
+#### Scenario: Keep a scalar argument on its compiler-known operation
+
+- **WHEN** the same generic is specialized at `i32`, whose conformance maps the operation to an intrinsic
+- **THEN** the operator lowers to the compiler-known operation with no call to source
+
+#### Scenario: Order a move-only element type
+
+- **WHEN** a bound-typed operand is an element type that owns an allocation and is therefore never `Copy`
+- **THEN** the comparison borrows the element rather than moving it, and the element is neither duplicated nor released twice
+
+#### Scenario: Reject an incomplete witness at the specialization
+
+- **WHEN** a user type's conformance maps only some of the bound's operations and a call specializes at it
+- **THEN** the call is rejected naming each operation the type does not implement
+
+### Requirement: A bound's operations are callable through the bound's own name
+
+A generic body SHALL be able to call every operation its parameter's bound declares, spelled
+`Bound.operation(args)`, whether or not an operator spells that operation's name. The call SHALL
+take the contract the interface declares for that operation with the interface's own type parameter
+replaced by the bounded parameter, SHALL be checked once over that parameter before any concrete
+argument exists, and MUST NOT accept type arguments of its own.
+
+#### Scenario: Call an operation no operator spells
+
+- **WHEN** a body bounded by an interface declaring `mix(left: T, right: T) -> T` evaluates `Mixer.mix(left, right)`
+- **THEN** the call is checked over the bounded parameter and evaluates through the type argument's witness
+
+#### Scenario: Keep a bound operation at its declared result
+
+- **WHEN** a bound declares `ranksBelow(left: T, right: T) -> bool` and the body calls it
+- **THEN** the call results in `bool` rather than the bounded parameter
+
+#### Scenario: Refuse an operation the bound does not declare
+
+- **WHEN** a body names an operation the bound's interface never declares
+- **THEN** the receiver reports that the interface has no such operation
+
+### Requirement: A bound receiver resolves to the bound before the interface's module
+
+A receiver naming an interface SHALL resolve to that interface's operation whenever the declaration
+being elaborated bounds one of its type parameters by that interface and the bound's recorded
+contract declares the named member; the bound SHALL be matched by the interface's canonical
+identity rather than by the spelling the bound was written with. Every other member of that
+interface's module, and every body no such bound belongs to, SHALL keep resolving to the public
+function of the declaring module exactly as before. A receiver naming an interface that bounds more
+than one of the declaration's type parameters answers to no single parameter and SHALL be reported
+rather than resolved to either.
+
+#### Scenario: Prefer the bound over a same-named module function
+
+- **WHEN** a body bounded by `Integer` calls `Integer.add(value, value)` and `silk/numeric` also declares a public `add`
+- **THEN** the call selects the bound's operation over the bounded parameter, not the module function
+
+#### Scenario: Keep the module function where no bound claims the name
+
+- **WHEN** an unbounded body calls `Integer.add(40, 2)`
+- **THEN** the call resolves to `silk/numeric`'s public `add` exactly as it did before
+
+#### Scenario: Report a receiver naming two bounded parameters
+
+- **WHEN** one declaration bounds two type parameters by one interface and the body calls that interface's operation
+- **THEN** the call is reported as ambiguous across those type parameters and resolves to neither
+
+### Requirement: A bound operation selects its implementation from the witness
+
+Lowering a bound operation call SHALL read the conformance the specialization admitted for the
+concrete type argument and use the compiler-known operation that conformance maps for the named
+operation, rather than any operation fixed before the type argument was known. Two specializations
+of one body whose witnesses map one operation to different compiler-known operations SHALL lower to
+those different operations, and every such reachable operation SHALL be reported to target
+availability under the specialization that reaches it.
+
+#### Scenario: Reach two witnesses from one body
+
+- **WHEN** one bound operation is mapped to a wrapping operation for `i32` and a saturating operation for `u8`, and one generic body is specialized at both
+- **THEN** each specialization lowers to the operation its own witness maps, and neither reuses the other's
+
+#### Scenario: Keep operator-spelled operations unchanged
+
+- **WHEN** a body reaches a bound operation through the operator that spells it
+- **THEN** the operator keeps the width-neutral lowering it already had and consults no conformance
+
+### Requirement: A bound records the interface contract it names
+
+A type parameter's bound SHALL retain the spelling and syntax its declaration supplies and SHALL be
+resolved, during header completion, in the bounded declaration's own module scope. A bound that
+names an interface SHALL record that interface's canonical identity together with its ordered
+operation names; a bound that names nothing, or names a declaration that is not an interface, SHALL
+remain unresolved and be reported at the specialization that would have had to satisfy it. A bound
+MUST NOT be restricted to interfaces declared by the bounded declaration's own module.
+
+#### Scenario: Bound an interface another module declares
+
+- **WHEN** a module imports `Integer` from `silk/numeric` and declares `fn twice<T: Integer>(value: T) -> T`
+- **THEN** the bound resolves to the imported interface and the declaration specializes for every conforming scalar
+
+#### Scenario: Record a two-operation contract
+
+- **WHEN** a declaration is bounded by an interface declaring `add` and `subtract`
+- **THEN** its type parameter records the interface's canonical identity and both operation names in declaration order
+
+#### Scenario: Report a bound that names no interface
+
+- **WHEN** a bound names a struct, or a name nothing declares, and a call specializes that parameter
+- **THEN** the call reports an unknown interface constraint naming the bound's spelling
+
+### Requirement: Every operation of a bound is callable at its declared contract
+
+A generic body SHALL be able to call each operation its parameter's bound declares, over the
+canonical parameter, checked once before any concrete argument exists. An operator on a bound-typed
+operand SHALL select the bound's operation exactly when the bound's recorded contract names the
+operation that operator spells, and SHALL take that operation's declared parameter and result
+types — substituting the parameter only where the compiler-known operation carries its actor's own
+type. An operator the bound does not declare MUST remain unavailable on that parameter.
+
+#### Scenario: Call two operations of one bound
+
+- **WHEN** a body bounded by an interface declaring `add` and `subtract` evaluates `(left + right) - left`
+- **THEN** both operations are selected from the bound and the body checks once over the parameter
+
+#### Scenario: Keep a bound comparison at its declared result
+
+- **WHEN** a bound declares `lessThan(left: T, right: T) -> bool` and the body compares two bound-typed values
+- **THEN** the comparison results in `bool` rather than the bounded parameter
+
+#### Scenario: Refuse an undeclared operator
+
+- **WHEN** a body multiplies two values bounded by an interface declaring only `add` and `subtract`
+- **THEN** the declaration is rejected before any concrete specialization can make the operation appear valid
+
+### Requirement: Specialization requires a complete witness
+
+Specialization SHALL admit a type argument for a bounded parameter only when that argument's
+conformance to the bound maps every operation the interface declares. Each operation the selected
+conformance leaves unmapped SHALL be reported by name at the specialization, and a bound with more
+than one operation MUST NOT be satisfied by a witness supplying only some of them.
+
+#### Scenario: Reject a partial witness by operation name
+
+- **WHEN** a bound declares `add` and `subtract` and the type argument's conformance maps only `add`
+- **THEN** the specialization is rejected with a diagnostic naming `subtract` as the operation the argument does not implement
+
+#### Scenario: Admit a complete witness
+
+- **WHEN** the type argument's conformance maps every operation the bound declares
+- **THEN** the specialization is admitted and selects each concrete operation without runtime dispatch
