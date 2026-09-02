@@ -1,10 +1,12 @@
 import * as Alignment from '@silklang/llvm/Alignment'
 import * as LlvmBlock from '@silklang/llvm/Block'
+import type * as Builder from '@silklang/llvm/Builder'
 import * as Constant from '@silklang/llvm/Constant'
 import * as FunctionActor from '@silklang/llvm/Function'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import type * as LlvmError from '@silklang/llvm/LlvmError'
-import type * as Value from '@silklang/llvm/Value'
+import * as LlvmType from '@silklang/llvm/Type'
+import * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
 import { suspensionPointKey } from './Backend.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
@@ -15,9 +17,11 @@ import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import * as Mir from './Mir.js'
 import type { LinearOperation } from './MirLinearization.js'
+import * as MirVerification from './MirVerification.js'
 import * as NativeAggregate from './NativeAggregate.js'
 import * as NativeCall from './NativeCall.js'
 import * as NativeLanePointer from './NativeLanePointer.js'
+import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeSuspension from './NativeSuspension.js'
@@ -869,8 +873,11 @@ const selectPackageFrom = Effect.fnUntraced(function* (
   yield* LlvmBlock.setInsertionPoint(body, following)
 })
 
-/** Drops one opaque Execution through its package state and retained continuation authority. */
-export const dropExecution = Effect.fnUntraced(function* (
+/**
+ * Drops one opaque Execution through its package state and retained continuation authority.
+ * Only the release helper expands this inline; every other cleanup site calls the helper.
+ */
+const dropExecution = Effect.fnUntraced(function* (
   context: NativeAggregate.Context,
   values: ReadonlyArray<Value.Input>,
   tag: string,
@@ -1070,6 +1077,164 @@ export const dropExecution = Effect.fnUntraced(function* (
       yield* LlvmBlock.setInsertionPoint(body, retainAllocationBlock)
       yield* FunctionBody.branch(body, done)
       yield* LlvmBlock.setInsertionPoint(body, done)
+    }),
+  )
+})
+
+const releaseHelperSymbol = 'silk_execution_release'
+
+/**
+ * Declares the module's single out-of-line Execution release when the module constructs any
+ * Execution package. It mirrors the WebAssembly `silk_execution_release` helper. The synthetic
+ * `DeclaredFunction` only feeds the cleanup contexts: its MIR has one Execution parameter and no
+ * roots, and its identity is distinct from every real function so no instance lookup can alias it.
+ */
+export const declareReleaseHelper = Effect.fnUntraced(function* (
+  builder: Builder.Builder,
+  program: Mir.Module,
+  pointer: LlvmType.Type,
+  declaredVoidType: LlvmType.Type | undefined,
+): Effect.fn.Return<NativeLoweringContext.DeclaredFunction | undefined, LlvmError.LlvmError> {
+  const source = program.functions
+    .flatMap((fn) =>
+      MirVerification.operations(fn).flatMap((operation) =>
+        operation._tag === 'ExecutionFromAllocation' ? [{ fn, operation }] : [],
+      ),
+    )
+    .at(0)
+  if (source === undefined) return undefined
+  // Resolved only here: an unneeded void type would perturb every other module's type table.
+  const voidType = declaredVoidType ?? (yield* LlvmType.voidType(builder))
+  const executionType = SilkType.execution(source.operation.plan.specialization.result)
+  const id = Object.freeze({ ...source.fn.id, name: releaseHelperSymbol })
+  const { suspension: _suspension, ...base } = source.fn
+  const fn: Mir.MirFunction = Object.freeze({
+    ...base,
+    id,
+    instance: Object.freeze({ ...source.fn.instance, declaration: id }),
+    parameterCount: 1,
+    localTypes: Object.freeze([Object.freeze({ _tag: 'Nominal' as const, type: executionType })]),
+  })
+  return Object.freeze({
+    fn,
+    symbol: releaseHelperSymbol,
+    publicSymbol: releaseHelperSymbol,
+    handle: yield* FunctionActor.declare(
+      builder,
+      releaseHelperSymbol,
+      yield* LlvmType.functionType(builder, voidType, [pointer]),
+    ),
+    resultType: voidType,
+    emittedResultType: voidType,
+    resultLaneCount: 0,
+    suspendable: false,
+    parameterTypes: Object.freeze([pointer]),
+    linear: Object.freeze([]),
+  })
+})
+
+export interface ReleaseHelperContext {
+  readonly builder: Builder.Builder
+  readonly program: Mir.Module
+  readonly i8: LlvmType.Type
+  readonly i32: LlvmType.Type
+  readonly pointer: LlvmType.Type
+  readonly usizeType?: LlvmType.Type
+  readonly free?: FunctionActor.Function
+  readonly coroutineFramePop?: FunctionActor.Function
+  readonly resumeThunks: NativeAggregate.Context['resumeThunks']
+  readonly declared: ReadonlyArray<NativeLoweringContext.DeclaredFunction>
+  readonly types: NativeType.LoweringContext
+  readonly lanePointers: NativeLanePointer.Context
+  readonly helper: NativeLoweringContext.DeclaredFunction
+}
+
+/**
+ * Defines the Execution release helper body. Every `ExecutionCleanup` in the module calls the
+ * helper, so the only inline expansion of `dropExecution` lives here: a coroutine frame that
+ * retains another Execution releases it through a runtime call instead of re-expanding the
+ * module's whole resume-frame inventory during IR construction.
+ */
+export const emitReleaseHelper = Effect.fnUntraced(function* (context: ReleaseHelperContext) {
+  const {
+    builder,
+    program,
+    i8,
+    i32,
+    pointer,
+    usizeType,
+    free,
+    coroutineFramePop,
+    resumeThunks,
+    declared,
+    types,
+    lanePointers,
+    helper,
+  } = context
+  yield* FunctionActor.buildBody(
+    builder,
+    helper.handle,
+    Effect.fnUntraced(function* (body) {
+      yield* LlvmBlock.make(body, 'entry')
+      const base = yield* Value.argument(body, 0)
+      const storage: NativeStorage.Context = Object.freeze({
+        builder,
+        body,
+        byteType: i8,
+        offsetType: i32,
+        fn: helper.fn,
+        layout: program.layout,
+        mutableRoots: new Set<number>(),
+        mutableStorage: new Map<number, ReadonlyArray<Value.Input>>(),
+        addressRoots: new Set<number>(),
+        addressStorage: new Map<number, Value.Input>(),
+        locals: new Map<number, ReadonlyArray<Value.Input>>(),
+        types,
+        lanePointers,
+        sequences: { materialize: 0, reload: 0 },
+      })
+      const call: NativeCall.Context = Object.freeze({
+        builder,
+        body,
+        program,
+        i8,
+        i32,
+        pointer,
+        entry: helper,
+        resumeThunks,
+        lanePointers,
+        types,
+        storage,
+        synchronous: Object.freeze({ body, storage }),
+        returns: Object.freeze({ builder, body, i32, pointer, entry: helper, types }),
+      })
+      const cleanup: NativeAggregate.Context = Object.freeze({
+        builder,
+        body,
+        program,
+        i8,
+        i32,
+        pointer,
+        ...(usizeType === undefined ? {} : { usizeType }),
+        ...(free === undefined ? {} : { free }),
+        ...(coroutineFramePop === undefined ? {} : { coroutineFramePop }),
+        resumeThunks,
+        declared,
+        types,
+        lanePointers,
+        call,
+        arith: Object.freeze({
+          body,
+          pointerBits: program.layout.target.pointerSize === 4 ? 32 : 64,
+          i32,
+          integerTypes: types.integerTypes,
+          types,
+        }),
+        storage,
+        executionRelease: helper.handle,
+      })
+      yield* dropExecution(cleanup, Object.freeze([base]), 'execution_release')
+      yield* FunctionBody.returnVoid(body)
     }),
   )
 })

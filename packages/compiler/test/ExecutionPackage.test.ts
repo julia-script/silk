@@ -6,6 +6,7 @@ import * as MirVerification from '../src/MirVerification.js'
 import * as SuspensionMode from '../src/SuspensionMode.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
+import { frameRetainedExecutionAbandonedFrame } from './support/corpus.js'
 import { ordinaryStorageSource } from './support/ordinaryStorageSource.js'
 
 const specialization = (suspension: SuspensionMode.Summary): ExecutionPackage.Specialization =>
@@ -950,6 +951,33 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     assert.lengthOf(
       reified.trace.filter((event) => event._tag === 'AllocationRelease'),
       1,
+    )
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('releases a nested execution exactly once when its retaining frame is abandoned', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'execution-package/frame-retained-abandoned-frame',
+      new TextEncoder().encode(frameRetainedExecutionAbandonedFrame),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.deepEqual(evaluated.result, { _tag: 'IntegerValue', type: 'i32', value: 42n })
+    // One package each for the outer and the retained inner execution; both released once.
+    assert.lengthOf(
+      evaluated.trace.filter((event) => event._tag === 'AllocationAcquire'),
+      2,
+    )
+    assert.lengthOf(
+      evaluated.trace.filter((event) => event._tag === 'AllocationRelease'),
+      2,
     )
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})

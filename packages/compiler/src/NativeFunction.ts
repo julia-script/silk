@@ -177,6 +177,7 @@ export interface EmissionContext {
   readonly free?: FunctionActor.Function
   readonly coroutineFramePush?: FunctionActor.Function
   readonly coroutineFramePop?: FunctionActor.Function
+  readonly executionRelease?: FunctionActor.Function
   readonly memcmp?: FunctionActor.Function
   readonly standardWrite?: FunctionActor.Function
   readonly osRuntimes: ReadonlyMap<
@@ -245,6 +246,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
     free,
     coroutineFramePush,
     coroutineFramePop,
+    executionRelease,
     memcmp,
     standardWrite,
     osRuntimes,
@@ -782,6 +784,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           ...(usizeType === undefined ? {} : { usizeType }),
           ...(free === undefined ? {} : { free }),
           ...(coroutineFramePop === undefined ? {} : { coroutineFramePop }),
+          ...(executionRelease === undefined ? {} : { executionRelease }),
           declared,
           resumeThunks,
           types: nativeTypes,
