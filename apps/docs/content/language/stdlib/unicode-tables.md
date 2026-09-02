@@ -39,7 +39,7 @@ pub fn main() -> i32 {
 
 Import as `UnicodeTables` with `import silk.unicode_tables { UnicodeTables }`.
 
-Public declarations: 8.
+Public declarations: 3.
 
 <a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a556e69636f64655461626c6573"></a>
 
@@ -57,25 +57,19 @@ This struct carries no data and is never constructed by the library. Every gener
 an inherent member declared in `impl UnicodeTables`, reached through
 `import silk.unicode_tables { UnicodeTables }`.
 
-<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a556e69636f64655461626c65732e6461746156657273696f6e"></a>
 
-## Implementation `UnicodeTables for _`
-
-```silk
-impl UnicodeTables for _
-```
-
-<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a6461746156657273696f6e"></a>
-
-## `dataVersion`
+### Associated function `UnicodeTables.dataVersion`
 
 ```silk
 pub fn dataVersion() -> string
 ```
 
-<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a6d6178696d756d4465636f6d706f736974696f6e4c656e677468"></a>
+Returns the Unicode data version that defines all lookup results in this module.
 
-## `maximumDecompositionLength`
+<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a556e69636f64655461626c65732e6d6178696d756d4465636f6d706f736974696f6e4c656e677468"></a>
+
+### Associated function `UnicodeTables.maximumDecompositionLength`
 
 ```silk
 pub fn maximumDecompositionLength() -> usize
@@ -83,9 +77,9 @@ pub fn maximumDecompositionLength() -> usize
 
 Returns the longest full canonical decomposition of one scalar in these tables.
 
-<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a636f6d62696e696e67436c617373"></a>
+<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a556e69636f64655461626c65732e636f6d62696e696e67436c617373"></a>
 
-## `combiningClass`
+### Associated function `UnicodeTables.combiningClass`
 
 ```silk
 pub fn combiningClass(scalar: u32) -> u32
@@ -93,9 +87,9 @@ pub fn combiningClass(scalar: u32) -> u32
 
 Returns a scalar's canonical combining class, or zero for a starter or unknown value.
 
-<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a63616e6f6e6963616c4465636f6d706f736974696f6e"></a>
+<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a556e69636f64655461626c65732e63616e6f6e6963616c4465636f6d706f736974696f6e"></a>
 
-## `canonicalDecomposition`
+### Associated function `UnicodeTables.canonicalDecomposition`
 
 ```silk
 pub fn canonicalDecomposition(scalar: u32) -> Decomposition
@@ -104,9 +98,9 @@ pub fn canonicalDecomposition(scalar: u32) -> Decomposition
 Returns the canonical decomposition of a scalar, or both components zero when it has none.
 Hangul syllables decompose algorithmically and are absent from this table by design.
 
-<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a63616e6f6e6963616c436f6d706f736974696f6e"></a>
+<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a556e69636f64655461626c65732e63616e6f6e6963616c436f6d706f736974696f6e"></a>
 
-## `canonicalComposition`
+### Associated function `UnicodeTables.canonicalComposition`
 
 ```silk
 pub fn canonicalComposition(first: u32, second: u32) -> u32
@@ -114,11 +108,11 @@ pub fn canonicalComposition(first: u32, second: u32) -> u32
 
 Composes a starter and a following scalar, or returns zero when the pair does not compose.
 
-### Details
+#### Details
 
 Excluded composition pairs are absent. A nonzero result is always a primary composite.
 
-### Gotchas
+#### Gotchas
 
 Hangul composition is algorithmic and is not included in this lookup.
 
@@ -127,8 +121,30 @@ Hangul composition is algorithmic and is not included in this lookup.
 ## `Decomposition`
 
 ```silk
-pub fn Decomposition(first: u32) -> _
+pub struct Decomposition
 ```
+
+One canonical decomposition with zero sentinels for an absent mapping or second scalar.
+
+<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a4465636f6d706f736974696f6e3a3a6669656c643a30"></a>
+
+### Field `first`
+
+```silk
+pub first: u32
+```
+
+The first mapped scalar, or zero when the input has no table mapping.
+
+<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a4465636f6d706f736974696f6e3a3a6669656c643a31"></a>
+
+### Field `second`
+
+```silk
+pub second: u32
+```
+
+The second mapped scalar, or zero when the mapping contains one scalar.
 
 <a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a506169725265636f7264"></a>
 

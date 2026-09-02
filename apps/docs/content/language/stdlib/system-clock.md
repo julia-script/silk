@@ -60,7 +60,7 @@ pub fn main() -> i32 {
 
 Import as `SystemClock` with `import silk.system_clock { SystemClock }`.
 
-Public declarations: 5.
+Public declarations: 2.
 
 <a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a496e7374616e74"></a>
 
@@ -117,25 +117,24 @@ effect fn getResolution() -> u64 ? &mut SystemClock
 Returns the provider-reported positive nominal resolution in whole nanoseconds.
 The value may be a lower bound on actual observable precision.
 
-<a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a53797374656d436c6f636b2e6d616b65"></a>
 
-## Implementation `SystemClock for _`
-
-```silk
-impl SystemClock for _
-```
-
-<a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a6d616b65"></a>
-
-## `make`
+### Associated function `SystemClock.make`
 
 ```silk
 pub fn make(seconds: i64, nanoseconds: i64) -> Instant
 ```
 
-<a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a7365636f6e6473"></a>
+Creates a canonical split-second instant.
 
-## `seconds`
+#### Gotchas
+
+`nanoseconds` must be non-negative and less than one billion. A noncanonical fraction traps
+instead of being normalized into another field pair.
+
+<a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a53797374656d436c6f636b2e7365636f6e6473"></a>
+
+### Associated function `SystemClock.seconds`
 
 ```silk
 pub fn seconds(self: &silk/system_clock.Instant) -> i64
@@ -143,9 +142,9 @@ pub fn seconds(self: &silk/system_clock.Instant) -> i64
 
 Returns the signed whole-second component of an instant.
 
-<a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a6e616e6f7365636f6e6473"></a>
+<a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a53797374656d436c6f636b2e6e616e6f7365636f6e6473"></a>
 
-## `nanoseconds`
+### Associated function `SystemClock.nanoseconds`
 
 ```silk
 pub fn nanoseconds(self: &silk/system_clock.Instant) -> i64

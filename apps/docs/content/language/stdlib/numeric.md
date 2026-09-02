@@ -35,7 +35,7 @@ pub fn main() -> i32 {
 
 Import as `Integer` with `import silk.numeric { Integer }`.
 
-Public declarations: 3.
+Public declarations: 2.
 
 <a id="declaration-73696c6b2f6e756d657269633a3a4e756d65726963"></a>
 
@@ -53,31 +53,50 @@ This struct carries no data and is never constructed by the library. The helpers
 members declared in `impl Numeric`, reached through `import silk.numeric { Numeric }`, and
 leave the [`Integer`](#declaration-73696c6b2f6e756d657269633a3a496e7465676572) interface's name to the interface.
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a4e756d657269632e616464"></a>
 
-## Implementation `Numeric for _`
-
-```silk
-impl Numeric for _
-```
-
-<a id="declaration-73696c6b2f6e756d657269633a3a616464"></a>
-
-## `add`
+### Associated function `Numeric.add`
 
 ```silk
 pub fn add<T>(left: T, right: T) -> T
 ```
+
+Adds two values and traps if the selected integer type cannot represent the result.
+
+#### When to use
+
+Use this function to call ordinary integer addition from generic code.
 
 <a id="declaration-73696c6b2f6e756d657269633a3a496e7465676572"></a>
 
 ## `Integer`
 
 ```silk
-pub fn Integer(_: fn(...), right: Self) -> Self
+pub interface Integer
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a31"></a>
+Static addition contract for primitive integer values.
+
+### When to use
+
+Use this interface when a generic algorithm needs only ordinary integer addition.
+
+### Details
+
+Interfaces select compiler-known operations during specialization. They do not create
+effect requirements, provider slots, or runtime dispatch.
+
+<a id="declaration-73696c6b2f6e756d657269633a3a496e74656765723a3a6f7065726174696f6e3a616464"></a>
+
+### Operation `add`
+
+```silk
+operator + fn add(left: Self, right: Self) -> Self
+```
+
+Adds two values and traps if the selected integer type cannot represent the result.
+
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a30"></a>
 
 ## Implementation `Integer for u8`
 
@@ -85,7 +104,7 @@ pub fn Integer(_: fn(...), right: Self) -> Self
 impl Integer for u8
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `add`
 
@@ -93,7 +112,7 @@ impl Integer for u8
 add = Intrinsic.u8Add
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a32"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a31"></a>
 
 ## Implementation `Integer for u16`
 
@@ -101,7 +120,7 @@ add = Intrinsic.u8Add
 impl Integer for u16
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `add`
 
@@ -109,7 +128,7 @@ impl Integer for u16
 add = Intrinsic.u16Add
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a33"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a32"></a>
 
 ## Implementation `Integer for u32`
 
@@ -117,7 +136,7 @@ add = Intrinsic.u16Add
 impl Integer for u32
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `add`
 
@@ -125,7 +144,7 @@ impl Integer for u32
 add = Intrinsic.u32Add
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a34"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a33"></a>
 
 ## Implementation `Integer for u64`
 
@@ -133,7 +152,7 @@ add = Intrinsic.u32Add
 impl Integer for u64
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `add`
 
@@ -141,7 +160,7 @@ impl Integer for u64
 add = Intrinsic.u64Add
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a35"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a34"></a>
 
 ## Implementation `Integer for usize`
 
@@ -149,7 +168,7 @@ add = Intrinsic.u64Add
 impl Integer for usize
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a353a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `add`
 
@@ -157,7 +176,7 @@ impl Integer for usize
 add = Intrinsic.usizeAdd
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a36"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a35"></a>
 
 ## Implementation `Integer for i8`
 
@@ -165,7 +184,7 @@ add = Intrinsic.usizeAdd
 impl Integer for i8
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a363a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a353a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `add`
 
@@ -173,7 +192,7 @@ impl Integer for i8
 add = Intrinsic.i8Add
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a37"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a36"></a>
 
 ## Implementation `Integer for i16`
 
@@ -181,7 +200,7 @@ add = Intrinsic.i8Add
 impl Integer for i16
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a373a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a363a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `add`
 
@@ -189,7 +208,7 @@ impl Integer for i16
 add = Intrinsic.i16Add
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a38"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a37"></a>
 
 ## Implementation `Integer for i32`
 
@@ -197,7 +216,7 @@ add = Intrinsic.i16Add
 impl Integer for i32
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a383a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a373a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `add`
 
@@ -205,7 +224,7 @@ impl Integer for i32
 add = Intrinsic.i32Add
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a39"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a38"></a>
 
 ## Implementation `Integer for i64`
 
@@ -213,7 +232,7 @@ add = Intrinsic.i32Add
 impl Integer for i64
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a393a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a383a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `add`
 
@@ -221,7 +240,7 @@ impl Integer for i64
 add = Intrinsic.i64Add
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a3130"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a39"></a>
 
 ## Implementation `Integer for isize`
 
@@ -229,7 +248,7 @@ add = Intrinsic.i64Add
 impl Integer for isize
 ```
 
-<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a31303a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a393a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `add`
 

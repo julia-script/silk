@@ -13,7 +13,7 @@ code. Use a scripted provider in tests to control partial reads, end-of-input, a
 
 The provider owns no persistent state and commits each host read directly into the caller's
 buffer. For a non-empty buffer, a zero-length host transfer becomes the outcome selected by
-`StandardInput.endOfInput`. Only a host read error becomes [`StreamReadError`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644572726f72). Partial transfer counts are
+[`StandardInput.endOfInput`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e7075742e656e644f66496e707574). Only a host read error becomes [`StreamReadError`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644572726f72). Partial transfer counts are
 preserved exactly.
 
 Constructing the provider performs no read. Portable code reads after the application supplies
@@ -41,7 +41,7 @@ pub fn main() -> i32 {
 
 Import as `OsStandardInput` with `import silk.os_standard_input { OsStandardInput }`.
 
-Public declarations: 2.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f6f735f7374616e646172645f696e7075743a3a4f735374616e64617264496e707574"></a>
 
@@ -58,47 +58,27 @@ A stateless native [`StandardInput`](./standard-input.md#declaration-73696c6b2f7
 The process owns the descriptor. Each read changes only the committed prefix of the caller's
 buffer and preserves the host transfer count.
 
-<a id="declaration-73696c6b2f6f735f7374616e646172645f696e7075743a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6f735f7374616e646172645f696e7075743a3a4f735374616e64617264496e7075742e6d616b65"></a>
 
-## Implementation `OsStandardInput for _`
-
-```silk
-impl OsStandardInput for _
-```
-
-<a id="declaration-73696c6b2f6f735f7374616e646172645f696e7075743a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
-
-### Operation `read`
-
-```silk
-read = _
-```
-
-Commits one host read into the caller's buffer.
-
-The low-level boundary reports a zero-length transfer for the end of input, which becomes
-`EndOfInput` data rather than a typed failure. Only a host error becomes `StreamReadError`.
-
-The caller must use a non-empty `buffer`. With no capacity, the host also reports a zero-length
-transfer and cannot prove permanent end-of-input.
-
-<a id="declaration-73696c6b2f6f735f7374616e646172645f696e7075743a3a696d706c656d656e746174696f6e3a31"></a>
-
-## Implementation `OsStandardInput for _`
-
-```silk
-impl OsStandardInput for _
-```
-
-<a id="declaration-73696c6b2f6f735f7374616e646172645f696e7075743a3a6d616b65"></a>
-
-## `make`
+### Associated function `OsStandardInput.make`
 
 ```silk
 pub fn make() -> OsStandardInput
 ```
 
-<a id="declaration-73696c6b2f6f735f7374616e646172645f696e7075743a3a696d706c656d656e746174696f6e3a32"></a>
+Creates a stateless provider for native standard-input bytes.
+
+#### When to use
+
+Use this function at a native application edge. Provide the result as `&mut StandardInput` to
+portable code that calls `silk.standard_input.receive`.
+
+#### Details
+
+Construction performs no read and cannot fail. For a non-empty read buffer, a later zero-byte
+host transfer becomes end-of-input data. A host read error becomes [`StreamReadError`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644572726f72).
+
+<a id="declaration-73696c6b2f6f735f7374616e646172645f696e7075743a3a696d706c656d656e746174696f6e3a30"></a>
 
 ## Implementation `StandardInput for OsStandardInput`
 
@@ -106,7 +86,7 @@ pub fn make() -> OsStandardInput
 impl StandardInput for OsStandardInput
 ```
 
-<a id="declaration-73696c6b2f6f735f7374616e646172645f696e7075743a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6f735f7374616e646172645f696e7075743a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `read`
 

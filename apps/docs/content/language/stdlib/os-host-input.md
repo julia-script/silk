@@ -42,7 +42,7 @@ pub fn main() -> i32 {
 
 Import as `OsHostInput` with `import silk.os_host_input { OsHostInput }`.
 
-Public declarations: 2.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a4f73486f7374496e707574"></a>
 
@@ -59,71 +59,27 @@ A stateless native [`HostInput`](./host-input.md#declaration-73696c6b2f686f73745
 The process owns the source values. Each successful byte lookup returns a new owned copy through
 the portable service.
 
-<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a4f73486f7374496e7075742e6d616b65"></a>
 
-## Implementation `OsHostInput for _`
-
-```silk
-impl OsHostInput for _
-```
-
-<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
-
-### Operation `argumentCount`
-
-```silk
-argumentCount = _
-```
-
-Reports how many arguments the process received, including the program name at index zero.
-
-<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a31"></a>
-
-### Operation `argument`
-
-```silk
-argument = _
-```
-
-Copies one argument's raw bytes, exactly as the process received them.
-
-<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a32"></a>
-
-### Operation `variable`
-
-```silk
-variable = _
-```
-
-Copies one environment value's raw bytes. An unset name is `None` rather than a failure.
-
-<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a33"></a>
-
-### Operation `workingDirectory`
-
-```silk
-workingDirectory = _
-```
-
-Copies the process working directory's raw bytes. It always exists, so absence is a host error.
-
-<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a31"></a>
-
-## Implementation `OsHostInput for _`
-
-```silk
-impl OsHostInput for _
-```
-
-<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a6d616b65"></a>
-
-## `make`
+### Associated function `OsHostInput.make`
 
 ```silk
 pub fn make() -> OsHostInput
 ```
 
-<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a32"></a>
+Creates a stateless provider for native process input.
+
+#### When to use
+
+Use this function at a native application edge. Provide the result as `&mut HostInput` to
+portable lookup operations in `silk.host_input`.
+
+#### Details
+
+Construction performs no lookup and cannot fail. Argument and environment absence remain
+ordinary `None` values when a later lookup runs.
+
+<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a30"></a>
 
 ## Implementation `HostInput for OsHostInput`
 
@@ -131,7 +87,7 @@ pub fn make() -> OsHostInput
 impl HostInput for OsHostInput
 ```
 
-<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `argumentCount`
 
@@ -139,7 +95,7 @@ impl HostInput for OsHostInput
 argumentCount = OsHostInput.argumentCount
 ```
 
-<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a31"></a>
+<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a31"></a>
 
 ### Operation `argument`
 
@@ -147,7 +103,7 @@ argumentCount = OsHostInput.argumentCount
 argument = OsHostInput.argument
 ```
 
-<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a32"></a>
+<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a32"></a>
 
 ### Operation `variable`
 
@@ -155,7 +111,7 @@ argument = OsHostInput.argument
 variable = OsHostInput.variable
 ```
 
-<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a33"></a>
+<a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a33"></a>
 
 ### Operation `workingDirectory`
 

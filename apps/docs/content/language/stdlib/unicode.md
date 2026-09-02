@@ -7,14 +7,14 @@ Explicit Unicode canonical normalization backed by the pinned Unicode 17.0.0 dat
 ## When to use
 
 Normalize text at a boundary where canonically equivalent spellings must compare alike. Use
-[`normalizeNfc`](#declaration-73696c6b2f756e69636f64653a3a6e6f726d616c697a654e6663) for ordinary storage and comparison, or [`normalizeNfd`](#declaration-73696c6b2f756e69636f64653a3a6e6f726d616c697a654e6664) when a decomposed,
+[`normalizeNfc`](#declaration-73696c6b2f756e69636f64653a3a556e69636f64652e6e6f726d616c697a654e6663) for ordinary storage and comparison, or [`normalizeNfd`](#declaration-73696c6b2f756e69636f64653a3a556e69636f64652e6e6f726d616c697a654e6664) when a decomposed,
 canonically ordered sequence is the desired representation.
 
 ## Details
 
 Normalization is opt-in: `string` equality continues to compare exact UTF-8 bytes. Both forms
 allocate a fresh owned [`String`](./string.md#declaration-73696c6b2f737472696e673a3a537472696e67), handle Hangul composition algorithmically, and use the same
-generated tables on every target. [`dataVersion`](#declaration-73696c6b2f756e69636f64653a3a6461746156657273696f6e) reports which Unicode database defines those
+generated tables on every target. [`dataVersion`](#declaration-73696c6b2f756e69636f64653a3a556e69636f64652e6461746156657273696f6e) reports which Unicode database defines those
 results.
 
 ## Gotchas
@@ -64,7 +64,7 @@ pub fn main() -> i32 {
 
 Import as `Unicode` with `import silk.unicode { Unicode }`.
 
-Public declarations: 6.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f756e69636f64653a3a556e69636f6465"></a>
 
@@ -81,25 +81,24 @@ The owner of the normalization and Unicode-data operations.
 This struct carries no data and is never constructed by the library. Every operation is an
 inherent member declared in `impl Unicode`, reached through `import silk.unicode { Unicode }`.
 
-<a id="declaration-73696c6b2f756e69636f64653a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f756e69636f64653a3a556e69636f64652e6461746156657273696f6e"></a>
 
-## Implementation `Unicode for _`
-
-```silk
-impl Unicode for _
-```
-
-<a id="declaration-73696c6b2f756e69636f64653a3a6461746156657273696f6e"></a>
-
-## `dataVersion`
+### Associated function `Unicode.dataVersion`
 
 ```silk
 pub fn dataVersion() -> string
 ```
 
-<a id="declaration-73696c6b2f756e69636f64653a3a6c6f6e676573744465636f6d706f736974696f6e"></a>
+Returns the Unicode version that defines this module's normalization results.
 
-## `longestDecomposition`
+#### Details
+
+The version is data, not identity: a later database changes what this returns and what the
+tables contain, and changes neither a compiler type nor a target ABI.
+
+<a id="declaration-73696c6b2f756e69636f64653a3a556e69636f64652e6c6f6e676573744465636f6d706f736974696f6e"></a>
+
+### Associated function `Unicode.longestDecomposition`
 
 ```silk
 pub fn longestDecomposition() -> usize
@@ -107,9 +106,9 @@ pub fn longestDecomposition() -> usize
 
 Returns the longest full canonical decomposition of one scalar in the active Unicode data.
 
-<a id="declaration-73696c6b2f756e69636f64653a3a63616e6f6e6963616c436f6d62696e696e67436c617373"></a>
+<a id="declaration-73696c6b2f756e69636f64653a3a556e69636f64652e63616e6f6e6963616c436f6d62696e696e67436c617373"></a>
 
-## `canonicalCombiningClass`
+### Associated function `Unicode.canonicalCombiningClass`
 
 ```silk
 pub fn canonicalCombiningClass(scalar: u32) -> u32
@@ -117,9 +116,9 @@ pub fn canonicalCombiningClass(scalar: u32) -> u32
 
 Returns a Unicode scalar's canonical combining class, or zero for a starter or unknown value.
 
-<a id="declaration-73696c6b2f756e69636f64653a3a63616e6f6e6963616c436f6d62696e696e67436c6173733a3a706172616d657465723a30"></a>
+<a id="declaration-73696c6b2f756e69636f64653a3a556e69636f64652e63616e6f6e6963616c436f6d62696e696e67436c6173733a3a706172616d657465723a30"></a>
 
-### Parameter `scalar`
+#### Parameter `scalar`
 
 ```silk
 scalar: u32
@@ -127,9 +126,9 @@ scalar: u32
 
 Unicode scalar value represented as its unsigned code point.
 
-<a id="declaration-73696c6b2f756e69636f64653a3a6e6f726d616c697a654e6664"></a>
+<a id="declaration-73696c6b2f756e69636f64653a3a556e69636f64652e6e6f726d616c697a654e6664"></a>
 
-## `normalizeNfd`
+### Associated function `Unicode.normalizeNfd`
 
 ```silk
 pub effect fn normalizeNfd(value: string) -> String ! OutOfMemoryError ? &mut Allocator
@@ -137,19 +136,19 @@ pub effect fn normalizeNfd(value: string) -> String ! OutOfMemoryError ? &mut Al
 
 Returns the Normalization Form D of text: fully decomposed, in canonical order.
 
-### When to use
+#### When to use
 
 Use this function when consumers require decomposed scalars in canonical combining-class order.
-Use [`normalizeNfc`](#declaration-73696c6b2f756e69636f64653a3a6e6f726d616c697a654e6663) for ordinary normalized storage and comparison.
+Use [`normalizeNfc`](#declaration-73696c6b2f756e69636f64653a3a556e69636f64652e6e6f726d616c697a654e6663) for ordinary normalized storage and comparison.
 
-### Details
+#### Details
 
 The function does not change `value`. It returns freshly owned UTF-8 text and can allocate.
 Canonically equivalent inputs produce equal NFD text under the same Unicode data version.
 
-<a id="declaration-73696c6b2f756e69636f64653a3a6e6f726d616c697a654e6663"></a>
+<a id="declaration-73696c6b2f756e69636f64653a3a556e69636f64652e6e6f726d616c697a654e6663"></a>
 
-## `normalizeNfc`
+### Associated function `Unicode.normalizeNfc`
 
 ```silk
 pub effect fn normalizeNfc(value: string) -> String ! OutOfMemoryError ? &mut Allocator
@@ -157,12 +156,12 @@ pub effect fn normalizeNfc(value: string) -> String ! OutOfMemoryError ? &mut Al
 
 Returns the Normalization Form C of text: decomposed, canonically ordered, then recomposed.
 
-### When to use
+#### When to use
 
 Use this function for ordinary normalized storage and canonical-equivalence comparison. Use
-[`normalizeNfd`](#declaration-73696c6b2f756e69636f64653a3a6e6f726d616c697a654e6664) when a consumer requires decomposed scalars.
+[`normalizeNfd`](#declaration-73696c6b2f756e69636f64653a3a556e69636f64652e6e6f726d616c697a654e6664) when a consumer requires decomposed scalars.
 
-### Details
+#### Details
 
 The function does not change `value`. It returns freshly owned UTF-8 text and can allocate.
 Canonically equivalent inputs produce equal NFC text under the same Unicode data version.

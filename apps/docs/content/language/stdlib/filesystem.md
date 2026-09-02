@@ -6,9 +6,9 @@ Portable normalized paths, whole-file operations, directory traversal, and expli
 
 ## When to use
 
-Build provider-absolute [`Path`](#declaration-73696c6b2f66696c6573797374656d3a3a50617468) values with [`make`](#declaration-73696c6b2f66696c6573797374656d3a3a6d616b65) or [`fromBytes`](#declaration-73696c6b2f66696c6573797374656d3a3a66726f6d4279746573), then run operations
-through a supplied [`FileSystem`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d). Use [`rawBytes`](#declaration-73696c6b2f66696c6573797374656d3a3a7261774279746573) for platform values that must round-trip even
-when they are not UTF-8, and [`resolve`](#declaration-73696c6b2f66696c6573797374656d3a3a7265736f6c7665) for lexical relative-path resolution.
+Build provider-absolute [`Path`](#declaration-73696c6b2f66696c6573797374656d3a3a50617468) values with [`make`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e6d616b65) or [`fromBytes`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e66726f6d4279746573), then run operations
+through a supplied [`FileSystem`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d). Use [`rawBytes`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e7261774279746573) for platform values that must round-trip even
+when they are not UTF-8, and [`resolve`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e7265736f6c7665) for lexical relative-path resolution.
 
 ## Details
 
@@ -19,13 +19,13 @@ Portable [`FileError`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c6545
 optional provider code for diagnostics.
 
 Temporary directories have an explicit lifecycle because removal can fail and needs services.
-Use [`release`](#declaration-73696c6b2f66696c6573797374656d3a3a72656c65617365) when cleanup failure matters, or [`releaseIgnored`](#declaration-73696c6b2f66696c6573797374656d3a3a72656c6561736549676e6f726564) as an infallible finalizer
+Use [`release`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e72656c65617365) when cleanup failure matters, or [`releaseIgnored`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e72656c6561736549676e6f726564) as an infallible finalizer
 only after deliberately accepting that loss.
 
 ## Gotchas
 
-A path created from arbitrary bytes may not have a valid text view. Keep using [`rawBytes`](#declaration-73696c6b2f66696c6573797374656d3a3a7261774279746573) unless
-the bytes were validated as UTF-8; [`view`](#declaration-73696c6b2f66696c6573797374656d3a3a76696577) and [`name`](#declaration-73696c6b2f66696c6573797374656d3a3a6e616d65) rely on that caller knowledge.
+A path created from arbitrary bytes may not have a valid text view. Keep using [`rawBytes`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e7261774279746573) unless
+the bytes were validated as UTF-8; [`view`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e76696577) and [`name`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e6e616d65) rely on that caller knowledge.
 
 ## Examples
 
@@ -60,7 +60,7 @@ pub fn main() -> i32 {
 
 Import as `FileSystem` with `import silk.filesystem { FileSystem }`.
 
-Public declarations: 58.
+Public declarations: 10.
 
 <a id="declaration-73696c6b2f66696c6573797374656d3a3a50617468"></a>
 
@@ -75,28 +75,28 @@ An owned, normalized absolute path in a [`FileSystem`](#declaration-73696c6b2f66
 ### Details
 
 Portable `/` means the selected provider's root, not necessarily the host operating system's
-root. Construct paths through [`make`](#declaration-73696c6b2f66696c6573797374656d3a3a6d616b65), [`fromBytes`](#declaration-73696c6b2f66696c6573797374656d3a3a66726f6d4279746573), [`root`](#declaration-73696c6b2f66696c6573797374656d3a3a726f6f74), [`join`](#declaration-73696c6b2f66696c6573797374656d3a3a6a6f696e), or [`resolve`](#declaration-73696c6b2f66696c6573797374656d3a3a7265736f6c7665); the
+root. Construct paths through [`make`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e6d616b65), [`fromBytes`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e66726f6d4279746573), [`root`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e726f6f74), [`join`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e6a6f696e), or [`resolve`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e7265736f6c7665); the
 representation is private so every `Path` satisfies the normalization rules.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a506174682e6d616b65"></a>
 
-## Implementation `Path for _`
-
-```silk
-impl Path for _
-```
-
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6d616b65"></a>
-
-## `make`
+### Associated function `Path.make`
 
 ```silk
 pub effect fn make(value: string) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
 ```
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a66726f6d4279746573"></a>
+Copies UTF-8 text into an owned, normalized provider-absolute [`Path`](#declaration-73696c6b2f66696c6573797374656d3a3a50617468).
 
-## `fromBytes`
+#### Details
+
+The text must begin with `/`. Root is valid; every other path must have nonempty components and
+no trailing slash, NUL, `.` component, or `..` component. Invalid input fails with
+`FileError(FileSystem.pathOperation(), FileSystem.invalidPath())`; copying can fail with [`OutOfMemoryError`](./allocator.md#declaration-73696c6b2f616c6c6f6361746f723a3a4f75744f664d656d6f72794572726f72).
+
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a506174682e66726f6d4279746573"></a>
+
+### Associated function `Path.fromBytes`
 
 ```silk
 pub effect fn fromBytes(values: &[u8]) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
@@ -104,7 +104,7 @@ pub effect fn fromBytes(values: &[u8]) -> Path ! FileError | OutOfMemoryError ? 
 
 Constructs an owned normalized provider-absolute Path from exact platform bytes.
 
-### Details
+#### Details
 
 Platform paths are byte sequences, and a caller that received one from the platform — a
 directory entry, an argument, an environment value — must be able to hand it back unchanged.
@@ -112,9 +112,9 @@ The same normalization applies as for textual construction: the value is absolut
 and rejects `.`, `..`, empty components, and trailing separators. Well-formed text is not
 required, so a Path built this way may have no `string` view.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a726f6f74"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a506174682e726f6f74"></a>
 
-## `root`
+### Associated function `Path.root`
 
 ```silk
 pub effect fn root() -> Path ! OutOfMemoryError ? &mut Allocator
@@ -122,63 +122,63 @@ pub effect fn root() -> Path ! OutOfMemoryError ? &mut Allocator
 
 Allocates the portable root path `/` in the selected allocator.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a7261774279746573"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a506174682e7261774279746573"></a>
 
-## `rawBytes`
+### Method `Path.rawBytes`
 
 ```silk
-pub fn rawBytes(self: &unavailable) -> &[u8]
+pub fn rawBytes(self: &Path) -> &[u8]
 ```
 
 Borrows the complete normalized path as exact platform bytes.
 
-### Details
+#### Details
 
 This is the lossless view. It round-trips a Path built from platform bytes even when those
 bytes are not well-formed text, which the `string` view cannot promise.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a76696577"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a506174682e76696577"></a>
 
-## `view`
+### Method `Path.view`
 
 ```silk
-pub fn view(self: &unavailable) -> string
+pub fn view(self: &Path) -> string
 ```
 
 Borrows the complete path as text when its bytes are known to be valid UTF-8.
 
-### Details
+#### Details
 
-Paths from [`make`](#declaration-73696c6b2f66696c6573797374656d3a3a6d616b65), [`join`](#declaration-73696c6b2f66696c6573797374656d3a3a6a6f696e), [`joinUtf8`](#declaration-73696c6b2f66696c6573797374656d3a3a6a6f696e55746638), and [`resolve`](#declaration-73696c6b2f66696c6573797374656d3a3a7265736f6c7665) satisfy that precondition. A path
-created with [`fromBytes`](#declaration-73696c6b2f66696c6573797374656d3a3a66726f6d4279746573) may not; use [`rawBytes`](#declaration-73696c6b2f66696c6573797374656d3a3a7261774279746573) unless the source bytes were validated.
+Paths from [`make`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e6d616b65), [`join`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e6a6f696e), [`joinUtf8`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e6a6f696e55746638), and [`resolve`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e7265736f6c7665) satisfy that precondition. A path
+created with [`fromBytes`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e66726f6d4279746573) may not; use [`rawBytes`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e7261774279746573) unless the source bytes were validated.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6973526f6f74"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a506174682e6973526f6f74"></a>
 
-## `isRoot`
+### Method `Path.isRoot`
 
 ```silk
-pub fn isRoot(self: &unavailable) -> bool
+pub fn isRoot(self: &Path) -> bool
 ```
 
 Returns `true` exactly when this path is the portable root `/`.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6e616d65"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a506174682e6e616d65"></a>
 
-## `name`
+### Method `Path.name`
 
 ```silk
-pub fn name(self: &unavailable) -> string
+pub fn name(self: &Path) -> string
 ```
 
 Borrows the final component as text; root returns empty text.
 
-### Details
+#### Details
 
-This has the same UTF-8 precondition as [`view`](#declaration-73696c6b2f66696c6573797374656d3a3a76696577). It does not allocate or include a separator.
+This has the same UTF-8 precondition as [`view`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e76696577). It does not allocate or include a separator.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6a6f696e"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a506174682e6a6f696e"></a>
 
-## `join`
+### Associated function `Path.join`
 
 ```silk
 pub effect fn join(base: &silk/filesystem.Path, fragment: string) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
@@ -186,14 +186,14 @@ pub effect fn join(base: &silk/filesystem.Path, fragment: string) -> Path ! File
 
 Appends one normalized relative text fragment to an absolute base path.
 
-### Details
+#### Details
 
 `fragment` must be nonempty and relative, with no NUL, empty, `.`, or `..` component and no
-trailing slash. Use [`resolve`](#declaration-73696c6b2f66696c6573797374656d3a3a7265736f6c7665) when dot components should be interpreted instead of rejected.
+trailing slash. Use [`resolve`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e7265736f6c7665) when dot components should be interpreted instead of rejected.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6a6f696e55746638"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a506174682e6a6f696e55746638"></a>
 
-## `joinUtf8`
+### Associated function `Path.joinUtf8`
 
 ```silk
 pub effect fn joinUtf8(base: &silk/filesystem.Path, fragment: &[u8]) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
@@ -201,14 +201,14 @@ pub effect fn joinUtf8(base: &silk/filesystem.Path, fragment: &[u8]) -> Path ! F
 
 Validates UTF-8 bytes as one normalized relative fragment and appends them to `base`.
 
-### Details
+#### Details
 
 This is useful for a child name returned as bytes by another portable API. Invalid UTF-8 and the
-same malformed components rejected by [`join`](#declaration-73696c6b2f66696c6573797374656d3a3a6a6f696e) fail with the `InvalidPath` reason.
+same malformed components rejected by [`join`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e6a6f696e) fail with the `InvalidPath` reason.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a7265736f6c7665"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a506174682e7265736f6c7665"></a>
 
-## `resolve`
+### Associated function `Path.resolve`
 
 ```silk
 pub effect fn resolve(base: &silk/filesystem.Path, relativeText: string) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
@@ -216,23 +216,23 @@ pub effect fn resolve(base: &silk/filesystem.Path, relativeText: string) -> Path
 
 Resolves relative text lexically against an explicit absolute base.
 
-### Details
+#### Details
 
 Empty text and `.` keep the base; `..` removes components; ordinary components append. An
 absolute relative value, an empty interior component, NUL, or any attempt to escape above root
 fails with the `InvalidPath` reason. Resolution is lexical and never accesses the filesystem.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a706172656e74"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a506174682e706172656e74"></a>
 
-## `parent`
+### Method `Path.parent`
 
 ```silk
-pub effect fn parent(self: &unavailable) -> silk/option.Option<silk/filesystem.Path> ! OutOfMemoryError ? &mut Allocator
+pub effect fn parent(self: &Path) -> silk/option.Option<silk/filesystem.Path> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Allocates an independently owned parent path, or [`None`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a30) when `self` is root.
 
-### Details
+#### Details
 
 The result does not borrow `self`. A direct child of root has root as its parent.
 
@@ -241,8 +241,20 @@ The result does not borrow `self`. A direct child of root has root as its parent
 ## `FileInfo`
 
 ```silk
-pub fn FileInfo(byteLength: usize) -> _
+pub struct FileInfo
 ```
+
+Minimal portable metadata for one regular file.
+
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c65496e666f3a3a6669656c643a30"></a>
+
+### Field `byteLength`
+
+```silk
+pub byteLength: usize
+```
+
+Complete file length in bytes.
 
 <a id="declaration-73696c6b2f66696c6573797374656d3a3a4469726563746f7279496e666f"></a>
 
@@ -272,7 +284,7 @@ The closed portable kind of one directory entry.
 pub code: i32
 ```
 
-Stable portable kind code selected by [`file`](#declaration-73696c6b2f66696c6573797374656d3a3a66696c65) or [`directory`](#declaration-73696c6b2f66696c6573797374656d3a3a6469726563746f7279).
+Stable portable kind code selected by [`file`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e66696c65) or [`directory`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6469726563746f7279).
 
 <a id="declaration-73696c6b2f66696c6573797374656d3a3a4469726563746f7279456e747279"></a>
 
@@ -356,7 +368,7 @@ An allocation-free portable failure naming the attempted operation and recovery 
 
 ### Details
 
-Match or compare [`operationCode`](#declaration-73696c6b2f66696c6573797374656d3a3a6f7065726174696f6e436f6465) and [`reasonCode`](#declaration-73696c6b2f66696c6573797374656d3a3a726561736f6e436f6465) for portable recovery. [`providerCode`](#declaration-73696c6b2f66696c6573797374656d3a3a70726f7669646572436f6465)
+Match or compare [`operationCode`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6f7065726174696f6e436f6465) and [`reasonCode`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e726561736f6e436f6465) for portable recovery. [`providerCode`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e70726f7669646572436f6465)
 may retain an OS or provider-specific numeric detail for diagnostics, but portable decisions
 must not depend on it.
 
@@ -444,14 +456,14 @@ Writes one complete byte view with create-or-truncate semantics.
 #### Details
 
 A missing file is created; an existing regular file is replaced by exactly `bytes`. The call
-does not create missing parent directories—use [`writeFileWithParents`](#declaration-73696c6b2f66696c6573797374656d3a3a777269746546696c6557697468506172656e7473) for that workflow.
+does not create missing parent directories—use [`writeFileWithParents`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e777269746546696c6557697468506172656e7473) for that workflow.
 
 <a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d3a3a6f7065726174696f6e3a73746174"></a>
 
 ### Operation `stat`
 
 ```silk
-effect fn stat(path: &silk/filesystem.Path) -> unavailable | unavailable ! FileError ? &mut FileSystem
+effect fn stat(path: &silk/filesystem.Path) -> silk/filesystem.DirectoryInfo | silk/filesystem.FileInfo ! FileError ? &mut FileSystem
 ```
 
 Returns [`FileInfo`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c65496e666f) or [`DirectoryInfo`](#declaration-73696c6b2f66696c6573797374656d3a3a4469726563746f7279496e666f) for the path without opening file contents.
@@ -488,7 +500,7 @@ Creates exactly one missing directory whose parent already exists.
 
 #### Details
 
-Existing paths fail with `AlreadyExists`; use [`createDirectoriesRecursively`](#declaration-73696c6b2f66696c6573797374656d3a3a6372656174654469726563746f726965735265637572736976656c79) to ensure every
+Existing paths fail with `AlreadyExists`; use [`createDirectoriesRecursively`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6372656174654469726563746f726965735265637572736976656c79) to ensure every
 missing component.
 
 <a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d3a3a6f7065726174696f6e3a72656d6f766546696c65"></a>
@@ -513,7 +525,7 @@ Removes exactly one empty directory.
 
 #### Details
 
-A nonempty directory fails with `NotEmpty`; use [`removeDirectoryRecursively`](#declaration-73696c6b2f66696c6573797374656d3a3a72656d6f76654469726563746f72795265637572736976656c79) only when all
+A nonempty directory fails with `NotEmpty`; use [`removeDirectoryRecursively`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e72656d6f76654469726563746f72795265637572736976656c79) only when all
 descendants are intentionally in scope for removal.
 
 <a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d3a3a6f7065726174696f6e3a63726561746554656d706f726172794469726563746f7279"></a>
@@ -534,25 +546,19 @@ to check-then-create, and the gap between those two is exactly the race this avo
 `prefix` is a byte prefix for the provider-chosen child name, not a complete path. The returned
 directory already exists and is an immediate child of `parent`.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a31"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e66696c65"></a>
 
-## Implementation `FileSystem for _`
-
-```silk
-impl FileSystem for _
-```
-
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a66696c65"></a>
-
-## `file`
+### Associated function `FileSystem.file`
 
 ```silk
 pub fn file() -> DirectoryEntryKind
 ```
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6469726563746f7279"></a>
+Constructs the regular-file [`DirectoryEntryKind`](#declaration-73696c6b2f66696c6573797374656d3a3a4469726563746f7279456e7472794b696e64).
 
-## `directory`
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6469726563746f7279"></a>
+
+### Associated function `FileSystem.directory`
 
 ```silk
 pub fn directory() -> DirectoryEntryKind
@@ -560,9 +566,9 @@ pub fn directory() -> DirectoryEntryKind
 
 Constructs the directory [`DirectoryEntryKind`](#declaration-73696c6b2f66696c6573797374656d3a3a4469726563746f7279456e7472794b696e64).
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a656e7472794b696e64436f6465"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e656e7472794b696e64436f6465"></a>
 
-## `entryKindCode`
+### Associated function `FileSystem.entryKindCode`
 
 ```silk
 pub fn entryKindCode(kind: DirectoryEntryKind) -> i32
@@ -570,9 +576,9 @@ pub fn entryKindCode(kind: DirectoryEntryKind) -> i32
 
 Returns the stable code for a consumed [`DirectoryEntryKind`](#declaration-73696c6b2f66696c6573797374656d3a3a4469726563746f7279456e7472794b696e64): `0` for file, `1` for directory.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a66696c65496e666f"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e66696c65496e666f"></a>
 
-## `fileInfo`
+### Associated function `FileSystem.fileInfo`
 
 ```silk
 pub fn fileInfo(byteLength: usize) -> FileInfo
@@ -580,9 +586,9 @@ pub fn fileInfo(byteLength: usize) -> FileInfo
 
 Constructs regular-file metadata with the complete length in bytes.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6469726563746f7279496e666f"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6469726563746f7279496e666f"></a>
 
-## `directoryInfo`
+### Associated function `FileSystem.directoryInfo`
 
 ```silk
 pub fn directoryInfo() -> DirectoryInfo
@@ -590,9 +596,9 @@ pub fn directoryInfo() -> DirectoryInfo
 
 Constructs the fieldless portable directory metadata value.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6469726563746f7279456e747279"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6469726563746f7279456e747279"></a>
 
-## `directoryEntry`
+### Associated function `FileSystem.directoryEntry`
 
 ```silk
 pub fn directoryEntry(path: Path, kind: DirectoryEntryKind) -> DirectoryEntry
@@ -600,9 +606,9 @@ pub fn directoryEntry(path: Path, kind: DirectoryEntryKind) -> DirectoryEntry
 
 Constructs a directory entry by taking ownership of its complete child `path` and `kind`.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a7265616446696c654f7065726174696f6e"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e7265616446696c654f7065726174696f6e"></a>
 
-## `readFileOperation`
+### Associated function `FileSystem.readFileOperation`
 
 ```silk
 pub fn readFileOperation() -> FileOperation
@@ -610,9 +616,9 @@ pub fn readFileOperation() -> FileOperation
 
 Selects the read-file operation.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a777269746546696c654f7065726174696f6e"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e777269746546696c654f7065726174696f6e"></a>
 
-## `writeFileOperation`
+### Associated function `FileSystem.writeFileOperation`
 
 ```silk
 pub fn writeFileOperation() -> FileOperation
@@ -620,9 +626,9 @@ pub fn writeFileOperation() -> FileOperation
 
 Selects the write-file operation.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a737461744f7065726174696f6e"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e737461744f7065726174696f6e"></a>
 
-## `statOperation`
+### Associated function `FileSystem.statOperation`
 
 ```silk
 pub fn statOperation() -> FileOperation
@@ -630,9 +636,9 @@ pub fn statOperation() -> FileOperation
 
 Selects the stat operation.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6c6973744469726563746f72794f7065726174696f6e"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6c6973744469726563746f72794f7065726174696f6e"></a>
 
-## `listDirectoryOperation`
+### Associated function `FileSystem.listDirectoryOperation`
 
 ```silk
 pub fn listDirectoryOperation() -> FileOperation
@@ -640,9 +646,9 @@ pub fn listDirectoryOperation() -> FileOperation
 
 Selects the list-directory operation.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6372656174654469726563746f72794f7065726174696f6e"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6372656174654469726563746f72794f7065726174696f6e"></a>
 
-## `createDirectoryOperation`
+### Associated function `FileSystem.createDirectoryOperation`
 
 ```silk
 pub fn createDirectoryOperation() -> FileOperation
@@ -650,9 +656,9 @@ pub fn createDirectoryOperation() -> FileOperation
 
 Selects the create-directory operation.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a72656d6f766546696c654f7065726174696f6e"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e72656d6f766546696c654f7065726174696f6e"></a>
 
-## `removeFileOperation`
+### Associated function `FileSystem.removeFileOperation`
 
 ```silk
 pub fn removeFileOperation() -> FileOperation
@@ -660,9 +666,9 @@ pub fn removeFileOperation() -> FileOperation
 
 Selects the remove-file operation.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a72656d6f76654469726563746f72794f7065726174696f6e"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e72656d6f76654469726563746f72794f7065726174696f6e"></a>
 
-## `removeDirectoryOperation`
+### Associated function `FileSystem.removeDirectoryOperation`
 
 ```silk
 pub fn removeDirectoryOperation() -> FileOperation
@@ -670,9 +676,9 @@ pub fn removeDirectoryOperation() -> FileOperation
 
 Selects the remove-directory operation.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a706174684f7065726174696f6e"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e706174684f7065726174696f6e"></a>
 
-## `pathOperation`
+### Associated function `FileSystem.pathOperation`
 
 ```silk
 pub fn pathOperation() -> FileOperation
@@ -680,9 +686,9 @@ pub fn pathOperation() -> FileOperation
 
 Selects path construction and resolution.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a63726561746554656d706f726172794469726563746f72794f7065726174696f6e"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e63726561746554656d706f726172794469726563746f72794f7065726174696f6e"></a>
 
-## `createTemporaryDirectoryOperation`
+### Associated function `FileSystem.createTemporaryDirectoryOperation`
 
 ```silk
 pub fn createTemporaryDirectoryOperation() -> FileOperation
@@ -690,9 +696,9 @@ pub fn createTemporaryDirectoryOperation() -> FileOperation
 
 Selects the create-temporary-directory operation.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6f7065726174696f6e436f6465"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6f7065726174696f6e436f6465"></a>
 
-## `operationCode`
+### Associated function `FileSystem.operationCode`
 
 ```silk
 pub fn operationCode(operation: FileOperation) -> i32
@@ -700,9 +706,9 @@ pub fn operationCode(operation: FileOperation) -> i32
 
 Returns the stable numeric code of a consumed [`FileOperation`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c654f7065726174696f6e).
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6e6f74466f756e64"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6e6f74466f756e64"></a>
 
-## `notFound`
+### Associated function `FileSystem.notFound`
 
 ```silk
 pub fn notFound() -> FileReason
@@ -710,9 +716,9 @@ pub fn notFound() -> FileReason
 
 Constructs the `NotFound` recovery reason.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a616c7265616479457869737473"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e616c7265616479457869737473"></a>
 
-## `alreadyExists`
+### Associated function `FileSystem.alreadyExists`
 
 ```silk
 pub fn alreadyExists() -> FileReason
@@ -720,9 +726,9 @@ pub fn alreadyExists() -> FileReason
 
 Constructs the `AlreadyExists` recovery reason.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a7065726d697373696f6e44656e696564"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e7065726d697373696f6e44656e696564"></a>
 
-## `permissionDenied`
+### Associated function `FileSystem.permissionDenied`
 
 ```silk
 pub fn permissionDenied() -> FileReason
@@ -730,9 +736,9 @@ pub fn permissionDenied() -> FileReason
 
 Constructs the `PermissionDenied` recovery reason.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a696e76616c696450617468"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e696e76616c696450617468"></a>
 
-## `invalidPath`
+### Associated function `FileSystem.invalidPath`
 
 ```silk
 pub fn invalidPath() -> FileReason
@@ -740,9 +746,9 @@ pub fn invalidPath() -> FileReason
 
 Constructs the `InvalidPath` recovery reason.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a77726f6e6754797065"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e77726f6e6754797065"></a>
 
-## `wrongType`
+### Associated function `FileSystem.wrongType`
 
 ```silk
 pub fn wrongType() -> FileReason
@@ -750,9 +756,9 @@ pub fn wrongType() -> FileReason
 
 Constructs the `WrongType` recovery reason.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6e6f74456d707479"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6e6f74456d707479"></a>
 
-## `notEmpty`
+### Associated function `FileSystem.notEmpty`
 
 ```silk
 pub fn notEmpty() -> FileReason
@@ -760,9 +766,9 @@ pub fn notEmpty() -> FileReason
 
 Constructs the `NotEmpty` recovery reason.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6e6f5370616365"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6e6f5370616365"></a>
 
-## `noSpace`
+### Associated function `FileSystem.noSpace`
 
 ```silk
 pub fn noSpace() -> FileReason
@@ -770,9 +776,9 @@ pub fn noSpace() -> FileReason
 
 Constructs the `NoSpace` recovery reason.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a746f6f4c61726765"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e746f6f4c61726765"></a>
 
-## `tooLarge`
+### Associated function `FileSystem.tooLarge`
 
 ```silk
 pub fn tooLarge() -> FileReason
@@ -780,9 +786,9 @@ pub fn tooLarge() -> FileReason
 
 Constructs the `TooLarge` recovery reason.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a756e737570706f72746564"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e756e737570706f72746564"></a>
 
-## `unsupported`
+### Associated function `FileSystem.unsupported`
 
 ```silk
 pub fn unsupported() -> FileReason
@@ -790,9 +796,9 @@ pub fn unsupported() -> FileReason
 
 Constructs the `Unsupported` recovery reason.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6f74686572"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6f74686572"></a>
 
-## `other`
+### Associated function `FileSystem.other`
 
 ```silk
 pub fn other() -> FileReason
@@ -800,9 +806,9 @@ pub fn other() -> FileReason
 
 Constructs the catch-all `Other` recovery reason.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a726561736f6e436f6465"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e726561736f6e436f6465"></a>
 
-## `reasonCode`
+### Associated function `FileSystem.reasonCode`
 
 ```silk
 pub fn reasonCode(reason: FileReason) -> i32
@@ -810,9 +816,9 @@ pub fn reasonCode(reason: FileReason) -> i32
 
 Returns the stable numeric code of a consumed [`FileReason`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c65526561736f6e).
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6572726f72"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6572726f72"></a>
 
-## `error`
+### Associated function `FileSystem.error`
 
 ```silk
 pub fn error(operation: FileOperation, reason: FileReason) -> FileError
@@ -820,9 +826,9 @@ pub fn error(operation: FileOperation, reason: FileReason) -> FileError
 
 Constructs a portable [`FileError`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c654572726f72) without a provider-specific numeric detail.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6572726f7257697468436f6465"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6572726f7257697468436f6465"></a>
 
-## `errorWithCode`
+### Associated function `FileSystem.errorWithCode`
 
 ```silk
 pub fn errorWithCode(operation: FileOperation, reason: FileReason, code: i32) -> FileError
@@ -830,14 +836,14 @@ pub fn errorWithCode(operation: FileOperation, reason: FileReason, code: i32) ->
 
 Constructs a portable [`FileError`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c654572726f72) while retaining one provider-specific diagnostic code.
 
-### Details
+#### Details
 
 The numeric `code` is opaque outside that provider. The portable `operation` and `reason` remain
 the fields callers should use for recovery.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a70726f7669646572436f6465"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e70726f7669646572436f6465"></a>
 
-## `providerCode`
+### Associated function `FileSystem.providerCode`
 
 ```silk
 pub fn providerCode(error: &silk/filesystem.FileError) -> silk/option.Option<i32>
@@ -845,9 +851,9 @@ pub fn providerCode(error: &silk/filesystem.FileError) -> silk/option.Option<i32
 
 Borrows an error and returns its provider-specific numeric detail, if one was retained.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a74656d706f726172794469726563746f7279"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e74656d706f726172794469726563746f7279"></a>
 
-## `temporaryDirectory`
+### Associated function `FileSystem.temporaryDirectory`
 
 ```silk
 pub effect fn temporaryDirectory(parent: &silk/filesystem.Path, prefix: string) -> TemporaryDirectory ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
@@ -855,15 +861,15 @@ pub effect fn temporaryDirectory(parent: &silk/filesystem.Path, prefix: string) 
 
 Creates an explicitly owned temporary directory under `parent` with a name beginning in `prefix`.
 
-### Details
+#### Details
 
-The result is owned. Nothing removes it until a caller runs [`release`](#declaration-73696c6b2f66696c6573797374656d3a3a72656c65617365) or [`releaseIgnored`](#declaration-73696c6b2f66696c6573797374656d3a3a72656c6561736549676e6f726564).
+The result is owned. Nothing removes it until a caller runs [`release`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e72656c65617365) or [`releaseIgnored`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e72656c6561736549676e6f726564).
 The prefix is encoded as UTF-8 and the provider chooses and claims the remaining unique name in
 one operation.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a72656c65617365"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e72656c65617365"></a>
 
-## `release`
+### Associated function `FileSystem.release`
 
 ```silk
 pub effect fn release(self: TemporaryDirectory) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
@@ -871,16 +877,16 @@ pub effect fn release(self: TemporaryDirectory) -> () ! FileError | OutOfMemoryE
 
 Consumes one TemporaryDirectory and removes it together with everything inside it.
 
-### Details
+#### Details
 
 Both rows are stated rather than hidden. Removal reaches the provider, so it can fail; walking the
 tree to find what to remove allocates, so it can exhaust memory. A caller that must observe a
 failed cleanup uses this operation and handles the failure. The owner is consumed even when
 removal fails, so copy any diagnostic path information needed before calling.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a72656c6561736549676e6f726564"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e72656c6561736549676e6f726564"></a>
 
-## `releaseIgnored`
+### Associated function `FileSystem.releaseIgnored`
 
 ```silk
 pub effect fn releaseIgnored(self: TemporaryDirectory) -> () ? &mut FileSystem | &mut Allocator
@@ -888,7 +894,7 @@ pub effect fn releaseIgnored(self: TemporaryDirectory) -> () ? &mut FileSystem |
 
 Consumes one TemporaryDirectory, removes it, and discards a failed removal.
 
-### Details
+#### Details
 
 This exists because `Effect.ensuring` types its finalizer `! never`, so a fallible release has
 to be recovered before it can be a finalizer. The recovery is deliberate and it is named: a
@@ -902,9 +908,9 @@ A caller who needs the failure uses `release` instead and does not compose it wi
 The finalizer consumes the directory. The protected Effect cannot borrow it when the finalizer
 starts. Derive the required paths before you give the owner to the finalizer.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a72656d6f76654469726563746f72795265637572736976656c79"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e72656d6f76654469726563746f72795265637572736976656c79"></a>
 
-## `removeDirectoryRecursively`
+### Associated function `FileSystem.removeDirectoryRecursively`
 
 ```silk
 pub effect fn removeDirectoryRecursively(path: &silk/filesystem.Path) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
@@ -912,7 +918,7 @@ pub effect fn removeDirectoryRecursively(path: &silk/filesystem.Path) -> () ! Fi
 
 Removes a directory, every descendant file, and every descendant directory.
 
-### Details
+#### Details
 
 Two passes, because the portable primitive removes exactly one _empty_ directory. The first
 pass walks the tree front to back, unlinking every file it meets and recording every directory
@@ -924,9 +930,9 @@ vector capacity rather than stack.
 This operation is destructive and not transactional. If a provider or allocation failure occurs,
 removals already completed remain completed and the remaining tree is left in place.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a6372656174654469726563746f726965735265637572736976656c79"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e6372656174654469726563746f726965735265637572736976656c79"></a>
 
-## `createDirectoriesRecursively`
+### Associated function `FileSystem.createDirectoriesRecursively`
 
 ```silk
 pub effect fn createDirectoriesRecursively(path: &silk/filesystem.Path) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
@@ -934,15 +940,15 @@ pub effect fn createDirectoriesRecursively(path: &silk/filesystem.Path) -> () ! 
 
 Ensures that `path` and every missing ancestor exist as directories.
 
-### Details
+#### Details
 
 Existing directories are kept. An existing regular file at any component fails with
 `WrongType`; failures other than `NotFound` propagate. This is ordinary stat-then-create
 composition, so concurrent namespace changes may still race according to provider policy.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a777269746546696c6557697468506172656e7473"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e777269746546696c6557697468506172656e7473"></a>
 
-## `writeFileWithParents`
+### Associated function `FileSystem.writeFileWithParents`
 
 ```silk
 pub effect fn writeFileWithParents(path: &silk/filesystem.Path, bytes: &[u8]) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
@@ -950,15 +956,15 @@ pub effect fn writeFileWithParents(path: &silk/filesystem.Path, bytes: &[u8]) ->
 
 Ensures every parent directory exists, then writes the complete byte view to `path`.
 
-### Details
+#### Details
 
 The final write uses `FileSystem.writeFile` create-or-truncate semantics. Passing root delegates
 directly to the provider and normally fails with `WrongType`. Directory creation and writing are
 not transactional, so a later failure may leave newly created parents behind.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a657869737473"></a>
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d2e657869737473"></a>
 
-## `exists`
+### Associated function `FileSystem.exists`
 
 ```silk
 pub effect fn exists(path: &silk/filesystem.Path) -> bool ! FileError ? &mut FileSystem
@@ -966,7 +972,7 @@ pub effect fn exists(path: &silk/filesystem.Path) -> bool ! FileError ? &mut Fil
 
 Returns whether a file or directory exists at `path`.
 
-### Details
+#### Details
 
 Only the portable `NotFound` reason becomes `false`. Permission, I/O, and every other provider
 failure propagate so callers cannot mistake an inaccessible path for an absent one.
@@ -976,5 +982,31 @@ failure propagate so callers cannot mistake an inaccessible path for an absent o
 ## `TemporaryDirectory`
 
 ```silk
-pub fn TemporaryDirectory(path: Path) -> _
+pub struct TemporaryDirectory
 ```
+
+A directory a caller owns outright, together with everything written inside it.
+
+### Details
+
+Ownership is affine: `TemporaryDirectory` holds an owned `Path`, so exactly one binding holds
+it and the compiler rejects a second use of a moved one. Ownership is not, however, a `Drop`
+hook. Removing a directory is a fallible operation that requires the `FileSystem` capability,
+and a `Drop` hook may carry neither a failure row nor a requirement row, so a hook here could
+only be written by inventing an infallible intrinsic over a fallible syscall. Release is
+therefore explicit and honest about both rows — see `release`.
+
+Scope ownership comes from composition rather than from a hook: `Effect.ensuring(release)`
+runs the release whatever the protected Effect's outcome. Because `ensuring` types its
+finalizer `! never`, that composition has to say what a failed removal means; `releaseIgnored`
+is the stdlib's answer and names the loss at the call site.
+
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a54656d706f726172794469726563746f72793a3a6669656c643a30"></a>
+
+### Field `path`
+
+```silk
+pub path: Path
+```
+
+The complete owned path callers use while the scope remains live.

@@ -6,28 +6,28 @@ Independently owned, caller-funded lazy computations with explicit external park
 
 ## When to use
 
-Use [`make`](#declaration-73696c6b2f657865637574696f6e3a3a6d616b65) when a lazy Effect must outlive the caller which constructs it and be resumed by a
-later owner. Use [`park`](#declaration-73696c6b2f657865637574696f6e3a3a7061726b) inside the body when readiness comes from an external registration.
-Use [`drive`](#declaration-73696c6b2f657865637574696f6e3a3a6472697665) for the initial activation and each later eligible activation.
+Use [`make`](#declaration-73696c6b2f657865637574696f6e3a3a457865637574696f6e2e6d616b65) when a lazy Effect must outlive the caller which constructs it and be resumed by a
+later owner. Use [`park`](#declaration-73696c6b2f657865637574696f6e3a3a457865637574696f6e2e7061726b) inside the body when readiness comes from an external registration.
+Use [`drive`](#declaration-73696c6b2f657865637574696f6e3a3a457865637574696f6e2e6472697665) for the initial activation and each later eligible activation.
 
 ## Details
 
 Construction obtains one combined package from the selected `Allocator`
 and does not start the Effect. The body representation, continuation, and fixed readiness
 endpoint remain private. A nested `Effect.suspend` transfers execution
-immediately. In contrast, [`park`](#declaration-73696c6b2f657865637574696f6e3a3a7061726b) relinquishes the Execution until one Wake makes it eligible.
+immediately. In contrast, [`park`](#declaration-73696c6b2f657865637574696f6e3a3a457865637574696f6e2e7061726b) relinquishes the Execution until one Wake makes it eligible.
 
 ## Gotchas
 
-`Execution` is affine. The readiness callback must be detached and non-parking. [`make`](#declaration-73696c6b2f657865637574696f6e3a3a6d616b65) can
+`Execution` is affine. The readiness callback must be detached and non-parking. [`make`](#declaration-73696c6b2f657865637574696f6e3a3a457865637574696f6e2e6d616b65) can
 report package allocation refusal. Later private execution-stack growth is a fatal trap.
 Dropping a dormant Execution cancels it. A retained Wake keeps the complete inert package alive
-until the Wake is consumed or dropped. [`drive`](#declaration-73696c6b2f657865637574696f6e3a3a6472697665) returns continued ownership only to
+until the Wake is consumed or dropped. [`drive`](#declaration-73696c6b2f657865637574696f6e3a3a457865637574696f6e2e6472697665) returns continued ownership only to
 `onSuspend`.
 
 Import as `Execution` with `import silk.execution { Execution }`.
 
-Public declarations: 5.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f657865637574696f6e3a3a457865637574696f6e"></a>
 
@@ -46,25 +46,25 @@ inherent member declared in `impl Execution`, so `import silk.execution { Execut
 one import that reaches `Execution.make(...)` and the rest. It is unrelated to the builtin
 `Intrinsic.Execution<A>` type.
 
-<a id="declaration-73696c6b2f657865637574696f6e3a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f657865637574696f6e3a3a457865637574696f6e2e6d616b65"></a>
 
-## Implementation `Execution for _`
-
-```silk
-impl Execution for _
-```
-
-<a id="declaration-73696c6b2f657865637574696f6e3a3a6d616b65"></a>
-
-## `make`
+### Associated function `Execution.make`
 
 ```silk
 pub effect fn make<A, F, O, R>(body: F, readyState: O, onReady: R) -> Intrinsic.Execution<A> ! OutOfMemoryError ? &mut Allocator
 ```
 
-<a id="declaration-73696c6b2f657865637574696f6e3a3a6472697665"></a>
+Allocates one combined package and transfers the lazy body and fixed endpoint into it.
 
-## `drive`
+#### Details
+
+The returned Execution is `Initial`. The body does not start during this call. Allocation refusal
+produces no Execution and leaves every input under ordinary Effect cleanup. Later private stack
+growth is a fatal trap and is not a `OutOfMemoryError`.
+
+<a id="declaration-73696c6b2f657865637574696f6e3a3a457865637574696f6e2e6472697665"></a>
+
+### Associated function `Execution.drive`
 
 ```silk
 pub effect fn drive<A, D, C, S>(execution: Intrinsic.Execution<A>, branchState: D, onComplete: C, onSuspend: S) -> ()
@@ -72,19 +72,19 @@ pub effect fn drive<A, D, C, S>(execution: Intrinsic.Execution<A>, branchState: 
 
 Drives one `Initial`, `InitialReady`, or `Eligible` activation and transfers `branchState` to one outcome callback.
 
-### Details
+#### Details
 
 Completion calls `onComplete`. Relinquishment calls `onSuspend` with the dormant Execution.
 Each activation calls exactly one callback. Nested transfer can complete in the same drive.
 External parking relinquishes ownership until the fixed readiness endpoint reports eligibility.
 
-### Gotchas
+#### Gotchas
 
 Driving a dormant, notifying, completed, or destroyed Execution is a fatal state trap.
 
-<a id="declaration-73696c6b2f657865637574696f6e3a3a6e6f74696679496e697469616c"></a>
+<a id="declaration-73696c6b2f657865637574696f6e3a3a457865637574696f6e2e6e6f74696679496e697469616c"></a>
 
-## `notifyInitial`
+### Associated function `Execution.notifyInitial`
 
 ```silk
 pub fn notifyInitial<A>(execution: &mut Intrinsic.Execution<A>) -> ()
@@ -92,19 +92,19 @@ pub fn notifyInitial<A>(execution: &mut Intrinsic.Execution<A>) -> ()
 
 Notifies the fixed readiness endpoint for one `Initial` Execution exactly once.
 
-### Details
+#### Details
 
 This operation changes the package to `InitialReady` before it invokes the endpoint. It is
-synchronous, does not park, and does not run the body. A later [`drive`](#declaration-73696c6b2f657865637574696f6e3a3a6472697665) starts the body.
+synchronous, does not park, and does not run the body. A later [`drive`](#declaration-73696c6b2f657865637574696f6e3a3a457865637574696f6e2e6472697665) starts the body.
 
-### Gotchas
+#### Gotchas
 
 The Execution must still be `Initial`. Calling this operation again, or calling it after the
 Execution has been driven, parked, completed, or destroyed, is a fatal state trap.
 
-<a id="declaration-73696c6b2f657865637574696f6e3a3a7061726b"></a>
+<a id="declaration-73696c6b2f657865637574696f6e3a3a457865637574696f6e2e7061726b"></a>
 
-## `park`
+### Associated function `Execution.park`
 
 ```silk
 pub effect fn park<G, F>(register: F) -> ()
@@ -112,13 +112,13 @@ pub effect fn park<G, F>(register: F) -> ()
 
 Relinquishes the currently Running Execution until one external readiness signal arrives.
 
-### Details
+#### Details
 
 The registration callback receives the generation's sole affine Wake. Its returned guard is
 retained while dormant and dropped immediately before source continues after this call. The Wake
 makes this Execution eligible and invokes its fixed readiness endpoint at most one time.
 
-### Gotchas
+#### Gotchas
 
 A caller that keeps a cancelled Wake also keeps the complete inert Execution package alive.
 Consuming or dropping that Wake releases the final package authority.

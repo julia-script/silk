@@ -38,7 +38,7 @@ effect fn pause() -> () ? &mut MonotonicClock {
 
 Import as `MonotonicClock` with `import silk.monotonic_clock { MonotonicClock }`.
 
-Public declarations: 2.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a4d6f6e6f746f6e6963436c6f636b"></a>
 
@@ -107,18 +107,24 @@ Waits for at least `howLong` nanoseconds on the provider's logical timeline.
 A zero duration requires no positive timeline advance. An implementation traps rather than
 wrapping when the derived absolute deadline cannot be represented.
 
-<a id="declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a4d6f6e6f746f6e6963436c6f636b2e646561646c696e654166746572"></a>
 
-## Implementation `MonotonicClock for _`
-
-```silk
-impl MonotonicClock for _
-```
-
-<a id="declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a646561646c696e654166746572"></a>
-
-## `deadlineAfter`
+### Associated function `MonotonicClock.deadlineAfter`
 
 ```silk
 pub fn deadlineAfter(start: &silk/system_clock.Instant, howLong: u64) -> Instant
 ```
+
+Derives the canonical absolute deadline `howLong` nanoseconds after `start`.
+
+#### Details
+
+The addition is performed in split seconds and nanoseconds so every `u64` duration is accepted
+whenever the resulting signed-seconds [`Instant`](./system-clock.md#declaration-73696c6b2f73797374656d5f636c6f636b3a3a496e7374616e74) remains representable. Fractional overflow
+carries exactly once into seconds.
+
+#### Gotchas
+
+This operation traps rather than wrapping when the resulting whole seconds exceed the
+representable `i64` range. `start` must belong to the provider timeline on which the deadline
+will be used.

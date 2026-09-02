@@ -42,102 +42,105 @@ import silk.usize as usize
 ///
 /// # Details
 ///
-/// This struct carries no data and is never constructed by the library. Importing it as
-/// `import silk.pointer { Pointer }` names the module scope, so `Pointer.fromRef(...)` and the
-/// other operations resolve through it. It is unrelated to the `*const T` and `*mut T` types.
+/// This struct carries no data and is never constructed by the library. Every operation is an
+/// inherent member declared in `impl Pointer`, so `import silk.pointer { Pointer }` is the one
+/// import that reaches `Pointer.fromRef(...)` and the rest. It is unrelated to the `*const T` and
+/// `*mut T` types.
 pub struct Pointer {}
 
-/// Returns the null `*mut T` address.
-///
-/// # Details
-///
-/// Null is a value, not a failure. Test for it with [`isNull`] before dereferencing a pointer
-/// that native code may have left unset.
-pub fn null<T>() -> *mut T {
-  return Intrinsic.pointerNull<T>()
-}
+impl Pointer {
+  /// Returns the null `*mut T` address.
+  ///
+  /// # Details
+  ///
+  /// Null is a value, not a failure. Test for it with [`isNull`] before dereferencing a pointer
+  /// that native code may have left unset.
+  pub fn null<T>() -> *mut T {
+    return Intrinsic.pointerNull<T>()
+  }
 
-/// Reports whether a pointer is null.
-pub fn isNull<T>(pointer: *const T) -> bool {
-  return Intrinsic.pointerIsNull<T>(pointer)
-}
+  /// Reports whether a pointer is null.
+  pub fn isNull<T>(pointer: *const T) -> bool {
+    return Intrinsic.pointerIsNull<T>(pointer)
+  }
 
-/// Forms a `*const T` from a shared reference.
-///
-/// # Details
-///
-/// The reference's loan ends as it would without the call; the pointer holds no loan on the
-/// referent and does not keep it alive.
-pub fn fromRef<T>(value: &T) -> *const T {
-  return Intrinsic.pointerFromRef<T>(value)
-}
+  /// Forms a `*const T` from a shared reference.
+  ///
+  /// # Details
+  ///
+  /// The reference's loan ends as it would without the call; the pointer holds no loan on the
+  /// referent and does not keep it alive.
+  pub fn fromRef<T>(value: &T) -> *const T {
+    return Intrinsic.pointerFromRef<T>(value)
+  }
 
-/// Forms a `*mut T` from an exclusive reference.
-///
-/// # Details
-///
-/// The reference's loan ends as it would without the call; the pointer holds no loan on the
-/// referent and does not keep it alive.
-pub fn fromMutRef<T>(value: &mut T) -> *mut T {
-  return Intrinsic.pointerFromMutRef<T>(value)
-}
+  /// Forms a `*mut T` from an exclusive reference.
+  ///
+  /// # Details
+  ///
+  /// The reference's loan ends as it would without the call; the pointer holds no loan on the
+  /// referent and does not keep it alive.
+  pub fn fromMutRef<T>(value: &mut T) -> *mut T {
+    return Intrinsic.pointerFromMutRef<T>(value)
+  }
 
-/// Forms a `*const T` addressing the first element of a shared slice.
-///
-/// # Details
-///
-/// The pointer carries no length. Pass the slice's length separately to native code that fills
-/// or reads a buffer.
-pub fn fromSlice<T>(values: &[T]) -> *const T {
-  return Intrinsic.pointerFromSlice<T>(values)
-}
+  /// Forms a `*const T` addressing the first element of a shared slice.
+  ///
+  /// # Details
+  ///
+  /// The pointer carries no length. Pass the slice's length separately to native code that fills
+  /// or reads a buffer.
+  pub fn fromSlice<T>(values: &[T]) -> *const T {
+    return Intrinsic.pointerFromSlice<T>(values)
+  }
 
-/// Forms a `*mut T` addressing the first element of an exclusive slice.
-///
-/// # Details
-///
-/// The pointer carries no length. Pass the slice's length separately to native code that fills
-/// or reads a buffer.
-pub fn fromMutSlice<T>(values: &mut [T]) -> *mut T {
-  return Intrinsic.pointerFromMutSlice<T>(values)
-}
+  /// Forms a `*mut T` addressing the first element of an exclusive slice.
+  ///
+  /// # Details
+  ///
+  /// The pointer carries no length. Pass the slice's length separately to native code that fills
+  /// or reads a buffer.
+  pub fn fromMutSlice<T>(values: &mut [T]) -> *mut T {
+    return Intrinsic.pointerFromMutSlice<T>(values)
+  }
 
-/// Advances a `*const T` by `count` elements of `T`.
-///
-/// # Gotchas
-///
-/// The caller must prove that the pointer and the result address elements of one live
-/// allocation.
-pub unsafe fn offset<T>(pointer: *const T, count: usize) -> *const T {
-  unsafe { return Intrinsic.pointerOffset<T>(pointer, count) }
-}
+  /// Advances a `*const T` by `count` elements of `T`.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove that the pointer and the result address elements of one live
+  /// allocation.
+  pub unsafe fn offset<T>(pointer: *const T, count: usize) -> *const T {
+    unsafe { return Intrinsic.pointerOffset<T>(pointer, count) }
+  }
 
-/// Advances a `*mut T` by `count` elements of `T`.
-///
-/// # Gotchas
-///
-/// The caller must prove that the pointer and the result address elements of one live
-/// allocation.
-pub unsafe fn offsetMut<T>(pointer: *mut T, count: usize) -> *mut T {
-  unsafe { return Intrinsic.pointerOffsetMut<T>(pointer, count) }
-}
+  /// Advances a `*mut T` by `count` elements of `T`.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove that the pointer and the result address elements of one live
+  /// allocation.
+  pub unsafe fn offsetMut<T>(pointer: *mut T, count: usize) -> *mut T {
+    unsafe { return Intrinsic.pointerOffsetMut<T>(pointer, count) }
+  }
 
-/// Copies the `T` stored at a pointer.
-///
-/// # Gotchas
-///
-/// The caller must prove that the pointer is non-null, aligned for `T`, and addresses an
-/// initialized `T` whose storage is still live.
-pub unsafe fn read<T: Copy>(pointer: *const T) -> T {
-  unsafe { return Intrinsic.pointerRead<T>(pointer) }
-}
+  /// Copies the `T` stored at a pointer.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove that the pointer is non-null, aligned for `T`, and addresses an
+  /// initialized `T` whose storage is still live.
+  pub unsafe fn read<T: Copy>(pointer: *const T) -> T {
+    unsafe { return Intrinsic.pointerRead<T>(pointer) }
+  }
 
-/// Stores a `Copy` value at a pointer.
-///
-/// # Gotchas
-///
-/// The caller must prove that the pointer is non-null, aligned for `T`, and addresses writable
-/// storage for `T` that is still live.
-pub unsafe fn write<T: Copy>(pointer: *mut T, value: T) -> () {
-  unsafe { return Intrinsic.pointerWrite<T>(pointer, value) }
+  /// Stores a `Copy` value at a pointer.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove that the pointer is non-null, aligned for `T`, and addresses writable
+  /// storage for `T` that is still live.
+  pub unsafe fn write<T: Copy>(pointer: *mut T, value: T) -> () {
+    unsafe { return Intrinsic.pointerWrite<T>(pointer, value) }
+  }
 }

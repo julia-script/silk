@@ -7,11 +7,11 @@ One provider-stable 128-bit value for initialization-time hash-flood hardening.
 ## When to use
 
 Read [`InsecureSeed`](#declaration-73696c6b2f696e7365637572655f736565643a3a496e73656375726553656564) once while initializing a language runtime or application data structure.
-Use [`fixed`](#declaration-73696c6b2f696e7365637572655f736565643a3a6669786564) in deterministic environments or [`fromRandom`](#declaration-73696c6b2f696e7365637572655f736565643a3a66726f6d52616e646f6d) when secure randomness is present.
+Use [`fixed`](#declaration-73696c6b2f696e7365637572655f736565643a3a496e736563757265536565642e6669786564) in deterministic environments or [`fromRandom`](#declaration-73696c6b2f696e7365637572655f736565643a3a496e736563757265536565642e66726f6d52616e646f6d) when secure randomness is present.
 
 ## Details
 
-A provider returns the same copyable [`Seed`](#declaration-73696c6b2f696e7365637572655f736565643a3a53656564) on every shared read. [`fromRandom`](#declaration-73696c6b2f696e7365637572655f736565643a3a66726f6d52616e646f6d) consumes two
+A provider returns the same copyable [`Seed`](#declaration-73696c6b2f696e7365637572655f736565643a3a53656564) on every shared read. [`fromRandom`](#declaration-73696c6b2f696e7365637572655f736565643a3a496e736563757265536565642e66726f6d52616e646f6d) consumes two
 secure words exactly once and stores them in an immutable provider.
 
 ## Gotchas
@@ -38,7 +38,7 @@ pub fn main() -> i32 {
 
 Import as `InsecureSeed` with `import silk.insecure_seed { InsecureSeed }`.
 
-Public declarations: 7.
+Public declarations: 3.
 
 <a id="declaration-73696c6b2f696e7365637572655f736565643a3a53656564"></a>
 
@@ -78,25 +78,19 @@ effect fn get() -> Seed ? &InsecureSeed
 
 Returns a copy of the provider's stable seed.
 
-<a id="declaration-73696c6b2f696e7365637572655f736565643a3a696d706c656d656e746174696f6e3a31"></a>
+<a id="declaration-73696c6b2f696e7365637572655f736565643a3a496e736563757265536565642e6669727374"></a>
 
-## Implementation `InsecureSeed for _`
-
-```silk
-impl InsecureSeed for _
-```
-
-<a id="declaration-73696c6b2f696e7365637572655f736565643a3a6669727374"></a>
-
-## `first`
+### Associated function `InsecureSeed.first`
 
 ```silk
 pub fn first(seed: &silk/insecure_seed.Seed) -> u64
 ```
 
-<a id="declaration-73696c6b2f696e7365637572655f736565643a3a7365636f6e64"></a>
+Returns the first word of `seed`.
 
-## `second`
+<a id="declaration-73696c6b2f696e7365637572655f736565643a3a496e736563757265536565642e7365636f6e64"></a>
+
+### Associated function `InsecureSeed.second`
 
 ```silk
 pub fn second(seed: &silk/insecure_seed.Seed) -> u64
@@ -104,9 +98,9 @@ pub fn second(seed: &silk/insecure_seed.Seed) -> u64
 
 Returns the second word of `seed`.
 
-<a id="declaration-73696c6b2f696e7365637572655f736565643a3a6669786564"></a>
+<a id="declaration-73696c6b2f696e7365637572655f736565643a3a496e736563757265536565642e6669786564"></a>
 
-## `fixed`
+### Associated function `InsecureSeed.fixed`
 
 ```silk
 pub fn fixed(first: u64, second: u64) -> FixedInsecureSeed
@@ -114,9 +108,9 @@ pub fn fixed(first: u64, second: u64) -> FixedInsecureSeed
 
 Creates a deterministic provider from two explicit words without requiring secure randomness.
 
-<a id="declaration-73696c6b2f696e7365637572655f736565643a3a66726f6d52616e646f6d"></a>
+<a id="declaration-73696c6b2f696e7365637572655f736565643a3a496e736563757265536565642e66726f6d52616e646f6d"></a>
 
-## `fromRandom`
+### Associated function `InsecureSeed.fromRandom`
 
 ```silk
 pub effect fn fromRandom() -> FixedInsecureSeed ? &mut Random
@@ -129,26 +123,12 @@ Samples two secure words once and returns an immutable seed provider.
 ## `FixedInsecureSeed`
 
 ```silk
-pub fn FixedInsecureSeed(seed: Seed) -> _
+pub struct FixedInsecureSeed
 ```
 
-<a id="declaration-73696c6b2f696e7365637572655f736565643a3a696d706c656d656e746174696f6e3a32"></a>
+An immutable provider containing one fixed seed.
 
-## Implementation `FixedInsecureSeed for _`
-
-```silk
-impl FixedInsecureSeed for _
-```
-
-<a id="declaration-73696c6b2f696e7365637572655f736565643a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
-
-### Operation `fixedGet`
-
-```silk
-fixedGet = _
-```
-
-<a id="declaration-73696c6b2f696e7365637572655f736565643a3a696d706c656d656e746174696f6e3a33"></a>
+<a id="declaration-73696c6b2f696e7365637572655f736565643a3a696d706c656d656e746174696f6e3a31"></a>
 
 ## Implementation `InsecureSeed for FixedInsecureSeed`
 
@@ -156,7 +136,7 @@ fixedGet = _
 impl InsecureSeed for FixedInsecureSeed
 ```
 
-<a id="declaration-73696c6b2f696e7365637572655f736565643a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f696e7365637572655f736565643a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `get`
 

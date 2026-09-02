@@ -6,8 +6,8 @@ Deterministic seeded hashing contracts for hash maps, hash sets, and user-define
 
 ## When to use
 
-Implement [`HashKey`](#declaration-73696c6b2f686173683a3a486173684b6579) when a type will be stored as a hashed key. Use [`mix`](#declaration-73696c6b2f686173683a3a6d6978) for the first
-integer field and [`combine`](#declaration-73696c6b2f686173683a3a636f6d62696e65) for further fields, feeding every field that participates in
+Implement [`HashKey`](#declaration-73696c6b2f686173683a3a486173684b6579) when a type will be stored as a hashed key. Use [`mix`](#declaration-73696c6b2f686173683a3a486173682e6d6978) for the first
+integer field and [`combine`](#declaration-73696c6b2f686173683a3a486173682e636f6d62696e65) for further fields, feeding every field that participates in
 equality. [`Word`](#declaration-73696c6b2f686173683a3a576f7264) is the ready-made key for one `u64`.
 
 ## Details
@@ -46,7 +46,7 @@ pub fn main() -> i32 {
 
 Import as `HashKey` with `import silk.hash { HashKey }`.
 
-Public declarations: 8.
+Public declarations: 4.
 
 <a id="declaration-73696c6b2f686173683a3a48617368"></a>
 
@@ -63,44 +63,38 @@ The owner of the seed, mixing, and ready-made key operations.
 This struct carries no data and is never constructed by the library. Every operation is an
 inherent member declared in `impl Hash`, reached through `import silk.hash { Hash }`.
 
-<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f686173683a3a486173682e73656564"></a>
 
-## Implementation `Hash for _`
-
-```silk
-impl Hash for _
-```
-
-<a id="declaration-73696c6b2f686173683a3a73656564"></a>
-
-## `seed`
+### Associated function `Hash.seed`
 
 ```silk
 pub fn seed(value: u64) -> HashSeed
 ```
 
-<a id="declaration-73696c6b2f686173683a3a6d6978"></a>
+Creates a deterministic hash seed from one `u64` value.
 
-## `mix`
+<a id="declaration-73696c6b2f686173683a3a486173682e6d6978"></a>
+
+### Associated function `Hash.mix`
 
 ```silk
-pub fn mix(seed: &unavailable, value: u64) -> u64
+pub fn mix(seed: &silk/hash.HashSeed, value: u64) -> u64
 ```
 
 Mixes the first integer field of a key with one seed into a 64-bit hash.
 
-### When to use
+#### When to use
 
 Use this function to start a hash for an integer key or the first integer field of a key.
 
-### Details
+#### Details
 
-The same seed and value return the same result on all Silk engines. Use [`combine`](#declaration-73696c6b2f686173683a3a636f6d62696e65) for each
+The same seed and value return the same result on all Silk engines. Use [`combine`](#declaration-73696c6b2f686173683a3a486173682e636f6d62696e65) for each
 additional field that participates in equality.
 
-<a id="declaration-73696c6b2f686173683a3a636f6d62696e65"></a>
+<a id="declaration-73696c6b2f686173683a3a486173682e636f6d62696e65"></a>
 
-## `combine`
+### Associated function `Hash.combine`
 
 ```silk
 pub fn combine(hashed: u64, value: u64) -> u64
@@ -108,13 +102,13 @@ pub fn combine(hashed: u64, value: u64) -> u64
 
 Continues a hash with one further value, so a key of several fields folds into one hash.
 
-### When to use
+#### When to use
 
-Use this function after [`mix`](#declaration-73696c6b2f686173683a3a6d6978) for each additional integer field that participates in equality.
+Use this function after [`mix`](#declaration-73696c6b2f686173683a3a486173682e6d6978) for each additional integer field that participates in equality.
 
-<a id="declaration-73696c6b2f686173683a3a776f7264"></a>
+<a id="declaration-73696c6b2f686173683a3a486173682e776f7264"></a>
 
-## `word`
+### Associated function `Hash.word`
 
 ```silk
 pub fn word(value: u64) -> Word
@@ -127,10 +121,27 @@ Creates a [`Word`](#declaration-73696c6b2f686173683a3a576f7264) key from one `u6
 ## `HashSeed`
 
 ```silk
-pub fn HashSeed(value: u64) -> _
+pub struct HashSeed
 ```
 
-<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a31"></a>
+A collection-wide value that changes deterministic hash and bucket results.
+
+### Details
+
+The same seed, keys, and operation sequence produce the same bucket order on all Silk engines.
+A seed does not use allocation addresses, clocks, or ambient entropy.
+
+<a id="declaration-73696c6b2f686173683a3a48617368536565643a3a6669656c643a30"></a>
+
+### Field `value`
+
+```silk
+pub value: u64
+```
+
+The seed value handed to every hash the collection computes.
+
+<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a30"></a>
 
 ## Implementation `Copy for HashSeed`
 
@@ -176,7 +187,7 @@ If this returns `true`, `HashKey.hash` must return equal hashes for both keys un
 ### Operation `hash`
 
 ```silk
-fn hash(value: &Self, seed: &unavailable) -> u64
+fn hash(value: &Self, seed: &silk/hash.HashSeed) -> u64
 ```
 
 Computes the key's deterministic 64-bit hash under the collection seed.
@@ -205,7 +216,7 @@ pub value: u64
 
 The integer this key stands for.
 
-<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a32"></a>
+<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a31"></a>
 
 ## Implementation `Copy for Word`
 
@@ -213,7 +224,7 @@ The integer this key stands for.
 impl Copy for Word
 ```
 
-<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a33"></a>
+<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a32"></a>
 
 ## Implementation `HashKey for Word`
 
@@ -221,7 +232,7 @@ impl Copy for Word
 impl HashKey for Word
 ```
 
-<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `equals`
 
@@ -229,7 +240,7 @@ impl HashKey for Word
 equals = Word.wordEquals
 ```
 
-<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a31"></a>
+<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a31"></a>
 
 ### Operation `hash`
 

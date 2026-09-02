@@ -12,8 +12,8 @@ slots are initialized.
 
 ## Details
 
-[`copy`](#declaration-73696c6b2f7261775f6275666665723a3a636f7079) supports overlapping ranges and behaves as though the moved elements passed through
-temporary storage. [`fill`](#declaration-73696c6b2f7261775f6275666665723a3a66696c6c) writes raw bytes and therefore operates only on `RawBuffer<u8>`.
+[`copy`](#declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e636f7079) supports overlapping ranges and behaves as though the moved elements passed through
+temporary storage. [`fill`](#declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e66696c6c) writes raw bytes and therefore operates only on `RawBuffer<u8>`.
 
 ## Gotchas
 
@@ -63,7 +63,7 @@ pub fn main() -> i32 {
 
 Import as `RawBuffer` with `import silk.raw_buffer { RawBuffer }`.
 
-Public declarations: 9.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f7261775f6275666665723a3a526177427566666572"></a>
 
@@ -82,25 +82,23 @@ inherent member declared in `impl RawBuffer`, so `import silk.raw_buffer { RawBu
 one import that reaches `RawBuffer.from(...)` and the rest. It is unrelated to the builtin
 `RawBuffer<T>` type.
 
-<a id="declaration-73696c6b2f7261775f6275666665723a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e66726f6d"></a>
 
-## Implementation `RawBuffer for _`
-
-```silk
-impl RawBuffer for _
-```
-
-<a id="declaration-73696c6b2f7261775f6275666665723a3a66726f6d"></a>
-
-## `from`
+### Associated function `RawBuffer.from`
 
 ```silk
 pub fn from<T>(allocation: Allocation, count: usize) -> silk/core.RawBuffer<T>
 ```
 
-<a id="declaration-73696c6b2f7261775f6275666665723a3a736c6f74"></a>
+Adopts an allocation as typed raw storage with the specified element capacity.
 
-## `slot`
+#### Gotchas
+
+The caller must prove that the allocation has the size and alignment for `count` values of `T`.
+
+<a id="declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e736c6f74"></a>
+
+### Associated function `RawBuffer.slot`
 
 ```silk
 pub fn slot<T>(buffer: &mut silk/core.RawBuffer<T>, index: usize) -> silk/core.Slot<T>
@@ -108,14 +106,14 @@ pub fn slot<T>(buffer: &mut silk/core.RawBuffer<T>, index: usize) -> silk/core.S
 
 Selects one raw storage slot without checking bounds or initialization.
 
-### Gotchas
+#### Gotchas
 
-`index` must be less than [`count`](#declaration-73696c6b2f7261775f6275666665723a3a636f756e74). The caller must separately track whether the slot is
+`index` must be less than [`count`](#declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e636f756e74). The caller must separately track whether the slot is
 initialized.
 
-<a id="declaration-73696c6b2f7261775f6275666665723a3a636f756e74"></a>
+<a id="declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e636f756e74"></a>
 
-## `count`
+### Associated function `RawBuffer.count`
 
 ```silk
 pub fn count<T>(buffer: &silk/core.RawBuffer<T>) -> usize
@@ -123,9 +121,9 @@ pub fn count<T>(buffer: &silk/core.RawBuffer<T>) -> usize
 
 Returns the element capacity recorded by a raw buffer.
 
-<a id="declaration-73696c6b2f7261775f6275666665723a3a72656164"></a>
+<a id="declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e72656164"></a>
 
-## `read`
+### Associated function `RawBuffer.read`
 
 ```silk
 pub fn read<T>(buffer: &silk/core.RawBuffer<T>, index: usize) -> T
@@ -133,13 +131,13 @@ pub fn read<T>(buffer: &silk/core.RawBuffer<T>, index: usize) -> T
 
 Copies one initialized element without changing its slot state.
 
-### Gotchas
+#### Gotchas
 
-`index` must be less than [`count`](#declaration-73696c6b2f7261775f6275666665723a3a636f756e74), and the selected slot must contain an initialized `T`.
+`index` must be less than [`count`](#declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e636f756e74), and the selected slot must contain an initialized `T`.
 
-<a id="declaration-73696c6b2f7261775f6275666665723a3a636f7079"></a>
+<a id="declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e636f7079"></a>
 
-## `copy`
+### Associated function `RawBuffer.copy`
 
 ```silk
 pub fn copy<T>(destination: &mut silk/core.RawBuffer<T>, destinationOffset: usize, source: &[T], length: usize) -> ()
@@ -147,19 +145,19 @@ pub fn copy<T>(destination: &mut silk/core.RawBuffer<T>, destinationOffset: usiz
 
 Moves a caller-proven initialized range into selected storage in one bulk transfer.
 
-### Details
+#### Details
 
 Source and destination may overlap; the result is as if the elements travelled through an
 intermediate buffer.
 
-### Gotchas
+#### Gotchas
 
 The caller must prove that both selected ranges are in bounds. The source range must be
 initialized.
 
-<a id="declaration-73696c6b2f7261775f6275666665723a3a66696c6c"></a>
+<a id="declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e66696c6c"></a>
 
-## `fill`
+### Associated function `RawBuffer.fill`
 
 ```silk
 pub fn fill(buffer: &mut silk/core.RawBuffer<u8>, offset: usize, length: usize, value: u8) -> ()
@@ -167,13 +165,13 @@ pub fn fill(buffer: &mut silk/core.RawBuffer<u8>, offset: usize, length: usize, 
 
 Initializes a selected byte range with one repeated byte value.
 
-### Gotchas
+#### Gotchas
 
-`offset + length` must not exceed [`count`](#declaration-73696c6b2f7261775f6275666665723a3a636f756e74).
+`offset + length` must not exceed [`count`](#declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e636f756e74).
 
-<a id="declaration-73696c6b2f7261775f6275666665723a3a76696577"></a>
+<a id="declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e76696577"></a>
 
-## `view`
+### Associated function `RawBuffer.view`
 
 ```silk
 pub fn view<T>(buffer: &silk/core.RawBuffer<T>, offset: usize, length: usize) -> &[T]
@@ -181,13 +179,13 @@ pub fn view<T>(buffer: &silk/core.RawBuffer<T>, offset: usize, length: usize) ->
 
 Borrows a shared view of an initialized element range.
 
-### Gotchas
+#### Gotchas
 
 The selected range must be in bounds, and each selected slot must be initialized.
 
-<a id="declaration-73696c6b2f7261775f6275666665723a3a766965774d7574"></a>
+<a id="declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e766965774d7574"></a>
 
-## `viewMut`
+### Associated function `RawBuffer.viewMut`
 
 ```silk
 pub fn viewMut<T>(buffer: &mut silk/core.RawBuffer<T>, offset: usize, length: usize) -> &mut [T]
@@ -195,6 +193,6 @@ pub fn viewMut<T>(buffer: &mut silk/core.RawBuffer<T>, offset: usize, length: us
 
 Borrows an exclusive view of an initialized element range.
 
-### Gotchas
+#### Gotchas
 
 The selected range must be in bounds, and each selected slot must be initialized.

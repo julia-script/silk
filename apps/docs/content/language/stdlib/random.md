@@ -12,7 +12,7 @@ the application boundary and a scripted provider only in deterministic tests.
 
 ## Details
 
-The service primitive exactly fills borrowed storage. [`nextU64`](#declaration-73696c6b2f72616e646f6d3a3a6e657874553634), [`nextBool`](#declaration-73696c6b2f72616e646f6d3a3a6e657874426f6f6c), and [`below`](#declaration-73696c6b2f72616e646f6d3a3a62656c6f77)
+The service primitive exactly fills borrowed storage. [`nextU64`](#declaration-73696c6b2f72616e646f6d3a3a52616e646f6d2e6e657874553634), [`nextBool`](#declaration-73696c6b2f72616e646f6d3a3a52616e646f6d2e6e657874426f6f6c), and [`below`](#declaration-73696c6b2f72616e646f6d3a3a52616e646f6d2e62656c6f77)
 have stable source-defined byte consumption and do not select a concrete provider.
 
 ## Gotchas
@@ -36,7 +36,7 @@ effect fn tokenWord() -> u64
 
 Import as `Random` with `import silk.random { Random }`.
 
-Public declarations: 4.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f72616e646f6d3a3a52616e646f6d"></a>
 
@@ -63,25 +63,19 @@ effect fn fillBytes(output: &mut [u8]) -> () ? &mut Random
 
 Fills the complete exclusive byte slice with fresh unpredictable data.
 
-<a id="declaration-73696c6b2f72616e646f6d3a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f72616e646f6d3a3a52616e646f6d2e6e657874553634"></a>
 
-## Implementation `Random for _`
-
-```silk
-impl Random for _
-```
-
-<a id="declaration-73696c6b2f72616e646f6d3a3a6e657874553634"></a>
-
-## `nextU64`
+### Associated function `Random.nextU64`
 
 ```silk
 pub effect fn nextU64() -> u64 ? &mut Random
 ```
 
-<a id="declaration-73696c6b2f72616e646f6d3a3a6e657874426f6f6c"></a>
+Returns one secure `u64` decoded least-significant byte first from exactly eight provider bytes.
 
-## `nextBool`
+<a id="declaration-73696c6b2f72616e646f6d3a3a52616e646f6d2e6e657874426f6f6c"></a>
+
+### Associated function `Random.nextBool`
 
 ```silk
 pub effect fn nextBool() -> bool ? &mut Random
@@ -89,9 +83,9 @@ pub effect fn nextBool() -> bool ? &mut Random
 
 Returns whether bit 63 of one secure provider word is set.
 
-<a id="declaration-73696c6b2f72616e646f6d3a3a62656c6f77"></a>
+<a id="declaration-73696c6b2f72616e646f6d3a3a52616e646f6d2e62656c6f77"></a>
 
-## `below`
+### Associated function `Random.below`
 
 ```silk
 pub effect fn below(upperExclusive: u64) -> silk/option.Option<u64> ? &mut Random
@@ -99,6 +93,6 @@ pub effect fn below(upperExclusive: u64) -> silk/option.Option<u64> ? &mut Rando
 
 Returns an unbiased secure value below `upperExclusive`, or `None` for zero.
 
-### Details
+#### Details
 
 A zero bound consumes no provider bytes. Positive bounds use complete-word rejection sampling.

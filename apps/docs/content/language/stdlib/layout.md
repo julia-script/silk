@@ -6,12 +6,12 @@ Checked size-and-alignment descriptions used to request storage from an allocato
 
 ## When to use
 
-Prefer [`of`](#declaration-73696c6b2f6c61796f75743a3a6f66) when storage will hold a known Silk type. Use [`make`](#declaration-73696c6b2f6c61796f75743a3a6d616b65) only at an untyped boundary
-that already knows a byte size and alignment, and [`repeat`](#declaration-73696c6b2f6c61796f75743a3a726570656174) when sizing contiguous elements.
+Prefer [`of`](#declaration-73696c6b2f6c61796f75743a3a4c61796f75742e6f66) when storage will hold a known Silk type. Use [`make`](#declaration-73696c6b2f6c61796f75743a3a4c61796f75742e6d616b65) only at an untyped boundary
+that already knows a byte size and alignment, and [`repeat`](#declaration-73696c6b2f6c61796f75743a3a4c61796f75742e726570656174) when sizing contiguous elements.
 
 ## Details
 
-Alignments are non-zero powers of two. [`repeat`](#declaration-73696c6b2f6c61796f75743a3a726570656174) preserves the element alignment and reports
+Alignments are non-zero powers of two. [`repeat`](#declaration-73696c6b2f6c61796f75743a3a4c61796f75742e726570656174) preserves the element alignment and reports
 [`LayoutOverflow`](#declaration-73696c6b2f6c61796f75743a3a4c61796f75744f766572666c6f77) instead of wrapping the aggregate byte size. A [`Layout`](#declaration-73696c6b2f6c61796f75743a3a4c61796f7574) describes storage;
 it does not allocate or initialize it.
 
@@ -35,7 +35,7 @@ pub fn main() -> i32 {
 
 Import as `Layout` with `import silk.layout { Layout }`.
 
-Public declarations: 6.
+Public declarations: 3.
 
 <a id="declaration-73696c6b2f6c61796f75743a3a4c61796f7574"></a>
 
@@ -67,39 +67,33 @@ pub alignment: usize
 
 The required non-zero power-of-two byte alignment.
 
-<a id="declaration-73696c6b2f6c61796f75743a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6c61796f75743a3a4c61796f75742e6f66"></a>
 
-## Implementation `Layout for _`
-
-```silk
-impl Layout for _
-```
-
-<a id="declaration-73696c6b2f6c61796f75743a3a6f66"></a>
-
-## `of`
+### Associated function `Layout.of`
 
 ```silk
 pub fn of<T>() -> Layout
 ```
 
-<a id="declaration-73696c6b2f6c61796f75743a3a6d616b65"></a>
+Returns the byte size and alignment required to store one value of `T`.
 
-## `make`
+<a id="declaration-73696c6b2f6c61796f75743a3a4c61796f75742e6d616b65"></a>
+
+### Associated function `Layout.make`
 
 ```silk
-pub fn make(size: usize, alignment: usize) -> unavailable | unavailable
+pub fn make(size: usize, alignment: usize) -> silk/layout.InvalidAlignment | silk/layout.Layout
 ```
 
 Creates a layout from an explicit byte size and alignment.
 
-### Gotchas
+#### Gotchas
 
 If `alignment` is zero or is not a power of two, returns `InvalidAlignment` with that value.
 
-<a id="declaration-73696c6b2f6c61796f75743a3a726570656174"></a>
+<a id="declaration-73696c6b2f6c61796f75743a3a4c61796f75742e726570656174"></a>
 
-## `repeat`
+### Associated function `Layout.repeat`
 
 ```silk
 pub fn repeat(layout: Layout, count: usize) -> silk/layout.Layout | silk/layout.LayoutOverflow
@@ -107,11 +101,11 @@ pub fn repeat(layout: Layout, count: usize) -> silk/layout.Layout | silk/layout.
 
 Returns a layout for `count` contiguous instances without wrapping the total byte size.
 
-### Details
+#### Details
 
 The result keeps the input alignment and multiplies its byte size by `count`.
 
-### Gotchas
+#### Gotchas
 
 If the total byte size does not fit in `usize`, returns `LayoutOverflow`.
 
@@ -120,8 +114,20 @@ If the total byte size does not fit in `usize`, returns `LayoutOverflow`.
 ## `InvalidAlignment`
 
 ```silk
-pub fn InvalidAlignment(alignment: usize) -> _
+pub struct InvalidAlignment
 ```
+
+Reports the rejected alignment supplied to [`make`](#declaration-73696c6b2f6c61796f75743a3a4c61796f75742e6d616b65).
+
+<a id="declaration-73696c6b2f6c61796f75743a3a496e76616c6964416c69676e6d656e743a3a6669656c643a30"></a>
+
+### Field `alignment`
+
+```silk
+pub alignment: usize
+```
+
+The zero or non-power-of-two alignment that was rejected.
 
 <a id="declaration-73696c6b2f6c61796f75743a3a4c61796f75744f766572666c6f77"></a>
 
@@ -131,4 +137,4 @@ pub fn InvalidAlignment(alignment: usize) -> _
 pub struct LayoutOverflow
 ```
 
-Reports that [`repeat`](#declaration-73696c6b2f6c61796f75743a3a726570656174) could not represent the aggregate byte size as `usize`.
+Reports that [`repeat`](#declaration-73696c6b2f6c61796f75743a3a4c61796f75742e726570656174) could not represent the aggregate byte size as `usize`.

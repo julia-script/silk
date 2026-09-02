@@ -7,19 +7,19 @@ One owned heap indirection for recursive data and values whose storage must have
 ## When to use
 
 Use [`Box`](#declaration-73696c6b2f626f783a3a426f78) to break an inline layout cycle, such as a tree node that owns more tree nodes. Use
-[`make`](#declaration-73696c6b2f626f783a3a6d616b65) to allocate, [`get`](#declaration-73696c6b2f626f783a3a676574) or [`getMut`](#declaration-73696c6b2f626f783a3a6765744d7574) to borrow the element, and [`into`](#declaration-73696c6b2f626f783a3a696e746f) to recover it.
+[`make`](#declaration-73696c6b2f626f783a3a426f782e6d616b65) to allocate, [`get`](#declaration-73696c6b2f626f783a3a426f782e676574) or [`getMut`](#declaration-73696c6b2f626f783a3a426f782e6765744d7574) to borrow the element, and [`into`](#declaration-73696c6b2f626f783a3a426f782e696e746f) to recover it.
 
 ## Details
 
 A box owns exactly one allocation and one value. Borrowing exposes a one-element slice because
 Silk can return a slice tied to a parameter but cannot return a bare borrowed value. Dropping
-the box recursively drops its element; consuming it with [`into`](#declaration-73696c6b2f626f783a3a696e746f) transfers the element and
+the box recursively drops its element; consuming it with [`into`](#declaration-73696c6b2f626f783a3a426f782e696e746f) transfers the element and
 still releases the allocation exactly once.
 
 ## Gotchas
 
 Ordinary recursive destruction uses the call stack. For a very deep chain, consume links with
-[`into`](#declaration-73696c6b2f626f783a3a696e746f) in an iterative loop when stack depth matters.
+[`into`](#declaration-73696c6b2f626f783a3a426f782e696e746f) in an iterative loop when stack depth matters.
 
 ## Examples
 
@@ -56,7 +56,7 @@ pub fn main() -> i32 {
 
 Import as `Box` with `import silk.box { Box }`.
 
-Public declarations: 7.
+Public declarations: 3.
 
 <a id="declaration-73696c6b2f626f783a3a566163616e74"></a>
 
@@ -88,61 +88,60 @@ pub struct Box<T>
 
 Owns one heap-allocated `T` and releases both the value and its allocation on drop.
 
-<a id="declaration-73696c6b2f626f783a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f626f783a3a426f782e6d616b65"></a>
 
-## Implementation `silk/box.Box<T> for _`
+### Associated function `Box.make`
 
 ```silk
-impl silk/box.Box<T> for _
+pub effect fn make<T>(value: T) -> silk/box.Box<T> ! OutOfMemoryError ? &mut Allocator
 ```
 
-<a id="declaration-73696c6b2f626f783a3a6d616b65"></a>
+Moves one value into a new box with storage for exactly one element.
 
-## `make`
+#### Details
+
+The returned box owns the value and the allocation. Allocation failure produces
+`OutOfMemoryError` and does not produce a partial box.
+
+<a id="declaration-73696c6b2f626f783a3a426f782e676574"></a>
+
+### Method `Box.get`
 
 ```silk
-pub effect fn make(value: T) -> Box<T> ! OutOfMemoryError ? &mut Allocator
-```
-
-<a id="declaration-73696c6b2f626f783a3a676574"></a>
-
-## `get`
-
-```silk
-pub fn get(self: &unavailable) -> &[unavailable]
+pub fn get<T>(self: &Box<T>) -> &[T]
 ```
 
 Borrows the held value as a shared slice of length one.
 
-### Details
+#### Details
 
 The slice borrows the box and remains valid only for the lexical borrow.
 
-<a id="declaration-73696c6b2f626f783a3a6765744d7574"></a>
+<a id="declaration-73696c6b2f626f783a3a426f782e6765744d7574"></a>
 
-## `getMut`
+### Method `Box.getMut`
 
 ```silk
-pub fn getMut(self: &mut unavailable) -> &mut[unavailable]
+pub fn getMut<T>(self: &mut Box<T>) -> &mut [T]
 ```
 
 Borrows the held value as an exclusive slice of length one.
 
-### Details
+#### Details
 
 The slice permits mutation of the element and remains valid only for the lexical borrow.
 
-<a id="declaration-73696c6b2f626f783a3a696e746f"></a>
+<a id="declaration-73696c6b2f626f783a3a426f782e696e746f"></a>
 
-## `into`
+### Method `Box.into`
 
 ```silk
-pub fn into(self: Self) -> T
+pub fn into<T>(self: Box<T>) -> T
 ```
 
 Consumes the box, returns its owned value, and releases its allocation.
 
-<a id="declaration-73696c6b2f626f783a3a696d706c656d656e746174696f6e3a31"></a>
+<a id="declaration-73696c6b2f626f783a3a696d706c656d656e746174696f6e3a30"></a>
 
 ## Implementation `Drop for silk/box.Box<T>`
 

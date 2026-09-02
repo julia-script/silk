@@ -23,7 +23,7 @@ Windows do not provide this implementation.
 
 Import as `OsRandom` with `import silk.os_random { OsRandom }`.
 
-Public declarations: 2.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f6f735f72616e646f6d3a3a4f7352616e646f6d"></a>
 
@@ -35,39 +35,17 @@ pub struct OsRandom
 
 A stateless Unix-family provider of fresh cryptographically secure bytes.
 
-<a id="declaration-73696c6b2f6f735f72616e646f6d3a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6f735f72616e646f6d3a3a4f7352616e646f6d2e6d616b65"></a>
 
-## Implementation `OsRandom for _`
-
-```silk
-impl OsRandom for _
-```
-
-<a id="declaration-73696c6b2f6f735f72616e646f6d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
-
-### Operation `fillBytes`
-
-```silk
-fillBytes = _
-```
-
-<a id="declaration-73696c6b2f6f735f72616e646f6d3a3a696d706c656d656e746174696f6e3a31"></a>
-
-## Implementation `OsRandom for _`
-
-```silk
-impl OsRandom for _
-```
-
-<a id="declaration-73696c6b2f6f735f72616e646f6d3a3a6d616b65"></a>
-
-## `make`
+### Associated function `OsRandom.make`
 
 ```silk
 pub fn make() -> OsRandom
 ```
 
-<a id="declaration-73696c6b2f6f735f72616e646f6d3a3a696d706c656d656e746174696f6e3a32"></a>
+Creates a native random provider without reading randomness or installing an ambient default.
+
+<a id="declaration-73696c6b2f6f735f72616e646f6d3a3a696d706c656d656e746174696f6e3a30"></a>
 
 ## Implementation `Random for OsRandom`
 
@@ -75,7 +53,7 @@ pub fn make() -> OsRandom
 impl Random for OsRandom
 ```
 
-<a id="declaration-73696c6b2f6f735f72616e646f6d3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6f735f72616e646f6d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `fillBytes`
 

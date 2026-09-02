@@ -8,22 +8,22 @@ Explicitly allocated, single-threaded shared ownership Shared.with callback-scop
 
 Use [`Shared`](#declaration-73696c6b2f7368617265643a3a536861726564) when several independently owned local values or dormant computations must retain
 one mutable state without retaining a lexical borrow for their whole lifetimes. Construction is
-the only implicit storage boundary: `Shared.make` allocates once, while `Shared.clone`, `Shared.with`, and
-`Shared.withMut` allocate nothing themselves.
+the only implicit storage boundary: [`Shared.make`](#declaration-73696c6b2f7368617265643a3a5368617265642e6d616b65) allocates once, while [`Shared.clone`](#declaration-73696c6b2f7368617265643a3a5368617265642e636c6f6e65), [`Shared.with`](#declaration-73696c6b2f7368617265643a3a5368617265642e77697468), and
+[`Shared.withMut`](#declaration-73696c6b2f7368617265643a3a5368617265642e776974684d7574) allocate nothing themselves.
 
 ## Details
 
 Every handle is affine and local to one execution thread. Cloning adds one strong obligation;
 dropping a non-last handle preserves the value and allocation, while dropping the last handle
 cleans the value and then releases the allocation. Access is callback-scoped and exclusive even
-through `Shared.with`: nesting `Shared.with` under `Shared.with`, `Shared.withMut` under `Shared.with`, `Shared.with` under `Shared.withMut`, or
+through [`Shared.with`](#declaration-73696c6b2f7368617265643a3a5368617265642e77697468): nesting `Shared.with` under `Shared.with`, `Shared.withMut` under `Shared.with`, `Shared.with` under `Shared.withMut`, or
 `Shared.withMut` under `Shared.withMut` through an alias traps before the nested callback receives a reference.
 
 ## Gotchas
 
 Strong-reference cycles leak until ordinary source breaks them. This module does not expose weak
 handles, allocation identity, raw addresses, thread transfer, or post-trap cleanup guarantees.
-Extract work under `Shared.withMut` and invoke external callbacks only after the access call returns.
+Extract work under [`Shared.withMut`](#declaration-73696c6b2f7368617265643a3a5368617265642e776974684d7574) and invoke external callbacks only after the access call returns.
 
 ## Examples
 
@@ -67,7 +67,7 @@ pub fn main() -> i32 {
 
 Import as `Shared` with `import silk.shared { Shared }`.
 
-Public declarations: 5.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f7368617265643a3a536861726564"></a>
 
@@ -84,62 +84,61 @@ An affine, non-thread-transferable strong handle to one local value.
 The opaque core is the sole field and supplies recursively derived cleanup and local execution
 affinity. `Shared` declares no source Drop hook.
 
-<a id="declaration-73696c6b2f7368617265643a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f7368617265643a3a5368617265642e6d616b65"></a>
 
-## Implementation `silk/shared.Shared<T> for _`
+### Associated function `Shared.make`
 
 ```silk
-impl silk/shared.Shared<T> for _
+pub effect fn make<T>(value: T) -> silk/shared.Shared<T> ! OutOfMemoryError ? &mut Allocator
 ```
 
-<a id="declaration-73696c6b2f7368617265643a3a6d616b65"></a>
+Allocates one control block and transfers `value` into a new strong handle.
 
-## `make`
+#### Details
+
+Allocation failure leaves `value` under ordinary Effect-frame cleanup and produces no handle.
+The returned handle carries no allocator requirement after construction completes.
+
+<a id="declaration-73696c6b2f7368617265643a3a5368617265642e636c6f6e65"></a>
+
+### Method `Shared.clone`
 
 ```silk
-pub effect fn make(value: T) -> Shared<T> ! OutOfMemoryError ? &mut Allocator
-```
-
-<a id="declaration-73696c6b2f7368617265643a3a636c6f6e65"></a>
-
-## `clone`
-
-```silk
-pub fn clone(self: &unavailable) -> Shared<T>
+pub fn clone<T>(self: &Shared<T>) -> silk/shared.Shared<T>
 ```
 
 Adds one strong handle without allocating or touching the stored value.
 
-### Details
+#### Details
 
 Count exhaustion traps before mutation and does not produce a partial handle.
 
-<a id="declaration-73696c6b2f7368617265643a3a776974684d7574"></a>
+<a id="declaration-73696c6b2f7368617265643a3a5368617265642e776974684d7574"></a>
 
-## `withMut`
+### Method `Shared.withMut`
 
 ```silk
-pub fn withMut<A>(self: &unavailable, use: once fn(...)) -> A
+pub fn withMut<T, A>(self: &Shared<T>, use: once fn(&mut T) -> A) -> A
 ```
 
 Runs one take-once callback Shared.with exclusive access to the stored value.
 
-### Details
+#### Details
 
 The borrow cannot escape the callback or remain live across suspension. Reentrant access through
 any alias traps before the nested callback receives a reference.
 
-<a id="declaration-73696c6b2f7368617265643a3a77697468"></a>
+<a id="declaration-73696c6b2f7368617265643a3a5368617265642e77697468"></a>
 
-## `with`
+### Method `Shared.with`
 
 ```silk
-pub fn with<A>(self: &unavailable, use: once fn(...)) -> A
+pub fn with<T, A>(self: &Shared<T>, use: once fn(&T) -> A) -> A
 ```
 
 Runs one take-once callback Shared.with shared access to the stored value.
 
-### Details
+#### Details
 
-Inspection delegates through `Shared.withMut`, so it has the same exclusive runtime access state and
+Inspection delegates through [`Shared.withMut`](#declaration-73696c6b2f7368617265643a3a5368617265642e776974684d7574), so it has the same exclusive runtime access state and
 the same four-way reentrant conflict policy. The callback cannot mutate through its `&T`.

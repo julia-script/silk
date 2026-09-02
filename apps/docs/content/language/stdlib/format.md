@@ -6,8 +6,8 @@ Writer-backed value presentation, statically validated templates, and complete d
 
 ## When to use
 
-Use [`display`](#declaration-73696c6b2f666f726d61743a3a646973706c6179) for one value. Use [`format`](#declaration-73696c6b2f666f726d61743a3a666f726d6174) for a static template and a borrowed argument
-pack. Use [`displayWith`](#declaration-73696c6b2f666f726d61743a3a646973706c617957697468) when presentation needs explicit options. Integer `parse` operations
+Use [`display`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e646973706c6179) for one value. Use [`format`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e666f726d6174) for a static template and a borrowed argument
+pack. Use [`displayWith`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e646973706c617957697468) when presentation needs explicit options. Integer `parse` operations
 are the allocation-free inverse of their default presentation.
 
 ## Details
@@ -68,7 +68,7 @@ pub fn main() -> i32 {
 
 Import as `Format` with `import silk.format { Format }`.
 
-Public declarations: 44.
+Public declarations: 9.
 
 <a id="declaration-73696c6b2f666f726d61743a3a466f726d6174"></a>
 
@@ -85,25 +85,24 @@ The owner of the parsing and rendering operations.
 This struct carries no data and is never constructed by the library. Every operation is an
 inherent member declared in `impl Format`, reached through `import silk.format { Format }`.
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e64656661756c744f7074696f6e73"></a>
 
-## Implementation `Format for _`
-
-```silk
-impl Format for _
-```
-
-<a id="declaration-73696c6b2f666f726d61743a3a64656661756c744f7074696f6e73"></a>
-
-## `defaultOptions`
+### Associated function `Format.defaultOptions`
 
 ```silk
 pub fn defaultOptions() -> FormatOptions
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a6d616b65"></a>
+Returns the canonical formatting defaults.
 
-## `make`
+#### Details
+
+The result has no width, default alignment, a space fill, negative-only signs, no alternate
+form, no zero padding, no precision, and no color permission.
+
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e6d616b65"></a>
+
+### Associated function `Format.make`
 
 ```silk
 pub fn make(options: FormatOptions) -> Formatter
@@ -111,19 +110,19 @@ pub fn make(options: FormatOptions) -> Formatter
 
 Starts a Formatter session with explicit options.
 
-<a id="declaration-73696c6b2f666f726d61743a3a6d616b6544656661756c74"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e6d616b6544656661756c74"></a>
 
-## `makeDefault`
+### Associated function `Format.makeDefault`
 
 ```silk
 pub fn makeDefault() -> Formatter
 ```
 
-Starts a Formatter session with [`defaultOptions`](#declaration-73696c6b2f666f726d61743a3a64656661756c744f7074696f6e73).
+Starts a Formatter session with [`defaultOptions`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e64656661756c744f7074696f6e73).
 
-<a id="declaration-73696c6b2f666f726d61743a3a6861735769647468"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e6861735769647468"></a>
 
-## `hasWidth`
+### Associated function `Format.hasWidth`
 
 ```silk
 pub fn hasWidth(self: &silk/format.Formatter) -> bool
@@ -131,9 +130,9 @@ pub fn hasWidth(self: &silk/format.Formatter) -> bool
 
 Reports whether a minimum width was supplied.
 
-<a id="declaration-73696c6b2f666f726d61743a3a7769647468"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e7769647468"></a>
 
-## `width`
+### Associated function `Format.width`
 
 ```silk
 pub fn width(self: &silk/format.Formatter) -> usize
@@ -142,9 +141,9 @@ pub fn width(self: &silk/format.Formatter) -> usize
 Returns the requested minimum width in Unicode scalars, not UTF-8 bytes or terminal cells, or
 zero when no width was supplied.
 
-<a id="declaration-73696c6b2f666f726d61743a3a616c69676e6d656e74"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e616c69676e6d656e74"></a>
 
-## `alignment`
+### Associated function `Format.alignment`
 
 ```silk
 pub fn alignment(self: &silk/format.Formatter) -> Alignment
@@ -152,9 +151,9 @@ pub fn alignment(self: &silk/format.Formatter) -> Alignment
 
 Returns the requested alignment.
 
-<a id="declaration-73696c6b2f666f726d61743a3a66696c6c"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e66696c6c"></a>
 
-## `fill`
+### Associated function `Format.fill`
 
 ```silk
 pub fn fill(self: &silk/format.Formatter) -> char
@@ -162,9 +161,9 @@ pub fn fill(self: &silk/format.Formatter) -> char
 
 Returns the requested fill scalar.
 
-<a id="declaration-73696c6b2f666f726d61743a3a7369676e"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e7369676e"></a>
 
-## `sign`
+### Associated function `Format.sign`
 
 ```silk
 pub fn sign(self: &silk/format.Formatter) -> Sign
@@ -172,9 +171,9 @@ pub fn sign(self: &silk/format.Formatter) -> Sign
 
 Returns the requested sign policy.
 
-<a id="declaration-73696c6b2f666f726d61743a3a616c7465726e617465"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e616c7465726e617465"></a>
 
-## `alternate`
+### Associated function `Format.alternate`
 
 ```silk
 pub fn alternate(self: &silk/format.Formatter) -> bool
@@ -182,9 +181,9 @@ pub fn alternate(self: &silk/format.Formatter) -> bool
 
 Reports whether alternate presentation is requested.
 
-<a id="declaration-73696c6b2f666f726d61743a3a7a65726f506164"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e7a65726f506164"></a>
 
-## `zeroPad`
+### Associated function `Format.zeroPad`
 
 ```silk
 pub fn zeroPad(self: &silk/format.Formatter) -> bool
@@ -193,9 +192,9 @@ pub fn zeroPad(self: &silk/format.Formatter) -> bool
 Reports whether width-driven integer zero padding is requested. A supplied precision disables
 that padding when presenting an integer.
 
-<a id="declaration-73696c6b2f666f726d61743a3a686173507265636973696f6e"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e686173507265636973696f6e"></a>
 
-## `hasPrecision`
+### Associated function `Format.hasPrecision`
 
 ```silk
 pub fn hasPrecision(self: &silk/format.Formatter) -> bool
@@ -203,9 +202,9 @@ pub fn hasPrecision(self: &silk/format.Formatter) -> bool
 
 Reports whether a numeric precision was supplied.
 
-<a id="declaration-73696c6b2f666f726d61743a3a707265636973696f6e"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e707265636973696f6e"></a>
 
-## `precision`
+### Associated function `Format.precision`
 
 ```silk
 pub fn precision(self: &silk/format.Formatter) -> usize
@@ -214,9 +213,9 @@ pub fn precision(self: &silk/format.Formatter) -> usize
 Returns the requested minimum digit count, or zero when no numeric precision was supplied. For
 integers, a supplied precision disables width-driven zero padding.
 
-<a id="declaration-73696c6b2f666f726d61743a3a636f6c6f72"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e636f6c6f72"></a>
 
-## `color`
+### Associated function `Format.color`
 
 ```silk
 pub fn color(self: &silk/format.Formatter) -> bool
@@ -224,9 +223,9 @@ pub fn color(self: &silk/format.Formatter) -> bool
 
 Reports whether a presentation may emit balanced ANSI styling.
 
-<a id="declaration-73696c6b2f666f726d61743a3a7772697465"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e7772697465"></a>
 
-## `write`
+### Associated function `Format.write`
 
 ```silk
 pub effect fn write(self: &mut silk/format.Formatter, bytes: &[u8]) -> () ! WriterError ? &mut Writer
@@ -234,14 +233,14 @@ pub effect fn write(self: &mut silk/format.Formatter, bytes: &[u8]) -> () ! Writ
 
 Writes one byte sequence through the ambient Writer.
 
-### Gotchas
+#### Gotchas
 
 If Writer fails, this returns the original `WriterError`; any prefix accepted before the failure
 remains written.
 
-<a id="declaration-73696c6b2f666f726d61743a3a777269746554657874"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e777269746554657874"></a>
 
-## `writeText`
+### Associated function `Format.writeText`
 
 ```silk
 pub effect fn writeText(self: &mut silk/format.Formatter, text: string) -> () ! WriterError ? &mut Writer
@@ -249,14 +248,14 @@ pub effect fn writeText(self: &mut silk/format.Formatter, text: string) -> () ! 
 
 Writes valid UTF-8 content without applying width policy.
 
-### Gotchas
+#### Gotchas
 
 If Writer fails, this returns the original `WriterError`; any prefix accepted before the failure
 remains written.
 
-<a id="declaration-73696c6b2f666f726d61743a3a777269746550616464696e67"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e777269746550616464696e67"></a>
 
-## `writePadding`
+### Associated function `Format.writePadding`
 
 ```silk
 pub effect fn writePadding(self: &mut silk/format.Formatter, count: usize) -> () ! WriterError ? &mut Writer
@@ -264,14 +263,14 @@ pub effect fn writePadding(self: &mut silk/format.Formatter, count: usize) -> ()
 
 Writes `count` copies of the session's fill scalar in bounded chunks.
 
-### Gotchas
+#### Gotchas
 
 If Writer fails, this returns the original `WriterError`; any fill accepted before the failure
 remains written.
 
-<a id="declaration-73696c6b2f666f726d61743a3a6c656164696e6750616464696e67"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e6c656164696e6750616464696e67"></a>
 
-## `leadingPadding`
+### Associated function `Format.leadingPadding`
 
 ```silk
 pub fn leadingPadding(self: &silk/format.Formatter, contentWidth: usize) -> usize
@@ -279,18 +278,18 @@ pub fn leadingPadding(self: &silk/format.Formatter, contentWidth: usize) -> usiz
 
 Returns the number of fill scalars before content with this visible width.
 
-### Details
+#### Details
 
-A user-defined Display can use this together with [`writeLeadingPadding`](#declaration-73696c6b2f666f726d61743a3a77726974654c656164696e6750616464696e67) and
-[`writeTrailingPadding`](#declaration-73696c6b2f666f726d61743a3a7772697465547261696c696e6750616464696e67) so ANSI control bytes never count toward the visible content width.
+A user-defined Display can use this together with [`writeLeadingPadding`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e77726974654c656164696e6750616464696e67) and
+[`writeTrailingPadding`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e7772697465547261696c696e6750616464696e67) so ANSI control bytes never count toward the visible content width.
 `Alignment.Default` and `Alignment.Right` put all extra fill before the content;
 `Alignment.Left` puts Option.none there. `Alignment.Center` puts half there, rounding an odd extra
 scalar down so the trailing side receives the remainder. No padding is returned when the
 requested width does not exceed `contentWidth`.
 
-<a id="declaration-73696c6b2f666f726d61743a3a747261696c696e6750616464696e67"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e747261696c696e6750616464696e67"></a>
 
-## `trailingPadding`
+### Associated function `Format.trailingPadding`
 
 ```silk
 pub fn trailingPadding(self: &silk/format.Formatter, contentWidth: usize) -> usize
@@ -298,16 +297,16 @@ pub fn trailingPadding(self: &silk/format.Formatter, contentWidth: usize) -> usi
 
 Returns the number of fill scalars after content with this visible width.
 
-### Details
+#### Details
 
 `Alignment.Default` and `Alignment.Right` put no extra fill after the content;
 `Alignment.Left` puts all extra fill there. `Alignment.Center` puts half there, rounding an odd
 extra scalar up. No padding is returned when the requested width does not exceed
 `contentWidth`.
 
-<a id="declaration-73696c6b2f666f726d61743a3a77726974654c656164696e6750616464696e67"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e77726974654c656164696e6750616464696e67"></a>
 
-## `writeLeadingPadding`
+### Associated function `Format.writeLeadingPadding`
 
 ```silk
 pub effect fn writeLeadingPadding(self: &mut silk/format.Formatter, contentWidth: usize) -> () ! WriterError ? &mut Writer
@@ -316,14 +315,14 @@ pub effect fn writeLeadingPadding(self: &mut silk/format.Formatter, contentWidth
 Emits all fill required before content whose width is the supplied Unicode-scalar count, not a
 byte or terminal-cell count.
 
-### Gotchas
+#### Gotchas
 
 If Writer fails, this returns the original `WriterError`; any leading fill accepted before the
 failure remains written.
 
-<a id="declaration-73696c6b2f666f726d61743a3a7772697465547261696c696e6750616464696e67"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e7772697465547261696c696e6750616464696e67"></a>
 
-## `writeTrailingPadding`
+### Associated function `Format.writeTrailingPadding`
 
 ```silk
 pub effect fn writeTrailingPadding(self: &mut silk/format.Formatter, contentWidth: usize) -> () ! WriterError ? &mut Writer
@@ -332,14 +331,14 @@ pub effect fn writeTrailingPadding(self: &mut silk/format.Formatter, contentWidt
 Emits all fill required after content whose width is the supplied Unicode-scalar count, not a
 byte or terminal-cell count.
 
-### Gotchas
+#### Gotchas
 
 If Writer fails, this returns the original `WriterError`; any trailing fill accepted before the
 failure remains written.
 
-<a id="declaration-73696c6b2f666f726d61743a3a646973706c6179"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e646973706c6179"></a>
 
-## `display`
+### Associated function `Format.display`
 
 ```silk
 pub effect fn display<T>(value: &T) -> () ! WriterError ? &mut Writer
@@ -347,14 +346,14 @@ pub effect fn display<T>(value: &T) -> () ! WriterError ? &mut Writer
 
 Displays one value with canonical defaults through the ambient mutable Writer.
 
-### Details
+#### Details
 
-This operation uses [`defaultOptions`](#declaration-73696c6b2f666f726d61743a3a64656661756c744f7074696f6e73) and does not require Allocator. If Writer fails, an
+This operation uses [`defaultOptions`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e64656661756c744f7074696f6e73) and does not require Allocator. If Writer fails, an
 accepted prefix remains written and the original `WriterError` is preserved.
 
-<a id="declaration-73696c6b2f666f726d61743a3a646973706c617957697468"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e646973706c617957697468"></a>
 
-## `displayWith`
+### Associated function `Format.displayWith`
 
 ```silk
 pub effect fn displayWith<T>(value: &T, options: FormatOptions) -> () ! WriterError ? &mut Writer
@@ -362,16 +361,16 @@ pub effect fn displayWith<T>(value: &T, options: FormatOptions) -> () ! WriterEr
 
 Displays one value with explicit options through the ambient mutable Writer.
 
-### Details
+#### Details
 
 Width counts Unicode scalars. For integers, precision disables width-driven zero padding.
 Alternate form and color do not change integer output. This operation does not require
 Allocator. If Writer fails, an accepted prefix remains written and the original `WriterError`
 is preserved.
 
-<a id="declaration-73696c6b2f666f726d61743a3a666f726d6174"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e666f726d6174"></a>
 
-## `format`
+### Associated function `Format.format`
 
 ```silk
 pub effect fn format<Args>(static template: string, args: &Args) -> () ! WriterError ? &mut Writer
@@ -379,25 +378,25 @@ pub effect fn format<Args>(static template: string, args: &Args) -> () ! WriterE
 
 Writes a statically validated template with values from one borrowed tuple or record.
 
-### When to use
+#### When to use
 
 Use when the template is static and each replacement value has a `Display` implementation.
 
-### Details
+#### Details
 
 `{}` selects tuple fields in order. `{name}` selects visible record fields. `{{` and `}}`
 write literal braces. The operation borrows `args` and does not allocate an intermediate
 `String`.
 
-### Gotchas
+#### Gotchas
 
 A template cannot mix positional and named placeholders. A positional template must use every
 tuple field one time. Malformed templates and unavailable fields stop compilation. A Writer
 failure preserves the prefix that the provider accepted.
 
-### Examples
+#### Examples
 
-#### Write a named argument pack
+##### Write a named argument pack
 
 This program writes `Hello, Julia. Age: 31` to standard output.
 
@@ -431,9 +430,9 @@ pub fn main() -> i32 {
 }
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a756e7369676e656456616c7565"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e756e7369676e656456616c7565"></a>
 
-## `unsignedValue`
+### Associated function `Format.unsignedValue`
 
 ```silk
 pub fn unsignedValue(text: string) -> silk/result.Result<u64, silk/format.ParseError>
@@ -441,15 +440,15 @@ pub fn unsignedValue(text: string) -> silk/result.Result<u64, silk/format.ParseE
 
 Reads complete decimal text as an unsigned value.
 
-### Details
+#### Details
 
 Empty text, a leading sign, and any byte outside `0`–`9` are `NotANumber` at the offset that
 stopped the read. A value above `u64.MAX` is `OutOfRange`, detected before the overflow rather
 than after it.
 
-<a id="declaration-73696c6b2f666f726d61743a3a7369676e656456616c7565"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e7369676e656456616c7565"></a>
 
-## `signedValue`
+### Associated function `Format.signedValue`
 
 ```silk
 pub fn signedValue(text: string) -> silk/result.Result<i64, silk/format.ParseError>
@@ -457,14 +456,14 @@ pub fn signedValue(text: string) -> silk/result.Result<i64, silk/format.ParseErr
 
 Reads complete decimal text as a signed value, accepting one leading `-`.
 
-### Details
+#### Details
 
 Digits accumulate negatively, so text naming `i64.MIN` reads like any other value. A leading `+`
 is not accepted. A value outside `i64.MIN`–`i64.MAX` is `OutOfRange`.
 
-<a id="declaration-73696c6b2f666f726d61743a3a753856616c7565"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e753856616c7565"></a>
 
-## `u8Value`
+### Associated function `Format.u8Value`
 
 ```silk
 pub fn u8Value(text: string) -> silk/result.Result<u8, silk/format.ParseError>
@@ -472,9 +471,9 @@ pub fn u8Value(text: string) -> silk/result.Result<u8, silk/format.ParseError>
 
 Reads complete decimal text as a `u8`, rejecting a value above `u8.MAX`.
 
-<a id="declaration-73696c6b2f666f726d61743a3a75313656616c7565"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e75313656616c7565"></a>
 
-## `u16Value`
+### Associated function `Format.u16Value`
 
 ```silk
 pub fn u16Value(text: string) -> silk/result.Result<u16, silk/format.ParseError>
@@ -482,9 +481,9 @@ pub fn u16Value(text: string) -> silk/result.Result<u16, silk/format.ParseError>
 
 Reads complete decimal text as a `u16`, rejecting a value above `u16.MAX`.
 
-<a id="declaration-73696c6b2f666f726d61743a3a75333256616c7565"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e75333256616c7565"></a>
 
-## `u32Value`
+### Associated function `Format.u32Value`
 
 ```silk
 pub fn u32Value(text: string) -> silk/result.Result<u32, silk/format.ParseError>
@@ -492,9 +491,9 @@ pub fn u32Value(text: string) -> silk/result.Result<u32, silk/format.ParseError>
 
 Reads complete decimal text as a `u32`, rejecting a value above `u32.MAX`.
 
-<a id="declaration-73696c6b2f666f726d61743a3a75363456616c7565"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e75363456616c7565"></a>
 
-## `u64Value`
+### Associated function `Format.u64Value`
 
 ```silk
 pub fn u64Value(text: string) -> silk/result.Result<u64, silk/format.ParseError>
@@ -502,9 +501,9 @@ pub fn u64Value(text: string) -> silk/result.Result<u64, silk/format.ParseError>
 
 Reads complete decimal text as a `u64`, rejecting a value above `u64.MAX`.
 
-<a id="declaration-73696c6b2f666f726d61743a3a7573697a6556616c7565"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e7573697a6556616c7565"></a>
 
-## `usizeValue`
+### Associated function `Format.usizeValue`
 
 ```silk
 pub fn usizeValue(text: string) -> silk/result.Result<usize, silk/format.ParseError>
@@ -513,9 +512,9 @@ pub fn usizeValue(text: string) -> silk/result.Result<usize, silk/format.ParseEr
 Reads complete decimal text as a `usize`, rejecting a value the target's pointer width cannot
 hold.
 
-<a id="declaration-73696c6b2f666f726d61743a3a693856616c7565"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e693856616c7565"></a>
 
-## `i8Value`
+### Associated function `Format.i8Value`
 
 ```silk
 pub fn i8Value(text: string) -> silk/result.Result<i8, silk/format.ParseError>
@@ -523,9 +522,9 @@ pub fn i8Value(text: string) -> silk/result.Result<i8, silk/format.ParseError>
 
 Reads complete decimal text as an `i8`, rejecting a value outside `i8.MIN`–`i8.MAX`.
 
-<a id="declaration-73696c6b2f666f726d61743a3a69313656616c7565"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e69313656616c7565"></a>
 
-## `i16Value`
+### Associated function `Format.i16Value`
 
 ```silk
 pub fn i16Value(text: string) -> silk/result.Result<i16, silk/format.ParseError>
@@ -533,9 +532,9 @@ pub fn i16Value(text: string) -> silk/result.Result<i16, silk/format.ParseError>
 
 Reads complete decimal text as an `i16`, rejecting a value outside `i16.MIN`–`i16.MAX`.
 
-<a id="declaration-73696c6b2f666f726d61743a3a69333256616c7565"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e69333256616c7565"></a>
 
-## `i32Value`
+### Associated function `Format.i32Value`
 
 ```silk
 pub fn i32Value(text: string) -> silk/result.Result<i32, silk/format.ParseError>
@@ -543,9 +542,9 @@ pub fn i32Value(text: string) -> silk/result.Result<i32, silk/format.ParseError>
 
 Reads complete decimal text as an `i32`, rejecting a value outside `i32.MIN`–`i32.MAX`.
 
-<a id="declaration-73696c6b2f666f726d61743a3a69363456616c7565"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e69363456616c7565"></a>
 
-## `i64Value`
+### Associated function `Format.i64Value`
 
 ```silk
 pub fn i64Value(text: string) -> silk/result.Result<i64, silk/format.ParseError>
@@ -553,9 +552,9 @@ pub fn i64Value(text: string) -> silk/result.Result<i64, silk/format.ParseError>
 
 Reads complete decimal text as an `i64`, rejecting a value outside `i64.MIN`–`i64.MAX`.
 
-<a id="declaration-73696c6b2f666f726d61743a3a6973697a6556616c7565"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e6973697a6556616c7565"></a>
 
-## `isizeValue`
+### Associated function `Format.isizeValue`
 
 ```silk
 pub fn isizeValue(text: string) -> silk/result.Result<isize, silk/format.ParseError>
@@ -666,7 +665,7 @@ Explicit policy for one formatting session.
 
 ### Details
 
-[`defaultOptions`](#declaration-73696c6b2f666f726d61743a3a64656661756c744f7074696f6e73) uses no width, default alignment, a space fill, negative-only signs, no
+[`defaultOptions`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e64656661756c744f7074696f6e73) uses no width, default alignment, a space fill, negative-only signs, no
 alternate form, no zero padding, no precision, and no color. Width counts Unicode scalars.
 For integers, precision disables width-driven zero padding. Alternate form and color do not
 change integer output.
@@ -845,7 +844,7 @@ pub reason: silk/format.NotANumber | silk/format.OutOfRange
 
 The reason the text was rejected.
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a31"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a30"></a>
 
 ## Implementation `Display for u8`
 
@@ -853,15 +852,15 @@ The reason the text was rejected.
 impl Display for u8
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `display`
 
 ```silk
-display = u8.impl@1.display
+display = u8.impl@0.display
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a32"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a31"></a>
 
 ## Implementation `Display for u16`
 
@@ -869,15 +868,15 @@ display = u8.impl@1.display
 impl Display for u16
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `display`
 
 ```silk
-display = u16.impl@2.display
+display = u16.impl@1.display
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a33"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a32"></a>
 
 ## Implementation `Display for u32`
 
@@ -885,15 +884,15 @@ display = u16.impl@2.display
 impl Display for u32
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `display`
 
 ```silk
-display = u32.impl@3.display
+display = u32.impl@2.display
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a34"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a33"></a>
 
 ## Implementation `Display for u64`
 
@@ -901,15 +900,15 @@ display = u32.impl@3.display
 impl Display for u64
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `display`
 
 ```silk
-display = u64.impl@4.display
+display = u64.impl@3.display
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a35"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a34"></a>
 
 ## Implementation `Display for usize`
 
@@ -917,15 +916,15 @@ display = u64.impl@4.display
 impl Display for usize
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a353a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `display`
 
 ```silk
-display = usize.impl@5.display
+display = usize.impl@4.display
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a36"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a35"></a>
 
 ## Implementation `Display for i8`
 
@@ -933,15 +932,15 @@ display = usize.impl@5.display
 impl Display for i8
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a363a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a353a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `display`
 
 ```silk
-display = i8.impl@6.display
+display = i8.impl@5.display
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a37"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a36"></a>
 
 ## Implementation `Display for i16`
 
@@ -949,15 +948,15 @@ display = i8.impl@6.display
 impl Display for i16
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a373a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a363a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `display`
 
 ```silk
-display = i16.impl@7.display
+display = i16.impl@6.display
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a38"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a37"></a>
 
 ## Implementation `Display for i32`
 
@@ -965,15 +964,15 @@ display = i16.impl@7.display
 impl Display for i32
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a383a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a373a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `display`
 
 ```silk
-display = i32.impl@8.display
+display = i32.impl@7.display
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a39"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a38"></a>
 
 ## Implementation `Display for i64`
 
@@ -981,15 +980,15 @@ display = i32.impl@8.display
 impl Display for i64
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a393a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a383a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `display`
 
 ```silk
-display = i64.impl@9.display
+display = i64.impl@8.display
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a3130"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a39"></a>
 
 ## Implementation `Display for isize`
 
@@ -997,15 +996,15 @@ display = i64.impl@9.display
 impl Display for isize
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a31303a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a393a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `display`
 
 ```silk
-display = isize.impl@10.display
+display = isize.impl@9.display
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a3131"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a3130"></a>
 
 ## Implementation `Display for string`
 
@@ -1013,12 +1012,12 @@ display = isize.impl@10.display
 impl Display for string
 ```
 
-<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a31313a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a31303a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `display`
 
 ```silk
-display = string.impl@11.display
+display = string.impl@10.display
 ```
 
 Writes the string's UTF-8 bytes through the ambient mutable Writer.

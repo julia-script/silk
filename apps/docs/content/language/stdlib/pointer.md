@@ -14,8 +14,8 @@ the compiler checks; a pointer carries no ownership, no loan, and no validity gu
 
 `*const T` and `*mut T` are `Copy` and may be null. Forming a pointer is safe because taking an
 address has no memory effect: the borrow's loan ends where it would anyway, and the pointer
-keeps nothing alive. [`offset`](#declaration-73696c6b2f706f696e7465723a3a6f6666736574) and [`offsetMut`](#declaration-73696c6b2f706f696e7465723a3a6f66667365744d7574) advance by whole elements of `T`. [`read`](#declaration-73696c6b2f706f696e7465723a3a72656164)
-and [`write`](#declaration-73696c6b2f706f696e7465723a3a7772697465) are bounded to a `Copy` pointee so a value can never be moved through raw memory.
+keeps nothing alive. [`offset`](#declaration-73696c6b2f706f696e7465723a3a506f696e7465722e6f6666736574) and [`offsetMut`](#declaration-73696c6b2f706f696e7465723a3a506f696e7465722e6f66667365744d7574) advance by whole elements of `T`. [`read`](#declaration-73696c6b2f706f696e7465723a3a506f696e7465722e72656164)
+and [`write`](#declaration-73696c6b2f706f696e7465723a3a506f696e7465722e7772697465) are bounded to a `Copy` pointee so a value can never be moved through raw memory.
 
 ## Gotchas
 
@@ -47,7 +47,7 @@ pub fn main() -> i32 {
 
 Import as `Pointer` with `import silk.pointer { Pointer }`.
 
-Public declarations: 11.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f706f696e7465723a3a506f696e746572"></a>
 
@@ -61,13 +61,14 @@ The importable name of the `silk.pointer` module scope.
 
 ### Details
 
-This struct carries no data and is never constructed by the library. Importing it as
-`import silk.pointer { Pointer }` names the module scope, so `Pointer.fromRef(...)` and the
-other operations resolve through it. It is unrelated to the `*const T` and `*mut T` types.
+This struct carries no data and is never constructed by the library. Every operation is an
+inherent member declared in `impl Pointer`, so `import silk.pointer { Pointer }` is the one
+import that reaches `Pointer.fromRef(...)` and the rest. It is unrelated to the `*const T` and
+`*mut T` types.
 
-<a id="declaration-73696c6b2f706f696e7465723a3a6e756c6c"></a>
+<a id="declaration-73696c6b2f706f696e7465723a3a506f696e7465722e6e756c6c"></a>
 
-## `null`
+### Associated function `Pointer.null`
 
 ```silk
 pub fn null<T>() -> *mut T
@@ -75,14 +76,14 @@ pub fn null<T>() -> *mut T
 
 Returns the null `*mut T` address.
 
-### Details
+#### Details
 
-Null is a value, not a failure. Test for it with [`isNull`](#declaration-73696c6b2f706f696e7465723a3a69734e756c6c) before dereferencing a pointer
+Null is a value, not a failure. Test for it with [`isNull`](#declaration-73696c6b2f706f696e7465723a3a506f696e7465722e69734e756c6c) before dereferencing a pointer
 that native code may have left unset.
 
-<a id="declaration-73696c6b2f706f696e7465723a3a69734e756c6c"></a>
+<a id="declaration-73696c6b2f706f696e7465723a3a506f696e7465722e69734e756c6c"></a>
 
-## `isNull`
+### Associated function `Pointer.isNull`
 
 ```silk
 pub fn isNull<T>(pointer: *const T) -> bool
@@ -90,9 +91,9 @@ pub fn isNull<T>(pointer: *const T) -> bool
 
 Reports whether a pointer is null.
 
-<a id="declaration-73696c6b2f706f696e7465723a3a66726f6d526566"></a>
+<a id="declaration-73696c6b2f706f696e7465723a3a506f696e7465722e66726f6d526566"></a>
 
-## `fromRef`
+### Associated function `Pointer.fromRef`
 
 ```silk
 pub fn fromRef<T>(value: &T) -> *const T
@@ -100,14 +101,14 @@ pub fn fromRef<T>(value: &T) -> *const T
 
 Forms a `*const T` from a shared reference.
 
-### Details
+#### Details
 
 The reference's loan ends as it would without the call; the pointer holds no loan on the
 referent and does not keep it alive.
 
-<a id="declaration-73696c6b2f706f696e7465723a3a66726f6d4d7574526566"></a>
+<a id="declaration-73696c6b2f706f696e7465723a3a506f696e7465722e66726f6d4d7574526566"></a>
 
-## `fromMutRef`
+### Associated function `Pointer.fromMutRef`
 
 ```silk
 pub fn fromMutRef<T>(value: &mut T) -> *mut T
@@ -115,14 +116,14 @@ pub fn fromMutRef<T>(value: &mut T) -> *mut T
 
 Forms a `*mut T` from an exclusive reference.
 
-### Details
+#### Details
 
 The reference's loan ends as it would without the call; the pointer holds no loan on the
 referent and does not keep it alive.
 
-<a id="declaration-73696c6b2f706f696e7465723a3a66726f6d536c696365"></a>
+<a id="declaration-73696c6b2f706f696e7465723a3a506f696e7465722e66726f6d536c696365"></a>
 
-## `fromSlice`
+### Associated function `Pointer.fromSlice`
 
 ```silk
 pub fn fromSlice<T>(values: &[T]) -> *const T
@@ -130,14 +131,14 @@ pub fn fromSlice<T>(values: &[T]) -> *const T
 
 Forms a `*const T` addressing the first element of a shared slice.
 
-### Details
+#### Details
 
 The pointer carries no length. Pass the slice's length separately to native code that fills
 or reads a buffer.
 
-<a id="declaration-73696c6b2f706f696e7465723a3a66726f6d4d7574536c696365"></a>
+<a id="declaration-73696c6b2f706f696e7465723a3a506f696e7465722e66726f6d4d7574536c696365"></a>
 
-## `fromMutSlice`
+### Associated function `Pointer.fromMutSlice`
 
 ```silk
 pub fn fromMutSlice<T>(values: &mut [T]) -> *mut T
@@ -145,14 +146,14 @@ pub fn fromMutSlice<T>(values: &mut [T]) -> *mut T
 
 Forms a `*mut T` addressing the first element of an exclusive slice.
 
-### Details
+#### Details
 
 The pointer carries no length. Pass the slice's length separately to native code that fills
 or reads a buffer.
 
-<a id="declaration-73696c6b2f706f696e7465723a3a6f6666736574"></a>
+<a id="declaration-73696c6b2f706f696e7465723a3a506f696e7465722e6f6666736574"></a>
 
-## `offset`
+### Associated function `Pointer.offset`
 
 ```silk
 pub unsafe fn offset<T>(pointer: *const T, count: usize) -> *const T
@@ -160,14 +161,14 @@ pub unsafe fn offset<T>(pointer: *const T, count: usize) -> *const T
 
 Advances a `*const T` by `count` elements of `T`.
 
-### Gotchas
+#### Gotchas
 
 The caller must prove that the pointer and the result address elements of one live
 allocation.
 
-<a id="declaration-73696c6b2f706f696e7465723a3a6f66667365744d7574"></a>
+<a id="declaration-73696c6b2f706f696e7465723a3a506f696e7465722e6f66667365744d7574"></a>
 
-## `offsetMut`
+### Associated function `Pointer.offsetMut`
 
 ```silk
 pub unsafe fn offsetMut<T>(pointer: *mut T, count: usize) -> *mut T
@@ -175,14 +176,14 @@ pub unsafe fn offsetMut<T>(pointer: *mut T, count: usize) -> *mut T
 
 Advances a `*mut T` by `count` elements of `T`.
 
-### Gotchas
+#### Gotchas
 
 The caller must prove that the pointer and the result address elements of one live
 allocation.
 
-<a id="declaration-73696c6b2f706f696e7465723a3a72656164"></a>
+<a id="declaration-73696c6b2f706f696e7465723a3a506f696e7465722e72656164"></a>
 
-## `read`
+### Associated function `Pointer.read`
 
 ```silk
 pub unsafe fn read<T>(pointer: *const T) -> T
@@ -190,14 +191,14 @@ pub unsafe fn read<T>(pointer: *const T) -> T
 
 Copies the `T` stored at a pointer.
 
-### Gotchas
+#### Gotchas
 
 The caller must prove that the pointer is non-null, aligned for `T`, and addresses an
 initialized `T` whose storage is still live.
 
-<a id="declaration-73696c6b2f706f696e7465723a3a7772697465"></a>
+<a id="declaration-73696c6b2f706f696e7465723a3a506f696e7465722e7772697465"></a>
 
-## `write`
+### Associated function `Pointer.write`
 
 ```silk
 pub unsafe fn write<T>(pointer: *mut T, value: T) -> ()
@@ -205,7 +206,7 @@ pub unsafe fn write<T>(pointer: *mut T, value: T) -> ()
 
 Stores a `Copy` value at a pointer.
 
-### Gotchas
+#### Gotchas
 
 The caller must prove that the pointer is non-null, aligned for `T`, and addresses writable
 storage for `T` that is still live.
