@@ -16,9 +16,9 @@ const encoder = new TextEncoder()
 const snapshot = (source: string, target = 'aarch64-apple-darwin') =>
   Analysis.ofSourceRealized('random/main', encoder.encode(source), target)
 
-const osRandomProgram = `import silk.effect as Effect
-import silk.os_random as OsRandom
-import silk.random as Random
+const osRandomProgram = `import silk.effect { Effect }
+import silk.os_random { OsRandom }
+import silk.random { Random }
 import silk.u8 as u8
 fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 {
@@ -349,7 +349,7 @@ it.effect('stages every evaluator failure before touching caller storage', () =>
 it.effect('keeps direct-Wasm rejection reachable-only', () =>
   Effect.gen(function* () {
     const unused = yield* snapshot(
-      `import silk.os_random as OsRandom
+      `import silk.os_random { OsRandom }
 pub fn main() -> i32 {
   let provider = OsRandom.make()
   drop provider

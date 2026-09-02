@@ -42,7 +42,7 @@ pub fn main() -> i32 {
 
 Import as `OsChildProcess` with `import silk.os_child_process { OsChildProcess }`.
 
-Public declarations: 2.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a4f734368696c6450726f63657373"></a>
 
@@ -59,9 +59,9 @@ A stateless native [`ChildProcess`](./child-process.md#declaration-73696c6b2f636
 The provider borrows the request and transfers each completed capture into independent [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573)
 storage. The returned [`ProcessOutcome`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734f7574636f6d65) owns that storage.
 
-<a id="declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a6d616b65"></a>
+<a id="declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a4f734368696c6450726f636573732e6d616b65"></a>
 
-## `make`
+### Associated function `OsChildProcess.make`
 
 ```silk
 pub fn make() -> OsChildProcess
@@ -69,12 +69,12 @@ pub fn make() -> OsChildProcess
 
 Creates a stateless provider for the native process boundary.
 
-### When to use
+#### When to use
 
 Use this function at a native application edge. Provide the result as `&mut ChildProcess` to
 portable code that calls `ChildProcess.execute` or `silk.child_process.submit`.
 
-### Details
+#### Details
 
 Construction starts no process and allocates no storage. Each execution translates native
 failures into [`ProcessError`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72) and requires an allocator for owned output captures.

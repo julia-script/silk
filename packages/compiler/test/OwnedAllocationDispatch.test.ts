@@ -10,7 +10,7 @@ const ascii = (value: string): Uint8Array =>
 /** A user-authored allocator that always refuses, exercising the failure half of dispatch. */
 const refusing = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct ExhaustedAllocator { tag: i32 }
 
@@ -40,7 +40,7 @@ const delegating = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct QuotaAllocator { tag: i32 }
 
@@ -135,7 +135,7 @@ const ordinalProgram = (
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct ExhaustedAllocator { tag: i32 }
 
@@ -215,7 +215,7 @@ const countedQuota = (quota: number): string => `import silk.allocator { Allocat
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct QuotaAllocator { remaining: i32 }
 
@@ -294,7 +294,7 @@ const forwardedProvider = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct CountingAllocator { hits: i32 }
 

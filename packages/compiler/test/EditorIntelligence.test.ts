@@ -23,7 +23,10 @@ const documentationText = (
   if (block === undefined) return undefined
   const source = Projections.syntaxOf(snapshot, block.span.sourceId)?.source
   if (source === undefined) return undefined
-  return decoder.decode(SourceFile.toUint8Array(source).slice(block.span.start, block.span.end))
+  // A member's block is indented inside its impl; documentation ignores that indentation.
+  return decoder
+    .decode(SourceFile.toUint8Array(source).slice(block.span.start, block.span.end))
+    .replace(/\n[ \t]+\/\/\//g, '\n///')
 }
 
 const occurrenceAt = (
@@ -182,7 +185,10 @@ pub fn main() -> i32 { let state = State. return 0 }`
 
 it.effect('completes variants and module operations from a file-named nominal union', () => {
   const source = `import state { State }
-pub fn main() -> i32 { let state = State. return 0 }`
+pub fn main() -> i32 {
+  let state = State.ready()
+  return 0
+}`
   return Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(source)) }).pipe(
     Effect.provide(
       SourceResolver.memory(
@@ -190,7 +196,7 @@ pub fn main() -> i32 { let state = State. return 0 }`
           [
             'state',
             encoder.encode(
-              'pub union State { Ready, Waiting { count: i32 } }\npub fn ready() -> State { return State.Ready }',
+              'pub union State { Ready, Waiting { count: i32 } }\nimpl State { pub fn ready() -> State { return State.Ready } }',
             ),
           ],
         ]),
@@ -204,9 +210,18 @@ pub fn main() -> i32 { let state = State. return 0 }`
         [
           ['Ready', 'Constructor'],
           ['Waiting', 'Constructor'],
-          ['ready', 'Function'],
-          ['State', 'Type'],
+          ['ready', 'AssociatedFunction'],
         ],
+      )
+      const operation = occurrenceAt(snapshot, source, 'ready')
+      assert.strictEqual(operation?.resolution._tag, 'Available')
+      assert.strictEqual(operation?.declaration?.module, 'state')
+      assert.strictEqual(operation?.declaration?.selectionSpan?.sourceId, 'state')
+      assert.include(
+        operation === undefined
+          ? ''
+          : (Analysis.occurrencePresentation(snapshot, 'main', operation)?.text ?? ''),
+        'pub fn ready() -> State',
       )
       return undefined
     }),
@@ -296,7 +311,7 @@ pub fn main() -> i32 { return recover(Problem { code: 41 }) }
 })
 
 it.effect('links public Effect operations to visible standard-library source', () => {
-  const source = `import silk.effect as Effect
+  const source = `import silk.effect { Effect }
 fn increment(value: i32) -> i32 { return value + 1 }
 effect fn answer() -> i32 { return 41 }
 pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
@@ -331,46 +346,46 @@ pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
 it.effect(
   'links Scheduler and Fiber hovers to their canonical documented Silk declarations',
   () => {
-    const source = `import silk.allocator as Allocator
-import silk.fiber as Fiber
-import silk.local_scheduler as LocalScheduler
-import silk.monotonic_clock as MonotonicClock
-import silk.scheduler as Scheduler
+    const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.fiber { Fiber, Cancelled, Outcome }
+import silk.local_scheduler { LocalScheduler, StalledError }
+import silk.monotonic_clock { MonotonicClock }
+import silk.scheduler { Scheduler, PendingPublication, TaskIdExhaustedError }
 
 effect fn child() -> i32
-? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+? &mut Scheduler | &mut MonotonicClock {
   return 42
 }
 
-effect fn prepareOnly() -> Scheduler.PendingPublication<i32, never>
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
-? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+effect fn prepareOnly() -> PendingPublication<i32, never>
+! OutOfMemoryError | TaskIdExhaustedError
+? &mut Scheduler | &mut MonotonicClock {
   return run Scheduler.prepare<i32, never>(child())
 }
 
 effect fn program() -> i32
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
-? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+! OutOfMemoryError | TaskIdExhaustedError | Cancelled
+? &mut Scheduler | &mut MonotonicClock {
   let childFiber = run Fiber.forkChild<i32, never>(child())
   return run Fiber.join<i32, never>(move childFiber)
 }
 
-effect fn observe(fiber: Fiber.Fiber<i32, never>) -> Fiber.Outcome<i32, never> {
+effect fn observe(fiber: Fiber<i32, never>) -> Outcome<i32, never> {
   return run Fiber.await<i32, never>(move fiber)
 }
 
 fn inspectErrors(
-  exhausted: &Scheduler.TaskIdExhaustedError,
-  cancelled: &Fiber.Cancelled,
-  stalled: &LocalScheduler.StalledError,
+  exhausted: &TaskIdExhaustedError,
+  cancelled: &Cancelled,
+  stalled: &StalledError,
 ) -> () { return () }
 
-effect fn runProgram(scheduler: &mut LocalScheduler.LocalScheduler) -> i32
-! Allocator.OutOfMemoryError
-  | Scheduler.TaskIdExhaustedError
-  | Fiber.Cancelled
-  | LocalScheduler.StalledError
-? &mut MonotonicClock.MonotonicClock {
+effect fn runProgram(scheduler: &mut LocalScheduler) -> i32
+! OutOfMemoryError
+  | TaskIdExhaustedError
+  | Cancelled
+  | StalledError
+? &mut MonotonicClock {
   return run LocalScheduler.execute(move scheduler, program())
 }
 
@@ -418,19 +433,19 @@ pub fn main() -> i32 {
             'Scheduler.prepare<i32',
             'Scheduler.'.length,
             'silk/scheduler',
-            'pub effect fn prepare<A, E>',
-            '/// Prepares one lazy child task through the active Scheduler provider.',
+            'effect fn prepare<A, E>',
+            '/// Prepares one lazy child task and returns its affine publication value.',
           ],
           [
-            'Scheduler.PendingPublication',
-            'Scheduler.'.length,
+            'PendingPublication<i32',
+            0,
             'silk/scheduler',
             'pub struct PendingPublication<A, E>',
             '/// A prepared child Fiber and the canonical data required for atomic publication.',
           ],
           [
-            'Scheduler.TaskIdExhaustedError',
-            'Scheduler.'.length,
+            'exhausted: &TaskIdExhaustedError',
+            'exhausted: &'.length,
             'silk/scheduler',
             'pub struct TaskIdExhaustedError',
             '/// A typed failure that reports exhaustion of the task identity space.',
@@ -443,15 +458,15 @@ pub fn main() -> i32 {
             '/// Prepares and atomically publishes one child task, then returns its affine Fiber.',
           ],
           [
-            'Fiber.Outcome',
-            'Fiber.'.length,
+            '-> Outcome<i32, never>',
+            '-> '.length,
             'silk/fiber',
             'pub struct Outcome<A, E>',
             '/// The three possible terminal observations of a Fiber.',
           ],
           [
-            'Fiber.Cancelled',
-            'Fiber.'.length,
+            'cancelled: &Cancelled',
+            'cancelled: &'.length,
             'silk/fiber',
             'pub struct Cancelled',
             '/// A Fiber outcome that reports structured task cancellation.',
@@ -464,8 +479,8 @@ pub fn main() -> i32 {
             '/// Runs one lazy root program under this Scheduler and returns its typed outcome.',
           ],
           [
-            'LocalScheduler.StalledError',
-            'LocalScheduler.'.length,
+            'stalled: &StalledError',
+            'stalled: &'.length,
             'silk/local_scheduler',
             'pub struct StalledError',
             '/// Reports that no task is ready and no event registration remains while the root is incomplete.',
@@ -495,11 +510,11 @@ pub fn main() -> i32 {
 
 it.effect('navigates and presents the source-defined Vector lexical view accessors', () => {
   const source = `import silk.usize as usize
-import silk.vector { make, asSlice, asMutSlice }
+import silk.vector { Vector }
 pub fn main() -> i32 {
-  let mut values = make<i32>()
-  let shared = asSlice<i32>(&values)
-  let exclusive = asMutSlice<i32>(&mut values)
+  let mut values = Vector.make<i32>()
+  let shared = Vector.asSlice<i32>(&values)
+  let exclusive = Vector.asMutSlice<i32>(&mut values)
   return usize.toI32(shared.length + exclusive.length)
 }`
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
@@ -522,7 +537,7 @@ pub fn main() -> i32 {
 /// Do not retain this slice across an operation that can grow the vector.`,
         ],
       ] as const) {
-        const occurrence = occurrenceAt(snapshot, source, name, 1)
+        const occurrence = occurrenceAt(snapshot, source, name)
         assert.strictEqual(occurrence?.resolution._tag, 'Available')
         assert.strictEqual(occurrence?.declaration?.module, 'silk/vector')
         assert.isDefined(occurrence?.declaration?.selectionSpan)
@@ -559,13 +574,19 @@ pub fn main() -> i32 {
 })
 
 it.effect('navigates and presents the source-defined owned Bytes surface', () => {
-  const source = `import silk.bytes { Bytes }
+  const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.bytes { Bytes }
 import silk.usize as usize
-import silk.bytes { Bytes as OwnedBytes, make, copy, append, length, asSlice, asMutSlice }
-pub fn main() -> i32 {
-  let bytes = Bytes.make()
-  return usize.toI32(length(&bytes))
-}`
+import silk.bytes { Bytes as OwnedBytes }
+effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let mut bytes = Bytes.make()
+  let copied = run Bytes.copy(Bytes.asSlice(&bytes))
+  let grown = run Bytes.append(&mut bytes, Bytes.asSlice(&copied))
+  let count = Bytes.length(&bytes)
+  let writable = Bytes.asMutSlice(&mut bytes)
+  return usize.toI32(count + writable.length)
+}
+pub fn main() -> i32 { return 0 }`
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       for (const [name, documentation] of [
@@ -627,7 +648,7 @@ pub fn main() -> i32 {
 })
 
 it.effect('completes and navigates the source-defined logging surface', () => {
-  const source = `import silk.effect as Effect
+  const source = `import silk.effect { Effect }
 import silk.logger { LogError }
 import silk.logger { LogLevel }
 import silk.logger { Logger }
@@ -675,7 +696,8 @@ pub fn main() -> i32 {
       )
       for (const [prefix, expected] of [
         ['Effect.', ['log', 'logAt', 'logTrace', 'logDebug', 'logInfo', 'logWarning', 'logError']],
-        ['Logger.', ['log', 'LogLevel', 'inMemoryProvider', 'stdoutProvider', 'length', 'levelAt']],
+        ['Logger.', ['log', 'inMemoryProvider', 'stdoutProvider', 'length', 'levelAt']],
+        ['LogLevel.', ['Trace', 'Debug', 'Info', 'Warning', 'Error']],
       ] as const) {
         const offset = source.indexOf(prefix) + prefix.length
         const labels = Analysis.completionAt(snapshot, 'main', offset)?.candidates.map(
@@ -691,25 +713,25 @@ pub fn main() -> i32 {
 it.effect('completes and navigates the portable Path and FileSystem surface', () => {
   const source = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
-import silk.filesystem { FileError, FileSystem, Path, exists, resolve }
+import silk.filesystem { FileError, FileSystem, Path }
 effect fn inspect(path: &Path) -> bool ! FileError ? &mut FileSystem {
   let info = run FileSystem.stat(path)
-  return run exists(path)
+  return run FileSystem.exists(path)
 }
 effect fn locate(base: &Path) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
-  return run resolve(base, "child")
+  return run Path.resolve(base, "child")
 }
-effect fn canonical() -> Path ! OutOfMemoryError ? &mut Allocator { return run FileSystem.root() }
+effect fn canonical() -> Path ! OutOfMemoryError ? &mut Allocator { return run Path.root() }
 fn code(error: &FileError) -> i32 { return FileSystem.operationCode(error.operation) }
 pub fn main() -> i32 { return 42 }`
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       for (const [spelling, ordinal, expected] of [
         ['stat', 0, ['effect fn stat(', '! FileError ? &mut FileSystem']],
-        ['exists', 1, ['pub effect fn exists(', '-> bool ! FileError ? &mut FileSystem']],
+        ['exists', 0, ['pub effect fn exists(', '-> bool ! FileError ? &mut FileSystem']],
         [
           'resolve',
-          1,
+          0,
           ['pub effect fn resolve(', '! FileError | OutOfMemoryError ? &mut Allocator'],
         ],
       ] as const) {
@@ -750,18 +772,13 @@ pub fn main() -> i32 { return 42 }`
             'createDirectory',
             'removeFile',
             'removeDirectory',
-            'make',
-            'root',
-            'join',
-            'resolve',
-            'isRoot',
-            'name',
-            'parent',
+            'exists',
             'error',
             'errorWithCode',
             'providerCode',
           ],
         ],
+        ['Path.', ['make', 'root', 'join', 'resolve', 'isRoot', 'name', 'parent']],
       ] as const) {
         const offset = source.indexOf(prefix) + prefix.length
         const labels = Analysis.completionAt(snapshot, 'main', offset)?.candidates.map(
@@ -803,7 +820,7 @@ pub fn main() -> i32 { let option = Option. return 0 }`
       )
       assert.strictEqual(
         completion?.candidates.find((candidate) => candidate.label === 'map')?.detail?.text,
-        'pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> Option<U>',
+        'pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> main.Option<U>',
       )
       return undefined
     }),
@@ -898,14 +915,14 @@ it.effect('presents canonical string in hover, inlay hints, and semantic occurre
 })
 
 it.effect('publishes proved hover contracts and inferred provider-selector hints', () => {
-  const source = `import silk.writer as Streams
+  const source = `import silk.writer { Writer, WriterError, StdoutWriter }
 import silk.writer { Writer }
-import silk.effect as Effect
+import silk.effect { Effect }
 
-fn inspect(value: Streams.StdoutWriter) -> () { return () }
+fn inspect(value: StdoutWriter) -> () { return () }
 
-pub effect fn main() -> () ! Streams.WriterError {
-  let mut streams = Streams.stdoutWriterProvider()
+pub effect fn main() -> () ! WriterError {
+  let mut streams = Writer.stdoutWriterProvider()
   return run Writer.writeAll(b"Hello, world!")
     |> Effect.provideMut(&mut streams)
 }`
@@ -965,15 +982,15 @@ pub effect fn main() -> () ! Streams.WriterError {
 })
 
 it.effect('presents selected imports and shared and owned provider selectors', () => {
-  const selectedImportSource = `import silk.writer { Writer }
-import silk.effect as Effect
+  const selectedImportSource = `import silk.writer { Writer, WriterError }
+import silk.effect { Effect }
 
-pub effect fn main() -> () ! Writer.WriterError {
+pub effect fn main() -> () ! WriterError {
   let mut streams = Writer.stdoutWriterProvider()
   return run Writer.writeAll(b"selected\\n")
     |> Effect.provideMut(&mut streams)
 }`
-  const accessFormsSource = `import silk.effect as Effect
+  const accessFormsSource = `import silk.effect { Effect }
 
 service Clock {}
 struct FixedClock {}
@@ -1014,7 +1031,7 @@ pub fn main() -> i32 {
 })
 
 it.effect('omits ambiguous and invalid selectors while preserving recovered facts', () => {
-  const ambiguousSource = `import silk.effect as Effect
+  const ambiguousSource = `import silk.effect { Effect }
 service Alpha {}
 service Beta {}
 struct Provider {}
@@ -1026,7 +1043,7 @@ pub fn main() -> i32 {
   let recipe = work() |> Effect.provide(&provider)
   return 0
 }`
-  const recoveredSource = `import silk.effect as Effect
+  const recoveredSource = `import silk.effect { Effect }
 service Clock {}
 struct FixedClock {}
 impl Clock for FixedClock {}
@@ -1074,13 +1091,13 @@ pub fn main() -> i32 {
 })
 
 it.effect('omits explicit provider selectors while retaining binding hints', () => {
-  const source = `import silk.writer as Streams
-import silk.effect as Effect
+  const source = `import silk.writer { Writer, WriterError, StdoutWriter }
+import silk.effect { Effect }
 
-pub effect fn main() -> () ! Streams.WriterError {
-  let mut streams = Streams.stdoutWriterProvider()
-  return run Streams.writeAll(b"ok\\n")
-    |> Effect.provideMut<Streams.Writer>(&mut streams)
+pub effect fn main() -> () ! WriterError {
+  let mut streams = Writer.stdoutWriterProvider()
+  return run Writer.writeAll(b"ok\\n")
+    |> Effect.provideMut<Writer>(&mut streams)
 }`
   return Analysis.ofSource('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
@@ -1089,7 +1106,7 @@ pub effect fn main() -> () ! Streams.WriterError {
         hints.map((hint) => hint._tag),
         ['BindingTypeHint'],
       )
-      assert.strictEqual(hints.at(0)?.presentation.text, 'Streams.StdoutWriter')
+      assert.strictEqual(hints.at(0)?.presentation.text, 'StdoutWriter')
       return undefined
     }),
   )
@@ -1643,7 +1660,7 @@ pub fn main() -> i32 { return Vector. }`
 
     // A seeded standard-library namespace is a prelude, so a local declaration of the same spelling
     // takes it rather than colliding with it: the qualifier is the empty local struct, which has no
-    // members to offer, and completion is unavailable rather than ambiguous.
+    // inherent members to offer, and completion is empty rather than ambiguous.
     const shadowedSource = `struct SystemAllocator {}
 pub fn main() -> i32 { return SystemAllocator. }`
     const shadowed = yield* Analysis.ofSourceRealized('main', encoder.encode(shadowedSource))
@@ -1653,9 +1670,10 @@ pub fn main() -> i32 { return SystemAllocator. }`
       shadowedSource.indexOf('SystemAllocator.') + 'SystemAllocator.'.length,
     )
     assert.deepEqual(shadowedResult?.context, {
-      _tag: 'ValueMemberContext',
-      state: 'Unavailable',
+      _tag: 'ActorMemberContext',
+      actor: 'SystemAllocator',
     })
+    assert.deepEqual(shadowedResult?.candidates, [])
     // The source is deliberately truncated after the dot, so it carries the parser's recovery
     // diagnostic; what matters is that no binding collision joins it.
     assert.notInclude(

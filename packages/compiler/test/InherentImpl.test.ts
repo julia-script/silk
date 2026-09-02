@@ -155,8 +155,12 @@ pub fn main() -> i32 { return 0 }`
     )
     const bounded = yield* analyze(`interface Display { fn display(value: &Self) -> i32 }
 pub union Option<T> { None, Some { pub value: T } }
-impl<T: Display> Option<T> { pub fn show() -> i32 { return 1 } }
+impl<T: Display> Option<T> {
+  pub fn show() -> i32 { return 1 }
+  pub fn make(value: T) -> Self { return Option.Some { value: move value } }
+}
 pub fn main() -> i32 { return 0 }`)
+    // The rejected head still closes `Self` for its members: the head's diagnostic is the only one.
     assert.deepEqual(codes(bounded), ['SEM0194'])
     const alias = yield* analyze(`pub union Option<T> { None, Some { pub value: T } }
 type Maybe = Option<i32>
@@ -423,5 +427,120 @@ pub fn main() -> i32 { return 0 }`)
     }
     assert.strictEqual(receiver('Option.owned'), true)
     assert.strictEqual(receiver('Option.shared'), true)
+  }),
+)
+
+it.effect('gives the module basename no semantic role in qualified lookup', () =>
+  Effect.gen(function* () {
+    const basename = yield* analyzeModules('app', [
+      [
+        'counter',
+        `pub struct Counter { pub value: i32 }
+pub fn increment(counter: Counter) -> Counter { return Counter { value: counter.value + 1 } }
+`,
+      ],
+      [
+        'app',
+        `import counter { Counter, increment }
+pub fn main() -> i32 {
+  let bumped = increment(Counter { value: 41 })
+  return bumped.value
+}`,
+      ],
+    ])
+    assert.strictEqual(evaluated(basename), 42n)
+    const projected = yield* analyzeModules('app', [
+      [
+        'counter',
+        `pub struct Counter { pub value: i32 }
+pub fn increment(counter: Counter) -> Counter { return Counter { value: counter.value + 1 } }
+`,
+      ],
+      [
+        'app',
+        `import counter { Counter }
+pub fn main() -> i32 {
+  let bumped = Counter.increment(Counter { value: 41 })
+  return bumped.value
+}`,
+      ],
+    ])
+    assert.include(codes(projected), 'SEM0010')
+    const namespace = yield* analyze(`import silk.option as OptionModule
+pub fn main() -> i32 {
+  let value = OptionModule.some<i32>(2)
+  drop value
+  return 0
+}`)
+    assert.include(codes(namespace), 'SEM0014')
+    const typeImport = yield* analyzeModules('app', [
+      [
+        'vectorish',
+        `pub struct Sequence { pub value: i32 }
+impl Sequence { pub fn make(value: i32) -> Self { return Sequence { value: value } } }
+pub fn debugDump() -> i32 { return 1 }
+`,
+      ],
+      [
+        'app',
+        `import vectorish { Sequence }
+pub fn main() -> i32 {
+  let made = Sequence.make(42)
+  return made.value + Sequence.debugDump()
+}`,
+      ],
+    ])
+    assert.include(codes(typeImport), 'SEM0010')
+    const renamed = yield* analyzeModules('app', [
+      [
+        'maybe_values',
+        `pub union Option<T> { None, Some { pub value: T } }
+impl<T> Option<T> {
+  pub fn some(value: T) -> Self { return Option.Some { value: move value } }
+  pub fn unwrapOr(self: Self, fallback: T) -> T {
+    return match move self {
+      Option<T>.Some { value } => keep<T>(move value, move fallback)
+      Option<T>.None => move fallback
+    }
+  }
+}
+fn keep<T>(present: T, unused: T) -> T {
+  drop unused
+  return move present
+}
+`,
+      ],
+      [
+        'app',
+        `import maybe_values { Option }
+pub fn main() -> i32 { return Option.unwrapOr(Option.some(42), 0) }`,
+      ],
+    ])
+    assert.strictEqual(evaluated(renamed), 42n)
+  }),
+)
+
+it.effect('carries only the owner binders a member mentions', () =>
+  Effect.gen(function* () {
+    const source = `pub struct Canceller { pub token: i32 }
+pub struct Fiber<A, E> { pub value: A pub error: E pub tag: i32 }
+impl<A, E> Fiber<A, E> {
+  pub fn cancel(canceller: Canceller) -> i32 { return canceller.token }
+  pub fn read(self: &Self) -> i32 { return self.tag }
+}
+pub fn main() -> i32 {
+  let fiber = Fiber { value: 0, error: false, tag: 1 }
+  return Fiber.cancel(Canceller { token: 41 }) + Fiber.read(&fiber)
+}`
+    assert.strictEqual(evaluated(yield* analyze(source)), 42n)
+    // Naming an instantiation for a member that mentions no owner binder is too many arguments.
+    const explicit = yield* analyze(
+      source.replace(
+        'Fiber.cancel(Canceller { token: 41 })',
+        'Fiber.cancel<i32, bool>(Canceller { token: 41 })',
+      ),
+    )
+    assert.notDeepEqual(codes(explicit), [])
+    assert.isTrue(codes(explicit).every((code) => code !== 'SEM0185'))
   }),
 )

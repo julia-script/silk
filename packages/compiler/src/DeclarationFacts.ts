@@ -1179,20 +1179,58 @@ export const closeConformanceSelf = (
   const substitution: Type.Substitution = new Map<string, Type.GenericArgument>([
     [Type.key(self), provider],
   ])
-  const rowsType = Type.substitute(
-    Type.effectWithRows(
-      Type.unit,
-      declaration.failureRow.row,
-      'Shared',
-      declaration.requirementRow.row,
-    ),
-    substitution,
-  )
-  const rows = Type.isEffect(rowsType) ? rowsType : Type.effect(Type.unit, [], 'Shared')
   const module =
     declaration.canonical._tag === 'Canonical'
       ? declaration.canonical.id.module
       : declaration.id.sourceId
+  const rowsBefore = Type.effectWithRows(
+    Type.unit,
+    declaration.failureRow.row,
+    'Shared',
+    declaration.requirementRow.row,
+  )
+  const rowsType = Type.substitute(rowsBefore, substitution)
+  // Only a fact that mentions `Self` is rewritten: substituting through a type that never names
+  // it would still renormalize representation binders (`?R`) that inference needs to see intact.
+  const selfKey = Type.key(self)
+  const mentionsSelf = (fact: DeclaredTypeFact): boolean => {
+    switch (fact._tag) {
+      case 'Resolved':
+        return Type.parameters(fact.type).some((parameter) => Type.key(parameter) === selfKey)
+      case 'Reference':
+        return mentionsSelf(fact.target)
+      case 'Applied':
+        return mentionsSelf(fact.target) || fact.arguments.some(mentionsSelf)
+      case 'FixedArray':
+      case 'Slice':
+        return mentionsSelf(fact.element)
+      default:
+        return false
+    }
+  }
+  const closeFact = (fact: DeclaredTypeFact): DeclaredTypeFact =>
+    mentionsSelf(fact) ? substituteDeclaredTypeFact(fact, substitution, module) : fact
+  const rowsMentionSelf = Type.parameters(rowsBefore).some(
+    (parameter) => Type.key(parameter) === selfKey,
+  )
+  if (
+    !rowsMentionSelf &&
+    !mentionsSelf(declaration.returnType) &&
+    !declaration.parameters.some((parameter) => mentionsSelf(parameter.declaredType))
+  )
+    return declaration
+  if (!rowsMentionSelf || Type.equals(rowsBefore, rowsType)) {
+    return Object.freeze({
+      ...declaration,
+      parameters: Object.freeze(
+        declaration.parameters.map((parameter) =>
+          Object.freeze({ ...parameter, declaredType: closeFact(parameter.declaredType) }),
+        ),
+      ),
+      returnType: closeFact(declaration.returnType),
+    })
+  }
+  const rows = Type.isEffect(rowsType) ? rowsType : Type.effect(Type.unit, [], 'Shared')
   return Object.freeze({
     ...declaration,
     parameters: Object.freeze(

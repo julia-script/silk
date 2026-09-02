@@ -90,7 +90,7 @@ pub effect fn main() -> () ! FirstError | SecondError {
   return ()
 }`
 
-const requirementSource = `import silk.effect as Effect
+const requirementSource = `import silk.effect { Effect }
 service LeftClock {
   effect fn read() -> i32 ? &LeftClock
 }
@@ -126,7 +126,7 @@ const affineCaptureSource = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct First {}
 struct Second {}
@@ -176,7 +176,7 @@ const hookCaptureSource = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct First {}
 struct Second {}

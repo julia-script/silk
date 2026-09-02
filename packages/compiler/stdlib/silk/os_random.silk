@@ -14,14 +14,25 @@
 //! service contract. GNU/Linux requires glibc 2.25 and Linux 3.17 or later. Direct WebAssembly and
 //! Windows do not provide this implementation.
 
-import silk.random as Random
+import silk.random { Random }
 
 /// A stateless Unix-family provider of fresh cryptographically secure bytes.
 pub struct OsRandom {}
 
-/// Creates a native random provider without reading randomness or installing an ambient default.
-pub fn make() -> OsRandom {
-  return OsRandom {}
+impl OsRandom {
+  effect fn fillBytes(self: &mut Self, output: &mut [u8]) -> () {
+    if output.length == 0 { return () }
+    if run rawFill(move output) { return () }
+    let invalid = 1 / 0
+    return ()
+  }
+}
+
+impl OsRandom {
+  /// Creates a native random provider without reading randomness or installing an ambient default.
+  pub fn make() -> OsRandom {
+    return OsRandom {}
+  }
 }
 
 effect fn rawFill(output: &mut [u8]) -> bool {
@@ -30,13 +41,6 @@ effect fn rawFill(output: &mut [u8]) -> bool {
   return false
 }
 
-effect fn fillBytes(self: &mut OsRandom, output: &mut [u8]) -> () {
-  if output.length == 0 { return () }
-  if run rawFill(move output) { return () }
-  let invalid = 1 / 0
-  return ()
-}
-
-impl Random.Random for OsRandom {
+impl Random for OsRandom {
   fillBytes: OsRandom.fillBytes
 }

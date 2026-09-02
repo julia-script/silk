@@ -21,16 +21,16 @@
 //! # Examples
 //! ## Parse a complete signed decimal value
 //! ```silk
-//! import silk.format {Format}
+//! import silk.format { Format, ParseError }
 //!
 //! import silk.i64
 //!
-//! import silk.result {Result}
+//! import silk.result { Result }
 //!
 //! pub fn main() -> i32 {
 //!   let parsed = i64.parse("-42")
 //!   let value = move parsed
-//!     |> Result.unwrapOr<i64, Format.ParseError>(0)
+//!     |> Result.unwrapOr<i64, ParseError>(0)
 //!   return i64.toI32(value + 84)
 //! }
 //! ```
@@ -43,7 +43,7 @@ import silk.i16 as i16
 import silk.i32 as i32
 import silk.i8 as i8
 import silk.isize as isize
-import silk.option { Option, none, some }
+import silk.option { Option }
 import silk.result { Result }
 import silk.u16 as u16
 import silk.u32 as u32
@@ -87,7 +87,7 @@ pub fn toU8(value: i64) -> u8 {
 /// Converts `value` to `u8`, or returns `None` if `value` is outside the `u8`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU8(value: i64) -> Option<u8> {
-  return Intrinsic.i64CheckedToU8<Option<u8>>(value, some, none)
+  return Intrinsic.i64CheckedToU8<Option<u8>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to `u16`. Traps if `value` is outside the `u16` range. Use
@@ -99,7 +99,7 @@ pub fn toU16(value: i64) -> u16 {
 /// Converts `value` to `u16`, or returns `None` if `value` is outside the `u16`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU16(value: i64) -> Option<u16> {
-  return Intrinsic.i64CheckedToU16<Option<u16>>(value, some, none)
+  return Intrinsic.i64CheckedToU16<Option<u16>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to `u32`. Traps if `value` is outside the `u32` range. Use
@@ -111,7 +111,7 @@ pub fn toU32(value: i64) -> u32 {
 /// Converts `value` to `u32`, or returns `None` if `value` is outside the `u32`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU32(value: i64) -> Option<u32> {
-  return Intrinsic.i64CheckedToU32<Option<u32>>(value, some, none)
+  return Intrinsic.i64CheckedToU32<Option<u32>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to `u64`. Traps if `value` is outside the `u64` range. Use
@@ -123,7 +123,7 @@ pub fn toU64(value: i64) -> u64 {
 /// Converts `value` to `u64`, or returns `None` if `value` is outside the `u64`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU64(value: i64) -> Option<u64> {
-  return Intrinsic.i64CheckedToU64<Option<u64>>(value, some, none)
+  return Intrinsic.i64CheckedToU64<Option<u64>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to `usize`. Traps if `value` is outside the `usize` range. Use
@@ -135,7 +135,7 @@ pub fn toUsize(value: i64) -> usize {
 /// Converts `value` to `usize`, or returns `None` if `value` is outside the `usize`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToUsize(value: i64) -> Option<usize> {
-  return Intrinsic.i64CheckedToUsize<Option<usize>>(value, some, none)
+  return Intrinsic.i64CheckedToUsize<Option<usize>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to `i8`. Traps if `value` is outside the `i8` range. Use
@@ -147,7 +147,7 @@ pub fn toI8(value: i64) -> i8 {
 /// Converts `value` to `i8`, or returns `None` if `value` is outside the `i8`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI8(value: i64) -> Option<i8> {
-  return Intrinsic.i64CheckedToI8<Option<i8>>(value, some, none)
+  return Intrinsic.i64CheckedToI8<Option<i8>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to `i16`. Traps if `value` is outside the `i16` range. Use
@@ -159,7 +159,7 @@ pub fn toI16(value: i64) -> i16 {
 /// Converts `value` to `i16`, or returns `None` if `value` is outside the `i16`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI16(value: i64) -> Option<i16> {
-  return Intrinsic.i64CheckedToI16<Option<i16>>(value, some, none)
+  return Intrinsic.i64CheckedToI16<Option<i16>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to `i32`. Traps if `value` is outside the `i32` range. Use
@@ -171,7 +171,7 @@ pub fn toI32(value: i64) -> i32 {
 /// Converts `value` to `i32`, or returns `None` if `value` is outside the `i32`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI32(value: i64) -> Option<i32> {
-  return Intrinsic.i64CheckedToI32<Option<i32>>(value, some, none)
+  return Intrinsic.i64CheckedToI32<Option<i32>>(value, Option.some, Option.none)
 }
 
 /// Returns `value` unchanged as `i64`. Use this function when generic conversion code
@@ -183,7 +183,7 @@ pub fn toI64(value: i64) -> i64 {
 /// Returns `Some` with `value` unchanged as `i64`. Use this function when generic
 /// checked-conversion code can select the same source and destination type.
 pub fn checkedToI64(value: i64) -> Option<i64> {
-  return Intrinsic.i64CheckedToI64<Option<i64>>(value, some, none)
+  return Intrinsic.i64CheckedToI64<Option<i64>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to `isize`. Traps if `value` is outside the `isize` range. Use
@@ -195,7 +195,7 @@ pub fn toIsize(value: i64) -> isize {
 /// Converts `value` to `isize`, or returns `None` if `value` is outside the `isize`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToIsize(value: i64) -> Option<isize> {
-  return Intrinsic.i64CheckedToIsize<Option<isize>>(value, some, none)
+  return Intrinsic.i64CheckedToIsize<Option<isize>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to the nearest `f32` value, with ties to even.
@@ -319,31 +319,31 @@ pub fn saturatingMultiply(left: i64, right: i64) -> i64 {
 /// Returns `Some` with `left + right`, or `None` if the result is outside the `i64` range.
 /// Use this function when overflow is input data.
 pub fn checkedAdd(left: i64, right: i64) -> Option<i64> {
-  return Intrinsic.i64CheckedAdd<Option<i64>>(left, right, some, none)
+  return Intrinsic.i64CheckedAdd<Option<i64>>(left, right, Option.some, Option.none)
 }
 
 /// Returns `Some` with `left - right`, or `None` if the result is outside the `i64` range.
 /// Use this function when overflow is input data.
 pub fn checkedSubtract(left: i64, right: i64) -> Option<i64> {
-  return Intrinsic.i64CheckedSubtract<Option<i64>>(left, right, some, none)
+  return Intrinsic.i64CheckedSubtract<Option<i64>>(left, right, Option.some, Option.none)
 }
 
 /// Returns `Some` with `left * right`, or `None` if the result is outside the `i64` range.
 /// Use this function when overflow is input data.
 pub fn checkedMultiply(left: i64, right: i64) -> Option<i64> {
-  return Intrinsic.i64CheckedMultiply<Option<i64>>(left, right, some, none)
+  return Intrinsic.i64CheckedMultiply<Option<i64>>(left, right, Option.some, Option.none)
 }
 
 /// Returns `Some` with `left / right`, or `None` if `right` is zero or [`MIN`] is
 /// divided by `-1`. Use this function when an invalid quotient is input data.
 pub fn checkedDivide(left: i64, right: i64) -> Option<i64> {
-  return Intrinsic.i64CheckedDivide<Option<i64>>(left, right, some, none)
+  return Intrinsic.i64CheckedDivide<Option<i64>>(left, right, Option.some, Option.none)
 }
 
 /// Returns `Some` with the remainder, or `None` if `right` is zero or [`MIN`] is
 /// divided by `-1`. Use this function when invalid division is input data.
 pub fn checkedRemainder(left: i64, right: i64) -> Option<i64> {
-  return Intrinsic.i64CheckedRemainder<Option<i64>>(left, right, some, none)
+  return Intrinsic.i64CheckedRemainder<Option<i64>>(left, right, Option.some, Option.none)
 }
 
 /// Returns `true` when `left` and `right` are equal.

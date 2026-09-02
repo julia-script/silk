@@ -26,7 +26,7 @@ const interleaved = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -124,16 +124,10 @@ const counted = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 import silk.usize as usize
-import silk.metrics {
-  AllocationMetrics,
-  copy as copyMetrics,
-  make as zeroedMetrics,
-  recordAcquire,
-  recordRelease
-}
+import silk.metrics { AllocationMetrics, Metrics }
 
 struct CountingAllocator {
   inner: SystemAllocator
@@ -143,7 +137,7 @@ struct CountingAllocator {
 effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut self.inner)
   let block = run pending
-  recordAcquire(&mut self.metrics)
+  Metrics.recordAcquire(&mut self.metrics)
   return move block
 }
 
@@ -152,7 +146,7 @@ impl Allocator for CountingAllocator { allocate: CountingAllocator.allocate }
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = CountingAllocator {
     inner: Allocator.systemAllocatorProvider(),
-    metrics: zeroedMetrics()
+    metrics: Metrics.make()
   }
   let firstLayout = Layout.of<[i32; 8]>()
   let firstPending = Allocator.allocate(move firstLayout) |> Effect.provideMut(&mut allocator)
@@ -163,17 +157,17 @@ effect fn build() -> i32 ! OutOfMemoryError {
 
   // Released oldest first, so the release order is not the reverse of the acquire order.
   drop first
-  recordRelease(&mut allocator.metrics)
+  Metrics.recordRelease(&mut allocator.metrics)
 
   let thirdLayout = Layout.of<[i32; 8]>()
   let thirdPending = Allocator.allocate(move thirdLayout) |> Effect.provideMut(&mut allocator)
   let third = run thirdPending
   drop second
-  recordRelease(&mut allocator.metrics)
+  Metrics.recordRelease(&mut allocator.metrics)
   drop third
-  recordRelease(&mut allocator.metrics)
+  Metrics.recordRelease(&mut allocator.metrics)
 
-  let observed = copyMetrics(&allocator.metrics)
+  let observed = Metrics.copy(&allocator.metrics)
   if observed.acquired == 3 {} else { return 1 }
   return usize.toI32(observed.released)
 }
@@ -201,8 +195,8 @@ it.effect('reports the folded release count on Wasm', () =>
 
 const interleavedShared = `import silk.allocator { Allocator }
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect as Effect
-import silk.shared as Shared
+import silk.effect { Effect }
+import silk.shared { Shared }
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut index = 0
@@ -238,19 +232,19 @@ it.effect(
   120_000,
 )
 
-const nominalUnionSharedExecutionCleanup = `import silk.allocator { Allocator }
-import silk.effect as Effect
-import silk.execution as Execution
-import silk.shared as Shared
+const nominalUnionSharedExecutionCleanup = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
+import silk.shared { Shared }
 
 union Ready {
-  SharedState { value: Shared.Shared<i32> },
+  SharedState { value: Shared<i32> },
   Unit
 }
 
 fn ready(state: &Ready) -> () { return () }
 
-effect fn packaged() -> () ! Allocator.OutOfMemoryError ? &mut Allocator {
+effect fn packaged() -> () ! OutOfMemoryError ? &mut Allocator {
   let mut index = 0
   while index < 10000 {
     let shared = run Shared.make<i32>(42)
@@ -262,12 +256,12 @@ effect fn packaged() -> () ! Allocator.OutOfMemoryError ? &mut Allocator {
   return ()
 }
 
-effect fn program() -> () ! Allocator.OutOfMemoryError {
+effect fn program() -> () ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   return run packaged() |> Effect.provideMut<Allocator>(&mut allocator)
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> () { return () }
+effect fn recover(error: OutOfMemoryError) -> () { return () }
 
 pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
 
@@ -294,8 +288,8 @@ it.effect(
 
 const repeatedSharedAccess = `import silk.allocator { Allocator }
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect as Effect
-import silk.shared as Shared
+import silk.effect { Effect }
+import silk.shared { Shared }
 struct Counter { value: i32 }
 fn increment(value: &mut Counter) -> i32 {
   value.value = value.value + 1

@@ -20,7 +20,7 @@ const prelude = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct Problem { code: i32 }
 
@@ -79,7 +79,7 @@ effect fn finalizePair() -> () {
 effect fn recover(problem: Problem) -> i32 { return problem.code }`
 
 /** The finalizer runs after a success, and the success value reaches the caller unchanged. */
-const succeeding = `import silk.effect as Effect
+const succeeding = `import silk.effect { Effect }
 ${prelude}
 
 effect fn work() -> i32 ! Problem { return 5 }
@@ -90,7 +90,7 @@ pub fn main() -> i32 {
 }`
 
 /** The finalizer runs after a typed failure, and that same failure reaches the caller. */
-const failing = `import silk.effect as Effect
+const failing = `import silk.effect { Effect }
 ${prelude}
 
 effect fn work() -> i32 ! Problem { fail Problem { code: 3 } }
@@ -106,7 +106,7 @@ pub fn main() -> i32 {
  * then `acquire acquire release release` for the finalizer. The finalizer running first would
  * read `acquire acquire release release acquire release` instead.
  */
-const ordering = `import silk.effect as Effect
+const ordering = `import silk.effect { Effect }
 ${prelude}
 
 effect fn work() -> i32 ! Problem {
@@ -125,7 +125,7 @@ pub fn main() -> i32 {
  * named this combinator as the one that would reintroduce that leak, so the balance is asserted
  * over both bodies at once — the protected Effect's owner and the finalizer's own.
  */
-const acquiringThenFailing = `import silk.effect as Effect
+const acquiringThenFailing = `import silk.effect { Effect }
 ${prelude}
 
 effect fn work() -> i32 ! Problem {
@@ -139,7 +139,7 @@ pub fn main() -> i32 {
 }`
 
 /** The same body on the succeeding path, where the release was never in doubt. */
-const acquiringThenSucceeding = `import silk.effect as Effect
+const acquiringThenSucceeding = `import silk.effect { Effect }
 ${prelude}
 
 effect fn work() -> i32 ! Problem {
@@ -153,7 +153,7 @@ pub fn main() -> i32 {
 }`
 
 /** A release that genuinely fails, recovered by the caller before it reaches `ensuring`. */
-const fallibleRelease = `import silk.effect as Effect
+const fallibleRelease = `import silk.effect { Effect }
 ${prelude}
 
 effect fn work() -> i32 ! Problem { fail Problem { code: 3 } }
@@ -173,7 +173,7 @@ pub fn main() -> i32 {
  * A trap inside the protected Effect. Traps bypass everything — `Effect.catch`, Drop hooks, and
  * now the finalizer — so the run blocks with the trap and the finalizer never starts.
  */
-const trapping = `import silk.effect as Effect
+const trapping = `import silk.effect { Effect }
 ${prelude}
 
 effect fn work(divisor: i32) -> i32 ! Problem {

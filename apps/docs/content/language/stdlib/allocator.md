@@ -20,7 +20,7 @@ implementation lexically. Allocation failure is typed as [`OutOfMemoryError`](#d
 ### Provide the process allocator
 
 ```silk
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.bytes { Bytes }
 
@@ -29,7 +29,7 @@ import silk.effect { Effect }
 import silk.usize
 
 effect fn copyMessage() -> i32
-! Allocator.OutOfMemoryError {
+! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let source = b"Silk"
   let copying = Bytes.copy(&source)
@@ -39,7 +39,7 @@ effect fn copyMessage() -> i32
     |> usize.toI32
 }
 
-effect fn recoverAllocation(error: Allocator.OutOfMemoryError) -> i32 {
+effect fn recoverAllocation(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -50,7 +50,7 @@ pub fn main() -> i32 {
 
 Import as `Allocator` with `import silk.allocator { Allocator }`.
 
-Public declarations: 5.
+Public declarations: 3.
 
 <a id="declaration-73696c6b2f616c6c6f6361746f723a3a4f75744f664d656d6f72794572726f72"></a>
 
@@ -61,20 +61,6 @@ pub struct OutOfMemoryError
 ```
 
 A failure that reports that an allocator cannot satisfy a storage request.
-
-<a id="declaration-73696c6b2f616c6c6f6361746f723a3a6f75744f664d656d6f7279"></a>
-
-## `outOfMemory`
-
-```silk
-pub effect fn outOfMemory() -> never ! OutOfMemoryError
-```
-
-Fails immediately with `OutOfMemoryError`.
-
-### When to use
-
-Use this function to translate a checked size failure into the standard allocation failure.
 
 <a id="declaration-73696c6b2f616c6c6f6361746f723a3a416c6c6f6361746f72"></a>
 
@@ -96,6 +82,30 @@ effect fn allocate(layout: LayoutValue) -> Allocation ! OutOfMemoryError ? &mut 
 
 Acquires one allocation for `layout`, or fails without returning partial storage.
 
+<a id="declaration-73696c6b2f616c6c6f6361746f723a3a416c6c6f6361746f722e6f75744f664d656d6f7279"></a>
+
+### Associated function `Allocator.outOfMemory`
+
+```silk
+pub effect fn outOfMemory() -> never ! OutOfMemoryError
+```
+
+Fails immediately with `OutOfMemoryError`.
+
+#### When to use
+
+Use this function to translate a checked size failure into the standard allocation failure.
+
+<a id="declaration-73696c6b2f616c6c6f6361746f723a3a416c6c6f6361746f722e73797374656d416c6c6f6361746f7250726f7669646572"></a>
+
+### Associated function `Allocator.systemAllocatorProvider`
+
+```silk
+pub fn systemAllocatorProvider() -> SystemAllocator
+```
+
+Creates a process-backed allocator provider without allocating storage.
+
 <a id="declaration-73696c6b2f616c6c6f6361746f723a3a53797374656d416c6c6f6361746f72"></a>
 
 ## `SystemAllocator`
@@ -105,16 +115,6 @@ pub struct SystemAllocator
 ```
 
 A process-backed provider for [`Allocator`](#declaration-73696c6b2f616c6c6f6361746f723a3a416c6c6f6361746f72).
-
-<a id="declaration-73696c6b2f616c6c6f6361746f723a3a73797374656d416c6c6f6361746f7250726f7669646572"></a>
-
-## `systemAllocatorProvider`
-
-```silk
-pub fn systemAllocatorProvider() -> SystemAllocator
-```
-
-Creates a process-backed allocator provider without allocating storage.
 
 <a id="declaration-73696c6b2f616c6c6f6361746f723a3a696d706c656d656e746174696f6e3a30"></a>
 

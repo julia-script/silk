@@ -12,7 +12,7 @@
 //! # Gotchas
 //! A provider claiming this service must return fresh unpredictable bytes and must treat failure as
 //! fatal. An environment without such a source must omit the capability, never substitute
-//! deterministic data. [`fillBytes`] performs no provider call for empty storage.
+//! deterministic data. `Random.fillBytes` performs no provider call for empty storage.
 //!
 //! # Examples
 //! ## Request a secure word
@@ -20,12 +20,12 @@
 //! import silk.random { Random }
 //!
 //! effect fn tokenWord() -> u64
-//! ? &mut Random.Random {
+//! ? &mut Random {
 //!   return run Random.nextU64()
 //! }
 //! ```
 
-import silk.option as Option
+import silk.option { Option }
 import silk.u64 as u64
 import silk.u8 as u8
 import silk.usize as usize
@@ -41,16 +41,45 @@ pub service Random {
   effect fn fillBytes(output: &mut [u8]) -> () ? &mut Random
 }
 
-/// Fills `output` through the active secure provider.
-///
-/// # Details
-///
-/// Empty output succeeds without dispatching the provider.
-pub effect fn fillBytes(output: &mut [u8]) -> () ? &mut Random {
-  if output.length == 0 {
-    return ()
+impl Random {
+  /// Returns one secure `u64` decoded least-significant byte first from exactly eight provider bytes.
+  pub effect fn nextU64() -> u64 ? &mut Random {
+    let mut bytes = emptyWordBytes()
+    run Random.fillBytes(&mut bytes)
+    let mut word = u64.MIN
+    let mut index = usize.ZERO
+    while index < 8 {
+      let byte = u8.toU64(bytes[index])
+      let shift = u64.wrappingMultiply(usize.toU64(index), 8)
+      word = u64.bitOr(word, u64.shiftLeft(byte, shift))
+      index = index + usize.ONE
+    }
+    return word
   }
-  return run Random.fillBytes(move output)
+
+  /// Returns whether bit 63 of one secure provider word is set.
+  pub effect fn nextBool() -> bool ? &mut Random {
+    let word = run Random.nextU64()
+    return u64.shiftRight(word, 63) == 1
+  }
+
+  /// Returns an unbiased secure value below `upperExclusive`, or `None` for zero.
+  ///
+  /// # Details
+  ///
+  /// A zero bound consumes no provider bytes. Positive bounds use complete-word rejection sampling.
+  pub effect fn below(upperExclusive: u64) -> Option<u64> ? &mut Random {
+    if upperExclusive == u64.MIN {
+      return Option.none<u64>()
+    }
+
+    let threshold = u64.remainder(u64.wrappingSubtract(u64.MIN, upperExclusive), upperExclusive)
+    let mut word = run Random.nextU64()
+    while word < threshold {
+      word = run Random.nextU64()
+    }
+    return Option.some<u64>(u64.remainder(word, upperExclusive))
+  }
 }
 
 fn emptyWordBytes() -> [u8; 8] {
@@ -66,41 +95,3 @@ fn emptyWordBytes() -> [u8; 8] {
   ]
 }
 
-/// Returns one secure `u64` decoded least-significant byte first from exactly eight provider bytes.
-pub effect fn nextU64() -> u64 ? &mut Random {
-  let mut bytes = emptyWordBytes()
-  run fillBytes(&mut bytes)
-  let mut word = u64.MIN
-  let mut index = usize.ZERO
-  while index < 8 {
-    let byte = u8.toU64(bytes[index])
-    let shift = u64.wrappingMultiply(usize.toU64(index), 8)
-    word = u64.bitOr(word, u64.shiftLeft(byte, shift))
-    index = index + usize.ONE
-  }
-  return word
-}
-
-/// Returns whether bit 63 of one secure provider word is set.
-pub effect fn nextBool() -> bool ? &mut Random {
-  let word = run nextU64()
-  return u64.shiftRight(word, 63) == 1
-}
-
-/// Returns an unbiased secure value below `upperExclusive`, or `None` for zero.
-///
-/// # Details
-///
-/// A zero bound consumes no provider bytes. Positive bounds use complete-word rejection sampling.
-pub effect fn below(upperExclusive: u64) -> Option.Option<u64> ? &mut Random {
-  if upperExclusive == u64.MIN {
-    return Option.none<u64>()
-  }
-
-  let threshold = u64.remainder(u64.wrappingSubtract(u64.MIN, upperExclusive), upperExclusive)
-  let mut word = run nextU64()
-  while word < threshold {
-    word = run nextU64()
-  }
-  return Option.some<u64>(u64.remainder(word, upperExclusive))
-}

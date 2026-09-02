@@ -51,9 +51,9 @@ const owners = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.i32 as i32
 import silk.layout { Layout }
-import silk.hash as Hash
+import silk.hash { Hash }
 import silk.hash { HashKey, HashSeed }
-import silk.hash_map { HashMap, contains, insert, length, make, remove, withMut }
+import silk.hash_map { HashMap }
 import silk.option { Option }
 
 struct Handle {
@@ -117,7 +117,7 @@ const program = (body: string): string =>
   `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 ${owners}
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -201,7 +201,7 @@ import silk.hash { Word }
 struct Box { value: i32 }
 fn expose(value: &mut Box) -> &mut Box { return move value }
 fn escaped(map: &mut HashMap<Word, Box>, key: Word) -> bool {
-  return withMut(move map, move key, expose)
+  return HashMap.withMut(move map, move key, expose)
 }
 pub fn main() -> i32 { return 0 }`
     const snapshot = yield* analyzed('hashed-ownership/callback-escape', source)
@@ -210,14 +210,14 @@ pub fn main() -> i32 { return 0 }`
     const reason = (diagnostics.at(0) ?? unreachable('expected one diagnostic')).reason
     assert.strictEqual(reason._tag, 'TypeArgumentInference')
     if (reason._tag !== 'TypeArgumentInference') return
-    assert.strictEqual(reason.target, 'withMut')
+    assert.strictEqual(reason.target, 'HashMap.withMut')
   }),
 )
 
 it.effect('rejects a callback that parks while holding the value borrow', () =>
   Effect.gen(function* () {
     const source = `${owners}
-import silk.execution as Execution
+import silk.execution { Execution }
 import silk.hash { Word }
 struct Guard {}
 struct Box { value: i32 }
@@ -228,8 +228,8 @@ fn parking(value: &mut Box) -> () {
   return ()
 }
 pub fn main() -> i32 {
-  let mut map = make<Word, Box>(Hash.seed(9))
-  let attempted = withMut(&mut map, Hash.word(1), parking)
+  let mut map = HashMap.make<Word, Box>(Hash.seed(9))
+  let attempted = HashMap.withMut(&mut map, Hash.word(1), parking)
   drop attempted
   return 0
 }
@@ -248,16 +248,16 @@ it.effect('transfers a move-only value out through callback-scoped mutation', ()
   Effect.gen(function* () {
     const outcome = yield* owned(
       'hashed-ownership/callback-extraction',
-      program(`  let mut map = make<Handle, Cell>(Hash.seed(3))
+      program(`  let mut map = HashMap.make<Handle, Cell>(Hash.seed(3))
   let key = run handle(7) |> Effect.provideMut(&mut allocator)
   let value = run held(42) |> Effect.provideMut(&mut allocator)
   let cell = Cell { slot: Filled { payload: move value } }
-  let inserted = run insert<Handle, Cell>(&mut map, move key, move cell)
+  let inserted = run HashMap.insert<Handle, Cell>(&mut map, move key, move cell)
     |> Effect.provideMut(&mut allocator)
   drop inserted
   let probe = run handle(7) |> Effect.provideMut(&mut allocator)
   let mut captured = Capture { slot: Empty {} }
-  let found = withMut(&mut map, move probe, extractInto(&mut captured))
+  let found = HashMap.withMut(&mut map, move probe, extractInto(&mut captured))
   if !found { return 1 }
   let answer = match move captured {
     Capture { slot } => match move slot {
@@ -265,7 +265,7 @@ it.effect('transfers a move-only value out through callback-scoped mutation', ()
       Filled { payload } => tagOf(move payload)
     }
   }
-  if length<Handle, Cell>(&map) != 1 { return 2 }
+  if HashMap.length<Handle, Cell>(&map) != 1 { return 2 }
   return answer`),
     )
     balanced(outcome, 42, 5)
@@ -280,17 +280,17 @@ it.effect('releases every owned key and value when a non-empty map is dropped', 
     // anything the program wrote released them.
     const outcome = yield* owned(
       'hashed-ownership/drop-non-empty',
-      program(`  let mut map = make<Handle, Held>(Hash.seed(3))
+      program(`  let mut map = HashMap.make<Handle, Held>(Hash.seed(3))
   let mut index = 0
   while index < 3 {
     let key = run handle(index) |> Effect.provideMut(&mut allocator)
     let value = run held(index + 10) |> Effect.provideMut(&mut allocator)
-    let previous = run insert<Handle, Held>(&mut map, move key, move value)
+    let previous = run HashMap.insert<Handle, Held>(&mut map, move key, move value)
       |> Effect.provideMut(&mut allocator)
     drop previous
     index = index + 1
   }
-  if length<Handle, Held>(&map) != 3 { return 1 }
+  if HashMap.length<Handle, Held>(&map) != 3 { return 1 }
   return 42`),
     )
     balanced(outcome, 42, 8)
@@ -307,17 +307,17 @@ it.effect('releases the replaced value and the replaced key when an overwrite la
     // back and did not release would leave five.
     const outcome = yield* owned(
       'hashed-ownership/overwrite',
-      program(`  let mut map = make<Handle, Held>(Hash.seed(3))
+      program(`  let mut map = HashMap.make<Handle, Held>(Hash.seed(3))
   let firstKey = run handle(7) |> Effect.provideMut(&mut allocator)
   let firstValue = run held(11) |> Effect.provideMut(&mut allocator)
-  let none = run insert<Handle, Held>(&mut map, move firstKey, move firstValue)
+  let none = run HashMap.insert<Handle, Held>(&mut map, move firstKey, move firstValue)
     |> Effect.provideMut(&mut allocator)
   drop none
   let secondKey = run handle(7) |> Effect.provideMut(&mut allocator)
   let secondValue = run held(31) |> Effect.provideMut(&mut allocator)
-  let displaced = run insert<Handle, Held>(&mut map, move secondKey, move secondValue)
+  let displaced = run HashMap.insert<Handle, Held>(&mut map, move secondKey, move secondValue)
     |> Effect.provideMut(&mut allocator)
-  if length<Handle, Held>(&map) != 1 { return 1 }
+  if HashMap.length<Handle, Held>(&map) != 1 { return 1 }
   let replaced = match move displaced {
     Option<Held>.Some { value } => tagOf(move value)
     Option<Held>.None => 0
@@ -337,20 +337,20 @@ it.effect('transfers a removed value out and releases the key the map held', () 
     // Three keys — two stored, one probing — two values, two buffers: seven acquisitions.
     const outcome = yield* owned(
       'hashed-ownership/remove',
-      program(`  let mut map = make<Handle, Held>(Hash.seed(3))
+      program(`  let mut map = HashMap.make<Handle, Held>(Hash.seed(3))
   let firstKey = run handle(4) |> Effect.provideMut(&mut allocator)
   let firstValue = run held(20) |> Effect.provideMut(&mut allocator)
-  let noFirst = run insert<Handle, Held>(&mut map, move firstKey, move firstValue)
+  let noFirst = run HashMap.insert<Handle, Held>(&mut map, move firstKey, move firstValue)
     |> Effect.provideMut(&mut allocator)
   drop noFirst
   let secondKey = run handle(9) |> Effect.provideMut(&mut allocator)
   let secondValue = run held(22) |> Effect.provideMut(&mut allocator)
-  let noSecond = run insert<Handle, Held>(&mut map, move secondKey, move secondValue)
+  let noSecond = run HashMap.insert<Handle, Held>(&mut map, move secondKey, move secondValue)
     |> Effect.provideMut(&mut allocator)
   drop noSecond
   let probe = run handle(4) |> Effect.provideMut(&mut allocator)
-  let taken = remove<Handle, Held>(&mut map, move probe)
-  if length<Handle, Held>(&map) != 1 { return 1 }
+  let taken = HashMap.remove<Handle, Held>(&mut map, move probe)
+  if HashMap.length<Handle, Held>(&map) != 1 { return 1 }
   let carried = match move taken {
     Option<Held>.Some { value } => tagOf(move value)
     Option<Held>.None => 0
@@ -372,17 +372,17 @@ it.effect('releases every owned key and value carried through a growth', () =>
     // Ten keys, ten values, and two buffers for each of the tables of eight and sixteen: twenty-four.
     const outcome = yield* owned(
       'hashed-ownership/growth',
-      program(`  let mut map = make<Handle, Held>(Hash.seed(3))
+      program(`  let mut map = HashMap.make<Handle, Held>(Hash.seed(3))
   let mut index = 0
   while index < 10 {
     let key = run handle(index) |> Effect.provideMut(&mut allocator)
     let value = run held(index) |> Effect.provideMut(&mut allocator)
-    let previous = run insert<Handle, Held>(&mut map, move key, move value)
+    let previous = run HashMap.insert<Handle, Held>(&mut map, move key, move value)
       |> Effect.provideMut(&mut allocator)
     drop previous
     index = index + 1
   }
-  if length<Handle, Held>(&map) != 10 { return 1 }
+  if HashMap.length<Handle, Held>(&map) != 10 { return 1 }
   return 42`),
     )
     balanced(outcome, 42, 24)

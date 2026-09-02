@@ -25,6 +25,7 @@ import {
   returnedBorrow,
 } from './DeclarationFacts.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
+import * as NameResolution from './NameResolution.js'
 import {
   attachExposure,
   canonicalKey,
@@ -499,10 +500,39 @@ export const complete = (
     // (not through an alias), or the head publishes no members.
     const inherentImpls = module.inherentImpls.map((head): InherentImplFact => {
       const owner = resolveDeclaredType(module.module, head.owner, resolvers, self.modules)
-      // A head already rejected at collection keeps only that diagnostic; resolving its owner is
+      // A head already rejected at collection keeps only that diagnostic; its owner is resolved
       // for closing `Self` in its members, not for a second report.
       if (head.validity._tag === 'Invalid') return Object.freeze({ ...head, owner: owner.fact })
-      diagnostics.push(...owner.diagnostics)
+      // The owner is a declaration of this module named by its own spelling. A local declaration
+      // wins over the type resolver's answer because a zero-data owner struct may share its
+      // spelling with a builtin storage type (`Slot`, `RawBuffer`), and the impl names the
+      // declaration. Only when no local declaration matches does the resolver's answer tell a
+      // foreign owner from an alias or a non-nominal.
+      const localOwner = module.members.find(
+        (member) =>
+          member.canonical._tag === 'Canonical' &&
+          member.canonical.id.name === head.ownerSpelling &&
+          NameResolution.isNominalOwner(member),
+      )
+      if (
+        localOwner !== undefined &&
+        localOwner.canonical._tag === 'Canonical' &&
+        owner.fact._tag === 'Resolved'
+      ) {
+        // The resolver's fact keeps the head's argument facts for tooling; only its type is replaced
+        // by the local declaration's nominal, and its diagnostics stand unless they came from the
+        // builtin that shadows the local spelling.
+        if (Type.isNominal(owner.fact.type)) diagnostics.push(...owner.diagnostics)
+        const binders = head.typeParameters.filter(
+          (parameter) => parameter.duplicateOf === undefined,
+        )
+        const ownerType = Type.nominal(
+          module.module,
+          localOwner.canonical.id.name,
+          binders.map((parameter) => parameter.type),
+        )
+        return Object.freeze({ ...head, owner: Object.freeze({ ...owner.fact, type: ownerType }) })
+      }
       const ownerType = owner.fact._tag === 'Resolved' ? owner.fact.type : undefined
       const nominal = ownerType !== undefined && Type.isNominal(ownerType) ? ownerType : undefined
       const ownerDeclaration =

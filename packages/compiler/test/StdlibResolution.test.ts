@@ -20,7 +20,7 @@ const ascii = (value: string): Uint8Array =>
 const targetSourceUrl = new URL('../stdlib/silk/target.silk', import.meta.url)
 const targetSource = new Uint8Array(readFileSync(targetSourceUrl))
 
-const importing = `import silk.vector { Vector, length }
+const importing = `import silk.vector { Vector }
 
 pub fn main() -> i32 {
   return 42
@@ -267,7 +267,7 @@ it('declares one discoverable namespace for every standard-library module', () =
   )
 })
 
-const insecureRandomImporter = `import silk.insecure_random as InsecureRandom
+const insecureRandomImporter = `import silk.insecure_random { InsecureRandom }
 
 pub fn main() -> i32 {
   let provider = InsecureRandom.seeded(0)
@@ -306,11 +306,10 @@ it.effect('resolves the complete InsecureRandom surface to canonical portable Si
       [
         'InsecureRandom',
         'Xoshiro256StarStar',
-        'seeded',
-        'nextU64',
-        'nextBool',
-        'below',
-        'fillBytes',
+        'InsecureRandom.seeded',
+        'InsecureRandom.nextBool',
+        'InsecureRandom.below',
+        'InsecureRandom.fillBytes',
       ],
     )
     assert.isTrue(canonicals.every((canonical) => canonical.module === 'silk/insecure_random'))
@@ -326,13 +325,13 @@ it.effect('keeps a renamed copy of the InsecureRandom implementation ordinary an
       .decode(source)
       .replaceAll('Xoshiro256StarStar', 'Sequence256')
       .replaceAll('InsecureRandom', 'Entropy')
-    const root = `import app.entropy as Entropy
-import silk.effect as Effect
+    const root = `import app.entropy { Entropy }
+import silk.effect { Effect }
 
 pub fn main() -> i32 {
   let mut provider = Entropy.seeded(0)
   let word = run Entropy.nextU64()
-    |> Effect.provideMut<Entropy.Entropy>(&mut provider)
+    |> Effect.provideMut<Entropy>(&mut provider)
   if word != 0x99ec5f36cb75f2b4 { return 1 }
   return 42
 }`
@@ -350,8 +349,8 @@ it.effect('resolves secure Random and InsecureSeed to distinct canonical portabl
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'stdlib/random-capabilities-importer',
-      ascii(`import silk.insecure_seed as InsecureSeed
-import silk.random as Random
+      ascii(`import silk.insecure_seed { InsecureSeed }
+import silk.random { Random }
 pub fn main() -> i32 {
   let provider = InsecureSeed.fixed(20, 22)
   drop provider
@@ -378,10 +377,9 @@ pub fn main() -> i32 {
     }
     assert.includeMembers(names('silk/random'), [
       'Random',
-      'fillBytes',
-      'nextU64',
-      'nextBool',
-      'below',
+      'Random.nextU64',
+      'Random.nextBool',
+      'Random.below',
     ])
     assert.notInclude(names('silk/random'), 'seeded')
     assert.notInclude(names('silk/random'), 'Xoshiro256StarStar')
@@ -389,11 +387,10 @@ pub fn main() -> i32 {
       'Seed',
       'InsecureSeed',
       'FixedInsecureSeed',
-      'first',
-      'second',
-      'fixed',
-      'fromRandom',
-      'get',
+      'InsecureSeed.first',
+      'InsecureSeed.second',
+      'InsecureSeed.fixed',
+      'InsecureSeed.fromRandom',
     ])
   }),
 )
@@ -616,7 +613,7 @@ pub fn main() -> i32 {
   return helped()
 }`
 
-const shadowedHelper = `import silk.result as Result
+const shadowedHelper = `import silk.result { Result }
 
 pub fn helped() -> i32 {
   let outcome = Result.succeed<i32, i32>(42)
@@ -624,9 +621,9 @@ pub fn helped() -> i32 {
   return 0
 }`
 
-/** The shadowing module reaches the standard-library module it shadowed through a namespace import. */
+/** The shadowing module reaches the standard-library type it shadowed through a selected alias. */
 const shadowingWithAlias = `import app.helper { helped }
-import silk.result as StdResult
+import silk.result { Result as StdResult }
 
 pub struct Result<A, F> { value: A }
 
@@ -662,8 +659,10 @@ it.effect('keeps catalog declarations out of an importing sibling module', () =>
     if (lookup.declaration.canonical._tag !== 'Canonical') return
     assert.strictEqual(lookup.declaration.canonical.id.module, 'app/main')
     const helperImport = Analysis.lookupName(snapshot, 'app/helper', 'Result')
-    assert.deepEqual(
-      helperImport._tag === 'Namespace' ? helperImport.module : helperImport._tag,
+    assert.strictEqual(
+      helperImport._tag === 'Resolved' && helperImport.declaration.canonical._tag === 'Canonical'
+        ? helperImport.declaration.canonical.id.module
+        : helperImport._tag,
       'silk/result',
     )
   }),
@@ -674,7 +673,12 @@ it.effect('reaches a shadowed standard-library module through an ordinary import
     const snapshot = yield* withHelper(shadowingWithAlias)
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const alias = Analysis.lookupName(snapshot, 'app/main', 'StdResult')
-    assert.deepEqual(alias._tag === 'Namespace' ? alias.module : alias._tag, 'silk/result')
+    assert.deepEqual(
+      alias._tag === 'Resolved' && alias.declaration.canonical._tag === 'Canonical'
+        ? alias.declaration.canonical.id
+        : alias._tag,
+      { _tag: 'CanonicalDeclarationId', module: 'silk/result', name: 'Result' },
+    )
     // The local declaration keeps the bare spelling.
     const local = Analysis.lookupName(snapshot, 'app/main', 'Result')
     assert.strictEqual(

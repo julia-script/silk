@@ -35,14 +35,25 @@ import silk.u64 as u64
 import silk.u8 as u8
 import silk.usize as usize
 
-/// The importable name of the `silk.numeric` module scope.
+/// The owner of the generic numeric helpers.
 ///
 /// # Details
 ///
-/// This struct carries no data and is never constructed by the library. Importing it as
-/// `import silk.numeric { Numeric }` names the module scope, so generic numeric helpers resolve
-/// through `Numeric` without renaming the [`Integer`] interface.
+/// This struct carries no data and is never constructed by the library. The helpers are inherent
+/// members declared in `impl Numeric`, reached through `import silk.numeric { Numeric }`, and
+/// leave the [`Integer`] interface's name to the interface.
 pub struct Numeric {}
+
+impl Numeric {
+  /// Adds two values and traps if the selected integer type cannot represent the result.
+  ///
+  /// # When to use
+  ///
+  /// Use this function to call ordinary integer addition from generic code.
+  pub fn add<T: Integer>(left: T, right: T) -> T {
+    return move left + move right
+  }
+}
 
 /// Static addition contract for primitive integer values.
 ///
@@ -70,11 +81,3 @@ impl Integer for i32 { add: Intrinsic.i32Add }
 impl Integer for i64 { add: Intrinsic.i64Add }
 impl Integer for isize { add: Intrinsic.isizeAdd }
 
-/// Adds two values and traps if the selected integer type cannot represent the result.
-///
-/// # When to use
-///
-/// Use this function to call ordinary integer addition from generic code.
-pub fn add<T: Integer>(left: T, right: T) -> T {
-  return move left + move right
-}

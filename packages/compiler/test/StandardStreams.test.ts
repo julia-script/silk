@@ -18,12 +18,12 @@ const decoder = new TextDecoder()
 const outputRoot = mkdtempSync(join(tmpdir(), 'silk-standard-streams-'))
 afterAll(() => rmSync(outputRoot, { recursive: true, force: true }))
 
-const source = `import silk.writer as Streams
+const source = `import silk.writer { Writer, WriterError, StdoutWriter }
 import silk.writer { Writer, WriterError }
-import silk.effect as Effect
+import silk.effect { Effect }
 pub effect fn main() -> () ! WriterError {
-  let mut stdout = Streams.stdoutWriterProvider()
-  let mut stderr = Streams.stderrWriterProvider()
+  let mut stdout = Writer.stdoutWriterProvider()
+  let mut stderr = Writer.stderrWriterProvider()
   let first = run Effect.provideMut(Writer.writeAll(Intrinsic.stringUtf8Bytes("heading\\n")), &mut stdout)
   let second = run Effect.provideMut(Writer.writeAll(b"warning\\n"), &mut stderr)
   let third = run Effect.provideMut(Writer.writeAll(Intrinsic.stringUtf8Bytes("row\\n")), &mut stdout)
@@ -89,12 +89,12 @@ it.effect('records complete ordered writes and typed provider failure determinis
   }),
 )
 
-const formatterSource = `import silk.effect as Effect
-import silk.format as Format
+const formatterSource = `import silk.effect { Effect }
+import silk.format { Format }
 import silk.format { Alignment, Display, FormatOptions, Formatter, Sign }
-import silk.option as Option
+import silk.option { Option }
 import silk.usize as usize
-import silk.writer as Writer
+import silk.writer { Writer }
 import silk.writer { WriterError }
 
 struct Badge {}
@@ -102,7 +102,7 @@ struct Badge {}
 effect fn badgeDisplay(
   self: &Badge,
   formatter: &mut Formatter
-) -> () ! WriterError ? &mut Writer.Writer {
+) -> () ! WriterError ? &mut Writer {
   run Format.writeLeadingPadding(&mut formatter, usize.ONE)
   if Format.color(&formatter) { run Format.write(&mut formatter, b"\\x1b[31m") }
   run Format.write(&mut formatter, b"X")
@@ -125,17 +125,17 @@ fn options(color: bool) -> FormatOptions {
   }
 }
 
-effect fn render(color: bool) -> () ! WriterError ? &mut Writer.Writer {
+effect fn render(color: bool) -> () ! WriterError ? &mut Writer {
   let badge = Badge {}
   return run Format.displayWith(&badge, options(color))
 }
 
 pub effect fn main() -> () ! WriterError {
   let mut stdout = Writer.stdoutWriterProvider()
-  run render(false) |> Effect.provideMut<Writer.Writer>(&mut stdout)
+  run render(false) |> Effect.provideMut<Writer>(&mut stdout)
   let mut stderr = Writer.stderrWriterProvider()
-  run render(false) |> Effect.provideMut<Writer.Writer>(&mut stderr)
-  return run render(true) |> Effect.provideMut<Writer.Writer>(&mut stderr)
+  run render(false) |> Effect.provideMut<Writer>(&mut stderr)
+  return run render(true) |> Effect.provideMut<Writer>(&mut stderr)
 }`
 
 it.effect('lets a nominal Display pad visible content across distinct Writer providers', () =>
@@ -336,9 +336,9 @@ it.effect('replaces the host provider with a pure source in-memory implementatio
   Effect.gen(function* () {
     const replaced = yield* Analysis.ofSourceRealized(
       'standard-streams/memory',
-      encoder.encode(`import silk.writer as Streams
+      encoder.encode(`import silk.writer { Writer, WriterError, StdoutWriter }
 import silk.writer { WriterError, Writer }
-import silk.effect as Effect
+import silk.effect { Effect }
 struct MemoryStreams { writes: i32 }
 effect fn record(
   self: &mut MemoryStreams,

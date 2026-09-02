@@ -18,7 +18,7 @@
 //! # Examples
 //! ## Initialize and read a raw byte buffer
 //! ```silk
-//! import silk.allocator { Allocator }
+//! import silk.allocator { Allocator, OutOfMemoryError }
 //!
 //! import silk.effect { Effect }
 //!
@@ -29,7 +29,7 @@
 //! import silk.u8
 //!
 //! effect fn build() -> i32
-//! ! Allocator.OutOfMemoryError {
+//! ! OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
 //!   let acquiring = Allocator.allocate(Layout.of<[u8; 3]>())
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -43,7 +43,7 @@
 //!   return 0
 //! }
 //!
-//! effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+//! effect fn recover(error: OutOfMemoryError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -52,91 +52,94 @@
 //! }
 //! ```
 
-import silk.slot as Slot
+import silk.slot { Slot }
 import silk.u8 as u8
 import silk.usize as usize
 
-/// The importable name of the `silk.raw_buffer` module scope.
+/// The owner of the raw storage operations.
 ///
 /// # Details
 ///
-/// This struct carries no data and is never constructed by the library. Importing it as
-/// `import silk.raw_buffer { RawBuffer }` names the module scope, so `RawBuffer.from(...)` and the
-/// other storage operations resolve through it. It is unrelated to the builtin `RawBuffer<T>`
-/// type.
+/// This struct carries no data and is never constructed by the library. Every operation is an
+/// inherent member declared in `impl RawBuffer`, so `import silk.raw_buffer { RawBuffer }` is the
+/// one import that reaches `RawBuffer.from(...)` and the rest. It is unrelated to the builtin
+/// `RawBuffer<T>` type.
 pub struct RawBuffer {}
 
-/// Adopts an allocation as typed raw storage with the specified element capacity.
-///
-/// # Gotchas
-///
-/// The caller must prove that the allocation has the size and alignment for `count` values of `T`.
-pub fn from<T>(allocation: Allocation, count: usize) -> RawBuffer<T> {
-  unsafe { return Intrinsic.rawBufferFrom<T>(move allocation, count) }
+impl RawBuffer {
+  /// Adopts an allocation as typed raw storage with the specified element capacity.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove that the allocation has the size and alignment for `count` values of `T`.
+  pub fn from<T>(allocation: Allocation, count: usize) -> RawBuffer<T> {
+    unsafe { return Intrinsic.rawBufferFrom<T>(move allocation, count) }
+  }
+
+  /// Selects one raw storage slot without checking bounds or initialization.
+  ///
+  /// # Gotchas
+  ///
+  /// `index` must be less than [`count`]. The caller must separately track whether the slot is
+  /// initialized.
+  pub fn slot<T>(buffer: &mut RawBuffer<T>, index: usize) -> Slot<T> {
+    unsafe { return Intrinsic.rawBufferSlot<T>(buffer, index) }
+  }
+
+  /// Returns the element capacity recorded by a raw buffer.
+  pub fn count<T>(buffer: &RawBuffer<T>) -> usize {
+    return Intrinsic.rawBufferCount<T>(buffer)
+  }
+
+  /// Copies one initialized element without changing its slot state.
+  ///
+  /// # Gotchas
+  ///
+  /// `index` must be less than [`count`], and the selected slot must contain an initialized `T`.
+  pub fn read<T: Copy>(buffer: &RawBuffer<T>, index: usize) -> T {
+    unsafe { return Intrinsic.rawBufferRead<T>(buffer, index) }
+  }
+
+  /// Moves a caller-proven initialized range into selected storage in one bulk transfer.
+  ///
+  /// # Details
+  ///
+  /// Source and destination may overlap; the result is as if the elements travelled through an
+  /// intermediate buffer.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove that both selected ranges are in bounds. The source range must be
+  /// initialized.
+  pub fn copy<T>(destination: &mut RawBuffer<T>, destinationOffset: usize, source: &[T], length: usize) -> () {
+    unsafe { return Intrinsic.rawBufferCopy<T>(destination, destinationOffset, source, length) }
+  }
+
+  /// Initializes a selected byte range with one repeated byte value.
+  ///
+  /// # Gotchas
+  ///
+  /// `offset + length` must not exceed [`count`].
+  pub fn fill(buffer: &mut RawBuffer<u8>, offset: usize, length: usize, value: u8) -> () {
+    unsafe { return Intrinsic.rawBufferFill(buffer, offset, length, value) }
+  }
+
+  /// Borrows a shared view of an initialized element range.
+  ///
+  /// # Gotchas
+  ///
+  /// The selected range must be in bounds, and each selected slot must be initialized.
+  pub fn view<T>(buffer: &RawBuffer<T>, offset: usize, length: usize) -> &[T] {
+    unsafe { return Intrinsic.rawBufferView<T>(buffer, offset, length) }
+  }
+
+  /// Borrows an exclusive view of an initialized element range.
+  ///
+  /// # Gotchas
+  ///
+  /// The selected range must be in bounds, and each selected slot must be initialized.
+  pub fn viewMut<T>(buffer: &mut RawBuffer<T>, offset: usize, length: usize) -> &mut [T] {
+    unsafe { return Intrinsic.rawBufferViewMut<T>(buffer, offset, length) }
+  }
 }
 
-/// Selects one raw storage slot without checking bounds or initialization.
-///
-/// # Gotchas
-///
-/// `index` must be less than [`count`]. The caller must separately track whether the slot is
-/// initialized.
-pub fn slot<T>(buffer: &mut RawBuffer<T>, index: usize) -> Slot<T> {
-  unsafe { return Intrinsic.rawBufferSlot<T>(buffer, index) }
-}
-
-/// Returns the element capacity recorded by a raw buffer.
-pub fn count<T>(buffer: &RawBuffer<T>) -> usize {
-  return Intrinsic.rawBufferCount<T>(buffer)
-}
-
-/// Copies one initialized element without changing its slot state.
-///
-/// # Gotchas
-///
-/// `index` must be less than [`count`], and the selected slot must contain an initialized `T`.
-pub fn read<T: Copy>(buffer: &RawBuffer<T>, index: usize) -> T {
-  unsafe { return Intrinsic.rawBufferRead<T>(buffer, index) }
-}
-
-/// Moves a caller-proven initialized range into selected storage in one bulk transfer.
-///
-/// # Details
-///
-/// Source and destination may overlap; the result is as if the elements travelled through an
-/// intermediate buffer.
-///
-/// # Gotchas
-///
-/// The caller must prove that both selected ranges are in bounds. The source range must be
-/// initialized.
-pub fn copy<T>(destination: &mut RawBuffer<T>, destinationOffset: usize, source: &[T], length: usize) -> () {
-  unsafe { return Intrinsic.rawBufferCopy<T>(destination, destinationOffset, source, length) }
-}
-
-/// Initializes a selected byte range with one repeated byte value.
-///
-/// # Gotchas
-///
-/// `offset + length` must not exceed [`count`].
-pub fn fill(buffer: &mut RawBuffer<u8>, offset: usize, length: usize, value: u8) -> () {
-  unsafe { return Intrinsic.rawBufferFill(buffer, offset, length, value) }
-}
-
-/// Borrows a shared view of an initialized element range.
-///
-/// # Gotchas
-///
-/// The selected range must be in bounds, and each selected slot must be initialized.
-pub fn view<T>(buffer: &RawBuffer<T>, offset: usize, length: usize) -> &[T] {
-  unsafe { return Intrinsic.rawBufferView<T>(buffer, offset, length) }
-}
-
-/// Borrows an exclusive view of an initialized element range.
-///
-/// # Gotchas
-///
-/// The selected range must be in bounds, and each selected slot must be initialized.
-pub fn viewMut<T>(buffer: &mut RawBuffer<T>, offset: usize, length: usize) -> &mut [T] {
-  unsafe { return Intrinsic.rawBufferViewMut<T>(buffer, offset, length) }
-}

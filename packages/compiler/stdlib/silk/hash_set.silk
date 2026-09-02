@@ -23,11 +23,11 @@
 //! # Examples
 //! ## Insert one unique element and remove it
 //! ```silk
-//! import silk.allocator { Allocator }
+//! import silk.allocator { Allocator, OutOfMemoryError }
 //!
 //! import silk.effect { Effect }
 //!
-//! import silk.hash { Hash }
+//! import silk.hash { Hash, Word }
 //!
 //! import silk.hash_set { HashSet }
 //!
@@ -36,21 +36,21 @@
 //! import silk.u64
 //!
 //! effect fn build() -> i32
-//! ! Allocator.OutOfMemoryError {
+//! ! OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
-//!   let mut set = HashSet.make<Hash.Word>(Hash.seed(17))
-//!   let inserting = HashSet.insert<Hash.Word>(&mut set, Hash.word(42))
+//!   let mut set = HashSet.make<Word>(Hash.seed(17))
+//!   let inserting = HashSet.insert<Word>(&mut set, Hash.word(42))
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let existed = run inserting
-//!   if existed || !HashSet.contains<Hash.Word>(&set, Hash.word(42)) {
+//!   if existed || !HashSet.contains<Word>(&set, Hash.word(42)) {
 //!     return 0
 //!   }
-//!   let removed = HashSet.remove<Hash.Word>(&mut set, Hash.word(42))
-//!     |> Option.unwrapOr<Hash.Word>(Hash.word(0))
+//!   let removed = HashSet.remove<Word>(&mut set, Hash.word(42))
+//!     |> Option.unwrapOr<Word>(Hash.word(0))
 //!   return u64.toI32(removed.value)
 //! }
 //!
-//! effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+//! effect fn recover(error: OutOfMemoryError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -69,15 +69,14 @@
 // set cannot be a map whose values are empty. What the two share is the shape, not the code.
 
 import silk.bool as bool
-import silk.allocator as AllocationFailure
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 import silk.allocator { OutOfMemoryError }
 import silk.hash { HashKey, HashSeed }
 import silk.layout { Layout }
 import silk.layout { LayoutOverflow }
-import silk.option { Option, none, some }
-import silk.raw_buffer as RawBuffer
-import silk.slot as Slot
+import silk.option { Option }
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
 import silk.u64 as u64
 import silk.u8 as u8
 import silk.usize as usize
@@ -122,48 +121,249 @@ pub struct Slots<T> {
 pub struct HashSet<T> {
   storage: Unseeded<T> | Slots<T>
   seed: HashSeed
-  length: usize
+  count: usize
   used: usize
   capacity: usize
+}
+
+impl<T> HashSet<T> {
+  /// Creates an empty set whose every hash is computed under one seed.
+  ///
+  /// # Details
+  ///
+  /// An empty set allocates no storage. The seed fixes bucket order for the same operation sequence.
+  pub fn make(seed: HashSeed) -> HashSet<T> {
+    return HashSet<T> {
+      storage: Unseeded<T> { anchor: [] },
+      seed: move seed,
+      count: usize.ZERO,
+      used: usize.ZERO,
+      capacity: usize.ZERO,
+    }
+  }
+
+  /// Returns the number of elements the set holds.
+  pub fn length(self: &Self) -> usize {
+    return self.count
+  }
+
+  /// Returns the number of buckets the set presents, which is the range `occupiedAt` accepts.
+  pub fn bucketCount(self: &Self) -> usize {
+    return self.capacity
+  }
+
+  /// Reports whether one bucket holds an element. Out-of-range buckets hold nothing.
+  pub fn occupiedAt(self: &Self, index: usize) -> bool {
+    if self.capacity <= index {
+      return false
+    }
+    return stateAt<T>(self, index) == OCCUPIED
+  }
+
+  /// Inserts one owned element, reporting whether an equivalent element was already held.
+  ///
+  /// # Details
+  ///
+  /// A set never holds two equivalent elements. When one is already held the set is unchanged and the
+  /// arriving element is released, so the element that survives is the one the set already had.
+  ///
+  /// Fails only with `OutOfMemoryError`, and only from the growth this insert needed. A failed insert
+  /// leaves every prior element present, and leaves the length and the bucket count unchanged.
+  pub effect fn insert<T: HashKey>(
+    self: &mut Self,
+    value: T
+  ) -> bool ! OutOfMemoryError ? &mut Allocator {
+    let hashed = HashKey.hash(&value, &self.seed)
+    if usize.ZERO < self.capacity {
+      let storage = Intrinsic.replace(self.storage, Unseeded<T> { anchor: [] })
+      let mut owned = openStorage<T>(move storage)
+      let mut found = false
+      let mut index = bucketOf(hashed, self.capacity)
+      let mut scanned = usize.ZERO
+      while scanned < self.capacity {
+        let seen = RawBuffer.view<u8>(&owned.states, usize.ZERO, self.capacity)
+        let state = seen[index]
+        if state == VACANT {
+          break
+        }
+        if state == OCCUPIED {
+          let held = RawBuffer.view<Member<T>>(&owned.members, index, usize.ONE)
+          if held[usize.ZERO].hash == hashed {
+            if (&held[usize.ZERO].value) == (&value) {
+              found = true
+              break
+            }
+          }
+        }
+        index = advance(index, self.capacity)
+        scanned = scanned + usize.ONE
+      }
+      self.storage = move owned
+      if found {
+        let released = release<T>(move value)
+        return true
+      }
+    }
+    // The element is absent. Growth is allocated before the storage is opened, so a failure here
+    // never observes the set with its buffers taken out.
+    if needsRoom(self.used, self.capacity) {
+      let next = grownWidth(self.capacity)
+      let fresh = run allocateSlots<T>(next)
+      let storage = Intrinsic.replace(self.storage, Unseeded<T> { anchor: [] })
+      self.storage = migrate<T>(move storage, self.capacity, move fresh, next)
+      self.capacity = next
+      self.used = self.count
+    }
+    let storage = Intrinsic.replace(self.storage, Unseeded<T> { anchor: [] })
+    let mut owned = openStorage<T>(move storage)
+    let mut index = bucketOf(hashed, self.capacity)
+    let mut searching = true
+    while searching {
+      let seen = RawBuffer.view<u8>(&owned.states, usize.ZERO, self.capacity)
+      if seen[index] == OCCUPIED {
+        index = advance(index, self.capacity)
+      } else {
+        searching = false
+      }
+    }
+    let fresh = vacantAt<T>(&owned, index)
+    let written = writeMember<T>(&mut owned, index, Member<T> { hash: hashed, value: move value })
+    self.storage = move owned
+    self.count = self.count + usize.ONE
+    if fresh {
+      self.used = self.used + usize.ONE
+    }
+    return false
+  }
+
+  /// Reports whether the set holds an element equivalent to one probe element.
+  ///
+  /// # Details
+  ///
+  /// This function consumes the probe element. It does not change the set or move a stored element.
+  pub fn contains<T: HashKey>(self: &Self, value: T) -> bool {
+    if self.capacity == usize.ZERO {
+      return false
+    }
+    let hashed = HashKey.hash(&value, &self.seed)
+    let mut index = bucketOf(hashed, self.capacity)
+    let mut scanned = usize.ZERO
+    while scanned < self.capacity {
+      let state = stateAt<T>(self, index)
+      if state == VACANT {
+        return false
+      }
+      if state == OCCUPIED {
+        let held = memberAt<T>(self, index)
+        if held[usize.ZERO].hash == hashed {
+          if (&held[usize.ZERO].value) == (&value) {
+            return true
+          }
+        }
+      }
+      index = advance(index, self.capacity)
+      scanned = scanned + usize.ONE
+    }
+    return false
+  }
+
+  /// Returns the bucket holding an element equivalent to one probe element, or an absent value.
+  ///
+  /// # Details
+  ///
+  /// This is the membership question a set of move-only elements answers without moving anything.
+  /// This function consumes the probe element.
+  pub fn indexOf<T: HashKey>(self: &Self, value: T) -> Option<usize> {
+    if self.capacity == usize.ZERO {
+      return Option.none<usize>()
+    }
+    let hashed = HashKey.hash(&value, &self.seed)
+    let mut index = bucketOf(hashed, self.capacity)
+    let mut scanned = usize.ZERO
+    while scanned < self.capacity {
+      let state = stateAt<T>(self, index)
+      if state == VACANT {
+        return Option.none<usize>()
+      }
+      if state == OCCUPIED {
+        let held = memberAt<T>(self, index)
+        if held[usize.ZERO].hash == hashed {
+          if (&held[usize.ZERO].value) == (&value) {
+            return Option.some<usize>(index)
+          }
+        }
+      }
+      index = advance(index, self.capacity)
+      scanned = scanned + usize.ONE
+    }
+    return Option.none<usize>()
+  }
+
+  /// Removes the element equivalent to one probe element and answers with it.
+  ///
+  /// # Details
+  ///
+  /// Ownership passes to the caller; the set does not also release it. The probe element is released.
+  pub fn remove<T: HashKey>(self: &mut Self, value: T) -> Option<T> {
+    if self.capacity == usize.ZERO {
+      return Option.none<T>()
+    }
+    let hashed = HashKey.hash(&value, &self.seed)
+    let storage = Intrinsic.replace(self.storage, Unseeded<T> { anchor: [] })
+    let mut owned = openStorage<T>(move storage)
+    let mut found = self.capacity
+    let mut index = bucketOf(hashed, self.capacity)
+    let mut scanned = usize.ZERO
+    while scanned < self.capacity {
+      let seen = RawBuffer.view<u8>(&owned.states, usize.ZERO, self.capacity)
+      let state = seen[index]
+      if state == VACANT {
+        break
+      }
+      if state == OCCUPIED {
+        let held = RawBuffer.view<Member<T>>(&owned.members, index, usize.ONE)
+        if held[usize.ZERO].hash == hashed {
+          if (&held[usize.ZERO].value) == (&value) {
+            found = index
+            break
+          }
+        }
+      }
+      index = advance(index, self.capacity)
+      scanned = scanned + usize.ONE
+    }
+    if self.capacity <= found {
+      self.storage = move owned
+      return Option.none<T>()
+    }
+    let carried = evict<T>(&mut owned, found)
+    let marked = markRemoved<T>(&mut owned, found)
+    self.storage = move owned
+    self.count = self.count - usize.ONE
+    return Option.some<T>(move carried)
+  }
+
+  /// Returns the element held in one bucket. Traps on a bucket that holds no element.
+  ///
+  /// # Details
+  ///
+  /// Reads a copy out of the set, so it answers for a set whose element type is `Copy`.
+  ///
+  /// # Gotchas
+  ///
+  /// If `index` is out of range or [`occupiedAt`] returns `false`, the program traps.
+  pub fn elementAt<T: Copy>(self: &Self, index: usize) -> T {
+    if !HashSet.occupiedAt<T>(self, index) {
+      let boom = 1 / 0
+    }
+    return keep<T>(readMember<T>(self, index))
+  }
 }
 
 // Diverges on the arms the surrounding logic has already proven impossible.
 fn absurd<T>() -> T {
   let boom = 1 / 0
   return absurd<T>()
-}
-
-/// Creates an empty set whose every hash is computed under one seed.
-///
-/// # Details
-///
-/// An empty set allocates no storage. The seed fixes bucket order for the same operation sequence.
-pub fn make<T>(seed: HashSeed) -> HashSet<T> {
-  return HashSet<T> {
-    storage: Unseeded<T> { anchor: [] },
-    seed: move seed,
-    length: usize.ZERO,
-    used: usize.ZERO,
-    capacity: usize.ZERO,
-  }
-}
-
-/// Returns the number of elements the set holds.
-pub fn length<T>(self: &HashSet<T>) -> usize {
-  return self.length
-}
-
-/// Returns the number of buckets the set presents, which is the range `occupiedAt` accepts.
-pub fn bucketCount<T>(self: &HashSet<T>) -> usize {
-  return self.capacity
-}
-
-/// Reports whether one bucket holds an element. Out-of-range buckets hold nothing.
-pub fn occupiedAt<T>(self: &HashSet<T>, index: usize) -> bool {
-  if self.capacity <= index {
-    return false
-  }
-  return stateAt<T>(self, index) == OCCUPIED
 }
 
 fn stateAt<T>(self: &HashSet<T>, index: usize) -> u8 {
@@ -206,7 +406,7 @@ impl<T> Drop for HashSet<T> {
   fn drop(self: &mut HashSet<T>) -> () {
     let storage = Intrinsic.replace(self.storage, Unseeded<T> { anchor: [] })
     let width = Intrinsic.replace(self.capacity, usize.ZERO)
-    let emptied = Intrinsic.replace(self.length, usize.ZERO)
+    let emptied = Intrinsic.replace(self.count, usize.ZERO)
     return match move storage {
       Unseeded<T> nothing => ()
       Slots<T> held => releaseSlots<T>(move held, width)
@@ -241,7 +441,7 @@ fn openStorage<T>(storage: Unseeded<T> | Slots<T>) -> Slots<T> {
 }
 
 effect fn overflowed() -> Layout ! OutOfMemoryError {
-  return run AllocationFailure.outOfMemory()
+  return run Allocator.outOfMemory()
 }
 
 // Both buffers exist before either is installed, so an allocation that fails releases the one
@@ -400,189 +600,6 @@ fn keep<T>(member: Member<T>) -> T {
   }
 }
 
-/// Inserts one owned element, reporting whether an equivalent element was already held.
-///
-/// # Details
-///
-/// A set never holds two equivalent elements. When one is already held the set is unchanged and the
-/// arriving element is released, so the element that survives is the one the set already had.
-///
-/// Fails only with `OutOfMemoryError`, and only from the growth this insert needed. A failed insert
-/// leaves every prior element present, and leaves the length and the bucket count unchanged.
-pub effect fn insert<T: HashKey>(
-  self: &mut HashSet<T>,
-  value: T
-) -> bool ! OutOfMemoryError ? &mut Allocator {
-  let hashed = HashKey.hash(&value, &self.seed)
-  if usize.ZERO < self.capacity {
-    let storage = Intrinsic.replace(self.storage, Unseeded<T> { anchor: [] })
-    let mut owned = openStorage<T>(move storage)
-    let mut found = false
-    let mut index = bucketOf(hashed, self.capacity)
-    let mut scanned = usize.ZERO
-    while scanned < self.capacity {
-      let seen = RawBuffer.view<u8>(&owned.states, usize.ZERO, self.capacity)
-      let state = seen[index]
-      if state == VACANT {
-        break
-      }
-      if state == OCCUPIED {
-        let held = RawBuffer.view<Member<T>>(&owned.members, index, usize.ONE)
-        if held[usize.ZERO].hash == hashed {
-          if (&held[usize.ZERO].value) == (&value) {
-            found = true
-            break
-          }
-        }
-      }
-      index = advance(index, self.capacity)
-      scanned = scanned + usize.ONE
-    }
-    self.storage = move owned
-    if found {
-      let released = release<T>(move value)
-      return true
-    }
-  }
-  // The element is absent. Growth is allocated before the storage is opened, so a failure here
-  // never observes the set with its buffers taken out.
-  if needsRoom(self.used, self.capacity) {
-    let next = grownWidth(self.capacity)
-    let fresh = run allocateSlots<T>(next)
-    let storage = Intrinsic.replace(self.storage, Unseeded<T> { anchor: [] })
-    self.storage = migrate<T>(move storage, self.capacity, move fresh, next)
-    self.capacity = next
-    self.used = self.length
-  }
-  let storage = Intrinsic.replace(self.storage, Unseeded<T> { anchor: [] })
-  let mut owned = openStorage<T>(move storage)
-  let mut index = bucketOf(hashed, self.capacity)
-  let mut searching = true
-  while searching {
-    let seen = RawBuffer.view<u8>(&owned.states, usize.ZERO, self.capacity)
-    if seen[index] == OCCUPIED {
-      index = advance(index, self.capacity)
-    } else {
-      searching = false
-    }
-  }
-  let fresh = vacantAt<T>(&owned, index)
-  let written = writeMember<T>(&mut owned, index, Member<T> { hash: hashed, value: move value })
-  self.storage = move owned
-  self.length = self.length + usize.ONE
-  if fresh {
-    self.used = self.used + usize.ONE
-  }
-  return false
-}
-
-/// Reports whether the set holds an element equivalent to one probe element.
-///
-/// # Details
-///
-/// This function consumes the probe element. It does not change the set or move a stored element.
-pub fn contains<T: HashKey>(self: &HashSet<T>, value: T) -> bool {
-  if self.capacity == usize.ZERO {
-    return false
-  }
-  let hashed = HashKey.hash(&value, &self.seed)
-  let mut index = bucketOf(hashed, self.capacity)
-  let mut scanned = usize.ZERO
-  while scanned < self.capacity {
-    let state = stateAt<T>(self, index)
-    if state == VACANT {
-      return false
-    }
-    if state == OCCUPIED {
-      let held = memberAt<T>(self, index)
-      if held[usize.ZERO].hash == hashed {
-        if (&held[usize.ZERO].value) == (&value) {
-          return true
-        }
-      }
-    }
-    index = advance(index, self.capacity)
-    scanned = scanned + usize.ONE
-  }
-  return false
-}
-
-/// Returns the bucket holding an element equivalent to one probe element, or an absent value.
-///
-/// # Details
-///
-/// This is the membership question a set of move-only elements answers without moving anything.
-/// This function consumes the probe element.
-pub fn indexOf<T: HashKey>(self: &HashSet<T>, value: T) -> Option<usize> {
-  if self.capacity == usize.ZERO {
-    return none<usize>()
-  }
-  let hashed = HashKey.hash(&value, &self.seed)
-  let mut index = bucketOf(hashed, self.capacity)
-  let mut scanned = usize.ZERO
-  while scanned < self.capacity {
-    let state = stateAt<T>(self, index)
-    if state == VACANT {
-      return none<usize>()
-    }
-    if state == OCCUPIED {
-      let held = memberAt<T>(self, index)
-      if held[usize.ZERO].hash == hashed {
-        if (&held[usize.ZERO].value) == (&value) {
-          return some<usize>(index)
-        }
-      }
-    }
-    index = advance(index, self.capacity)
-    scanned = scanned + usize.ONE
-  }
-  return none<usize>()
-}
-
-/// Removes the element equivalent to one probe element and answers with it.
-///
-/// # Details
-///
-/// Ownership passes to the caller; the set does not also release it. The probe element is released.
-pub fn remove<T: HashKey>(self: &mut HashSet<T>, value: T) -> Option<T> {
-  if self.capacity == usize.ZERO {
-    return none<T>()
-  }
-  let hashed = HashKey.hash(&value, &self.seed)
-  let storage = Intrinsic.replace(self.storage, Unseeded<T> { anchor: [] })
-  let mut owned = openStorage<T>(move storage)
-  let mut found = self.capacity
-  let mut index = bucketOf(hashed, self.capacity)
-  let mut scanned = usize.ZERO
-  while scanned < self.capacity {
-    let seen = RawBuffer.view<u8>(&owned.states, usize.ZERO, self.capacity)
-    let state = seen[index]
-    if state == VACANT {
-      break
-    }
-    if state == OCCUPIED {
-      let held = RawBuffer.view<Member<T>>(&owned.members, index, usize.ONE)
-      if held[usize.ZERO].hash == hashed {
-        if (&held[usize.ZERO].value) == (&value) {
-          found = index
-          break
-        }
-      }
-    }
-    index = advance(index, self.capacity)
-    scanned = scanned + usize.ONE
-  }
-  if self.capacity <= found {
-    self.storage = move owned
-    return none<T>()
-  }
-  let carried = evict<T>(&mut owned, found)
-  let marked = markRemoved<T>(&mut owned, found)
-  self.storage = move owned
-  self.length = self.length - usize.ONE
-  return some<T>(move carried)
-}
-
 fn evict<T>(owned: &mut Slots<T>, index: usize) -> T {
   unsafe {
     let selected = RawBuffer.slot(&mut owned.members, index)
@@ -590,22 +607,6 @@ fn evict<T>(owned: &mut Slots<T>, index: usize) -> T {
     return keep<T>(move taken)
   }
   return absurd<T>()
-}
-
-/// Returns the element held in one bucket. Traps on a bucket that holds no element.
-///
-/// # Details
-///
-/// Reads a copy out of the set, so it answers for a set whose element type is `Copy`.
-///
-/// # Gotchas
-///
-/// If `index` is out of range or [`occupiedAt`] returns `false`, the program traps.
-pub fn elementAt<T: Copy>(self: &HashSet<T>, index: usize) -> T {
-  if !occupiedAt<T>(self, index) {
-    let boom = 1 / 0
-  }
-  return keep<T>(readMember<T>(self, index))
 }
 
 fn readMember<T: Copy>(self: &HashSet<T>, index: usize) -> Member<T> {

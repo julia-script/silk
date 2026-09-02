@@ -34,16 +34,16 @@ const assertRunsEverywhere = Effect.fnUntraced(function* (
  * below decode to identical bytes, so each must equal the inline literal it stands for.
  */
 const readsConstants = `import silk.usize as usize
-import silk.string { byteLength, utf8Bytes }
+import silk.string { String }
 
 const escapedPattern: string = "\\\\d+\\\\.\\\\d+"
 const rawPattern: string = r"\\d+\\.\\d+"
 const windowsPath: string = r"C:\\Users\\build"
 
 fn sameText(left: string, right: string) -> bool {
-  if byteLength(left) == byteLength(right) {} else { return false }
-  let leftBytes = utf8Bytes(left)
-  let rightBytes = utf8Bytes(right)
+  if String.byteLength(left) == String.byteLength(right) {} else { return false }
+  let leftBytes = String.utf8Bytes(left)
+  let rightBytes = String.utf8Bytes(right)
   let mut index = usize.ZERO
   while index < leftBytes.length {
     if leftBytes[index] == rightBytes[index] {} else { return false }
@@ -56,8 +56,8 @@ pub fn main() -> i32 {
   if sameText(escapedPattern, r"\\d+\\.\\d+") {} else { return 1 }
   if sameText(rawPattern, "\\\\d+\\\\.\\\\d+") {} else { return 2 }
   if sameText(rawPattern, escapedPattern) {} else { return 3 }
-  if usize.toI32(byteLength(rawPattern)) == 8 {} else { return 4 }
-  if usize.toI32(byteLength(windowsPath)) == 14 {} else { return 5 }
+  if usize.toI32(String.byteLength(rawPattern)) == 8 {} else { return 4 }
+  if usize.toI32(String.byteLength(windowsPath)) == 14 {} else { return 5 }
   // A named constant passes wherever a string value is accepted.
   if sameText(windowsPath, r"C:\\Users\\build") {} else { return 6 }
   return 42

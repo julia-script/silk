@@ -19,14 +19,14 @@ commits, so failed growth leaves existing entries, length, and bucket count unch
 
 One [`HashSeed`](./hash.md#declaration-73696c6b2f686173683a3a4861736853656564) plus the same operation sequence fixes bucket presentation order across the
 evaluator, native code, and WebAssembly. Iterate deterministically by scanning
-`0..bucketCount`, testing [`occupiedAt`](#declaration-73696c6b2f686173685f6d61703a3a6f636375706965644174), then reading [`keyAt`](#declaration-73696c6b2f686173685f6d61703a3a6b65794174) and [`valueAt`](#declaration-73696c6b2f686173685f6d61703a3a76616c75654174). This is bucket
+`0..bucketCount`, testing [`occupiedAt`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e6f636375706965644174), then reading [`keyAt`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e6b65794174) and [`valueAt`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e76616c75654174). This is bucket
 order, not insertion order.
 
 ## Gotchas
 
-Lookup and removal consume the probe key. [`get`](#declaration-73696c6b2f686173685f6d61703a3a676574), [`keyAt`](#declaration-73696c6b2f686173685f6d61703a3a6b65794174), and [`valueAt`](#declaration-73696c6b2f686173685f6d61703a3a76616c75654174) copy a complete
-stored entry and therefore require both stored key and value to be `Copy`; use [`withMut`](#declaration-73696c6b2f686173685f6d61703a3a776974684d7574) to
-update a move-only value in place or [`remove`](#declaration-73696c6b2f686173685f6d61703a3a72656d6f7665) to transfer it out. Equivalent keys must also
+Lookup and removal consume the probe key. [`get`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e676574), [`keyAt`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e6b65794174), and [`valueAt`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e76616c75654174) copy a complete
+stored entry and therefore require both stored key and value to be `Copy`; use [`withMut`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e776974684d7574) to
+update a move-only value in place or [`remove`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e72656d6f7665) to transfer it out. Equivalent keys must also
 obey the [`HashKey`](./hash.md#declaration-73696c6b2f686173683a3a486173684b6579) hash contract.
 
 ## Examples
@@ -34,35 +34,35 @@ obey the [`HashKey`](./hash.md#declaration-73696c6b2f686173683a3a486173684b6579)
 ### Insert, read, and remove one value
 
 ```silk
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.effect { Effect }
 
-import silk.hash { Hash }
+import silk.hash { Hash, Word }
 
 import silk.hash_map { HashMap }
 
 import silk.option { Option }
 
 effect fn build() -> i32
-! Allocator.OutOfMemoryError {
+! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut map = HashMap.make<Hash.Word, i32>(Hash.seed(17))
-  let inserting = HashMap.insert<Hash.Word, i32>(&mut map, Hash.word(7), 42)
+  let mut map = HashMap.make<Word, i32>(Hash.seed(17))
+  let inserting = HashMap.insert<Word, i32>(&mut map, Hash.word(7), 42)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let previous = run inserting
   drop previous
-  let found = HashMap.get<Hash.Word, i32>(&map, Hash.word(7))
+  let found = HashMap.get<Word, i32>(&map, Hash.word(7))
     |> Option.unwrapOr<i32>(0)
-  let removed = HashMap.remove<Hash.Word, i32>(&mut map, Hash.word(7))
+  let removed = HashMap.remove<Word, i32>(&mut map, Hash.word(7))
   drop removed
-  if HashMap.contains<Hash.Word, i32>(&map, Hash.word(7)) {
+  if HashMap.contains<Word, i32>(&map, Hash.word(7)) {
     return 0
   }
   return found
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -73,7 +73,7 @@ pub fn main() -> i32 {
 
 Import as `HashMap` with `import silk.hash_map { HashMap }`.
 
-Public declarations: 16.
+Public declarations: 4.
 
 <a id="declaration-73696c6b2f686173685f6d61703a3a456e747279"></a>
 
@@ -128,9 +128,9 @@ Owns unique keys and their values under one equivalence, hash witness, and seed.
 An equivalent insertion replaces the stored value instead of adding another entry. The seed
 and operation sequence determine bucket presentation order, which is not insertion order.
 
-<a id="declaration-73696c6b2f686173685f6d61703a3a6d616b65"></a>
+<a id="declaration-73696c6b2f686173685f6d61703a3a486173684d61702e6d616b65"></a>
 
-## `make`
+### Associated function `HashMap.make`
 
 ```silk
 pub fn make<K, V>(seed: HashSeed) -> silk/hash_map.HashMap<K, V>
@@ -138,60 +138,52 @@ pub fn make<K, V>(seed: HashSeed) -> silk/hash_map.HashMap<K, V>
 
 Constructs an empty map whose every hash is computed under one seed.
 
-### Details
+#### Details
 
 An empty map allocates nothing. The seed fixes the order the map will present its entries in,
 and is the only thing besides the sequence of operations that decides it.
 
-<a id="declaration-73696c6b2f686173685f6d61703a3a6c656e677468"></a>
+<a id="declaration-73696c6b2f686173685f6d61703a3a486173684d61702e6c656e677468"></a>
 
-## `length`
+### Method `HashMap.length`
 
 ```silk
-pub fn length<K, V>(self: &silk/hash_map.HashMap<K, V>) -> usize
+pub fn length<K, V>(self: &HashMap<K, V>) -> usize
 ```
 
 Returns the number of entries the map holds.
 
-<a id="declaration-73696c6b2f686173685f6d61703a3a6275636b6574436f756e74"></a>
+<a id="declaration-73696c6b2f686173685f6d61703a3a486173684d61702e6275636b6574436f756e74"></a>
 
-## `bucketCount`
+### Method `HashMap.bucketCount`
 
 ```silk
-pub fn bucketCount<K, V>(self: &silk/hash_map.HashMap<K, V>) -> usize
+pub fn bucketCount<K, V>(self: &HashMap<K, V>) -> usize
 ```
 
 Returns the number of buckets the map presents, which is the range `occupiedAt` accepts.
 
-<a id="declaration-73696c6b2f686173685f6d61703a3a6f636375706965644174"></a>
+<a id="declaration-73696c6b2f686173685f6d61703a3a486173684d61702e6f636375706965644174"></a>
 
-## `occupiedAt`
+### Method `HashMap.occupiedAt`
 
 ```silk
-pub fn occupiedAt<K, V>(self: &silk/hash_map.HashMap<K, V>, index: usize) -> bool
+pub fn occupiedAt<K, V>(self: &HashMap<K, V>, index: usize) -> bool
 ```
 
 Reports whether one bucket holds an entry. Out-of-range buckets hold nothing.
 
-<a id="declaration-73696c6b2f686173685f6d61703a3a696d706c656d656e746174696f6e3a31"></a>
+<a id="declaration-73696c6b2f686173685f6d61703a3a486173684d61702e696e73657274"></a>
 
-## Implementation `Drop for silk/hash_map.HashMap<K, V>`
-
-```silk
-impl Drop for silk/hash_map.HashMap<K, V>
-```
-
-<a id="declaration-73696c6b2f686173685f6d61703a3a696e73657274"></a>
-
-## `insert`
+### Method `HashMap.insert`
 
 ```silk
-pub effect fn insert<K, V>(self: &mut silk/hash_map.HashMap<K, V>, key: K, value: V) -> silk/option.Option<V> ! OutOfMemoryError ? &mut Allocator
+pub effect fn insert<K, V>(self: &mut HashMap<K, V>, key: K, value: V) -> silk/option.Option<V> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Inserts one owned key and value, answering with the value an equivalent key already held.
 
-### Details
+#### Details
 
 The map takes ownership of both. When an equivalent key is already present the map's length does
 not change, the replaced value travels to the caller, and the key the map held is released.
@@ -199,63 +191,63 @@ not change, the replaced value travels to the caller, and the key the map held i
 Fails only with `OutOfMemoryError`, and only from the growth this insert needed. A failed insert
 leaves every prior entry at its own key, and leaves the length and the bucket count unchanged.
 
-<a id="declaration-73696c6b2f686173685f6d61703a3a636f6e7461696e73"></a>
+<a id="declaration-73696c6b2f686173685f6d61703a3a486173684d61702e636f6e7461696e73"></a>
 
-## `contains`
+### Method `HashMap.contains`
 
 ```silk
-pub fn contains<K, V>(self: &silk/hash_map.HashMap<K, V>, key: K) -> bool
+pub fn contains<K, V>(self: &HashMap<K, V>, key: K) -> bool
 ```
 
 Reports whether the map holds an entry under a key equivalent to one probe key.
 
-### Details
+#### Details
 
 This function consumes the probe key. It does not change the map or move a stored entry.
 
-<a id="declaration-73696c6b2f686173685f6d61703a3a696e6465784f66"></a>
+<a id="declaration-73696c6b2f686173685f6d61703a3a486173684d61702e696e6465784f66"></a>
 
-## `indexOf`
+### Method `HashMap.indexOf`
 
 ```silk
-pub fn indexOf<K, V>(self: &silk/hash_map.HashMap<K, V>, key: K) -> silk/option.Option<usize>
+pub fn indexOf<K, V>(self: &HashMap<K, V>, key: K) -> silk/option.Option<usize>
 ```
 
 Returns the bucket holding an entry under a key equivalent to one probe key, or an absent value.
 
-### Details
+#### Details
 
 This is the lookup a map with move-only values answers: the bucket names the entry without
-moving anything out of the map. A move-only value can then be transferred with [`remove`](#declaration-73696c6b2f686173685f6d61703a3a72656d6f7665).
+moving anything out of the map. A move-only value can then be transferred with [`remove`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e72656d6f7665).
 This function consumes the probe key.
 
-<a id="declaration-73696c6b2f686173685f6d61703a3a676574"></a>
+<a id="declaration-73696c6b2f686173685f6d61703a3a486173684d61702e676574"></a>
 
-## `get`
+### Method `HashMap.get`
 
 ```silk
-pub fn get<K, V>(self: &silk/hash_map.HashMap<K, V>, key: K) -> silk/option.Option<V>
+pub fn get<K, V>(self: &HashMap<K, V>, key: K) -> silk/option.Option<V>
 ```
 
 Returns the value held under a key equivalent to one probe key, or an absent value.
 
-### Details
+#### Details
 
 Reads a complete entry copy, so it answers only when both stored key and value types are `Copy`.
-Use [`indexOf`](#declaration-73696c6b2f686173685f6d61703a3a696e6465784f66) for a non-moving presence check and [`remove`](#declaration-73696c6b2f686173685f6d61703a3a72656d6f7665) to transfer a move-only value.
+Use [`indexOf`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e696e6465784f66) for a non-moving presence check and [`remove`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e72656d6f7665) to transfer a move-only value.
 This function consumes the probe key and does not change the map.
 
-<a id="declaration-73696c6b2f686173685f6d61703a3a776974684d7574"></a>
+<a id="declaration-73696c6b2f686173685f6d61703a3a486173684d61702e776974684d7574"></a>
 
-## `withMut`
+### Method `HashMap.withMut`
 
 ```silk
-pub fn withMut<K, V, F>(self: &mut silk/hash_map.HashMap<K, V>, key: K, use: F) -> bool
+pub fn withMut<K, V, F>(self: &mut HashMap<K, V>, key: K, use: F) -> bool
 ```
 
 Runs one take-once callback with exclusive access to an existing value.
 
-### Details
+#### Details
 
 Lookup and mutation allocate nothing and never grow the map. Returns `true` after running the
 callback exactly once for an equivalent key, or `false` without running it when the key is
@@ -265,53 +257,61 @@ rejected.
 This function consumes the probe key but leaves the stored key, length, used count, and bucket
 count unchanged.
 
-<a id="declaration-73696c6b2f686173685f6d61703a3a72656d6f7665"></a>
+<a id="declaration-73696c6b2f686173685f6d61703a3a486173684d61702e72656d6f7665"></a>
 
-## `remove`
+### Method `HashMap.remove`
 
 ```silk
-pub fn remove<K, V>(self: &mut silk/hash_map.HashMap<K, V>, key: K) -> silk/option.Option<V>
+pub fn remove<K, V>(self: &mut HashMap<K, V>, key: K) -> silk/option.Option<V>
 ```
 
 Removes the entry under a key equivalent to one probe key and answers with its value.
 
-### Details
+#### Details
 
 Ownership of the value passes to the caller; the map does not also release it. The key the map
 held is released, and the probe key is released as well.
 
-<a id="declaration-73696c6b2f686173685f6d61703a3a6b65794174"></a>
+<a id="declaration-73696c6b2f686173685f6d61703a3a486173684d61702e6b65794174"></a>
 
-## `keyAt`
+### Method `HashMap.keyAt`
 
 ```silk
-pub fn keyAt<K, V>(self: &silk/hash_map.HashMap<K, V>, index: usize) -> K
+pub fn keyAt<K, V>(self: &HashMap<K, V>, index: usize) -> K
 ```
 
 Returns the key held in one bucket. Traps on a bucket that holds no entry.
 
-### Details
+#### Details
 
 Reads a complete entry copy, so both stored key and value types must be `Copy`.
 
-### Gotchas
+#### Gotchas
 
-If `index` is out of range or [`occupiedAt`](#declaration-73696c6b2f686173685f6d61703a3a6f636375706965644174) returns `false`, the program traps.
+If `index` is out of range or [`occupiedAt`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e6f636375706965644174) returns `false`, the program traps.
 
-<a id="declaration-73696c6b2f686173685f6d61703a3a76616c75654174"></a>
+<a id="declaration-73696c6b2f686173685f6d61703a3a486173684d61702e76616c75654174"></a>
 
-## `valueAt`
+### Method `HashMap.valueAt`
 
 ```silk
-pub fn valueAt<K, V>(self: &silk/hash_map.HashMap<K, V>, index: usize) -> V
+pub fn valueAt<K, V>(self: &HashMap<K, V>, index: usize) -> V
 ```
 
 Returns the value held in one bucket. Traps on a bucket that holds no entry.
 
-### Details
+#### Details
 
 Reads a complete entry copy, so both stored key and value types must be `Copy`.
 
-### Gotchas
+#### Gotchas
 
-If `index` is out of range or [`occupiedAt`](#declaration-73696c6b2f686173685f6d61703a3a6f636375706965644174) returns `false`, the program traps.
+If `index` is out of range or [`occupiedAt`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e6f636375706965644174) returns `false`, the program traps.
+
+<a id="declaration-73696c6b2f686173685f6d61703a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `Drop for silk/hash_map.HashMap<K, V>`
+
+```silk
+impl Drop for silk/hash_map.HashMap<K, V>
+```

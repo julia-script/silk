@@ -1,13 +1,13 @@
 // Compiler fixture: push readiness without scanning dormant Execution values.
-import silk.allocator { Allocator }
-import silk.effect as Effect
-import silk.execution as Execution
-import silk.shared as Shared
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
+import silk.shared { Shared }
 
 struct Empty {}
 struct Waiting { wake: Intrinsic.Wake }
 struct Condition { slot: Empty | Waiting }
-struct Guard { condition: Shared.Shared<Condition> }
+struct Guard { condition: Shared<Condition> }
 
 fn install(self: &mut Condition, wake: Intrinsic.Wake) -> () {
   let previous = Intrinsic.replace(self.slot, Waiting { wake: move wake })
@@ -17,16 +17,16 @@ fn install(self: &mut Condition, wake: Intrinsic.Wake) -> () {
 fn extract(self: &mut Condition) -> Empty | Waiting {
   return Intrinsic.replace(self.slot, Empty {})
 }
-fn register(wake: Intrinsic.Wake, condition: Shared.Shared<Condition>) -> Guard {
+fn register(wake: Intrinsic.Wake, condition: Shared<Condition>) -> Guard {
   let installed = Shared.withMut(&condition, install(move wake))
   return Guard { condition: move condition }
 }
-effect fn body(condition: Shared.Shared<Condition>, value: i32) -> i32 {
+effect fn body(condition: Shared<Condition>, value: i32) -> i32 {
   let registration = register(move condition)
   run Execution.park(move registration)
   return value
 }
-fn signal(condition: &Shared.Shared<Condition>) -> () {
+fn signal(condition: &Shared<Condition>) -> () {
   let selected = Shared.withMut(condition, extract)
   return match move selected {
     Empty {} => ()
@@ -47,7 +47,7 @@ fn takeReady(self: &mut Inbox) -> i32 {
   self.taken = self.taken + 1
   return result
 }
-struct Endpoint { inbox: Shared.Shared<Inbox> identity: i32 }
+struct Endpoint { inbox: Shared<Inbox> identity: i32 }
 fn ready(endpoint: &Endpoint) -> () {
   let identity = endpoint.identity
   return Shared.withMut(&endpoint.inbox, push(identity))
@@ -83,7 +83,7 @@ fn take(self: &mut Tasks, identity: i32) -> Empty | Stored {
 fn record(self: &mut Tasks, value: i32) -> () { self.result = value return () }
 fn readResult(self: &Tasks) -> i32 { return self.result }
 
-struct Branch { tasks: Shared.Shared<Tasks> identity: i32 }
+struct Branch { tasks: Shared<Tasks> identity: i32 }
 fn complete(branch: Branch, value: i32) -> () {
   let Branch { tasks, identity } = move branch
   let recorded = Shared.withMut(&tasks, record(value))
@@ -105,14 +105,14 @@ effect fn driveSelected(selected: Empty | Stored, branch: Branch) -> () {
     Stored { execution } => run drive(move execution, move branch)
   }
 }
-effect fn driveIdentity(tasks: &Shared.Shared<Tasks>, identity: i32) -> () {
+effect fn driveIdentity(tasks: &Shared<Tasks>, identity: i32) -> () {
   // Removal happens under the short Shared access; drive starts only after it has ended.
   let selected = Shared.withMut(tasks, take(identity))
   let branch = Branch { tasks: Shared.clone<Tasks>(tasks), identity: identity }
   return run driveSelected(move selected, move branch)
 }
 
-effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+effect fn program() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let inbox = run Shared.make<Inbox>(Inbox { first: 0, second: 0, length: 0, taken: 0 })
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -167,5 +167,5 @@ effect fn program() -> i32 ! Allocator.OutOfMemoryError {
   return result
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -100 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return -100 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }

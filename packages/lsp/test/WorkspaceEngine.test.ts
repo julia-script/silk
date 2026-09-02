@@ -858,7 +858,7 @@ it.effect('interrupts active analysis and canceled requests exactly once during 
 it.effect('never lets an intermediate spelling become the final diagnostic revision', () =>
   Effect.gen(function* () {
     const engine = yield* makeEngine()
-    const source = (line: string) => `import silk.vector as Vector
+    const source = (line: string) => `import silk.vector { Vector }
 fn outer() -> Effect<i32> {
   let n = 123
   return effect { return n }

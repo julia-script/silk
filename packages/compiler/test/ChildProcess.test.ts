@@ -51,11 +51,11 @@ effect fn scriptedExecute(
   self: &mut Scripted,
   request: &ProcessRequest
 ) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut Allocator {
-  let mut output = bytesMake()
+  let mut output = Bytes.make()
   let one = [self.first]
-  let appended = run bytesAppend(&mut output, &one)
-  if self.signal { return signaled(self.code, move output, bytesMake()) }
-  return exited(self.code, move output, bytesMake())
+  let appended = run Bytes.append(&mut output, &one)
+  if self.signal { return ChildProcess.signaled(self.code, move output, Bytes.make()) }
+  return ChildProcess.exited(self.code, move output, Bytes.make())
 }
 
 impl ChildProcess for Scripted { execute: Scripted.scriptedExecute }
@@ -66,42 +66,18 @@ effect fn brokenExecute(
   self: &mut Broken,
   request: &ProcessRequest
 ) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut Allocator {
-  fail failure(spawnOperation(), notFound())
+  fail ChildProcess.failure(ChildProcess.spawnOperation(), ChildProcess.notFound())
 }
 
 impl ChildProcess for Broken { execute: Broken.brokenExecute }
 `
 
-const imports = `import silk.bytes { append as bytesAppend, make as bytesMake }
-import silk.effect as Effect
+const imports = `import silk.bytes { Bytes }
+import silk.effect { Effect }
 import silk.u8 as u8
 import silk.usize as usize
-import silk.child_process {
-  ChildProcess,
-  ProcessError,
-  ProcessOutcome,
-  ProcessRequest,
-  addArgument,
-  argumentCount,
-  environmentCount,
-  errorBytes,
-  exitCode,
-  exited,
-  failure,
-  hasWorkingDirectory,
-  isSignaled,
-  notFound,
-  outputBytes,
-  providerCode,
-  request,
-  requestWithin,
-  setVariable,
-  signaled,
-  spawnOperation,
-  submit,
-  terminatingSignal
-}
-import silk.filesystem { FileError, fromBytes as pathFromBytes }
+import silk.child_process { ChildProcess, ProcessError, ProcessOutcome, ProcessRequest }
+import silk.filesystem { FileError, Path }
 import silk.option { Option }
 import silk.result { Result }
 
@@ -118,7 +94,7 @@ pub fn main() -> i32 {
   return match move attempted {
       Result<i32, ProcessError | OutOfMemoryError | FileError>.Success { value } => value
       Result<i32, ProcessError | OutOfMemoryError | FileError>.Failure { error } => match move error {
-        ProcessError processFailure => match move providerCode(&processFailure) {
+        ProcessError processFailure => match move ChildProcess.providerCode(&processFailure) {
           Option<i32>.Some { value } =>
             70 + processFailure.reason.code + 10 * processFailure.operation.code + value
           _ => 70 + processFailure.reason.code + 10 * processFailure.operation.code
@@ -151,11 +127,11 @@ import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.filesystem { FileError }
 ${imports}
-import silk.os_child_process { make as osChildMake }
+import silk.os_child_process { OsChildProcess }
 
 effect fn program() -> i32 ! ProcessError | OutOfMemoryError | FileError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut provider = osChildMake()
+  let mut provider = OsChildProcess.make()
 ${vocabulary}
 ${body}
 }
@@ -164,9 +140,9 @@ ${recovery}`
 
 it.effect('loads the ordinary canonical native provider without compiler-known privilege', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.os_child_process { OsChildProcess, make }
+    const self = yield* snapshot(`import silk.os_child_process { OsChildProcess }
 pub fn construct() -> OsChildProcess {
-  return make()
+  return OsChildProcess.make()
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
   }),
@@ -177,17 +153,17 @@ it.effect('carries an exit code, captured output, and captured errors as one own
     const self = yield* snapshot(
       scriptedRun(
         'Scripted { code: 0, signal: false, first: u8.toU8(115) }',
-        `  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
-  let built = run request(&path) |> Effect.provideMut(&mut allocator)
+        `  let path = run Path.fromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
+  let built = run ChildProcess.request(&path) |> Effect.provideMut(&mut allocator)
   let outcome = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
+    Intrinsic.bindRequirementMut(ChildProcess.submit(&built), &mut provider),
     &mut allocator
   )
-  if isSignaled(&outcome) { return 1 }
-  if outputBytes(&outcome).length != usize.ONE { return 2 }
-  if outputBytes(&outcome)[usize.ZERO] != u8.toU8(115) { return 3 }
-  if errorBytes(&outcome).length != usize.ZERO { return 4 }
-  return match move exitCode(&outcome) {
+  if ChildProcess.isSignaled(&outcome) { return 1 }
+  if ChildProcess.outputBytes(&outcome).length != usize.ONE { return 2 }
+  if ChildProcess.outputBytes(&outcome)[usize.ZERO] != u8.toU8(115) { return 3 }
+  if ChildProcess.errorBytes(&outcome).length != usize.ZERO { return 4 }
+  return match move ChildProcess.exitCode(&outcome) {
     Option<i32>.Some { value } => 42 + value
     Option<i32>.None => 5
   }`,
@@ -206,14 +182,14 @@ it.effect('reports a nonzero exit code as outcome data rather than as a typed fa
       scriptedRun(
         'Scripted { code: 3, signal: false, first: u8.toU8(0) }',
         // A failing child stays on the success channel, so this run never reaches the recovery band.
-        `  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
-  let built = run request(&path) |> Effect.provideMut(&mut allocator)
+        `  let path = run Path.fromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
+  let built = run ChildProcess.request(&path) |> Effect.provideMut(&mut allocator)
   let outcome = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
+    Intrinsic.bindRequirementMut(ChildProcess.submit(&built), &mut provider),
     &mut allocator
   )
-  if isSignaled(&outcome) { return 1 }
-  return match move exitCode(&outcome) {
+  if ChildProcess.isSignaled(&outcome) { return 1 }
+  return match move ChildProcess.exitCode(&outcome) {
     Option<i32>.Some { value } => 39 + value
     Option<i32>.None => 2
   }`,
@@ -231,20 +207,20 @@ it.effect('separates termination by a signal from an ordinary exit code', () =>
     const self = yield* snapshot(
       scriptedRun(
         'Scripted { code: 9, signal: true, first: u8.toU8(0) }',
-        `  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
-  let built = run request(&path) |> Effect.provideMut(&mut allocator)
+        `  let path = run Path.fromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
+  let built = run ChildProcess.request(&path) |> Effect.provideMut(&mut allocator)
   let outcome = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
+    Intrinsic.bindRequirementMut(ChildProcess.submit(&built), &mut provider),
     &mut allocator
   )
-  if isSignaled(&outcome) == false { return 1 }
+  if ChildProcess.isSignaled(&outcome) == false { return 1 }
   // A signal never presents itself as an exit code, so no caller reads 9 as a return value.
-  let absent = match move exitCode(&outcome) {
+  let absent = match move ChildProcess.exitCode(&outcome) {
     Option<i32>.Some { value } => false
     Option<i32>.None => true
   }
   if absent == false { return 2 }
-  return match move terminatingSignal(&outcome) {
+  return match move ChildProcess.terminatingSignal(&outcome) {
     Option<i32>.Some { value } => 33 + value
     Option<i32>.None => 3
   }`,
@@ -262,10 +238,10 @@ it.effect('routes a provider failure into the typed failure channel', () =>
     const self = yield* snapshot(
       scriptedRun(
         'Broken {}',
-        `  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
-  let built = run request(&path) |> Effect.provideMut(&mut allocator)
+        `  let path = run Path.fromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
+  let built = run ChildProcess.request(&path) |> Effect.provideMut(&mut allocator)
   let outcome = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
+    Intrinsic.bindRequirementMut(ChildProcess.submit(&built), &mut provider),
     &mut allocator
   )
   return 1`,
@@ -284,20 +260,20 @@ it.effect('retains ordered arguments, an exact environment, and an optional dire
     const self = yield* snapshot(
       scriptedRun(
         'Scripted { code: 0, signal: false, first: u8.toU8(0) }',
-        `  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
-  let mut plain = run request(&path) |> Effect.provideMut(&mut allocator)
-  if argumentCount(&plain) != usize.ZERO { return 1 }
-  if environmentCount(&plain) != usize.ZERO { return 2 }
-  if hasWorkingDirectory(&plain) { return 3 }
-  let first = run addArgument(&mut plain, &firstArgument) |> Effect.provideMut(&mut allocator)
-  let second = run addArgument(&mut plain, &secondArgument) |> Effect.provideMut(&mut allocator)
-  let variable = run setVariable(&mut plain, &variableName, &variableValue)
+        `  let path = run Path.fromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
+  let mut plain = run ChildProcess.request(&path) |> Effect.provideMut(&mut allocator)
+  if ChildProcess.argumentCount(&plain) != usize.ZERO { return 1 }
+  if ChildProcess.environmentCount(&plain) != usize.ZERO { return 2 }
+  if ChildProcess.hasWorkingDirectory(&plain) { return 3 }
+  let first = run ChildProcess.addArgument(&mut plain, &firstArgument) |> Effect.provideMut(&mut allocator)
+  let second = run ChildProcess.addArgument(&mut plain, &secondArgument) |> Effect.provideMut(&mut allocator)
+  let variable = run ChildProcess.setVariable(&mut plain, &variableName, &variableValue)
     |> Effect.provideMut(&mut allocator)
-  if argumentCount(&plain) != usize.add(0, 2) { return 4 }
-  if environmentCount(&plain) != usize.ONE { return 5 }
-  let directory = run pathFromBytes(&workPath) |> Effect.provideMut(&mut allocator)
-  let located = run requestWithin(&path, &directory) |> Effect.provideMut(&mut allocator)
-  if hasWorkingDirectory(&located) == false { return 6 }
+  if ChildProcess.argumentCount(&plain) != usize.add(0, 2) { return 4 }
+  if ChildProcess.environmentCount(&plain) != usize.ONE { return 5 }
+  let directory = run Path.fromBytes(&workPath) |> Effect.provideMut(&mut allocator)
+  let located = run ChildProcess.requestWithin(&path, &directory) |> Effect.provideMut(&mut allocator)
+  if ChildProcess.hasWorkingDirectory(&located) == false { return 6 }
   return 42`,
       ),
     )
@@ -309,20 +285,20 @@ it.effect('retains ordered arguments, an exact environment, and an optional dire
 )
 
 const nativeEcho =
-  nativeRun(`  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
-  let mut built = run request(&path) |> Effect.provideMut(&mut allocator)
-  let added = run addArgument(&mut built, &firstArgument) |> Effect.provideMut(&mut allocator)
+  nativeRun(`  let path = run Path.fromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
+  let mut built = run ChildProcess.request(&path) |> Effect.provideMut(&mut allocator)
+  let added = run ChildProcess.addArgument(&mut built, &firstArgument) |> Effect.provideMut(&mut allocator)
   let outcome = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
+    Intrinsic.bindRequirementMut(ChildProcess.submit(&built), &mut provider),
     &mut allocator
   )
-  if isSignaled(&outcome) { return 1 }
-  if outputBytes(&outcome).length != usize.add(0, 3) { return 2 }
-  if outputBytes(&outcome)[usize.ZERO] != u8.toU8(111) { return 3 }
-  if outputBytes(&outcome)[usize.add(0, 2)] != u8.toU8(116) { return 4 }
-  if errorBytes(&outcome).length != usize.add(0, 2) { return 5 }
-  if errorBytes(&outcome)[usize.ZERO] != u8.toU8(101) { return 6 }
-  return match move exitCode(&outcome) {
+  if ChildProcess.isSignaled(&outcome) { return 1 }
+  if ChildProcess.outputBytes(&outcome).length != usize.add(0, 3) { return 2 }
+  if ChildProcess.outputBytes(&outcome)[usize.ZERO] != u8.toU8(111) { return 3 }
+  if ChildProcess.outputBytes(&outcome)[usize.add(0, 2)] != u8.toU8(116) { return 4 }
+  if ChildProcess.errorBytes(&outcome).length != usize.add(0, 2) { return 5 }
+  if ChildProcess.errorBytes(&outcome)[usize.ZERO] != u8.toU8(101) { return 6 }
+  return match move ChildProcess.exitCode(&outcome) {
     Option<i32>.Some { value } => 42 + value
     Option<i32>.None => 7
   }`)
@@ -351,16 +327,16 @@ it.effect('runs a program that exits zero and owns everything it captured', () =
 it.effect('keeps a nonzero exit code on the success channel through the native provider', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      nativeRun(`  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
-  let built = run request(&path) |> Effect.provideMut(&mut allocator)
+      nativeRun(`  let path = run Path.fromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
+  let built = run ChildProcess.request(&path) |> Effect.provideMut(&mut allocator)
   let outcome = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
+    Intrinsic.bindRequirementMut(ChildProcess.submit(&built), &mut provider),
     &mut allocator
   )
-  if isSignaled(&outcome) { return 1 }
-  if outputBytes(&outcome).length != usize.ONE { return 2 }
-  if errorBytes(&outcome).length != usize.add(0, 4) { return 3 }
-  return match move exitCode(&outcome) {
+  if ChildProcess.isSignaled(&outcome) { return 1 }
+  if ChildProcess.outputBytes(&outcome).length != usize.ONE { return 2 }
+  if ChildProcess.errorBytes(&outcome).length != usize.add(0, 4) { return 3 }
+  return match move ChildProcess.exitCode(&outcome) {
     Option<i32>.Some { value } => 39 + value
     Option<i32>.None => 4
   }`),
@@ -378,10 +354,10 @@ it.effect('keeps a nonzero exit code on the success channel through the native p
 it.effect('turns a missing executable into a typed start failure that retains its code', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      nativeRun(`  let path = run pathFromBytes(&absentPath) |> Effect.provideMut(&mut allocator)
-  let built = run request(&path) |> Effect.provideMut(&mut allocator)
+      nativeRun(`  let path = run Path.fromBytes(&absentPath) |> Effect.provideMut(&mut allocator)
+  let built = run ChildProcess.request(&path) |> Effect.provideMut(&mut allocator)
   let outcome = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
+    Intrinsic.bindRequirementMut(ChildProcess.submit(&built), &mut provider),
     &mut allocator
   )
   return 1`),
@@ -400,18 +376,18 @@ it.effect('turns a missing executable into a typed start failure that retains it
 it.effect('never reads the caller environment and passes exact bytes for what it was given', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      nativeRun(`  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
-  let inherited = run request(&path) |> Effect.provideMut(&mut allocator)
+      nativeRun(`  let path = run Path.fromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
+  let inherited = run ChildProcess.request(&path) |> Effect.provideMut(&mut allocator)
   let first = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(submit(&inherited), &mut provider),
+    Intrinsic.bindRequirementMut(ChildProcess.submit(&inherited), &mut provider),
     &mut allocator
   )
-  let mut named = run request(&path) |> Effect.provideMut(&mut allocator)
-  let variable = run setVariable(&mut named, &variableName, &rawValue)
+  let mut named = run ChildProcess.request(&path) |> Effect.provideMut(&mut allocator)
+  let variable = run ChildProcess.setVariable(&mut named, &variableName, &rawValue)
     |> Effect.provideMut(&mut allocator)
-  let argument = run addArgument(&mut named, &rawArgument) |> Effect.provideMut(&mut allocator)
+  let argument = run ChildProcess.addArgument(&mut named, &rawArgument) |> Effect.provideMut(&mut allocator)
   let second = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(submit(&named), &mut provider),
+    Intrinsic.bindRequirementMut(ChildProcess.submit(&named), &mut provider),
     &mut allocator
   )
   return 42`),
@@ -440,11 +416,11 @@ it.effect('never reads the caller environment and passes exact bytes for what it
 it.effect('presents the requested working directory to the host', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      nativeRun(`  let path = run pathFromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
-  let directory = run pathFromBytes(&workPath) |> Effect.provideMut(&mut allocator)
-  let built = run requestWithin(&path, &directory) |> Effect.provideMut(&mut allocator)
+      nativeRun(`  let path = run Path.fromBytes(&toolPath) |> Effect.provideMut(&mut allocator)
+  let directory = run Path.fromBytes(&workPath) |> Effect.provideMut(&mut allocator)
+  let built = run ChildProcess.requestWithin(&path, &directory) |> Effect.provideMut(&mut allocator)
   let outcome = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(submit(&built), &mut provider),
+    Intrinsic.bindRequirementMut(ChildProcess.submit(&built), &mut provider),
     &mut allocator
   )
   return 42`),

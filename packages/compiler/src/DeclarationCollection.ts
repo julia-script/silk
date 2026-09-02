@@ -3098,7 +3098,9 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
     ownerName: string,
     headBinders: ReadonlyArray<TypeParameterFact>,
     self: Type.Parameter,
-  ): Omit<DeclarationFact, 'canonical' | 'visibility' | 'name' | 'id'> => {
+  ): Omit<DeclarationFact, 'canonical' | 'visibility' | 'name' | 'id'> & {
+    readonly refinedBinders: ReadonlyMap<string, TypeParameterFact>
+  } => {
     const targetName = ownerName
     // `Self` is in scope for the member's own binder bounds (`U: Like<Self>`) exactly as the
     // head binders are, so it rides along as a synthetic enclosing binder.
@@ -3120,7 +3122,39 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       ...headBinders,
       ...selfBinder,
     ])
-    diagnostics.push(...collected.diagnostics)
+    // A member may redeclare an owner binder to refine its bounds for that member alone
+    // (`fn get<K: HashKey + Copy, V: Copy>` inside `impl<K, V> HashMap<K, V>`): the binder keeps
+    // the head's identity and gains the member's bounds, and no duplicate is reported.
+    const refinedNames = new Set(
+      collected.facts.flatMap((fact) =>
+        fact.duplicateOf !== undefined &&
+        fact.name._tag === 'Present' &&
+        headBinders.some((binder) => binder.type === fact.duplicateOf)
+          ? [fact.name.spelling]
+          : [],
+      ),
+    )
+    diagnostics.push(
+      ...collected.diagnostics.filter(
+        (diagnostic) =>
+          !(
+            diagnostic.reason._tag === 'DuplicateTypeParameter' &&
+            refinedNames.has(diagnostic.reason.spelling)
+          ),
+      ),
+    )
+    const refinedBinders = new Map(
+      collected.facts.flatMap((fact) =>
+        fact.duplicateOf !== undefined &&
+        fact.name._tag === 'Present' &&
+        refinedNames.has(fact.name.spelling)
+          ? [[fact.name.spelling, fact] as const]
+          : [],
+      ),
+    )
+    const ownFacts = collected.facts.filter(
+      (fact) => !(fact.name._tag === 'Present' && refinedNames.has(fact.name.spelling)),
+    )
     const environment = new Map(collected.environment)
     environment.set('Self', self)
     const parameterList = childNode(node, 'ParameterList')
@@ -3180,7 +3214,8 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
           ? ('Ordinary' as const)
           : ('Effect' as const),
       unsafe: SyntaxTree.directToken(node, 'UnsafeKeyword') !== undefined,
-      typeParameters: collected.facts,
+      typeParameters: ownFacts,
+      refinedBinders,
       parameterCount: parameterFacts.length,
       parameters: parameterFacts,
       returnType: returnType.fact,
@@ -3210,13 +3245,11 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
           sourceId: source.id,
           ordinal: nestedDeclarationOrdinal + conformanceIndex * 1024 + operationIndex,
         })
-        const { bodyTemplate: _retained, ...shared } = implMember(
-          node,
-          id,
-          targetName,
-          conformance.typeParameters,
-          conformance.self,
-        )
+        const {
+          bodyTemplate: _retained,
+          refinedBinders: _refined,
+          ...shared
+        } = implMember(node, id, targetName, conformance.typeParameters, conformance.self)
         return [
           Object.freeze({
             ...shared,
@@ -3360,16 +3393,53 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         sourceId: source.id,
         ordinal: nestedDeclarationOrdinal + (conformances.length + ordinal) * 1024 + memberIndex,
       })
-      const built = implMember(member, id, ownerSpelling, collected.facts, selfType)
-      // Owner binders precede the member's own, so `Option.map<i32, i64>` reads T then U.
+      const memberName = name._tag === 'Present' ? name.spelling : `member#${memberIndex}`
+      // The member's own binders are minted under the member's identity, not the owner's, so two
+      // members' `?R` binders never share one key and one member can call another with inference.
+      const { refinedBinders, ...built } = implMember(
+        member,
+        id,
+        `${ownerSpelling}.${memberName}`,
+        collected.facts,
+        selfType,
+      )
+      // Owner binders precede the member's own, so `Option.map<i32, i64>` reads T then U; a binder
+      // the member refined carries the member's bounds under the head's identity.
+      // An owner binder joins the member's generic sequence only when the member mentions it (or
+      // names `Self`, which stands for the whole applied owner); a member that never mentions one
+      // (`Fiber.cancel(canceller: CompletionCanceller)`) would otherwise carry a binder no call
+      // could ever infer.
+      const mentioned = new Set(
+        SyntaxTree.tokens(member)
+          .filter((token) => token.kind === 'Identifier')
+          .map((token) => spelling(source, token)),
+      )
+      const namesSelf = mentioned.has('Self')
       const shared = Object.freeze({
         ...built,
         typeParameters: Object.freeze([
-          ...collected.facts.filter((parameter) => parameter.duplicateOf === undefined),
+          ...collected.facts
+            .filter(
+              (parameter) =>
+                parameter.duplicateOf === undefined &&
+                (namesSelf ||
+                  (parameter.name._tag === 'Present' && mentioned.has(parameter.name.spelling))),
+            )
+            .map((parameter) => {
+              const refined =
+                parameter.name._tag === 'Present'
+                  ? refinedBinders.get(parameter.name.spelling)
+                  : undefined
+              return refined === undefined
+                ? parameter
+                : Object.freeze({
+                    ...parameter,
+                    bounds: Object.freeze([...parameter.bounds, ...refined.bounds]),
+                  })
+            }),
           ...built.typeParameters,
         ]),
       })
-      const memberName = name._tag === 'Present' ? name.spelling : `member#${memberIndex}`
       const receiverParameter = shared.parameters.at(0)
       const receiver =
         receiverParameter !== undefined &&

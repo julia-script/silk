@@ -1,4 +1,4 @@
-import silk.vector as Vector
+import silk.vector { Vector }
 import Util
 
 fn outer() -> Effect<i32> {

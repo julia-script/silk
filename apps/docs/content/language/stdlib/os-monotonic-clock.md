@@ -25,7 +25,7 @@ ambient implementation.
 
 Import as `OsMonotonicClock` with `import silk.os_monotonic_clock { OsMonotonicClock }`.
 
-Public declarations: 2.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a4f734d6f6e6f746f6e6963436c6f636b"></a>
 
@@ -42,9 +42,9 @@ A stateless Unix-family native provider of monotonic marks and blocking deadline
 A failed, invalid, or unrepresentable clock result traps. Direct WebAssembly does not support a
 reachable operation on this provider.
 
-<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a6d616b65"></a>
+<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a4f734d6f6e6f746f6e6963436c6f636b2e6d616b65"></a>
 
-## `make`
+### Associated function `OsMonotonicClock.make`
 
 ```silk
 pub fn make() -> OsMonotonicClock
@@ -54,10 +54,10 @@ Creates a native monotonic-clock provider without reading the clock or installin
 
 <a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a30"></a>
 
-## Implementation `MonotonicClock.MonotonicClock for OsMonotonicClock`
+## Implementation `MonotonicClock for OsMonotonicClock`
 
 ```silk
-impl MonotonicClock.MonotonicClock for OsMonotonicClock
+impl MonotonicClock for OsMonotonicClock
 ```
 
 <a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>

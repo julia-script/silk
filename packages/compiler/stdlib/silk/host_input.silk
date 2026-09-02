@@ -20,11 +20,11 @@
 //! ```silk
 //! import silk.bytes { Bytes }
 //!
-//! import silk.allocator { Allocator }
+//! import silk.allocator { Allocator, OutOfMemoryError }
 //!
 //! import silk.effect { Effect }
 //!
-//! import silk.host_input { HostInput as Host }
+//! import silk.host_input { HostInput as Host, HostInputError }
 //!
 //! import silk.option { Option }
 //!
@@ -33,29 +33,29 @@
 //! struct FixedInput {}
 //!
 //! effect fn argumentCount(self: &mut FixedInput) -> usize
-//! ! Host.HostInputError {
+//! ! HostInputError {
 //!   return usize.ONE
 //! }
 //!
-//! effect fn argument(self: &mut FixedInput, index: usize) -> Option.Option<Bytes.Bytes>
-//! ! Host.HostInputError | Allocator.OutOfMemoryError
+//! effect fn argument(self: &mut FixedInput, index: usize) -> Option<Bytes>
+//! ! HostInputError | OutOfMemoryError
 //! ? &mut Allocator {
 //!   fail Host.inputFailure()
 //! }
 //!
-//! effect fn variable(self: &mut FixedInput, name: &[u8]) -> Option.Option<Bytes.Bytes>
-//! ! Host.HostInputError | Allocator.OutOfMemoryError
+//! effect fn variable(self: &mut FixedInput, name: &[u8]) -> Option<Bytes>
+//! ! HostInputError | OutOfMemoryError
 //! ? &mut Allocator {
 //!   fail Host.inputFailure()
 //! }
 //!
-//! effect fn workingDirectory(self: &mut FixedInput) -> Bytes.Bytes
-//! ! Host.HostInputError | Allocator.OutOfMemoryError
+//! effect fn workingDirectory(self: &mut FixedInput) -> Bytes
+//! ! HostInputError | OutOfMemoryError
 //! ? &mut Allocator {
 //!   fail Host.inputFailure()
 //! }
 //!
-//! impl Host.HostInput for FixedInput {
+//! impl Host for FixedInput {
 //!   argumentCount: FixedInput.argumentCount
 //!   argument: FixedInput.argument
 //!   variable: FixedInput.variable
@@ -63,17 +63,17 @@
 //! }
 //!
 //! effect fn program() -> i32
-//! ! Host.HostInputError {
+//! ! HostInputError {
 //!   let mut provider = FixedInput {}
 //!   let total = run Host.argumentCount()
-//!     |> Effect.provideMut<Host.HostInput>(&mut provider)
+//!     |> Effect.provideMut<Host>(&mut provider)
 //!   if total != usize.ONE {
 //!     return 1
 //!   }
 //!   return 42
 //! }
 //!
-//! effect fn recover(error: Host.HostInputError) -> i32 {
+//! effect fn recover(error: HostInputError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -91,22 +91,16 @@
 // fallible view for the common case; it never replaces or discards the bytes.
 
 import silk.bytes { Bytes }
-import silk.allocator { Allocator }
-import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator, OutOfMemoryError }
 import silk.option { Option }
 import silk.result { Result }
-import silk.string { InvalidUtf8, fromUtf8 as stringFromUtf8, utf8Bytes as stringUtf8Bytes }
+import silk.string { InvalidUtf8, String }
 import silk.u8 as u8
 import silk.usize as usize
-import silk.vector { Vector, append as vectorAppend, make as vectorMake }
+import silk.vector { Vector }
 
 /// A typed failure from a host-input provider that could not answer a lookup.
 pub struct HostInputError {}
-
-/// Creates a host-input failure for a provider that cannot complete a lookup.
-pub fn inputFailure() -> HostInputError {
-  return HostInputError {}
-}
 
 /// A portable read-only service for process arguments, environment values, and working directory.
 ///
@@ -153,108 +147,72 @@ pub service HostInput {
   effect fn workingDirectory() -> Bytes ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 }
 
-/// Returns the process argument count through the active [`HostInput`] provider.
-///
-/// # Details
-///
-/// The count includes the program name at index zero. Provider failure produces
-/// [`HostInputError`].
-pub effect fn argumentCount() -> usize ! HostInputError ? &mut HostInput {
-  return run HostInput.argumentCount()
-}
+impl HostInput {
+  /// Creates a host-input failure for a provider that cannot complete a lookup.
+  pub fn inputFailure() -> HostInputError {
+    return HostInputError {}
+  }
 
-/// Copies one process argument through the active [`HostInput`] provider.
-///
-/// # Details
-///
-/// Returns `None` when `index` is at or past [`argumentCount`]. The returned [`Bytes`] value is
-/// independently owned and can contain bytes that are not valid UTF-8.
-pub effect fn argument(
-  index: usize
-) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator {
-  return run HostInput.argument(index)
-}
+  /// Copies one environment value selected by a valid UTF-8 name.
+  ///
+  /// # Details
+  ///
+  /// This function borrows the UTF-8 encoding of `name` and delegates to `HostInput.variable`. It returns
+  /// `None` when the name is unset and independently owns a present value.
+  pub effect fn variableNamed(
+    name: string
+  ) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator {
+    return run HostInput.variable(String.utf8Bytes(name))
+  }
 
-/// Copies one environment value selected by a raw byte name.
-///
-/// # Details
-///
-/// Returns `None` when the name is unset. This operation reads the provider and does not modify the
-/// process environment. The returned [`Bytes`] value is independently owned.
-pub effect fn variable(
-  name: &[u8]
-) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator {
-  return run HostInput.variable(name)
-}
+  /// Copies all process arguments into an owned vector in host order.
+  ///
+  /// # When to use
+  ///
+  /// Use this function when the caller needs the complete argument list. Use `HostInput.argument` for one
+  /// index without retaining all argument values.
+  ///
+  /// # Details
+  ///
+  /// A host that reports a count it cannot then supply is a broken host, so a missing index below the
+  /// count is `HostInputError` rather than a silently shorter sequence.
+  ///
+  /// Each argument and the result vector own their storage. The operation preserves the program name
+  /// at index zero.
+  pub effect fn arguments(
+  ) -> Vector<Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator {
+    let total = run HostInput.argumentCount()
+    let mut collected = Vector.make<Bytes>()
+    let mut index = usize.ZERO
+    while index < total {
+      let found = run HostInput.argument(index)
+      let owned = match move found {
+        Option<Bytes>.Some { value: bytes } => move bytes
+        Option<Bytes>.None => run missingArgument()
+      }
+      let appended = run Vector.append<Bytes>(&mut collected, move owned)
+      index = index + usize.ONE
+    }
+    return move collected
+  }
 
-/// Copies one environment value selected by a valid UTF-8 name.
-///
-/// # Details
-///
-/// This function borrows the UTF-8 encoding of `name` and delegates to [`variable`]. It returns
-/// `None` when the name is unset and independently owns a present value.
-pub effect fn variableNamed(
-  name: string
-) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator {
-  return run HostInput.variable(stringUtf8Bytes(name))
-}
-
-/// Copies the process working directory through the active [`HostInput`] provider.
-///
-/// # Details
-///
-/// The returned [`Bytes`] value is independently owned and is not required to be valid UTF-8. This
-/// operation reads the directory and does not change it.
-pub effect fn workingDirectory() -> Bytes ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator {
-  return run HostInput.workingDirectory()
+  /// Validates host bytes as UTF-8 and returns a borrowed textual view or [`InvalidUtf8`].
+  ///
+  /// # When to use
+  ///
+  /// Use this function only when the caller needs text. Keep byte-oriented code on the original
+  /// slice so every host value can pass through unchanged.
+  ///
+  /// # Details
+  ///
+  /// Host input is not required to be UTF-8. Validation does not allocate or change `values`. A
+  /// failure identifies invalid text while the original bytes remain available to the caller.
+  pub fn text(values: &[u8]) -> Result<string, InvalidUtf8> {
+    return String.fromUtf8(values)
+  }
 }
 
 effect fn missingArgument() -> Bytes ! HostInputError {
-  fail inputFailure()
+  fail HostInput.inputFailure()
 }
 
-/// Copies all process arguments into an owned vector in host order.
-///
-/// # When to use
-///
-/// Use this function when the caller needs the complete argument list. Use [`argument`] for one
-/// index without retaining all argument values.
-///
-/// # Details
-///
-/// A host that reports a count it cannot then supply is a broken host, so a missing index below the
-/// count is `HostInputError` rather than a silently shorter sequence.
-///
-/// Each argument and the result vector own their storage. The operation preserves the program name
-/// at index zero.
-pub effect fn arguments(
-) -> Vector<Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator {
-  let total = run HostInput.argumentCount()
-  let mut collected = vectorMake<Bytes>()
-  let mut index = usize.ZERO
-  while index < total {
-    let found = run HostInput.argument(index)
-    let owned = match move found {
-      Option<Bytes>.Some { value: bytes } => move bytes
-      Option<Bytes>.None => run missingArgument()
-    }
-    let appended = run vectorAppend<Bytes>(&mut collected, move owned)
-    index = index + usize.ONE
-  }
-  return move collected
-}
-
-/// Validates host bytes as UTF-8 and returns a borrowed textual view or [`InvalidUtf8`].
-///
-/// # When to use
-///
-/// Use this function only when the caller needs text. Keep byte-oriented code on the original
-/// slice so every host value can pass through unchanged.
-///
-/// # Details
-///
-/// Host input is not required to be UTF-8. Validation does not allocate or change `values`. A
-/// failure identifies invalid text while the original bytes remain available to the caller.
-pub fn text(values: &[u8]) -> Result<string, InvalidUtf8> {
-  return stringFromUtf8(values)
-}

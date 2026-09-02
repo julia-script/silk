@@ -6,19 +6,19 @@ Deterministic single-threaded execution for structured Fibers.
 
 ## When to use
 
-Use [`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a65786563757465) at an application entry point to run one lazy program that uses the
+Use [`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a4c6f63616c5363686564756c65722e65786563757465) at an application entry point to run one lazy program that uses the
 `silk.scheduler.Scheduler` and `silk.monotonic_clock.MonotonicClock` services.
 
 ## Details
 
 Each call creates fresh task storage, a FIFO ready queue, and a private timer source. The root is
 task zero and uses the same `Execution<()>` storage as every child. Task clock waits park only
-their task; the driver uses the parent clock when its event sources need to wait. [`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a65786563757465)
+their task; the driver uses the parent clock when its event sources need to wait. [`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a4c6f63616c5363686564756c65722e65786563757465)
 returns only after the root terminates.
 
 Import as `LocalScheduler` with `import silk.local_scheduler { LocalScheduler }`.
 
-Public declarations: 4.
+Public declarations: 2.
 
 <a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a4c6f63616c5363686564756c6572"></a>
 
@@ -32,7 +32,37 @@ A reusable deterministic single-threaded Scheduler provider.
 
 ### Details
 
-Each call to [`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a65786563757465) creates fresh task storage and readiness state.
+Each call to [`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a4c6f63616c5363686564756c65722e65786563757465) creates fresh task storage and readiness state.
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a4c6f63616c5363686564756c65722e6d616b65"></a>
+
+### Associated function `LocalScheduler.make`
+
+```silk
+pub fn make() -> LocalScheduler
+```
+
+Constructs a reusable local Scheduler value.
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a4c6f63616c5363686564756c65722e65786563757465"></a>
+
+### Method `LocalScheduler.execute`
+
+```silk
+pub effect fn execute<A, E>(self: &mut LocalScheduler, program: once Effect<A ! E ? &mut silk/monotonic_clock.MonotonicClock | &mut silk/scheduler.Scheduler>) -> A ! E | OutOfMemoryError | StalledError ? &mut MonotonicClock
+```
+
+Runs one lazy root program under this Scheduler and returns its typed outcome.
+
+#### Details
+
+The root becomes task zero. This operation owns all per-run task and timer storage, provides
+distinct Scheduler and MonotonicClock clients to each task, and dispatches ready tasks in FIFO
+order. Task clock reads use one cached mark per driver turn. Future waits suspend their task and
+are resumed in deadline and registration order. When the ready queue is empty, the driver waits
+through its required parent MonotonicClock for the earliest timer; it raises [`StalledError`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a5374616c6c65644572726f72)
+only when no task is ready and no timer registration remains. Before any typed return or failure,
+it cancels every unfinished descendant and releases the complete run state.
 
 <a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a5374616c6c65644572726f72"></a>
 
@@ -46,17 +76,7 @@ Reports that no task is ready and no event registration remains while the root i
 
 ### Details
 
-[`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a65786563757465) cancels and releases the incomplete task tree before it raises this error.
-
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a6d616b65"></a>
-
-## `make`
-
-```silk
-pub fn make() -> LocalScheduler
-```
-
-Constructs a reusable local Scheduler value.
+[`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a4c6f63616c5363686564756c65722e65786563757465) cancels and releases the incomplete task tree before it raises this error.
 
 <a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a30"></a>
 
@@ -84,10 +104,10 @@ impl Copy for ClockSnapshot
 
 <a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a33"></a>
 
-## Implementation `MonotonicClock.MonotonicClock for TaskClockClient`
+## Implementation `MonotonicClock for TaskClockClient`
 
 ```silk
-impl MonotonicClock.MonotonicClock for TaskClockClient
+impl MonotonicClock for TaskClockClient
 ```
 
 <a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a30"></a>
@@ -124,10 +144,10 @@ waitFor = TaskClockClient.taskWaitFor
 
 <a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a34"></a>
 
-## Implementation `Scheduler.Scheduler for SchedulerClient`
+## Implementation `Scheduler for SchedulerClient`
 
 ```silk
-impl Scheduler.Scheduler for SchedulerClient
+impl Scheduler for SchedulerClient
 ```
 
 <a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a30"></a>
@@ -153,23 +173,3 @@ impl Drop for CompletionCancellation
 ```silk
 impl Copy for TimerEntry
 ```
-
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a65786563757465"></a>
-
-## `execute`
-
-```silk
-pub effect fn execute<A, E>(self: &mut silk/local_scheduler.LocalScheduler, program: once Effect<A ! E ? &mut silk/monotonic_clock.MonotonicClock | &mut silk/scheduler.Scheduler>) -> A ! E | OutOfMemoryError | StalledError ? &mut MonotonicClock.MonotonicClock
-```
-
-Runs one lazy root program under this Scheduler and returns its typed outcome.
-
-### Details
-
-The root becomes task zero. This operation owns all per-run task and timer storage, provides
-distinct Scheduler and MonotonicClock clients to each task, and dispatches ready tasks in FIFO
-order. Task clock reads use one cached mark per driver turn. Future waits suspend their task and
-are resumed in deadline and registration order. When the ready queue is empty, the driver waits
-through its required parent MonotonicClock for the earliest timer; it raises [`StalledError`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a5374616c6c65644572726f72)
-only when no task is ready and no timer registration remains. Before any typed return or failure,
-it cancels every unfinished descendant and releases the complete run state.

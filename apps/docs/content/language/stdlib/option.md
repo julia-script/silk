@@ -6,8 +6,8 @@ Optional owned values that distinguish presence from absence without a failure c
 
 ## When to use
 
-Use [`Option`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e) when absence is an expected answer and needs no error payload. Use [`map`](#declaration-73696c6b2f6f7074696f6e3a3a6d6170) for a
-pure transform, [`flatMap`](#declaration-73696c6b2f6f7074696f6e3a3a666c61744d6170) when the transform may also return absence, and [`unwrapOr`](#declaration-73696c6b2f6f7074696f6e3a3a756e777261704f72) only
+Use [`Option`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e) when absence is an expected answer and needs no error payload. Use [`map`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e2e6d6170) for a
+pure transform, [`flatMap`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e2e666c61744d6170) when the transform may also return absence, and [`unwrapOr`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e2e756e777261704f72) only
 when the caller is ready to consume the option.
 
 ## Details
@@ -26,7 +26,7 @@ fn double(value: i32) -> i32 {
   return value * 2
 }
 
-fn positive(value: i32) -> Option.Option<i32> {
+fn positive(value: i32) -> Option<i32> {
   if value > 0 {
     return Option.some<i32>(value)
   }
@@ -47,7 +47,7 @@ pub fn main() -> i32 {
 
 Import as `Option` with `import silk.option { Option }`.
 
-Public declarations: 6.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e"></a>
 
@@ -61,8 +61,8 @@ An owned value that is either [`Some`](#declaration-73696c6b2f6f7074696f6e3a3a4f
 
 ### Details
 
-Match on an `Option` when both arms need custom behavior. Prefer [`map`](#declaration-73696c6b2f6f7074696f6e3a3a6d6170), [`flatMap`](#declaration-73696c6b2f6f7074696f6e3a3a666c61744d6170), or
-[`unwrapOr`](#declaration-73696c6b2f6f7074696f6e3a3a756e777261704f72) for the common transform, continue, and default cases.
+Match on an `Option` when both arms need custom behavior. Prefer [`map`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e2e6d6170), [`flatMap`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e2e666c61744d6170), or
+[`unwrapOr`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e2e756e777261704f72) for the common transform, continue, and default cases.
 
 <a id="declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a30"></a>
 
@@ -94,9 +94,9 @@ pub value: T
 
 The value moved through present-only combinator branches.
 
-<a id="declaration-73696c6b2f6f7074696f6e3a3a6e6f6e65"></a>
+<a id="declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e2e6e6f6e65"></a>
 
-## `none`
+### Associated function `Option.none`
 
 ```silk
 pub fn none<T>() -> silk/option.Option<T>
@@ -104,9 +104,9 @@ pub fn none<T>() -> silk/option.Option<T>
 
 Constructs an absent optional value of the requested element type.
 
-<a id="declaration-73696c6b2f6f7074696f6e3a3a736f6d65"></a>
+<a id="declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e2e736f6d65"></a>
 
-## `some`
+### Associated function `Option.some`
 
 ```silk
 pub fn some<T>(value: T) -> silk/option.Option<T>
@@ -114,55 +114,55 @@ pub fn some<T>(value: T) -> silk/option.Option<T>
 
 Constructs a present option by moving `value` into it.
 
-<a id="declaration-73696c6b2f6f7074696f6e3a3a6d6170"></a>
+<a id="declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e2e6d6170"></a>
 
-## `map`
+### Method `Option.map`
 
 ```silk
-pub fn map<T, U>(self: silk/option.Option<T>, transform: once fn(T) -> U) -> silk/option.Option<U>
+pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> silk/option.Option<U>
 ```
 
 Applies `transform` once to a present value and keeps an absent value absent.
 
-### Details
+#### Details
 
 The callback is not called for [`None`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a30). This operation consumes `self`; use a shared borrow and
 `match` instead when the original option must remain available.
 
-<a id="declaration-73696c6b2f6f7074696f6e3a3a666c61744d6170"></a>
+<a id="declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e2e666c61744d6170"></a>
 
-## `flatMap`
+### Method `Option.flatMap`
 
 ```silk
-pub fn flatMap<T, U>(self: silk/option.Option<T>, transform: once fn(T) -> silk/option.Option<U>) -> silk/option.Option<U>
+pub fn flatMap<T, U>(self: Option<T>, transform: once fn(T) -> silk/option.Option<U>) -> silk/option.Option<U>
 ```
 
 Continues a present value with a transform that itself answers with an Option, so the
 outcome stays one Option deep instead of nesting.
 
-### Details
+#### Details
 
 The callback runs once for [`Some`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a31) and not at all for [`None`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a30). Use this when the next step may
 reject the value without needing to explain why; use a `Result` when rejection needs an error.
 
-<a id="declaration-73696c6b2f6f7074696f6e3a3a756e777261704f72"></a>
+<a id="declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e2e756e777261704f72"></a>
 
-## `unwrapOr`
+### Method `Option.unwrapOr`
 
 ```silk
-pub fn unwrapOr<T>(self: silk/option.Option<T>, fallback: T) -> T
+pub fn unwrapOr<T>(self: Option<T>, fallback: T) -> T
 ```
 
 Returns the present value, or the fallback value when the option is absent.
 
-### Details
+#### Details
 
 Only the absent arm consumes the fallback. The present arm releases it, so exactly one of the
 two owned values leaves this call and the other drops.
 
-### Examples
+#### Examples
 
-#### Choose between a present value and a fallback
+##### Choose between a present value and a fallback
 
 ```silk
 import silk.option { Option }
@@ -178,9 +178,9 @@ pub fn main() -> i32 {
 }
 ```
 
-<a id="declaration-73696c6b2f6f7074696f6e3a3a756e777261704f723a3a706172616d657465723a31"></a>
+<a id="declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e2e756e777261704f723a3a706172616d657465723a31"></a>
 
-### Parameter `fallback`
+#### Parameter `fallback`
 
 ```silk
 fallback: T

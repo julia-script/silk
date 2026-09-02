@@ -6,8 +6,8 @@ Deterministic seeded hashing contracts for hash maps, hash sets, and user-define
 
 ## When to use
 
-Implement [`HashKey`](#declaration-73696c6b2f686173683a3a486173684b6579) when a type will be stored as a hashed key. Use [`mix`](#declaration-73696c6b2f686173683a3a6d6978) for the first
-integer field and [`combine`](#declaration-73696c6b2f686173683a3a636f6d62696e65) for further fields, feeding every field that participates in
+Implement [`HashKey`](#declaration-73696c6b2f686173683a3a486173684b6579) when a type will be stored as a hashed key. Use [`mix`](#declaration-73696c6b2f686173683a3a486173682e6d6978) for the first
+integer field and [`combine`](#declaration-73696c6b2f686173683a3a486173682e636f6d62696e65) for further fields, feeding every field that participates in
 equality. [`Word`](#declaration-73696c6b2f686173683a3a576f7264) is the ready-made key for one `u64`.
 
 ## Details
@@ -46,7 +46,7 @@ pub fn main() -> i32 {
 
 Import as `HashKey` with `import silk.hash { HashKey }`.
 
-Public declarations: 8.
+Public declarations: 4.
 
 <a id="declaration-73696c6b2f686173683a3a48617368"></a>
 
@@ -56,13 +56,65 @@ Public declarations: 8.
 pub struct Hash
 ```
 
-The importable name of the `silk.hash` module scope.
+The owner of the seed, mixing, and ready-made key operations.
 
 ### Details
 
-This struct carries no data and is never constructed by the library. Importing it as
-`import silk.hash { Hash }` names the module scope, so seed, mixing, and ready-made key
-operations resolve through `Hash`.
+This struct carries no data and is never constructed by the library. Every operation is an
+inherent member declared in `impl Hash`, reached through `import silk.hash { Hash }`.
+
+<a id="declaration-73696c6b2f686173683a3a486173682e73656564"></a>
+
+### Associated function `Hash.seed`
+
+```silk
+pub fn seed(value: u64) -> HashSeed
+```
+
+Creates a deterministic hash seed from one `u64` value.
+
+<a id="declaration-73696c6b2f686173683a3a486173682e6d6978"></a>
+
+### Associated function `Hash.mix`
+
+```silk
+pub fn mix(seed: &silk/hash.HashSeed, value: u64) -> u64
+```
+
+Mixes the first integer field of a key with one seed into a 64-bit hash.
+
+#### When to use
+
+Use this function to start a hash for an integer key or the first integer field of a key.
+
+#### Details
+
+The same seed and value return the same result on all Silk engines. Use [`combine`](#declaration-73696c6b2f686173683a3a486173682e636f6d62696e65) for each
+additional field that participates in equality.
+
+<a id="declaration-73696c6b2f686173683a3a486173682e636f6d62696e65"></a>
+
+### Associated function `Hash.combine`
+
+```silk
+pub fn combine(hashed: u64, value: u64) -> u64
+```
+
+Continues a hash with one further value, so a key of several fields folds into one hash.
+
+#### When to use
+
+Use this function after [`mix`](#declaration-73696c6b2f686173683a3a486173682e6d6978) for each additional integer field that participates in equality.
+
+<a id="declaration-73696c6b2f686173683a3a486173682e776f7264"></a>
+
+### Associated function `Hash.word`
+
+```silk
+pub fn word(value: u64) -> Word
+```
+
+Creates a [`Word`](#declaration-73696c6b2f686173683a3a576f7264) key from one `u64` value.
 
 <a id="declaration-73696c6b2f686173683a3a4861736853656564"></a>
 
@@ -96,16 +148,6 @@ The seed value handed to every hash the collection computes.
 ```silk
 impl Copy for HashSeed
 ```
-
-<a id="declaration-73696c6b2f686173683a3a73656564"></a>
-
-## `seed`
-
-```silk
-pub fn seed(value: u64) -> HashSeed
-```
-
-Creates a deterministic hash seed from one `u64` value.
 
 <a id="declaration-73696c6b2f686173683a3a486173684b6579"></a>
 
@@ -154,39 +196,6 @@ Computes the key's deterministic 64-bit hash under the collection seed.
 
 Equivalent keys must return equal results for the same seed.
 
-<a id="declaration-73696c6b2f686173683a3a6d6978"></a>
-
-## `mix`
-
-```silk
-pub fn mix(seed: &silk/hash.HashSeed, value: u64) -> u64
-```
-
-Mixes the first integer field of a key with one seed into a 64-bit hash.
-
-### When to use
-
-Use this function to start a hash for an integer key or the first integer field of a key.
-
-### Details
-
-The same seed and value return the same result on all Silk engines. Use [`combine`](#declaration-73696c6b2f686173683a3a636f6d62696e65) for each
-additional field that participates in equality.
-
-<a id="declaration-73696c6b2f686173683a3a636f6d62696e65"></a>
-
-## `combine`
-
-```silk
-pub fn combine(hashed: u64, value: u64) -> u64
-```
-
-Continues a hash with one further value, so a key of several fields folds into one hash.
-
-### When to use
-
-Use this function after [`mix`](#declaration-73696c6b2f686173683a3a6d6978) for each additional integer field that participates in equality.
-
 <a id="declaration-73696c6b2f686173683a3a576f7264"></a>
 
 ## `Word`
@@ -214,16 +223,6 @@ The integer this key stands for.
 ```silk
 impl Copy for Word
 ```
-
-<a id="declaration-73696c6b2f686173683a3a776f7264"></a>
-
-## `word`
-
-```silk
-pub fn word(value: u64) -> Word
-```
-
-Creates a [`Word`](#declaration-73696c6b2f686173683a3a576f7264) key from one `u64` value.
 
 <a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a32"></a>
 

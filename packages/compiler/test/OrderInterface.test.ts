@@ -24,15 +24,15 @@ const evaluated = (source: string) =>
 
 it.effect('narrows a three-way comparison to each of the three results', () =>
   Effect.gen(function* () {
-    const value = yield* evaluated(`import silk.order { compare, isLess, isEqual, isGreater }
+    const value = yield* evaluated(`import silk.order { Order }
 pub fn main() -> i32 {
-  let low = compare<i32>(1, 2)
-  let same = compare<i32>(7, 7)
-  let high = compare<i32>(9, 3)
+  let low = Order.compare<i32>(1, 2)
+  let same = Order.compare<i32>(7, 7)
+  let high = Order.compare<i32>(9, 3)
   let mut score = 0
-  if isLess(&low) { score = score + 1 }
-  if isEqual(&same) { score = score + 10 }
-  if isGreater(&high) { score = score + 100 }
+  if Order.isLess(&low) { score = score + 1 }
+  if Order.isEqual(&same) { score = score + 10 }
+  if Order.isGreater(&high) { score = score + 100 }
   return score
 }`)
     assert.strictEqual(value, 111)
@@ -43,13 +43,13 @@ it.effect('reports exactly one of the three results for one comparison', () =>
   Effect.gen(function* () {
     // A witness cannot disagree with itself: equality is derived from the same strict `lessThan`
     // the ordering uses, so no comparison can be both less and equal.
-    const value = yield* evaluated(`import silk.order { compare, isLess, isEqual, isGreater }
+    const value = yield* evaluated(`import silk.order { Order }
 pub fn main() -> i32 {
-  let outcome = compare<i32>(4, 4)
+  let outcome = Order.compare<i32>(4, 4)
   let mut hits = 0
-  if isLess(&outcome) { hits = hits + 1 }
-  if isEqual(&outcome) { hits = hits + 1 }
-  if isGreater(&outcome) { hits = hits + 1 }
+  if Order.isLess(&outcome) { hits = hits + 1 }
+  if Order.isEqual(&outcome) { hits = hits + 1 }
+  if Order.isGreater(&outcome) { hits = hits + 1 }
   if hits == 1 { return 42 }
   return hits
 }`)
@@ -59,19 +59,19 @@ pub fn main() -> i32 {
 
 it.effect('ships an Order witness for every integer type', () =>
   Effect.gen(function* () {
-    const value = yield* evaluated(`import silk.order { less }
+    const value = yield* evaluated(`import silk.order { Order }
 pub fn main() -> i32 {
   let mut score = 0
-  if less<u8>(1, 2) { score = score + 1 }
-  if less<u16>(1, 2) { score = score + 1 }
-  if less<u32>(1, 2) { score = score + 1 }
-  if less<u64>(1, 2) { score = score + 1 }
-  if less<usize>(1, 2) { score = score + 1 }
-  if less<i8>(0 - 2, 1) { score = score + 1 }
-  if less<i16>(0 - 2, 1) { score = score + 1 }
-  if less<i32>(0 - 2, 1) { score = score + 1 }
-  if less<i64>(0 - 2, 1) { score = score + 1 }
-  if less<isize>(0 - 2, 1) { score = score + 1 }
+  if Order.less<u8>(1, 2) { score = score + 1 }
+  if Order.less<u16>(1, 2) { score = score + 1 }
+  if Order.less<u32>(1, 2) { score = score + 1 }
+  if Order.less<u64>(1, 2) { score = score + 1 }
+  if Order.less<usize>(1, 2) { score = score + 1 }
+  if Order.less<i8>(0 - 2, 1) { score = score + 1 }
+  if Order.less<i16>(0 - 2, 1) { score = score + 1 }
+  if Order.less<i32>(0 - 2, 1) { score = score + 1 }
+  if Order.less<i64>(0 - 2, 1) { score = score + 1 }
+  if Order.less<isize>(0 - 2, 1) { score = score + 1 }
   return score
 }`)
     assert.strictEqual(value, 10)
@@ -80,12 +80,12 @@ pub fn main() -> i32 {
 
 it.effect('derives equality from the same strict comparison', () =>
   Effect.gen(function* () {
-    const value = yield* evaluated(`import silk.order { equal }
+    const value = yield* evaluated(`import silk.order { Order }
 pub fn main() -> i32 {
   let mut score = 0
-  if equal<i32>(5, 5) { score = score + 1 }
-  if equal<i32>(5, 6) { score = score + 10 }
-  if equal<i32>(6, 5) { score = score + 10 }
+  if Order.equal<i32>(5, 5) { score = score + 1 }
+  if Order.equal<i32>(5, 6) { score = score + 10 }
+  if Order.equal<i32>(6, 5) { score = score + 10 }
   return score
 }`)
     assert.strictEqual(value, 1)
@@ -94,9 +94,9 @@ pub fn main() -> i32 {
 
 it.effect('rejects a type with no Order witness', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.order { less }
+    const self = yield* snapshot(`import silk.order { Order }
 pub fn main() -> bool {
-  return less(true, false)
+  return Order.less(true, false)
 }`)
     assert.isTrue(
       Analysis.diagnostics(self).some((diagnostic) =>
@@ -109,9 +109,9 @@ pub fn main() -> bool {
 
 it.effect('selects one concrete comparison with no runtime dispatch', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.order { less }
+    const self = yield* snapshot(`import silk.order { Order }
 pub fn main() -> i32 {
-  let ordered = less<i32>(1, 2)
+  let ordered = Order.less<i32>(1, 2)
   if ordered { return 42 }
   return 0
 }`)
@@ -134,10 +134,10 @@ pub fn main() -> i32 {
 
 it.effect('specializes one bound per conforming integer width', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.order { less }
+    const self = yield* snapshot(`import silk.order { Order }
 pub fn main() -> i32 {
-  let narrow = less<u8>(1, 2)
-  let wide = less<i64>(1, 2)
+  let narrow = Order.less<u8>(1, 2)
+  let wide = Order.less<i64>(1, 2)
   if narrow { if wide { return 42 } }
   return 0
 }`)

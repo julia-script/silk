@@ -471,18 +471,14 @@ const handledEffectEdit = (
   const leading = raw.slice(0, raw.length - trimmed.length)
   const operation = trimmed.slice('run '.length)
   const text = decoder.decode(SourceFile.toUint8Array(syntax.source))
-  const make = (
-    title: string,
-    imported: string,
-    localSpelling: string,
-    replacement: string,
-  ): ReadonlyArray<CodeAction> => {
+  // Every combinator is a member of `Effect`, so the one import the fix needs is the owner.
+  const make = (title: string, replacement: string): ReadonlyArray<CodeAction> => {
     const plan = Option.getOrUndefined(
       ImportPlan.make({
         syntax,
         module: 'silk/effect',
-        spelling: imported,
-        localSpelling,
+        spelling: 'Effect',
+        localSpelling: 'Effect',
       }),
     )
     if (plan === undefined) return []
@@ -512,12 +508,7 @@ const handledEffectEdit = (
     diagnostic.reason._tag === 'UnhandledEffectFailures' &&
     /\beffect\s+fn\s+recover\s*\(/.test(text)
   )
-    return make(
-      'Recover this Effect with recover',
-      'catchAll',
-      'effectCatchAll',
-      `run effectCatchAll(${operation}, recover)`,
-    )
+    return make('Recover this Effect with recover', `run Effect.catchAll(${operation}, recover)`)
   if (
     diagnostic.reason._tag === 'UnhandledEffectRequirements' &&
     diagnostic.reason.requirements.length === 1
@@ -530,16 +521,9 @@ const handledEffectEdit = (
     return mutable
       ? make(
           'Provide this Effect with provider',
-          'provideMut',
-          'effectProvideMut',
-          `run effectProvideMut(${operation}, &mut provider)`,
+          `run Effect.provideMut(${operation}, &mut provider)`,
         )
-      : make(
-          'Provide this Effect with provider',
-          'provide',
-          'effectProvide',
-          `run effectProvide(${operation}, &provider)`,
-        )
+      : make('Provide this Effect with provider', `run Effect.provide(${operation}, &provider)`)
   }
   return []
 }

@@ -19,7 +19,7 @@ ambient clock.
 
 ## Gotchas
 
-[`getResolution`](#declaration-73696c6b2f73797374656d5f636c6f636b3a3a6765745265736f6c7574696f6e) reports a positive nominal tick in whole nanoseconds. The tick may be a lower
+`SystemClock.getResolution` reports a positive nominal tick in whole nanoseconds. The tick may be a lower
 bound on observable precision. An invalid or unrepresentable provider result traps because this
 service has no typed failure channel.
 
@@ -29,13 +29,13 @@ service has no typed failure channel.
 
 ```silk
 import silk.effect { Effect }
-import silk.system_clock { SystemClock }
+import silk.system_clock { SystemClock, Instant }
 
 import silk.u64
 
 struct FixedClock {}
 
-effect fn fixedNow(self: &mut FixedClock) -> SystemClock.Instant {
+effect fn fixedNow(self: &mut FixedClock) -> Instant {
   return SystemClock.make(-1, 999999999)
 }
 
@@ -43,7 +43,7 @@ effect fn fixedResolution(self: &mut FixedClock) -> u64 {
   return u64.toU64(1)
 }
 
-impl SystemClock.SystemClock for FixedClock {
+impl SystemClock for FixedClock {
   now: FixedClock.fixedNow
   getResolution: FixedClock.fixedResolution
 }
@@ -51,7 +51,7 @@ impl SystemClock.SystemClock for FixedClock {
 pub fn main() -> i32 {
   let mut provider = FixedClock {}
   let instant = run SystemClock.now()
-    |> Effect.provideMut<SystemClock.SystemClock>(&mut provider)
+    |> Effect.provideMut<SystemClock>(&mut provider)
   if SystemClock.seconds(&instant) != -1 { return 1 }
   if SystemClock.nanoseconds(&instant) != 999999999 { return 2 }
   return 42
@@ -60,7 +60,7 @@ pub fn main() -> i32 {
 
 Import as `SystemClock` with `import silk.system_clock { SystemClock }`.
 
-Public declarations: 7.
+Public declarations: 2.
 
 <a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a496e7374616e74"></a>
 
@@ -78,41 +78,6 @@ System-clock seconds are measured from `1970-01-01T00:00:00Z`. A monotonic provi
 this representation with an unspecified provider-local origin. The fraction is always in
 `0..1000000000`; consequently `{ seconds: -1, nanoseconds: 999999999 }` is one nanosecond before
 zero.
-
-<a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a6d616b65"></a>
-
-## `make`
-
-```silk
-pub fn make(seconds: i64, nanoseconds: i64) -> Instant
-```
-
-Creates a canonical split-second instant.
-
-### Gotchas
-
-`nanoseconds` must be non-negative and less than one billion. A noncanonical fraction traps
-instead of being normalized into another field pair.
-
-<a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a7365636f6e6473"></a>
-
-## `seconds`
-
-```silk
-pub fn seconds(self: &silk/system_clock.Instant) -> i64
-```
-
-Returns the signed whole-second component of an instant.
-
-<a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a6e616e6f7365636f6e6473"></a>
-
-## `nanoseconds`
-
-```silk
-pub fn nanoseconds(self: &silk/system_clock.Instant) -> i64
-```
-
-Returns the canonical non-negative nanosecond fraction of an instant.
 
 <a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a53797374656d436c6f636b"></a>
 
@@ -152,25 +117,37 @@ effect fn getResolution() -> u64 ? &mut SystemClock
 Returns the provider-reported positive nominal resolution in whole nanoseconds.
 The value may be a lower bound on actual observable precision.
 
-<a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a6e6f77"></a>
+<a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a53797374656d436c6f636b2e6d616b65"></a>
 
-## `now`
-
-```silk
-pub effect fn now() -> Instant ? &mut SystemClock
-```
-
-Reads the current Unix-epoch instant from the active [`SystemClock`](#declaration-73696c6b2f73797374656d5f636c6f636b3a3a53797374656d436c6f636b) provider.
-The result can precede an earlier result. An invalid or unrepresentable provider result traps.
-
-<a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a6765745265736f6c7574696f6e"></a>
-
-## `getResolution`
+### Associated function `SystemClock.make`
 
 ```silk
-pub effect fn getResolution() -> u64 ? &mut SystemClock
+pub fn make(seconds: i64, nanoseconds: i64) -> Instant
 ```
 
-Returns the active [`SystemClock`](#declaration-73696c6b2f73797374656d5f636c6f636b3a3a53797374656d436c6f636b) provider's positive nominal resolution in nanoseconds.
-The result may be a lower bound on observable precision. An invalid or unrepresentable result
-traps.
+Creates a canonical split-second instant.
+
+#### Gotchas
+
+`nanoseconds` must be non-negative and less than one billion. A noncanonical fraction traps
+instead of being normalized into another field pair.
+
+<a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a53797374656d436c6f636b2e7365636f6e6473"></a>
+
+### Associated function `SystemClock.seconds`
+
+```silk
+pub fn seconds(self: &silk/system_clock.Instant) -> i64
+```
+
+Returns the signed whole-second component of an instant.
+
+<a id="declaration-73696c6b2f73797374656d5f636c6f636b3a3a53797374656d436c6f636b2e6e616e6f7365636f6e6473"></a>
+
+### Associated function `SystemClock.nanoseconds`
+
+```silk
+pub fn nanoseconds(self: &silk/system_clock.Instant) -> i64
+```
+
+Returns the canonical non-negative nanosecond fraction of an instant.

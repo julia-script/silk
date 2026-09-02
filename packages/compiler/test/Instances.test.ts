@@ -122,7 +122,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(result), [])
     assert.deepEqual(
       Analysis.instancesOf(result).instances.map((instance) => instance.key.declaration.name),
-      ['main', 'provideMut', 'forward', 'forward', 'impl@0.value'],
+      ['main', 'Effect.provideMut', 'forward', 'forward', 'impl@0.value'],
     )
   }),
 )
@@ -449,7 +449,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const composed = Analysis.loweredMir(
-        yield* snapshot(`import silk.effect as Effect
+        yield* snapshot(`import silk.effect { Effect }
 effect fn work() -> i32 { return 41 }
 pub fn main() -> i32 { return run work() |> Effect.retry(2) }`),
       )

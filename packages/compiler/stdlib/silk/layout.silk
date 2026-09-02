@@ -12,15 +12,15 @@
 //! # Examples
 //! ## Size storage for repeated values
 //! ```silk
-//! import silk.layout { Layout }
+//! import silk.layout { Layout, LayoutOverflow }
 //!
 //! import silk.usize
 //!
 //! pub fn main() -> i32 {
 //!   let element = Layout.of<i32>()
 //!   return match move Layout.repeat(move element, 3) {
-//!     Layout.Layout {bytes, alignment} => usize.toI32(bytes) + 30
-//!     Layout.LayoutOverflow {} => 0
+//!     Layout {bytes, alignment} => usize.toI32(bytes) + 30
+//!     LayoutOverflow {} => 0
 //!   }
 //! }
 //! ```
@@ -36,6 +36,45 @@ pub struct Layout {
   pub alignment: usize
 }
 
+impl Layout {
+  /// Returns the byte size and alignment required to store one value of `T`.
+  pub fn of<T>() -> Layout {
+    return Intrinsic.layoutOf<T>()
+  }
+
+  /// Creates a layout from an explicit byte size and alignment.
+  ///
+  /// # Gotchas
+  ///
+  /// If `alignment` is zero or is not a power of two, returns `InvalidAlignment` with that value.
+  pub fn make(size: usize, alignment: usize) -> Layout | InvalidAlignment {
+    if alignment == 0 {
+      return InvalidAlignment { alignment: alignment }
+    }
+    let previous = alignment - 1
+    if usize.bitAnd(alignment, previous) != 0 {
+      return InvalidAlignment { alignment: alignment }
+    }
+    return Layout { bytes: size, alignment: alignment }
+  }
+
+  /// Returns a layout for `count` contiguous instances without wrapping the total byte size.
+  ///
+  /// # Details
+  ///
+  /// The result keeps the input alignment and multiplies its byte size by `count`.
+  ///
+  /// # Gotchas
+  ///
+  /// If the total byte size does not fit in `usize`, returns `LayoutOverflow`.
+  pub fn repeat(layout: Layout, count: usize) -> Layout | LayoutOverflow {
+    return match move usize.checkedMultiply(layout.bytes, count) {
+      Option<usize>.None => LayoutOverflow {}
+      Option<usize>.Some { value } => Layout { bytes: value, alignment: layout.alignment }
+    }
+  }
+}
+
 /// Reports the rejected alignment supplied to [`make`].
 pub struct InvalidAlignment {
   /// The zero or non-power-of-two alignment that was rejected.
@@ -45,39 +84,3 @@ pub struct InvalidAlignment {
 /// Reports that [`repeat`] could not represent the aggregate byte size as `usize`.
 pub struct LayoutOverflow {}
 
-/// Returns the byte size and alignment required to store one value of `T`.
-pub fn of<T>() -> Layout {
-  return Intrinsic.layoutOf<T>()
-}
-
-/// Creates a layout from an explicit byte size and alignment.
-///
-/// # Gotchas
-///
-/// If `alignment` is zero or is not a power of two, returns `InvalidAlignment` with that value.
-pub fn make(size: usize, alignment: usize) -> Layout | InvalidAlignment {
-  if alignment == 0 {
-    return InvalidAlignment { alignment: alignment }
-  }
-  let previous = alignment - 1
-  if usize.bitAnd(alignment, previous) != 0 {
-    return InvalidAlignment { alignment: alignment }
-  }
-  return Layout { bytes: size, alignment: alignment }
-}
-
-/// Returns a layout for `count` contiguous instances without wrapping the total byte size.
-///
-/// # Details
-///
-/// The result keeps the input alignment and multiplies its byte size by `count`.
-///
-/// # Gotchas
-///
-/// If the total byte size does not fit in `usize`, returns `LayoutOverflow`.
-pub fn repeat(layout: Layout, count: usize) -> Layout | LayoutOverflow {
-  return match move usize.checkedMultiply(layout.bytes, count) {
-    Option<usize>.None => LayoutOverflow {}
-    Option<usize>.Some { value } => Layout { bytes: value, alignment: layout.alignment }
-  }
-}

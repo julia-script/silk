@@ -140,7 +140,7 @@ it.effect('binds provider-selected rows before checking subset constraints', () 
   Effect.gen(function* () {
     const self = yield* Analysis.ofSource(
       'generics/provider-bound-subset',
-      new TextEncoder().encode(`import silk.effect as Effect
+      new TextEncoder().encode(`import silk.effect { Effect }
 service Clock { effect fn value() -> i32 ? &mut Clock }
 struct FixedClock {}
 effect fn clockValue(self: &mut FixedClock) -> i32 { return 0 }

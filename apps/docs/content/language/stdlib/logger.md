@@ -20,7 +20,7 @@ bytes, and exposes attempted calls separately from successful commits.
 ## Gotchas
 
 Logger failures are typed [`LogError`](#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72) values and do not guarantee that a message committed.
-In-memory accessors require an event index less than [`length`](#declaration-73696c6b2f6c6f676765723a3a6c656e677468) and a valid message-byte index.
+In-memory accessors require an event index less than [`length`](#declaration-73696c6b2f6c6f676765723a3a4c6f676765722e6c656e677468) and a valid message-byte index.
 
 ## Examples
 
@@ -29,13 +29,13 @@ In-memory accessors require an event index less than [`length`](#declaration-736
 ```silk
 import silk.effect { Effect }
 
-import silk.logger { Logger }
+import silk.logger { Logger, LogError }
 import silk.logger { LogLevel }
 
 import silk.usize
 
 effect fn program() -> i32
-! Logger.LogError {
+! LogError {
   let mut logger = Logger.inMemoryProvider()
   let logged = run Effect.logWarning("cache miss")
     |> Effect.provideMut(&mut logger)
@@ -48,7 +48,7 @@ effect fn program() -> i32
   return 42
 }
 
-effect fn recover(error: Logger.LogError) -> i32 {
+effect fn recover(error: LogError) -> i32 {
   return 0
 }
 
@@ -59,7 +59,7 @@ pub fn main() -> i32 {
 
 Import as `Logger` with `import silk.logger { Logger }`.
 
-Public declarations: 14.
+Public declarations: 5.
 
 <a id="declaration-73696c6b2f6c6f676765723a3a4c6f674c6576656c"></a>
 
@@ -136,21 +136,6 @@ A typed failure reported by one [`Logger`](#declaration-73696c6b2f6c6f676765723a
 The numeric code belongs to the provider. Portable code can recover from `LogError` without
 assigning one meaning to that code across different providers.
 
-<a id="declaration-73696c6b2f6c6f676765723a3a6572726f72436f6465"></a>
-
-## `errorCode`
-
-```silk
-pub fn errorCode(error: LogError) -> i32
-```
-
-Returns the provider-defined failure code for diagnostics.
-
-### Gotchas
-
-Interpret this code only with knowledge of the selected provider. Different providers can use
-the same code for different failures.
-
 <a id="declaration-73696c6b2f6c6f676765723a3a4c6f67676572"></a>
 
 ## `Logger`
@@ -186,6 +171,138 @@ Submits one complete UTF-8 message at one severity to the active provider.
 The call preserves the message bytes exactly. It does not add a newline, severity label,
 timestamp, or other formatting. A provider failure produces [`LogError`](#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72).
 
+<a id="declaration-73696c6b2f6c6f676765723a3a4c6f676765722e6572726f72436f6465"></a>
+
+### Associated function `Logger.errorCode`
+
+```silk
+pub fn errorCode(error: LogError) -> i32
+```
+
+Returns the provider-defined failure code for diagnostics.
+
+#### Gotchas
+
+Interpret this code only with knowledge of the selected provider. Different providers can use
+the same code for different failures.
+
+<a id="declaration-73696c6b2f6c6f676765723a3a4c6f676765722e7374646f757450726f7669646572"></a>
+
+### Associated function `Logger.stdoutProvider`
+
+```silk
+pub fn stdoutProvider() -> StdoutLogger
+```
+
+Creates a logger that forwards each complete message to process standard output.
+
+#### Gotchas
+
+The caller must include a newline in `message` when line separation is required. A standard-
+output write failure becomes a provider-defined [`LogError`](#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72).
+
+<a id="declaration-73696c6b2f6c6f676765723a3a4c6f676765722e696e4d656d6f727950726f7669646572"></a>
+
+### Associated function `Logger.inMemoryProvider`
+
+```silk
+pub fn inMemoryProvider() -> InMemoryLogger
+```
+
+Creates an empty in-memory logger with capacity for eight events and 64 message bytes.
+
+#### Gotchas
+
+A call fails when eight events are already committed. A call also fails when its bytes exceed
+the remaining 64-byte total. Neither failure commits the event.
+
+<a id="declaration-73696c6b2f6c6f676765723a3a4c6f676765722e696e4d656d6f727950726f76696465724661696c4174"></a>
+
+### Associated function `Logger.inMemoryProviderFailAt`
+
+```silk
+pub fn inMemoryProviderFailAt(failAt: usize) -> InMemoryLogger
+```
+
+Creates an in-memory logger that rejects one zero-based attempted-call ordinal.
+
+#### Details
+
+The configured attempt increases [`attempts`](#declaration-73696c6b2f6c6f676765723a3a4c6f676765722e617474656d707473) but does not increase [`length`](#declaration-73696c6b2f6c6f676765723a3a4c6f676765722e6c656e677468) or consume
+message capacity. Other attempts retain the eight-event and 64-byte limits of
+[`inMemoryProvider`](#declaration-73696c6b2f6c6f676765723a3a4c6f676765722e696e4d656d6f727950726f7669646572).
+
+<a id="declaration-73696c6b2f6c6f676765723a3a4c6f676765722e6c656e677468"></a>
+
+### Associated function `Logger.length`
+
+```silk
+pub fn length(self: &silk/logger.InMemoryLogger) -> usize
+```
+
+Returns the number of events that the in-memory logger committed.
+
+#### Details
+
+Failed attempts do not increase this count. Use [`attempts`](#declaration-73696c6b2f6c6f676765723a3a4c6f676765722e617474656d707473) when rejected calls must also be
+observed.
+
+<a id="declaration-73696c6b2f6c6f676765723a3a4c6f676765722e6c6576656c4174"></a>
+
+### Associated function `Logger.levelAt`
+
+```silk
+pub fn levelAt(self: &silk/logger.InMemoryLogger, index: usize) -> LogLevel
+```
+
+Returns the severity of one committed event.
+
+#### Gotchas
+
+`index` must be less than [`length`](#declaration-73696c6b2f6c6f676765723a3a4c6f676765722e6c656e677468). An unused index below eight returns the initial Trace
+value instead of trapping. An index of eight or more traps.
+
+<a id="declaration-73696c6b2f6c6f676765723a3a4c6f676765722e6d6573736167654c656e6774684174"></a>
+
+### Associated function `Logger.messageLengthAt`
+
+```silk
+pub fn messageLengthAt(self: &silk/logger.InMemoryLogger, index: usize) -> usize
+```
+
+Returns the UTF-8 byte length of one committed message.
+
+#### Gotchas
+
+`index` must be less than [`length`](#declaration-73696c6b2f6c6f676765723a3a4c6f676765722e6c656e677468). An unused index below eight returns zero instead of
+trapping. An index of eight or more traps.
+
+<a id="declaration-73696c6b2f6c6f676765723a3a4c6f676765722e6d657373616765427974654174"></a>
+
+### Associated function `Logger.messageByteAt`
+
+```silk
+pub fn messageByteAt(self: &silk/logger.InMemoryLogger, eventIndex: usize, byteIndex: usize) -> u8
+```
+
+Returns one UTF-8 byte from a committed message.
+
+#### Gotchas
+
+`eventIndex` must be less than [`length`](#declaration-73696c6b2f6c6f676765723a3a4c6f676765722e6c656e677468). `byteIndex` must be less than
+[`messageLengthAt`](#declaration-73696c6b2f6c6f676765723a3a4c6f676765722e6d6573736167654c656e6774684174) for that event. An unused event or invalid byte index traps. An event index
+of eight or more also traps.
+
+<a id="declaration-73696c6b2f6c6f676765723a3a4c6f676765722e617474656d707473"></a>
+
+### Associated function `Logger.attempts`
+
+```silk
+pub fn attempts(self: &silk/logger.InMemoryLogger) -> usize
+```
+
+Returns the number of calls attempted, including calls that produced [`LogError`](#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72).
+
 <a id="declaration-73696c6b2f6c6f676765723a3a5374646f75744c6f67676572"></a>
 
 ## `StdoutLogger`
@@ -200,21 +317,6 @@ A [`Logger`](#declaration-73696c6b2f6c6f676765723a3a4c6f67676572) provider that 
 
 The provider ignores the severity for physical formatting and writes only the UTF-8 message
 bytes. It adds no newline and performs no message allocation.
-
-<a id="declaration-73696c6b2f6c6f676765723a3a7374646f757450726f7669646572"></a>
-
-## `stdoutProvider`
-
-```silk
-pub fn stdoutProvider() -> StdoutLogger
-```
-
-Creates a logger that forwards each complete message to process standard output.
-
-### Gotchas
-
-The caller must include a newline in `message` when line separation is required. A standard-
-output write failure becomes a provider-defined [`LogError`](#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72).
 
 <a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a30"></a>
 
@@ -253,37 +355,6 @@ The provider copies each committed message into fixed internal storage. It recor
 calls separately from committed events. Capacity failure and configured failure do not commit an
 event.
 
-<a id="declaration-73696c6b2f6c6f676765723a3a696e4d656d6f727950726f7669646572"></a>
-
-## `inMemoryProvider`
-
-```silk
-pub fn inMemoryProvider() -> InMemoryLogger
-```
-
-Creates an empty in-memory logger with capacity for eight events and 64 message bytes.
-
-### Gotchas
-
-A call fails when eight events are already committed. A call also fails when its bytes exceed
-the remaining 64-byte total. Neither failure commits the event.
-
-<a id="declaration-73696c6b2f6c6f676765723a3a696e4d656d6f727950726f76696465724661696c4174"></a>
-
-## `inMemoryProviderFailAt`
-
-```silk
-pub fn inMemoryProviderFailAt(failAt: usize) -> InMemoryLogger
-```
-
-Creates an in-memory logger that rejects one zero-based attempted-call ordinal.
-
-### Details
-
-The configured attempt increases [`attempts`](#declaration-73696c6b2f6c6f676765723a3a617474656d707473) but does not increase [`length`](#declaration-73696c6b2f6c6f676765723a3a6c656e677468) or consume
-message capacity. Other attempts retain the eight-event and 64-byte limits of
-[`inMemoryProvider`](#declaration-73696c6b2f6c6f676765723a3a696e4d656d6f727950726f7669646572).
-
 <a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a31"></a>
 
 ## Implementation `Logger for InMemoryLogger`
@@ -299,74 +370,3 @@ impl Logger for InMemoryLogger
 ```silk
 log = InMemoryLogger.record
 ```
-
-<a id="declaration-73696c6b2f6c6f676765723a3a6c656e677468"></a>
-
-## `length`
-
-```silk
-pub fn length(self: &silk/logger.InMemoryLogger) -> usize
-```
-
-Returns the number of events that the in-memory logger committed.
-
-### Details
-
-Failed attempts do not increase this count. Use [`attempts`](#declaration-73696c6b2f6c6f676765723a3a617474656d707473) when rejected calls must also be
-observed.
-
-<a id="declaration-73696c6b2f6c6f676765723a3a6c6576656c4174"></a>
-
-## `levelAt`
-
-```silk
-pub fn levelAt(self: &silk/logger.InMemoryLogger, index: usize) -> LogLevel
-```
-
-Returns the severity of one committed event.
-
-### Gotchas
-
-`index` must be less than [`length`](#declaration-73696c6b2f6c6f676765723a3a6c656e677468). An unused index below eight returns the initial Trace
-value instead of trapping. An index of eight or more traps.
-
-<a id="declaration-73696c6b2f6c6f676765723a3a6d6573736167654c656e6774684174"></a>
-
-## `messageLengthAt`
-
-```silk
-pub fn messageLengthAt(self: &silk/logger.InMemoryLogger, index: usize) -> usize
-```
-
-Returns the UTF-8 byte length of one committed message.
-
-### Gotchas
-
-`index` must be less than [`length`](#declaration-73696c6b2f6c6f676765723a3a6c656e677468). An unused index below eight returns zero instead of
-trapping. An index of eight or more traps.
-
-<a id="declaration-73696c6b2f6c6f676765723a3a6d657373616765427974654174"></a>
-
-## `messageByteAt`
-
-```silk
-pub fn messageByteAt(self: &silk/logger.InMemoryLogger, eventIndex: usize, byteIndex: usize) -> u8
-```
-
-Returns one UTF-8 byte from a committed message.
-
-### Gotchas
-
-`eventIndex` must be less than [`length`](#declaration-73696c6b2f6c6f676765723a3a6c656e677468). `byteIndex` must be less than
-[`messageLengthAt`](#declaration-73696c6b2f6c6f676765723a3a6d6573736167654c656e6774684174) for that event. An unused event or invalid byte index traps. An event index
-of eight or more also traps.
-
-<a id="declaration-73696c6b2f6c6f676765723a3a617474656d707473"></a>
-
-## `attempts`
-
-```silk
-pub fn attempts(self: &silk/logger.InMemoryLogger) -> usize
-```
-
-Returns the number of calls attempted, including calls that produced [`LogError`](#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72).

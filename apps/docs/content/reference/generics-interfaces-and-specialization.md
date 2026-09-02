@@ -1254,7 +1254,7 @@ offer to move the conformance into a module the author cannot modify.
 module defining its provider's outer nominal type; compiler-sealed intrinsic contracts retain their
 own explicitly privileged rules.
 
-**Evidence:** [actor and conformance style](style-guide.md#style-002--public-apis-prefer-qualified-data-first-functions).
+**Evidence:** [member and conformance style](style-guide.md#style-002--operations-intrinsic-to-one-type-are-inherent-members-with-the-receiver-first).
 
 ### IMPL-005 — Conformances have no independent import or visibility modifier
 
@@ -1493,7 +1493,7 @@ The later interface rules must preserve decisions already confirmed elsewhere:
 - A service is an interface with dependency eligibility and no other distinct conformance behavior.
   See [SERV-003](requirements-and-services.md#serv-003--a-service-is-a-dependency-eligible-interface).
 - Only the module defining a nominal provider type may declare its conformances. See
-  [STYLE-002](style-guide.md#style-002--public-apis-prefer-qualified-data-first-functions).
+  [STYLE-002](style-guide.md#style-002--operations-intrinsic-to-one-type-are-inherent-members-with-the-receiver-first).
 - Interface operation operands retain their declared move or borrow modes. They do not receive
   blanket reference adaptation.
 - Effectful operations preserve ordinary failure types, requirement rows, and explicit Effect

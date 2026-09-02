@@ -58,28 +58,34 @@ alongside `Success` and `Failure`, not an error payload type.
 
 **Evidence:** [ordinary failure values](typed-failures.md#fail-001--any-concrete-detached-value-may-be-a-typed-failure).
 
-## STYLE-002 — Public APIs prefer qualified data-first functions
+## STYLE-002 — Operations intrinsic to one type are inherent members with the receiver first
 
 **Status:** Confirmed
 
-A public operation on a value should usually be an ordinary module-level function whose first
-parameter is that value. Callers qualify the operation through its defining module:
+An operation intrinsic to one nominal type is declared in that type's inherent `impl` block, with
+the value it operates on as the first parameter. Callers qualify the operation through the owner
+type:
 
 ```silk
 pub struct Counter { value: i32 }
 
-pub fn increment(counter: Counter, amount: i32) -> Counter {
-  return Counter { value: counter.value + amount }
+impl Counter {
+  pub fn increment(self: Self, amount: i32) -> Counter {
+    return Counter { value: self.value + amount }
+  }
 }
 
-let direct = Counter.increment(Counter { value: 40 }, 1)
-let piped = Counter { value: 40 } |> Counter.increment(1)
+pub fn main() -> i32 {
+  let direct = Counter.increment(Counter { value: 40 }, 1)
+  let piped = Counter { value: 40 } |> Counter.increment(1)
+  return direct.value + piped.value - 40
+}
 ```
 
-The direct and piped forms have the same meaning. This is not special treatment for Effect APIs.
-Supplying a non-empty trailing suffix of an ordinary multi-parameter function creates a callable
-waiting for its remaining leading arguments, so the same convention supports operations on any
-value:
+The direct and pipeline forms share one contract. `Counter.increment` is an ordinary function whose
+parameter zero is the receiver, so supplying a non-empty trailing suffix of its arguments creates a
+callable waiting for that receiver. This is not special treatment for Effect APIs: `Effect.provide`
+is an inherent member of the `Effect` struct and has the same shape:
 
 ```silk
 import silk.effect { Effect }
@@ -88,49 +94,75 @@ let specialized = Effect.provide(computation, &clock)
 let piped = computation |> Effect.provide(&clock)
 ```
 
-Nominal data types should remain primarily data. A library may expose a small set of operations
-needed to construct or preserve the type's invariants, but the bulk of its API should remain
-ordinary composable functions. An `impl` declaration should exist because a type must conform to an
-interface or service, not merely to collect all functions related to that type. When a conformance
-operation is also a useful concrete API, prefer mapping it to an actor function; an inline
-conformance body remains valid when no separately callable operation is useful.
+An operation that relates several peer types, or that expresses a module-level concept rather than
+one type, stays a free function at the module root and is imported or namespace-qualified:
 
-This organization permits another module to add operations for an existing public type without
-mutating the type or its method set. The added operation is qualified by the module that defines
-it—or imported directly—not injected into the original module's namespace. Modules and nominal
-types are not reopenable namespaces. If two imported modules or selected functions would introduce
-the same local name, the import is a collision and the caller must alias at least one of them. Silk
-does not select by import order or form an overload set.
+```silk
+pub struct Meters { value: i32 }
+pub struct Seconds { value: i32 }
 
-**Boundary:** This is an API convention, not a validity rule. A function may place another argument
+pub fn speed(distance: &Meters, elapsed: &Seconds) -> i32 {
+  return distance.value / elapsed.value
+}
+
+pub fn main() -> i32 {
+  return speed(&Meters { value: 84 }, &Seconds { value: 2 })
+}
+```
+
+Put an operation where its receiver is. A function whose first parameter is the owner and whose
+meaning belongs to that type is a member; a function that would pick one owner arbitrarily among
+equals is free. The standard library follows this split with one deliberate exception:
+`Order.compare`, `Order.less`, `Order.equal`, `Order.isLess`, `Order.isEqual`, and
+`Order.isGreater` are associated functions of the `Order` interface although their parameters are
+`T: Order` values or an `Ordering`, so the spelling callers already use stays stable.
+
+Nominal data types remain primarily data. An inherent `impl` collects the operations intrinsic to
+its owner; a conformance `impl Contract for Type` exists because the type conforms to an interface
+or service, not to collect functions. When a contract operation is also a useful concrete API,
+declare it as an inherent member and map the conformance operation to it; an inline conformance
+body remains valid when no separately callable operation is useful.
+
+Only the module declaring a nominal type may declare its inherent impls and its conformances.
+Another module adds behavior for an existing public type as a free function qualified by the
+module that defines it—or imported directly—never by injecting a member into the owner. Modules and
+nominal types are not reopenable namespaces. If two imported modules or selected functions would
+introduce the same local name, the import is a collision and the caller must alias at least one of
+them. Silk does not select by import order or form an overload set.
+
+**Boundary:** This is an API convention, not a validity rule. A member may place another argument
 first when its domain meaning calls for that order, and a valid inline conformance is not rejected
-for lacking a mapped actor function. Silk does not, however, reinterpret a qualified data-first
-function as an instance method:
+for lacking a mapped member. An inherent member is called through its owner; the language does not
+currently reinterpret a member as an instance method:
 
 ```silk,ignore
 counter.increment(1)
 ```
 
-Use `Counter.increment(counter, 1)` or `counter |> Counter.increment(1)`.
+Use `Counter.increment(counter, 1)` or `counter |> Counter.increment(1)`. Receiver-position
+method-call syntax is defined by a separate later change; the receiver-first contract described here
+is what lets that spelling reuse the same member without a second calling convention.
 
-Only the module defining a nominal type may declare its conformances. Extension functions do not
-retroactively make an external type conform to an interface or service; a third-party
-type/interface combination requires an owned adapter type. This coherence boundary is independent
-from the ability to add ordinary functions anywhere.
+Extension functions do not retroactively make an external type conform to an interface or service;
+a third-party type/interface combination requires an owned adapter type. This coherence boundary is
+independent from the ability to add ordinary functions anywhere.
 
-**Tooling:** The compiler does not require public APIs to be data-first. Language tooling and API
-documentation may prefer this shape and show its direct and piped forms together. Method-call syntax
-and reopening another module or type remain invalid language boundaries, not style warnings.
+**Tooling:** The compiler does not require an operation to be a member or a free function. Language
+tooling and API documentation present a member under its owner, label it a method when parameter
+zero is a `self` receiver of the owner type and an associated function otherwise, and may show the
+direct and pipeline forms together. Reopening another module or type remains an invalid language
+boundary, not a style warning.
 
-**Evidence:** [callable pipeline specification](../../../../openspec/specs/bootstrap-callable-values/spec.md).
+**Evidence:** [inherent member index](../../../../openspec/specs/bootstrap-declaration-index/spec.md),
+[callable pipeline specification](../../../../openspec/specs/bootstrap-callable-values/spec.md),
+[nominal qualifiers](modules-names-and-visibility.md#name-005--a-nominal-qualifier-exposes-only-its-associated-items).
 
-## STYLE-003 — Examples prefer actor imports and qualified operations
+## STYLE-003 — Examples import the owner type and qualify operations through it
 
 **Status:** Confirmed
 
-When a module contains a struct, service, or interface matching its filename, documentation,
-tutorials, and public API examples should normally import that actor declaration directly and
-qualify its operations through the imported name:
+Documentation, tutorials, and public API examples import the type that owns an operation and
+qualify the operation through that name:
 
 ```silk
 import model.User { User }
@@ -139,14 +171,11 @@ let user = User.make(42)
 let reassigned = User.withId(move user, 43)
 ```
 
-This keeps the operation's owner visible where it is used. A reader can identify `make` and
-`withId` as part of the `User` actor without searching the import list or relying on a globally
-distinct function name. It also keeps related APIs visually grouped and matches the qualified,
-data-first convention in STYLE-002.
-
-The matching struct, service, or interface makes the module's public operations available through
-the imported actor qualifier, so this form keeps both the actor type and related operations under
-one binding. Prefer it in ordinary examples:
+This keeps the operation's owner visible where it is used. A reader identifies `make` and `withId`
+as members of `User` without searching the import list or relying on a globally distinct function
+name, and the spelling matches the receiver-first convention in STYLE-002. A selected type binding
+exposes exactly the type's associated items—variants, contract operations, and inherent members—so
+one import names both the type and its operations:
 
 ```silk
 import silk.effect { Effect }
@@ -155,11 +184,13 @@ let provided = computation |> Effect.provide(&clock)
 return run provided
 ```
 
-Import a module namespace when no matching struct, service, or interface exists, or when the module
-rather than a matching actor declaration is the subject being taught. A matching scalar enum is
-not a nominal module scope: its qualifier exposes only its members and generated `value` operation.
-Import other selected members when an API is conventionally read unqualified or repeated
-qualification would obscure the example's actual point:
+Import a module namespace when the module itself is the subject being taught, or when the operation
+is a root declaration with no owner type, as in the primitive namespaces `silk.i32` and
+`silk.usize`. A namespace binding exposes only root declarations and never reaches an inherent
+member, so `import silk.option as OptionModule` followed by `OptionModule.map(...)` is not a
+substitute for the owner import. Select a root declaration directly when an example reads it
+unqualified or when repeated qualification would obscure the example's actual point; an inherent
+member cannot be selected on its own.
 
 ```silk
 import model.User { User }
@@ -169,8 +200,8 @@ fn id(user: &User) -> i32 {
 }
 ```
 
-When two matching actors have the same default name, alias one selected actor explicitly and keep
-its operations qualified:
+When two owner types have the same default name, alias one selected type explicitly and keep its
+operations qualified:
 
 ```silk
 import model.User { User }
@@ -183,14 +214,15 @@ UserAudit.record(&user)
 **Boundary:** This is a documentation and API-style preference, not a compiler restriction.
 Namespace imports, member aliases, and hybrid imports have their ordinary language meaning. A
 reference page specifically documenting those forms should show them directly even though general
-examples prefer the matching actor import. For a matching service or interface, declared contract
-operations take precedence over same-named top-level module members; a namespace alias performs
-ordinary module-member lookup instead. A matching struct has no separate contract-operation lookup.
+examples prefer the owner import. A root type declared beside an owner is not an associated item of
+that owner: select `ParseError` directly with `import silk.format { Format, ParseError }` rather
+than writing `Format.ParseError`. Conformances still belong to the provider's module, whichever
+type an example imports.
 
 **Tooling:** Formatters do not rewrite between namespace and selective imports. Documentation lint
 may prefer qualification in general examples but must permit selective imports where the example is
 teaching that syntax or naming an imported type directly.
 
-**Evidence:** [nominal module scopes](modules-names-and-visibility.md#name-005--a-file-named-struct-or-contract-also-scopes-that-modules-public-members),
+**Evidence:** [nominal qualifiers](modules-names-and-visibility.md#name-005--a-nominal-qualifier-exposes-only-its-associated-items),
 [namespace imports](modules-names-and-visibility.md#import-001--a-namespace-import-binds-the-targets-final-path-segment),
-[qualified data-first APIs](#style-002--public-apis-prefer-qualified-data-first-functions).
+[receiver-first members](#style-002--operations-intrinsic-to-one-type-are-inherent-members-with-the-receiver-first).

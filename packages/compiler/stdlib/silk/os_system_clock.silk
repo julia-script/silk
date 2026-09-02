@@ -16,7 +16,7 @@
 //! and does not add an ambient time import.
 
 import silk.i64 as i64
-import silk.system_clock as SystemClock
+import silk.system_clock { SystemClock }
 import silk.system_clock { Instant }
 import silk.u64 as u64
 
@@ -25,9 +25,32 @@ import silk.u64 as u64
 /// reachable operation on this provider.
 pub struct OsSystemClock {}
 
-/// Creates a native system-clock provider without reading the clock or installing it as a default.
-pub fn make() -> OsSystemClock {
-  return OsSystemClock {}
+impl OsSystemClock {
+  effect fn now(self: &mut Self) -> Instant {
+    let mut seconds = i64.toI64(0)
+    let mut nanoseconds = i64.toI64(0)
+    let succeeded = run read(&mut seconds, &mut nanoseconds)
+    if succeeded { return SystemClock.make(seconds, nanoseconds) }
+    let invalid = 1 / 0
+    return SystemClock.make(seconds, nanoseconds)
+  }
+
+  effect fn getResolution(self: &mut Self) -> u64 {
+    let mut nanoseconds = u64.MIN
+    let succeeded = run readResolution(&mut nanoseconds)
+    if succeeded {
+      if nanoseconds > u64.MIN { return nanoseconds }
+    }
+    let invalid = 1 / 0
+    return nanoseconds
+  }
+}
+
+impl OsSystemClock {
+  /// Creates a native system-clock provider without reading the clock or installing it as a default.
+  pub fn make() -> OsSystemClock {
+    return OsSystemClock {}
+  }
 }
 
 effect fn read(seconds: &mut i64, nanoseconds: &mut i64) -> bool {
@@ -40,26 +63,7 @@ effect fn readResolution(nanoseconds: &mut u64) -> bool {
   return false
 }
 
-effect fn now(self: &mut OsSystemClock) -> Instant {
-  let mut seconds = i64.toI64(0)
-  let mut nanoseconds = i64.toI64(0)
-  let succeeded = run read(&mut seconds, &mut nanoseconds)
-  if succeeded { return SystemClock.make(seconds, nanoseconds) }
-  let invalid = 1 / 0
-  return SystemClock.make(seconds, nanoseconds)
-}
-
-effect fn getResolution(self: &mut OsSystemClock) -> u64 {
-  let mut nanoseconds = u64.MIN
-  let succeeded = run readResolution(&mut nanoseconds)
-  if succeeded {
-    if nanoseconds > u64.MIN { return nanoseconds }
-  }
-  let invalid = 1 / 0
-  return nanoseconds
-}
-
-impl SystemClock.SystemClock for OsSystemClock {
+impl SystemClock for OsSystemClock {
   now: OsSystemClock.now
   getResolution: OsSystemClock.getResolution
 }

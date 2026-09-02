@@ -1,3 +1,4 @@
+import * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Mir from './Mir.js'
 import * as ProvisionalMir from './ProvisionalMir.js'
@@ -15,8 +16,14 @@ interface ConstructorShape {
 const sameRegion = (left: Mir.RegionId, right: Mir.RegionId): boolean =>
   left.ordinal === right.ordinal
 
+/**
+ * A constructor is one effect construction returned as is. Its function either returns the
+ * construction from the entry region or forwards to one cleanup region that only drops parameters
+ * whose cleanup has no effect: a service operation's outer function ends by dropping its borrowed
+ * `self`, and that drop is nothing the fold could lose.
+ */
 const constructorShape = (fn: Mir.MirFunction | undefined): ConstructorShape | undefined => {
-  if (fn === undefined || fn.regions.length !== 1) return undefined
+  if (fn === undefined || fn.regions.length === 0 || fn.regions.length > 2) return undefined
   const region = fn.regions.at(0)
   if (
     region?._tag !== 'OperationRegion' ||
@@ -25,14 +32,36 @@ const constructorShape = (fn: Mir.MirFunction | undefined): ConstructorShape | u
   )
     return undefined
   const construction = region.operations.at(0)
+  if (construction?._tag !== 'MakeEffect') return undefined
+  if (fn.regions.length === 1) {
+    return region.outcome._tag === 'Return' &&
+      region.outcome.value.ordinal === construction.destination.ordinal
+      ? Object.freeze({ fn, construction })
+      : undefined
+  }
+  const cleanup = fn.regions.at(1)
   if (
-    construction?._tag !== 'MakeEffect' ||
-    region.outcome._tag !== 'Return' ||
-    region.outcome.value.ordinal !== construction.destination.ordinal
+    region.outcome._tag !== 'Forward' ||
+    cleanup?._tag !== 'CleanupRegion' ||
+    !sameRegion(region.outcome.target, cleanup.id) ||
+    cleanup.outcome._tag !== 'Return' ||
+    cleanup.outcome.value.ordinal !== construction.destination.ordinal ||
+    !cleanup.releases.every(
+      (release) =>
+        release._tag === 'Drop' &&
+        release.local.ordinal < fn.parameterCount &&
+        !CleanupPlan.hasEffect(release.cleanup),
+    )
   )
     return undefined
   return Object.freeze({ fn, construction })
 }
+
+/** The region guard a fold proved: one region, or one trailing cleanup region of trivial drops. */
+type ConstructorGuard = 'SingleRegion' | 'TrivialCleanup'
+
+const constructorGuardOf = (shape: ConstructorShape): ConstructorGuard =>
+  shape.fn.regions.length === 1 ? 'SingleRegion' : 'TrivialCleanup'
 
 const directTarget = (
   program: Mir.Module,
@@ -209,6 +238,7 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
   let changed = false
   const functions = program.functions.map((fn) => {
     let functionChanged = false
+    const constructorGuards = new Map<number, ConstructorGuard>()
     const foldedRegions = fn.regions.map((region) => {
       if (region._tag !== 'OperationRegion') return region
       const operations = region.operations.map((operation) => {
@@ -246,6 +276,8 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
         }
         functionChanged = true
         changed = true
+        const guard = target === undefined ? 'SingleRegion' : constructorGuardOf(target)
+        constructorGuards.set(folded.destination.ordinal, guard)
         verdicts.push(
           Object.freeze({
             _tag: 'Normalized',
@@ -253,13 +285,7 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
             function: fn.id,
             region: region.id,
             local: folded.destination,
-            guards: Object.freeze([
-              'DirectTarget',
-              'SingleRegion',
-              'Synchronous',
-            ] satisfies ReadonlyArray<
-              'DirectTarget' | 'SingleRegion' | 'SingleUse' | 'Synchronous' | 'CopyOrShared'
-            >),
+            guards: Object.freeze(['DirectTarget', guard, 'Synchronous'] as const),
             provenance: folded.provenance,
           }),
         )
@@ -375,13 +401,11 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
             local: run.destination,
             guards: Object.freeze([
               'DirectTarget',
-              'SingleRegion',
+              constructorGuards.get(construction.destination.ordinal) ?? 'SingleRegion',
               'SingleUse',
               'Synchronous',
               'CopyOrShared',
-            ] satisfies ReadonlyArray<
-              'DirectTarget' | 'SingleRegion' | 'SingleUse' | 'Synchronous' | 'CopyOrShared'
-            >),
+            ] as const),
             provenance: run.provenance,
           }),
         )

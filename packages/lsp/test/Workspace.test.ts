@@ -356,7 +356,7 @@ it.effect('navigates Effect.suspend to its shipped Silk declaration', () =>
   Effect.gen(function* () {
     const root = project()
     const source = `import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect as Effect
+import silk.effect { Effect }
 
 pub effect fn delayed() -> i32 ! OutOfMemoryError ? &mut Allocator {
   return run Effect.suspend(effect { return 42 })

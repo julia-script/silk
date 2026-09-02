@@ -8,7 +8,7 @@ import * as SuspensionMir from '../src/SuspensionMir.js'
 
 const encoder = new TextEncoder()
 
-const source = `import silk.effect as Effect
+const source = `import silk.effect { Effect }
 effect fn delayed() -> i32 {
   return run Effect.suspend(effect { return 2 })
 }

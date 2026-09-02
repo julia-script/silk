@@ -48,14 +48,56 @@
 import silk.bool as bool
 import silk.u64 as u64
 
-/// The importable name of the `silk.hash` module scope.
+/// The owner of the seed, mixing, and ready-made key operations.
 ///
 /// # Details
 ///
-/// This struct carries no data and is never constructed by the library. Importing it as
-/// `import silk.hash { Hash }` names the module scope, so seed, mixing, and ready-made key
-/// operations resolve through `Hash`.
+/// This struct carries no data and is never constructed by the library. Every operation is an
+/// inherent member declared in `impl Hash`, reached through `import silk.hash { Hash }`.
 pub struct Hash {}
+
+impl Hash {
+  /// Creates a deterministic hash seed from one `u64` value.
+  pub fn seed(value: u64) -> HashSeed {
+    return HashSeed { value: value }
+  }
+
+  /// Mixes the first integer field of a key with one seed into a 64-bit hash.
+  ///
+  /// # When to use
+  ///
+  /// Use this function to start a hash for an integer key or the first integer field of a key.
+  ///
+  /// # Details
+  ///
+  /// The same seed and value return the same result on all Silk engines. Use [`combine`] for each
+  /// additional field that participates in equality.
+  pub fn mix(seed: &HashSeed, value: u64) -> u64 {
+    let salted = u64.wrappingAdd(value, seed.value)
+    let stepped = u64.wrappingAdd(salted, 11400714819323198485)
+    let folded = u64.bitXor(stepped, u64.shiftRight(stepped, 30))
+    let spread = u64.wrappingMultiply(folded, 13787848793156543929)
+    let refolded = u64.bitXor(spread, u64.shiftRight(spread, 27))
+    let respread = u64.wrappingMultiply(refolded, 10723151780598845931)
+    return u64.bitXor(respread, u64.shiftRight(respread, 31))
+  }
+
+  /// Continues a hash with one further value, so a key of several fields folds into one hash.
+  ///
+  /// # When to use
+  ///
+  /// Use this function after [`mix`] for each additional integer field that participates in equality.
+  pub fn combine(hashed: u64, value: u64) -> u64 {
+    let mingled = u64.bitXor(hashed, u64.wrappingAdd(value, 11400714819323198485))
+    let spread = u64.wrappingMultiply(mingled, 13787848793156543929)
+    return u64.bitXor(spread, u64.shiftRight(spread, 27))
+  }
+
+  /// Creates a [`Word`] key from one `u64` value.
+  pub fn word(value: u64) -> Word {
+    return Word { value: value }
+  }
+}
 
 /// A collection-wide value that changes deterministic hash and bucket results.
 ///
@@ -69,11 +111,6 @@ pub struct HashSeed {
 }
 
 impl Copy for HashSeed {}
-
-/// Creates a deterministic hash seed from one `u64` value.
-pub fn seed(value: u64) -> HashSeed {
-  return HashSeed { value: value }
-}
 
 /// A compile-time equivalence and seeded-hash contract for hashed collection keys.
 ///
@@ -100,37 +137,6 @@ pub interface HashKey {
   fn hash(value: &Self, seed: &HashSeed) -> u64
 }
 
-/// Mixes the first integer field of a key with one seed into a 64-bit hash.
-///
-/// # When to use
-///
-/// Use this function to start a hash for an integer key or the first integer field of a key.
-///
-/// # Details
-///
-/// The same seed and value return the same result on all Silk engines. Use [`combine`] for each
-/// additional field that participates in equality.
-pub fn mix(seed: &HashSeed, value: u64) -> u64 {
-  let salted = u64.wrappingAdd(value, seed.value)
-  let stepped = u64.wrappingAdd(salted, 11400714819323198485)
-  let folded = u64.bitXor(stepped, u64.shiftRight(stepped, 30))
-  let spread = u64.wrappingMultiply(folded, 13787848793156543929)
-  let refolded = u64.bitXor(spread, u64.shiftRight(spread, 27))
-  let respread = u64.wrappingMultiply(refolded, 10723151780598845931)
-  return u64.bitXor(respread, u64.shiftRight(respread, 31))
-}
-
-/// Continues a hash with one further value, so a key of several fields folds into one hash.
-///
-/// # When to use
-///
-/// Use this function after [`mix`] for each additional integer field that participates in equality.
-pub fn combine(hashed: u64, value: u64) -> u64 {
-  let mingled = u64.bitXor(hashed, u64.wrappingAdd(value, 11400714819323198485))
-  let spread = u64.wrappingMultiply(mingled, 13787848793156543929)
-  return u64.bitXor(spread, u64.shiftRight(spread, 27))
-}
-
 /// A ready-made [`HashKey`] that holds one `u64` value.
 pub struct Word {
   /// The integer this key stands for.
@@ -139,17 +145,12 @@ pub struct Word {
 
 impl Copy for Word {}
 
-/// Creates a [`Word`] key from one `u64` value.
-pub fn word(value: u64) -> Word {
-  return Word { value: value }
-}
-
 fn wordEquals(left: &Word, right: &Word) -> bool {
   return left.value == right.value
 }
 
 fn wordHash(value: &Word, seed: &HashSeed) -> u64 {
-  return mix(seed, value.value)
+  return Hash.mix(seed, value.value)
 }
 
 impl HashKey for Word { equals: Word.wordEquals hash: Word.wordHash }

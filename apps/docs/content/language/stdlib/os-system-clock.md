@@ -24,7 +24,7 @@ and does not add an ambient time import.
 
 Import as `OsSystemClock` with `import silk.os_system_clock { OsSystemClock }`.
 
-Public declarations: 2.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a4f7353797374656d436c6f636b"></a>
 
@@ -38,9 +38,9 @@ A stateless Unix-family native provider of Unix-epoch time.
 A failed, invalid, or unrepresentable clock result traps. Direct WebAssembly does not support a
 reachable operation on this provider.
 
-<a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a6d616b65"></a>
+<a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a4f7353797374656d436c6f636b2e6d616b65"></a>
 
-## `make`
+### Associated function `OsSystemClock.make`
 
 ```silk
 pub fn make() -> OsSystemClock
@@ -50,10 +50,10 @@ Creates a native system-clock provider without reading the clock or installing i
 
 <a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a696d706c656d656e746174696f6e3a30"></a>
 
-## Implementation `SystemClock.SystemClock for OsSystemClock`
+## Implementation `SystemClock for OsSystemClock`
 
 ```silk
-impl SystemClock.SystemClock for OsSystemClock
+impl SystemClock for OsSystemClock
 ```
 
 <a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>

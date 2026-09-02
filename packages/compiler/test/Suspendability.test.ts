@@ -93,7 +93,7 @@ it('normalizes direct, nested, external, open, and unavailable graph summaries d
 
 it.effect('separates lazy Effect runners from their factory and synchronous siblings', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 fn recipes() -> Effect<i32> {
   let synchronous = effect { return 1 }
   let suspended = delayed()
@@ -144,7 +144,7 @@ it.effect(
   'derives Detached independently from affinity and NonParking independently from nested transfer',
   () =>
     Effect.gen(function* () {
-      const self = yield* snapshot(`import silk.effect as Effect
+      const self = yield* snapshot(`import silk.effect { Effect }
 struct Box { value: i32 }
 struct HiddenResult { value: i32 }
 fn borrowed(value: &Box) -> Effect<i32> { return effect { return value.value } }
@@ -165,7 +165,7 @@ pub fn main() -> i32 {
   drop opaque
   return run nested(42)
 }`)
-      const repeated = yield* snapshot(`import silk.effect as Effect
+      const repeated = yield* snapshot(`import silk.effect { Effect }
 struct Box { value: i32 }
 struct HiddenResult { value: i32 }
 fn borrowed(value: &Box) -> Effect<i32> { return effect { return value.value } }
@@ -276,7 +276,7 @@ pub fn main() -> i32 {
 
 it.effect('retains borrowed provider provenance through an ordinary provide wrapper', () =>
   Effect.gen(function* () {
-    const source = `import silk.effect as Effect
+    const source = `import silk.effect { Effect }
 service Clock { effect fn read() -> i32 ? &Clock }
 struct FixedClock {}
 effect fn read(self: &FixedClock) -> i32 { return 42 }
@@ -422,7 +422,7 @@ pub fn main() -> i32 {
 
 it.effect('closes direct self and mutual cycles over exact execution nodes', () =>
   Effect.gen(function* () {
-    const direct = yield* snapshot(`import silk.effect as Effect
+    const direct = yield* snapshot(`import silk.effect { Effect }
 effect fn loop(value: i32) -> i32 {
   if value == 0 { return 0 }
   return run Effect.suspend(loop(value - 1))
@@ -431,7 +431,7 @@ ${main('loop(1)')}`)
     assert.deepEqual(Analysis.diagnostics(direct), [])
     assert.include(names(direct), 'suspendability/main.loop<>')
 
-    const mutual = yield* snapshot(`import silk.effect as Effect
+    const mutual = yield* snapshot(`import silk.effect { Effect }
 effect fn even(value: i32) -> i32 {
   if value == 0 { return 1 }
   return run odd(value - 1)
@@ -449,7 +449,7 @@ ${main('even(2)')}`)
 
 it.effect('propagates through concrete Effect.map and flatMap specializations', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 effect fn seed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
@@ -472,7 +472,7 @@ ${main('program()')}`)
       suspendable.some(
         (instance) =>
           instance.key.declaration.module === 'silk/effect' &&
-          instance.key.declaration.name === 'map' &&
+          instance.key.declaration.name === 'Effect.map' &&
           instance.key.typeArguments.length > 0,
       ),
     )
@@ -480,7 +480,7 @@ ${main('program()')}`)
       suspendable.some(
         (instance) =>
           instance.key.declaration.module === 'silk/effect' &&
-          instance.key.declaration.name === 'flatMap' &&
+          instance.key.declaration.name === 'Effect.flatMap' &&
           instance.key.typeArguments.length > 0,
       ),
     )
@@ -489,7 +489,7 @@ ${main('program()')}`)
 
 it.effect('propagates through applied callables but not stored callable values', () =>
   Effect.gen(function* () {
-    const prelude = `import silk.effect as Effect
+    const prelude = `import silk.effect { Effect }
 fn suspendAndRecover(value: i32) -> i32 {
   let pending = Effect.suspend(effect { return value })
   return run pending
@@ -510,7 +510,7 @@ pub fn main() -> i32 { let callback = suspendAndRecover return callback(42) }`)
 
 it.effect('keeps synchronous controls empty and ordering deterministic', () =>
   Effect.gen(function* () {
-    const source = `import silk.effect as Effect
+    const source = `import silk.effect { Effect }
 effect fn seed(value: i32) -> i32 { return value }
 fn increment(value: i32) -> i32 { return value + 1 }
 pub fn main() -> i32 { return run seed(41) |> Effect.map(increment) }`
@@ -566,7 +566,7 @@ pub fn main() -> i32 { return 42 }`)
 
 const suspendingAllocator = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 role SharedAudit
 role ExclusiveAudit
@@ -587,7 +587,7 @@ impl Allocator for SuspendingAllocator { allocate: SuspendingAllocator.allocate 
 it.effect('keeps shared non-default Allocator demands out of private coroutine storage', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`import silk.allocator { Allocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 ${suspendingAllocator}
 
 effect fn work() -> i32
@@ -611,7 +611,7 @@ pub fn main() -> i32 {
 it.effect('allows ordinary allocator implementations to suspend', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`import silk.allocator { Allocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 ${suspendingAllocator}
 
 effect fn acquire() -> Allocation ! OutOfMemoryError ? &mut Allocator {
@@ -647,7 +647,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`)
 
 it.effect('ignores unused suspending operations on the selected provider witness', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 service Work {
   effect fn direct() -> i32 ? &mut Work
   effect fn delayed() -> i32 ? &mut Work

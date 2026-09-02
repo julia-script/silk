@@ -531,7 +531,7 @@ it('bounds damaged effect-block recovery before the following declaration', () =
 it('parses Effect.retry in direct and pipeline insertion forms', () => {
   const result = parseText(
     'memory://effect-retry.silk',
-    `import silk.effect as Effect
+    `import silk.effect { Effect }
 fn main() -> i32 {
   let direct = Effect.retry(work(), policy)
   let piped = work() |> Effect.retry(policy)
@@ -553,7 +553,7 @@ fn main() -> i32 {
 })
 
 it('rejects the removed bare role-selector argument without retaining role syntax', () => {
-  const source = `import silk.effect as Effect
+  const source = `import silk.effect { Effect }
 fn main() -> i32 {
   let selected = work() |> Effect.provideMut(&mut provider, @Audit)
   return 0
@@ -1837,9 +1837,9 @@ pub fn main() -> i32 { return 42 }`
 })
 
 it('parses reserved import-path segments without changing their token kinds', () => {
-  const source = `import silk.effect as Effect
+  const source = `import silk.effect { Effect }
 import toolkit.effect.helpers as Helpers
-import silk.effect { map }
+import silk.effect { Effect }
 import app.type as Types
 fn main() -> i32 { return 42 }`
   const result = parseText('fixture://reserved-import-paths.silk', source)
@@ -2763,7 +2763,7 @@ fn use(operation: fn(i32) -> i32, value: i32) -> i32 {
 })
 
 it('gives pipelines a complete callable expression and run the complete following expression', () => {
-  const source = `import silk.effect as Effect
+  const source = `import silk.effect { Effect }
 fn use(attempt: Effect<i32>, operation: fn(i32) -> i32) -> i32 {
   let a = 1 |> operation
   let b = 2 |> (operation)

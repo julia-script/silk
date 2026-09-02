@@ -7,7 +7,7 @@ Completed success-or-failure values that can be inspected and transformed as ord
 ## When to use
 
 Use [`Result`](#declaration-73696c6b2f726573756c743a3a526573756c74) after an effectful computation has been reified, or whenever both outcome arms
-belong in a value. Use [`map`](#declaration-73696c6b2f726573756c743a3a6d6170) for success, [`mapError`](#declaration-73696c6b2f726573756c743a3a6d61704572726f72) for failure, and [`flatMap`](#declaration-73696c6b2f726573756c743a3a666c61744d6170) for a
+belong in a value. Use [`map`](#declaration-73696c6b2f726573756c743a3a526573756c742e6d6170) for success, [`mapError`](#declaration-73696c6b2f726573756c743a3a526573756c742e6d61704572726f72) for failure, and [`flatMap`](#declaration-73696c6b2f726573756c743a3a526573756c742e666c61744d6170) for a
 success continuation that already returns a result.
 
 ## Details
@@ -47,7 +47,7 @@ pub fn main() -> i32 {
 
 Import as `Result` with `import silk.result { Result }`.
 
-Public declarations: 7.
+Public declarations: 1.
 
 <a id="declaration-73696c6b2f726573756c743a3a526573756c74"></a>
 
@@ -107,9 +107,9 @@ pub error: F
 
 The produced failure value.
 
-<a id="declaration-73696c6b2f726573756c743a3a73756363656564"></a>
+<a id="declaration-73696c6b2f726573756c743a3a526573756c742e73756363656564"></a>
 
-## `succeed`
+### Associated function `Result.succeed`
 
 ```silk
 pub fn succeed<A, F>(value: A) -> silk/result.Result<A, F>
@@ -117,9 +117,9 @@ pub fn succeed<A, F>(value: A) -> silk/result.Result<A, F>
 
 Constructs a completed success by moving `value` into the success arm.
 
-<a id="declaration-73696c6b2f726573756c743a3a6661696c526573756c74"></a>
+<a id="declaration-73696c6b2f726573756c743a3a526573756c742e6661696c526573756c74"></a>
 
-## `failResult`
+### Associated function `Result.failResult`
 
 ```silk
 pub fn failResult<A, F>(error: F) -> silk/result.Result<A, F>
@@ -127,71 +127,71 @@ pub fn failResult<A, F>(error: F) -> silk/result.Result<A, F>
 
 Constructs a completed failure by moving `error` into the failure arm.
 
-<a id="declaration-73696c6b2f726573756c743a3a6d6170"></a>
+<a id="declaration-73696c6b2f726573756c743a3a526573756c742e6d6170"></a>
 
-## `map`
+### Method `Result.map`
 
 ```silk
-pub fn map<A, B, F>(self: silk/result.Result<A, F>, transform: once fn(A) -> B) -> silk/result.Result<B, F>
+pub fn map<A, F, B>(self: Result<A, F>, transform: once fn(A) -> B) -> silk/result.Result<B, F>
 ```
 
 Applies `transform` once to a success value and carries a failure through unchanged.
 
-### Details
+#### Details
 
 The callback is never called for [`Failure`](#declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a31). This consumes the result and may change only its
-success type; use [`mapError`](#declaration-73696c6b2f726573756c743a3a6d61704572726f72) to change the failure type instead.
+success type; use [`mapError`](#declaration-73696c6b2f726573756c743a3a526573756c742e6d61704572726f72) to change the failure type instead.
 
-<a id="declaration-73696c6b2f726573756c743a3a6d61704572726f72"></a>
+<a id="declaration-73696c6b2f726573756c743a3a526573756c742e6d61704572726f72"></a>
 
-## `mapError`
+### Method `Result.mapError`
 
 ```silk
-pub fn mapError<A, F, G>(self: silk/result.Result<A, F>, transform: once fn(F) -> G) -> silk/result.Result<A, G>
+pub fn mapError<A, F, G>(self: Result<A, F>, transform: once fn(F) -> G) -> silk/result.Result<A, G>
 ```
 
 Applies `transform` once to a failure value and carries a success through unchanged.
 
-### Details
+#### Details
 
 The callback is never called for [`Success`](#declaration-73696c6b2f726573756c743a3a526573756c743a3a76617269616e743a30). This consumes the result and may change only its
 failure type.
 
-<a id="declaration-73696c6b2f726573756c743a3a666c61744d6170"></a>
+<a id="declaration-73696c6b2f726573756c743a3a526573756c742e666c61744d6170"></a>
 
-## `flatMap`
+### Method `Result.flatMap`
 
 ```silk
-pub fn flatMap<A, B, F>(self: silk/result.Result<A, F>, transform: once fn(A) -> silk/result.Result<B, F>) -> silk/result.Result<B, F>
+pub fn flatMap<A, F, B>(self: Result<A, F>, transform: once fn(A) -> silk/result.Result<B, F>) -> silk/result.Result<B, F>
 ```
 
 Continues a success with a transform that answers with a Result of its own, so the outcome
 stays one Result deep instead of nesting.
 
-### Details
+#### Details
 
 A failure bypasses the callback unchanged. The callback must use the same failure type `F`, so
-use [`mapError`](#declaration-73696c6b2f726573756c743a3a6d61704572726f72) before or after this operation when the steps use different error types.
+use [`mapError`](#declaration-73696c6b2f726573756c743a3a526573756c742e6d61704572726f72) before or after this operation when the steps use different error types.
 
-<a id="declaration-73696c6b2f726573756c743a3a756e777261704f72"></a>
+<a id="declaration-73696c6b2f726573756c743a3a526573756c742e756e777261704f72"></a>
 
-## `unwrapOr`
+### Method `Result.unwrapOr`
 
 ```silk
-pub fn unwrapOr<A, F>(self: silk/result.Result<A, F>, fallback: A) -> A
+pub fn unwrapOr<A, F>(self: Result<A, F>, fallback: A) -> A
 ```
 
 Returns the success value, or the fallback value when the outcome is a failure.
 
-### Details
+#### Details
 
 Only the failure arm consumes the fallback. The success arm releases it, and the failure arm
 releases the error, so exactly one owned value leaves this call and the other drops.
 Use `match` instead when the failure payload affects recovery or must be retained.
 
-<a id="declaration-73696c6b2f726573756c743a3a756e777261704f723a3a706172616d657465723a31"></a>
+<a id="declaration-73696c6b2f726573756c743a3a526573756c742e756e777261704f723a3a706172616d657465723a31"></a>
 
-### Parameter `fallback`
+#### Parameter `fallback`
 
 ```silk
 fallback: A

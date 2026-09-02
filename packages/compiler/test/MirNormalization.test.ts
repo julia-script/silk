@@ -10,7 +10,7 @@ import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as Projections from './support/projections.js'
 
 const encoder = new TextEncoder()
-const source = `import silk.effect as Effect
+const source = `import silk.effect { Effect }
 import silk.result { Result }
 effect fn succeed(value: i32) -> i32 { return value }
 fn addOne(value: i32) -> i32 { return value + 1 }
@@ -94,7 +94,7 @@ it.effect('retains concrete suspendable runs without a global suspension mode', 
   Effect.gen(function* () {
     const raw = yield* Analysis.ofSourceRealized(
       'test/mir-normalization-suspendable',
-      encoder.encode(`import silk.effect as Effect
+      encoder.encode(`import silk.effect { Effect }
 effect fn delayed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
@@ -158,7 +158,7 @@ it.effect('retains suspendable catch and effect-entry closure control', () =>
   Effect.gen(function* () {
     const caught = yield* Analysis.ofSourceRealized(
       'test/mir-normalization-catch-suspendable',
-      encoder.encode(`import silk.effect as Effect
+      encoder.encode(`import silk.effect { Effect }
 struct Problem {}
 effect fn seed(value: i32) -> i32 ! Problem {
   return run Effect.suspend(effect { return value })
@@ -223,7 +223,7 @@ it.effect('retains a provider-specialized suspendable runner', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(
       'test/mir-normalization-provided-suspendable',
-      encoder.encode(`import silk.effect as Effect
+      encoder.encode(`import silk.effect { Effect }
 service Value {
   effect fn get() -> i32 ? &Value
 }
@@ -418,5 +418,142 @@ it.effect('verifier rejects dangling normalization identities', () =>
         (violation) => violation.rule === 'InvalidNormalization',
       ),
     )
+  }),
+)
+
+const providedOperationSource = `import silk.effect { Effect }
+service Clock { effect fn read() -> i32 ? &mut Clock }
+struct Fixed {}
+impl Fixed { effect fn read(self: &mut Self) -> i32 { return 42 } }
+impl Clock for Fixed { read: Fixed.read }
+effect fn program() -> i32 ? &mut Clock { return run Clock.read() }
+pub fn main() -> i32 {
+  let mut provider = Fixed {}
+  return run program() |> Effect.provideMut(&mut provider)
+}`
+
+it.effect(
+  'folds a direct service operation whose outer function only drops its borrowed self',
+  () =>
+    Effect.gen(function* () {
+      // The witness operation's constructor ends in a cleanup region that drops `self`; the fold
+      // treats that drop as nothing lost, so the provided instance runs the operation statically
+      // instead of becoming a suspendable constructor with a coroutine frame.
+      const normalized = yield* Analysis.ofSourceRealized(
+        'test/mir-normalization-provided-operation',
+        encoder.encode(providedOperationSource),
+        'wasm32-unknown-unknown',
+        { normalizeMir: true },
+      )
+      assert.deepEqual(Analysis.diagnostics(normalized), [])
+      const program = Analysis.loweredMir(normalized)
+      const provided = program.functions.filter((fn) => fn.id.name.startsWith('program$effect$'))
+      assert.isNotEmpty(provided)
+      assert.isTrue(
+        provided.every((fn) =>
+          MirVerification.operations(fn).some((operation) => operation._tag === 'RunStaticEffect'),
+        ),
+      )
+      assert.deepEqual(
+        (program.normalization ?? []).filter(
+          (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'ComplexConstructor',
+        ),
+        [],
+      )
+      assert.deepEqual(MirVerification.verify(program), [])
+      const evaluated = Analysis.evaluate(normalized)
+      assert.strictEqual(evaluated._tag, 'Completed')
+      if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+    }),
+)
+
+const sectionProvidedSource = `import silk.effect { Effect }
+service Clock { effect fn read() -> i32 ? &mut Clock }
+struct Fixed {}
+impl Fixed { effect fn read(self: &mut Self) -> i32 { return 21 } }
+impl Clock for Fixed { read: Fixed.read }
+service Counter { effect fn next() -> i32 ? &mut Counter }
+struct Cell {}
+impl Cell { effect fn next(self: &mut Self) -> i32 { return 21 } }
+impl Counter for Cell { next: Cell.next }
+effect fn count() -> i32 ? &mut Counter { return run Counter.next() }
+effect fn program() -> i32 ? &mut Clock {
+  let mut cell = Cell {}
+  let first = run Clock.read()
+  let second = run count() |> Effect.provideMut(&mut cell)
+  return first + second
+}
+pub fn main() -> i32 {
+  let mut provider = Fixed {}
+  return run program() |> Effect.provideMut(&mut provider)
+}`
+
+it.effect('classifies a section-provided run inside a provider-specialized execution', () =>
+  Effect.gen(function* () {
+    // `program` dispatches `Clock` directly, so its provided instance is materialized on its own;
+    // the ordinary effect piped into an erased `Effect.provideMut` section must still identify its
+    // runner, or the whole instance stays unknown, gains a coroutine frame, and every run in it
+    // suspends (the shape of `LocalScheduler.execute` after the clock wrappers were deleted).
+    const normalized = yield* Analysis.ofSourceRealized(
+      'test/mir-normalization-section-provided',
+      encoder.encode(sectionProvidedSource),
+      'wasm32-unknown-unknown',
+      { normalizeMir: true },
+    )
+    assert.deepEqual(Analysis.diagnostics(normalized), [])
+    const program = Analysis.loweredMir(normalized)
+    assert.deepEqual(
+      (program.normalization ?? []).filter(
+        (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'SuspensionUnknown',
+      ),
+      [],
+    )
+    assert.deepEqual(
+      (program.coroutineFrames?.entries ?? []).map((entry) => entry.function.declaration.name),
+      [],
+    )
+    assert.deepEqual(MirVerification.verify(program), [])
+    const evaluated = Analysis.evaluate(normalized)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+  }),
+)
+
+const owningParameterSource = `import silk.effect { Effect }
+import silk.vector { Vector }
+service Clock { effect fn read(extra: Vector<i32>) -> i32 ? &mut Clock }
+struct Fixed {}
+impl Fixed { effect fn read(self: &mut Self, extra: Vector<i32>) -> i32 { return 42 } }
+impl Clock for Fixed { read: Fixed.read }
+effect fn program() -> i32 ? &mut Clock { return run Clock.read(Vector.make<i32>()) }
+pub fn main() -> i32 {
+  let mut provider = Fixed {}
+  return run program() |> Effect.provideMut(&mut provider)
+}`
+
+it.effect('refuses to fold a constructor whose parameter drop has a cleanup effect', () =>
+  Effect.gen(function* () {
+    // The witness operation drops an owned `Vector` parameter it never captured; that release is
+    // real work the fold would lose, so the constructor stays complex.
+    const normalized = yield* Analysis.ofSourceRealized(
+      'test/mir-normalization-owning-parameter',
+      encoder.encode(owningParameterSource),
+      'wasm32-unknown-unknown',
+      { normalizeMir: true },
+    )
+    assert.deepEqual(Analysis.diagnostics(normalized), [])
+    const program = Analysis.loweredMir(normalized)
+    assert.isTrue(
+      (program.normalization ?? []).some(
+        (verdict) =>
+          verdict._tag === 'Rejected' &&
+          verdict.reason === 'ComplexConstructor' &&
+          verdict.function.name.startsWith('program$effect$'),
+      ),
+    )
+    assert.deepEqual(MirVerification.verify(program), [])
+    const evaluated = Analysis.evaluate(normalized)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
   }),
 )

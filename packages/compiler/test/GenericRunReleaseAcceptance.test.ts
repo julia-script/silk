@@ -14,7 +14,7 @@ const provider = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct Clock { storage: Allocation }
 
@@ -48,7 +48,7 @@ effect fn holding<A, E>(self: once Effect<A ! E>, held: once Clock) -> A ! E {
 
 /** The specialized row really can fail, and the failing execution still releases the owner. */
 const failingRun = `import silk.allocator { OutOfMemoryError }
-import silk.effect as Effect
+import silk.effect { Effect }
 ${generic}
 
 effect fn failing() -> i32 ! OutOfMemoryError { fail OutOfMemoryError {} }
@@ -64,7 +64,7 @@ pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
 /** The same body on the succeeding path, where the release is never in doubt. */
 const succeedingRun = `import silk.allocator { OutOfMemoryError }
-import silk.effect as Effect
+import silk.effect { Effect }
 ${generic}
 
 effect fn fine() -> i32 ! OutOfMemoryError { return 7 }

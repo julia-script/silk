@@ -368,7 +368,7 @@ it.effect('discovers unused proof dependencies before a conditional Drop hook', 
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 interface Releasable { fn release(value: &Self) -> i32 }
 
@@ -792,7 +792,7 @@ it.effect('infers operand binders and propagates a failing smaller generic witne
     const module = 'conditional-conformance/smaller-generic-row'
     const snapshot = yield* analyze(
       module,
-      `import silk.effect as Effect
+      `import silk.effect { Effect }
 import silk.result { Result }
 
 struct Problem { code: i32 }

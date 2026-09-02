@@ -64,71 +64,73 @@ pub union Result<A, F> {
   }
 }
 
-/// Constructs a completed success by moving `value` into the success arm.
-pub fn succeed<A, F>(value: A) -> Result<A, F> {
-  return Result<A, F>.Success { value: move value }
-}
-
-/// Constructs a completed failure by moving `error` into the failure arm.
-pub fn failResult<A, F>(error: F) -> Result<A, F> {
-  return Result<A, F>.Failure { error: move error }
-}
-
-/// Applies `transform` once to a success value and carries a failure through unchanged.
-///
-/// # Details
-///
-/// The callback is never called for [`Failure`]. This consumes the result and may change only its
-/// success type; use [`mapError`] to change the failure type instead.
-pub fn map<A, B, F>(self: Result<A, F>, transform: once fn(A) -> B) -> Result<B, F> {
-  return match move self {
-    Result<A, F>.Success { value } => succeed<B, F>(transform(move value))
-    Result<A, F>.Failure { error } => failResult<B, F>(move error)
+impl<A, F> Result<A, F> {
+  /// Constructs a completed success by moving `value` into the success arm.
+  pub fn succeed(value: A) -> Result<A, F> {
+    return Result<A, F>.Success { value: move value }
   }
-}
 
-/// Applies `transform` once to a failure value and carries a success through unchanged.
-///
-/// # Details
-///
-/// The callback is never called for [`Success`]. This consumes the result and may change only its
-/// failure type.
-pub fn mapError<A, F, G>(self: Result<A, F>, transform: once fn(F) -> G) -> Result<A, G> {
-  return match move self {
-    Result<A, F>.Success { value } => succeed<A, G>(move value)
-    Result<A, F>.Failure { error } => failResult<A, G>(transform(move error))
+  /// Constructs a completed failure by moving `error` into the failure arm.
+  pub fn failResult(error: F) -> Result<A, F> {
+    return Result<A, F>.Failure { error: move error }
   }
-}
 
-/// Continues a success with a transform that answers with a Result of its own, so the outcome
-/// stays one Result deep instead of nesting.
-///
-/// # Details
-///
-/// A failure bypasses the callback unchanged. The callback must use the same failure type `F`, so
-/// use [`mapError`] before or after this operation when the steps use different error types.
-pub fn flatMap<A, B, F>(self: Result<A, F>, transform: once fn(A) -> Result<B, F>) -> Result<B, F> {
-  return match move self {
-    Result<A, F>.Success { value } => transform(move value)
-    Result<A, F>.Failure { error } => failResult<B, F>(move error)
+  /// Applies `transform` once to a success value and carries a failure through unchanged.
+  ///
+  /// # Details
+  ///
+  /// The callback is never called for [`Failure`]. This consumes the result and may change only its
+  /// success type; use [`mapError`] to change the failure type instead.
+  pub fn map<B>(self: Self, transform: once fn(A) -> B) -> Result<B, F> {
+    return match move self {
+      Result<A, F>.Success { value } => Result.succeed<B, F>(transform(move value))
+      Result<A, F>.Failure { error } => Result.failResult<B, F>(move error)
+    }
   }
-}
 
-/// Returns the success value, or the fallback value when the outcome is a failure.
-///
-/// # Details
-///
-/// Only the failure arm consumes the fallback. The success arm releases it, and the failure arm
-/// releases the error, so exactly one owned value leaves this call and the other drops.
-/// Use `match` instead when the failure payload affects recovery or must be retained.
-pub fn unwrapOr<A, F>(
-  self: Result<A, F>,
-  /// The owned alternative consumed only when `self` is a failure.
-  fallback: A,
-) -> A {
-  return match move self {
-    Result<A, F>.Success { value } => keepSuccess<A>(move value, move fallback)
-    Result<A, F>.Failure { error } => keepFallback<A, F>(move fallback, move error)
+  /// Applies `transform` once to a failure value and carries a success through unchanged.
+  ///
+  /// # Details
+  ///
+  /// The callback is never called for [`Success`]. This consumes the result and may change only its
+  /// failure type.
+  pub fn mapError<G>(self: Self, transform: once fn(F) -> G) -> Result<A, G> {
+    return match move self {
+      Result<A, F>.Success { value } => Result.succeed<A, G>(move value)
+      Result<A, F>.Failure { error } => Result.failResult<A, G>(transform(move error))
+    }
+  }
+
+  /// Continues a success with a transform that answers with a Result of its own, so the outcome
+  /// stays one Result deep instead of nesting.
+  ///
+  /// # Details
+  ///
+  /// A failure bypasses the callback unchanged. The callback must use the same failure type `F`, so
+  /// use [`mapError`] before or after this operation when the steps use different error types.
+  pub fn flatMap<B>(self: Self, transform: once fn(A) -> Result<B, F>) -> Result<B, F> {
+    return match move self {
+      Result<A, F>.Success { value } => transform(move value)
+      Result<A, F>.Failure { error } => Result.failResult<B, F>(move error)
+    }
+  }
+
+  /// Returns the success value, or the fallback value when the outcome is a failure.
+  ///
+  /// # Details
+  ///
+  /// Only the failure arm consumes the fallback. The success arm releases it, and the failure arm
+  /// releases the error, so exactly one owned value leaves this call and the other drops.
+  /// Use `match` instead when the failure payload affects recovery or must be retained.
+  pub fn unwrapOr(
+    self: Self,
+    /// The owned alternative consumed only when `self` is a failure.
+    fallback: A,
+  ) -> A {
+    return match move self {
+      Result<A, F>.Success { value } => keepSuccess<A>(move value, move fallback)
+      Result<A, F>.Failure { error } => keepFallback<A, F>(move fallback, move error)
+    }
   }
 }
 

@@ -23,7 +23,7 @@
 //! ```silk
 //! import silk.effect { Effect }
 //!
-//! import silk.standard_input { StandardInput as Input }
+//! import silk.standard_input { StandardInput as Input, ReadOutcome, StreamReadError }
 //!
 //! import silk.u8
 //!
@@ -33,8 +33,8 @@
 //!   complete: bool
 //! }
 //!
-//! effect fn read(self: &mut OneByte, buffer: &mut [u8]) -> Input.ReadOutcome
-//! ! Input.StreamReadError {
+//! effect fn read(self: &mut OneByte, buffer: &mut [u8]) -> ReadOutcome
+//! ! StreamReadError {
 //!   if self.complete {
 //!     return Input.endOfInput()
 //!   }
@@ -43,28 +43,28 @@
 //!   return Input.filled(usize.ONE)
 //! }
 //!
-//! impl Input.StandardInput for OneByte {
+//! impl Input for OneByte {
 //!   read: OneByte.read
 //! }
 //!
 //! effect fn program() -> i32
-//! ! Input.StreamReadError {
+//! ! StreamReadError {
 //!   let mut provider = OneByte {complete: false}
 //!   let mut buffer = [u8.toU8(0)]
 //!   let first = run Input.receive(&mut buffer)
-//!     |> Effect.provideMut<Input.StandardInput>(&mut provider)
+//!     |> Effect.provideMut<Input>(&mut provider)
 //!   if Input.count(&first) != usize.ONE {
 //!     return 1
 //!   }
 //!   let second = run Input.receive(&mut buffer)
-//!     |> Effect.provideMut<Input.StandardInput>(&mut provider)
+//!     |> Effect.provideMut<Input>(&mut provider)
 //!   if Input.isEndOfInput(&second) == false {
 //!     return 2
 //!   }
 //!   return u8.toI32(buffer[usize.ZERO])
 //! }
 //!
-//! effect fn recover(error: Input.StreamReadError) -> i32 {
+//! effect fn recover(error: StreamReadError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -83,11 +83,6 @@ import silk.usize as usize
 
 /// A typed failure from a standard-input provider that could not complete one read.
 pub struct StreamReadError {}
-
-/// Creates a standard-input failure for a provider that cannot complete one read.
-pub fn readFailure() -> StreamReadError {
-  return StreamReadError {}
-}
 
 /// A read that committed a known prefix of the caller's buffer.
 pub struct Filled {
@@ -139,54 +134,62 @@ pub service StandardInput {
   ) -> ReadOutcome ! StreamReadError ? &mut StandardInput
 }
 
-/// Creates an outcome for a read that committed exactly `count` leading bytes.
-///
-/// # Gotchas
-///
-/// A provider must not use a count greater than the buffer length passed to its read operation.
-pub fn filled(count: usize) -> ReadOutcome {
-  return ReadOutcome { value: Filled { count: count } }
-}
+impl StandardInput {
+  /// Creates a standard-input failure for a provider that cannot complete one read.
+  pub fn readFailure() -> StreamReadError {
+    return StreamReadError {}
+  }
 
-/// Creates an outcome that reports permanent end-of-input after a valid non-empty read.
-pub fn endOfInput() -> ReadOutcome {
-  return ReadOutcome { value: EndOfInput {} }
-}
+  /// Creates an outcome for a read that committed exactly `count` leading bytes.
+  ///
+  /// # Gotchas
+  ///
+  /// A provider must not use a count greater than the buffer length passed to its read operation.
+  pub fn filled(count: usize) -> ReadOutcome {
+    return ReadOutcome { value: Filled { count: count } }
+  }
 
-/// Returns the committed byte count, or zero for end-of-input.
-///
-/// # Gotchas
-///
-/// A zero count does not by itself identify end-of-input. Use [`isEndOfInput`] when that
-/// distinction controls another read.
-pub fn count(outcome: &ReadOutcome) -> usize {
-  return match &outcome.value {
-    Filled { count } => count
-    EndOfInput {} => usize.ZERO
+  /// Creates an outcome that reports permanent end-of-input after a valid non-empty read.
+  pub fn endOfInput() -> ReadOutcome {
+    return ReadOutcome { value: EndOfInput {} }
+  }
+
+  /// Returns the committed byte count, or zero for end-of-input.
+  ///
+  /// # Gotchas
+  ///
+  /// A zero count does not by itself identify end-of-input. Use [`isEndOfInput`] when that
+  /// distinction controls another read.
+  pub fn count(outcome: &ReadOutcome) -> usize {
+    return match &outcome.value {
+      Filled { count } => count
+      EndOfInput {} => usize.ZERO
+    }
+  }
+
+  /// Reports whether the outcome guarantees that no later read produces bytes.
+  pub fn isEndOfInput(outcome: &ReadOutcome) -> bool {
+    return match &outcome.value {
+      Filled { count } => false
+      EndOfInput {} => true
+    }
+  }
+
+  /// Reads through the active [`StandardInput`] provider into a mutable buffer.
+  ///
+  /// # Details
+  ///
+  /// This wrapper preserves partial-read behavior and the exclusive provider requirement. Inspect
+  /// [`count`] before reading buffer bytes. Use [`isEndOfInput`] to decide when draining is complete.
+  ///
+  /// # Gotchas
+  ///
+  /// `buffer` must be non-empty. A native provider can otherwise report end-of-input while bytes are
+  /// still available.
+  pub effect fn receive(
+    buffer: &mut [u8]
+  ) -> ReadOutcome ! StreamReadError ? &mut StandardInput {
+    return run StandardInput.read(move buffer)
   }
 }
 
-/// Reports whether the outcome guarantees that no later read produces bytes.
-pub fn isEndOfInput(outcome: &ReadOutcome) -> bool {
-  return match &outcome.value {
-    Filled { count } => false
-    EndOfInput {} => true
-  }
-}
-
-/// Reads through the active [`StandardInput`] provider into a mutable buffer.
-///
-/// # Details
-///
-/// This wrapper preserves partial-read behavior and the exclusive provider requirement. Inspect
-/// [`count`] before reading buffer bytes. Use [`isEndOfInput`] to decide when draining is complete.
-///
-/// # Gotchas
-///
-/// `buffer` must be non-empty. A native provider can otherwise report end-of-input while bytes are
-/// still available.
-pub effect fn receive(
-  buffer: &mut [u8]
-) -> ReadOutcome ! StreamReadError ? &mut StandardInput {
-  return run StandardInput.read(move buffer)
-}

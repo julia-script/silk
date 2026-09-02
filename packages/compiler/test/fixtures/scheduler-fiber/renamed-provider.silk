@@ -1,7 +1,7 @@
-import silk.allocator as Allocator
-import silk.effect as Effect
-import silk.monotonic_clock as MonotonicClock
-import silk.scheduler as RuntimePolicy
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.monotonic_clock { MonotonicClock }
+import silk.scheduler { Scheduler as RuntimePolicy, PendingPublication, TaskIdExhaustedError }
 
 struct RenamedDispatcher { calls: i32 }
 
@@ -12,35 +12,35 @@ effect fn prepare<A, E>(
   child: once Effect<
     A
     ! E
-    ? &mut RuntimePolicy.Scheduler | &mut MonotonicClock.MonotonicClock
+    ? &mut RuntimePolicy | &mut MonotonicClock
   >,
-) -> RuntimePolicy.PendingPublication<A, E>
-! Allocator.OutOfMemoryError | RuntimePolicy.TaskIdExhaustedError {
+) -> PendingPublication<A, E>
+! OutOfMemoryError | TaskIdExhaustedError {
   drop child
   self.calls = self.calls + 1
   renamedPrepareCalled()
-  fail RuntimePolicy.TaskIdExhaustedError {}
+  fail TaskIdExhaustedError {}
 }
 
-impl RuntimePolicy.Scheduler for RenamedDispatcher {
+impl RuntimePolicy for RenamedDispatcher {
   prepare: RenamedDispatcher.prepare
 }
 
 effect fn child() -> i32
-? &mut RuntimePolicy.Scheduler | &mut MonotonicClock.MonotonicClock {
+? &mut RuntimePolicy | &mut MonotonicClock {
   return 1
 }
 
 effect fn request() -> i32
-! Allocator.OutOfMemoryError | RuntimePolicy.TaskIdExhaustedError
-? &mut RuntimePolicy.Scheduler {
+! OutOfMemoryError | TaskIdExhaustedError
+? &mut RuntimePolicy {
   let pending = run RuntimePolicy.prepare<i32, never>(child())
   drop pending
   return 0
 }
 
 effect fn refused(
-  error: Allocator.OutOfMemoryError | RuntimePolicy.TaskIdExhaustedError,
+  error: OutOfMemoryError | TaskIdExhaustedError,
 ) -> i32 {
   drop error
   return 42
@@ -48,6 +48,6 @@ effect fn refused(
 
 pub fn main() -> i32 {
   let provider = RenamedDispatcher { calls: 0 }
-  let bound = Effect.bindRequirementOwned<RuntimePolicy.Scheduler>(request(), move provider)
+  let bound = Effect.bindRequirementOwned<RuntimePolicy>(request(), move provider)
   return run Effect.catchAll(move bound, refused)
 }

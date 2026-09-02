@@ -11,17 +11,17 @@ const ascii = (value: string): Uint8Array =>
  * Every manifest namespace is auto-injected into user scope, so a program names Option, Result,
  * and Vector as qualified actors without writing a single import statement.
  */
-const qualified = `import silk.option as Option
-import silk.result as Result
-import silk.vector as Vector
-fn present(value: Option.Option<i32>) -> i32 {
+const qualified = `import silk.option { Option }
+import silk.result { Result }
+import silk.vector { Vector }
+fn present(value: Option<i32>) -> i32 {
   return match move value {
-    Option.Option<i32>.None => 0
-    Option.Option<i32>.Some { value: carried } => carried
+    Option<i32>.None => 0
+    Option<i32>.Some { value: carried } => carried
   }
 }
 
-fn settled(value: Result.Result<i32, i32>) -> i32 {
+fn settled(value: Result<i32, i32>) -> i32 {
   drop value
   return 2
 }

@@ -18,7 +18,7 @@
 //! # Examples
 //! ## Copy and then take one initialized value
 //! ```silk
-//! import silk.allocator { Allocator }
+//! import silk.allocator { Allocator, OutOfMemoryError }
 //!
 //! import silk.effect { Effect }
 //!
@@ -29,7 +29,7 @@
 //! import silk.slot { Slot }
 //!
 //! effect fn build() -> i32
-//! ! Allocator.OutOfMemoryError {
+//! ! OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
 //!   let acquiring = Allocator.allocate(Layout.of<i32>())
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -44,7 +44,7 @@
 //!   return 0
 //! }
 //!
-//! effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+//! effect fn recover(error: OutOfMemoryError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -53,48 +53,51 @@
 //! }
 //! ```
 
-/// The importable name of the `silk.slot` module scope.
+/// The owner of the slot operations.
 ///
 /// # Details
 ///
-/// This struct carries no data and is never constructed by the library. Importing it as
-/// `import silk.slot { Slot }` names the module scope, so `Slot.write(...)` and the other slot
-/// operations resolve through it. It is unrelated to the builtin `Slot<T>` place type.
+/// This struct carries no data and is never constructed by the library. Every operation is an
+/// inherent member declared in `impl Slot`, so `import silk.slot { Slot }` is the one import that
+/// reaches `Slot.write(...)` and the rest. It is unrelated to the builtin `Slot<T>` place type.
 pub struct Slot {}
 
-/// Moves one value into a selected uninitialized raw slot.
-///
-/// # Gotchas
-///
-/// The slot must be in bounds and uninitialized. A second write without a state transition is
-/// invalid.
-pub fn write<T>(slot: Slot<T>, value: T) -> () {
-  unsafe { return Intrinsic.slotWrite<T>(move slot, move value) }
+impl Slot {
+  /// Moves one value into a selected uninitialized raw slot.
+  ///
+  /// # Gotchas
+  ///
+  /// The slot must be in bounds and uninitialized. A second write without a state transition is
+  /// invalid.
+  pub fn write<T>(slot: Slot<T>, value: T) -> () {
+    unsafe { return Intrinsic.slotWrite<T>(move slot, move value) }
+  }
+
+  /// Moves a value out of a selected initialized raw slot and leaves the slot uninitialized.
+  ///
+  /// # Gotchas
+  ///
+  /// The slot must be in bounds and initialized.
+  pub fn take<T>(slot: Slot<T>) -> T {
+    unsafe { return Intrinsic.slotTake<T>(move slot) }
+  }
+
+  /// Copies a `Copy` value from a selected initialized raw slot without changing its state.
+  ///
+  /// # Gotchas
+  ///
+  /// The slot must be in bounds and initialized.
+  pub fn copy<T: Copy>(slot: Slot<T>) -> T {
+    unsafe { return Intrinsic.slotCopy<T>(move slot) }
+  }
+
+  /// Drops a value in a selected initialized raw slot and leaves the slot uninitialized.
+  ///
+  /// # Gotchas
+  ///
+  /// The slot must be in bounds and initialized.
+  pub fn dropValue<T>(slot: Slot<T>) -> () {
+    unsafe { return Intrinsic.slotDrop<T>(move slot) }
+  }
 }
 
-/// Moves a value out of a selected initialized raw slot and leaves the slot uninitialized.
-///
-/// # Gotchas
-///
-/// The slot must be in bounds and initialized.
-pub fn take<T>(slot: Slot<T>) -> T {
-  unsafe { return Intrinsic.slotTake<T>(move slot) }
-}
-
-/// Copies a `Copy` value from a selected initialized raw slot without changing its state.
-///
-/// # Gotchas
-///
-/// The slot must be in bounds and initialized.
-pub fn copy<T: Copy>(slot: Slot<T>) -> T {
-  unsafe { return Intrinsic.slotCopy<T>(move slot) }
-}
-
-/// Drops a value in a selected initialized raw slot and leaves the slot uninitialized.
-///
-/// # Gotchas
-///
-/// The slot must be in bounds and initialized.
-pub fn dropValue<T>(slot: Slot<T>) -> () {
-  unsafe { return Intrinsic.slotDrop<T>(move slot) }
-}

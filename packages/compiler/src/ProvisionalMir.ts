@@ -446,6 +446,29 @@ const effectIdentityOf = (
       context.instance.key,
       expression.parameter.ordinal,
     )
+  // An erased section applied in place (`effect |> Effect.provideMut(&mut provider)`) is one
+  // recorded call of the section's declaration, so its result Effect is identified exactly as a
+  // direct call's. Without this, a provided execution that owns such a run has no runner identity
+  // for it and its classification stays unknown forever.
+  // The piped call is recorded at the same span, so the section's declaration is matched too;
+  // together they select at most one record.
+  if (
+    expression._tag === 'CallableApply' &&
+    expression.realization === 'DirectErasedSection' &&
+    expression.callee._tag === 'CallableSection' &&
+    expression.callee.target._tag === 'DeclarationCallableTarget'
+  ) {
+    const target = expression.callee.target.declaration
+    return context.discovery.calls.find(
+      (call) =>
+        Instances.keyText(call.owner) === Instances.keyText(context.instance.key) &&
+        call.target.declaration.module === target.module &&
+        call.target.declaration.name === target.name &&
+        call.span.sourceId === expression.span.sourceId &&
+        call.span.start === expression.span.start &&
+        call.span.end === expression.span.end,
+    )?.resultEffect
+  }
   if (expression._tag === 'EffectConstruct') {
     return context.discovery.calls.find(
       (call) =>

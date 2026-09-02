@@ -30,14 +30,9 @@ afterAll(() => {
  * named at the call site — `release` when the caller wants the failure, `releaseIgnored` when it is
  * being handed to `Effect.ensuring`, whose finalizer is typed `! never`.
  */
-const prelude = `import silk.os_filesystem { make as osMake }
-import silk.effect as Effect
-import silk.filesystem {
-  FileError, FileSystem, Path, TemporaryDirectory,
-  createDirectoriesRecursively, exists, fromBytes as pathFromBytes, join as pathJoin,
-  make as pathMake, rawBytes as pathRawBytes, release, releaseIgnored,
-  removeDirectoryRecursively, temporaryDirectory, view as pathView
-}
+const prelude = `import silk.os_filesystem { OsFileSystem }
+import silk.effect { Effect }
+import silk.filesystem { FileError, FileSystem, Path, TemporaryDirectory }
 import silk.result { Result }
 
 struct Sentinel { code: i32 }
@@ -68,14 +63,14 @@ pub fn main() -> i32 {
  * compilation byte-unique, so the content-addressed emission and executable caches could never
  * hit; with a stable source they hit on every warm run.
  */
-const nativeRootResolution = `import silk.bytes { Bytes, asSlice as rootSlice }
-import silk.host_input { HostInputError, inputFailure, variableNamed }
+const nativeRootResolution = `import silk.bytes { Bytes }
+import silk.host_input { HostInputError, HostInput }
 import silk.option { Option }
-import silk.os_host_input as OsHostInput
-import silk.string { InvalidUtf8, String, copy as stringCopy, copyUtf8 as stringCopyUtf8, view as stringView }
+import silk.os_host_input { OsHostInput }
+import silk.string { InvalidUtf8, String }
 
 effect fn missingRoot() -> Bytes ! HostInputError {
-  fail inputFailure()
+  fail HostInput.inputFailure()
 }
 
 effect fn requiredRoot(found: Option<Bytes>) -> Bytes ! HostInputError {
@@ -85,18 +80,18 @@ effect fn requiredRoot(found: Option<Bytes>) -> Bytes ! HostInputError {
   }
 }
 
-/// A root that is not valid UTF-8 is a harness defect, not a program outcome; trap like osMake
+/// A root that is not valid UTF-8 is a harness defect, not a program outcome; trap like OsFileSystem.make
 /// does for its own malformed-root preconditions.
 effect fn invalidRoot() -> String ! OutOfMemoryError ? &mut Allocator {
   let invalid = 1 / 0
-  return run stringCopy("/")
+  return run String.copy("/")
 }
 
 effect fn confinedRootString() -> String ! HostInputError | OutOfMemoryError ? &mut Allocator {
   let mut hostInput = OsHostInput.make()
-  let found = run Effect.provideMut(variableNamed("SILK_TEST_ROOT"), &mut hostInput)
+  let found = run Effect.provideMut(HostInput.variableNamed("SILK_TEST_ROOT"), &mut hostInput)
   let rootBytes = run requiredRoot(move found)
-  let copied = run stringCopyUtf8(rootSlice(&rootBytes))
+  let copied = run String.copyUtf8(Bytes.asSlice(&rootBytes))
   return match move copied {
     Result<String, InvalidUtf8>.Success { value } => move value
     Result<String, InvalidUtf8>.Failure { error } => run invalidRoot()
@@ -126,7 +121,7 @@ pub fn main() -> i32 {
 const nativeSource = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.filesystem { FileError }
 import silk.filesystem { FileSystem }
 import silk.u8 as u8
@@ -136,38 +131,38 @@ ${nativeRootResolution}
 effect fn program() -> i32 ! FileError | OutOfMemoryError | HostInputError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let root = run confinedRootString() |> Effect.provideMut(&mut allocator)
-  let mut fs = run osMake(stringView(&root)) |> Effect.provideMut(&mut allocator)
-  let parent = run pathMake("/scopes") |> Effect.provideMut(&mut allocator)
+  let mut fs = run OsFileSystem.make(String.view(&root)) |> Effect.provideMut(&mut allocator)
+  let parent = run Path.make("/scopes") |> Effect.provideMut(&mut allocator)
   let prepared = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(createDirectoriesRecursively(&parent), &mut fs),
+    Intrinsic.bindRequirementMut(FileSystem.createDirectoriesRecursively(&parent), &mut fs),
     &mut allocator
   )
   let first = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(temporaryDirectory(&parent, "silk-build-"), &mut fs),
+    Intrinsic.bindRequirementMut(FileSystem.temporaryDirectory(&parent, "silk-build-"), &mut fs),
     &mut allocator
   )
   let second = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(temporaryDirectory(&parent, "silk-build-"), &mut fs),
+    Intrinsic.bindRequirementMut(FileSystem.temporaryDirectory(&parent, "silk-build-"), &mut fs),
     &mut allocator
   )
 
   // Two makes, two paths.
-  if pathView(&first.path) == pathView(&second.path) { return 1 }
+  if Path.view(&first.path) == Path.view(&second.path) { return 1 }
 
   // The made directory is there.
-  if run Intrinsic.bindRequirementMut(exists(&first.path), &mut fs) {} else { return 2 }
+  if run Intrinsic.bindRequirementMut(FileSystem.exists(&first.path), &mut fs) {} else { return 2 }
 
   // The artifact a caller keeps: written to a durable path outside the scope before it releases.
   let payload = [u8.toU8(1), u8.toU8(2), u8.toU8(3)]
-  let durable = run pathJoin(&parent, "promoted.bin") |> Effect.provideMut(&mut allocator)
+  let durable = run Path.join(&parent, "promoted.bin") |> Effect.provideMut(&mut allocator)
   let promoted = run Intrinsic.bindRequirementMut(FileSystem.writeFile(&durable, &payload), &mut fs)
 
   let released = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(release(move first), &mut fs),
+    Intrinsic.bindRequirementMut(FileSystem.release(move first), &mut fs),
     &mut allocator
   )
   let releasedSecond = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(release(move second), &mut fs),
+    Intrinsic.bindRequirementMut(FileSystem.release(move second), &mut fs),
     &mut allocator
   )
   return 42
@@ -183,7 +178,7 @@ ${nativeEpilogue}`
 const nativeTreeSource = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.filesystem { FileError }
 ${prelude}
 ${nativeRootResolution}
@@ -191,10 +186,10 @@ ${nativeRootResolution}
 effect fn program() -> i32 ! FileError | OutOfMemoryError | HostInputError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let root = run confinedRootString() |> Effect.provideMut(&mut allocator)
-  let mut fs = run osMake(stringView(&root)) |> Effect.provideMut(&mut allocator)
-  let target = run pathMake("/tree") |> Effect.provideMut(&mut allocator)
+  let mut fs = run OsFileSystem.make(String.view(&root)) |> Effect.provideMut(&mut allocator)
+  let target = run Path.make("/tree") |> Effect.provideMut(&mut allocator)
   let removed = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(removeDirectoryRecursively(&target), &mut fs),
+    Intrinsic.bindRequirementMut(FileSystem.removeDirectoryRecursively(&target), &mut fs),
     &mut allocator
   )
   return 42
@@ -211,7 +206,7 @@ ${nativeEpilogue}`
 const nativeManySource = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.filesystem { FileError }
 import silk.filesystem { FileSystem }
 import silk.u8 as u8
@@ -221,33 +216,33 @@ ${nativeRootResolution}
 effect fn program() -> i32 ! FileError | OutOfMemoryError | HostInputError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let root = run confinedRootString() |> Effect.provideMut(&mut allocator)
-  let mut fs = run osMake(stringView(&root)) |> Effect.provideMut(&mut allocator)
-  let parent = run pathMake("/many") |> Effect.provideMut(&mut allocator)
+  let mut fs = run OsFileSystem.make(String.view(&root)) |> Effect.provideMut(&mut allocator)
+  let parent = run Path.make("/many") |> Effect.provideMut(&mut allocator)
   let prepared = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(createDirectoriesRecursively(&parent), &mut fs),
+    Intrinsic.bindRequirementMut(FileSystem.createDirectoriesRecursively(&parent), &mut fs),
     &mut allocator
   )
   let payload = [u8.toU8(1), u8.toU8(2), u8.toU8(3)]
 ${[0, 1, 2]
   .map(
     (index) => `  let scope${index} = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(temporaryDirectory(&parent, "silk-many${index}-"), &mut fs),
+    Intrinsic.bindRequirementMut(FileSystem.temporaryDirectory(&parent, "silk-many${index}-"), &mut fs),
     &mut allocator
   )
-  let nested${index} = run pathJoin(&scope${index}.path, "nested") |> Effect.provideMut(&mut allocator)
+  let nested${index} = run Path.join(&scope${index}.path, "nested") |> Effect.provideMut(&mut allocator)
   let madeNested${index} = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(createDirectoriesRecursively(&nested${index}), &mut fs),
+    Intrinsic.bindRequirementMut(FileSystem.createDirectoriesRecursively(&nested${index}), &mut fs),
     &mut allocator
   )
-  let file${index} = run pathJoin(&nested${index}, "payload.bin") |> Effect.provideMut(&mut allocator)
+  let file${index} = run Path.join(&nested${index}, "payload.bin") |> Effect.provideMut(&mut allocator)
   let wrote${index} = run Intrinsic.bindRequirementMut(FileSystem.writeFile(&file${index}, &payload), &mut fs)
-  if run Intrinsic.bindRequirementMut(exists(&scope${index}.path), &mut fs) {} else { return ${index + 1} }`,
+  if run Intrinsic.bindRequirementMut(FileSystem.exists(&scope${index}.path), &mut fs) {} else { return ${index + 1} }`,
   )
   .join('\n')}
 ${[0, 1, 2]
   .map(
     (index) => `  let released${index} = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(release(move scope${index}), &mut fs),
+    Intrinsic.bindRequirementMut(FileSystem.release(move scope${index}), &mut fs),
     &mut allocator
   )`,
   )
@@ -265,23 +260,23 @@ ${nativeEpilogue}`
 const evaluatorSource = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.filesystem { FileError }
 ${prelude}
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
-  let parent = run pathMake("/scopes") |> Effect.provideMut(&mut allocator)
+  let mut fs = run OsFileSystem.make("/root") |> Effect.provideMut(&mut allocator)
+  let parent = run Path.make("/scopes") |> Effect.provideMut(&mut allocator)
   let scope = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(temporaryDirectory(&parent, "silk-"), &mut fs),
+    Intrinsic.bindRequirementMut(FileSystem.temporaryDirectory(&parent, "silk-"), &mut fs),
     &mut allocator
   )
-  if pathView(&scope.path) != "/scopes/silk-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" {
+  if Path.view(&scope.path) != "/scopes/silk-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" {
     return 1
   }
   let released = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(release(move scope), &mut fs),
+    Intrinsic.bindRequirementMut(FileSystem.release(move scope), &mut fs),
     &mut allocator
   )
   return 42

@@ -1687,6 +1687,16 @@ const resolveBareUnionVariantTarget = (
   )
   if (lookup._tag !== 'Resolved' || lookup.declaration._tag !== 'UnionDeclaration') return undefined
   const union = lookup.declaration
+  // `Option.some` names an inherent member, not a misspelled variant.
+  const variantName = spelling(source, variantToken)
+  if (
+    !union.variants.some(
+      (variant) => variant.name._tag === 'Present' && variant.name.spelling === variantName,
+    ) &&
+    NameResolution.lookupAssociated(resolution.index, union, variantName, resolution.scope.module)
+      ._tag !== 'Missing'
+  )
+    return undefined
   const type =
     union.canonical._tag === 'Canonical'
       ? Type.nominal(
@@ -3921,7 +3931,6 @@ import {
   interfaceOperationContract,
   isSectionArity,
   ownedProviderCaptureAccess,
-  resolvedFunctionReference,
   serviceOperation,
   sourceCallable,
   unavailableIdentifierFact,
@@ -7811,20 +7820,6 @@ export function analyzeExpression(
     }
     const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
     if (qualifierLookup._tag === 'Intrinsic') {
-      const libraryReference =
-        qualifier === 'Effect'
-          ? resolvedFunctionReference(source, node, declarations, resolution)
-          : undefined
-      if (libraryReference?._tag === 'Resolved')
-        return finishDeclarationCall(
-          node,
-          libraryReference,
-          argumentsResult,
-          callTypeArguments,
-          undefined,
-          declaration,
-          resolution,
-        )
       return analyzeBuiltinCall(
         source,
         node,
@@ -7891,9 +7886,7 @@ export function analyzeExpression(
     }
     if (
       qualifierLookup._tag === 'Resolved' &&
-      qualifierLookup.declaration._tag === 'ServiceDeclaration' &&
-      (serviceOperation(qualifierLookup.declaration, member) !== undefined ||
-        NameResolution.scopedModule(qualifierLookup.declaration) === undefined)
+      qualifierLookup.declaration._tag === 'ServiceDeclaration'
     ) {
       const operation = serviceOperation(qualifierLookup.declaration, member)
       const diagnostic =
@@ -7970,57 +7963,19 @@ export function analyzeExpression(
     }
     if (
       qualifierLookup._tag === 'Resolved' &&
-      (qualifierLookup.declaration._tag === 'StructDeclaration' ||
-        qualifierLookup.declaration._tag === 'UnionDeclaration' ||
-        qualifierLookup.declaration._tag === 'ServiceDeclaration' ||
-        qualifierLookup.declaration._tag === 'InterfaceDeclaration') &&
-      qualifierLookup.declaration.canonical._tag === 'Canonical'
+      NameResolution.isNominalOwner(qualifierLookup.declaration)
     ) {
-      // A member resolves through the declaring module only when the type names its own module
-      // (`Logger.inMemoryProvider()` in logger.silk), or when an interface's own operation is invoked without
-      // a bound in scope (`HashKey.hash(...)`). Any other member is unknown.
-      const actorModule =
-        NameResolution.scopedModule(qualifierLookup.declaration) ??
-        (qualifierLookup.declaration._tag === 'InterfaceDeclaration' &&
-        serviceOperation(qualifierLookup.declaration, member) !== undefined
-          ? qualifierLookup.declaration.canonical.id.module
-          : undefined)
-      const memberLookup =
-        actorModule === undefined
-          ? undefined
-          : DeclarationFacts.lookup(resolution.index, actorModule, member)
-      const candidate = memberLookup?._tag === 'Resolved' ? memberLookup.declaration : undefined
-      let diagnostic: Diagnostic.Diagnostic | undefined
-      if (candidate === undefined) {
-        diagnostic = Diagnostic.unknownActorOperation(qualifier, member, memberToken.span)
-      } else if (candidate.visibility === 'Private') {
-        diagnostic = Diagnostic.inaccessibleImportedMember(
-          actorModule ?? qualifier,
-          member,
-          memberToken.span,
-        )
-      } else {
-        diagnostic = undefined
-      }
-      let reference: CallReferenceFact
-      if (candidate !== undefined && candidate.visibility === 'Public') {
-        reference = Object.freeze({
-          _tag: 'Resolved',
-          spelling: `${qualifier}.${member}`,
-          token: memberToken,
-          declaration: candidate,
-        })
-      } else {
-        reference = Object.freeze({
+      // The owner declares no such associated item: contract operations and inherent members are
+      // the only members a nominal qualifier exposes, never its module's root declarations.
+      const diagnostic = Diagnostic.unknownActorOperation(qualifier, member, memberToken.span)
+      return finishDeclarationCall(
+        node,
+        Object.freeze({
           _tag: 'Missing',
           spelling: `${qualifier}.${member}`,
           token: memberToken,
-          ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
-        })
-      }
-      return finishDeclarationCall(
-        node,
-        reference,
+          cause: Diagnostic.identity(diagnostic),
+        }),
         argumentsResult,
         callTypeArguments,
         diagnostic,

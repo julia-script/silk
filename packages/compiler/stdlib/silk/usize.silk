@@ -21,7 +21,7 @@
 //! # Examples
 //! ## Keep a count within the target range
 //! ```silk
-//! import silk.option {Option}
+//! import silk.option { Option }
 //!
 //! import silk.usize
 //!
@@ -42,7 +42,7 @@ import silk.i32 as i32
 import silk.i64 as i64
 import silk.i8 as i8
 import silk.isize as isize
-import silk.option { Option, none, some }
+import silk.option { Option }
 import silk.result { Result }
 import silk.target as Target
 import silk.u16 as u16
@@ -79,7 +79,7 @@ pub fn toU8(value: usize) -> u8 {
 /// Converts `value` to `u8`, or returns `None` if `value` is outside the `u8`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU8(value: usize) -> Option<u8> {
-  return Intrinsic.usizeCheckedToU8<Option<u8>>(value, some, none)
+  return Intrinsic.usizeCheckedToU8<Option<u8>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to `u16`. Traps if `value` is outside the `u16` range. Use
@@ -91,7 +91,7 @@ pub fn toU16(value: usize) -> u16 {
 /// Converts `value` to `u16`, or returns `None` if `value` is outside the `u16`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU16(value: usize) -> Option<u16> {
-  return Intrinsic.usizeCheckedToU16<Option<u16>>(value, some, none)
+  return Intrinsic.usizeCheckedToU16<Option<u16>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to `u32`. Traps if `value` is outside the `u32` range. Use
@@ -103,7 +103,7 @@ pub fn toU32(value: usize) -> u32 {
 /// Converts `value` to `u32`, or returns `None` if `value` is outside the `u32`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU32(value: usize) -> Option<u32> {
-  return Intrinsic.usizeCheckedToU32<Option<u32>>(value, some, none)
+  return Intrinsic.usizeCheckedToU32<Option<u32>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` exactly to `u64`. Every `usize` value is representable.
@@ -114,7 +114,7 @@ pub fn toU64(value: usize) -> u64 {
 /// Converts `value` exactly to `u64` and returns `Some`. Every `usize` value is
 /// representable.
 pub fn checkedToU64(value: usize) -> Option<u64> {
-  return Intrinsic.usizeCheckedToU64<Option<u64>>(value, some, none)
+  return Intrinsic.usizeCheckedToU64<Option<u64>>(value, Option.some, Option.none)
 }
 
 /// Returns `value` unchanged as `usize`. Use this function when generic conversion code
@@ -126,7 +126,7 @@ pub fn toUsize(value: usize) -> usize {
 /// Returns `Some` with `value` unchanged as `usize`. Use this function when generic
 /// checked-conversion code can select the same source and destination type.
 pub fn checkedToUsize(value: usize) -> Option<usize> {
-  return Intrinsic.usizeCheckedToUsize<Option<usize>>(value, some, none)
+  return Intrinsic.usizeCheckedToUsize<Option<usize>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to `i8`. Traps if `value` is outside the `i8` range. Use
@@ -138,7 +138,7 @@ pub fn toI8(value: usize) -> i8 {
 /// Converts `value` to `i8`, or returns `None` if `value` is outside the `i8`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI8(value: usize) -> Option<i8> {
-  return Intrinsic.usizeCheckedToI8<Option<i8>>(value, some, none)
+  return Intrinsic.usizeCheckedToI8<Option<i8>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to `i16`. Traps if `value` is outside the `i16` range. Use
@@ -150,7 +150,7 @@ pub fn toI16(value: usize) -> i16 {
 /// Converts `value` to `i16`, or returns `None` if `value` is outside the `i16`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI16(value: usize) -> Option<i16> {
-  return Intrinsic.usizeCheckedToI16<Option<i16>>(value, some, none)
+  return Intrinsic.usizeCheckedToI16<Option<i16>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to `i32`. Traps if `value` is outside the `i32` range. Use
@@ -162,7 +162,7 @@ pub fn toI32(value: usize) -> i32 {
 /// Converts `value` to `i32`, or returns `None` if `value` is outside the `i32`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI32(value: usize) -> Option<i32> {
-  return Intrinsic.usizeCheckedToI32<Option<i32>>(value, some, none)
+  return Intrinsic.usizeCheckedToI32<Option<i32>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to `i64`. Traps if `value` is outside the `i64` range. Use
@@ -174,7 +174,7 @@ pub fn toI64(value: usize) -> i64 {
 /// Converts `value` to `i64`, or returns `None` if `value` is outside the `i64`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI64(value: usize) -> Option<i64> {
-  return Intrinsic.usizeCheckedToI64<Option<i64>>(value, some, none)
+  return Intrinsic.usizeCheckedToI64<Option<i64>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to `isize`. Traps if `value` is outside the `isize` range. Use
@@ -186,7 +186,7 @@ pub fn toIsize(value: usize) -> isize {
 /// Converts `value` to `isize`, or returns `None` if `value` is outside the `isize`
 /// range. Use this function when an out-of-range value is input data.
 pub fn checkedToIsize(value: usize) -> Option<isize> {
-  return Intrinsic.usizeCheckedToIsize<Option<isize>>(value, some, none)
+  return Intrinsic.usizeCheckedToIsize<Option<isize>>(value, Option.some, Option.none)
 }
 
 /// Converts `value` to the nearest `f32` value, with ties to even.
@@ -309,31 +309,31 @@ pub fn saturatingMultiply(left: usize, right: usize) -> usize {
 /// Returns `Some` with `left + right`, or `None` if the result is outside the `usize` range.
 /// Use this function when overflow is input data.
 pub fn checkedAdd(left: usize, right: usize) -> Option<usize> {
-  return Intrinsic.usizeCheckedAdd<Option<usize>>(left, right, some, none)
+  return Intrinsic.usizeCheckedAdd<Option<usize>>(left, right, Option.some, Option.none)
 }
 
 /// Returns `Some` with `left - right`, or `None` if the result is outside the `usize` range.
 /// Use this function when overflow is input data.
 pub fn checkedSubtract(left: usize, right: usize) -> Option<usize> {
-  return Intrinsic.usizeCheckedSubtract<Option<usize>>(left, right, some, none)
+  return Intrinsic.usizeCheckedSubtract<Option<usize>>(left, right, Option.some, Option.none)
 }
 
 /// Returns `Some` with `left * right`, or `None` if the result is outside the `usize` range.
 /// Use this function when overflow is input data.
 pub fn checkedMultiply(left: usize, right: usize) -> Option<usize> {
-  return Intrinsic.usizeCheckedMultiply<Option<usize>>(left, right, some, none)
+  return Intrinsic.usizeCheckedMultiply<Option<usize>>(left, right, Option.some, Option.none)
 }
 
 /// Returns `Some` with `left / right`, or `None` if `right` is zero. Use this
 /// function when a zero divisor is input data.
 pub fn checkedDivide(left: usize, right: usize) -> Option<usize> {
-  return Intrinsic.usizeCheckedDivide<Option<usize>>(left, right, some, none)
+  return Intrinsic.usizeCheckedDivide<Option<usize>>(left, right, Option.some, Option.none)
 }
 
 /// Returns `Some` with the remainder, or `None` if `right` is zero. Use this function
 /// when a zero divisor is input data.
 pub fn checkedRemainder(left: usize, right: usize) -> Option<usize> {
-  return Intrinsic.usizeCheckedRemainder<Option<usize>>(left, right, some, none)
+  return Intrinsic.usizeCheckedRemainder<Option<usize>>(left, right, Option.some, Option.none)
 }
 
 /// Returns `true` when `left` and `right` are equal.

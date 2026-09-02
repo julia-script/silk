@@ -365,13 +365,12 @@ each line after the example.
 Order multiple examples from the most common case to the most specialized case. Give each example
 a different title.
 
-### Actor imports
+### Owner imports
 
-When a standard-library module contains a struct, service, or interface matching its filename,
-import that actor directly in documentation examples. The imported actor makes the module's public
-operations available through its qualifier, so calls remain qualified and contextual. Service and
-interface contract operations still take precedence over same-named module members. This follows
-[STYLE-003](style-guide.md#style-003--examples-prefer-actor-imports-and-qualified-operations).
+When an operation is an inherent member of a standard-library type, import that owner type directly
+in documentation examples and qualify the operation through it. A selected type exposes its
+associated items, so calls remain qualified and contextual. This follows
+[STYLE-003](style-guide.md#style-003--examples-import-the-owner-type-and-qualify-operations-through-it).
 
 Preferred:
 
@@ -388,9 +387,10 @@ pub fn main() -> i32 {
 }
 ```
 
-Use a namespace import when a module has no matching struct, service, or interface. A matching
-scalar enum does not expose the module's top-level operations. Do not import actor operations such
-as `make`, `append`, `get`, and `length` as unqualified names when that removes useful context.
+Use a namespace import when the operation is a root declaration with no owner type, as in the
+primitive modules. A namespace binding exposes only root declarations and never an inherent member.
+Do not import root operations as unqualified names when that removes useful context; an inherent
+member such as `make`, `append`, `get`, or `length` cannot be selected on its own.
 
 `Vector.length` gives context that `length` does not give. This rule is mandatory in official
 documentation examples.
@@ -529,7 +529,7 @@ an owned value pipeline.
 /// ## Get the second vector element
 ///
 /// ```silk
-/// import silk.allocator { Allocator }
+/// import silk.allocator { Allocator, OutOfMemoryError }
 ///
 /// import silk.effect { Effect }
 ///
@@ -538,7 +538,7 @@ an owned value pipeline.
 /// import silk.vector { Vector }
 ///
 /// pub effect fn main() -> ()
-/// ! Allocator.OutOfMemoryError {
+/// ! OutOfMemoryError {
 ///   let mut allocator = Allocator.systemAllocatorProvider()
 ///   let mut values = Vector.make<i32>()
 ///   let first = run Vector.append<i32>(&mut values, 10)

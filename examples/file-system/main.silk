@@ -4,28 +4,9 @@ import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
 import silk.u8
 import silk.usize
-import silk.filesystem {
-  DirectoryEntry,
-  DirectoryInfo,
-  FileError,
-  FileInfo,
-  FileSystem,
-  Path,
-  directoryInfo,
-  error,
-  exists,
-  fileInfo,
-  make as path,
-  createTemporaryDirectoryOperation,
-  notFound,
-  readFileOperation,
-  statOperation,
-  unsupported,
-  writeFileOperation,
-  writeFileWithParents,
-}
-import silk.bytes { Bytes, asSlice, copy }
-import silk.vector { Vector, make as vector }
+import silk.filesystem { DirectoryEntry, DirectoryInfo, FileError, FileInfo, FileSystem, Path }
+import silk.bytes { Bytes }
+import silk.vector { Vector }
 
 /// A tiny application-owned provider. Browser code could replace this with a virtual filesystem.
 struct MemoryFileSystem {
@@ -41,9 +22,9 @@ effect fn read(
   self: &mut MemoryFileSystem,
   target: &Path,
 ) -> Bytes ! FileError | OutOfMemoryError ? &mut Allocator {
-  if self.present == false { fail error(readFileOperation(), notFound()) }
+  if self.present == false { fail FileSystem.error(FileSystem.readFileOperation(), FileSystem.notFound()) }
   let snapshot = self.bytes
-  return run copy(&snapshot)
+  return run Bytes.copy(&snapshot)
 }
 
 effect fn write(
@@ -51,7 +32,7 @@ effect fn write(
   target: &Path,
   bytes: &[u8],
 ) -> () ! FileError {
-  if bytes.length != usize.add(0, 4) { fail error(writeFileOperation(), notFound()) }
+  if bytes.length != usize.add(0, 4) { fail FileSystem.error(FileSystem.writeFileOperation(), FileSystem.notFound()) }
   let mut stored = Intrinsic.replace(self.bytes, emptyBytes())
   let mut index = usize.add(0, 0)
   while index < bytes.length {
@@ -66,21 +47,21 @@ effect fn stat(
   self: &mut MemoryFileSystem,
   target: &Path,
 ) -> FileInfo | DirectoryInfo ! FileError {
-  if self.present { return fileInfo(usize.add(0, 4)) }
-  return directoryInfo()
+  if self.present { return FileSystem.fileInfo(usize.add(0, 4)) }
+  return FileSystem.directoryInfo()
 }
 
 effect fn list(
   self: &mut MemoryFileSystem,
   target: &Path,
 ) -> Vector<DirectoryEntry> ! FileError | OutOfMemoryError ? &mut Allocator {
-  return vector<DirectoryEntry>()
+  return Vector.make<DirectoryEntry>()
 }
 
 effect fn create(self: &mut MemoryFileSystem, target: &Path) -> () ! FileError { return () }
 
 effect fn removeFile(self: &mut MemoryFileSystem, target: &Path) -> () ! FileError {
-  if self.present == false { fail error(readFileOperation(), notFound()) }
+  if self.present == false { fail FileSystem.error(FileSystem.readFileOperation(), FileSystem.notFound()) }
   self.present = false
 }
 
@@ -94,7 +75,7 @@ effect fn createTemporaryDirectory(
   parent: &Path,
   prefix: &[u8],
 ) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
-  fail error(createTemporaryDirectoryOperation(), unsupported())
+  fail FileSystem.error(FileSystem.createTemporaryDirectoryOperation(), FileSystem.unsupported())
 }
 
 impl FileSystem for MemoryFileSystem {
@@ -124,18 +105,18 @@ effect fn example() -> i32 ! FileError | OutOfMemoryError {
     bytes: emptyBytes(),
     present: false,
   }
-  let target = run path("/notes/todo.bin") |> Effect.provideMut(&mut allocator)
+  let target = run Path.make("/notes/todo.bin") |> Effect.provideMut(&mut allocator)
   let message = [u8.toU8(10), u8.toU8(11), u8.toU8(12), u8.toU8(9)]
   let written = run Intrinsic.bindRequirementMut(
-    Intrinsic.bindRequirementMut(writeFileWithParents(&target, &message), &mut files),
+    Intrinsic.bindRequirementMut(FileSystem.writeFileWithParents(&target, &message), &mut files),
     &mut allocator,
   )
-  if run exists(&target) |> Effect.provideMut(&mut files) {} else { return 1 }
+  if run FileSystem.exists(&target) |> Effect.provideMut(&mut files) {} else { return 1 }
   let owned = run Intrinsic.bindRequirementMut(
     Intrinsic.bindRequirementMut(FileSystem.readFile(&target), &mut files),
     &mut allocator,
   )
-  return checksum(asSlice(&owned))
+  return checksum(Bytes.asSlice(&owned))
 }
 
 effect fn recover(error: FileError | OutOfMemoryError) -> i32 { return 2 }

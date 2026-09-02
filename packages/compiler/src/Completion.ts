@@ -748,12 +748,7 @@ export const complete = (options: {
           _tag: 'CompletionResult',
           context: Object.freeze({ _tag: 'ActorMemberContext', actor: intrinsic.spelling }),
           replacement: replacement.span,
-          candidates: stable([
-            ...actorCandidates(intrinsic),
-            ...(intrinsic.spelling === 'Effect'
-              ? namespaceCandidates(options.index, 'silk/effect')
-              : []),
-          ]),
+          candidates: stable([...actorCandidates(intrinsic)]),
         })
     }
     if (lookup?._tag === 'Namespace')
@@ -763,8 +758,7 @@ export const complete = (options: {
         replacement: replacement.span,
         candidates: stable(namespaceCandidates(options.index, lookup.module)),
       })
-    // Declared inherent members lead the legacy basename projection, which is consulted only
-    // as the trailing group until the standard library migrates.
+    // Declared inherent members are the only associated candidates of a nominal qualifier.
     const inherent =
       lookup?._tag === 'Resolved'
         ? inherentCandidates(
@@ -799,7 +793,6 @@ export const complete = (options: {
         candidates: stable([...enumCandidates(lookup.declaration), ...inherent]),
       })
     if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'UnionDeclaration') {
-      const scoped = NameResolution.scopedModule(lookup.declaration)
       return Object.freeze({
         _tag: 'CompletionResult',
         context: Object.freeze({
@@ -810,21 +803,15 @@ export const complete = (options: {
               : (qualifier ?? 'union'),
         }),
         replacement: replacement.span,
-        candidates: stable([
-          ...unionCandidates(lookup.declaration),
-          ...inherent,
-          ...(scoped === undefined ? [] : namespaceCandidates(options.index, scoped, 2)),
-        ]),
+        candidates: stable([...unionCandidates(lookup.declaration), ...inherent]),
       })
     }
     if (
       lookup?._tag === 'Resolved' &&
       (lookup.declaration._tag === 'StructDeclaration' ||
         lookup.declaration._tag === 'InterfaceDeclaration') &&
-      lookup.declaration.canonical._tag === 'Canonical' &&
-      (inherent.length > 0 || NameResolution.scopedModule(lookup.declaration) !== undefined)
+      lookup.declaration.canonical._tag === 'Canonical'
     ) {
-      const scoped = NameResolution.scopedModule(lookup.declaration)
       return Object.freeze({
         _tag: 'CompletionResult',
         context: Object.freeze({
@@ -832,14 +819,10 @@ export const complete = (options: {
           actor: lookup.declaration.canonical.id.name,
         }),
         replacement: replacement.span,
-        candidates: stable([
-          ...inherent,
-          ...(scoped === undefined ? [] : namespaceCandidates(options.index, scoped, 2)),
-        ]),
+        candidates: stable(inherent),
       })
     }
     if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'ServiceDeclaration') {
-      const scoped = NameResolution.scopedModule(lookup.declaration)
       return Object.freeze({
         _tag: 'CompletionResult',
         context: Object.freeze({
@@ -850,11 +833,7 @@ export const complete = (options: {
               : (qualifier ?? 'service'),
         }),
         replacement: replacement.span,
-        candidates: stable([
-          ...serviceCandidates(lookup.declaration),
-          ...inherent,
-          ...(scoped === undefined ? [] : namespaceCandidates(options.index, scoped, 2)),
-        ]),
+        candidates: stable([...serviceCandidates(lookup.declaration), ...inherent]),
       })
     }
     let state: 'Ambiguous' | 'Missing' | 'Unavailable'

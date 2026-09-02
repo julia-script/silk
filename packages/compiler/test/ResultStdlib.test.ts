@@ -6,7 +6,7 @@ import * as Analysis from '../src/Analysis.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const copyPayloads = `import silk.result { Result, succeed, failResult }
+const copyPayloads = `import silk.result { Result }
 
 fn observe(result: Result<i32, i32>) -> i32 {
   return match move result {
@@ -16,8 +16,8 @@ fn observe(result: Result<i32, i32>) -> i32 {
 }
 
 pub fn main() -> i32 {
-  let success = succeed<i32, i32>(40)
-  let failure = failResult<i32, i32>(2)
+  let success = Result.succeed<i32, i32>(40)
+  let failure = Result.failResult<i32, i32>(2)
   return observe(move success) + observe(move failure)
 }`
 
@@ -25,9 +25,9 @@ const affinePayload = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
-import silk.result { Result, succeed }
+import silk.result { Result }
 
 struct Token { storage: Allocation }
 
@@ -54,7 +54,7 @@ effect fn build() -> i32 ! OutOfMemoryError {
   let layout = Layout.of<i32>()
   let storage = run Intrinsic.bindRequirementMut(Allocator.allocate(move layout), &mut allocator)
   let token = Token { storage: move storage }
-  let result = succeed<Token, i32>(move token)
+  let result = Result.succeed<Token, i32>(move token)
   return observe(move result)
 }
 
@@ -62,7 +62,7 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
-const reifiedEffect = `import silk.effect as Effect
+const reifiedEffect = `import silk.effect { Effect }
 import silk.result { Result }
 
 struct First { code: i32 }
@@ -94,7 +94,7 @@ const reifiedRequirement = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 import silk.result { Result }
 
@@ -175,7 +175,7 @@ pub fn main() -> i32 {
   return run Effect.provideMut(program(), &mut writer)
 }`
 
-const alternateResultLikeUnion = `import silk.effect as Effect
+const alternateResultLikeUnion = `import silk.effect { Effect }
 
 union Outcome<A, E> {
   Good { value: A },
@@ -227,7 +227,7 @@ pub fn main() -> i32 {
   return success + first + second - 5
 }`
 
-const reifiedTrap = `import silk.effect as Effect
+const reifiedTrap = `import silk.effect { Effect }
 import silk.result { Result }
 
 effect fn explode() -> i32 {
@@ -259,7 +259,7 @@ pub fn main() -> i32 {
   return run closed
 }`
 
-const sourceDefinedMaps = `import silk.effect as Effect
+const sourceDefinedMaps = `import silk.effect { Effect }
 import silk.result { Result }
 
 struct First { code: i32 }
@@ -283,7 +283,7 @@ pub fn main() -> i32 {
   return observe(move success) + observe(move failure) - 42
 }`
 
-const sourceDefinedEffectfulCombinators = `import silk.effect as Effect
+const sourceDefinedEffectfulCombinators = `import silk.effect { Effect }
 import silk.result { Result }
 
 struct First { code: i32 }
@@ -319,7 +319,7 @@ pub fn main() -> i32 {
   return observeBoth(move chained) + observeBoth(move observed) + observeSecond(move recovered) - 82
 }`
 
-const sourceDefinedRetry = `import silk.effect as Effect
+const sourceDefinedRetry = `import silk.effect { Effect }
 import silk.result { Result }
 
 struct Problem { code: i32 }
@@ -340,7 +340,7 @@ pub fn main() -> i32 {
   return observe(move success) + observe(move failure) - 2
 }`
 
-const sourceDefinedProvide = `import silk.effect as Effect
+const sourceDefinedProvide = `import silk.effect { Effect }
 service Clock { effect fn value() -> i32 ? &mut Clock }
 struct FixedClock { value: i32 }
 effect fn clockValue(self: &mut FixedClock) -> i32 { return self.value }

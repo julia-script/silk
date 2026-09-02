@@ -157,13 +157,22 @@ const associatedTarget = (
   spelling: string,
   owner: DeclarationFacts.CanonicalId | undefined,
 ): Document.LinkTarget | undefined => {
-  const headers = Analysis.declarationIndex(snapshot).modules.find(
-    (candidate) => candidate.module === module,
-  )
-  const candidates = (headers?.members ?? []).filter(
+  const modules = Analysis.declarationIndex(snapshot).modules
+  const headers = modules.find((candidate) => candidate.module === module)
+  // `[`member`]` names a member of the enclosing owner or of any owner in the module;
+  // `[`Owner.member`]` names one owner's member explicitly, in this module or any other.
+  const dot = spelling.indexOf('.')
+  const ownerSpelling = dot === -1 ? undefined : spelling.slice(0, dot)
+  const memberName = dot === -1 ? spelling : spelling.slice(dot + 1)
+  const searched =
+    ownerSpelling === undefined
+      ? (headers?.members ?? [])
+      : modules.flatMap((candidate) => candidate.members)
+  const candidates = searched.filter(
     (member) =>
       isAssociated(member) &&
-      member.associatedMember.name === spelling &&
+      member.associatedMember.name === memberName &&
+      (ownerSpelling === undefined || member.associatedMember.ownerSpelling === ownerSpelling) &&
       member.canonical._tag === 'Canonical',
   )
   const preferred =

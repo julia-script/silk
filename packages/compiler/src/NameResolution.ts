@@ -386,29 +386,6 @@ export const lookup = (
     : Object.freeze({ _tag: 'Resolved', spelling, declaration })
 }
 
-/**
- * A nominal declaration doubles as its module's scope only when its name matches the module's
- * basename — case-insensitively, ignoring underscores, so `hash_map` names `HashMap`. Returns the
- * module it scopes, or undefined for every other declaration.
- */
-export const scopedModule = (declaration: DeclarationFacts.MemberFact): string | undefined => {
-  if (
-    declaration._tag !== 'StructDeclaration' &&
-    declaration._tag !== 'EnumDeclaration' &&
-    declaration._tag !== 'UnionDeclaration' &&
-    declaration._tag !== 'ServiceDeclaration' &&
-    declaration._tag !== 'InterfaceDeclaration'
-  )
-    return undefined
-  if (declaration.canonical._tag !== 'Canonical') return undefined
-  const module = declaration.canonical.id.module
-  const basename = module.slice(module.lastIndexOf('/') + 1)
-  return basename.replaceAll('_', '').toLowerCase() ===
-    declaration.canonical.id.name.replaceAll('_', '').toLowerCase()
-    ? module
-    : undefined
-}
-
 /** The outcome of looking one associated member up on a nominal owner declaration. */
 export type AssociatedLookup =
   | { readonly _tag: 'Inherent'; readonly declaration: DeclarationFacts.DeclarationFact }
@@ -572,16 +549,9 @@ export const lookupQualified = (
       declaration: qualifier.declaration,
     })
   }
-  let module: string | undefined
-  if (qualifier._tag === 'Namespace') {
-    module = qualifier.module
-  } else if (qualifier._tag === 'Resolved') {
-    module = scopedModule(qualifier.declaration)
-  } else {
-    module = undefined
-  }
-  if (module === undefined)
+  if (qualifier._tag !== 'Namespace')
     return Object.freeze({ _tag: 'Missing', spelling: `${namespace}.${member}` })
+  const module = qualifier.module
   const declaration = canonicalDeclaration(index, module, member)
   if (declaration === undefined) {
     const diagnostic = Diagnostic.unknownImportedMember(module, member, token.span)

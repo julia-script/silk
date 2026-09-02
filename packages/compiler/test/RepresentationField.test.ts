@@ -46,7 +46,6 @@ it.effect('keeps field and specialization keys stable across rename and span mov
     const moved = yield* declarations(
       module,
       `
-
 struct Parser<F: fn(i32) -> i32> {
   renamed: F
 }`,

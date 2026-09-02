@@ -70,7 +70,7 @@ pub fn main() -> i32 { return addOne(41) }`,
     pair: 'map',
     kind: 'effect',
     expected: 42,
-    source: `import silk.effect as Effect
+    source: `import silk.effect { Effect }
 
 fn addOne(value: i32) -> i32 { return value + 1 }
 effect fn succeed(value: i32) -> i32 { return value }
@@ -89,7 +89,7 @@ pub fn main() -> i32 { return addOne(41) }`,
     pair: 'map-both-success',
     kind: 'effect',
     expected: 42,
-    source: `import silk.effect as Effect
+    source: `import silk.effect { Effect }
 
 pub struct Problem { code: i32 }
 fn addOne(value: i32) -> i32 { return value + 1 }
@@ -114,7 +114,7 @@ pub fn main() -> i32 { return recover(Problem { code: 41 }) }`,
     pair: 'map-both-failure',
     kind: 'effect',
     expected: 42,
-    source: `import silk.effect as Effect
+    source: `import silk.effect { Effect }
 
 struct Problem { code: i32 }
 struct OtherProblem { code: i32 }
@@ -141,7 +141,7 @@ pub fn main() -> i32 { return addOne(41) }`,
     pair: 'flat-map',
     kind: 'effect',
     expected: 42,
-    source: `import silk.effect as Effect
+    source: `import silk.effect { Effect }
 
 effect fn succeed(value: i32) -> i32 { return value }
 effect fn addOne(value: i32) -> i32 { return value + 1 }
@@ -161,7 +161,7 @@ pub fn main() -> i32 { let clock = Clock { value: 42 } return read(&clock) }`,
     pair: 'provide',
     kind: 'effect',
     expected: 42,
-    source: `import silk.effect as Effect
+    source: `import silk.effect { Effect }
 
 service Clock {}
 struct FixedClock { value: i32 }
@@ -189,7 +189,7 @@ pub fn main() -> i32 { return double(addOne(20)) }`,
     pair: 'stored',
     kind: 'effect',
     expected: 42,
-    source: `import silk.effect as Effect
+    source: `import silk.effect { Effect }
 
 fn addOne(value: i32) -> i32 { return value + 1 }
 fn double(value: i32) -> i32 { return value * 2 }
@@ -206,7 +206,7 @@ pub fn main() -> i32 {
     kind: 'baseline',
     expected: 42,
     source: `import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 
 struct Payload { storage: Allocation value: i32 }
@@ -232,7 +232,7 @@ pub fn main() -> i32 { return run program() |> Effect.catchAll(recover) }`,
     kind: 'effect',
     expected: 42,
     source: `import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 
 struct Payload { storage: Allocation value: i32 }
@@ -264,7 +264,7 @@ pub fn main() -> i32 { return divide(0) }`,
     pair: 'trap',
     kind: 'effect',
     expected: 'trap',
-    source: `import silk.effect as Effect
+    source: `import silk.effect { Effect }
 
 fn divide(value: i32) -> i32 { return 1 / value }
 effect fn zero() -> i32 { return 0 }

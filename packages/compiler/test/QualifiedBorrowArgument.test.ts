@@ -14,7 +14,7 @@ const codes = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
  * one standard: the same diagnostics and, since the module identity is the same, the same MIR.
  * Only the reference form differs between the two sources.
  */
-const shared = `import silk.vector { Vector, make }
+const shared = `import silk.vector { Vector }
 
 pub fn main() -> usize {
   let values = Vector.make<i32>()
@@ -23,16 +23,16 @@ pub fn main() -> usize {
   return count
 }`
 
-const importedShared = `import silk.vector { Vector, make, length }
+const importedShared = `import silk.vector { Vector }
 
 pub fn main() -> usize {
-  let values = make<i32>()
-  let count = length<i32>(&values)
+  let values = Vector.make<i32>()
+  let count = Vector.length<i32>(&values)
   drop values
   return count
 }`
 
-const exclusive = `import silk.vector { Vector, make }
+const exclusive = `import silk.vector { Vector }
 
 pub fn main() -> usize {
   let mut values = Vector.make<i32>()
@@ -43,19 +43,19 @@ pub fn main() -> usize {
   return count
 }`
 
-const importedExclusive = `import silk.vector { Vector, make, length, asMutSlice }
+const importedExclusive = `import silk.vector { Vector }
 
 pub fn main() -> usize {
-  let mut values = make<i32>()
-  let slice = asMutSlice<i32>(&mut values)
+  let mut values = Vector.make<i32>()
+  let slice = Vector.asMutSlice<i32>(&mut values)
   drop slice
-  let count = length<i32>(&values)
+  let count = Vector.length<i32>(&values)
   drop values
   return count
 }`
 
 /** A borrow in a position that wants an owned value is still an invalid borrow position. */
-const ownedPosition = `import silk.vector { Vector, make }
+const ownedPosition = `import silk.vector { Vector }
 
 pub fn main() -> usize {
   let values = Vector.make<i32>()

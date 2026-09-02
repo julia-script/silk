@@ -24,7 +24,7 @@ const snapshot = (source: string, target?: string) =>
 const evaluate = (source: string) =>
   Effect.map(snapshot(source), (self) => ({ self, outcome: Analysis.evaluate(self) }))
 
-const sharedSource = `import silk.effect as Effect
+const sharedSource = `import silk.effect { Effect }
 service Counter {
   effect fn get() -> i32 ? &Counter
 }
@@ -56,7 +56,7 @@ it.effect(
   'specializes a conditional generic service witness and its unused proof dependency',
   () =>
     Effect.gen(function* () {
-      const source = `import silk.effect as Effect
+      const source = `import silk.effect { Effect }
 interface Marker { fn mark(value: &Self) -> i32 }
 
 struct Token {}
@@ -199,7 +199,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('dispatches an exclusive source service and preserves provider mutation', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`import silk.effect as Effect
+    const { self, outcome } = yield* evaluate(`import silk.effect { Effect }
 service Counter {
   effect fn increment() -> i32 ? &mut Counter
 }
@@ -224,9 +224,9 @@ pub fn main() -> i32 {
   }),
 )
 
-const randomServiceSource = `import silk.effect as Effect
-import silk.option as Option
-import silk.insecure_random as InsecureRandom
+const randomServiceSource = `import silk.effect { Effect }
+import silk.option { Option }
+import silk.insecure_random { InsecureRandom }
 import silk.u64 as u64
 import silk.u8 as u8
 import silk.usize as usize
@@ -250,11 +250,15 @@ effect fn scriptedNext(self: &mut Scripted) -> u64 {
   return value
 }
 
-impl InsecureRandom.InsecureRandom for Scripted { nextU64: Scripted.scriptedNext }
+impl InsecureRandom for Scripted { nextU64: Scripted.scriptedNext }
 
-fn next(provider: &mut Scripted) -> u64 {
+// The operation is provided at each call site from a local: a service effect provided from a
+// \`&mut\` parameter inside a section is blocked by the MIR verifier as an invalid call shape, a
+// pre-existing lowering hole that the deleted root wrapper used to mask (follow-up task "Fix silent
+// trap when a service effect is provided from a &mut parameter"; the characterization test below
+// pins it).
+effect fn next() -> u64 ? &mut InsecureRandom {
   return run InsecureRandom.nextU64()
-    |> Effect.provideMut<InsecureRandom.InsecureRandom>(provider)
 }
 
 fn matches(seed: u64, expected: &[u64]) -> bool {
@@ -262,7 +266,7 @@ fn matches(seed: u64, expected: &[u64]) -> bool {
   let mut index = usize.ZERO
   while index < expected.length {
     let actual = run InsecureRandom.nextU64()
-      |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut provider)
+      |> Effect.provideMut<InsecureRandom>(&mut provider)
     if actual != expected[index] { return false }
     index = index + usize.ONE
   }
@@ -295,9 +299,9 @@ fn reproducible() -> bool {
   let mut index = usize.ZERO
   while index < 16 {
     let leftWord = run InsecureRandom.nextU64()
-      |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut left)
+      |> Effect.provideMut<InsecureRandom>(&mut left)
     let rightWord = run InsecureRandom.nextU64()
-      |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut right)
+      |> Effect.provideMut<InsecureRandom>(&mut right)
     if leftWord != rightWord { return false }
     index = index + usize.ONE
   }
@@ -325,37 +329,40 @@ fn zeroBytes3() -> [u8; 3] {
 
 fn derivedOperations() -> bool {
   let mut direct = scripted(20, 22, 99)
-  if next(&mut direct) + next(&mut direct) != 42 { return false }
+  let first = run next() |> Effect.provideMut<InsecureRandom>(&mut direct)
+  let second = run next() |> Effect.provideMut<InsecureRandom>(&mut direct)
+  if first + second != 42 { return false }
   if direct.index != 2 { return false }
 
   let mut booleans = scripted(0, 0x8000000000000000, 99)
   let low = run InsecureRandom.nextBool()
-    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut booleans)
+    |> Effect.provideMut<InsecureRandom>(&mut booleans)
   let high = run InsecureRandom.nextBool()
-    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut booleans)
+    |> Effect.provideMut<InsecureRandom>(&mut booleans)
   if low || !high || booleans.index != 2 { return false }
 
   let mut zeroBound = scripted(41, 99, 99)
   let absent = run InsecureRandom.below(0)
-    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut zeroBound)
+    |> Effect.provideMut<InsecureRandom>(&mut zeroBound)
   if Option.unwrapOr<u64>(move absent, 42) != 42 { return false }
-  if next(&mut zeroBound) != 41 || zeroBound.index != 1 { return false }
+  let bound = run next() |> Effect.provideMut<InsecureRandom>(&mut zeroBound)
+  if bound != 41 || zeroBound.index != 1 { return false }
 
   let mut rejected = scripted(5, 17, 99)
   let bounded = run InsecureRandom.below(10)
-    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut rejected)
+    |> Effect.provideMut<InsecureRandom>(&mut rejected)
   if Option.unwrapOr<u64>(move bounded, 99) != 7 { return false }
   if rejected.index != 2 { return false }
 
   let mut bytesProvider = scripted(0x0807060504030201, 0x11100f0e0d0c0b0a, 99)
   let mut empty = emptyBytes()
   run InsecureRandom.fillBytes(&mut empty)
-    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut bytesProvider)
+    |> Effect.provideMut<InsecureRandom>(&mut bytesProvider)
   if bytesProvider.index != usize.ZERO { return false }
 
   let mut full = zeroBytes8()
   run InsecureRandom.fillBytes(&mut full)
-    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut bytesProvider)
+    |> Effect.provideMut<InsecureRandom>(&mut bytesProvider)
   if bytesProvider.index != usize.ONE { return false }
   let expectedFull = [
     u8.toU8(1),
@@ -375,7 +382,7 @@ fn derivedOperations() -> bool {
 
   let mut partial = zeroBytes3()
   run InsecureRandom.fillBytes(&mut partial)
-    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut bytesProvider)
+    |> Effect.provideMut<InsecureRandom>(&mut bytesProvider)
   if bytesProvider.index != 2 { return false }
   if partial[0] != u8.toU8(10) || partial[1] != u8.toU8(11) || partial[2] != u8.toU8(12) {
     return false
@@ -408,10 +415,10 @@ it.effect(
     }),
 )
 
-const randomCapabilitiesSource = `import silk.effect as Effect
-import silk.insecure_seed as InsecureSeed
-import silk.option as Option
-import silk.random as Random
+const randomCapabilitiesSource = `import silk.effect { Effect }
+import silk.insecure_seed { InsecureSeed }
+import silk.option { Option }
+import silk.random { Random }
 import silk.u64 as u64
 import silk.u8 as u8
 import silk.usize as usize
@@ -456,7 +463,7 @@ effect fn scriptedFill(self: &mut ScriptedRandom, output: &mut [u8]) -> () {
   return ()
 }
 
-impl Random.Random for ScriptedRandom {
+impl Random for ScriptedRandom {
   fillBytes: ScriptedRandom.scriptedFill
 }
 
@@ -466,34 +473,34 @@ fn values() -> bool {
   let mut provider = scriptedRandom()
   let mut firstEmpty = emptyBytes()
   run Random.fillBytes(&mut firstEmpty)
-    |> Effect.provideMut<Random.Random>(&mut provider)
+    |> Effect.provideMut<Random>(&mut provider)
   let mut secondEmpty = emptyBytes()
-  run Random.Random.fillBytes(&mut secondEmpty)
-    |> Effect.provideMut<Random.Random>(&mut provider)
+  run Random.fillBytes(&mut secondEmpty)
+    |> Effect.provideMut<Random>(&mut provider)
   if provider.index != usize.ZERO { return false }
 
   let word = run Random.nextU64()
-    |> Effect.provideMut<Random.Random>(&mut provider)
+    |> Effect.provideMut<Random>(&mut provider)
   if word != u64.toU64(0x0807060504030201) { return false }
   let flag = run Random.nextBool()
-    |> Effect.provideMut<Random.Random>(&mut provider)
+    |> Effect.provideMut<Random>(&mut provider)
   if !flag { return false }
   let absent = run Random.below(0)
-    |> Effect.provideMut<Random.Random>(&mut provider)
+    |> Effect.provideMut<Random>(&mut provider)
   if Option.unwrapOr<u64>(move absent, 42) != 42 { return false }
   if provider.index != 2 { return false }
   let bounded = run Random.below(10)
-    |> Effect.provideMut<Random.Random>(&mut provider)
+    |> Effect.provideMut<Random>(&mut provider)
   if Option.unwrapOr<u64>(move bounded, 99) != 7 { return false }
   if provider.index != 4 { return false }
 
   let seedProvider = run InsecureSeed.fromRandom()
-    |> Effect.provideMut<Random.Random>(&mut provider)
+    |> Effect.provideMut<Random>(&mut provider)
   if provider.index != 6 { return false }
   let firstSeed = run InsecureSeed.get()
-    |> Effect.provide<InsecureSeed.InsecureSeed>(&seedProvider)
+    |> Effect.provide<InsecureSeed>(&seedProvider)
   let secondSeed = run InsecureSeed.get()
-    |> Effect.provide<InsecureSeed.InsecureSeed>(&seedProvider)
+    |> Effect.provide<InsecureSeed>(&seedProvider)
   if InsecureSeed.first(&firstSeed) != 20 { return false }
   if InsecureSeed.second(&firstSeed) != 22 { return false }
   if InsecureSeed.first(&secondSeed) != 20 { return false }
@@ -502,7 +509,7 @@ fn values() -> bool {
 
   let fixed = InsecureSeed.fixed(40, 2)
   let fixedSeed = run InsecureSeed.get()
-    |> Effect.provide<InsecureSeed.InsecureSeed>(&fixed)
+    |> Effect.provide<InsecureSeed>(&fixed)
   return InsecureSeed.first(&fixedSeed) + InsecureSeed.second(&fixedSeed) == 42
 }
 
@@ -529,7 +536,7 @@ it.effect('keeps InsecureSeed fields private', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(
       'insecure-seed/private',
-      encoder.encode(`import silk.insecure_seed as InsecureSeed
+      encoder.encode(`import silk.insecure_seed { InsecureSeed }
 pub fn main() -> i32 {
   let provider = InsecureSeed.fixed(1, 2)
   return provider.seed.first
@@ -572,7 +579,7 @@ for (const provider of [
     `transfers ${provider.label} Effect recipes and protected borrows through move aliases`,
     () =>
       Effect.gen(function* () {
-        const source = `import silk.effect as Effect
+        const source = `import silk.effect { Effect }
 import silk.result { Result }
 struct Token { value: i32 }
 service Counter {
@@ -653,7 +660,7 @@ pub fn main() -> i32 {
 
 it.effect('dispatches an owned source service provider exactly once', () =>
   Effect.gen(function* () {
-    const source = `import silk.effect as Effect
+    const source = `import silk.effect { Effect }
 service Counter {
   effect fn increment() -> i32 ? &mut Counter
 }
@@ -730,7 +737,7 @@ it.effect('releases an affine owned provider after a pre-read scalar suspends an
     const self = yield* snapshot(ownedProviderSuspendedFailure, 'wasm32-unknown-unknown')
     assert.deepEqual(Analysis.diagnostics(self), [])
     const catchRunner = Analysis.loweredMir(self).functions.find((fn) =>
-      fn.id.name.startsWith('catchAll$effect$'),
+      fn.id.name.startsWith('Effect.catchAll$effect$'),
     )
     const caught = catchRunner?.suspension?.regions.find(
       (region) =>
@@ -766,7 +773,7 @@ it.effect('keeps a synchronous service with an allocator requirement synchronous
     const source = `import silk.allocator { Allocator }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 service Value {
   effect fn read() -> i32 ? &mut Value | &mut Allocator
 }
@@ -837,7 +844,7 @@ import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.layout { Layout }
-import silk.effect as Effect
+import silk.effect { Effect }
 struct Problem { code: i32 }
 service Value { effect fn read() -> i32 ? &mut Value }
 struct Provider { storage: Allocation }
@@ -906,7 +913,7 @@ pub fn main() -> i32 {
 
 it.effect('uses a nested provider override only for its lexical provision', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`import silk.effect as Effect
+    const { self, outcome } = yield* evaluate(`import silk.effect { Effect }
 service Value {
   effect fn get() -> i32 ? &Value
 }
@@ -932,7 +939,7 @@ pub fn main() -> i32 {
 
 it.effect('selects each lexical provider of the same service capability', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 service Value {
   effect fn get() -> i32 ? &Value
 }
@@ -1006,7 +1013,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('ends the provider loan after the provided effect completes', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`import silk.effect as Effect
+    const { self, outcome } = yield* evaluate(`import silk.effect { Effect }
 service Value {
   effect fn get() -> i32 ? &Value
 }
@@ -1041,5 +1048,51 @@ it.effect('lowers shared source service dispatch through LLVM and direct Wasm', 
     const main = instance.exports.silk_main
     if (typeof main !== 'function') throw new Error('source-service Wasm lost silk_main')
     assert.strictEqual(main(), 42)
+  }),
+)
+
+const parameterProvidedSource = `import silk.effect { Effect }
+import silk.insecure_random { InsecureRandom }
+import silk.usize as usize
+
+struct Scripted { first: u64 index: usize }
+
+effect fn scriptedNext(self: &mut Scripted) -> u64 {
+  self.index = self.index + usize.ONE
+  return self.first
+}
+
+impl InsecureRandom for Scripted { nextU64: Scripted.scriptedNext }
+
+fn next(provider: &mut Scripted) -> u64 {
+  return run InsecureRandom.nextU64() |> Effect.provideMut<InsecureRandom>(provider)
+}
+
+pub fn main() -> i32 {
+  let mut direct = Scripted { first: 21, index: usize.ZERO }
+  if next(&mut direct) + next(&mut direct) != 42 { return 1 }
+  return 42
+}`
+
+it.effect('characterizes the trap of a service effect provided from a borrowed parameter', () =>
+  Effect.gen(function* () {
+    // Known lowering hole, kept visible on purpose: analysis reports nothing, the provider's
+    // operation is lowered as an unavailable body, and the verifier blocks the run as an invalid
+    // call shape instead of completing with 42. Delete this case together with the hole.
+    const self = yield* Analysis.ofSourceRealized(
+      'user-services/parameter-provided',
+      new TextEncoder().encode(parameterProvidedSource),
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Blocked')
+    if (evaluated._tag !== 'Blocked') return
+    assert.strictEqual(evaluated.reason._tag, 'InvalidMir')
+    if (evaluated.reason._tag !== 'InvalidMir') return
+    // Both calls of `next` are refused for the same reason.
+    assert.deepEqual(
+      evaluated.reason.violations.map((violation) => violation.rule),
+      ['InvalidCallShape', 'InvalidCallShape'],
+    )
   }),
 )
