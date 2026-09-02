@@ -52,7 +52,9 @@ The resolver seam is built from the _collected_ headers before completion runs, 
 target is still syntax when a use site first asks for it. The type resolver therefore resolves an
 alias target on first demand through `resolveDeclaredType`, memoizes the outcome per canonical alias
 id, and keeps an in-progress set. Re-entering an alias already in the set is a cycle: the alias
-resolves to `Unavailable` with a cyclic-alias cause. `DeclarationCompletion` forces every alias once
+resolves to an unresolved spelling of its own name carrying the cyclic-alias cause, the same fact
+shape an unknown type produces, so uses after completion still read the cause off the completed
+fact. `DeclarationCompletion` forces every alias once
 so the cycle diagnostic is reported at each declaration on the cycle, with the others related, and
 so a use site only ever reports the unavailable cause rather than a second cycle diagnostic.
 
