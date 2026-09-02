@@ -785,7 +785,7 @@ pub fn main() -> i32 { return 42 }`),
 
 it.effect('writes and reads array elements through an offset slice pointer', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`import silk.pointer as Pointer
+    const outcome = yield* evaluateSource(`import silk.pointer { Pointer }
 pub fn main() -> i32 {
   let mut values = [1, 2, 3, 4]
   let pointer = Pointer.fromMutSlice(&mut values)
@@ -803,14 +803,14 @@ pub fn main() -> i32 {
 
 it.effect('reads the second raw-buffer element through an offset ticket pointer', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`import silk.allocator { Allocator }
+    const outcome = yield* evaluateSource(`import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.layout { Layout }
 import silk.pointer { Pointer }
 import silk.raw_buffer { RawBuffer }
 import silk.u8
 
-effect fn build() -> i32 ! Allocator.OutOfMemoryError {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let acquiring = Allocator.allocate(Layout.of<[u8; 3]>())
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -825,7 +825,7 @@ effect fn build() -> i32 ! Allocator.OutOfMemoryError {
   return 0
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -840,7 +840,7 @@ pub fn main() -> i32 {
 
 it.effect('writes a scalar through a pointer formed from an exclusive reference', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`import silk.pointer as Pointer
+    const outcome = yield* evaluateSource(`import silk.pointer { Pointer }
 pub fn main() -> i32 {
   let mut x = 1
   let pointer = Pointer.fromMutRef(&mut x)
@@ -857,7 +857,7 @@ pub fn main() -> i32 {
 
 it.effect('traps a dereference of a pointer to a returned frame as data', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`import silk.pointer as Pointer
+    const outcome = yield* evaluateSource(`import silk.pointer { Pointer }
 fn dangling() -> *const i32 {
   let local = 5
   return Pointer.fromRef(&local)
@@ -877,7 +877,7 @@ pub fn main() -> i32 {
 
 it.effect('traps a write through the null pointer naming the primitive', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`import silk.pointer as Pointer
+    const outcome = yield* evaluateSource(`import silk.pointer { Pointer }
 pub fn main() -> i32 {
   unsafe {
     Pointer.write(Pointer.null<i32>(), 7)
@@ -893,7 +893,7 @@ pub fn main() -> i32 {
 
 it.effect('distinguishes the null pointer from a formed one', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`import silk.pointer as Pointer
+    const outcome = yield* evaluateSource(`import silk.pointer { Pointer }
 pub fn main() -> i32 {
   let x = 1
   if Pointer.isNull(Pointer.fromRef(&x)) {

@@ -1152,7 +1152,7 @@ const staticCompositionCorpus: ReadonlyArray<CorpusProgram> = [
 ]
 
 /** A Silk callee stores through a `*mut i32` parameter; the caller reloads the place afterwards. */
-const pointerParameterWrite = `import silk.pointer as Pointer
+const pointerParameterWrite = `import silk.pointer { Pointer }
 fn store(target: *mut i32, value: i32) -> () {
   unsafe { Pointer.write(target, value) }
 }
@@ -2846,7 +2846,7 @@ pub fn main() -> i32 {
   // array place; and a Silk callee writing through a `*mut i32` parameter observed by its caller.
   {
     name: 'pointer-slice-offset-write',
-    source: `import silk.pointer as Pointer
+    source: `import silk.pointer { Pointer }
 pub fn main() -> i32 {
   let mut values = [1, 2, 3, 4]
   let pointer = Pointer.fromMutSlice(&mut values)
@@ -3062,7 +3062,7 @@ void silk_test_fill(uint8_t *buffer, size_t length, uint8_t byte) {
 `
 
 /** `Pointer.fromMutRef(&mut result)` handed to C; the Silk read afterwards observes the store. */
-export const foreignPointerStoreNative = `import silk.pointer as Pointer
+export const foreignPointerStoreNative = `import silk.pointer { Pointer }
 unsafe extern "C" fn silk_test_store(out: *mut i32, value: i32) -> ()
 pub fn main() -> i32 {
   let mut result = 0
@@ -3073,7 +3073,7 @@ pub fn main() -> i32 {
 /** `Pointer.fromMutSlice(&mut bytes)` plus `bytes.length` handed to C; `bytes[0]` observes the fill. */
 export const foreignPointerFillNative = `import silk.i32 as i32
 import silk.u8 as u8
-import silk.pointer as Pointer
+import silk.pointer { Pointer }
 unsafe extern "C" fn silk_test_fill(buffer: *mut u8, length: usize, byte: u8) -> ()
 fn fill(bytes: &mut [u8], byte: u8) -> () {
   unsafe silk_test_fill(Pointer.fromMutSlice(&mut bytes), bytes.length, byte)
@@ -3111,7 +3111,7 @@ pub fn main() -> i32 {
 export const foreignLibcRoundtripNative = `import silk.i32 as i32
 import silk.isize as isize
 import silk.usize as usize
-import silk.pointer as Pointer
+import silk.pointer { Pointer }
 unsafe extern "C" fn malloc(size: usize) -> *mut u8
 unsafe extern "C" fn free(pointer: *mut u8) -> ()
 unsafe extern "C" fn memcpy(destination: *mut u8, source: *const u8, length: usize) -> *mut u8

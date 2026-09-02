@@ -562,7 +562,7 @@ it.effect('verifies a foreign pointer argument against the declared pointee', ()
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'mir/foreign-pointer-argument',
-      ascii(`import silk.pointer as Pointer
+      ascii(`import silk.pointer { Pointer }
 unsafe extern "C" fn inspect(value: *const i32) -> i32
 pub fn main() -> i32 {
   let mut value = 1
@@ -623,7 +623,7 @@ it.effect('lowers pointer formation, offset, write, and read to explicit pointer
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'mir/pointer-slice',
-      ascii(`import silk.pointer as Pointer
+      ascii(`import silk.pointer { Pointer }
 pub fn main() -> i32 {
   let mut values = [1, 2, 3]
   let pointer = Pointer.fromMutSlice(&mut values)

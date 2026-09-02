@@ -2641,7 +2641,7 @@ it.effect('bounds Pointer.read and Pointer.write to a Copy pointee at the wrappe
   Effect.gen(function* () {
     const rejected = yield* analyzeWithStdlib(
       'pointer://move-only-read',
-      `import silk.pointer as Pointer
+      `import silk.pointer { Pointer }
 import silk.vector { Vector }
 fn read(pointer: *const Vector<i32>) -> Vector<i32> {
   unsafe { return Pointer.read(pointer) }
@@ -2653,7 +2653,7 @@ fn read(pointer: *const Vector<i32>) -> Vector<i32> {
     )
     const accepted = yield* analyzeWithStdlib(
       'pointer://copy-read',
-      `import silk.pointer as Pointer
+      `import silk.pointer { Pointer }
 fn read(pointer: *const i32) -> i32 {
   unsafe { return Pointer.read(pointer) }
 }`,
@@ -2666,7 +2666,7 @@ it.effect('forms pointers in safe code and requires unsafe to dereference', () =
   Effect.gen(function* () {
     const formed = yield* analyzeWithStdlib(
       'pointer://safe-formation',
-      `import silk.pointer as Pointer
+      `import silk.pointer { Pointer }
 fn form(value: &mut i32, values: &[u8]) -> *mut i32 {
   let first = Pointer.fromSlice(values)
   let missing = Pointer.isNull(first)
@@ -2677,7 +2677,7 @@ fn form(value: &mut i32, values: &[u8]) -> *mut i32 {
     assert.deepEqual(formed.diagnostics, [])
     const rejected = yield* analyzeWithStdlib(
       'pointer://safe-read',
-      `import silk.pointer as Pointer
+      `import silk.pointer { Pointer }
 fn read(pointer: *const i32) -> i32 { return Pointer.read(pointer) }`,
     )
     assert.deepEqual(

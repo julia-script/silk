@@ -732,7 +732,7 @@ it.effect('accepts distinct export symbols across modules in canonical order', (
 
 it.effect('rejects an export whose body suspends and accepts a synchronous one', () =>
   Effect.gen(function* () {
-    const suspending = yield* snapshot(`import silk.effect as Effect
+    const suspending = yield* snapshot(`import silk.effect { Effect }
 export "C" fn silk_test_wait_v1() -> i32 { return run Effect.suspend(effect { return 2 }) }
 pub fn main() -> i32 { return 0 }`)
     assert.deepEqual(Analysis.diagnostics(suspending), [])
