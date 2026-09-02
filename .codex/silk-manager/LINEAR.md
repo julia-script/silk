@@ -36,6 +36,28 @@ Create a `Blocked` issue label only when the first real blocked issue needs it; 
 large project-specific label taxonomy. Use the existing `Bug`, `Improvement`, and `Feature` labels
 as broad Linear labels, while the description carries the precise maintenance theme.
 
+## Area labels
+
+The team has an optional, mutually exclusive `Area` issue-label group:
+
+| Label              | ID                                     | Apply when the primary owned surface is                                           |
+| ------------------ | -------------------------------------- | --------------------------------------------------------------------------------- |
+| `Docs`             | `c474a43d-ee5c-45a1-89f6-879b5f4de89e` | reference, tutorials, READMEs, examples, generated docs, or documentation tooling |
+| `Standard library` | `97c9816f-e6ad-4e41-bc26-9f54984b5fee` | standard-library APIs, implementations, runtime contracts, or generated surfaces  |
+| `Compiler`         | `f1ae3797-6ffb-4e1d-9801-11913fa5695b` | frontend, analysis, IR, ownership, evaluation, diagnostics, lowering, or backends |
+| `LSP`              | `2e78d926-3248-4680-8031-092813c98825` | language-server behavior, protocol integration, or editor language intelligence   |
+
+Apply exactly one Area label only when one of these is the issue's clear primary owning surface.
+Classify by the core deliverable, not incidental follow-up: a compiler change that also updates
+reference text is `Compiler`, while a ticket whose outcome is correcting false documentation is
+`Docs`. Leave Area empty for repository-wide work, tooling outside these four surfaces,
+cross-cutting work without one clear owner, or uncertain intake. Do not force the nearest label.
+
+Area is independent of the broad `Bug`, `Improvement`, or `Feature` label and the maintenance theme
+in the description. Preserve valid labels outside the current workflow decision. Discovery and
+demand may set an evident Area at intake; triage must verify, replace, or clear it from the final
+scope. A later technical review does the same when the issue's primary ownership changes.
+
 ## Selection
 
 Restrict every listing, deduplication pass, and count to canonical project ID

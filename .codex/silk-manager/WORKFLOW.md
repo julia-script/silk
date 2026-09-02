@@ -123,6 +123,7 @@ description uses this shape, omitting empty sections:
 - Theme: <maintenance theme>
 - Origin: discovery | direct demand
 - Scope: <package, app, docs area, or repository-wide>
+- Area label: Docs | Standard library | Compiler | LSP | none
 
 ## Why this matters
 
@@ -202,6 +203,11 @@ commit delta.
 `Source baseline` remains the issue's origin. `Review baseline` tells the next agent exactly which
 commit and repository context last supported the current issue state. The advancement rules in
 `REVIEW_BASELINE.md` are part of the issue quality bar.
+
+The `Area label` line records the Linear Area classification for future readers; it does not replace
+the actual label. Follow `LINEAR.md` and use exactly one only for a clear primary owning surface.
+Write `none` and leave the Linear Area field empty when none applies. Triage and later technical
+reviews keep the line and Linear label synchronized with the current scope.
 
 Use Linear comments for dated discovery additions, implementation reports, and reconciliation
 history. Keep the description as the current specification rather than an activity log.

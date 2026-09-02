@@ -54,6 +54,8 @@ cap the result or stop after the first strong finding.
    concrete provisional desired-behavior snippet under `WORKFLOW.md`; do not invent a target API
    merely to make the pair complete.
    Use `Bug` only for directly demonstrated defects; otherwise use `Improvement` or no broad label.
+   Apply the optional Area label from `LINEAR.md` only when the lead has one clear primary owning
+   surface. Leave Area empty when none applies or ownership is uncertain.
 7. For an existing issue, add only genuinely new evidence as a dated comment. Do not reopen,
    reprioritize, rewrite a triaged issue, or advance its Review baseline during discovery. A
    mechanical legacy migration from its Source baseline is allowed.
@@ -63,6 +65,6 @@ cap the result or stop after the first strong finding.
 
 Every new issue must meet the Backlog intake bar in `WORKFLOW.md`, include concrete breadcrumbs,
 an explicit causal justification, useful current/desired snippets when applicable, triage
-questions, and both baseline sections. Draft acceptance is optional because triage owns the final
-specification. One excellent issue is not evidence of a thorough sweep; breadth is demonstrated by
-completed scout assignments, coverage, and the second-pass rule.
+questions, an explicit Area-label decision, and both baseline sections. Draft acceptance is optional
+because triage owns the final specification. One excellent issue is not evidence of a thorough
+sweep; breadth is demonstrated by completed scout assignments, coverage, and the second-pass rule.

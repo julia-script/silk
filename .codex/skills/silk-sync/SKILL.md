@@ -37,8 +37,10 @@ new maintenance issues.
 5. Re-read every issue before and after mutation. Preserve priority, estimate, relations, and
    specification unless the observed transition requires a focused note. When reconciliation fully
    revalidates the issue, apply the state/specification conclusion first and then advance Review
-   baseline to the exact supporting commit with `Stage: sync`. Use `Outcome: delivered` or
-   `Outcome: terminal` for final states and the accurate nonterminal Outcome otherwise. If the
+   baseline to the exact supporting commit with `Stage: sync`. During that review, also reconcile
+   the optional Area label and description line under `LINEAR.md` when primary ownership changed;
+   leave the Linear Area field empty and record `none` when no Area applies. Use
+   `Outcome: delivered` or `Outcome: terminal` for final states and the accurate nonterminal Outcome otherwise. If the
    old-to-new delta for an established baseline cannot be inspected, retain it and report the gap.
    A legacy unresolved or unknown baseline may advance only after the full current-state recovery
    review in `REVIEW_BASELINE.md`.

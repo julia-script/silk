@@ -35,7 +35,9 @@ provides them. Do not invent missing detail or require a person's name when a ro
    enough evidence, add the short paired current/desired snippets described in `WORKFLOW.md`. Copy
    current code exactly and keep a user-supplied desired example faithful; otherwise omit the
    uncertain side and make it a triage question rather than inventing code. Use `Feature`, `Bug`,
-   or `Improvement` only when the request clearly fits; otherwise omit the label.
+   or `Improvement` only when the request clearly fits; otherwise omit the label. Set the optional
+   Area label from `LINEAR.md` only when the request has one clear primary owning surface; otherwise
+   record `Area label: none` and leave the Linear Area field empty.
 6. Read the issue back and report its identifier, title, link, requester, captured outcome, and
    Review baseline commit and stage.
 

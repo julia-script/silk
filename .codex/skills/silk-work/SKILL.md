@@ -31,7 +31,8 @@ next issue only when selection was automatic. If the delta cannot be reviewed, d
 advance an established baseline. A legacy unresolved or unknown baseline requires the full
 current-state recovery review from `REVIEW_BASELINE.md` before claiming. Otherwise update the issue
 specification if needed, including refreshing or removing current/desired snippets invalidated by
-the reviewed delta, set Review baseline to `Stage: work admission` and
+the reviewed delta and correcting the Area label when primary ownership changed, set Review
+baseline to `Stage: work admission` and
 `Outcome: implementation ready`, then set it to In Progress and read it back before editing.
 
 ## Implementation

@@ -73,6 +73,7 @@ coverage:
 candidates:
   - title
     theme
+    area_label: Docs | Standard library | Compiler | LSP | none
     scope
     confidence: high | medium | low
     observation
@@ -114,8 +115,9 @@ states, open PRs, and active OpenSpec changes before creating anything.
 Spot-check lead identity, provenance, and rationale during fan-in. This is not a skeptical or
 adversarial review. Confirm that the cited subject exists, the evidence was not fabricated, the
 lead is not an exact duplicate or clearly owned by active work, and `Why this matters` states a
-specific causal hypothesis rather than merely repeating the observation. Leave verification of
-that impact, final design, and worth to triage.
+specific causal hypothesis rather than merely repeating the observation. Verify that any proposed
+Area label names one clear primary owning surface under `LINEAR.md`; use `none` rather than guessing.
+Leave verification of that impact, final design, and worth to triage.
 
 Build a coverage ledger for these areas:
 

@@ -51,7 +51,9 @@ state` and `## Desired behavior` snippets under `WORKFLOW.md`. Verify the curren
    the exact triage baseline, make the desired example express the accepted observable behavior,
    and replace or remove stale intake snippets.
    Never leave Todo with only an outcome, scope, and acceptance list. Make every acceptance item
-   observable. Assign priority, estimate, and a broad existing label. Move it to Todo.
+   observable. Assign priority, estimate, and a broad existing label. Verify, replace, or clear the
+   optional Area label under `LINEAR.md`, keeping the description's `Area label` line synchronized;
+   do not force an Area when none applies. Move it to Todo.
    Then update Review baseline to the exact triage commit with `Stage: triage` and either
    `Outcome: confirmed current` or `Outcome: specification revised`.
 8. When completion is genuinely blocked, keep it Todo, add the smallest accurate `## Gate`, and

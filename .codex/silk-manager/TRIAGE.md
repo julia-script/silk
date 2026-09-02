@@ -51,6 +51,7 @@ overlaps:
 recommended_shape:
   title
   pitch
+  area_label: Docs | Standard library | Compiler | LSP | none
   why_it_matters:
     current_cost_or_risk
     affected_workflow_or_property
@@ -81,6 +82,8 @@ challenges:
   - claim challenged, counter-evidence, and consequence
 grouping_review:
   - merge, split, keep separate, or no concern
+area_label_review:
+  - correct, replace with one named Area, or clear because none has primary ownership
 acceptance_gaps:
   - condition that is vague, solution-prescriptive, or cannot falsify completion
 snippet_gaps:
