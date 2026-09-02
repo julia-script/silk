@@ -1048,7 +1048,7 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
         return [
           ...(expression.root._tag === 'TemporarySliceRoot' ? [expression.root.value] : []),
           ...expression.selectors.flatMap((selector) =>
-            selector._tag === 'Index' ? [selector.index] : [],
+            selector._tag === 'Index' || selector._tag === 'SliceIndex' ? [selector.index] : [],
           ),
         ]
       case 'Construct':

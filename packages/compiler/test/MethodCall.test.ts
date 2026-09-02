@@ -279,6 +279,117 @@ pub fn main() -> i32 { return 0 }`)
   }),
 )
 
+it.effect('discovers calls inside compiler-owned temporary borrow roots', () =>
+  Effect.gen(function* () {
+    const source = `${counter}
+struct Guard { value: i32 }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () { return () }
+}
+fn makeCounter(trace: &mut [i32], digit: i32) -> Counter {
+  trace[0] = trace[0] * 10 + digit
+  return Counter { value: digit }
+}
+fn makeRows(trace: &mut [i32]) -> [[i32; 2]; 2] {
+  trace[0] = trace[0] * 10 + 3
+  return [[1, 2], [40, 2]]
+}
+fn select(trace: &mut [i32]) -> usize {
+  trace[0] = trace[0] * 10 + 4
+  return 1
+}
+fn sum(values: &[i32]) -> i32 { return values[0] + values[1] }
+fn selectSlice(trace: &mut [i32]) -> usize {
+  trace[0] = trace[0] * 10 + 5
+  return 1
+}
+fn read(value: &i32) -> i32 { return value.* }
+fn readSelected(values: &[i32], trace: &mut [i32]) -> i32 {
+  return read(&values[selectSlice(trace)])
+}
+fn makeGuards(trace: &mut [i32]) -> [Guard; 1] {
+  trace[0] = trace[0] * 10 + 6
+  return [Guard { value: 42 }]
+}
+fn readGuard(values: &[Guard]) -> i32 { return values[0].value }
+pub fn main() -> i32 {
+  let mut trace = [0]
+  let directZero = Counter.read(&Counter.zero())
+  let receiverZero = Counter.zero().read()
+  let direct = Counter.read(&makeCounter(&mut trace, 1))
+  let receiver = makeCounter(&mut trace, 2).read()
+  let selected = sum(&makeRows(&mut trace)[select(&mut trace)])
+  let values = [1, 42]
+  let sliceSelected = readSelected(&values, &mut trace)
+  let guarded = readGuard(&makeGuards(&mut trace))
+  return directZero + receiverZero + direct + receiver + selected + sliceSelected + guarded + trace[0]
+}`
+    const self = yield* analyze(source)
+    assert.deepEqual(codes(self), [])
+    const lowered = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(lowered), [])
+    const main = lowered.functions.find((fn) => fn.id.name === 'main')
+    const operations =
+      main?.regions.flatMap((region) => {
+        if (region._tag === 'OperationRegion') return region.operations
+        if (region._tag === 'CleanupRegion') return region.releases
+        return []
+      }) ?? []
+    assert.deepEqual(
+      operations.flatMap((operation) => (operation._tag === 'Call' ? [operation.target.name] : [])),
+      [
+        'Counter.zero',
+        'Counter.read',
+        'Counter.zero',
+        'Counter.read',
+        'makeCounter',
+        'Counter.read',
+        'makeCounter',
+        'Counter.read',
+        'makeRows',
+        'select',
+        'sum',
+        'readSelected',
+        'makeGuards',
+        'readGuard',
+      ],
+    )
+    const readSelected = lowered.functions.find((fn) => fn.id.name === 'readSelected')
+    assert.deepEqual(
+      readSelected?.regions.flatMap((region) =>
+        region._tag === 'OperationRegion'
+          ? region.operations.flatMap((operation) =>
+              operation._tag === 'Call' ? [operation.target.name] : [],
+            )
+          : [],
+      ),
+      ['selectSlice', 'read'],
+    )
+    const guardRead = operations.findIndex(
+      (operation) => operation._tag === 'Call' && operation.target.name === 'readGuard',
+    )
+    const guardLoanEnd = operations.findIndex(
+      (operation, ordinal) => operation._tag === 'EndLoan' && ordinal > guardRead,
+    )
+    const guardCleanup = operations.findIndex(
+      (operation, ordinal) =>
+        operation._tag === 'Drop' &&
+        operation.cleanup._tag === 'ArrayCleanup' &&
+        ordinal > guardLoanEnd,
+    )
+    assert.isAtLeast(guardRead, 0)
+    assert.isAbove(guardLoanEnd, guardRead)
+    assert.isAbove(guardCleanup, guardLoanEnd)
+    assert.strictEqual(
+      operations.filter(
+        (operation) => operation._tag === 'Drop' && operation.cleanup._tag === 'ArrayCleanup',
+      ).length,
+      1,
+    )
+    assert.strictEqual(evaluated(self), 123585n)
+  }),
+)
+
 it.effect('rejects associated functions on values and binds receiver methods as values', () =>
   Effect.gen(function* () {
     const noReceiver = yield* analyze(`${counter}

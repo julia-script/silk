@@ -426,6 +426,11 @@ export const make = (operations: Operations) => {
         ...callTargets(expression.index, index, substitution),
       ]
     }
+    if (expression._tag === 'SliceBorrow' || expression._tag === 'ValueBorrow') {
+      return Hir.expressionChildren(expression).flatMap((child) =>
+        callTargets(child, index, substitution),
+      )
+    }
     if (expression._tag === 'Construct' || expression._tag === 'ConstructUnionVariant') {
       return expression.fields.flatMap((field) => callTargets(field.value, index, substitution))
     }
