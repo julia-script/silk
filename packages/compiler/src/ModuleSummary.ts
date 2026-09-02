@@ -42,6 +42,7 @@ const declarationKind = (
 ): { readonly declarationKind: DeclarationKind; readonly namespace: Namespace } | undefined => {
   switch (kind) {
     case 'FunctionDeclaration':
+    case 'ForeignFunctionDeclaration':
       return { declarationKind: 'Function', namespace: 'Value' }
     case 'ConstantDeclaration':
       return { declarationKind: 'Constant', namespace: 'Value' }

@@ -19,6 +19,7 @@ import * as Frontend from './Frontend.js'
 import * as FrontendTooling from './FrontendTooling.js'
 import * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
+import * as ForeignAvailability from './ForeignAvailability.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Layout from './Layout.js'
 import * as LlvmBackend from './LlvmBackend.js'
@@ -1105,6 +1106,22 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
       operation: 'Analysis.codegen',
       message: `${selected.name} cannot emit a program with unavailable intrinsics`,
       diagnostics: Diagnostic.merge(self.diagnostics, availability.diagnostics),
+      resolutionFailures: self.closure.resolutionFailures,
+    })
+  }
+  const foreign =
+    self.target._tag === 'Resolved'
+      ? ForeignAvailability.select(
+          self.instances.foreignCalls,
+          IntrinsicAvailability.backendTarget(selected.id),
+          self.target.target,
+        )
+      : Object.freeze([])
+  if (foreign.length > 0) {
+    return yield* new CodegenUnavailable({
+      operation: 'Analysis.codegen',
+      message: `${selected.name} cannot emit a program with unavailable foreign functions`,
+      diagnostics: Diagnostic.merge(self.diagnostics, foreign),
       resolutionFailures: self.closure.resolutionFailures,
     })
   }

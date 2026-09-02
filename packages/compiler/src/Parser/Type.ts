@@ -642,6 +642,7 @@ export const parseParameterList = (initial: State): NodeResult => {
     kind !== 'EnumKeyword' &&
     kind !== 'UnionKeyword' &&
     kind !== 'TypeKeyword' &&
+    kind !== 'ExternKeyword' &&
     kind !== 'ServiceKeyword' &&
     kind !== 'FnKeyword' &&
     kind !== 'EffectKeyword' &&
@@ -699,6 +700,7 @@ export const parseParameterList = (initial: State): NodeResult => {
       kind === 'EnumKeyword' ||
       kind === 'UnionKeyword' ||
       kind === 'TypeKeyword' ||
+      kind === 'ExternKeyword' ||
       kind === 'ServiceKeyword' ||
       kind === 'FnKeyword' ||
       kind === 'EffectKeyword' ||
@@ -719,6 +721,7 @@ export const parseParameterList = (initial: State): NodeResult => {
       'EnumKeyword',
       'UnionKeyword',
       'TypeKeyword',
+      'ExternKeyword',
       'ServiceKeyword',
       'FnKeyword',
       'EffectKeyword',
@@ -738,6 +741,7 @@ export const parseParameterList = (initial: State): NodeResult => {
     'EnumKeyword',
     'UnionKeyword',
     'TypeKeyword',
+    'ExternKeyword',
     'ServiceKeyword',
     'FnKeyword',
     'EffectKeyword',

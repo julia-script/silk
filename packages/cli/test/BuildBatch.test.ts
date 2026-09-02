@@ -24,6 +24,7 @@ const project = (): Project.Project =>
       backend: 'llvm',
       targets: ['host', 'wasm32-unknown-unknown'] as const,
       outputDirectory: '/workspace/build',
+      nativeLibraries: ['c', 'm'],
     }),
   })
 
@@ -40,6 +41,10 @@ it('preflights an ordered deduplicated multi-target LLVM batch', () => {
   assert.deepStrictEqual(
     batch.success.plans.map((plan) => plan.target.id),
     [host.success.id, 'wasm32-unknown-unknown'],
+  )
+  assert.deepStrictEqual(
+    batch.success.plans.map((plan) => plan.nativeLibraries),
+    [['c', 'm'], []],
   )
 })
 

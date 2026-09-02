@@ -111,7 +111,9 @@ export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Pre
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
   const phase = self.phase === 'Static' ? 'static ' : ''
-  const kind = `${phase}${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
+  const extern = self.foreign === undefined ? '' : `extern "${self.foreign.abi}" `
+  const kind = `${phase}${self.unsafe ? 'unsafe ' : ''}${extern}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
+  const symbol = self.foreign === undefined ? '' : ` as "${self.foreign.symbol}"`
   const typeParameters =
     self.typeParameters.length === 0
       ? ''
@@ -128,7 +130,7 @@ export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Pre
     _tag: 'FunctionPresentation',
     name,
     functionKind: self.functionKind,
-    text: `${visibility}${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}`,
+    text: `${visibility}${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}${symbol}`,
   })
 }
 

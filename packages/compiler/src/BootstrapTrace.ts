@@ -391,6 +391,10 @@ export type BlockedReason =
       readonly _tag: 'IntrinsicTargetUnavailable'
       readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
     }
+  | {
+      readonly _tag: 'ForeignTargetUnavailable'
+      readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+    }
 
 /** A completed exact bootstrap result. */
 export type Completed = Termination.Completed<IntegerValue, TraceEvent>

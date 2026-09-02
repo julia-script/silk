@@ -114,6 +114,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'FailureRow',
   'FixedArrayType',
   'FunctionDeclaration',
+  'ForeignFunctionDeclaration',
   'GroupedExpression',
   'IdentifierExpression',
   'ImportAlias',
@@ -343,6 +344,42 @@ type PointF32 = Point<f32>
     const second = yield* SyntaxFormatter.format(parse('memory://type-alias-format.silk', text))
     assert.strictEqual(formattedText(second), text)
     assert.strictEqual(second.changed, false)
+  }),
+)
+
+it.effect('formats foreign function declarations canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source = `// native absolute value
+pub   unsafe extern "C"  fn cAbs( value : i32 )->i32 as "abs"
+unsafe  extern "C" fn tick( )`
+    const first = yield* SyntaxFormatter.format(parse('memory://foreign-format.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `// native absolute value
+pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"
+
+unsafe extern "C" fn tick()
+`,
+    )
+    const second = yield* SyntaxFormatter.format(parse('memory://foreign-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
+it.effect('formats retained foreign declaration forms without repair', () =>
+  Effect.gen(function* () {
+    const source =
+      'static unsafe extern "C" effect fn g<T>(value: T) -> i32 ! Problem as "g" { return 1 }'
+    const first = yield* SyntaxFormatter.format(parse('memory://foreign-retained.silk', source))
+    assert.strictEqual(
+      formattedText(first),
+      `static unsafe extern "C" effect fn g<T>(value: T) -> i32 ! Problem as "g" {
+  return 1
+}
+`,
+    )
   }),
 )
 
@@ -1155,6 +1192,7 @@ fn helper(value: i32, other: i32) -> i32 {
   return moved
 }
 pub unsafe fn unchecked(value: i32) -> i32 { return value }
+pub unsafe extern "C" fn cAbs(value:i32)->i32 as "abs"
 fn inspect(event: Token | End) -> i32 {
   return match &mut event { Token { span: Span { start: offset, .. }, .. } if true => offset _ => 0 }
 }

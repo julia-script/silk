@@ -386,8 +386,23 @@ export const artifactCacheKey = Effect.fn('NativeToolchain.artifactCacheKey')(fu
   profile: ToolchainPlan.OptimizationProfile,
   bitcode: Uint8Array | string,
   shimSource: string,
+  link: {
+    /** Paths of request-supplied native objects; their bytes join the key. */
+    readonly nativeObjects?: ReadonlyArray<string>
+    readonly nativeLibraries?: ReadonlyArray<string>
+  } = {},
 ): Effect.fn.Return<string, ToolchainError> {
   const version = yield* clangVersionOf(toolchain.clang)
+  const objects: Array<Uint8Array> = []
+  for (const path of link.nativeObjects ?? []) {
+    objects.push(
+      yield* Effect.try({
+        try: () => readFileSync(path),
+        catch: (cause) =>
+          storageError('NativeToolchain.artifactCacheKey', 'cache-key', path, cause),
+      }),
+    )
+  }
   return yield* Effect.try({
     try: () => {
       const digest = createHash('sha256')
@@ -396,6 +411,11 @@ export const artifactCacheKey = Effect.fn('NativeToolchain.artifactCacheKey')(fu
         digest.update('\0')
       }
       digest.update(bitcode)
+      for (const bytes of objects) {
+        digest.update(`\0object:${bytes.length}\0`)
+        digest.update(bytes)
+      }
+      for (const library of link.nativeLibraries ?? []) digest.update(`\0library:${library}`)
       return `${digest.digest('hex')}.${kind === 'NativeExecutable' ? 'bin' : 'wasm'}`
     },
     catch: (cause) =>
@@ -593,30 +613,33 @@ export const emitObject = Effect.fn('NativeToolchain.emitObject')(function* (
   })
 })
 
-export const compileShim = Effect.fn('NativeToolchain.compileShim')(function* (
+/**
+ * Compiles one C translation unit to `<scope>/<name>.o` through the pinned Clang `-c -x c`
+ * command, reusing the shim cache keyed by Clang, target, and source text.
+ */
+export const compileCObject = Effect.fn('NativeToolchain.compileCObject')(function* (
   toolchain: Toolchain,
   scope: BuildScope,
   target: Target.Target,
-  termination: Backend.Termination,
-  nativeRuntimeSymbols: ReadonlyArray<string> = Object.freeze([]),
+  name: string,
+  sourceText: string,
 ): Effect.fn.Return<ObjectArtifact, ToolchainError> {
-  const sourceText = ToolchainPlan.shimSource(termination, nativeRuntimeSymbols)
   const cacheKey = `${toolchain.clang}\u0000${target.id}\u0000${sourceText}`
-  const objectPath = join(scope.root, 'silk_shim.o')
-  const source = yield* writeArtifact(scope, target, 'silk_shim.c', sourceText)
+  const objectPath = join(scope.root, `${name}.o`)
+  const source = yield* writeArtifact(scope, target, `${name}.c`, sourceText)
   const planned = ToolchainPlan.shimCommand(toolchain.clang, target, source.path, objectPath)
   const cached =
     toolchain.shimCache === undefined
       ? undefined
       : yield* readShimCache(toolchain.shimCache, cacheKey)
   if (cached !== undefined) {
-    yield* writeArtifact(scope, target, 'silk_shim.o', cached)
+    yield* writeArtifact(scope, target, `${name}.o`, cached)
   } else {
-    yield* runPlanned('NativeToolchain.compileShim', 'shim', planned)
-    yield* requirePath('NativeToolchain.compileShim', 'shim', objectPath)
+    yield* runPlanned('NativeToolchain.compileCObject', 'shim', planned)
+    yield* requirePath('NativeToolchain.compileCObject', 'shim', objectPath)
     const bytes = yield* Effect.try({
       try: () => readFileSync(objectPath),
-      catch: (cause) => storageError('NativeToolchain.compileShim', 'shim', objectPath, cause),
+      catch: (cause) => storageError('NativeToolchain.compileCObject', 'shim', objectPath, cause),
     })
     if (toolchain.shimCache !== undefined)
       yield* writeShimCache(toolchain.shimCache, cacheKey, bytes)
@@ -633,6 +656,58 @@ export const compileShim = Effect.fn('NativeToolchain.compileShim')(function* (
   })
 })
 
+export const compileShim = Effect.fn('NativeToolchain.compileShim')(function* (
+  toolchain: Toolchain,
+  scope: BuildScope,
+  target: Target.Target,
+  termination: Backend.Termination,
+  nativeRuntimeSymbols: ReadonlyArray<string> = Object.freeze([]),
+): Effect.fn.Return<ObjectArtifact, ToolchainError> {
+  return yield* compileCObject(
+    toolchain,
+    scope,
+    target,
+    'silk_shim',
+    ToolchainPlan.shimSource(termination, nativeRuntimeSymbols),
+  )
+})
+
+/**
+ * Plans the link and rejects an input that targets another triple or is missing on disk, so a
+ * bad object is reported as linker input data wherever the check runs.
+ */
+export const requireLinkInputs = Effect.fnUntraced(function* (
+  toolchain: Toolchain,
+  target: Target.Target,
+  objects: ReadonlyArray<PathArtifact>,
+  libraries: ReadonlyArray<string>,
+  outputPath: string,
+): Effect.fn.Return<ToolchainPlan.PlannedCommand, ToolchainError> {
+  const planned = ToolchainPlan.linkCommand(
+    toolchain.clang,
+    target,
+    objects.map((object) => object.path),
+    libraries,
+    outputPath,
+  )
+  for (const object of objects) {
+    if (object.target.id !== target.id) {
+      return yield* linkError(
+        planned,
+        null,
+        `linker input ${object.path} targets ${object.target.id}; expected ${target.id}`,
+      )
+    }
+    const exists = yield* Effect.try({
+      try: () => existsSync(object.path),
+      catch: (cause) =>
+        linkError(planned, null, `cannot inspect linker input ${object.path}`, cause),
+    })
+    if (!exists) return yield* linkError(planned, null, `missing linker input: ${object.path}`)
+  }
+  return planned
+})
+
 export const ClangLinker = Object.freeze({
   link: Effect.fn('NativeToolchain.ClangLinker.link')(function* (
     toolchain: Toolchain,
@@ -643,28 +718,7 @@ export const ClangLinker = Object.freeze({
     destination: string,
   ): Effect.fn.Return<Executable, ToolchainError> {
     const outputPath = join(scope.root, 'linked-program')
-    const planned = ToolchainPlan.linkCommand(
-      toolchain.clang,
-      target,
-      objects.map((object) => object.path),
-      libraries,
-      outputPath,
-    )
-    for (const object of objects) {
-      if (object.target.id !== target.id) {
-        return yield* linkError(
-          planned,
-          null,
-          `linker input ${object.path} targets ${object.target.id}; expected ${target.id}`,
-        )
-      }
-      const exists = yield* Effect.try({
-        try: () => existsSync(object.path),
-        catch: (cause) =>
-          linkError(planned, null, `cannot inspect linker input ${object.path}`, cause),
-      })
-      if (!exists) return yield* linkError(planned, null, `missing linker input: ${object.path}`)
-    }
+    const planned = yield* requireLinkInputs(toolchain, target, objects, libraries, outputPath)
     const result = yield* Effect.try({
       try: () => spawnSync(planned.command, [...planned.arguments], { encoding: 'utf8' }),
       catch: (cause) => linkError(planned, null, '', cause),

@@ -26,6 +26,7 @@ const documentableKinds: ReadonlySet<SyntaxTree.NodeKind> = new Set([
   'TypeAliasDeclaration',
   'ImplDeclaration',
   'FunctionDeclaration',
+  'ForeignFunctionDeclaration',
   'StructField',
   'EnumMember',
   'UnionVariant',

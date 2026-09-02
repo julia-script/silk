@@ -83,7 +83,7 @@ representation can be decided without blocking it.
   the declaration-start, `pub`-following, and top-level-following tables in `Parser/Declaration.ts`
   and `Parser/Grammar.ts`.
 - **Declaration pipeline.** `DeclarationCollection` collects the header with `foreign: { abi,
-  symbol }`; `DeclarationCompletion` admits the signature by spelling and reports admission,
+symbol }`; `DeclarationCompletion` admits the signature by spelling and reports admission,
   restriction, and symbol diagnostics; body analysis and residualization skip foreign headers. Name
   and call resolution, the callable contract, and unsafe acknowledgement are reused unchanged.
 - **New module.** `CAbi.ts`: the target-aware classifier from `Type.Type` to a C ABI type and the

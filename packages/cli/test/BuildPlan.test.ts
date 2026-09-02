@@ -23,7 +23,12 @@ const project = (name = 'hello', outputDirectory = '/workspace/build'): Project.
       sourceRoot: '/workspace/src',
       bytes: SourceFile.toUint8Array(SourceFile.make('Main', new Uint8Array())),
     }),
-    build: Object.freeze({ backend: 'llvm', targets: ['host'] as const, outputDirectory }),
+    build: Object.freeze({
+      backend: 'llvm',
+      targets: ['host'] as const,
+      outputDirectory,
+      nativeLibraries: [],
+    }),
   })
 
 it('plans deterministic backend/target/profile/package destinations', () => {

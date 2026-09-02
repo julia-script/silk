@@ -760,6 +760,55 @@ const printFunctionDeclaration = (
   )
 }
 
+const printForeignFunctionDeclaration = (
+  context: Context,
+  node: SyntaxTree.Node,
+  prefix: FormatDocument.Document,
+): FormatDocument.Document => {
+  const tokens = directTokens(node)
+  const nodes = directNodes(node)
+  // Every modifier through `fn`: `[pub] [static] [unsafe] extern "C" [effect] fn`.
+  const head = tokens.slice(0, tokens.findIndex((token) => token.kind === 'FnKeyword') + 1)
+  const asIndex = tokens.findIndex((token) => token.kind === 'AsKeyword')
+  const asKeyword = tokens.at(asIndex)
+  const symbol = asIndex < 0 ? undefined : tokens.at(asIndex + 1)
+  const returnType = nodes.find((child) => child.kind === 'ReturnType')
+  const typeParameters = nodes.find((child) => child.kind === 'TypeParameterList')
+  const failureRow = nodes.find((child) => child.kind === 'FailureRow')
+  const requirementRow = nodes.find((child) => child.kind === 'RequirementRow')
+  const whereClause = nodes.find((child) => child.kind === 'WhereClause')
+  const body = nodes.find((child) => child.kind === 'Block')
+  return FormatDocument.concat(
+    ...head.map((token, index) =>
+      printToken(context, token, index === 0 ? prefix : FormatDocument.text(' ')),
+    ),
+    printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+    ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
+    printNode(context, nodeOf(node, 'ParameterList')),
+    ...(returnType === undefined ? [] : [printNode(context, returnType, FormatDocument.text(' '))]),
+    FormatDocument.group(
+      FormatDocument.concat(
+        ...(failureRow === undefined
+          ? []
+          : [printNode(context, failureRow, FormatDocument.softLine)]),
+        ...(requirementRow === undefined
+          ? []
+          : [printNode(context, requirementRow, FormatDocument.softLine)]),
+        ...(whereClause === undefined
+          ? []
+          : [printNode(context, whereClause, FormatDocument.softLine)]),
+      ),
+    ),
+    ...(asKeyword === undefined || symbol === undefined
+      ? []
+      : [
+          printToken(context, asKeyword, FormatDocument.text(' ')),
+          printToken(context, symbol, FormatDocument.text(' ')),
+        ]),
+    ...(body === undefined ? [] : [printNode(context, body, FormatDocument.text(' '))]),
+  )
+}
+
 const printImplDeclaration = (
   context: Context,
   node: SyntaxTree.Node,
@@ -1212,6 +1261,8 @@ const printNode = (
     }
     case 'FunctionDeclaration':
       return printFunctionDeclaration(context, node, prefix)
+    case 'ForeignFunctionDeclaration':
+      return printForeignFunctionDeclaration(context, node, prefix)
     case 'ParameterList':
       return printDelimited(
         context,

@@ -59,6 +59,7 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as DurationLiteral from './internal/DurationLiteral.js'
+import * as ForeignSymbol from './ForeignSymbol.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as LiteralForm from './LiteralForm.js'
 import type * as ModuleClosure from './ModuleClosure.js'
@@ -2317,12 +2318,89 @@ const collectUnion = (
   })
 }
 
+const decodedText = (source: SourceFile.SourceFile, token: Token.Token): string | undefined => {
+  const bytes = Option.getOrUndefined(SourceFile.slice(source, token.span))
+  const form = bytes === undefined ? undefined : LiteralForm.recognize(bytes)
+  if (bytes === undefined || form === undefined) return undefined
+  const decoded = StaticText.decode(Array.from(bytes), form)
+  return decoded._tag === 'Decoded'
+    ? textDecoder.decode(Uint8Array.from(decoded.data.bytes))
+    : undefined
+}
+
+const textDecoder = new TextDecoder()
+
+const foreignRestrictions: ReadonlyArray<
+  readonly [kind: Token.TokenKind | SyntaxTree.NodeKind, restriction: string]
+> = [
+  ['StaticKeyword', 'static'],
+  ['EffectKeyword', 'effect'],
+  ['TypeParameterList', 'type parameters'],
+  ['FailureRow', 'failure row'],
+  ['RequirementRow', 'requirement row'],
+  ['WhereClause', 'where clause'],
+  ['Block', 'body'],
+]
+
+/**
+ * The syntax-level foreign header checks: ABI, the mandatory `unsafe`, retained Silk-only syntax,
+ * and the native symbol. Type admission needs resolved types and runs at completion.
+ */
+const collectForeign = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  name: DeclaredName,
+): {
+  readonly fact: NonNullable<DeclarationFact['foreign']>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const declarationSpan = name._tag === 'Present' ? name.token.span : node.span
+  const spellingOf = name._tag === 'Present' ? name.spelling : '#foreign'
+  const abiToken = SyntaxTree.directToken(node, 'TextLiteral')
+  // A missing ABI literal is already a parser diagnostic.
+  if (abiToken !== undefined) {
+    const abi = decodedText(source, abiToken)
+    if (abi !== 'C') diagnostics.push(Diagnostic.unsupportedForeignAbi(abi ?? '', abiToken.span))
+  }
+  if (SyntaxTree.directToken(node, 'UnsafeKeyword') === undefined)
+    diagnostics.push(Diagnostic.foreignFunctionRequiresUnsafe(spellingOf, declarationSpan))
+  for (const child of node.children) {
+    const kind = SyntaxTree.isMissingToken(child) ? undefined : child.kind
+    const restriction = foreignRestrictions.find(([expected]) => expected === kind)?.[1]
+    if (restriction !== undefined)
+      diagnostics.push(Diagnostic.foreignDeclarationRestriction(restriction, child.span))
+  }
+  const asIndex = node.children.findIndex(
+    (child) => SyntaxTree.isToken(child) && child.kind === 'AsKeyword',
+  )
+  const symbolToken = node.children
+    .slice(asIndex + 1)
+    .find(
+      (child): child is Token.Token => SyntaxTree.isToken(child) && child.kind === 'TextLiteral',
+    )
+  const renamed =
+    asIndex >= 0 && symbolToken !== undefined ? decodedText(source, symbolToken) : undefined
+  const symbol = renamed ?? spellingOf
+  const symbolSpan =
+    renamed === undefined ? declarationSpan : (symbolToken?.span ?? declarationSpan)
+  if (!ForeignSymbol.isValidSpelling(symbol))
+    diagnostics.push(Diagnostic.invalidForeignSymbol(symbol, symbolSpan))
+  else if (ForeignSymbol.isReserved(symbol))
+    diagnostics.push(Diagnostic.reservedForeignSymbol(symbol, symbolSpan))
+  return Object.freeze({
+    fact: Object.freeze({ abi: 'C' as const, symbol }),
+    diagnostics: Object.freeze(diagnostics),
+  })
+}
+
 const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
   const source = syntax.source
   const nodes = syntax.root.children.filter(
     (element): element is SyntaxTree.Node =>
       SyntaxTree.isNode(element) &&
       (element.kind === 'FunctionDeclaration' ||
+        element.kind === 'ForeignFunctionDeclaration' ||
         element.kind === 'StructDeclaration' ||
         element.kind === 'TupleDeclaration' ||
         element.kind === 'EnumDeclaration' ||
@@ -2969,22 +3047,35 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       ...requirementRow.diagnostics,
       ...constraints.diagnostics,
     )
-    if (functionKind === 'Ordinary' && failureRow.fact.syntax !== undefined)
+    const foreign =
+      node.kind === 'ForeignFunctionDeclaration' ? collectForeign(source, node, name) : undefined
+    if (
+      foreign === undefined &&
+      functionKind === 'Ordinary' &&
+      failureRow.fact.syntax !== undefined
+    )
       diagnostics.push(Diagnostic.failureChannelOnOrdinary(failureRow.fact.syntax.span))
-    const retainedBody = bodyTemplate(source, node)
+    if (foreign !== undefined) diagnostics.push(...foreign.diagnostics)
+    const retainedBody = foreign === undefined ? bodyTemplate(source, node) : undefined
     return Object.freeze({
       _tag: 'FunctionDeclaration',
       id,
       canonical,
       visibility,
-      phase: staticFunction ? 'Static' : 'Runtime',
-      functionKind,
+      phase: foreign === undefined && staticFunction ? 'Static' : 'Runtime',
+      functionKind: foreign === undefined ? functionKind : 'Ordinary',
       unsafe: SyntaxTree.directToken(node, 'UnsafeKeyword') !== undefined,
+      ...(foreign === undefined ? {} : { foreign: foreign.fact }),
       typeParameters: typeParameters.facts,
       parameterCount: facts.length,
       parameters: facts,
       name,
-      returnType: returnType.fact,
+      // A rejected foreign header withholds its result so no callable contract is published and
+      // call sites get the ordinary unavailable-contract behavior instead of repeated errors.
+      returnType:
+        foreign !== undefined && foreign.diagnostics.length > 0
+          ? Object.freeze({ _tag: 'Unavailable' as const, syntax: returnType.fact.syntax })
+          : returnType.fact,
       ...(returnType.opaqueResult === undefined ? {} : { opaqueResult: returnType.opaqueResult }),
       failureRow: failureRow.fact,
       requirementRow: requirementRow.fact,

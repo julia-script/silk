@@ -23,6 +23,8 @@ export interface DeclarationFact {
   readonly phase: 'Runtime' | 'Static'
   readonly functionKind: 'Ordinary' | 'Effect'
   readonly unsafe: boolean
+  /** Present when native code supplies the body: the ABI and the logical native symbol. */
+  readonly foreign?: { readonly abi: 'C'; readonly symbol: string }
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly parameterCount: number
   readonly parameters: ReadonlyArray<ParameterFact>

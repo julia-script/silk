@@ -48,6 +48,7 @@ const overBudgetBoundaries: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'EnumKeyword',
   'UnionKeyword',
   'TypeKeyword',
+  'ExternKeyword',
   'FnKeyword',
   'EffectKeyword',
   'ImportKeyword',
@@ -519,6 +520,7 @@ export const primaryKind = (
       token.kind === 'EnumKeyword' ||
       token.kind === 'UnionKeyword' ||
       token.kind === 'TypeKeyword' ||
+      token.kind === 'ExternKeyword' ||
       token.kind === 'FnKeyword' ||
       token.kind === 'EffectKeyword' ||
       token.kind === 'ImportKeyword' ||
@@ -553,6 +555,7 @@ export const remainingRightParentheses = (state: State): number => {
       token.kind === 'EnumKeyword' ||
       token.kind === 'UnionKeyword' ||
       token.kind === 'TypeKeyword' ||
+      token.kind === 'ExternKeyword' ||
       token.kind === 'FnKeyword' ||
       token.kind === 'ImportKeyword' ||
       token.kind === 'LetKeyword' ||
@@ -600,6 +603,7 @@ export const expectCallRightParenthesis = (
     'EnumKeyword',
     'UnionKeyword',
     'TypeKeyword',
+    'ExternKeyword',
     'FnKeyword',
     'ImportKeyword',
     'LetKeyword',
@@ -630,6 +634,7 @@ export function parseArgumentList(
     'EnumKeyword',
     'UnionKeyword',
     'TypeKeyword',
+    'ExternKeyword',
     'FnKeyword',
     'ImportKeyword',
   ])
@@ -648,6 +653,7 @@ export function parseArgumentList(
     kind !== 'EnumKeyword' &&
     kind !== 'UnionKeyword' &&
     kind !== 'TypeKeyword' &&
+    kind !== 'ExternKeyword' &&
     kind !== 'FnKeyword' &&
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
@@ -670,6 +676,7 @@ export function parseArgumentList(
       kind === 'EnumKeyword' ||
       kind === 'UnionKeyword' ||
       kind === 'TypeKeyword' ||
+      kind === 'ExternKeyword' ||
       kind === 'FnKeyword' ||
       kind === 'ImportKeyword'
     )
@@ -686,6 +693,7 @@ export function parseArgumentList(
       'EnumKeyword',
       'UnionKeyword',
       'TypeKeyword',
+      'ExternKeyword',
       'FnKeyword',
       'ImportKeyword',
     ])
@@ -815,6 +823,7 @@ export function parseStructLiteralExpression(
     kind !== 'EnumKeyword' &&
     kind !== 'UnionKeyword' &&
     kind !== 'TypeKeyword' &&
+    kind !== 'ExternKeyword' &&
     kind !== 'FnKeyword' &&
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
@@ -1501,6 +1510,7 @@ export const reservedTemplateBoundaries: ReadonlyArray<Token.TokenKind> = Object
   'EnumKeyword',
   'UnionKeyword',
   'TypeKeyword',
+  'ExternKeyword',
   'FnKeyword',
   'ImportKeyword',
   'EndOfFile',

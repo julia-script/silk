@@ -25,6 +25,8 @@ language author; the proposal remains Draft until its whole-language review is a
   behavior and lowering.
 - The **executable closure** is the set of declarations and intrinsic calls reachable from the
   selected entry for one concrete program and target.
+- A **foreign function** is a bodiless `unsafe extern "C" fn` declaration whose implementation is
+  native code linked into the artifact under a named symbol.
 
 ## Safety outcomes
 
@@ -759,3 +761,253 @@ availability, if needed, must refine the same compile-time rule rather than crea
 [target selection](../../../../packages/compiler/src/Target.ts),
 [target availability specification](../../../../openspec/specs/bootstrap-intrinsic-target-availability/spec.md),
 [static target selection](static-evaluation.md#static-009--silktarget-exposes-target-information-only-as-static-source-values).
+
+## Foreign functions
+
+### FFI-001 — `extern "C"` declares a native symbol under an explicit ABI
+
+**Status:** Confirmed
+
+Source syntax:
+
+```silk,ignore
+pub unsafe extern "C" fn abs(value: i32) -> i32
+
+unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"
+```
+
+A foreign function declaration names one module-level function whose implementation is supplied
+by native code linked into the artifact. It has no body. The declaration carries three separate
+identities:
+
+- the **Silk name** (`abs`, `cAbs`), which source uses to resolve and call it;
+- the **native symbol**, which is the `as` string when present and the Silk name otherwise; and
+- the **ABI**, named by the string after `extern`.
+
+Only `"C"` is accepted as the ABI. The symbol is the logical native name: the compiler applies the
+selected target's own decoration, so a Darwin `_abs` is never spelled in source. `pub` controls
+Silk module visibility exactly as for an ordinary function and says nothing about native linkage;
+a private foreign function still reaches the linker when it is called.
+
+**Boundary:** Renaming with `as` creates no declaration under the symbol's spelling; `cAbs` above
+does not introduce a Silk name `abs`. Two modules may declare the same symbol under different Silk
+names. A public foreign function imported from another module is called under the same rules as
+in its declaring module.
+
+**Diagnostics:** An ABI string other than `"C"` reports `SEM0185` at the string and publishes no
+callable.
+
+**Current compiler:** Aligned. `extern` is a complete-identifier keyword; the declaration index
+records the symbol and ABI as header facts with no body, and the module semantic surface encodes
+them so a symbol change invalidates dependents.
+
+**Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
+[declaration collection](../../../../packages/compiler/src/DeclarationCollection.ts),
+[declaration completion](../../../../packages/compiler/src/DeclarationCompletion.ts),
+[foreign diagnostics](../../../../packages/compiler/src/Diagnostic.ts).
+
+### FFI-002 — Foreign functions are unsafe by declaration
+
+**Status:** Confirmed
+
+Every foreign declaration carries the `unsafe` qualifier. The compiler cannot see the native
+implementation, so it cannot prove any invariant about it; the caller owns the whole contract. The
+qualifier makes the foreign callable an ordinary unsafe callable under
+[UNSAFE-002](#unsafe-002--ordinary-source-may-declare-a-caller-owned-unsafe-contract): a call
+needs a lexical unsafe boundary, and every ownership, borrowing, and type check still applies.
+
+```silk,ignore
+unsafe extern "C" fn abs(value: i32) -> i32
+
+pub fn magnitude(value: i32) -> i32 {
+  return unsafe abs(value)
+}
+```
+
+**Boundary:** `unsafe` on the declaration is mandatory, not a choice the author makes per symbol.
+Wrapping a foreign call in a safe function is an ordinary Silk proof under
+[INTR-004](#intr-004--safe-wrappers-are-ordinary-silk-proofs-over-unsafe-contracts); the wrapper
+author accepts responsibility for the native contract.
+
+**Diagnostics:** A foreign declaration without `unsafe` reports `SEM0186` at the declaration and
+publishes no callable. Calling a foreign function outside an unsafe boundary reports the same
+missing-acknowledgement diagnostic as any unsafe source callable.
+
+**Current compiler:** Aligned. The callable contract, acknowledgement checks, and tooling
+presentations are reused unchanged from unsafe source functions.
+
+**Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
+[declaration completion](../../../../packages/compiler/src/DeclarationCompletion.ts),
+[foreign diagnostics](../../../../packages/compiler/src/Diagnostic.ts).
+
+### FFI-003 — Foreign signatures admit only the C-compatible scalar subset
+
+**Status:** Confirmed
+
+Each parameter and the result of a foreign function passes a foreign-ABI admission relation that is
+distinct from Silk type compatibility. The admitted subset is:
+
+- `()` as the result only;
+- `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64` as exact-width integers;
+- `isize` and `usize` as pointer-width integers of the selected target; and
+- `f32` and `f64` as the C `float` and `double` classes.
+
+Parameters are passed by value. Every other type is rejected: `bool`, `char`, `string`,
+references, slices, fixed arrays, structs, unions, enums, callable types, and type parameters.
+
+Admission is judged on the type spelling alone, so a foreign header is admitted or rejected once
+per module, independent of the target. The C classification of `isize` and `usize` takes the
+selected target's pointer width when the executable is realized for that target.
+
+**Boundary:** A type being representable in C does not admit it. `bool` has a C-compatible
+layout on every supported target and is still outside the subset, because admission is a closed
+relation this change defines, not a layout query. Pointers and C-layout records are separate
+proposals and are not admitted today.
+
+**Diagnostics:** A parameter or result outside the subset reports `SEM0187` at the offending
+type, naming the type and the ABI. One declaration with several offending types reports one
+diagnostic per type. A rejected header publishes no callable.
+
+**Current compiler:** Aligned. `CAbi.admit` judges the spelling; `CAbi.classify` and
+`CAbi.signature` derive the target-specific C signature used by MIR, verification, and the backend.
+
+**Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
+[C ABI classification](../../../../packages/compiler/src/CAbi.ts),
+[declaration completion](../../../../packages/compiler/src/DeclarationCompletion.ts).
+
+### FFI-004 — Foreign declarations carry no Silk-only contract and are callable only
+
+**Status:** Confirmed
+
+A foreign function declaration cannot declare type parameters, a `where` clause, a failure row, a
+requirement row, the `effect` kind, the `static` phase, or a body. Each of these is a Silk-owned
+contract that native code cannot honor.
+
+```silk,ignore
+unsafe extern "C" fn bad<T>(value: T) -> T
+unsafe extern "C" effect fn bad() -> ()
+unsafe extern "C" fn bad() -> i32 { return 1 }
+```
+
+The value of a foreign function is callable only. Binding it with `let`, passing it as a callable
+argument, storing it, or partially applying it is rejected.
+
+**Boundary:** This restriction is narrower than
+[UNSAFE-007](#unsafe-007--partial-application-preserves-unsafety-but-does-not-invoke-it), which
+lets ordinary unsafe source callables be taken as values. A foreign function has no Silk callable
+representation in this change; a later proposal may lift the first-class restriction.
+
+**Diagnostics:** Retained Silk-only syntax reports `SEM0188` at the offending syntax and publishes
+no callable. A first-class use reports `SEM0189` at the use.
+
+**Current compiler:** Aligned. Header restrictions are checked in declaration completion; the
+first-class check runs at the use site.
+
+**Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
+[declaration completion](../../../../packages/compiler/src/DeclarationCompletion.ts),
+[foreign diagnostics](../../../../packages/compiler/src/Diagnostic.ts).
+
+### FFI-005 — Foreign symbols are valid, unreserved, and unique per executable
+
+**Status:** Confirmed
+
+A native symbol is a non-empty ASCII identifier: a letter or underscore followed by letters,
+digits, or underscores. Any other spelling, including an embedded NUL, is rejected at the
+declaration.
+
+A symbol the compiler owns is reserved: the process entry `main`, the Silk entry `silk_main`, the
+`silk_os_*_v1` and coroutine runtime symbols, the host-argument and standard-stream symbols, and
+the generated shapes `silk_suspend_*` and `silk_<module>_<name>__<instance>`.
+
+Within one executable closure, two reachable foreign declarations of one symbol are accepted when
+their classified C signatures are equal and rejected when they differ. The executable declares
+the symbol once.
+
+```silk,ignore
+unsafe extern "C" fn f() -> () as "not a symbol"
+unsafe extern "C" fn g() -> i32 as "silk_main"
+```
+
+**Boundary:** Agreement is judged on the classified C signature, not the Silk spelling. `isize` on
+a 64-bit target and `i64` classify to the same C type and therefore agree. Two unreachable
+declarations never conflict, because neither enters the closure.
+
+**Diagnostics:** An invalid spelling reports `SEM0190` at the `as` string or, without `as`, at the
+declaration. A reserved symbol reports `SEM0191` at the same position. A conflicting redeclaration
+reports `SEM0192` at one declaration with a note relating the other; planning constructs no
+artifact. A symbol the native backend also declares for its own use, with a disagreeing signature,
+is a backend diagnostic naming the symbol.
+
+**Current compiler:** Aligned. Spelling and reservation are checked per module; signature
+agreement is checked when the executable origin collects reachable foreign calls for the target.
+
+**Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
+[symbol spelling and reservation](../../../../packages/compiler/src/ForeignSymbol.ts),
+[C ABI signature identity](../../../../packages/compiler/src/CAbi.ts).
+
+### FFI-006 — Foreign calls are direct linked calls
+
+**Status:** Confirmed
+
+A call to a foreign function lowers to one direct native call under the target's C calling
+convention with the classified signature. The artifact contains the symbol as an undefined
+external reference that the system linker resolves from the program's link inputs. The compiler
+introduces no runtime symbol lookup, cache, indirection, or compiler-owned adapter.
+
+Link inputs are the program object, the toolchain shim, and the libraries the project manifest
+names. The optional `[build]` table's `native-libraries` list reaches the link command as `-l`
+arguments; a name with a path separator, whitespace, NUL, or leading `-` is rejected when the
+manifest is read. Arbitrary linker flags stay out of source and manifest.
+
+```toml
+[build]
+native-libraries = ["m"]
+```
+
+**Boundary:** The compiler does not verify that a link input defines the symbol or that its real
+C signature matches the declaration. A wrong declaration is undefined behavior at the call under
+[SAFETY-001](#safety-001--only-violating-an-explicit-unsafe-contract-permits-undefined-behavior).
+This rule does not stabilize the compiler's own runtime symbols; see
+[RUNTIME-003](runtime-and-standard-library.md#runtime-003--toolchain-runtime-support-guarantees-contracts-not-implementation-abi).
+
+**Diagnostics:** No link input defining the symbol is a typed link failure from the driver that
+retains the linker output and produces no executable. It is toolchain data, not a language
+diagnostic.
+
+**Current compiler:** Aligned. The LLVM backend declares each reachable symbol once with the C
+calling convention and external linkage, emits the call the way an OS intrinsic call is emitted,
+and records the reachable symbols with their C signatures on the artifact.
+
+**Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
+[C ABI signature](../../../../packages/compiler/src/CAbi.ts).
+
+### FFI-007 — Foreign functions are native-only and pay-for-use
+
+**Status:** Confirmed
+
+Foreign functions are available on native targets only. A foreign call retained in the executable
+closure for the evaluator, for the direct WebAssembly backend, or for LLVM emission of a
+WebAssembly target is rejected before backend construction, under the same reachability rule as
+[TARGET-001](#target-001--intrinsic-availability-is-checked-only-for-the-selected-executable-closure).
+
+Parsing, importing, indexing, or retaining an uncalled foreign declaration does not reject a
+portable program, and a call in an unselected `static if` arm does not enter the closure. A
+reachable foreign function contributes exactly one external declaration to the native artifact; an
+unreachable one contributes nothing, as
+[TARGET-002](#target-002--unreachable-target-specific-primitives-have-no-artifact-cost) requires.
+
+**Boundary:** Availability is a property of the target kind, not of the backend. The LLVM backend
+emitting `wasm32-unknown-unknown` rejects a reachable foreign call exactly as the direct
+WebAssembly backend does. Evaluator host tables and Wasm import binding are later proposals.
+
+**Diagnostics:** A reachable foreign call on an unavailable surface reports `SEM0193`, naming the
+symbol and the requested execution surface or target, in the
+[TARGET-003](#target-003--target-unavailability-is-a-compile-time-compatibility-error) shape. It
+does not suggest catching a failure or adding an unsafe block.
+
+**Current compiler:** Aligned. The executable origin collects reachable foreign calls beside
+intrinsic calls, and every availability site checks them with a native-only rule.
+
+**Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
+[foreign diagnostics](../../../../packages/compiler/src/Diagnostic.ts),
+[C ABI classification](../../../../packages/compiler/src/CAbi.ts).

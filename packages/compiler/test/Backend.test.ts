@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import type * as Backend from '../src/Backend.js'
+import * as Backend from '../src/Backend.js'
+import * as LlvmBackend from '../src/LlvmBackend.js'
+import * as WasmBackend from '../src/WasmBackend.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -427,5 +429,108 @@ it.effect('publishes native branch provenance back to canonical loop regions', (
       ),
       true,
     )
+  }),
+)
+
+it.effect('declares each reachable foreign symbol once and calls it directly', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'backend/foreign-native',
+      ascii(`import silk.i32 as i32
+import silk.usize as usize
+unsafe extern "C" fn silk_test_add(a: i32, b: i32) -> i32
+unsafe extern "C" fn silk_test_scale(count: usize) -> usize
+unsafe extern "C" fn abs(value: i32) -> i32
+fn first() -> i32 { return unsafe silk_test_add(1, 2) }
+fn second() -> i32 { return unsafe silk_test_add(3, 4) }
+pub fn main() -> i32 {
+  let scaled = unsafe silk_test_scale(i32.toUsize(5))
+  return first() + second() + unsafe abs(-1) + usize.toI32(scaled)
+}`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+    assert.strictEqual(artifact._tag, 'LlvmBitcodeArtifact')
+    if (artifact._tag !== 'LlvmBitcodeArtifact') return
+    const lines = artifact.ir.split('\n')
+    // Convention 0 renders without a `ccc`/`cc <n>` marker.
+    assert.deepEqual(
+      lines.filter((line) => line.startsWith('declare') && line.includes('@silk_test_add')),
+      ['declare i32 @silk_test_add(i32, i32)'],
+    )
+    assert.strictEqual(lines.filter((line) => /call i32 @silk_test_add\(/.test(line)).length, 2)
+    assert.deepEqual(
+      lines.filter((line) => line.startsWith('declare') && line.includes('@silk_test_scale')),
+      ['declare i64 @silk_test_scale(i64)'],
+    )
+    assert.strictEqual(
+      lines.filter((line) => /call i64 @silk_test_scale\(i64 /.test(line)).length,
+      1,
+    )
+    assert.deepEqual(artifact.foreignImports, [
+      { symbol: 'abs', parameters: ['i32'], result: 'i32' },
+      { symbol: 'silk_test_add', parameters: ['i32', 'i32'], result: 'i32' },
+      { symbol: 'silk_test_scale', parameters: ['u64'], result: 'u64' },
+    ])
+
+    const plain = yield* emit(nestedSource, { mode: 'release' })
+    assert.deepEqual(plain.foreignImports, [])
+  }),
+)
+
+it.effect('gates a reachable foreign call at Backend.emit for every non-native surface', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'backend/foreign',
+      ascii(`unsafe extern "C" fn abs(value: i32) -> i32
+pub fn main() -> i32 { return unsafe abs(-42) }`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    const backends: ReadonlyArray<Backend.Backend> = [
+      WasmBackend.WasmBackend,
+      LlvmBackend.LlvmBackend,
+    ]
+    for (const backend of backends) {
+      const failure = yield* Effect.flip(Backend.emit(backend, program, { mode: 'release' }))
+      assert.strictEqual(failure.reason._tag, 'UnsupportedForeignFunction')
+      if (failure.reason._tag === 'UnsupportedForeignFunction')
+        assert.deepEqual(
+          failure.reason.diagnostics.map((diagnostic) => diagnostic.code),
+          ['SEM0193'],
+        )
+    }
+  }),
+)
+
+it.effect('rejects a foreign declaration of a symbol the native backend declares itself', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'backend/foreign-malloc',
+      ascii(`import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { SystemAllocator }
+import silk.effect as Effect
+import silk.layout { Layout }
+unsafe extern "C" fn malloc(size: i32) -> i32
+effect fn store() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let layout = Layout.of<[i32; 2]>()
+  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  let allocation = run recipe
+  drop allocation
+  return unsafe malloc(8)
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const failure = yield* Effect.flip(Analysis.codegen(snapshot, { mode: 'release' }))
+    assert.strictEqual(failure._tag, 'BackendError')
+    if (failure._tag !== 'BackendError') return
+    assert.deepEqual(failure.reason, { _tag: 'ForeignSymbolConflict', symbol: 'malloc' })
   }),
 )

@@ -34,15 +34,29 @@ import {
   parseWhereClause,
 } from './Type.js'
 
+/**
+ * `static` opens a function declaration before `fn`, or before a foreign header whose `static` is
+ * retained for semantic rejection.
+ */
+const staticBeginsFunction = (state: State, offset: number): boolean => {
+  const following = peek(state, offset)
+  return (
+    following === 'FnKeyword' ||
+    following === 'ExternKeyword' ||
+    (following === 'UnsafeKeyword' && peek(state, offset + 1) === 'ExternKeyword')
+  )
+}
+
 export const beginsTopLevelDeclaration = (state: State): boolean => {
   const kind = nextSignificantKind(state)
-  if (kind === 'StaticKeyword') return peek(state, 1) === 'FnKeyword'
+  if (kind === 'StaticKeyword') return staticBeginsFunction(state, 1)
   if (
     kind === 'ImportKeyword' ||
     kind === 'ConstKeyword' ||
     kind === 'FnKeyword' ||
     kind === 'EffectKeyword' ||
     kind === 'UnsafeKeyword' ||
+    kind === 'ExternKeyword' ||
     kind === 'StructKeyword' ||
     kind === 'TupleKeyword' ||
     kind === 'EnumKeyword' ||
@@ -57,11 +71,14 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
   if (kind !== 'PubKeyword') return false
   const following = peek(state, 1)
   return (
-    (following === 'StaticKeyword' && peek(state, 2) === 'FnKeyword') ||
+    (following === 'StaticKeyword' && staticBeginsFunction(state, 2)) ||
     following === 'FnKeyword' ||
     following === 'EffectKeyword' ||
+    following === 'ExternKeyword' ||
     (following === 'UnsafeKeyword' &&
-      (peek(state, 2) === 'FnKeyword' || peek(state, 2) === 'EffectKeyword')) ||
+      (peek(state, 2) === 'FnKeyword' ||
+        peek(state, 2) === 'EffectKeyword' ||
+        peek(state, 2) === 'ExternKeyword')) ||
     following === 'StructKeyword' ||
     following === 'TupleKeyword' ||
     following === 'EnumKeyword' ||
@@ -733,6 +750,7 @@ const parseServiceLikeDeclaration = (initial: State, kind: 'Service' | 'Interfac
     nextSignificantKind(state) !== 'EnumKeyword' &&
     nextSignificantKind(state) !== 'UnionKeyword' &&
     nextSignificantKind(state) !== 'TypeKeyword' &&
+    nextSignificantKind(state) !== 'ExternKeyword' &&
     nextSignificantKind(state) !== 'ServiceKeyword' &&
     nextSignificantKind(state) !== 'InterfaceKeyword' &&
     nextSignificantKind(state) !== 'ImplKeyword'
@@ -834,8 +852,8 @@ export const parseTopLevelDeclaration = (state: State): NodeResult => {
   const kind = nextSignificantKind(state)
   const following = kind === 'PubKeyword' ? peek(state, 1) : undefined
   if (
-    (kind === 'StaticKeyword' && peek(state, 1) !== 'FnKeyword') ||
-    (kind === 'PubKeyword' && following === 'StaticKeyword' && peek(state, 2) !== 'FnKeyword')
+    (kind === 'StaticKeyword' && !staticBeginsFunction(state, 1)) ||
+    (kind === 'PubKeyword' && following === 'StaticKeyword' && !staticBeginsFunction(state, 2))
   )
     return parseInvalidStaticDeclaration(state)
   if (kind === 'ImportKeyword') return parseImportDeclaration(state)
@@ -866,6 +884,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     lookaheadToken.kind !== 'StaticKeyword' &&
     lookaheadToken.kind !== 'EffectKeyword' &&
     lookaheadToken.kind !== 'UnsafeKeyword' &&
+    lookaheadToken.kind !== 'ExternKeyword' &&
     lookaheadToken.kind !== 'StructKeyword' &&
     lookaheadToken.kind !== 'TupleKeyword' &&
     lookaheadToken.kind !== 'EnumKeyword' &&
@@ -888,6 +907,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     ? expect(initial, 'PubKeyword', [
         'StaticKeyword',
         'UnsafeKeyword',
+        'ExternKeyword',
         'EffectKeyword',
         'FnKeyword',
         'Identifier',
@@ -896,21 +916,49 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     : Object.freeze({ state: initial, elements: Object.freeze([]) })
   const staticKeyword =
     nextSignificantKind(pubKeyword.state) === 'StaticKeyword'
-      ? expect(pubKeyword.state, 'StaticKeyword', ['FnKeyword', 'Identifier', 'LeftParenthesis'])
+      ? expect(pubKeyword.state, 'StaticKeyword', [
+          'UnsafeKeyword',
+          'ExternKeyword',
+          'FnKeyword',
+          'Identifier',
+          'LeftParenthesis',
+        ])
       : Object.freeze({ state: pubKeyword.state, elements: Object.freeze([]) })
   const unsafeKeyword =
     nextSignificantKind(staticKeyword.state) === 'UnsafeKeyword'
       ? expect(staticKeyword.state, 'UnsafeKeyword', [
+          'ExternKeyword',
           'EffectKeyword',
           'FnKeyword',
           'Identifier',
           'LeftParenthesis',
         ])
       : Object.freeze({ state: staticKeyword.state, elements: Object.freeze([]) })
+  // `extern <abi>` marks a foreign header; a missing ABI literal recovers inside the declaration.
+  const externKeyword =
+    nextSignificantKind(unsafeKeyword.state) === 'ExternKeyword'
+      ? expect(unsafeKeyword.state, 'ExternKeyword', [
+          'TextLiteral',
+          'EffectKeyword',
+          'FnKeyword',
+          'Identifier',
+          'LeftParenthesis',
+        ])
+      : undefined
+  const abi =
+    externKeyword === undefined
+      ? undefined
+      : expect(externKeyword.state, 'TextLiteral', [
+          'EffectKeyword',
+          'FnKeyword',
+          'Identifier',
+          'LeftParenthesis',
+        ])
+  const afterExtern = abi?.state ?? unsafeKeyword.state
   const effectKeyword =
-    nextSignificantKind(unsafeKeyword.state) === 'EffectKeyword'
-      ? expect(unsafeKeyword.state, 'EffectKeyword', ['FnKeyword', 'Identifier', 'LeftParenthesis'])
-      : Object.freeze({ state: unsafeKeyword.state, elements: Object.freeze([]) })
+    nextSignificantKind(afterExtern) === 'EffectKeyword'
+      ? expect(afterExtern, 'EffectKeyword', ['FnKeyword', 'Identifier', 'LeftParenthesis'])
+      : Object.freeze({ state: afterExtern, elements: Object.freeze([]) })
   const fnKeyword = expect(effectKeyword.state, 'FnKeyword', [
     'Identifier',
     ...(allowDropName ? (['DropKeyword'] as const) : []),
@@ -921,28 +969,61 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
       ? 'DropKeyword'
       : 'Identifier'
   const name = expect(fnKeyword.state, nameKind, ['Less', 'LeftParenthesis'])
-  const contract = parseCallableContractTail(name.state, ['LeftBrace'])
+  const contract = parseCallableContractTail(
+    name.state,
+    externKeyword === undefined ? ['LeftBrace'] : ['AsKeyword', 'LeftBrace'],
+  )
   const unitResult =
     contract.returnType === undefined ||
     SyntaxTree.directNode(contract.returnType.node, 'UnitType') !== undefined
-  const block = parseBlock(contract.state, !unitResult, unitResult)
+  const header: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+    ...pubKeyword.elements,
+    ...staticKeyword.elements,
+    ...unsafeKeyword.elements,
+    ...(externKeyword?.elements ?? []),
+    ...(abi?.elements ?? []),
+    ...effectKeyword.elements,
+    ...fnKeyword.elements,
+    ...name.elements,
+    ...(contract.typeParameters === undefined ? [] : [contract.typeParameters.node]),
+    contract.parameters.node,
+    ...(contract.returnType === undefined ? [] : [contract.returnType.node]),
+    ...(contract.failureRow === undefined ? [] : [contract.failureRow.node]),
+    ...(contract.requirementRow === undefined ? [] : [contract.requirementRow.node]),
+    ...(contract.whereClause === undefined ? [] : [contract.whereClause.node]),
+  ])
 
+  if (externKeyword === undefined) {
+    const block = parseBlock(contract.state, !unitResult, unitResult)
+    return Object.freeze({
+      state: block.state,
+      node: syntaxNode(block.state, 'FunctionDeclaration', [...header, block.node]),
+    })
+  }
+
+  // A foreign header has no body; `static`, `effect`, rows, and a block are retained for semantic
+  // rejection so their diagnostics stay navigable.
+  const asKeyword =
+    nextSignificantKind(contract.state) === 'AsKeyword'
+      ? expect(contract.state, 'AsKeyword', ['TextLiteral', 'LeftBrace', ...topLevelFollowing])
+      : undefined
+  const symbol =
+    asKeyword === undefined
+      ? undefined
+      : expect(asKeyword.state, 'TextLiteral', ['LeftBrace', ...topLevelFollowing])
+  const afterSymbol = symbol?.state ?? contract.state
+  const body =
+    nextSignificantKind(afterSymbol) === 'LeftBrace'
+      ? parseBlock(afterSymbol, !unitResult, unitResult)
+      : undefined
+  const state = body?.state ?? afterSymbol
   return Object.freeze({
-    state: block.state,
-    node: syntaxNode(block.state, 'FunctionDeclaration', [
-      ...pubKeyword.elements,
-      ...staticKeyword.elements,
-      ...unsafeKeyword.elements,
-      ...effectKeyword.elements,
-      ...fnKeyword.elements,
-      ...name.elements,
-      ...(contract.typeParameters === undefined ? [] : [contract.typeParameters.node]),
-      contract.parameters.node,
-      ...(contract.returnType === undefined ? [] : [contract.returnType.node]),
-      ...(contract.failureRow === undefined ? [] : [contract.failureRow.node]),
-      ...(contract.requirementRow === undefined ? [] : [contract.requirementRow.node]),
-      ...(contract.whereClause === undefined ? [] : [contract.whereClause.node]),
-      block.node,
+    state,
+    node: syntaxNode(state, 'ForeignFunctionDeclaration', [
+      ...header,
+      ...(asKeyword?.elements ?? []),
+      ...(symbol?.elements ?? []),
+      ...(body === undefined ? [] : [body.node]),
     ]),
   })
 }

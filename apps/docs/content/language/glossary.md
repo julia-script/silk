@@ -326,8 +326,9 @@ _Avoid_: shell link command, backend-owned linking, external build harness
 The private compiler-versioned C boundary beneath bootstrap host-service implementations. Its ABI
 uses fixed-width scalars, raw pointers with explicit lengths, transient integer handles, caller-
 owned output buffers, and numeric status codes; it never retains Silk pointers, returns C-owned
-objects, calls arbitrary Silk callbacks, unwinds across the boundary, or exposes a public FFI.
-Its surface is limited to aligned allocation, host-path and whole-file primitives, unique temporary
+objects, calls arbitrary Silk callbacks, or unwinds across the boundary. It remains private:
+`extern "C"` foreign functions are the public foreign-function boundary, and the shim is not
+reachable through them. Its surface is limited to aligned allocation, host-path and whole-file primitives, unique temporary
 directories, redirected synchronous child execution, standard-stream writes, monotonic time, and
 startup handoff; higher-level portable values and typed semantics remain in Silk. It is one native
 implementation boundary, not the definition of `FileSystem` or `Logger`. Each required host
@@ -514,6 +515,13 @@ A small, explicit region that may perform operations whose safety invariants the
 prove, such as low-level foreign-function or memory access. Unsafe behavior does not implicitly
 spread into ordinary code.
 _Avoid_: escape hatch, unchecked mode
+
+**Foreign function**:
+A bodiless `unsafe extern "C" fn` declaration whose implementation is native code linked into the
+artifact. It carries a Silk name, a logical native symbol (`as "..."` or the Silk name), and the
+C ABI; it admits only by-value scalars, is called only inside an unsafe boundary, lowers to one
+direct linked call, and is available on native targets only.
+_Avoid_: FFI binding, extern block, intrinsic
 
 **Allocation requirement**:
 A typed capability in a function signature indicating that the function may perform dynamic

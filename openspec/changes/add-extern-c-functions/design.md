@@ -47,11 +47,15 @@ calling lane exists (`CallingShape.AddressScalar`), but no source-level pointer 
 ### A foreign function is a `FunctionDeclaration` fact with a `foreign` field
 
 `DeclarationFact` gains `foreign?: { readonly abi: 'C'; readonly symbol: string }`. Collection sets
-`unsafe` from the qualifier and reports the missing-qualifier diagnostic when absent. Name
-resolution, call resolution, `CallableContract`, unsafe acknowledgement, module surface encoding,
-LSP structure, hover, and docgen see an ordinary unsafe function header. Body analysis in
-`Elaboration.elaborateModule` and `Residualization` skips a fact with `foreign` set instead of
-demanding a `Block`; `Instances` already tolerates a callee without HIR.
+`unsafe` from the qualifier and reports every syntax-level header diagnostic there, because the
+ABI and symbol literals need the source bytes and the restrictions are syntax facts: unsupported
+ABI, missing `unsafe`, each retained `static`/`effect`/type-parameter list/row/`where`/body, and
+invalid or reserved symbols. Completion reports only type admission. Name resolution, call
+resolution, `CallableContract`, unsafe acknowledgement, module surface encoding, LSP structure,
+hover, and docgen see an ordinary unsafe function header. Body analysis in
+`Elaboration.elaborateModule` skips a fact with `foreign` set instead of demanding a `Block`;
+`Residualization` is never reached for one because a foreign fact is `Runtime` phase and has no
+body template, and `Instances` already tolerates a callee without HIR.
 
 The alternative was the report's separate `HirForeignFunction` entity with its own id space. It
 would need its own name-resolution arm, call-resolution arm, surface encoding, and tooling paths for
@@ -70,8 +74,9 @@ signature(fact, target): CAbiSignature     // parameters + result, canonical key
 ```
 
 `DeclarationCompletion` runs `admit` over every parameter and result of a foreign header and
-reports one diagnostic per rejected type at that type's span; a rejected header publishes no
-callable, so call sites get the ordinary unknown-callee behavior. `admit` is a closed switch over
+reports one diagnostic per rejected type at that type's span. A rejected header, whether from
+collection or completion, publishes an unavailable return type so its callable contract is
+withheld and call sites get the ordinary unavailable-contract behavior without a cascade. `admit` is a closed switch over
 `Type.Builtin` scalars and returns `NotAdmitted` for every other `Type` variant; it does not
 consult `TypeCompatibility`, because `u32` and `i32` are distinct C classes and `char` is rejected
 even though it is 32 bits wide. `classify` resolves `isize`/`usize` through the target's pointer
@@ -97,8 +102,8 @@ migration target for the OS runtime later. `BootstrapEvaluation` and `WasmBacken
 `ExecutableOrigin` collects `ReachableForeignCall { symbol, signature, declaration: CanonicalId,
 declarationSpan, callSpan }` beside intrinsic calls (a `Call` HIR expression whose target fact is
 foreign). `Instances.Discovery` carries it, `Lower.lowerProgram` copies it onto `Mir.Module`
-beside `intrinsics`, and `IntrinsicAvailability.select` (or a sibling `ForeignAvailability`) reads
-it at all four call sites. A reachable entry is rejected when the execution target is `Evaluator`
+beside `intrinsics`, and the sibling actor `ForeignAvailability.select` reads it at all four call
+sites, reporting through distinct foreign reason tags rather than the intrinsic ones. A reachable entry is rejected when the execution target is `Evaluator`
 or `Wasm`, or when `Target.kind !== 'Native'` (which catches LLVM emission of
 `wasm32-unknown-unknown`), with a new stable code. Conflicting signatures under one symbol across
 the closure report a second new code relating both declarations through the carried declaration
@@ -113,8 +118,8 @@ symbol-and-signature key on the operation and the inventory is the seam it will 
 A symbol must match `[A-Za-z_][A-Za-z0-9_]*`. It is rejected when it equals `main`, `silk_main`,
 any `OsRuntime.symbols` or `CoroutineRuntime.symbols` entry, `silk_standard_stream_write_v1`,
 `silk_host_argc_v1`, `silk_host_argv_v1`, or matches `^silk_.*__` (the generated
-`silk_<module>_<name>__<instance>` shape) or `^silk_suspend_`. The reserved set is one exported
-list next to `osRuntimeSymbol`. `malloc`, `free`, and `memcmp` are not reserved: the backend
+`silk_<module>_<name>__<instance>` shape) or `^silk_suspend_`. The reserved set and the spelling
+rule live in the `ForeignSymbol` actor. `malloc`, `free`, and `memcmp` are not reserved: the backend
 declares them itself with fixed signatures, so a user declaration must agree, and when
 `FunctionActor.declare` reports an incompatible redeclaration `NativeProgram` maps that
 `LlvmError` to a `BackendError` naming the symbol rather than letting it surface as an

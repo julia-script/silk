@@ -680,3 +680,38 @@ pub fn make<B, A>(captured: A) -> some<F: once fn(A) -> A> F { return select<A>(
     assert.strictEqual(beforeArtifact.wat, afterArtifact.wat)
   }),
 )
+
+it.effect('invalidates direct importers when a foreign symbol is renamed but not respelled', () =>
+  Effect.gen(function* () {
+    const importer =
+      'import app.B { cAbs } pub fn use(value: i32) -> i32 { return unsafe cAbs(value) }'
+    const previous = yield* analyze(
+      sources({
+        'app/A': importer,
+        'app/B': 'pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"',
+      }),
+      ['app/A'],
+    )
+    const respelled = yield* analyze(
+      sources({
+        'app/A': importer,
+        'app/B': '\n\npub unsafe extern "C" fn cAbs( value: i32 ) -> i32 as "abs"',
+      }),
+      ['app/A'],
+      previous,
+    )
+    const renamed = yield* analyze(
+      sources({
+        'app/A': importer,
+        'app/B': 'pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "labs"',
+      }),
+      ['app/A'],
+      respelled,
+    )
+
+    expectReusable(respelled, 'app/A')
+    expectReasons(respelled, 'app/B', ['LocalChange'])
+    expectReasons(renamed, 'app/A', ['DependencySurfaceChange'])
+    expectReasons(renamed, 'app/B', ['LocalChange'])
+  }),
+)

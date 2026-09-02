@@ -2555,3 +2555,60 @@ effect fn main() -> i32 ? &Logger { return run Logger.value() }`,
     'service-call service://call.Logger.value@DefaultRole:shared',
   )
 })
+
+it('treats a foreign function as an unsafe callable that is never first-class', () => {
+  const foreign = `unsafe extern "C" fn abs(value: i32) -> i32
+unsafe extern "C" fn add(left: i32, right: i32) -> i32
+`
+  const accepted = analyzeText(
+    'fixture://foreign-unsafe-accepted.silk',
+    `${foreign}fn blocked(value: i32) -> i32 { unsafe { return abs(value) } }
+fn prefixed(value: i32) -> i32 { return unsafe abs(value) }`,
+  )
+  const unacknowledged = analyzeText(
+    'fixture://foreign-unsafe-rejected.silk',
+    `${foreign}fn main() -> i32 { return abs(1) }`,
+  )
+  const firstClass = [
+    ['binding', `${foreign}fn main() -> i32 { let f = abs return 0 }`, 'abs'],
+    [
+      'argument',
+      `${foreign}fn apply(f: fn(i32) -> i32, value: i32) -> i32 { return f(value) }
+fn main() -> i32 { return apply(abs, 1) }`,
+      'abs',
+    ],
+    ['section', `${foreign}fn main() -> i32 { let addOne = add(1) return 0 }`, 'add(1)'],
+  ] as const
+
+  assert.deepEqual(accepted.diagnostics, [])
+  assert.strictEqual(accepted.functions.length, 2)
+  assert.deepEqual(
+    unacknowledged.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0082'],
+  )
+  for (const [name, source, spelling] of firstClass) {
+    const result = analyzeText(`fixture://foreign-first-class-${name}.silk`, source)
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      ]),
+      [['SEM0189', spelling]],
+      spelling,
+    )
+  }
+})
+
+it.effect('realizes a module holding an uncalled foreign declaration without a body error', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'foreign/Idle',
+      ascii(`unsafe extern "C" fn abs(value: i32) -> i32
+pub fn main() -> i32 { return 0 }`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(self.results.get('foreign/Idle')?.functions.length, 1)
+  }),
+)

@@ -1,3 +1,4 @@
+import * as CAbi from './CAbi.js'
 import * as ConformanceHead from './ConformanceHead.js'
 import { copyAssumptions, copyProof } from './ConformanceProof.js'
 import type {
@@ -8,6 +9,8 @@ import type {
   InterfaceFact,
   MemberFact,
   ModuleHeaders,
+  ParameterFact,
+  ReturnTypeFact,
   ServiceFact,
   StructFact,
   TypeParameterFact,
@@ -78,6 +81,23 @@ const sourceConformanceOwner = (
 /** Structural providers whose only coherent source owner is the declaring contract module. */
 const isContractOwnedInlineProvider = (provider: Type.Type): boolean =>
   Type.isBuiltin(provider) || Type.isString(provider)
+
+const foreignAdmission = (
+  parameters: ReadonlyArray<ParameterFact>,
+  result: ReturnTypeFact,
+): ReadonlyArray<Diagnostic.Diagnostic> =>
+  [...parameters.map((parameter) => parameter.declaredType), result].flatMap(
+    (declared, ordinal) => {
+      if (declared._tag !== 'Resolved') return []
+      const admission = CAbi.admit(
+        declared.type,
+        ordinal < parameters.length ? 'Parameter' : 'Result',
+      )
+      return admission._tag === 'Admitted'
+        ? []
+        : [Diagnostic.foreignTypeNotAdmitted(declared.spelling, 'C', declared.syntax.span)]
+    },
+  )
 
 export const complete = (
   self: DeclarationIndex.Index,
@@ -175,11 +195,18 @@ export const complete = (
           self.modules,
         )
         diagnostics.push(...constraints.diagnostics)
+        const admission =
+          member.foreign === undefined ? [] : foreignAdmission(parameters, result.fact)
+        diagnostics.push(...admission)
         return Object.freeze({
           ...member,
           typeParameters: resolvedTypeParameters,
           parameters: Object.freeze(parameters),
-          returnType: result.fact,
+          // A foreign header outside the C subset withholds its result so no callable is published.
+          returnType:
+            admission.length === 0
+              ? result.fact
+              : Object.freeze({ _tag: 'Unavailable' as const, syntax: result.fact.syntax }),
           ...(result.opaqueResult === undefined ? {} : { opaqueResult: result.opaqueResult }),
           failureRow: failureRow.fact,
           requirementRow: requirementRow.fact,

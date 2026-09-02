@@ -383,6 +383,24 @@ export const staticResidualGrowthLimitCode = 'SEM0182' as const
 export const cyclicTypeAliasCode = 'SEM0183' as const
 /** Stable code for a type alias that declares type parameters. */
 export const typeAliasParametersCode = 'SEM0184' as const
+/** Stable code for a foreign function whose ABI string is not "C". */
+export const unsupportedForeignAbiCode = 'SEM0185' as const
+/** Stable code for a foreign function declared without the mandatory unsafe qualifier. */
+export const foreignFunctionRequiresUnsafeCode = 'SEM0186' as const
+/** Stable code for a foreign parameter or result type outside the C-compatible scalar subset. */
+export const foreignTypeNotAdmittedCode = 'SEM0187' as const
+/** Stable code for Silk-only contract syntax retained on a foreign function declaration. */
+export const foreignDeclarationRestrictionCode = 'SEM0188' as const
+/** Stable code for using a foreign function as a first-class value rather than calling it. */
+export const foreignFunctionNotFirstClassCode = 'SEM0189' as const
+/** Stable code for a native symbol that is not an ASCII identifier. */
+export const invalidForeignSymbolCode = 'SEM0190' as const
+/** Stable code for a native symbol the compiler reserves for its own runtime or entry. */
+export const reservedForeignSymbolCode = 'SEM0191' as const
+/** Stable code for two reachable declarations of one symbol with different C signatures. */
+export const conflictingForeignSignatureCode = 'SEM0192' as const
+/** Stable code for one reachable foreign call unavailable on the requested execution surface. */
+export const foreignFunctionTargetUnavailableCode = 'SEM0193' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -609,6 +627,15 @@ export type Code =
   | typeof staticResidualGrowthLimitCode
   | typeof cyclicTypeAliasCode
   | typeof typeAliasParametersCode
+  | typeof unsupportedForeignAbiCode
+  | typeof foreignFunctionRequiresUnsafeCode
+  | typeof foreignTypeNotAdmittedCode
+  | typeof foreignDeclarationRestrictionCode
+  | typeof foreignFunctionNotFirstClassCode
+  | typeof invalidForeignSymbolCode
+  | typeof reservedForeignSymbolCode
+  | typeof conflictingForeignSignatureCode
+  | typeof foreignFunctionTargetUnavailableCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -1061,6 +1088,23 @@ export type Reason =
   | { readonly _tag: 'InlineRecursiveAggregate'; readonly members: ReadonlyArray<string> }
   | { readonly _tag: 'CyclicTypeAlias'; readonly aliases: ReadonlyArray<string> }
   | { readonly _tag: 'TypeAliasParameters'; readonly alias: string }
+  | { readonly _tag: 'UnsupportedForeignAbi'; readonly abi: string }
+  | { readonly _tag: 'ForeignFunctionRequiresUnsafe'; readonly name: string }
+  | { readonly _tag: 'ForeignTypeNotAdmitted'; readonly type: string; readonly abi: string }
+  | { readonly _tag: 'ForeignDeclarationRestriction'; readonly restriction: string }
+  | { readonly _tag: 'ForeignFunctionNotFirstClass'; readonly name: string }
+  | { readonly _tag: 'InvalidForeignSymbol'; readonly symbol: string }
+  | { readonly _tag: 'ReservedForeignSymbol'; readonly symbol: string }
+  | {
+      readonly _tag: 'ConflictingForeignSignature'
+      readonly symbol: string
+      readonly otherSpan: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'ForeignFunctionTargetUnavailable'
+      readonly symbol: string
+      readonly surface: string
+    }
   | { readonly _tag: 'InaccessibleStructConstruction'; readonly type: string }
   | { readonly _tag: 'UnknownStructField'; readonly type: string; readonly field: string }
   | {
@@ -2294,6 +2338,134 @@ export const typeAliasParameters = (alias: string, span: SourceSpan.SourceSpan):
     severity: 'error',
     message: `Type alias ${alias} cannot declare type parameters; alias an applied type such as Point<i32> instead`,
     reason: Object.freeze({ _tag: 'TypeAliasParameters', alias }),
+    span,
+  })
+
+/** Rejects the ABI string of a foreign function declaration; only "C" is supported. */
+export const unsupportedForeignAbi = (abi: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unsupportedForeignAbiCode,
+    severity: 'error',
+    message: `Foreign ABI "${abi}" is not supported; only "C" is available`,
+    reason: Object.freeze({ _tag: 'UnsupportedForeignAbi', abi }),
+    span,
+  })
+
+export const foreignFunctionRequiresUnsafe = (
+  name: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: foreignFunctionRequiresUnsafeCode,
+    severity: 'error',
+    message: `Foreign function ${name} must be declared unsafe`,
+    reason: Object.freeze({ _tag: 'ForeignFunctionRequiresUnsafe', name }),
+    span,
+  })
+
+/** Reported at the offending parameter or result type of a foreign function. */
+export const foreignTypeNotAdmitted = (
+  type: string,
+  abi: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: foreignTypeNotAdmittedCode,
+    severity: 'error',
+    message: `${type} is not admitted by the ${abi} ABI`,
+    reason: Object.freeze({ _tag: 'ForeignTypeNotAdmitted', type, abi }),
+    span,
+  })
+
+/** Reported at retained Silk-only syntax such as type parameters, rows, `effect`, or a body. */
+export const foreignDeclarationRestriction = (
+  restriction: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: foreignDeclarationRestrictionCode,
+    severity: 'error',
+    message: `A foreign function declaration must not include ${restriction}`,
+    reason: Object.freeze({ _tag: 'ForeignDeclarationRestriction', restriction }),
+    span,
+  })
+
+export const foreignFunctionNotFirstClass = (
+  name: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: foreignFunctionNotFirstClassCode,
+    severity: 'error',
+    message: `Foreign function ${name} can only be called; it cannot be used as a first-class value`,
+    reason: Object.freeze({ _tag: 'ForeignFunctionNotFirstClass', name }),
+    span,
+  })
+
+export const invalidForeignSymbol = (symbol: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidForeignSymbolCode,
+    severity: 'error',
+    message: `"${symbol}" is not a valid native symbol; use a letter or underscore followed by letters, digits, or underscores`,
+    reason: Object.freeze({ _tag: 'InvalidForeignSymbol', symbol }),
+    span,
+  })
+
+export const reservedForeignSymbol = (symbol: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: reservedForeignSymbolCode,
+    severity: 'error',
+    message: `Native symbol ${symbol} is reserved by the compiler runtime`,
+    reason: Object.freeze({ _tag: 'ReservedForeignSymbol', symbol }),
+    span,
+  })
+
+/** Relates the other reachable declaration of the same symbol. */
+export const conflictingForeignSignature = (
+  symbol: string,
+  span: SourceSpan.SourceSpan,
+  otherSpan: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: conflictingForeignSignatureCode,
+    severity: 'error',
+    message: `Foreign symbol ${symbol} is declared with a conflicting C signature`,
+    reason: Object.freeze({ _tag: 'ConflictingForeignSignature', symbol, otherSpan }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'conflicting declaration', span: otherSpan }),
+    ]),
+  })
+
+/** Diagnoses a reachable foreign call before a non-native execution surface is entered. */
+export const foreignFunctionTargetUnavailable = (
+  symbol: string,
+  surface: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: foreignFunctionTargetUnavailableCode,
+    severity: 'error',
+    message: `Foreign function ${symbol} is unavailable for ${surface}`,
+    reason: Object.freeze({ _tag: 'ForeignFunctionTargetUnavailable', symbol, surface }),
     span,
   })
 

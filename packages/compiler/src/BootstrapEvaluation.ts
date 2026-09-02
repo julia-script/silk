@@ -22,6 +22,7 @@ import * as FloatingPoint from './FloatingPoint.js'
 import type * as Hir from './Hir.js'
 import type * as HostInput from './HostInput.js'
 import * as Instances from './Instances.js'
+import * as ForeignAvailability from './ForeignAvailability.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as LocalSharedLifecycle from './LocalSharedLifecycle.js'
 import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
@@ -2482,6 +2483,10 @@ function* executeFunction(
             )
             break
           }
+          case 'ForeignCall':
+            throw new RangeError(
+              `Target validation allowed a foreign call into the evaluator: ${operation.symbol}`,
+            )
           case 'HostWrite':
           case 'OsOpen':
           case 'OsCall': {
@@ -5098,6 +5103,19 @@ export const evaluate = (
         _tag: 'IntrinsicTargetUnavailable',
         diagnostics: availability.diagnostics,
       }),
+      trace: Object.freeze([]),
+    })
+  }
+  const foreign = ForeignAvailability.select(
+    program.foreignCalls,
+    'Evaluator',
+    program.layout.target,
+  )
+  if (foreign.length > 0) {
+    return Object.freeze({
+      _tag: 'Blocked',
+      entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
+      reason: Object.freeze({ _tag: 'ForeignTargetUnavailable', diagnostics: foreign }),
       trace: Object.freeze([]),
     })
   }

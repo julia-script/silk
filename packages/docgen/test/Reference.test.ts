@@ -63,6 +63,9 @@ pub fn identity<
 
 /// Private implementation helper.
 fn helper() -> i32 { return 0 }
+
+/// Computes an absolute value through libc.
+pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"
 `
 
 const rendered = Effect.fnUntraced(function* () {
@@ -82,7 +85,10 @@ it.effect('renders the complete public hierarchy in source order with accurate c
     const page = result.reference.files.find((file) => file.path === 'reference.md')?.contents
     assert.isDefined(page)
     assert.include(page, 'Import as `Recovery` with `import test.reference { Recovery }`.')
-    assert.include(page, 'Public declarations: 3.')
+    assert.include(page, 'Public declarations: 4.')
+    assert.include(page, '## `cAbs`')
+    assert.include(page, 'pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"')
+    assert.include(page, 'Computes an absolute value through libc.')
     assert.include(page, '### Operation `recover`')
     assert.include(page, '#### Parameter `problem`')
     assert.notInclude(page, 'Parameter `fallback`')

@@ -1,3 +1,4 @@
+import * as CAbi from './CAbi.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as Constraint from './Constraint.js'
@@ -13,11 +14,13 @@ import * as Specialization from './Specialization.js'
 import type * as StaticEvaluation from './StaticEvaluation.js'
 import type * as StaticValue from './StaticValue.js'
 import * as SuspensionMode from './SuspensionMode.js'
+import type * as Target from './Target.js'
 import * as Type from './Type.js'
 
 type Instance = Omit<Instances.Instance, 'ownership'>
 type InstanceKey = Instances.InstanceKey
 type IntrinsicCall = Instances.IntrinsicCall
+type ForeignCall = Instances.ForeignCall
 
 export interface SuspensionGraph {
   readonly roots: ReadonlyMap<SuspensionMode.Mode, ReadonlySet<string>>
@@ -105,6 +108,81 @@ export const reachableIntrinsics = (
     }
   }
   return Object.freeze([...retained.values()].sort(compareIntrinsicCalls))
+}
+
+/** The foreign header a canonical call target names, when it is one. */
+export const foreignFact = (
+  index: DeclarationIndex.Index,
+  target: DeclarationFacts.CanonicalId,
+): DeclarationFacts.DeclarationFact | undefined => {
+  const fact = DeclarationFacts.byCanonical(index, target)
+  return fact?._tag === 'FunctionDeclaration' && fact.foreign !== undefined ? fact : undefined
+}
+
+/** Classifies one admitted foreign header's declared parameter and result types for a target. */
+export const foreignSignature = (
+  fact: DeclarationFacts.DeclarationFact,
+  target: Target.Target,
+): CAbi.CAbiSignature => {
+  const declared = (type: DeclarationFacts.DeclaredTypeFact): Type.Type => {
+    if (type._tag !== 'Resolved')
+      throw new RangeError(
+        `Runtime HIR reached foreign function ${fact.canonical._tag === 'Canonical' ? fact.canonical.id.name : fact.id.ordinal} with an unresolved type`,
+      )
+    return type.type
+  }
+  return CAbi.signature(
+    fact.parameters.map((parameter) => declared(parameter.declaredType)),
+    declared(fact.returnType),
+    target,
+  )
+}
+
+const compareForeignCalls = (left: ForeignCall, right: ForeignCall): number =>
+  left.symbol.localeCompare(right.symbol) ||
+  left.declaration.module.localeCompare(right.declaration.module) ||
+  left.declaration.name.localeCompare(right.declaration.name)
+
+const compareSpans = (left: Hir.Expression['span'], right: Hir.Expression['span']): number =>
+  left.sourceId.localeCompare(right.sourceId) || left.start - right.start || left.end - right.end
+
+/**
+ * Collects every foreign declaration retained by reachable concrete instances, one entry per
+ * declaration keyed by its first reachable call, classified for the selected target.
+ */
+export const reachableForeignCalls = (
+  instances: ReadonlyArray<Instance>,
+  index: DeclarationIndex.Index,
+  target: Target.Target,
+): ReadonlyArray<ForeignCall> => {
+  const retained = new Map<string, ForeignCall>()
+  for (const instance of instances) {
+    for (const statement of instance.function.statements) {
+      for (const root of Hir.statementExpressions(statement)) {
+        for (const expression of Hir.expressionTree(root)) {
+          if (expression._tag !== 'Call') continue
+          const fact = foreignFact(index, expression.target)
+          if (fact?.foreign === undefined || fact.name._tag !== 'Present') continue
+          const key = `${expression.target.module} ${expression.target.name}`
+          const existing = retained.get(key)
+          if (existing !== undefined && compareSpans(existing.callSpan, expression.span) <= 0)
+            continue
+          retained.set(
+            key,
+            Object.freeze({
+              _tag: 'ReachableForeignCall',
+              symbol: fact.foreign.symbol,
+              signature: foreignSignature(fact, target),
+              declaration: expression.target,
+              declarationSpan: fact.name.token.span,
+              callSpan: expression.span,
+            }),
+          )
+        }
+      }
+    }
+  }
+  return Object.freeze([...retained.values()].sort(compareForeignCalls))
 }
 
 /** Computes normalized direct/nested/external-park facts for every execution node. */

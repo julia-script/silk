@@ -2,10 +2,13 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import type * as Mir from '../src/Mir.js'
+import * as Instances from '../src/Instances.js'
+import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
+import * as Target from '../src/Target.js'
 import { scalarEnumSignedAcceptance } from './support/corpus.js'
 import * as Json from './support/Json.js'
+import * as MirSamples from './support/mirSamples.js'
 
 // UTF-8, not charCodeAt: corpus programs may carry non-ASCII literals, and for ASCII sources the
 // bytes are identical.
@@ -735,3 +738,32 @@ pub fn main() -> i32 { return inspect(Token { value: 42 }) }`),
     })
   }),
 )
+
+it.effect('blocks a reachable foreign call before execution starts', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(`unsafe extern "C" fn abs(value: i32) -> i32
+pub fn main() -> i32 { return unsafe abs(-42) }`)
+    assert.strictEqual(outcome._tag, 'Blocked')
+    if (outcome._tag !== 'Blocked' || outcome.reason._tag !== 'ForeignTargetUnavailable')
+      return assert.fail('expected foreign availability to block the evaluator')
+    assert.deepEqual(
+      outcome.reason.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0193'],
+    )
+    assert.deepEqual(outcome.trace, [])
+  }),
+)
+
+it('throws when target validation lets a ForeignCall reach the evaluator', () => {
+  const program = MirSamples.foreignCallSample(Target.aarch64AppleDarwin)
+  const discovery: Instances.Discovery = Object.freeze({
+    ...Instances.invalid(program.module),
+    entry: Object.freeze({
+      _tag: 'Resolved',
+      kind: 'Ordinary',
+      result: 'Status',
+      key: Mir.machineEntry(program),
+    }),
+  })
+  assert.throws(() => BootstrapEvaluation.evaluate(discovery, program), RangeError)
+})

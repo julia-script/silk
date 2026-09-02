@@ -1652,3 +1652,126 @@ impl<U> Drop for Vector<U> { fn drop(self: &mut Vector<U>) -> () { return () } }
     ])
   }),
 )
+
+const spans = (
+  index: DeclarationIndex.Index,
+  source: string,
+  code: string,
+): ReadonlyArray<string> =>
+  index.diagnostics
+    .filter((diagnostic) => diagnostic.code === code)
+    .map((diagnostic) => source.slice(diagnostic.span.start, diagnostic.span.end).trim())
+
+it.effect('indexes foreign headers as unsafe bodiless function facts with a native symbol', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `pub unsafe extern "C" fn abs(value: i32) -> i32
+unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"
+unsafe extern "C" fn every(a: i8, b: u8, c: i16, d: u16, e: i32, f: u32, g: i64, h: u64, i: isize, j: usize, k: f32, l: f64) -> ()
+unsafe extern "C" fn bare(value: u8)`,
+      ],
+    ])
+    const [abs, renamed, every, bare] = index.modules.at(0)?.declarations ?? []
+
+    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(abs?.foreign, { abi: 'C', symbol: 'abs' })
+    assert.strictEqual(abs?.unsafe, true)
+    assert.strictEqual(abs?.visibility, 'Public')
+    assert.strictEqual(abs?.phase, 'Runtime')
+    assert.strictEqual(abs?.functionKind, 'Ordinary')
+    assert.strictEqual(abs?.bodyTemplate, undefined)
+    assert.strictEqual(abs?.returnType._tag, 'Resolved')
+    assert.deepEqual(
+      abs === undefined ? undefined : Type.encode(DeclarationFacts.callableContract(abs).result),
+      'i32',
+    )
+    assert.strictEqual(
+      abs === undefined ? undefined : DeclarationFacts.callableContract(abs).unsafe,
+      true,
+    )
+    assert.deepEqual(renamed?.foreign, { abi: 'C', symbol: 'abs' })
+    assert.strictEqual(renamed?.visibility, 'Private')
+    const spelling = (declaration: DeclarationFacts.DeclarationFact): string | undefined =>
+      declaration.name._tag === 'Present' ? declaration.name.spelling : undefined
+    assert.strictEqual(renamed === undefined ? undefined : spelling(renamed), 'cAbs')
+    assert.deepEqual(
+      (index.modules.at(0)?.declarations ?? [])
+        .filter((declaration) => spelling(declaration) === 'abs')
+        .map((declaration) => declaration.visibility),
+      ['Public'],
+    )
+    assert.strictEqual(every?.returnType._tag, 'Resolved')
+    assert.strictEqual(every?.parameters.length, 12)
+    assert.strictEqual(bare?.returnType._tag, 'Resolved')
+    assert.strictEqual(DeclarationFacts.lookup(index, 'root', 'abs')._tag, 'Resolved')
+  }),
+)
+
+it.effect('reports the same-module collision between a foreign and an ordinary function', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `fn abs(value: i32) -> i32 { return value }
+unsafe extern "C" fn abs(value: i32) -> i32`,
+      ],
+    ])
+
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0003'],
+    )
+    assert.strictEqual(index.modules.at(0)?.declarations.at(1)?.canonical._tag, 'Duplicate')
+  }),
+)
+
+it.effect('rejects foreign headers outside the C contract and publishes no callable', () =>
+  Effect.gen(function* () {
+    const cases: ReadonlyArray<readonly [string, string, ReadonlyArray<string>]> = [
+      ['unsafe extern "fastcall" fn f() -> ()', 'SEM0185', ['"fastcall"']],
+      ['extern "C" fn abs(value: i32) -> i32', 'SEM0186', ['abs']],
+      ['pub static unsafe extern "C" fn f() -> i32', 'SEM0188', ['static']],
+      ['unsafe extern "C" effect fn f() -> ()', 'SEM0188', ['effect']],
+      ['unsafe extern "C" fn bad<T>(value: T) -> T', 'SEM0188', ['<T>']],
+      ['struct Problem {}\nunsafe extern "C" fn f() -> i32 ! Problem', 'SEM0188', ['! Problem']],
+      ['struct Clock {}\nunsafe extern "C" fn f() -> i32 ? &Clock', 'SEM0188', ['? &Clock']],
+      [
+        'unsafe extern "C" fn f<?S, P, ?R>() -> i32 where P provides S from R',
+        'SEM0188',
+        ['<?S, P, ?R>', 'where P provides S from R'],
+      ],
+      ['unsafe extern "C" fn bad() -> i32 { return 1 }', 'SEM0188', ['{ return 1 }']],
+      ['unsafe extern "C" fn bad(text: string) -> ()', 'SEM0187', ['string']],
+      ['unsafe extern "C" fn bad(flag: bool) -> char', 'SEM0187', ['bool', 'char']],
+      ['unsafe extern "C" fn bad(bytes: &[u8]) -> ()', 'SEM0187', ['&[u8]']],
+      ['unsafe extern "C" fn bad(value: &mut i32) -> ()', 'SEM0187', ['&mut i32']],
+      ['unsafe extern "C" fn f() -> () as "not a symbol"', 'SEM0190', ['"not a symbol"']],
+      ['unsafe extern "C" fn f() -> i32 as "main"', 'SEM0191', ['"main"']],
+      ['unsafe extern "C" fn f() -> i32 as "silk_main"', 'SEM0191', ['"silk_main"']],
+      ['unsafe extern "C" fn silk_os_file_open_v1() -> i32', 'SEM0191', ['silk_os_file_open_v1']],
+    ]
+
+    for (const [source, code, expected] of cases) {
+      const index = yield* collect('root', [['root', source]])
+      const header = index.modules.at(0)?.declarations.at(-1)
+
+      assert.deepEqual(spans(index, source, code), expected, source)
+      assert.strictEqual(header?.foreign?.abi, 'C', source)
+      assert.strictEqual(header?.returnType._tag, 'Unavailable', source)
+    }
+  }),
+)
+
+it.effect('does not double-report a foreign header whose ABI literal the parser lost', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [['root', 'unsafe extern fn f() -> i32']])
+
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      [],
+    )
+    assert.strictEqual(index.modules.at(0)?.declarations.at(0)?.foreign?.symbol, 'f')
+  }),
+)

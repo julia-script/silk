@@ -18,6 +18,8 @@ export interface BuildPlan {
   readonly profile: ToolchainPlan.OptimizationProfile
   readonly destination: string
   readonly toolchain: NativeToolchain.Toolchain
+  /** The manifest's native libraries for a native target; empty for WebAssembly. */
+  readonly nativeLibraries: ReadonlyArray<string>
 }
 
 export type BuildPlanErrorReason =
@@ -120,6 +122,9 @@ export const make = (
         fileName,
       ),
       toolchain: Object.freeze({ _tag: 'Toolchain' as const, clang: options.clang ?? 'clang' }),
+      nativeLibraries: Target.isNative(options.target)
+        ? project.build.nativeLibraries
+        : Object.freeze([]),
     }),
   )
 }

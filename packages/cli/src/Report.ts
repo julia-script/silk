@@ -161,7 +161,8 @@ export const backendError = (self: Backend.BackendError, sources: SourceCatalog)
         head,
         ...self.reason.violations.map((violation) => mirViolation(violation, sources)),
       ].join('\n')
-    case 'UnsupportedIntrinsic': {
+    case 'UnsupportedIntrinsic':
+    case 'UnsupportedForeignFunction': {
       const rendered = diagnostics(self.reason.diagnostics, sources)
       return rendered.length > 0 ? [head, rendered].join('\n') : head
     }

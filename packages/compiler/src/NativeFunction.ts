@@ -22,6 +22,7 @@ import type * as NativeArith from './NativeArith.js'
 import type * as NativeCall from './NativeCall.js'
 import * as NativeControl from './NativeControl.js'
 import * as NativeDebug from './NativeDebug.js'
+import type * as NativeForeignOperation from './NativeForeignOperation.js'
 import type * as NativeHostFailure from './NativeHostFailure.js'
 import type * as NativeLanePointer from './NativeLanePointer.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
@@ -187,6 +188,7 @@ export interface EmissionContext {
       readonly symbol: string
     }
   >
+  readonly foreignFunctions: ReadonlyMap<string, NativeForeignOperation.Declaration>
   readonly declared: ReadonlyArray<NativeLoweringContext.DeclaredFunction>
   readonly originThunks: ReadonlyMap<
     string,
@@ -246,6 +248,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
     memcmp,
     standardWrite,
     osRuntimes,
+    foreignFunctions,
     declared,
     originThunks,
     resumeThunks,
@@ -812,6 +815,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           ...(memcmp === undefined ? {} : { memcmp }),
           ...(standardWrite === undefined ? {} : { standardWrite }),
           osRuntimes,
+          foreignFunctions,
           lanePointers,
           suspensionRegions,
           types: nativeTypes,

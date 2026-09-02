@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
@@ -54,6 +54,7 @@ const compileSource = (
   name: string,
   text: string,
   imports?: Readonly<Record<string, string>>,
+  link: Pick<Driver.CompileRequest, 'nativeObjects' | 'nativeLibraries'> = {},
 ): Effect.Effect<Driver.Outcome, Driver.SourceResolutionFailed | NativeToolchain.ToolchainError> =>
   Driver.compile({
     compilation: {
@@ -62,6 +63,7 @@ const compileSource = (
     toolchain,
     profile: 'release',
     destination: join(destinationRoot, name),
+    ...link,
   }).pipe(
     Effect.provide(
       imports === undefined
@@ -73,6 +75,24 @@ const compileSource = (
           ),
     ),
   )
+
+/** Compiles corpus C sources through the pinned Clang into durable objects under the test root. */
+const compileCSources = Effect.fnUntraced(function* (
+  name: string,
+  sources: Readonly<Record<string, string>>,
+) {
+  const target = yield* NativeToolchain.hostTarget()
+  return yield* NativeToolchain.withBuildScope(`${name}-c`, (scope) =>
+    Effect.forEach(Object.entries(sources), ([unit, text]) =>
+      Effect.gen(function* () {
+        const object = yield* NativeToolchain.compileCObject(toolchain, scope, target, unit, text)
+        const path = join(destinationRoot, `${name}-${unit}.o`)
+        writeFileSync(path, readFileSync(object.artifact.path))
+        return path
+      }),
+    ),
+  )
+})
 
 /**
  * `SILK_NATIVE_SHARD=k/n` selects every n-th corpus case starting at k (1-based), letting CI run
@@ -100,10 +120,15 @@ it.each(shardedCorpus)(
       )
       if (snapshot.mir._tag !== 'Available') return
       const interpreted = Analysis.evaluate(snapshot)
+      const nativeObjects =
+        program.nativeCSources === undefined
+          ? []
+          : yield* compileCSources(`corpus-${program.name}`, program.nativeCSources)
       const outcome = yield* compileSource(
         `corpus-${program.name}`,
         program.nativeSource ?? program.source,
         program.nativeImports,
+        { nativeObjects, nativeLibraries: program.nativeLibraries ?? [] },
       )
 
       if (program.expected._tag === 'UnavailableEntry') {
@@ -156,6 +181,29 @@ it.each(shardedCorpus)(
     }).pipe(Effect.runPromise)
   },
   1_500_000,
+)
+it.effect(
+  'fails to link a foreign symbol nothing defines and keeps the linker output',
+  () =>
+    Effect.gen(function* () {
+      const destination = join(destinationRoot, 'foreign-undefined')
+      const result = yield* Effect.result(
+        compileSource(
+          'foreign-undefined',
+          `unsafe extern "C" fn silk_test_missing_symbol(value: i32) -> i32
+pub fn main() -> i32 { return unsafe silk_test_missing_symbol(1) }`,
+        ),
+      )
+      assert.strictEqual(result._tag, 'Failure')
+      if (result._tag !== 'Failure') return
+      assert.strictEqual(result.failure._tag, 'ToolchainError')
+      if (result.failure._tag !== 'ToolchainError') return
+      assert.strictEqual(result.failure.reason._tag, 'LinkFailed')
+      if (result.failure.reason._tag !== 'LinkFailed') return
+      assert.match(result.failure.reason.output, /silk_test_missing_symbol/)
+      assert.strictEqual(existsSync(destination), false)
+    }),
+  120_000,
 )
 it.effect(
   'links and runs the native system and monotonic clock ABI',

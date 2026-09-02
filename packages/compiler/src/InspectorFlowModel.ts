@@ -698,6 +698,8 @@ const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
       return 'MissingRandomHost: no random host provider was supplied'
     case 'IntrinsicTargetUnavailable':
       return `IntrinsicTargetUnavailable: ${reason.diagnostics.map((diagnostic) => diagnostic.message).join('; ')}`
+    case 'ForeignTargetUnavailable':
+      return `ForeignTargetUnavailable: ${reason.diagnostics.map((diagnostic) => diagnostic.message).join('; ')}`
   }
 }
 
@@ -736,6 +738,8 @@ const blockedSpan = (
     case 'EvaluationLimit':
       return reason.span
     case 'IntrinsicTargetUnavailable':
+      return reason.diagnostics.at(0)?.span
+    case 'ForeignTargetUnavailable':
       return reason.diagnostics.at(0)?.span
   }
 }

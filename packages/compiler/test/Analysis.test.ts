@@ -1223,3 +1223,36 @@ pub fn main() -> i32 { return 42 }`,
     )
   }),
 )
+
+it.effect('resolves public foreign functions across modules under the unsafe rule', () =>
+  Effect.gen(function* () {
+    const root = `import lib { abs }
+import lib as Lib
+pub fn main() -> i32 { return unsafe abs(1) + unsafe Lib.abs(2) + Lib.hidden(3) }`
+    const self = yield* Analysis.make({ root: SourceFile.make('root', ascii(root)) }).pipe(
+      Effect.provide(
+        SourceResolver.memory(
+          new Map([
+            [
+              'lib',
+              ascii(`pub unsafe extern "C" fn abs(value: i32) -> i32
+unsafe extern "C" fn hidden(value: i32) -> i32`),
+            ],
+          ]),
+        ),
+      ),
+    )
+    const selected = Analysis.semanticOccurrenceAt(self, 'root', root.indexOf('abs(1)'))
+    const qualified = Analysis.semanticOccurrenceAt(self, 'root', root.indexOf('abs(2)'))
+
+    assert.strictEqual(selected?.declaration?.module, 'lib')
+    assert.strictEqual(qualified?.declaration?.module, 'lib')
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => [
+        diagnostic.code,
+        root.slice(diagnostic.span.start, diagnostic.span.end),
+      ]),
+      [['SEM0015', 'hidden']],
+    )
+  }),
+)

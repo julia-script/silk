@@ -9,6 +9,7 @@ import type * as NativeAggregate from './NativeAggregate.js'
 import type * as NativeArith from './NativeArith.js'
 import type * as NativeCall from './NativeCall.js'
 import type * as NativeDebug from './NativeDebug.js'
+import type * as NativeForeignOperation from './NativeForeignOperation.js'
 import type * as NativeHostFailure from './NativeHostFailure.js'
 import type * as NativeLanePointer from './NativeLanePointer.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
@@ -55,6 +56,7 @@ export interface Context {
       readonly symbol: string
     }
   >
+  readonly foreignFunctions: ReadonlyMap<string, NativeForeignOperation.Declaration>
   readonly lanePointers: NativeLanePointer.Context
   readonly suspensionRegions: ReadonlyMap<Mir.Operation, Mir.SuspensionRegion>
   readonly types: NativeType.LoweringContext

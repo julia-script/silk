@@ -1,3 +1,4 @@
+import type * as CAbi from './CAbi.js'
 import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as ExecutionPackage from './ExecutionPackage.js'
@@ -497,6 +498,17 @@ export type Operation =
       readonly _tag: 'OsCall'
       readonly operation: Intrinsic.OperationId
       readonly destination: LocalId
+      readonly arguments: ReadonlyArray<LocalId>
+      readonly type: Type
+      readonly provenance: Provenance
+    }
+  | {
+      /** Calls one foreign (`extern "C"`) symbol directly under its classified C signature. */
+      readonly _tag: 'ForeignCall'
+      readonly destination: LocalId
+      readonly symbol: string
+      readonly abi: 'C'
+      readonly signature: CAbi.CAbiSignature
       readonly arguments: ReadonlyArray<LocalId>
       readonly type: Type
       readonly provenance: Provenance
@@ -1452,6 +1464,8 @@ export interface Module {
   readonly module: string
   readonly entry: Entry
   readonly intrinsics: ReadonlyArray<Instances.IntrinsicCall>
+  /** Reachable foreign declarations copied from discovery; every availability site reads it. */
+  readonly foreignCalls: ReadonlyArray<Instances.ForeignCall>
   readonly layout: Layout.Plan
   readonly staticData?: ReadonlyArray<StaticText.Data>
   readonly functions: ReadonlyArray<MirFunction>
@@ -1641,6 +1655,7 @@ export interface Violation {
     | 'InvalidAllocationOperation'
     | 'InvalidStandardStreamOperation'
     | 'InvalidOsOperation'
+    | 'InvalidForeignCall'
     | 'InvalidRawStorageOperation'
     | 'InvalidLocalSharedOperation'
     | 'InvalidExecutionOperation'
