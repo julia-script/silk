@@ -5,6 +5,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as LlvmBackend from '../src/LlvmBackend.js'
+import type * as Mir from '../src/Mir.js'
 import * as WasmBackend from '../src/WasmBackend.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -505,6 +506,38 @@ pub fn main() -> i32 { return unsafe abs(-42) }`),
   }),
 )
 
+it.effect('gates an export record off a native target at Backend.emit', () =>
+  Effect.gen(function* () {
+    const source = `export "C" fn silk_test_double_v1(value: i32) -> i32 { return value * 2 }
+pub fn main() -> i32 { return 0 }`
+    const native = yield* Analysis.ofSourceRealized(
+      'backend/export',
+      ascii(source),
+      'aarch64-apple-darwin',
+    )
+    const wasm = yield* Analysis.ofSourceRealized(
+      'backend/export',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(native), [])
+    assert.deepEqual(Analysis.diagnostics(wasm), [])
+    const program: Mir.Module = Object.freeze({
+      ...Analysis.loweredMir(wasm),
+      foreignExports: Analysis.loweredMir(native).foreignExports,
+    })
+    const failure = yield* Effect.flip(
+      Backend.emit(WasmBackend.WasmBackend, program, { mode: 'release' }),
+    )
+    assert.strictEqual(failure.reason._tag, 'UnsupportedForeignFunction')
+    if (failure.reason._tag === 'UnsupportedForeignFunction')
+      assert.deepEqual(
+        failure.reason.diagnostics.map((diagnostic) => diagnostic.code),
+        ['SEM0193'],
+      )
+  }),
+)
+
 it.effect('rejects a foreign declaration of a symbol the native backend declares itself', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -532,5 +565,138 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`),
     assert.strictEqual(failure._tag, 'BackendError')
     if (failure._tag !== 'BackendError') return
     assert.deepEqual(failure.reason, { _tag: 'ForeignSymbolConflict', symbol: 'malloc' })
+  }),
+)
+
+it.effect('defines one C thunk per export that forwards to the private implementation', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'backend/foreign-export',
+      ascii(`export "C" fn silk_test_double_v1(value: i32) -> i32 { return value * 2 }
+pub fn main() -> i32 { return 0 }`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const first = yield* Analysis.codegen(snapshot, { mode: 'release' })
+    const second = yield* Analysis.codegen(snapshot, { mode: 'release' })
+    assert.strictEqual(first._tag, 'LlvmBitcodeArtifact')
+    if (first._tag !== 'LlvmBitcodeArtifact' || second._tag !== 'LlvmBitcodeArtifact') return
+    assert.deepEqual(first.bitcode, second.bitcode)
+    const lines = first.ir.split('\n')
+    // Convention 0 renders without a `ccc`/`cc <n>` marker; the export is emitted even though
+    // `main` never calls it.
+    const start = lines.findIndex((line) => line.startsWith('define i32 @silk_test_double_v1(i32'))
+    assert.notStrictEqual(start, -1, first.ir)
+    const body = lines.slice(start + 1, lines.indexOf('}', start))
+    const calls = body.filter((line) => line.includes(' call '))
+    assert.strictEqual(calls.length, 1, body.join('\n'))
+    assert.match(calls.at(0) ?? '', /call i32 @silk_[^(\s]+__[^(\s]+\(i32 /)
+    assert.isFalse((calls.at(0) ?? '').includes('@silk_test_double_v1('))
+    assert.strictEqual(body.filter((line) => /^\s*ret /.test(line)).length, 1, body.join('\n'))
+    assert.deepEqual(first.foreignExports, [
+      { symbol: 'silk_test_double_v1', parameters: ['i32'], result: 'i32' },
+    ])
+    const plain = yield* emit(nestedSource, { mode: 'release' })
+    assert.deepEqual(plain.foreignExports, [])
+  }),
+)
+
+it.effect('lowers raw pointers to one address lane and stores through a formed pointer', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'backend/pointer-native',
+      ascii(`import silk.pointer { Pointer }
+import silk.i32 as i32
+pub fn main() -> i32 {
+  let mut values = [1, 2, 3]
+  let pointer = Pointer.fromMutSlice(&mut values)
+  let empty = Pointer.null<i32>()
+  if !Pointer.isNull(empty) {
+    return 2
+  }
+  unsafe {
+    let third = Pointer.offsetMut(pointer, i32.toUsize(2))
+    Pointer.write(third, 9)
+    if Pointer.read(third) != values[2] {
+      return 1
+    }
+  }
+  return 0
+}`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.strictEqual(Analysis.evaluate(snapshot)._tag, 'Completed')
+    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+    assert.strictEqual(artifact._tag, 'LlvmBitcodeArtifact')
+    if (artifact._tag !== 'LlvmBitcodeArtifact') return
+    assert.match(artifact.ir, /icmp eq i64 %ptr_is_null\d+_address, 0/)
+    assert.match(
+      artifact.ir,
+      /%ptr_offset\d+ = getelementptr i8, ptr %[^,]+, i64 %ptr_offset\d+_bytes/,
+    )
+    assert.match(artifact.ir, /store i32 %v\d+, ptr %ptr_write\d+_0_ptr/)
+    assert.match(artifact.ir, /%ptr_read\d+_0 = load i32, ptr %ptr_read\d+_0_ptr/)
+  }),
+)
+
+it.effect('reloads a pointed-to local from its storage after a foreign call', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'backend/pointer-reload',
+      ascii(`import silk.pointer { Pointer }
+unsafe extern "C" fn touch(pointer: *mut i32) -> ()
+pub fn main() -> i32 {
+  let mut value = 1
+  let pointer = Pointer.fromMutRef(&mut value)
+  let touched = unsafe touch(pointer)
+  return value
+}`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+    assert.strictEqual(artifact._tag, 'LlvmBitcodeArtifact')
+    if (artifact._tag !== 'LlvmBitcodeArtifact') return
+    const lines = artifact.ir.split('\n')
+    assert.include(lines, 'declare void @touch(ptr)')
+    const call = lines.findIndex((line) => /call void @touch\(ptr %/.test(line))
+    assert.notStrictEqual(call, -1, artifact.ir)
+    const reload = lines.findIndex(
+      (line, index) =>
+        index > call && /%reload\d+_0_\d+ = load i32, ptr %reload\d+_0_\d+_ptr/.test(line),
+    )
+    assert.notStrictEqual(reload, -1, artifact.ir)
+    assert.deepEqual(artifact.foreignImports, [
+      { symbol: 'touch', parameters: ['*mut'], result: 'void' },
+    ])
+  }),
+)
+
+it.effect('declares a foreign pointer signature with the LLVM pointer type', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'backend/pointer-malloc',
+      ascii(`import silk.pointer { Pointer }
+import silk.i32 as i32
+unsafe extern "C" fn malloc(size: usize) -> *mut u8
+pub fn main() -> i32 {
+  let bytes = unsafe malloc(i32.toUsize(8))
+  if Pointer.isNull(bytes) {
+    return 1
+  }
+  return 0
+}`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+    assert.strictEqual(artifact._tag, 'LlvmBitcodeArtifact')
+    if (artifact._tag !== 'LlvmBitcodeArtifact') return
+    assert.include(artifact.ir.split('\n'), 'declare ptr @malloc(i64)')
+    assert.match(artifact.ir, /call ptr @malloc\(i64 %/)
+    assert.deepEqual(artifact.foreignImports, [
+      { symbol: 'malloc', parameters: ['u64'], result: '*mut' },
+    ])
   }),
 )

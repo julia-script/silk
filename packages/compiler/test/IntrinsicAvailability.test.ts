@@ -2,8 +2,11 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as CAbi from '../src/CAbi.js'
+import type * as Diagnostic from '../src/Diagnostic.js'
 import * as ForeignAvailability from '../src/ForeignAvailability.js'
-import type * as Instances from '../src/Instances.js'
+import * as ForeignPlanning from '../src/ForeignPlanning.js'
+import * as Instances from '../src/Instances.js'
+import * as Mir from '../src/Mir.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -11,6 +14,8 @@ import * as SourceResolver from '../src/SourceResolver.js'
 import * as SourceSpan from '../src/SourceSpan.js'
 import * as Target from '../src/Target.js'
 import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
+import * as MirSamples from './support/mirSamples.js'
+import { unreachable } from './support/raise.js'
 
 const encoder = new TextEncoder()
 const source = `fn nativeWrapper() -> i32 { return Intrinsic.i32Add(20, 22) }
@@ -562,3 +567,265 @@ it.effect('rejects a conflicting redeclaration relating both declarations', () =
     )
   }),
 )
+
+const exportSource = `export "C" fn silk_test_double_v1(value: i32) -> i32 { return value * 2 }
+pub fn main() -> i32 { return 0 }`
+
+const exportInventory = (self: Analysis.Snapshot) =>
+  self.instances.foreignExports.map((record) => ({
+    symbol: record.symbol,
+    signature: CAbi.signatureKey(record.signature),
+    key: Instances.keyText(record.key),
+    declaration: record.declaration.name,
+    declarationSource: record.declarationSpan.sourceId,
+  }))
+
+it.effect('seeds native discovery with an uncalled export and records it on MIR', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(exportSource)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(
+      self.instances.instances.map((instance) => instance.key.declaration.name),
+      ['main', 'silk_test_double_v1'],
+    )
+    assert.deepEqual(exportInventory(self), [
+      {
+        symbol: 'silk_test_double_v1',
+        signature: '(i32)->i32',
+        key: Instances.keyText(
+          self.instances.instances.at(1)?.key ?? unreachable('expected the export instance'),
+        ),
+        declaration: 'silk_test_double_v1',
+        declarationSource: 'availability/main',
+      },
+    ])
+    assert.deepEqual(Analysis.loweredMir(self).foreignExports, self.instances.foreignExports)
+    const again = yield* snapshot(exportSource)
+    assert.deepEqual(
+      again.instances.instances.map((instance) => Instances.keyText(instance.key)),
+      self.instances.instances.map((instance) => Instances.keyText(instance.key)),
+    )
+    assert.deepEqual(exportInventory(again), exportInventory(self))
+  }),
+)
+
+it.effect(
+  'adds no export roots for a Wasm target and rejects the export under either backend',
+  () =>
+    Effect.gen(function* () {
+      const self = yield* snapshot(exportSource, 'wasm32-unknown-unknown')
+      assert.deepEqual(Analysis.diagnostics(self), [])
+      assert.deepEqual(
+        self.instances.instances.map((instance) => instance.key.declaration.name),
+        ['main'],
+      )
+      assert.deepEqual(
+        exportInventory(self).map((record) => record.symbol),
+        ['silk_test_double_v1'],
+      )
+      const surfaces = (diagnostics: ReadonlyArray<Diagnostic.Diagnostic>) =>
+        diagnostics.map((diagnostic) =>
+          diagnostic.reason._tag === 'ForeignFunctionTargetUnavailable'
+            ? `${diagnostic.code}:${diagnostic.reason.symbol}@${diagnostic.reason.surface}`
+            : diagnostic.code,
+        )
+      const direct = yield* Effect.flip(Analysis.codegenWasm(self, { mode: 'release' }))
+      assert.strictEqual(direct._tag, 'CodegenUnavailable')
+      if (direct._tag === 'CodegenUnavailable')
+        assert.deepEqual(surfaces(direct.diagnostics), ['SEM0193:silk_test_double_v1@Wasm'])
+      const llvm = yield* Effect.flip(Analysis.codegen(self, { mode: 'release' }))
+      assert.strictEqual(llvm._tag, 'CodegenUnavailable')
+      if (llvm._tag === 'CodegenUnavailable')
+        assert.deepEqual(surfaces(llvm.diagnostics), [
+          'SEM0193:silk_test_double_v1@wasm32-unknown-unknown',
+        ])
+    }),
+)
+
+const exportModules = (root: string, dependency: string, main = 'Dep.viaDep()') =>
+  Analysis.makeRealized({
+    root: SourceFile.make(
+      'availability/export-root',
+      encoder.encode(`import export_dep as Dep
+${root}
+pub fn main() -> i32 { return ${main} }`),
+    ),
+  }).pipe(
+    Effect.provide(
+      SourceResolver.memory(
+        new Map([
+          [
+            'export_dep',
+            encoder.encode(`${dependency}
+pub fn viaDep() -> i32 { return 0 }`),
+          ] as const,
+        ]),
+      ),
+    ),
+  )
+
+const planningFailure = (self: Analysis.Snapshot) =>
+  Effect.map(Effect.flip(Analysis.codegen(self, { mode: 'release' })), (failure) => {
+    assert.strictEqual(failure._tag, 'CodegenUnavailable')
+    return failure._tag === 'CodegenUnavailable'
+      ? failure.diagnostics.map((diagnostic) => [
+          diagnostic.code,
+          diagnostic.span.sourceId,
+          diagnostic.relatedSpans?.map((related) => related.span.sourceId),
+        ])
+      : []
+  })
+
+it.effect('rejects two exports of one symbol relating both declarations', () =>
+  Effect.gen(function* () {
+    const self = yield* exportModules(
+      'export "C" fn one(value: i32) -> i32 as "silk_test_v1" { return value }',
+      'export "C" fn two(value: i32) -> i32 as "silk_test_v1" { return value }',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(yield* planningFailure(self), [
+      ['SEM0192', 'export_dep', ['availability/export-root']],
+    ])
+  }),
+)
+
+it.effect('rejects an export whose symbol a reachable import claims', () =>
+  Effect.gen(function* () {
+    const self = yield* exportModules(
+      'unsafe extern "C" fn abs(value: i32) -> i32',
+      'export "C" fn abs(value: i32) -> i32 { return value }',
+      'unsafe abs(-1) + Dep.viaDep()',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(yield* planningFailure(self), [
+      ['SEM0192', 'export_dep', ['availability/export-root']],
+    ])
+  }),
+)
+
+it.effect('accepts distinct export symbols across modules in canonical order', () =>
+  Effect.gen(function* () {
+    const self = yield* exportModules(
+      'export "C" fn silk_test_double_v1(value: i32) -> i32 { return value * 2 }',
+      'export "C" fn silk_test_add_v1(left: i32, right: i32) -> i32 { return left + right }',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(
+      exportInventory(self).map((record) => [record.symbol, record.signature]),
+      [
+        ['silk_test_double_v1', '(i32)->i32'],
+        ['silk_test_add_v1', '(i32,i32)->i32'],
+      ],
+    )
+    if (self.target._tag !== 'Resolved') return assert.fail('expected a resolved target')
+    assert.deepEqual(
+      ForeignPlanning.check(Analysis.loweredMir(self), 'LLVM', self.target.target),
+      [],
+    )
+    const artifact = yield* Analysis.codegen(self, { mode: 'release' })
+    assert.deepEqual(artifact.foreignExports, [
+      { symbol: 'silk_test_add_v1', parameters: ['i32', 'i32'], result: 'i32' },
+      { symbol: 'silk_test_double_v1', parameters: ['i32'], result: 'i32' },
+    ])
+  }),
+)
+
+it.effect('rejects an export whose body suspends and accepts a synchronous one', () =>
+  Effect.gen(function* () {
+    const suspending = yield* snapshot(`import silk.effect { Effect }
+export "C" fn silk_test_wait_v1() -> i32 { return run Effect.suspend(effect { return 2 }) }
+pub fn main() -> i32 { return 0 }`)
+    assert.deepEqual(Analysis.diagnostics(suspending), [])
+    const failure = yield* Effect.flip(Analysis.codegen(suspending, { mode: 'release' }))
+    assert.strictEqual(failure._tag, 'CodegenUnavailable')
+    if (failure._tag === 'CodegenUnavailable')
+      assert.deepEqual(
+        failure.diagnostics.map((diagnostic) => [
+          diagnostic.code,
+          diagnostic.reason._tag,
+          diagnostic.relatedSpans?.map((related) => related.label),
+        ]),
+        [['SEM0201', 'ExportSuspends', ['suspending call']]],
+      )
+    const synchronous = yield* snapshot(exportSource)
+    if (synchronous.target._tag !== 'Resolved') return assert.fail('expected a resolved target')
+    assert.deepEqual(
+      ForeignPlanning.check(Analysis.loweredMir(synchronous), 'LLVM', synchronous.target.target),
+      [],
+    )
+  }),
+)
+
+it('plans exports over MIR: symbol map, non-native rejection, and suspension', () => {
+  const sample = MirSamples.foreignCallSample(Target.aarch64AppleDarwin)
+  const key = Mir.machineEntry(sample)
+  const i32 = Object.freeze({ _tag: 'Integer' as const, bits: 32 as const, signed: true })
+  const record = (symbol: string, sourceId: string, start: number): Instances.ForeignExport =>
+    Object.freeze({
+      _tag: 'ForeignExport',
+      symbol,
+      signature: Object.freeze({ parameters: Object.freeze([i32]), result: i32 }),
+      key,
+      declaration: Object.freeze({
+        _tag: 'CanonicalDeclarationId',
+        module: sourceId,
+        name: symbol,
+      }),
+      declarationSpan: foreignEntry(symbol, [], sourceId, start).declarationSpan,
+    })
+  const program: Mir.Module = Object.freeze({
+    ...sample,
+    foreignCalls: Object.freeze([foreignEntry('abs', [i32], 'planning/import', 0)]),
+    foreignExports: Object.freeze([
+      record('silk_test_v1', 'planning/a', 0),
+      record('abs', 'planning/b', 0),
+      record('silk_test_v1', 'planning/c', 0),
+      record('silk_test_ok', 'planning/d', 0),
+    ]),
+  })
+  const summarize = (diagnostics: ReadonlyArray<Diagnostic.Diagnostic>) =>
+    diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.span.sourceId,
+      diagnostic.reason._tag === 'ForeignFunctionTargetUnavailable'
+        ? diagnostic.reason.surface
+        : diagnostic.relatedSpans?.map((related) => related.span.sourceId).join(','),
+    ])
+  assert.deepEqual(summarize(ForeignPlanning.check(program, 'LLVM', Target.aarch64AppleDarwin)), [
+    ['SEM0192', 'planning/b', 'planning/import'],
+    ['SEM0192', 'planning/c', 'planning/a'],
+  ])
+  assert.deepEqual(
+    summarize(
+      ForeignPlanning.check(
+        { ...program, foreignExports: program.foreignExports.slice(3) },
+        'Wasm',
+        Target.wasm32UnknownUnknown,
+      ),
+    ),
+    [['SEM0193', 'planning/d', 'Wasm']],
+  )
+  assert.deepEqual(
+    summarize(
+      ForeignPlanning.check(
+        { ...program, foreignExports: program.foreignExports.slice(3) },
+        'LLVM',
+        Target.wasm32UnknownUnknown,
+      ),
+    ),
+    [['SEM0193', 'planning/d', 'wasm32-unknown-unknown']],
+  )
+  const suspending: Mir.Module = {
+    ...program,
+    foreignExports: program.foreignExports.slice(3),
+    functions: program.functions.map((fn) => ({
+      ...fn,
+      suspension: { classification: 'Suspendable' as const, regions: Object.freeze([]) },
+    })),
+  }
+  assert.deepEqual(
+    summarize(ForeignPlanning.check(suspending, 'LLVM', Target.aarch64AppleDarwin)),
+    [['SEM0201', 'planning/d', undefined]],
+  )
+  assert.deepEqual(ForeignPlanning.check(sample, 'Wasm', Target.wasm32UnknownUnknown), [])
+})

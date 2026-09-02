@@ -1151,6 +1151,17 @@ const staticCompositionCorpus: ReadonlyArray<CorpusProgram> = [
     })),
 ]
 
+/** A Silk callee stores through a `*mut i32` parameter; the caller reloads the place afterwards. */
+const pointerParameterWrite = `import silk.pointer { Pointer }
+fn store(target: *mut i32, value: i32) -> () {
+  unsafe { Pointer.write(target, value) }
+}
+pub fn main() -> i32 {
+  let mut result = 0
+  store(Pointer.fromMutRef(&mut result), 42)
+  return result
+}`
+
 export const corpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'literal',
@@ -2831,6 +2842,28 @@ pub fn main() -> i32 {
     source: program.source,
     expected: { _tag: 'Completes', result: 42 } as const,
   })),
+  // Raw pointer parity: a formed slice pointer offset and written, then observed through the
+  // array place; and a Silk callee writing through a `*mut i32` parameter observed by its caller.
+  {
+    name: 'pointer-slice-offset-write',
+    source: `import silk.pointer { Pointer }
+pub fn main() -> i32 {
+  let mut values = [1, 2, 3, 4]
+  let pointer = Pointer.fromMutSlice(&mut values)
+  unsafe {
+    let third = Pointer.offsetMut(pointer, 2)
+    Pointer.write(third, 40)
+    if Pointer.read(third) != 40 { return 1 }
+  }
+  return values[2] + values[3] - 2
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'pointer-parameter-write',
+    source: pointerParameterWrite,
+    expected: { _tag: 'Completes', result: 42 },
+  },
 ]
 
 /**
@@ -3019,8 +3052,205 @@ pub fn main() -> i32 {
   return i32.remainder(sum, 256)
 }`
 
+/** C writes through a Silk-formed `*mut i32` and fills a Silk-formed `*mut u8` buffer. */
+export const foreignPointerFixture = `#include <stdint.h>
+#include <stddef.h>
+void silk_test_store(int32_t *out, int32_t value) { *out = value; }
+void silk_test_fill(uint8_t *buffer, size_t length, uint8_t byte) {
+  for (size_t index = 0; index < length; index += 1) buffer[index] = byte;
+}
+`
+
+/** `Pointer.fromMutRef(&mut result)` handed to C; the Silk read afterwards observes the store. */
+export const foreignPointerStoreNative = `import silk.pointer { Pointer }
+unsafe extern "C" fn silk_test_store(out: *mut i32, value: i32) -> ()
+pub fn main() -> i32 {
+  let mut result = 0
+  unsafe silk_test_store(Pointer.fromMutRef(&mut result), 42)
+  return result
+}`
+
+/** `Pointer.fromMutSlice(&mut bytes)` plus `bytes.length` handed to C; `bytes[0]` observes the fill. */
+export const foreignPointerFillNative = `import silk.i32 as i32
+import silk.u8 as u8
+import silk.pointer { Pointer }
+unsafe extern "C" fn silk_test_fill(buffer: *mut u8, length: usize, byte: u8) -> ()
+fn fill(bytes: &mut [u8], byte: u8) -> () {
+  unsafe silk_test_fill(Pointer.fromMutSlice(&mut bytes), bytes.length, byte)
+}
+pub fn main() -> i32 {
+  let mut bytes = [i32.toU8(0), i32.toU8(0), i32.toU8(0)]
+  fill(&mut bytes, i32.toU8(42))
+  return u8.toI32(bytes[0]) + u8.toI32(bytes[2]) - 42
+}`
+
+/** Pure-Silk evaluator reference for `foreignPointerFillNative`. */
+export const foreignPointerFillReference = `import silk.i32 as i32
+import silk.u8 as u8
+import silk.usize as usize
+fn fill(bytes: &mut [u8], byte: u8) -> () {
+  let mut index = usize.ZERO
+  while index < bytes.length {
+    bytes[index] = byte
+    index = index + 1
+  }
+}
+pub fn main() -> i32 {
+  let mut bytes = [i32.toU8(0), i32.toU8(0), i32.toU8(0)]
+  fill(&mut bytes, i32.toU8(42))
+  return u8.toI32(bytes[0]) + u8.toI32(bytes[2]) - 42
+}`
+
+/**
+ * The libc round trip: allocate, copy a Silk byte view in, NUL-terminate, compare, write to
+ * standard output, free. The backend declares `malloc` as `ptr(i64)`, `free` as `void(ptr)`, and
+ * `memcmp` as `i32(ptr, ptr, i64)` on a 64-bit host (`NativeProgram.ts`); these externs classify
+ * to exactly those LLVM types (`*mut`/`*const` -> `ptr`, `usize` -> `i64`, `()` -> `void`) so the
+ * redeclarations share one entry instead of reporting `ForeignSymbolConflict`.
+ */
+export const foreignLibcRoundtripNative = `import silk.i32 as i32
+import silk.isize as isize
+import silk.usize as usize
+import silk.pointer { Pointer }
+unsafe extern "C" fn malloc(size: usize) -> *mut u8
+unsafe extern "C" fn free(pointer: *mut u8) -> ()
+unsafe extern "C" fn memcpy(destination: *mut u8, source: *const u8, length: usize) -> *mut u8
+unsafe extern "C" fn memcmp(left: *const u8, right: *const u8, length: usize) -> i32
+unsafe extern "C" fn strlen(text: *const u8) -> usize
+unsafe extern "C" fn write(descriptor: i32, data: *const u8, length: usize) -> isize
+pub fn main() -> i32 {
+  let bytes = b"hello\\n"
+  let length = bytes.length
+  let buffer = unsafe malloc(length + 1)
+  if Pointer.isNull(buffer) { return 1 }
+  unsafe {
+    let copied = memcpy(buffer, Pointer.fromSlice(bytes), length)
+    Pointer.write(Pointer.offsetMut(buffer, length), i32.toU8(0))
+    if memcmp(buffer, Pointer.fromSlice(bytes), length) != 0 { return 2 }
+    if strlen(buffer) != length { return 3 }
+    if isize.toI32(write(1, buffer, length)) != usize.toI32(length) { return 4 }
+    free(buffer)
+  }
+  return usize.toI32(length) * 7
+}`
+
+/** Pure-Silk evaluator reference for `foreignLibcRoundtripNative`: the same status without libc. */
+export const foreignLibcRoundtripReference = `import silk.usize as usize
+pub fn main() -> i32 {
+  let bytes = b"hello\\n"
+  return usize.toI32(bytes.length) * 7
+}`
+
+/** C calls back into an exported Silk function from a Silk-called C function. */
+export const foreignExportRoundtripFixture = `#include <stdint.h>
+int32_t silk_test_double_v1(int32_t);
+int32_t silk_test_roundtrip(int32_t value) { return silk_test_double_v1(value) + 1; }
+`
+
+export const foreignExportRoundtripNative = `unsafe extern "C" fn silk_test_roundtrip(value: i32) -> i32
+export "C" fn silk_test_double_v1(value: i32) -> i32 { return value * 2 }
+pub fn main() -> i32 { return unsafe silk_test_roundtrip(20) }`
+
+export const foreignExportRoundtripReference = `fn double(value: i32) -> i32 { return value * 2 }
+fn roundtrip(value: i32) -> i32 { return double(value) + 1 }
+pub fn main() -> i32 { return roundtrip(20) }`
+
+/**
+ * C calls one export per admitted scalar class plus a void export whose effect (a call back into
+ * the fixture's counter) is observed through a second export; the checksum equals
+ * `foreignScalarReference`.
+ */
+export const foreignExportScalarFixture = `#include <stdint.h>
+#include <stddef.h>
+int8_t silk_test_export_add_i8(int8_t, int8_t);
+uint8_t silk_test_export_add_u8(uint8_t, uint8_t);
+int16_t silk_test_export_add_i16(int16_t, int16_t);
+uint16_t silk_test_export_add_u16(uint16_t, uint16_t);
+int32_t silk_test_export_add_i32(int32_t, int32_t);
+uint32_t silk_test_export_add_u32(uint32_t, uint32_t);
+int64_t silk_test_export_add_i64(int64_t, int64_t);
+uint64_t silk_test_export_add_u64(uint64_t, uint64_t);
+intptr_t silk_test_export_add_isize(intptr_t, intptr_t);
+size_t silk_test_export_add_usize(size_t, size_t);
+float silk_test_export_scale_f32(float, float);
+double silk_test_export_scale_f64(double, double);
+void silk_test_export_touch(void);
+int32_t silk_test_export_touched(void);
+static int32_t silk_test_export_counter = 0;
+void silk_test_export_note(void) { silk_test_export_counter += 1; }
+int32_t silk_test_export_noted(void) { return silk_test_export_counter; }
+int32_t silk_test_export_checksum(void) {
+  int32_t sum = 0;
+  sum += silk_test_export_add_i8(-7, 3);
+  sum += silk_test_export_add_u8(200, 5);
+  sum += silk_test_export_add_i16(-300, 50);
+  sum += silk_test_export_add_u16(60000, 7);
+  sum += silk_test_export_add_i32(-11, 4);
+  sum += (int32_t)silk_test_export_add_u32(9, 13);
+  sum += (int32_t)silk_test_export_add_i64(-21, 6);
+  sum += (int32_t)silk_test_export_add_u64(17, 23);
+  sum += (int32_t)silk_test_export_add_isize(-5, 2);
+  sum += (int32_t)silk_test_export_add_usize(8, 9);
+  sum += (int32_t)silk_test_export_scale_f32(3.0f, 7.0f);
+  sum += (int32_t)silk_test_export_scale_f64(-4.0, 5.0);
+  silk_test_export_touch();
+  silk_test_export_touch();
+  silk_test_export_touch();
+  sum += silk_test_export_touched() * 10;
+  return ((sum % 256) + 256) % 256;
+}
+`
+
+export const foreignExportScalarNative = `import silk.i8 as i8
+import silk.u8 as u8
+import silk.i16 as i16
+import silk.u16 as u16
+import silk.i32 as i32
+import silk.u32 as u32
+import silk.i64 as i64
+import silk.u64 as u64
+import silk.isize as isize
+import silk.usize as usize
+import silk.f32 as f32
+import silk.f64 as f64
+unsafe extern "C" fn silk_test_export_note() -> ()
+unsafe extern "C" fn silk_test_export_noted() -> i32
+unsafe extern "C" fn silk_test_export_checksum() -> i32
+export "C" fn silk_test_export_add_i8(a: i8, b: i8) -> i8 { return a + b }
+export "C" fn silk_test_export_add_u8(a: u8, b: u8) -> u8 { return a + b }
+export "C" fn silk_test_export_add_i16(a: i16, b: i16) -> i16 { return a + b }
+export "C" fn silk_test_export_add_u16(a: u16, b: u16) -> u16 { return a + b }
+export "C" fn silk_test_export_add_i32(a: i32, b: i32) -> i32 { return a + b }
+export "C" fn silk_test_export_add_u32(a: u32, b: u32) -> u32 { return a + b }
+export "C" fn silk_test_export_add_i64(a: i64, b: i64) -> i64 { return a + b }
+export "C" fn silk_test_export_add_u64(a: u64, b: u64) -> u64 { return a + b }
+export "C" fn silk_test_export_add_isize(a: isize, b: isize) -> isize { return a + b }
+export "C" fn silk_test_export_add_usize(a: usize, b: usize) -> usize { return a + b }
+export "C" fn silk_test_export_scale_f32(value: f32, factor: f32) -> f32 { return value * factor }
+export "C" fn silk_test_export_scale_f64(value: f64, factor: f64) -> f64 { return value * factor }
+export "C" fn silk_test_export_touch() -> () {
+  unsafe silk_test_export_note()
+  return ()
+}
+export "C" fn silk_test_export_touched() -> i32 { return unsafe silk_test_export_noted() }
+pub fn main() -> i32 { return unsafe silk_test_export_checksum() }`
+
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   ...corpus,
+  {
+    name: 'foreign-export-roundtrip',
+    source: foreignExportRoundtripReference,
+    nativeSource: foreignExportRoundtripNative,
+    nativeCSources: { silk_test_foreign_export_roundtrip: foreignExportRoundtripFixture },
+    expected: { _tag: 'Completes', result: 41 },
+  },
+  {
+    name: 'foreign-export-scalars',
+    source: foreignScalarReference,
+    nativeSource: foreignExportScalarNative,
+    nativeCSources: { silk_test_foreign_export_scalars: foreignExportScalarFixture },
+    expected: { _tag: 'Completes', result: 139 },
+  },
   {
     name: 'foreign-scalar-fixture',
     source: foreignScalarReference,
@@ -3034,6 +3264,27 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
 pub fn main() -> i32 { return magnitude(-42) }`,
     nativeSource: `unsafe extern "C" fn abs(value: i32) -> i32
 pub fn main() -> i32 { return unsafe abs(-42) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'pointer-foreign-store',
+    source: pointerParameterWrite,
+    nativeSource: foreignPointerStoreNative,
+    nativeCSources: { silk_test_foreign_pointers: foreignPointerFixture },
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'pointer-foreign-fill',
+    source: foreignPointerFillReference,
+    nativeSource: foreignPointerFillNative,
+    nativeCSources: { silk_test_foreign_pointers: foreignPointerFixture },
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'pointer-libc-roundtrip',
+    source: foreignLibcRoundtripReference,
+    nativeSource: foreignLibcRoundtripNative,
+    nativeStdout: 'hello\n',
     expected: { _tag: 'Completes', result: 42 },
   },
   {

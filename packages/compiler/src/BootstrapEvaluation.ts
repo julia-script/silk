@@ -58,6 +58,8 @@ import type {
   FloatValue,
   IntegerValue,
   NominalUnionValue,
+  PointerAddress,
+  PointerValue,
   SharedCoreValue,
   SliceValue,
   StaticViewValue,
@@ -83,6 +85,8 @@ export type {
   FloatValue,
   IntegerValue,
   NominalUnionValue,
+  PointerAddress,
+  PointerValue,
   RawBufferValue,
   ReferenceValue,
   SharedCoreValue,
@@ -245,6 +249,8 @@ interface EvaluationState {
   executionStackBytes: number
   activeFrames: ReadonlyArray<ActiveFrame>
   readonly cells: Map<string, LocalState>
+  /** Frames whose activation completed; their cells linger only for dangling-pointer detection. */
+  readonly endedFrames: Set<number>
   readonly allocations: BootstrapStorage.Allocations
   readonly callables: Map<number, { state: 'Available' | 'Running' | 'Consumed' | 'Released' }>
   readonly activeLoans: Set<string>
@@ -527,6 +533,102 @@ function* executeFunction(
     if (selected._tag === 'OutOfBounds')
       throw new RangeError('MIR reference selector is outside its checked place')
     return Object.freeze({ value: selected.selected, fromCall: found.fromCall })
+  }
+
+  const pointerValue = (address: PointerAddress | null): PointerValue =>
+    Object.freeze({ _tag: 'PointerValue', address })
+
+  const pointerTrap = (primitive: string, reason: string, span: SourceSpan.SourceSpan): Step =>
+    blockedStep({ _tag: 'Trap', function: fn.id, reason: `${primitive} ${reason}`, span })
+
+  /** The address of one non-null pointer whose frame is still live, or the Trap otherwise. */
+  const livePointer = (
+    primitive: string,
+    pointer: Value,
+    span: SourceSpan.SourceSpan,
+  ): PointerAddress | Step => {
+    if (pointer._tag !== 'PointerValue')
+      throw new RangeError('MIR verifier allowed a pointer primitive on a non-pointer value')
+    const address = pointer.address
+    if (address === null) return pointerTrap(primitive, 'through a null pointer', span)
+    if (address._tag === 'Frame' && state.endedFrames.has(address.frame))
+      return pointerTrap(primitive, 'through a pointer whose frame has returned', span)
+    return address
+  }
+
+  /** Resolves the pointee of one pointer as a value plus a store that replaces it in place. */
+  const pointerTarget = (
+    primitive: string,
+    pointer: Value,
+    span: SourceSpan.SourceSpan,
+  ):
+    | Step
+    | {
+        readonly _tag: 'Target'
+        readonly value: Value | undefined
+        readonly store: (value: Value) => void
+      } => {
+    const address = livePointer(primitive, pointer, span)
+    if (address._tag !== 'Frame' && address._tag !== 'Ticket') return address
+    const outside = (): Step => pointerTrap(primitive, 'addresses outside its storage', span)
+    if (address._tag === 'Ticket') {
+      const allocation = state.allocations.get(address.ticket)
+      if (allocation === undefined || !allocation.active) return outside()
+      const key = String(address.offset)
+      return {
+        _tag: 'Target',
+        value: allocation.values.get(key),
+        store: (value) => allocation.values.set(key, value),
+      }
+    }
+    const key = cellKey(address.frame, address.cell)
+    const stored = state.cells.get(key)
+    if (stored === undefined) throw new RangeError('Pointer addresses a missing evaluator cell')
+    const resolved = BootstrapPlace.walkPlace(
+      stored.value,
+      address.selectors,
+      address.indexes,
+      placeAccess,
+    )
+    if (resolved._tag === 'OutOfBounds')
+      throw new RangeError('Pointer place is outside its checked bounds')
+    const place = resolved.selected
+    const replaceStored = (replacement: Value): void => {
+      state.cells.set(key, {
+        value: BootstrapPlace.replacePlaceByIndexes(
+          stored.value,
+          address.selectors,
+          resolved.indexes,
+          replacement,
+          placeAccess,
+        ),
+        fromCall: stored.fromCall,
+      })
+    }
+    if (!address.elements) {
+      if (address.offset !== 0) return outside()
+      return { _tag: 'Target', value: place, store: replaceStored }
+    }
+    if (place._tag !== 'ArrayValue')
+      throw new RangeError('MIR verifier allowed an element pointer into a non-array place')
+    const element = place.elements.at(address.offset)
+    if (element === undefined || address.offset < 0) return outside()
+    return {
+      _tag: 'Target',
+      value: element,
+      store: (value) =>
+        replaceStored(
+          Object.freeze({
+            _tag: 'ArrayValue',
+            type: place.type,
+            elements: Object.freeze(
+              place.elements.map((current, ordinal) =>
+                ordinal === address.offset ? value : current,
+              ),
+            ),
+          }),
+        ),
+    }
   }
 
   const readInteger = (local: Mir.LocalId, expected?: Scalar.IntegerSpelling): IntegerValue => {
@@ -3509,6 +3611,118 @@ function* executeFunction(
             )
             break
           }
+          case 'PointerNull': {
+            write(operation.destination, { value: pointerValue(null), fromCall: false })
+            break
+          }
+          case 'PointerIsNull': {
+            const pointer = read(operation.pointer).value
+            if (pointer._tag !== 'PointerValue')
+              throw new RangeError('MIR verifier allowed Pointer.isNull on a non-pointer value')
+            write(operation.destination, {
+              value: integerValue('i32', pointer.address === null ? 1n : 0n),
+              fromCall: false,
+            })
+            break
+          }
+          case 'PointerFromReference': {
+            const source = read(operation.source).value
+            let address: PointerAddress
+            if (source._tag === 'ReferenceValue') {
+              // A reference to one array element addresses its siblings too, so the element
+              // selector becomes the offset and the pointer walks the array.
+              const last = source.selectors.at(-1)
+              const index = source.indexes.at(-1)
+              address =
+                last?._tag === 'ElementSelector' && index !== undefined
+                  ? {
+                      _tag: 'Frame',
+                      frame: source.frame,
+                      cell: source.cell,
+                      selectors: source.selectors.slice(0, -1),
+                      indexes: source.indexes.slice(0, -1),
+                      elements: true,
+                      offset: index,
+                    }
+                  : {
+                      _tag: 'Frame',
+                      frame: source.frame,
+                      cell: source.cell,
+                      selectors: source.selectors,
+                      indexes: source.indexes,
+                      elements: false,
+                      offset: 0,
+                    }
+            } else if (source._tag === 'SliceValue') {
+              address =
+                source.ticket === undefined
+                  ? {
+                      _tag: 'Frame',
+                      frame: source.frame,
+                      cell: source.cell,
+                      selectors: source.selectors ?? Object.freeze([]),
+                      indexes: source.indexes ?? Object.freeze([]),
+                      elements: true,
+                      offset: source.base,
+                    }
+                  : { _tag: 'Ticket', ticket: source.ticket, offset: source.base }
+            } else {
+              throw new RangeError('MIR verifier allowed pointer formation from a non-borrow value')
+            }
+            write(operation.destination, {
+              value: pointerValue(Object.freeze(address)),
+              fromCall: false,
+            })
+            break
+          }
+          case 'PointerOffset': {
+            const address = livePointer(
+              operation.type.type.mutable ? 'Pointer.offsetMut' : 'Pointer.offset',
+              read(operation.pointer).value,
+              operation.provenance.span,
+            )
+            if (address._tag !== 'Frame' && address._tag !== 'Ticket') return address
+            const count = Number(readInteger(operation.count, 'usize').value)
+            write(operation.destination, {
+              value: pointerValue(Object.freeze({ ...address, offset: address.offset + count })),
+              fromCall: false,
+            })
+            break
+          }
+          case 'PointerRead': {
+            const target = pointerTarget(
+              'Pointer.read',
+              read(operation.pointer).value,
+              operation.provenance.span,
+            )
+            if (target._tag !== 'Target') return target
+            if (target.value === undefined)
+              return pointerTrap(
+                'Pointer.read',
+                'requires initialized storage',
+                operation.provenance.span,
+              )
+            write(operation.destination, { value: target.value, fromCall: false })
+            break
+          }
+          case 'PointerWrite': {
+            const target = pointerTarget(
+              'Pointer.write',
+              read(operation.pointer).value,
+              operation.provenance.span,
+            )
+            if (target._tag !== 'Target') return target
+            target.store(read(operation.value).value)
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'AggregateValue',
+                type: Type.unit,
+                fields: Object.freeze([]),
+              }),
+              fromCall: false,
+            })
+            break
+          }
           case 'SlotWrite': {
             const slot = read(operation.slot).value
             if (slot._tag !== 'SlotValue' || !Type.equals(slot.element, operation.element)) {
@@ -4866,6 +5080,7 @@ const executeMachine = (
     resumed = undefined
     if (advanced.done) {
       stack.pop()
+      state.endedFrames.add(activation.frame)
       if (advanced.value._tag === 'Blocked') return advanced.value
       releaseActivationFrame(activation)
       if (stack.length === 0 && transfer !== undefined) {
@@ -5167,6 +5382,7 @@ export const evaluate = (
     activeFrames: Object.freeze([]),
     cells: new Map(),
     allocations: new Map(),
+    endedFrames: new Set(),
     callables: new Map(),
     activeLoans: new Set(),
     stringLoans: new Set(),

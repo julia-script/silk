@@ -137,36 +137,34 @@ describe('preset catalog', () => {
   })
 
   // Also the file's wasm32 build gate: this is the only sweep compiling every preset for
-  // wasm32-unknown-unknown, so a preset that cannot build for it fails here.
-  it('gives every projected MIR row a unique React key', () => {
+  // wasm32-unknown-unknown, so a preset that cannot build for it fails here. One case per preset
+  // keeps each compile inside its own timeout budget and names the preset that regressed.
+  it.each(presets)('gives every projected MIR row a unique React key for $label', (preset) => {
     const mirView = viewById('mir')
     expect(mirView).toBeDefined()
     if (mirView === undefined) return
 
+    const snapshot = snapshotOf(preset, 'wasm32-unknown-unknown')
+    const keys = mirView
+      .project({
+        snapshot,
+        modules: preset.modules,
+        root: preset.root,
+        mode: 'release',
+        profile: 'release',
+        evaluation: undefined,
+        filter: '',
+        showTrivia: false,
+      })
+      .rows.map((row) => row.key)
+    const seen = new Set<string>()
     const collisions: Array<string> = []
-    for (const preset of presets) {
-      const snapshot = snapshotOf(preset, 'wasm32-unknown-unknown')
-      const keys = mirView
-        .project({
-          snapshot,
-          modules: preset.modules,
-          root: preset.root,
-          mode: 'release',
-          profile: 'release',
-          evaluation: undefined,
-          filter: '',
-          showTrivia: false,
-        })
-        .rows.map((row) => row.key)
-      const seen = new Set<string>()
-      for (const key of keys) {
-        if (seen.has(key)) collisions.push(`${preset.label}: ${key}`)
-        seen.add(key)
-      }
+    for (const key of keys) {
+      if (seen.has(key)) collisions.push(`${preset.label}: ${key}`)
+      seen.add(key)
     }
-
     expect(collisions).toEqual([])
-  }, 60_000)
+  })
 
   it('prefixes every label with ok, fail, or trap so intent is visible in the picker', () => {
     for (const preset of presets) {

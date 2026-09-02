@@ -8,7 +8,8 @@ Ownership behavior is defined by [ownership and borrowing](ownership-and-borrowi
 callable, and match result types are defined by
 [functions, callables, and control flow](functions-callables-and-control-flow.md). This page defines
 the identities, construction rules, and ordinary compatibility of foundational values, nominal
-structs, scalar enums, nominal unions, arrays, references, slices, and structural unions.
+structs, scalar enums, nominal unions, arrays, references, slices, raw pointers, and structural
+unions.
 
 ## Terminology
 
@@ -1152,6 +1153,202 @@ uses `SEM0058`; implicit array decay uses `SEM0059`.
 **Evidence:** [runtime slice specification](../../../../openspec/specs/bootstrap-runtime-slices/spec.md),
 [borrow rules](ownership-and-borrowing.md#borrow-001--a-shared-borrow-grants-temporary-read-access),
 [returned views](ownership-and-borrowing.md#view-001--an-ordinary-function-may-return-a-view-from-one-borrowed-parameter).
+
+## Raw pointers
+
+### PTR-001 — A raw pointer is one un-owned machine address
+
+**Status:** Confirmed
+
+`*const T` and `*mut T` are types for any concrete pointee `T`, including a struct with no fields
+used as an opaque handle. Pointer identity includes the canonical pointee and the mutability, so
+`*const u8`, `*mut u8`, and `*mut i8` are three distinct types. A raw pointer is Copy, may be
+null, owns nothing, holds no loan, and carries no guarantee that its address is valid, aligned,
+initialized, or still allocated. It is exactly the value a C API means by a pointer.
+
+```silk
+struct Opaque {}
+
+struct Handle {
+  raw: *mut Opaque
+}
+
+fn keep(handle: Handle) -> Handle {
+  let again = handle.raw
+  let copy = handle.raw
+  return handle
+}
+```
+
+Reading `handle.raw` twice is an ordinary Copy read: nothing moves and the binding records no
+cleanup. `*mut T` converts to `*const T` at an immediate expected-type boundary, such as an
+argument for a `*const T` parameter; the reverse direction is an ordinary type mismatch.
+
+**Boundary:** No other conversion exists. A pointer cannot be cast to or from an integer, compared
+with anything except null through `Pointer.isNull`, used in arithmetic, or converted to a reference
+or slice. Pointing at a Silk struct is allowed, but native code reading its fields is undefined
+until C-layout records exist. Function pointers are a separate proposal.
+
+**Diagnostics:** Passing `*const T` where `*mut T` is expected reports the ordinary type mismatch.
+A `*` in type position not followed by `const` or `mut` is a parser diagnostic that recovers at the
+pointee.
+
+**Current compiler:** Aligned. `Type.Pointer` is one variant whose canonical key carries the
+pointee and mutability; the Copy proof and the layout entry mark it Copy the way builtin scalars
+are, and instance keys treat it as an ordinary concrete runtime type that does not reach the
+pointee's instances.
+
+**Evidence:** [raw pointer specification](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-raw-pointers/spec.md),
+[pointer type variant](../../../../packages/compiler/src/Type.ts),
+[pointer layout](../../../../packages/compiler/src/Layout.ts),
+[C ABI classification](../../../../packages/compiler/src/CAbi.ts).
+
+### PTR-002 — Pointer primitives are sealed and split by safety
+
+**Status:** Confirmed
+
+The compiler exposes the pointer primitives through the sealed `Intrinsic` namespace, and the
+module `silk/pointer` exposes them as the ordinary `Pointer` API:
+
+| Operation                                   | Safety | Result     |
+| ------------------------------------------- | ------ | ---------- |
+| `null<T>()`                                 | safe   | `*mut T`   |
+| `isNull(pointer: *const T)`                 | safe   | `bool`     |
+| `fromRef(value: &T)`                        | safe   | `*const T` |
+| `fromMutRef(value: &mut T)`                 | safe   | `*mut T`   |
+| `fromSlice(values: &[T])`                   | safe   | `*const T` |
+| `fromMutSlice(values: &mut [T])`            | safe   | `*mut T`   |
+| `offset(pointer: *const T, count: usize)`   | unsafe | `*const T` |
+| `offsetMut(pointer: *mut T, count: usize)`  | unsafe | `*mut T`   |
+| `read<T: Copy>(pointer: *const T)`          | unsafe | `T`        |
+| `write<T: Copy>(pointer: *mut T, value: T)` | unsafe | `()`       |
+
+Forming a pointer is safe because taking an address has no memory effect. `offset` and `offsetMut`
+advance by `count` elements of `T` and are unsafe because the result must stay inside one
+allocation. `read` and `write` are unsafe because the address must be valid, aligned, initialized
+for a read, and writable for a write.
+
+```silk
+import silk.pointer as Pointer
+
+fn seventh() -> i32 {
+  let mut value = 0
+  let pointer = Pointer.fromMutRef(&mut value)
+  unsafe {
+    Pointer.write(pointer, 7)
+  }
+  return value
+}
+```
+
+The `Pointer` source API bounds `read` and `write` to a Copy pointee, so `Pointer.read` on a
+`*const Vector<i32>` is rejected at the bound, exactly as `RawBuffer.read` is. MIR verification
+applies the same Copy rule to every pointer read and write operation as the backstop for direct
+intrinsic use. Every primitive is available on the evaluator, LLVM, and Wasm.
+
+**Boundary:** A pointer cannot move a value through raw memory; a slot protocol over pointers is a
+later change. Null is a value, not a failure: reading through it is an unsafe-contract violation,
+not a typed error. The intrinsic catalog cannot express a Copy bound, which is why the bound lives
+in the source wrapper and the verifier rather than in the primitive's signature.
+
+**Diagnostics:** Calling `read`, `write`, `offset`, or `offsetMut` outside an unsafe boundary
+reports the existing unsafe-acknowledgement diagnostic. A move-only pointee at `read` or `write`
+reports the ordinary bound failure naming the Copy requirement. A pointer read or write whose
+pointee is not Copy in constructed MIR is a structural verification violation and emits no artifact.
+
+**Current compiler:** Aligned. The `Pointer` intrinsic actor carries one all-target operation per
+primitive, each unsafe one with its caller invariant; `silk/pointer.silk` wraps them with the
+documented bounds.
+
+**Evidence:** [raw pointer specification](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-raw-pointers/spec.md),
+[pointer intrinsics](../../../../packages/compiler/src/Intrinsic.ts),
+[pointer source API](../../../../packages/compiler/stdlib/silk/pointer.silk),
+[unsafe boundaries](unsafe-intrinsics-and-targets.md#unsafe-003--unsafe-call-marks-one-invocation-unsafe---marks-a-statement-region).
+
+### PTR-003 — Formation ends no loan and validity is the caller's obligation
+
+**Status:** Confirmed
+
+Forming a pointer from a borrow is an ordinary read of that borrow: the borrow's loan ends where
+it would anyway, and the pointer itself holds no loan on the root. The root stays movable,
+mutable, and droppable while pointers to it exist.
+
+```silk
+import silk.pointer as Pointer
+
+fn address(value: i32) -> *const i32 {
+  let pointer = Pointer.fromRef(&value)
+  return pointer
+}
+```
+
+Returning a pointer to a local is accepted; the local's storage ends with the frame, so
+dereferencing the result is the caller's unsafe obligation. A dangling pointer is an
+unsafe-contract violation under
+[SAFETY-001](unsafe-intrinsics-and-targets.md#safety-001--only-violating-an-explicit-unsafe-contract-permits-undefined-behavior),
+not a compile error.
+
+A place from which a pointer has been formed has authoritative memory storage for the rest of its
+live range, as every borrowed root does, and every call reloads such places afterwards. A foreign
+call reloads them the same way, so a subsequent Silk read observes bytes native code wrote through
+the pointer during the call. The compiler never caches the place's value across a foreign call.
+
+**Boundary:** Formation does not keep the root alive, extend its scope, or reject the program when
+the root's scope ends. Observability is stated for the place the pointer was formed from; writes
+through a pointer obtained from native allocation are observable through pointer reads only.
+
+**Diagnostics:** None at formation. Ownership records no loan conflict when the root is moved
+after a pointer is formed from it.
+
+**Current compiler:** Aligned. Ownership treats formation as a read of the borrow. The native
+backend already materializes every borrowed root in memory and reloads every address root after
+each synchronous and foreign call; the direct WebAssembly backend's reload reachability includes
+pointer lanes so a Silk callee writing through a `*mut` parameter is observed by its caller.
+
+**Evidence:** [raw pointer specification](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-raw-pointers/spec.md),
+[pointer ownership](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-ownership/spec.md),
+[backend reload rule](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-backend/spec.md),
+[borrow rules](ownership-and-borrowing.md#borrow-003--a-borrow-preserves-the-original-owner).
+
+### PTR-004 — The evaluator models pointers as logical addresses
+
+**Status:** Confirmed
+
+The evaluator represents a raw pointer as null, as a logical address naming a frame, cell, place
+path, and element offset, or as an allocation ticket and element offset for a pointer formed from a
+raw-buffer-backed view. It executes every pointer primitive with the same observable results as
+the native backends for programs that reach no foreign call.
+
+```silk
+import silk.pointer as Pointer
+
+fn third() -> i32 {
+  let mut values = [1, 2, 3]
+  let pointer = Pointer.fromMutSlice(&mut values)
+  unsafe {
+    Pointer.write(Pointer.offsetMut(pointer, 2), 9)
+  }
+  return values[2]
+}
+```
+
+A `read`, `write`, or `offset` through null or through an address whose frame has ended stops
+execution as an unsafe-contract violation reported as data, naming the primitive.
+
+**Boundary:** Dangling detection is permitted evaluator behavior, not a language guarantee. Native
+code cannot detect it, and parity between surfaces is required only for well-defined programs.
+Foreign calls are native-only, so the evaluator never observes a native write through a pointer.
+
+**Diagnostics:** None at compile time. The evaluator's stop is an as-data trap, not a host
+exception or a typed failure.
+
+**Current compiler:** Aligned. `PointerValue` copies the reference or slice base at formation,
+offsets add elements, and reads and writes resolve the cell through the stored-place path or the
+allocation ticket.
+
+**Evidence:** [raw pointer specification](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-raw-pointers/spec.md),
+[pointer parity scenarios](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-backend/spec.md),
+[foreign availability](unsafe-intrinsics-and-targets.md#ffi-007--foreign-functions-are-native-only-and-pay-for-use).
 
 ## Structural unions and inference
 

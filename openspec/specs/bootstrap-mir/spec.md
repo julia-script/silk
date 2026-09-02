@@ -1152,3 +1152,40 @@ formatting or referent intrinsic.
 
 - **WHEN** MIR claims a referent target or access incompatible with its reference subject
 - **THEN** MIR verification rejects the program
+
+### Requirement: Foreign calls are explicit verified MIR operations
+
+A call to a foreign function SHALL lower to one dedicated MIR operation carrying the native symbol,
+the ABI, the classified C signature, the argument locals, the destination local, the logical result
+type, and provenance. The verifier SHALL reject an operation whose argument count or argument local
+types disagree with its signature or whose destination type disagrees with the signature result.
+The operation SHALL encode deterministically, and equal source SHALL produce byte-identical
+encodings across processes.
+
+#### Scenario: Lower a foreign call
+
+- **WHEN** a reachable function calls `unsafe extern "C" fn silk_test_add(a: i32, b: i32) -> i32`
+- **THEN** its MIR contains one foreign-call operation with symbol `silk_test_add`, ABI `C`, signature `(i32, i32) -> i32`, two argument locals, and an `i32` destination
+
+#### Scenario: Verify an arity mismatch as data
+
+- **WHEN** a constructed foreign-call operation supplies one argument to a two-parameter signature
+- **THEN** verification reports one structural violation naming the operation and neither trap nor throw occurs
+
+### Requirement: MIR carries raw pointer types and primitives
+
+MIR SHALL carry `*const T` and `*mut T` as a logical pointer type with the canonical pointee and
+mutability, realized by the layout plan as one address-width scalar. Pointer null, null test,
+formation from a reference or slice place, offset, read, and write SHALL be explicit verified
+operations; verification SHALL reject a read or write whose pointee is not Copy and an operation
+whose operand types disagree with the pointer type. Pointer MIR SHALL encode deterministically.
+
+#### Scenario: Lower a slice pointer formation
+
+- **WHEN** a function calls `Pointer.fromMutSlice(&mut bytes)`
+- **THEN** its MIR contains one pointer-formation operation from the slice's address lane to a `*mut u8` destination
+
+#### Scenario: Verify a move-only write as data
+
+- **WHEN** a constructed pointer-write operation targets a `*mut Vector<i32>`
+- **THEN** verification reports one structural violation and no artifact is emitted

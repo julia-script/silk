@@ -315,6 +315,37 @@ without fabricated fallback types.
 - **WHEN** a public variant field exposes a private nominal type
 - **THEN** its field dependency remains queryable but unavailable with the ordinary exposure diagnostic before body analysis
 
+### Requirement: Foreign function headers join the canonical index
+
+A foreign function declaration SHALL be indexed as a function header with a canonical identity,
+ordinary visibility, an unsafe callable contract, the retained ABI and native symbol, an admitted
+foreign signature, and no block body. Header resolution SHALL report foreign-ABI admission,
+restriction, and symbol diagnostics at the header level, independent of the selected target, and a
+rejected foreign header SHALL publish no callable. Body analysis SHALL skip a foreign header rather
+than treat its missing body as an error.
+
+#### Scenario: Index a foreign header
+
+- **WHEN** a module declares `unsafe extern "C" fn abs(value: i32) -> i32`
+- **THEN** the index records one function header with unsafe contract `(i32) -> i32`, ABI `C`, symbol `abs`, a foreign fact, and no block body, and body analysis reports nothing for it
+
+#### Scenario: Collide with an ordinary declaration
+
+- **WHEN** a module declares both `fn abs(value: i32) -> i32 { ... }` and `unsafe extern "C" fn abs(value: i32) -> i32`
+- **THEN** the index reports the existing same-module collision diagnostic
+
+### Requirement: Exported function headers carry native export facts
+
+A function declaration with an export marker SHALL be indexed as an ordinary function header with
+the retained ABI, native symbol, and a classified C signature for the selected target. Header
+resolution SHALL report foreign-ABI admission, restriction, and symbol diagnostics at the header
+level, and a rejected exported header SHALL publish no callable and no export.
+
+#### Scenario: Index an exported header
+
+- **WHEN** a module declares `export "C" fn double(value: i32) -> i32 as "silk_test_double_v1" { ... }`
+- **THEN** the index records one ordinary function header with export ABI `C`, symbol `silk_test_double_v1`, and signature `(i32) -> i32`
+
 ### Requirement: Inherent members join the canonical declaration index
 
 The declaration index SHALL record every function declared inside an inherent impl as an

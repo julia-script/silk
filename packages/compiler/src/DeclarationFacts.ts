@@ -26,6 +26,8 @@ export interface DeclarationFact {
   readonly unsafe: boolean
   /** Present when native code supplies the body: the ABI and the logical native symbol. */
   readonly foreign?: { readonly abi: 'C'; readonly symbol: string }
+  /** Native export facts for an `export "C"` function: its ABI and the C-callable symbol. */
+  readonly foreignExport?: { readonly abi: 'C'; readonly symbol: string }
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly parameterCount: number
   readonly parameters: ReadonlyArray<ParameterFact>
@@ -324,6 +326,15 @@ export type DeclaredTypeFact =
       readonly _tag: 'Reference'
       readonly access: Type.BorrowAccess
       readonly target: DeclaredTypeFact
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly syntax: SyntaxTree.Node
+      readonly cause?: Diagnostic.Identity
+    }
+  | {
+      readonly _tag: 'Pointer'
+      readonly mutable: boolean
+      readonly pointee: DeclaredTypeFact
       readonly spelling: string
       readonly token: Token.Token
       readonly syntax: SyntaxTree.Node

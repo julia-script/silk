@@ -4801,6 +4801,74 @@ const emitRawBufferFillOperation = (
   ]
 }
 
+/** The address lane is lane 0 of both a reference and a slice, so formation copies that lane. */
+const emitPointerFromReferenceOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'PointerFromReference' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, scalar } = state
+  const address = slots(operation.source).at(0)
+  if (address === undefined) throw new RangeError('Wasm pointer formation lost its address lane')
+  return [Instr.localGet(address), Instr.localSet(scalar(operation.destination))]
+}
+
+const emitPointerOffsetOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'PointerOffset' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { plan, scalar } = state
+  const pointee = LayoutPlan.entry(plan, operation.type.type.pointee)
+  if (pointee === undefined) throw new RangeError('Wasm pointer offset lost its pointee layout')
+  return [
+    Instr.localGet(scalar(operation.pointer)),
+    Instr.localGet(scalar(operation.count)),
+    Instr.i32Const(alignUp(pointee.size, pointee.alignment)),
+    Instr.op('i32.mul'),
+    Instr.op('i32.add'),
+    Instr.localSet(scalar(operation.destination)),
+  ]
+}
+
+const emitPointerReadOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'PointerRead' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { plan, slots, scalar, loadAt } = state
+  const address = scalar(operation.pointer)
+  const pointee = Mir.semanticType(operation.type)
+  const shape = LayoutPlan.callingShape(plan, pointee)
+  if (shape === undefined) throw new RangeError('Wasm pointer read lost its pointee shape')
+  return shape.lanes.flatMap((lane, ordinal) => {
+    const destination = slots(operation.destination).at(ordinal)
+    const offset = LayoutVerify.laneOffset(plan, pointee, lane.path)
+    if (destination === undefined || offset === undefined) {
+      throw new RangeError('Wasm pointer read lost a pointee lane')
+    }
+    return [...loadAt(address, offset, lane), Instr.localSet(destination)]
+  })
+}
+
+const emitPointerWriteOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'PointerWrite' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, plan, slots, scalar, storeAt } = state
+  const address = scalar(operation.pointer)
+  const pointer = layout.types.at(operation.pointer.ordinal)
+  if (pointer?._tag !== 'Pointer') throw new RangeError('Wasm pointer write lost its pointer type')
+  const pointee = pointer.type.pointee
+  const shape = LayoutPlan.callingShape(plan, pointee)
+  if (shape === undefined) throw new RangeError('Wasm pointer write lost its pointee shape')
+  return shape.lanes.flatMap((lane, ordinal) => {
+    const value = slots(operation.value).at(ordinal)
+    const offset = LayoutVerify.laneOffset(plan, pointee, lane.path)
+    if (value === undefined || offset === undefined) {
+      throw new RangeError('Wasm pointer write lost a pointee lane')
+    }
+    return storeAt(address, value, offset, lane)
+  })
+}
+
 const emitSlotWriteOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'SlotWrite' }>,
   state: WasmOperationContext,
@@ -7586,6 +7654,22 @@ const emitOperationWithContext = (
       throw new RangeError(
         `Target validation allowed a foreign call into Wasm: ${operation.symbol}`,
       )
+    case 'PointerNull':
+      return [Instr.i32Const(0), Instr.localSet(context.scalar(operation.destination))]
+    case 'PointerIsNull':
+      return [
+        Instr.localGet(context.scalar(operation.pointer)),
+        Instr.op('i32.eqz'),
+        Instr.localSet(context.scalar(operation.destination)),
+      ]
+    case 'PointerFromReference':
+      return emitPointerFromReferenceOperation(operation, context)
+    case 'PointerOffset':
+      return emitPointerOffsetOperation(operation, context)
+    case 'PointerRead':
+      return emitPointerReadOperation(operation, context)
+    case 'PointerWrite':
+      return emitPointerWriteOperation(operation, context)
     case 'RawBufferFrom':
       return emitRawBufferFromOperation(operation, context)
     case 'SharedFromAllocation':
@@ -9924,6 +10008,7 @@ export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = O
       nativeRuntimeSymbols: Object.freeze([]),
       runtimeFeatures: output.runtimeFeatures,
       foreignImports: Object.freeze([]),
+      foreignExports: Object.freeze([]),
       control: controlProvenance(program),
       bytes: output.bitcode,
       wat: output.ir,

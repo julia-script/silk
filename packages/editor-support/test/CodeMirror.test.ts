@@ -128,6 +128,12 @@ it('highlights the complete match surface through compiler tokens', () => {
   assert.include(spellings(doc, 'identifier'), '_')
 })
 
+it('highlights raw pointer qualifiers as keywords behind the star operator', () => {
+  const doc = 'fn fill(buffer: *mut u8) -> *const u8 { return buffer }'
+  assert.deepStrictEqual(spellings(doc, 'keyword'), ['fn', 'mut', 'const', 'return'])
+  assert.deepStrictEqual(spellings(doc, 'operator'), ['*', '->', '*'])
+})
+
 it('highlights bracketed fixed-array punctuation', () => {
   assert.deepStrictEqual(spellings('[i32; 4]', 'punctuation'), ['[', ';', ']'])
 })

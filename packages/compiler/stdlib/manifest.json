@@ -280,6 +280,12 @@
     "namespace": "OsSystemClock"
   },
   {
+    "module": "silk/pointer",
+    "path": "silk/pointer.silk",
+    "layer": "portable",
+    "namespace": "Pointer"
+  },
+  {
     "module": "silk/random",
     "path": "silk/random.silk",
     "layer": "portable",

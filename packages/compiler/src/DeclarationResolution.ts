@@ -786,6 +786,33 @@ export const resolveDeclaredType = (
       diagnostics: target.diagnostics,
     })
   }
+  if (fact._tag === 'Pointer') {
+    const pointee = resolveDeclaredType(module, fact.pointee, resolvers, modules)
+    if (pointee.fact._tag === 'Resolved') {
+      const type = Type.pointer(fact.mutable, pointee.fact.type)
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Resolved',
+          type,
+          spelling: Type.encode(type),
+          token: fact.token,
+          syntax: fact.syntax,
+          components: Object.freeze([pointee.fact]),
+        }),
+        diagnostics: pointee.diagnostics,
+      })
+    }
+    return Object.freeze({
+      fact: Object.freeze({
+        ...fact,
+        pointee: pointee.fact,
+        ...('cause' in pointee.fact && pointee.fact.cause !== undefined
+          ? { cause: pointee.fact.cause }
+          : {}),
+      }),
+      diagnostics: pointee.diagnostics,
+    })
+  }
   if (fact._tag !== 'FixedArray') return Object.freeze({ fact, diagnostics: Object.freeze([]) })
   return (() => {
     const element = resolveDeclaredType(module, fact.element, resolvers, modules)
@@ -1783,6 +1810,8 @@ const inlineReach = (
       descend(type.target)
       return
     }
+    // A raw pointer is one address; its layout never embeds the pointee.
+    if (Type.isPointer(type)) return
     if (Type.isCallable(type)) {
       for (const parameter of type.parameters) descend(parameter)
       descend(type.result)

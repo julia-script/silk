@@ -1396,6 +1396,69 @@ can reject it.
 - **WHEN** source contains `type Pair<T> = Point<T>`
 - **THEN** the concrete tree retains the parameter list as a branch of the alias declaration without a parser diagnostic
 
+### Requirement: Foreign function declarations parse losslessly and recover locally
+
+The parser SHALL recognize `[pub] [static] [unsafe] extern <text-literal> [effect] fn
+<name>(<parameters>) [-> <type>] [as <text-literal>]` as one foreign function declaration node
+retaining every token in source order; the `extern` marker occupies the slot after `unsafe` and
+before `effect`. The ABI literal, the `as` literal, and the absence of a body SHALL be explicit in
+the tree. For recovery the parser SHALL retain a `static` or `effect` keyword, a type parameter
+list, failure row, requirement row, `where` clause, or block body that follows and SHALL leave
+their rejection to semantic analysis. A malformed foreign declaration SHALL recover at the next
+top-level declaration start without consuming it.
+
+#### Scenario: Parse a renamed foreign declaration
+
+- **WHEN** the source spells `pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"`
+- **THEN** the result contains one complete foreign function declaration with the public modifier, the unsafe modifier, the ABI literal `"C"`, one typed parameter, the return type, the symbol literal `"abs"`, and no body
+
+#### Scenario: Retain a body for semantic rejection
+
+- **WHEN** the source spells `unsafe extern "C" fn f() -> i32 { return 1 }`
+- **THEN** the parser produces one foreign function declaration containing the block body and no parser diagnostic
+
+#### Scenario: Recover from a missing ABI literal
+
+- **WHEN** the source spells `unsafe extern fn f() -> i32` followed by a complete function
+- **THEN** the parser reports one missing-ABI diagnostic inside the foreign declaration and the following function parses completely
+
+### Requirement: Exported function declarations parse losslessly and recover locally
+
+The parser SHALL recognize `[pub] [static] [unsafe] export <text-literal> [effect] fn
+<name>(<parameters>) [-> <type>] [as <text-literal>] { <statements> }` as one function declaration
+node carrying an explicit export marker with its ABI literal and optional symbol literal, retaining
+every token in source order; the `export` marker occupies the same slot as `extern`, after `unsafe`
+and before `effect`. For recovery the parser SHALL retain a type parameter list, rows, `where`
+clause, `effect`, `static`, or `unsafe` modifier and leave their rejection to semantic analysis. A malformed exported
+declaration SHALL recover at the next top-level declaration start.
+
+#### Scenario: Parse a renamed export
+
+- **WHEN** the source spells `pub export "C" fn double(value: i32) -> i32 as "silk_test_double_v1" { return value * 2 }`
+- **THEN** the result contains one complete function declaration with the public modifier, the export marker with ABI `"C"`, the symbol literal, one parameter, the return type, and the block body
+
+#### Scenario: Recover from a missing body
+
+- **WHEN** the source spells `export "C" fn f() -> i32` followed by a complete function
+- **THEN** the parser reports one missing-body diagnostic inside the declaration and the following function parses completely
+
+### Requirement: Raw pointer type syntax is lossless and recoverable
+
+The parser SHALL recognize `*const <type>` and `*mut <type>` as one pointer type node in every
+type position, retaining the star, the `const` or `mut` keyword, and the pointee type. A star not
+followed by `const` or `mut` in type position SHALL report one missing-mutability diagnostic and
+recover at the following type.
+
+#### Scenario: Parse nested pointer types
+
+- **WHEN** a parameter is typed `*mut *const u8`
+- **THEN** the result contains a mutable pointer type node whose pointee is a constant pointer type node whose pointee is `u8`
+
+#### Scenario: Recover from a bare star
+
+- **WHEN** a parameter is typed `*u8`
+- **THEN** the parser reports the missing-mutability diagnostic and the parameter still resolves its pointee type `u8`
+
 ### Requirement: Inherent impl declarations parse losslessly
 
 The declaration grammar SHALL accept `impl [<Binders>] Owner { members }` where no `for` keyword

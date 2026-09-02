@@ -89,6 +89,63 @@ it('produces a stable canonical signature key', () => {
   )
 })
 
+const pointers: ReadonlyArray<readonly [string, Type.Pointer]> = [
+  ['*const u8', Type.pointer(false, 'u8')],
+  ['*mut u8', Type.pointer(true, 'u8')],
+  ['*mut Opaque', Type.pointer(true, Type.nominal('app/main', 'Opaque'))],
+  ['*const Vector<i32>', Type.pointer(false, Type.nominal('silk/vector', 'Vector', ['i32']))],
+]
+
+it('admits a pointer of any pointee in both positions without examining the pointee', () => {
+  for (const [spelling, type] of pointers) {
+    assert.strictEqual(CAbi.admit(type, 'Parameter')._tag, 'Admitted', spelling)
+    assert.strictEqual(CAbi.admit(type, 'Result')._tag, 'Admitted', spelling)
+    assert.deepEqual(
+      CAbi.classify(type, Target.aarch64AppleDarwin, 'Result'),
+      { _tag: 'Pointer', mutable: type.mutable, pointee: type.pointee },
+      spelling,
+    )
+    assert.strictEqual(
+      CAbi.typeText(CAbi.classify(type, Target.wasm32UnknownUnknown, 'Parameter')),
+      type.mutable ? '*mut' : '*const',
+      spelling,
+    )
+  }
+  // The pointee stays unexamined: a pointer to a rejected pointee is still admitted.
+  for (const [label, type] of rejected) {
+    assert.strictEqual(CAbi.admit(Type.pointer(false, type), 'Parameter')._tag, 'Admitted', label)
+  }
+})
+
+it('keys pointer mutability so `*const u8` and `*mut u8` name different signatures', () => {
+  const constKey = CAbi.signatureKey(
+    CAbi.signature([Type.pointer(false, 'u8'), 'usize'], 'i32', Target.aarch64AppleDarwin),
+  )
+  const mutKey = CAbi.signatureKey(
+    CAbi.signature([Type.pointer(true, 'u8'), 'usize'], 'i32', Target.aarch64AppleDarwin),
+  )
+  assert.strictEqual(constKey, '(*const,u64)->i32')
+  assert.strictEqual(mutKey, '(*mut,u64)->i32')
+  assert.notStrictEqual(constKey, mutKey)
+  assert.strictEqual(
+    CAbi.signatureKey(
+      CAbi.signature(['usize'], Type.pointer(true, 'u8'), Target.x8664UnknownLinuxGnu),
+    ),
+    '(u64)->*mut',
+  )
+  // Pointee spelling does not reach the key: two opaque pointees classify identically.
+  assert.strictEqual(
+    CAbi.signatureKey(
+      CAbi.signature(
+        [Type.pointer(true, Type.nominal('app/main', 'Opaque'))],
+        Type.unit,
+        Target.aarch64AppleDarwin,
+      ),
+    ),
+    '(*mut)->void',
+  )
+})
+
 it('validates native symbol spelling', () => {
   for (const symbol of ['abs', '_start', 'silk_test_add', 'A1']) {
     assert.isTrue(ForeignSymbol.isValidSpelling(symbol), symbol)

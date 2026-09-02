@@ -84,6 +84,8 @@ const declaredCauses = (
     case 'Slice':
     case 'Reference':
       return [...own, ...declaredCauses(fact._tag === 'Slice' ? fact.element : fact.target)]
+    case 'Pointer':
+      return [...own, ...declaredCauses(fact.pointee)]
     case 'Callable':
       return [...own, ...fact.parameters.flatMap(declaredCauses), ...declaredCauses(fact.result)]
     case 'Applied':
@@ -115,6 +117,7 @@ const ofTypeInner = (
   if (Type.isFixedArray(type)) return ofTypeInner(index, type.element, active)
   if (Type.isSlice(type)) return ofTypeInner(index, type.element, active)
   if (Type.isReference(type)) return ofTypeInner(index, type.target, active)
+  if (Type.isPointer(type)) return ofTypeInner(index, type.pointee, active)
   if (Type.isUnion(type))
     return join(type.members.map((member) => ofTypeInner(index, member, active)))
   // Callable and Effect contracts describe invocation, not the hidden values retained by a

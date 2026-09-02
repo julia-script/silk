@@ -15,7 +15,12 @@ Instance discovery SHALL start from one of the root module's three valid user en
 zero-parameter public ordinary `main() -> ()`, a unique zero-parameter public ordinary
 `main() -> i32`, or a unique zero-parameter public `effect fn main() -> () ! E` whose requirement
 row is empty and whose failure members are concrete detached owned values. Discovery SHALL retain
-the selected entry kind and normalized failure metadata.
+the selected entry kind and normalized failure metadata. When the selected target's kind is native,
+discovery SHALL additionally seed the worklist, after the entry, with every `export "C"` function
+declared in the loaded module closure, in canonical module then declaration order, and SHALL
+record each export root with its native symbol so later phases can name the instance it selects.
+Export roots are monomorphic by declaration restriction and SHALL be specialized, ownership-checked,
+and closed exactly as call-reached instances. For a WebAssembly target exports SHALL NOT be roots.
 
 The compiler SHALL select the concrete compilation target before constructing the executable
 worklist. For each demanded concrete application, the realization coordinator SHALL first evaluate
@@ -27,8 +32,8 @@ successful residual specialization before admitting the resulting local and cros
 call closure. The deterministic candidate worklist SHALL record a specialization before following
 direct calls, so directly and mutually recursive programs terminate with each canonical
 specialization discovered exactly once in deterministic order. Declarations and static applications
-not reachable from the entry SHALL NOT become runtime instances merely because their modules are
-loaded or imported.
+not reachable from the entry or from a native export root SHALL NOT become runtime instances merely
+because their modules are loaded or imported.
 
 #### Scenario: Discover a call chain once each
 
@@ -67,8 +72,18 @@ loaded or imported.
 
 #### Scenario: Exclude unreachable declarations
 
-- **WHEN** the closure contains a declaration no residual reachable body calls
+- **WHEN** the closure contains a declaration no residual reachable body calls and that is not a native export
 - **THEN** it produces no runtime instance and none of its static functions execute
+
+#### Scenario: Discover an uncalled export
+
+- **WHEN** the target is native, `main` calls nothing, and a loaded module declares one exported function
+- **THEN** discovery records the `main` specialization followed by the export's specialization and one export record naming it
+
+#### Scenario: Discover export roots deterministically
+
+- **WHEN** the same closure with exports is discovered in fresh processes
+- **THEN** the instance order and export records are byte-identical
 
 ### Requirement: Instance keys are canonical and normalized
 
@@ -439,3 +454,20 @@ declaration is present in semantic facts.
 
 - **WHEN** an anonymous aggregate occurs only inside an unreachable declaration
 - **THEN** its semantic declaration remains inspectable but is absent from runtime aggregate reachability
+
+### Requirement: Pointer-bearing instance keys include pointee and mutability
+
+Instance keys SHALL treat `*const T` and `*mut T` as ordinary concrete runtime types whose
+canonical form includes the pointee type and mutability, and reachability SHALL NOT follow a
+pointee's construction, cleanup, or conformance instances merely because a pointer to it is
+reachable.
+
+#### Scenario: Key two pointer instances distinctly
+
+- **WHEN** a generic function is applied to `*const i32` and to `*mut i32`
+- **THEN** discovery records two specializations with different canonical keys
+
+#### Scenario: A pointer does not reach the pointee
+
+- **WHEN** a program's only use of `Vector<i32>` is a `*mut Vector<i32>` parameter
+- **THEN** discovery records no `Vector<i32>` cleanup or method instance

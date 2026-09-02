@@ -1439,9 +1439,9 @@ export const completion = (
     module.split('/').at(-1)?.split('_').map(capitalize).join('') ?? 'Imported'
   const alias = (candidate: WorkspaceInventory.Candidate): string => {
     const base =
-      candidate.exported.namespace === 'Value'
-        ? `${(prefix(candidate.module)[0] ?? 'i').toLowerCase()}${prefix(candidate.module).slice(1)}${capitalize(candidate.exported.spelling)}`
-        : `${prefix(candidate.module)}${capitalize(candidate.exported.spelling)}`
+      candidate.declaration.namespace === 'Value'
+        ? `${(prefix(candidate.module)[0] ?? 'i').toLowerCase()}${prefix(candidate.module).slice(1)}${capitalize(candidate.declaration.spelling)}`
+        : `${prefix(candidate.module)}${capitalize(candidate.declaration.spelling)}`
     let selected = base
     let suffix = 2
     while (visible.has(selected)) {
@@ -1462,7 +1462,7 @@ export const completion = (
     return selected
   }
   const completionItemKind = (candidate: WorkspaceInventory.Candidate): CompletionItemKind => {
-    switch (candidate.exported.declarationKind) {
+    switch (candidate.declaration.declarationKind) {
       case 'Function':
         return CompletionItemKind.Function
       case 'Constant':
@@ -1533,17 +1533,17 @@ export const completion = (
     .filter(
       (candidate) =>
         candidate.module !== self.module &&
-        !imported.has(`${candidate.module}:${candidate.exported.spelling}`),
+        !imported.has(`${candidate.module}:${candidate.declaration.spelling}`),
     )
     .flatMap((candidate, ordinal): ReadonlyArray<CompletionItem> => {
-      const localSpelling = visible.has(candidate.exported.spelling)
+      const localSpelling = visible.has(candidate.declaration.spelling)
         ? alias(candidate)
-        : candidate.exported.spelling
+        : candidate.declaration.spelling
       const plan = Option.getOrUndefined(
         ImportPlan.make({
           syntax,
           module: candidate.module,
-          spelling: candidate.exported.spelling,
+          spelling: candidate.declaration.spelling,
           localSpelling,
         }),
       )
@@ -1551,7 +1551,7 @@ export const completion = (
       if (edits === undefined) return []
       return [
         {
-          label: candidate.exported.spelling,
+          label: candidate.declaration.spelling,
           labelDetails: { description: candidate.module },
           kind: completionItemKind(candidate),
           detail: `Import from ${candidate.module}`,

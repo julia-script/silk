@@ -1,0 +1,146 @@
+//! Raw pointers: un-owned machine addresses for foreign interfaces and hand-written storage.
+//!
+//! # When to use
+//! Use these operations to pass the address of a Silk value or slice to a foreign function, or to
+//! read and write memory that native code owns. Application code should prefer references, which
+//! the compiler checks; a pointer carries no ownership, no loan, and no validity guarantee.
+//!
+//! # Details
+//! `*const T` and `*mut T` are `Copy` and may be null. Forming a pointer is safe because taking an
+//! address has no memory effect: the borrow's loan ends where it would anyway, and the pointer
+//! keeps nothing alive. [`offset`] and [`offsetMut`] advance by whole elements of `T`. [`read`]
+//! and [`write`] are bounded to a `Copy` pointee so a value can never be moved through raw memory.
+//!
+//! # Gotchas
+//! Dereferencing a null pointer, a misaligned pointer, or a pointer whose storage has ended is an
+//! unsafe-contract violation, not a diagnostic. The evaluator may stop such a program; native code
+//! cannot. Ownership records no conflict when the root is moved or dropped after a pointer to it
+//! is formed, so the caller must prove the address is still live at every dereference.
+//!
+//! # Examples
+//! ## Write and read one element through a slice pointer
+//! ```silk
+//! import silk.pointer {Pointer}
+//!
+//! pub fn main() -> i32 {
+//!   let mut values = [1, 2, 3]
+//!   let pointer = Pointer.fromMutSlice(&mut values)
+//!   unsafe {
+//!     let third = Pointer.offsetMut(pointer, 2)
+//!     Pointer.write(third, 9)
+//!     if Pointer.read(third) != values[2] {
+//!       return 1
+//!     }
+//!   }
+//!   return 0
+//! }
+//! ```
+
+import silk.usize as usize
+
+/// The importable name of the `silk.pointer` module scope.
+///
+/// # Details
+///
+/// This struct carries no data and is never constructed by the library. Every operation is an
+/// inherent member declared in `impl Pointer`, so `import silk.pointer { Pointer }` is the one
+/// import that reaches `Pointer.fromRef(...)` and the rest. It is unrelated to the `*const T` and
+/// `*mut T` types.
+pub struct Pointer {}
+
+impl Pointer {
+  /// Returns the null `*mut T` address.
+  ///
+  /// # Details
+  ///
+  /// Null is a value, not a failure. Test for it with [`isNull`] before dereferencing a pointer
+  /// that native code may have left unset.
+  pub fn null<T>() -> *mut T {
+    return Intrinsic.pointerNull<T>()
+  }
+
+  /// Reports whether a pointer is null.
+  pub fn isNull<T>(pointer: *const T) -> bool {
+    return Intrinsic.pointerIsNull<T>(pointer)
+  }
+
+  /// Forms a `*const T` from a shared reference.
+  ///
+  /// # Details
+  ///
+  /// The reference's loan ends as it would without the call; the pointer holds no loan on the
+  /// referent and does not keep it alive.
+  pub fn fromRef<T>(value: &T) -> *const T {
+    return Intrinsic.pointerFromRef<T>(value)
+  }
+
+  /// Forms a `*mut T` from an exclusive reference.
+  ///
+  /// # Details
+  ///
+  /// The reference's loan ends as it would without the call; the pointer holds no loan on the
+  /// referent and does not keep it alive.
+  pub fn fromMutRef<T>(value: &mut T) -> *mut T {
+    return Intrinsic.pointerFromMutRef<T>(value)
+  }
+
+  /// Forms a `*const T` addressing the first element of a shared slice.
+  ///
+  /// # Details
+  ///
+  /// The pointer carries no length. Pass the slice's length separately to native code that fills
+  /// or reads a buffer.
+  pub fn fromSlice<T>(values: &[T]) -> *const T {
+    return Intrinsic.pointerFromSlice<T>(values)
+  }
+
+  /// Forms a `*mut T` addressing the first element of an exclusive slice.
+  ///
+  /// # Details
+  ///
+  /// The pointer carries no length. Pass the slice's length separately to native code that fills
+  /// or reads a buffer.
+  pub fn fromMutSlice<T>(values: &mut [T]) -> *mut T {
+    return Intrinsic.pointerFromMutSlice<T>(values)
+  }
+
+  /// Advances a `*const T` by `count` elements of `T`.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove that the pointer and the result address elements of one live
+  /// allocation.
+  pub unsafe fn offset<T>(pointer: *const T, count: usize) -> *const T {
+    unsafe { return Intrinsic.pointerOffset<T>(pointer, count) }
+  }
+
+  /// Advances a `*mut T` by `count` elements of `T`.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove that the pointer and the result address elements of one live
+  /// allocation.
+  pub unsafe fn offsetMut<T>(pointer: *mut T, count: usize) -> *mut T {
+    unsafe { return Intrinsic.pointerOffsetMut<T>(pointer, count) }
+  }
+
+  /// Copies the `T` stored at a pointer.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove that the pointer is non-null, aligned for `T`, and addresses an
+  /// initialized `T` whose storage is still live.
+  pub unsafe fn read<T: Copy>(pointer: *const T) -> T {
+    unsafe { return Intrinsic.pointerRead<T>(pointer) }
+  }
+
+  /// Stores a `Copy` value at a pointer.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove that the pointer is non-null, aligned for `T`, and addresses writable
+  /// storage for `T` that is still live.
+  pub unsafe fn write<T: Copy>(pointer: *mut T, value: T) -> () {
+    unsafe { return Intrinsic.pointerWrite<T>(pointer, value) }
+  }
+}

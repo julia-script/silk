@@ -19,8 +19,8 @@ export type DeclarationKind =
   | 'Alias'
 
 /** One compact public declaration header retained for exact-name candidate lookup. */
-export interface Export {
-  readonly _tag: 'ModuleSummaryExport'
+export interface PublicDeclaration {
+  readonly _tag: 'ModuleSummaryPublicDeclaration'
   readonly spelling: string
   readonly declarationKind: DeclarationKind
   readonly namespace: Namespace
@@ -34,7 +34,7 @@ export interface ModuleSummary {
   readonly module: string
   readonly source: SourceFile.SourceFile
   readonly imports: ReadonlyArray<string>
-  readonly exports: ReadonlyArray<Export>
+  readonly publicDeclarations: ReadonlyArray<PublicDeclaration>
 }
 
 const declarationKind = (
@@ -73,7 +73,7 @@ const importModule = (
   return ImportPath.canonicalTarget(source, path)
 }
 
-interface PendingExport {
+interface PendingPublicDeclaration {
   readonly spelling: string
   readonly declarationKind: DeclarationKind
   readonly namespace: Namespace
@@ -85,7 +85,7 @@ const publicHeader = (
   source: SourceFile.SourceFile,
   declaration: SyntaxTree.Node,
   ordinal: number,
-): PendingExport | undefined => {
+): PendingPublicDeclaration | undefined => {
   const kind = declarationKind(declaration.kind)
   const name = SyntaxTree.directToken(declaration, 'Identifier')
   if (
@@ -118,7 +118,7 @@ const headerSpelling = (
 /** Extracts importable header facts without resolving types or elaborating declaration bodies. */
 export const make = (syntax: SyntaxFile.SyntaxFile): ModuleSummary => {
   const imports: Array<string> = []
-  const pending: Array<PendingExport> = []
+  const pending: Array<PendingPublicDeclaration> = []
   const counts = new Map<string, number>()
   let declarationOrdinal = 0
   for (const element of syntax.root.children) {
@@ -134,15 +134,17 @@ export const make = (syntax: SyntaxFile.SyntaxFile): ModuleSummary => {
     if (declarationKind(element.kind) !== undefined) declarationOrdinal += 1
     if (exported !== undefined) pending.push(exported)
   }
-  const exports = pending
+  const publicDeclarations = pending
     .filter((exported) => counts.get(exported.spelling) === 1)
-    .map((exported): Export => Object.freeze({ _tag: 'ModuleSummaryExport', ...exported }))
+    .map((exported): PublicDeclaration =>
+      Object.freeze({ _tag: 'ModuleSummaryPublicDeclaration', ...exported }),
+    )
   return Object.freeze({
     _tag: 'ModuleSummary',
     module: syntax.source.id,
     source: syntax.source,
     imports: Object.freeze(imports),
-    exports: Object.freeze(exports),
+    publicDeclarations: Object.freeze(publicDeclarations),
   })
 }
 

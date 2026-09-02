@@ -247,6 +247,7 @@ const isTypeArgumentNode = (element: SyntaxTree.Element): element is SyntaxTree.
     element.kind === 'FixedArrayType' ||
     element.kind === 'SliceType' ||
     element.kind === 'ReferenceType' ||
+    element.kind === 'PointerType' ||
     element.kind === 'CallableType' ||
     element.kind === 'ParenthesizedType' ||
     element.kind === 'UnionType')

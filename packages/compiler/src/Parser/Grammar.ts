@@ -27,6 +27,7 @@ export const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze
   'UnionKeyword',
   'TypeKeyword',
   'ExternKeyword',
+  'ExportKeyword',
   'FnKeyword',
   'EffectKeyword',
   'ImportKeyword',
@@ -72,6 +73,7 @@ export const typeStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'LeftParenthesis',
   'LeftBracket',
   'Ampersand',
+  'Star',
 ])
 export const topLevelFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'ImportKeyword',
@@ -84,6 +86,7 @@ export const topLevelFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'UnionKeyword',
   'TypeKeyword',
   'ExternKeyword',
+  'ExportKeyword',
   'ServiceKeyword',
   'InterfaceKeyword',
   'RoleKeyword',

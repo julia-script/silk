@@ -217,13 +217,19 @@ export const complete = (
         )
         diagnostics.push(...constraints.diagnostics)
         const admission =
-          member.foreign === undefined ? [] : foreignAdmission(parameters, result.fact)
+          member.foreign === undefined && member.foreignExport === undefined
+            ? []
+            : foreignAdmission(parameters, result.fact)
         diagnostics.push(...admission)
+        const { foreignExport, ...retained } = member
         return Object.freeze({
-          ...member,
+          ...retained,
+          // An export outside the C subset publishes no symbol, so discovery never roots it.
+          ...(admission.length === 0 && foreignExport !== undefined ? { foreignExport } : {}),
           typeParameters: resolvedTypeParameters,
           parameters: Object.freeze(parameters),
-          // A foreign header outside the C subset withholds its result so no callable is published.
+          // A foreign or exported header outside the C subset withholds its result so no callable
+          // is published.
           returnType:
             admission.length === 0
               ? result.fact

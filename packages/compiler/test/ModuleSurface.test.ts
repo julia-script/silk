@@ -1420,3 +1420,28 @@ impl Counter { pub fn zero() -> Self { return Counter { value: 0 } } }`,
       assert.include(base.canonical, 'InherentImpl')
     }),
 )
+
+it.effect('round-trips raw pointer types and keys public pointer signatures by mutability', () =>
+  Effect.gen(function* () {
+    const pointer = Type.pointer(true, Type.pointer(false, Type.nominal('surface/Main', 'Opaque')))
+    const decoded = yield* ModuleSurface.decodeSemanticType(
+      ModuleSurface.encodeSemanticType(pointer),
+    )
+    assert.strictEqual(Type.key(decoded), Type.key(pointer))
+    assert.strictEqual(Type.encode(decoded), '*mut *const surface/Main.Opaque')
+
+    const mutable = yield* surface(
+      'pub struct Opaque {}\npub fn take(handle: *mut Opaque) -> *mut Opaque { return handle }',
+    )
+    const repeated = yield* surface(
+      'pub struct Opaque {}\npub fn take(handle: *mut Opaque) -> *mut Opaque { return handle }',
+    )
+    const constant = yield* surface(
+      'pub struct Opaque {}\npub fn take(handle: *const Opaque) -> *const Opaque { return handle }',
+    )
+    assert.strictEqual(ModuleSurface.equals(mutable, repeated), true)
+    assert.strictEqual(ModuleSurface.equals(mutable, constant), false)
+    assert.include(mutable.canonical, '"tag":"Pointer","mutable":true')
+    assert.include(constant.canonical, '"tag":"Pointer","mutable":false')
+  }),
+)

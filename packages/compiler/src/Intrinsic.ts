@@ -162,6 +162,7 @@ const admission = (family: string): AdmissionCategory => {
   if (family === 'Layout' || family === 'string') return 'Representation'
   if (
     family === 'RawBuffer' ||
+    family === 'Pointer' ||
     family === 'Slot' ||
     family === 'Shared' ||
     family === 'Execution' ||
@@ -207,6 +208,20 @@ const consumer = (family: string, operation: string): string => {
   return `silk/${family.replaceAll(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()}.${operation}`
 }
 
+/** The caller obligation of each unsafe pointer primitive, keyed by operation name. */
+const pointerInvariants: ReadonlyMap<string, string> = new Map([
+  [
+    'offset',
+    'caller proves the pointer and the offset result address elements of one live allocation',
+  ],
+  [
+    'offsetMut',
+    'caller proves the pointer and the offset result address elements of one live allocation',
+  ],
+  ['read', 'caller proves the pointer is non-null, aligned, and addresses an initialized T'],
+  ['write', 'caller proves the pointer is non-null, aligned, and addresses writable storage for T'],
+])
+
 const builtin = (options: {
   readonly actor: string
   readonly name: string
@@ -229,6 +244,9 @@ const builtin = (options: {
       case 'RawBuffer':
         invariant =
           'caller proves raw-buffer bounds, ownership, and initializedness required by the operation'
+        break
+      case 'Pointer':
+        invariant = pointerInvariants.get(options.name)
         break
       case 'Slot':
         invariant =
@@ -324,6 +342,8 @@ const actor = (
 
 const rawElement = Type.parameter({ module: 'silk/core', name: '$RawStorage' }, 0, 'T')
 const rawTypeParameters = Object.freeze([rawElement])
+const pointerElement = Type.parameter({ module: 'Intrinsic', name: '$Pointer' }, 0, 'T')
+const pointerTypeParameters = Object.freeze([pointerElement])
 const sharedElement = Type.parameter({ module: 'Intrinsic', name: '$LocalShared' }, 0, 'T')
 const sharedResult = Type.parameter({ module: 'Intrinsic', name: '$LocalShared' }, 1, 'A')
 const sharedTypeParameters = Object.freeze([sharedElement])
@@ -1869,6 +1889,131 @@ const intrinsicOperations = Object.freeze([
         'usize',
         'u8',
       ]),
+      result: '()',
+      semanticResult: Type.unit,
+      unsafe: true,
+    }),
+  ]),
+  ...Object.freeze([
+    builtin({
+      actor: 'Pointer',
+      name: 'null',
+      operation: 'PointerNull',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: pointerTypeParameters,
+      parameters: Object.freeze([]),
+      semanticParameters: Object.freeze([]),
+      result: '*mut T',
+      semanticResult: Type.pointer(true, pointerElement),
+    }),
+    builtin({
+      actor: 'Pointer',
+      name: 'isNull',
+      operation: 'PointerIsNull',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: pointerTypeParameters,
+      parameters: Object.freeze([valueParameter('pointer', '*const T')]),
+      semanticParameters: Object.freeze([Type.pointer(false, pointerElement)]),
+      result: 'bool',
+      semanticResult: 'bool',
+    }),
+    builtin({
+      actor: 'Pointer',
+      name: 'fromRef',
+      operation: 'PointerFromRef',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: pointerTypeParameters,
+      parameters: Object.freeze([valueParameter('value', '&T')]),
+      semanticParameters: Object.freeze([Type.reference('Shared', pointerElement)]),
+      result: '*const T',
+      semanticResult: Type.pointer(false, pointerElement),
+    }),
+    builtin({
+      actor: 'Pointer',
+      name: 'fromMutRef',
+      operation: 'PointerFromMutRef',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: pointerTypeParameters,
+      parameters: Object.freeze([valueParameter('value', '&mut T')]),
+      semanticParameters: Object.freeze([Type.reference('Exclusive', pointerElement)]),
+      result: '*mut T',
+      semanticResult: Type.pointer(true, pointerElement),
+    }),
+    builtin({
+      actor: 'Pointer',
+      name: 'fromSlice',
+      operation: 'PointerFromSlice',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: pointerTypeParameters,
+      parameters: Object.freeze([valueParameter('values', '&[T]')]),
+      semanticParameters: Object.freeze([Type.slice('Shared', pointerElement)]),
+      result: '*const T',
+      semanticResult: Type.pointer(false, pointerElement),
+    }),
+    builtin({
+      actor: 'Pointer',
+      name: 'fromMutSlice',
+      operation: 'PointerFromMutSlice',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: pointerTypeParameters,
+      parameters: Object.freeze([valueParameter('values', '&mut [T]')]),
+      semanticParameters: Object.freeze([Type.slice('Exclusive', pointerElement)]),
+      result: '*mut T',
+      semanticResult: Type.pointer(true, pointerElement),
+    }),
+    builtin({
+      actor: 'Pointer',
+      name: 'offset',
+      operation: 'PointerOffset',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: pointerTypeParameters,
+      parameters: Object.freeze([
+        valueParameter('pointer', '*const T'),
+        valueParameter('count', 'usize'),
+      ]),
+      semanticParameters: Object.freeze([Type.pointer(false, pointerElement), 'usize']),
+      result: '*const T',
+      semanticResult: Type.pointer(false, pointerElement),
+      unsafe: true,
+    }),
+    builtin({
+      actor: 'Pointer',
+      name: 'offsetMut',
+      operation: 'PointerOffsetMut',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: pointerTypeParameters,
+      parameters: Object.freeze([
+        valueParameter('pointer', '*mut T'),
+        valueParameter('count', 'usize'),
+      ]),
+      semanticParameters: Object.freeze([Type.pointer(true, pointerElement), 'usize']),
+      result: '*mut T',
+      semanticResult: Type.pointer(true, pointerElement),
+      unsafe: true,
+    }),
+    builtin({
+      actor: 'Pointer',
+      name: 'read',
+      operation: 'PointerRead',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: pointerTypeParameters,
+      parameters: Object.freeze([valueParameter('pointer', '*const T')]),
+      semanticParameters: Object.freeze([Type.pointer(false, pointerElement)]),
+      result: 'T',
+      semanticResult: pointerElement,
+      unsafe: true,
+    }),
+    builtin({
+      actor: 'Pointer',
+      name: 'write',
+      operation: 'PointerWrite',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: pointerTypeParameters,
+      parameters: Object.freeze([
+        valueParameter('pointer', '*mut T'),
+        valueParameter('value', 'T'),
+      ]),
+      semanticParameters: Object.freeze([Type.pointer(true, pointerElement), pointerElement]),
       result: '()',
       semanticResult: Type.unit,
       unsafe: true,

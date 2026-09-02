@@ -355,6 +355,23 @@ export const parseTypePrimary = (
       ]),
     })
   }
+  if (nextSignificantKind(initial) === 'Star') {
+    const star = expect(initial, 'Star', ['ConstKeyword', ...typeStarts, ...following])
+    const mutability = expect(
+      star.state,
+      nextSignificantKind(star.state) === 'MutKeyword' ? 'MutKeyword' : 'ConstKeyword',
+      [...typeStarts, ...following],
+    )
+    const pointee = parseTypePrimary(mutability.state, following)
+    return Object.freeze({
+      state: pointee.state,
+      node: syntaxNode(pointee.state, 'PointerType', [
+        ...star.elements,
+        ...mutability.elements,
+        pointee.node,
+      ]),
+    })
+  }
   if (nextSignificantKind(initial) === 'Ampersand') {
     const ampersand = expect(initial, 'Ampersand', [
       'MutKeyword',
@@ -643,6 +660,7 @@ export const parseParameterList = (initial: State): NodeResult => {
     kind !== 'UnionKeyword' &&
     kind !== 'TypeKeyword' &&
     kind !== 'ExternKeyword' &&
+    kind !== 'ExportKeyword' &&
     kind !== 'ServiceKeyword' &&
     kind !== 'FnKeyword' &&
     kind !== 'EffectKeyword' &&
@@ -701,6 +719,7 @@ export const parseParameterList = (initial: State): NodeResult => {
       kind === 'UnionKeyword' ||
       kind === 'TypeKeyword' ||
       kind === 'ExternKeyword' ||
+      kind === 'ExportKeyword' ||
       kind === 'ServiceKeyword' ||
       kind === 'FnKeyword' ||
       kind === 'EffectKeyword' ||
@@ -722,6 +741,7 @@ export const parseParameterList = (initial: State): NodeResult => {
       'UnionKeyword',
       'TypeKeyword',
       'ExternKeyword',
+      'ExportKeyword',
       'ServiceKeyword',
       'FnKeyword',
       'EffectKeyword',
@@ -742,6 +762,7 @@ export const parseParameterList = (initial: State): NodeResult => {
     'UnionKeyword',
     'TypeKeyword',
     'ExternKeyword',
+    'ExportKeyword',
     'ServiceKeyword',
     'FnKeyword',
     'EffectKeyword',

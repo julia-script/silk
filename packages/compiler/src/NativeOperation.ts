@@ -11,6 +11,7 @@ import * as NativeLocalSharedOperation from './NativeLocalSharedOperation.js'
 import * as NativeMemoryOperation from './NativeMemoryOperation.js'
 import type * as NativeOperationContext from './NativeOperationContext.js'
 import * as NativePlaceOperation from './NativePlaceOperation.js'
+import * as NativePointerOperation from './NativePointerOperation.js'
 import * as NativeScalarOperation from './NativeScalarOperation.js'
 import * as NativeValueOperation from './NativeValueOperation.js'
 /** Whether one MIR operation requires the native allocation ABI. */
@@ -135,5 +136,12 @@ export const emit = Effect.fnUntraced(function* (
       return yield* NativeCallOperation.emit(context.call, operation)
     case 'ForeignCall':
       return yield* NativeForeignOperation.emit(context.call, operation)
+    case 'PointerNull':
+    case 'PointerIsNull':
+    case 'PointerFromReference':
+    case 'PointerOffset':
+    case 'PointerRead':
+    case 'PointerWrite':
+      return yield* NativePointerOperation.emit(context.memory, operation)
   }
 })

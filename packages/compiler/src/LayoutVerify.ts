@@ -19,6 +19,7 @@ import {
   catalogEntry,
   entry,
   neverEntry,
+  pointerEntry,
   referenceEntry,
   scalarEntry,
   sliceEntry,
@@ -444,6 +445,21 @@ const verifyEntry = (
             'InvalidScalar',
             candidate.type,
             `${Type.encode(candidate.type)} does not match the canonical reference layout`,
+          ),
+        ])
+  }
+  if (Type.isPointer(candidate.type)) {
+    const expected = pointerEntry(target, candidate.type)
+    return candidate.size === expected.size &&
+      candidate.alignment === expected.alignment &&
+      candidate.copy === expected.copy &&
+      representationEquals(candidate.representation, expected.representation)
+      ? Object.freeze([])
+      : Object.freeze([
+          invalid(
+            'InvalidScalar',
+            candidate.type,
+            `${Type.encode(candidate.type)} does not match the canonical pointer layout`,
           ),
         ])
   }

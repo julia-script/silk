@@ -134,6 +134,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'ParameterList',
   'ParenthesizedType',
   'PipelineExpression',
+  'PointerType',
   'CallableType',
   'ExactRepresentationType',
   'ExpressionStatement',
@@ -380,6 +381,29 @@ it.effect('formats retained foreign declaration forms without repair', () =>
 }
 `,
     )
+  }),
+)
+
+it.effect('formats exported function declarations canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source = `// exported symbol
+pub  export "C"fn double( value:i32 )->i32 as "silk_test_double_v1"{ return value * 2 }
+export "C"  fn tick( ) {}`
+    const first = yield* SyntaxFormatter.format(parse('memory://export-format.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `// exported symbol
+pub export "C" fn double(value: i32) -> i32 as "silk_test_double_v1" {
+  return value * 2
+}
+
+export "C" fn tick() {}
+`,
+    )
+    const second = yield* SyntaxFormatter.format(parse('memory://export-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
+    assert.strictEqual(second.changed, false)
   }),
 )
 
@@ -1193,6 +1217,7 @@ fn helper(value: i32, other: i32) -> i32 {
 }
 pub unsafe fn unchecked(value: i32) -> i32 { return value }
 pub unsafe extern "C" fn cAbs(value:i32)->i32 as "abs"
+pub export "C" fn double(value:i32)->i32 as "silk_test_double_v1" { return value * 2 }
 fn inspect(event: Token | End) -> i32 {
   return match &mut event { Token { span: Span { start: offset, .. }, .. } if true => offset _ => 0 }
 }
@@ -1204,6 +1229,7 @@ fn scan(values: &[i32], output: &mut [i32]) -> i32 {
   return helper(usize.toI32(values.length), output[0])
 }
 fn readReferent(value: &i32) -> i32 { return value.* }
+fn pointers(cursor: *mut *const u8, count: *const i32) -> *const u8 { return cursor }
 fn callbacks(shared: fn(i32, bool) -> i32, exclusive: mut fn(i32) -> bool, consuming: once fn() -> i32) -> i32 {
   return shared(1, true)
 }
@@ -1255,6 +1281,24 @@ pub fn main() -> i32 { return unsafe unchecked(helper(-1, 2) |> Core.finish()) }
     const second = yield* SyntaxFormatter.format(reparsed)
     assert.deepEqual(second.bytes, first.bytes)
     assert.strictEqual(second.changed, false)
+  }),
+)
+
+it.effect('formats pointer types canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source = 'fn raw(cursor:* mut   u8,nested:*mut *const u8)->*const u8{return cursor}'
+    const first = yield* SyntaxFormatter.format(parse('memory://pointer-types.silk', source))
+    const text = formattedText(first)
+
+    assert.strictEqual(
+      text,
+      `fn raw(cursor: *mut u8, nested: *mut *const u8) -> *const u8 {
+  return cursor
+}
+`,
+    )
+    const second = yield* SyntaxFormatter.format(parse('memory://pointer-types.silk', text))
+    assert.deepEqual(second.bytes, first.bytes)
   }),
 )
 

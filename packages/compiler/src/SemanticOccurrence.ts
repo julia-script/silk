@@ -529,6 +529,10 @@ const collectDeclaredType = (
     collectDeclaredType(fact.target, index, scope, pending)
     return
   }
+  if (fact._tag === 'Pointer') {
+    collectDeclaredType(fact.pointee, index, scope, pending)
+    return
+  }
   if (fact._tag === 'Callable') {
     for (const parameter of fact.parameters) collectDeclaredType(parameter, index, scope, pending)
     collectDeclaredType(fact.result, index, scope, pending)

@@ -41,6 +41,7 @@ export type NodeKind =
   | 'FixedArrayType'
   | 'SliceType'
   | 'ReferenceType'
+  | 'PointerType'
   | 'CallableType'
   | 'ExactRepresentationType'
   | 'OpaqueResultType'

@@ -3,7 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as CAbi from '../src/CAbi.js'
-import type * as Mir from '../src/Mir.js'
+import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Target from '../src/Target.js'
@@ -284,6 +284,7 @@ it('reports broken graphs deterministically as data', () => {
     module: 'sample://broken.silk',
     intrinsics: straight?.intrinsics ?? raise('expected the sample intrinsic inventory'),
     foreignCalls: Object.freeze([]),
+    foreignExports: Object.freeze([]),
     entry: straight?.entry ?? raise('expected the sample entry'),
     layout: straight?.layout ?? raise('expected the sample layout'),
     executionTransitions: straight?.executionTransitions ?? Object.freeze([]),
@@ -556,3 +557,138 @@ it('verifies foreign call arity and C classes as structural violations', () => {
     ['InvalidForeignCall'],
   )
 })
+
+it.effect('verifies a foreign pointer argument against the declared pointee', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'mir/foreign-pointer-argument',
+      ascii(`import silk.pointer { Pointer }
+unsafe extern "C" fn inspect(value: *const i32) -> i32
+pub fn main() -> i32 {
+  let mut value = 1
+  return unsafe inspect(Pointer.fromMutRef(&mut value))
+}`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(program), [])
+    // The same `*mut i32` argument against a `*const u8` parameter is one violation.
+    const rewritten: Mir.Module = Object.freeze({
+      ...program,
+      functions: Object.freeze(
+        program.functions.map((fn) =>
+          Object.freeze({
+            ...fn,
+            regions: Object.freeze(
+              fn.regions.map((region) =>
+                region._tag !== 'OperationRegion'
+                  ? region
+                  : Object.freeze({
+                      ...region,
+                      operations: Object.freeze(
+                        region.operations.map((operation) =>
+                          operation._tag !== 'ForeignCall'
+                            ? operation
+                            : Object.freeze({
+                                ...operation,
+                                signature: Object.freeze({
+                                  ...operation.signature,
+                                  parameters: Object.freeze([
+                                    Object.freeze({
+                                      _tag: 'Pointer' as const,
+                                      mutable: false,
+                                      pointee: 'u8' as const,
+                                    }),
+                                  ]),
+                                }),
+                              }),
+                        ),
+                      ),
+                    }),
+              ),
+            ),
+          }),
+        ),
+      ),
+    })
+    assert.deepEqual(
+      MirVerification.verify(rewritten).map((violation) => violation.rule),
+      ['InvalidForeignCall'],
+    )
+  }),
+)
+
+it.effect('lowers pointer formation, offset, write, and read to explicit pointer operations', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'mir/pointer-slice',
+      ascii(`import silk.pointer { Pointer }
+pub fn main() -> i32 {
+  let mut values = [1, 2, 3]
+  let pointer = Pointer.fromMutSlice(&mut values)
+  unsafe {
+    let third = Pointer.offsetMut(pointer, 2)
+    Pointer.write(third, 9)
+    return Pointer.read(third)
+  }
+  return 0
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(program), [])
+    const described = program.functions.flatMap((fn) =>
+      MirVerification.operations(fn).flatMap((operation) => {
+        if (operation._tag === 'PointerFromReference')
+          return [
+            `${operation._tag} ${fn.localTypes.at(operation.source.ordinal)?._tag} -> ${Type.encode(operation.type.type)}`,
+          ]
+        if (operation._tag === 'PointerOffset')
+          return [
+            `${operation._tag} ${fn.localTypes.at(operation.count.ordinal)?._tag} -> ${Type.encode(operation.type.type)}`,
+          ]
+        if (operation._tag === 'PointerRead')
+          return [`${operation._tag} -> ${Type.encode(Mir.semanticType(operation.type))}`]
+        if (operation._tag === 'PointerWrite')
+          return [`${operation._tag} ${fn.localTypes.at(operation.value.ordinal)?._tag}`]
+        return []
+      }),
+    )
+    assert.deepEqual(described.sort(), [
+      'PointerFromReference Slice -> *mut i32',
+      'PointerOffset usize -> *mut i32',
+      'PointerRead -> i32',
+      'PointerWrite i32',
+    ])
+    const encoded = MirEncoding.encode(program)
+    assert.include(encoded, '= pointer-from-reference ')
+    assert.include(encoded, '= pointer-offset ')
+    assert.include(encoded, '= pointer-write ')
+    assert.include(encoded, '= pointer-read ')
+    assert.strictEqual(MirEncoding.encode(program), encoded)
+  }),
+)
+
+it.effect('rejects a direct-intrinsic pointer write of a move-only pointee as data', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'mir/pointer-move-only-write',
+      ascii(`struct Owned { value: i32 }
+pub fn main() -> i32 {
+  let mut holder = Owned { value: 1 }
+  let pointer = Intrinsic.pointerFromMutRef<Owned>(&mut holder)
+  unsafe {
+    Intrinsic.pointerWrite<Owned>(pointer, Owned { value: 2 })
+  }
+  return holder.value
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    assert.deepEqual(
+      MirVerification.verify(program).map((violation) => violation.rule),
+      ['InvalidPointerOperation'],
+    )
+  }),
+)

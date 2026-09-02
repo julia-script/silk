@@ -415,6 +415,8 @@ export const associatedFunctionOnValueCode = 'SEM0198' as const
 export const receiverMethodRequiresCallCode = 'SEM0199' as const
 /** Stable code for a receiver operation declared by more than one bound of one type parameter. */
 export const ambiguousReceiverOperationCode = 'SEM0200' as const
+/** Stable code for an `export "C"` function whose body may suspend. */
+export const exportSuspendsCode = 'SEM0201' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -657,6 +659,7 @@ export type Code =
   | typeof associatedFunctionOnValueCode
   | typeof receiverMethodRequiresCallCode
   | typeof ambiguousReceiverOperationCode
+  | typeof exportSuspendsCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -1368,6 +1371,7 @@ export type Reason =
       readonly member: string
       readonly interfaces: ReadonlyArray<string>
     }
+  | { readonly _tag: 'ExportSuspends'; readonly symbol: string }
 /** One additional source span labeled with its relationship to the diagnostic. */
 export interface RelatedSpan {
   readonly label: string
@@ -5456,4 +5460,27 @@ export const wrongCallArity = (
     }),
     span,
     ...(target._tag === 'DeclarationId' ? { entity: target } : {}),
+  })
+
+/** Rejects an exported C function whose MIR body may suspend, relating the suspending call. */
+export const exportSuspends = (
+  symbol: string,
+  span: SourceSpan.SourceSpan,
+  callSpan?: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: exportSuspendsCode,
+    severity: 'error',
+    message: `Exported function ${symbol} may suspend; a C-callable body must be synchronous`,
+    reason: Object.freeze({ _tag: 'ExportSuspends', symbol }),
+    span,
+    ...(callSpan === undefined
+      ? {}
+      : {
+          relatedSpans: Object.freeze([
+            Object.freeze({ label: 'suspending call', span: callSpan }),
+          ]),
+        }),
   })

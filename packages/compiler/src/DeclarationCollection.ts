@@ -182,6 +182,7 @@ export const isDeclaredTypeNode = (element: SyntaxTree.Element): element is Synt
     element.kind === 'FixedArrayType' ||
     element.kind === 'SliceType' ||
     element.kind === 'ReferenceType' ||
+    element.kind === 'PointerType' ||
     element.kind === 'CallableType' ||
     element.kind === 'UnitType' ||
     element.kind === 'ParenthesizedType' ||
@@ -658,6 +659,46 @@ export const analyzeDeclaredType = (
           : {}),
       }),
       diagnostics: target.diagnostics,
+    })
+  }
+  if (syntax.kind === 'PointerType') {
+    const token = SyntaxTree.directToken(syntax, 'Star')
+    const pointeeSyntax = syntax.children.find(isDeclaredTypeNode)
+    if (token === undefined || pointeeSyntax === undefined) {
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
+        diagnostics: Object.freeze([]),
+      })
+    }
+    const mutable = SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined
+    const pointee = analyzeDeclaredType(source, pointeeSyntax, typeParameters)
+    if (pointee.fact._tag === 'Resolved') {
+      const type = Type.pointer(mutable, pointee.fact.type)
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Resolved',
+          type,
+          spelling: Type.encode(type),
+          token,
+          syntax,
+          components: Object.freeze([pointee.fact]),
+        }),
+        diagnostics: pointee.diagnostics,
+      })
+    }
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Pointer',
+        mutable,
+        pointee: pointee.fact,
+        spelling: `${mutable ? '*mut ' : '*const '}unavailable`,
+        token,
+        syntax,
+        ...('cause' in pointee.fact && pointee.fact.cause !== undefined
+          ? { cause: pointee.fact.cause }
+          : {}),
+      }),
+      diagnostics: pointee.diagnostics,
     })
   }
   if (syntax.kind === 'FixedArrayType') {
@@ -2333,7 +2374,7 @@ const decodedText = (source: SourceFile.SourceFile, token: Token.Token): string 
 
 const textDecoder = new TextDecoder()
 
-const foreignRestrictions: ReadonlyArray<
+const sharedForeignRestrictions: ReadonlyArray<
   readonly [kind: Token.TokenKind | SyntaxTree.NodeKind, restriction: string]
 > = [
   ['StaticKeyword', 'static'],
@@ -2342,17 +2383,24 @@ const foreignRestrictions: ReadonlyArray<
   ['FailureRow', 'failure row'],
   ['RequirementRow', 'requirement row'],
   ['WhereClause', 'where clause'],
-  ['Block', 'body'],
 ]
 
+/** A foreign header has no body; an exported one keeps its body but may not be `unsafe`. */
+const foreignRestrictions: Record<'Foreign' | 'Export', typeof sharedForeignRestrictions> = {
+  Foreign: [...sharedForeignRestrictions, ['Block', 'body']],
+  Export: [...sharedForeignRestrictions, ['UnsafeKeyword', 'unsafe']],
+}
+
 /**
- * The syntax-level foreign header checks: ABI, the mandatory `unsafe`, retained Silk-only syntax,
- * and the native symbol. Type admission needs resolved types and runs at completion.
+ * The syntax-level checks shared by `extern` and `export` headers: ABI, the mandatory `unsafe` on
+ * a foreign header, retained Silk-only syntax, and the native symbol. Type admission needs
+ * resolved types and runs at completion.
  */
 const collectForeign = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
   name: DeclaredName,
+  direction: 'Foreign' | 'Export',
 ): {
   readonly fact: NonNullable<DeclarationFact['foreign']>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -2366,11 +2414,11 @@ const collectForeign = (
     const abi = decodedText(source, abiToken)
     if (abi !== 'C') diagnostics.push(Diagnostic.unsupportedForeignAbi(abi ?? '', abiToken.span))
   }
-  if (SyntaxTree.directToken(node, 'UnsafeKeyword') === undefined)
+  if (direction === 'Foreign' && SyntaxTree.directToken(node, 'UnsafeKeyword') === undefined)
     diagnostics.push(Diagnostic.foreignFunctionRequiresUnsafe(spellingOf, declarationSpan))
   for (const child of node.children) {
     const kind = SyntaxTree.isMissingToken(child) ? undefined : child.kind
-    const restriction = foreignRestrictions.find(([expected]) => expected === kind)?.[1]
+    const restriction = foreignRestrictions[direction].find(([expected]) => expected === kind)?.[1]
     if (restriction !== undefined)
       diagnostics.push(Diagnostic.foreignDeclarationRestriction(restriction, child.span))
   }
@@ -3052,14 +3100,18 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       ...constraints.diagnostics,
     )
     const foreign =
-      node.kind === 'ForeignFunctionDeclaration' ? collectForeign(source, node, name) : undefined
-    if (
-      foreign === undefined &&
-      functionKind === 'Ordinary' &&
-      failureRow.fact.syntax !== undefined
-    )
+      node.kind === 'ForeignFunctionDeclaration'
+        ? collectForeign(source, node, name, 'Foreign')
+        : undefined
+    const foreignExport =
+      node.kind === 'FunctionDeclaration' &&
+      SyntaxTree.directToken(node, 'ExportKeyword') !== undefined
+        ? collectForeign(source, node, name, 'Export')
+        : undefined
+    const native = foreign ?? foreignExport
+    if (native === undefined && functionKind === 'Ordinary' && failureRow.fact.syntax !== undefined)
       diagnostics.push(Diagnostic.failureChannelOnOrdinary(failureRow.fact.syntax.span))
-    if (foreign !== undefined) diagnostics.push(...foreign.diagnostics)
+    if (native !== undefined) diagnostics.push(...native.diagnostics)
     const retainedBody = foreign === undefined ? bodyTemplate(source, node) : undefined
     return Object.freeze({
       _tag: 'FunctionDeclaration',
@@ -3070,14 +3122,19 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       functionKind: foreign === undefined ? functionKind : 'Ordinary',
       unsafe: SyntaxTree.directToken(node, 'UnsafeKeyword') !== undefined,
       ...(foreign === undefined ? {} : { foreign: foreign.fact }),
+      // A rejected export publishes no symbol, so discovery never roots it.
+      ...(foreignExport === undefined || foreignExport.diagnostics.length > 0
+        ? {}
+        : { foreignExport: foreignExport.fact }),
       typeParameters: typeParameters.facts,
       parameterCount: facts.length,
       parameters: facts,
       name,
-      // A rejected foreign header withholds its result so no callable contract is published and
-      // call sites get the ordinary unavailable-contract behavior instead of repeated errors.
+      // A rejected foreign or exported header withholds its result so no callable contract is
+      // published and call sites get the ordinary unavailable-contract behavior instead of
+      // repeated errors.
       returnType:
-        foreign !== undefined && foreign.diagnostics.length > 0
+        native !== undefined && native.diagnostics.length > 0
           ? Object.freeze({ _tag: 'Unavailable' as const, syntax: returnType.fact.syntax })
           : returnType.fact,
       ...(returnType.opaqueResult === undefined ? {} : { opaqueResult: returnType.opaqueResult }),

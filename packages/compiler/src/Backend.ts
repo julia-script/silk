@@ -4,6 +4,7 @@ import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Instances from './Instances.js'
 import * as ForeignAvailability from './ForeignAvailability.js'
+import * as ForeignPlanning from './ForeignPlanning.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
@@ -68,6 +69,13 @@ export interface ForeignImport {
   readonly result: string
 }
 
+/** One exported C-callable symbol and the C class spellings of its thunk signature. */
+export interface ForeignExport {
+  readonly symbol: string
+  readonly parameters: ReadonlyArray<string>
+  readonly result: string
+}
+
 interface ArtifactBase {
   readonly module: string
   readonly backend: Id
@@ -78,6 +86,8 @@ interface ArtifactBase {
   readonly runtimeFeatures: ReadonlyArray<RuntimeFeature>
   /** Reachable foreign symbols sorted by symbol; empty for direct WebAssembly. */
   readonly foreignImports: ReadonlyArray<ForeignImport>
+  /** Exported C-callable symbols with their classified signatures, sorted by symbol. */
+  readonly foreignExports: ReadonlyArray<ForeignExport>
   readonly control: ReadonlyArray<ControlProvenance>
 }
 
@@ -169,12 +179,17 @@ export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
     IntrinsicAvailability.backendTarget(self.id),
     program.layout.target,
   )
-  if (foreign.length > 0) {
+  const planning = ForeignPlanning.check(
+    program,
+    IntrinsicAvailability.backendTarget(self.id),
+    program.layout.target,
+  )
+  if (foreign.length > 0 || planning.length > 0) {
     return yield* new BackendError({
       operation: 'Backend.emit',
       backend: self.name,
       message: `${self.name} cannot emit a program with unavailable foreign functions`,
-      reason: { _tag: 'UnsupportedForeignFunction', diagnostics: foreign },
+      reason: { _tag: 'UnsupportedForeignFunction', diagnostics: [...foreign, ...planning] },
     })
   }
   const violations = MirVerification.verify(program)

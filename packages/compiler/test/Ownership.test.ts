@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Ownership from '../src/Ownership.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
@@ -1128,3 +1130,54 @@ pub fn main() -> i32 { return 0 }`,
   )
   assert.deepEqual(bothArms.diagnostics, [])
 })
+
+it('copies a raw pointer binding freely without a move or cleanup', () => {
+  const facts = check(
+    'ownership://pointer-copy.silk',
+    `fn take(value: *const i32) -> i32 { return 0 }
+pub fn twice(pointer: *mut i32) -> i32 {
+  let copy = pointer
+  return take(copy) + take(copy) + take(pointer)
+}`,
+  )
+
+  assert.deepEqual(facts.diagnostics, [])
+  const twice = facts.functions.at(1)
+  assert.strictEqual(twice?.verdict._tag, 'Satisfied')
+  assert.deepEqual(
+    twice?.bindings.map((binding) => [binding.name, binding.category._tag]),
+    [
+      ['pointer', 'Copyable'],
+      ['copy', 'Copyable'],
+    ],
+  )
+})
+
+it.effect('records no conflict when a pointer root is moved or mutated after formation', () =>
+  Effect.gen(function* () {
+    const moved = yield* Analysis.ofSource(
+      'ownership/pointer-root-moved',
+      ascii(`import silk.pointer { Pointer }
+struct Token { value: i32 }
+fn take(token: Token) -> i32 { return token.value }
+pub fn main() -> i32 {
+  let mut box = Token { value: 1 }
+  let p = Pointer.fromMutRef(&mut box)
+  return take(move box)
+}`),
+    )
+    const mutated = yield* Analysis.ofSource(
+      'ownership/pointer-root-mutated',
+      ascii(`import silk.pointer { Pointer }
+pub fn main() -> i32 {
+  let mut values = [1, 2, 3, 4]
+  let p = Pointer.fromMutSlice(&mut values)
+  values[0] = 40
+  return values[0]
+}`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(moved), [])
+    assert.deepEqual(Analysis.diagnostics(mutated), [])
+  }),
+)

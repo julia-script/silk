@@ -1,5 +1,5 @@
 import * as Diagnostic from '../Diagnostic.js'
-import type { NodeResult, State } from '../internal/ParseState.js'
+import type { ElementsResult, NodeResult, State } from '../internal/ParseState.js'
 import {
   addDiagnostic,
   advance,
@@ -34,16 +34,21 @@ import {
   parseWhereClause,
 } from './Type.js'
 
+/** `extern` and `export` mark a function header with a native ABI literal in the same slot. */
+const isAbiMarker = (
+  kind: Token.TokenKind | undefined,
+): kind is 'ExternKeyword' | 'ExportKeyword' => kind === 'ExternKeyword' || kind === 'ExportKeyword'
+
 /**
- * `static` opens a function declaration before `fn`, or before a foreign header whose `static` is
- * retained for semantic rejection.
+ * `static` opens a function declaration before `fn`, or before a foreign or exported header whose
+ * `static` is retained for semantic rejection.
  */
 const staticBeginsFunction = (state: State, offset: number): boolean => {
   const following = peek(state, offset)
   return (
     following === 'FnKeyword' ||
-    following === 'ExternKeyword' ||
-    (following === 'UnsafeKeyword' && peek(state, offset + 1) === 'ExternKeyword')
+    isAbiMarker(following) ||
+    (following === 'UnsafeKeyword' && isAbiMarker(peek(state, offset + 1)))
   )
 }
 
@@ -56,7 +61,7 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
     kind === 'FnKeyword' ||
     kind === 'EffectKeyword' ||
     kind === 'UnsafeKeyword' ||
-    kind === 'ExternKeyword' ||
+    isAbiMarker(kind) ||
     kind === 'StructKeyword' ||
     kind === 'TupleKeyword' ||
     kind === 'EnumKeyword' ||
@@ -74,11 +79,11 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
     (following === 'StaticKeyword' && staticBeginsFunction(state, 2)) ||
     following === 'FnKeyword' ||
     following === 'EffectKeyword' ||
-    following === 'ExternKeyword' ||
+    isAbiMarker(following) ||
     (following === 'UnsafeKeyword' &&
       (peek(state, 2) === 'FnKeyword' ||
         peek(state, 2) === 'EffectKeyword' ||
-        peek(state, 2) === 'ExternKeyword')) ||
+        isAbiMarker(peek(state, 2)))) ||
     following === 'StructKeyword' ||
     following === 'TupleKeyword' ||
     following === 'EnumKeyword' ||
@@ -751,6 +756,7 @@ const parseServiceLikeDeclaration = (initial: State, kind: 'Service' | 'Interfac
     nextSignificantKind(state) !== 'UnionKeyword' &&
     nextSignificantKind(state) !== 'TypeKeyword' &&
     nextSignificantKind(state) !== 'ExternKeyword' &&
+    nextSignificantKind(state) !== 'ExportKeyword' &&
     nextSignificantKind(state) !== 'ServiceKeyword' &&
     nextSignificantKind(state) !== 'InterfaceKeyword' &&
     nextSignificantKind(state) !== 'ImplKeyword'
@@ -897,6 +903,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     lookaheadToken.kind !== 'EffectKeyword' &&
     lookaheadToken.kind !== 'UnsafeKeyword' &&
     lookaheadToken.kind !== 'ExternKeyword' &&
+    lookaheadToken.kind !== 'ExportKeyword' &&
     lookaheadToken.kind !== 'StructKeyword' &&
     lookaheadToken.kind !== 'TupleKeyword' &&
     lookaheadToken.kind !== 'EnumKeyword' &&
@@ -920,6 +927,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
         'StaticKeyword',
         'UnsafeKeyword',
         'ExternKeyword',
+        'ExportKeyword',
         'EffectKeyword',
         'FnKeyword',
         'Identifier',
@@ -931,6 +939,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
       ? expect(pubKeyword.state, 'StaticKeyword', [
           'UnsafeKeyword',
           'ExternKeyword',
+          'ExportKeyword',
           'FnKeyword',
           'Identifier',
           'LeftParenthesis',
@@ -940,27 +949,29 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     nextSignificantKind(staticKeyword.state) === 'UnsafeKeyword'
       ? expect(staticKeyword.state, 'UnsafeKeyword', [
           'ExternKeyword',
+          'ExportKeyword',
           'EffectKeyword',
           'FnKeyword',
           'Identifier',
           'LeftParenthesis',
         ])
       : Object.freeze({ state: staticKeyword.state, elements: Object.freeze([]) })
-  // `extern <abi>` marks a foreign header; a missing ABI literal recovers inside the declaration.
-  const externKeyword =
-    nextSignificantKind(unsafeKeyword.state) === 'ExternKeyword'
-      ? expect(unsafeKeyword.state, 'ExternKeyword', [
-          'TextLiteral',
-          'EffectKeyword',
-          'FnKeyword',
-          'Identifier',
-          'LeftParenthesis',
-        ])
-      : undefined
+  // `extern <abi>` marks a foreign header and `export <abi>` an exported one; a missing ABI literal
+  // recovers inside the declaration.
+  const markerKind = nextSignificantKind(unsafeKeyword.state)
+  const marker = isAbiMarker(markerKind)
+    ? expect(unsafeKeyword.state, markerKind, [
+        'TextLiteral',
+        'EffectKeyword',
+        'FnKeyword',
+        'Identifier',
+        'LeftParenthesis',
+      ])
+    : undefined
   const abi =
-    externKeyword === undefined
+    marker === undefined
       ? undefined
-      : expect(externKeyword.state, 'TextLiteral', [
+      : expect(marker.state, 'TextLiteral', [
           'EffectKeyword',
           'FnKeyword',
           'Identifier',
@@ -983,7 +994,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
   const name = expect(fnKeyword.state, nameKind, ['Less', 'LeftParenthesis'])
   const contract = parseCallableContractTail(
     name.state,
-    externKeyword === undefined ? ['LeftBrace'] : ['AsKeyword', 'LeftBrace'],
+    marker === undefined ? ['LeftBrace'] : ['AsKeyword', 'LeftBrace'],
   )
   const unitResult =
     contract.returnType === undefined ||
@@ -992,7 +1003,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     ...pubKeyword.elements,
     ...staticKeyword.elements,
     ...unsafeKeyword.elements,
-    ...(externKeyword?.elements ?? []),
+    ...(marker?.elements ?? []),
     ...(abi?.elements ?? []),
     ...effectKeyword.elements,
     ...fnKeyword.elements,
@@ -1005,7 +1016,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     ...(contract.whereClause === undefined ? [] : [contract.whereClause.node]),
   ])
 
-  if (externKeyword === undefined) {
+  if (marker === undefined) {
     const block = parseBlock(contract.state, !unitResult, unitResult)
     return Object.freeze({
       state: block.state,
@@ -1013,29 +1024,57 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     })
   }
 
+  const symbol = parseSymbolTail(contract.state)
+  if (markerKind === 'ExportKeyword') {
+    // An exported function requires a body; without one the declaration closes on an empty block
+    // so the next top-level declaration parses intact.
+    const block =
+      nextSignificantKind(symbol.state) === 'LeftBrace'
+        ? parseBlock(symbol.state, !unitResult, unitResult)
+        : parseMissingBlock(symbol.state)
+    return Object.freeze({
+      state: block.state,
+      node: syntaxNode(block.state, 'FunctionDeclaration', [
+        ...header,
+        ...symbol.elements,
+        block.node,
+      ]),
+    })
+  }
+
   // A foreign header has no body; `static`, `effect`, rows, and a block are retained for semantic
   // rejection so their diagnostics stay navigable.
-  const asKeyword =
-    nextSignificantKind(contract.state) === 'AsKeyword'
-      ? expect(contract.state, 'AsKeyword', ['TextLiteral', 'LeftBrace', ...topLevelFollowing])
-      : undefined
-  const symbol =
-    asKeyword === undefined
-      ? undefined
-      : expect(asKeyword.state, 'TextLiteral', ['LeftBrace', ...topLevelFollowing])
-  const afterSymbol = symbol?.state ?? contract.state
   const body =
-    nextSignificantKind(afterSymbol) === 'LeftBrace'
-      ? parseBlock(afterSymbol, !unitResult, unitResult)
+    nextSignificantKind(symbol.state) === 'LeftBrace'
+      ? parseBlock(symbol.state, !unitResult, unitResult)
       : undefined
-  const state = body?.state ?? afterSymbol
+  const state = body?.state ?? symbol.state
   return Object.freeze({
     state,
     node: syntaxNode(state, 'ForeignFunctionDeclaration', [
       ...header,
-      ...(asKeyword?.elements ?? []),
-      ...(symbol?.elements ?? []),
+      ...symbol.elements,
       ...(body === undefined ? [] : [body.node]),
     ]),
+  })
+}
+
+/** The optional `as <symbol>` tail shared by foreign and exported function headers. */
+const parseSymbolTail = (initial: State): ElementsResult => {
+  if (nextSignificantKind(initial) !== 'AsKeyword')
+    return Object.freeze({ state: initial, elements: Object.freeze([]) })
+  const asKeyword = expect(initial, 'AsKeyword', ['TextLiteral', 'LeftBrace', ...topLevelFollowing])
+  const symbol = expect(asKeyword.state, 'TextLiteral', ['LeftBrace', ...topLevelFollowing])
+  return Object.freeze({
+    state: symbol.state,
+    elements: Object.freeze([...asKeyword.elements, ...symbol.elements]),
+  })
+}
+
+const parseMissingBlock = (initial: State): NodeResult => {
+  const leftBrace = expect(initial, 'LeftBrace', topLevelFollowing)
+  return Object.freeze({
+    state: leftBrace.state,
+    node: syntaxNode(leftBrace.state, 'Block', leftBrace.elements),
   })
 }
