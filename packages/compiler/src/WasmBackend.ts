@@ -1214,7 +1214,7 @@ const layoutOf = (
     return `local${ordinal}_${lane}`
   }
   const logicalLanes = (type: Mir.Type): ReadonlyArray<LayoutPlan.CallingLane> => {
-    if (type._tag === 'EffectBorrow') {
+    if (type._tag === 'EnvironmentBorrow') {
       const shape = LayoutPlan.callingShape(plan, type.type)
       if (shape === undefined) throw new RangeError('Wasm backend lost a borrowed calling shape')
       return shape.lanes
@@ -1223,7 +1223,7 @@ const layoutOf = (
   }
   const lanes = fn.localTypes.map(logicalLanes)
   const signatureLaneCount = (type: Mir.Type): number =>
-    type._tag === 'EffectBorrow' ? 1 : logicalLanes(type).length
+    type._tag === 'EnvironmentBorrow' ? 1 : logicalLanes(type).length
   const parameterLaneCount = fn.localTypes
     .slice(0, fn.parameterCount)
     .reduce((total, type) => total + signatureLaneCount(type), 0)
@@ -1237,7 +1237,7 @@ const layoutOf = (
   for (let ordinal = 0; ordinal < fn.parameterCount; ordinal += 1) {
     const type = fn.localTypes.at(ordinal)
     if (type === undefined) throw new RangeError(`Wasm backend lost parameter %${ordinal}`)
-    if (type._tag === 'EffectBorrow') {
+    if (type._tag === 'EnvironmentBorrow') {
       borrowPointers.set(ordinal, parameterPhysical)
       parameterPhysical += 1
       parameterTypes.push(i32)
@@ -1980,7 +1980,7 @@ const makeOperationContext = (
     if (!CleanupPlan.hasHook(cleanup)) return []
     if (memory === undefined) throw new RangeError('Wasm hook cleanup has no private memory')
     const localType = layout.types.at(local.ordinal)
-    if (localType?._tag === 'EffectBorrow') {
+    if (localType?._tag === 'EnvironmentBorrow') {
       const pointer = layout.borrowPointers.get(local.ordinal)
       if (pointer === undefined) throw new RangeError('Wasm hook cleanup lost its borrow pointer')
       const rootLanes = layout.lanes.at(local.ordinal) ?? []
@@ -3137,16 +3137,17 @@ const makeOperationContext = (
   const flushBorrowRoot = (root: Mir.LocalId): ReadonlyArray<Instr.Instr> => {
     const pointer = layout.borrowPointers.get(root.ordinal)
     if (pointer === undefined) return []
-    if (memory === undefined) throw new RangeError('Wasm Effect borrow has no private memory')
+    if (memory === undefined) throw new RangeError('Wasm environment borrow has no private memory')
     const type = layout.types.at(root.ordinal)
-    if (type?._tag !== 'EffectBorrow') throw new RangeError('Wasm Effect borrow lost its type')
+    if (type?._tag !== 'EnvironmentBorrow')
+      throw new RangeError('Wasm environment borrow lost its type')
     const rootLanes = layout.lanes.at(root.ordinal) ?? []
     const rootSlots = slots(root)
     return rootLanes.flatMap((lane, ordinal) => {
       const offset = LayoutVerify.laneOffset(memory.plan, type.type, lane.path)
       const source = rootSlots.at(ordinal)
       if (offset === undefined || source === undefined)
-        throw new RangeError(`Wasm Effect borrow lost lane ${ordinal}`)
+        throw new RangeError(`Wasm environment borrow lost lane ${ordinal}`)
       return [
         Instr.localGet(pointer),
         ...(offset === 0 ? [] : [Instr.i32Const(offset), Instr.op('i32.add')]),
@@ -5196,7 +5197,7 @@ const emitBeginLoanOperation = (
   } else {
     const rootType = layout.types.at(operation.root.ordinal)
     const rootSemantic = rootType === undefined ? undefined : Mir.semanticType(rootType)
-    const borrowedRoot = rootType?._tag === 'EffectBorrow'
+    const borrowedRoot = rootType?._tag === 'EnvironmentBorrow'
     const borrowedPointer = borrowedRoot
       ? layout.borrowPointers.get(operation.root.ordinal)
       : undefined
@@ -6650,7 +6651,17 @@ const emitApplyCallableOperation = (
   state: WasmOperationContext,
   explicitArguments?: ReadonlyArray<ReadonlyArray<Instr.Instr>>,
 ): ReadonlyArray<Instr.Instr> => {
-  const { layout, plan, resolve, memory, slots, scalar, reloadReachableRoots } = state
+  const {
+    layout,
+    plan,
+    resolve,
+    memory,
+    slots,
+    scalar,
+    reloadReachableRoots,
+    materializeRoot,
+    frameAddress,
+  } = state
 
   const sourceType =
     operation.callable === undefined ? undefined : layout.types.at(operation.callable.ordinal)
@@ -6658,6 +6669,8 @@ const emitApplyCallableOperation = (
     operation.target ?? (sourceType?._tag === 'CallableValue' ? sourceType.target : undefined)
   if (target === undefined)
     throw new RangeError('Wasm callable application lost its hidden identity')
+  const targetUsesEnvironmentBorrows =
+    target._tag === 'DeclarationCallableTarget' && Hir.isAnonymousCallableId(target.declaration)
   const captureGroups: Array<{
     readonly parameterOrdinal: number
     readonly operands: ReadonlyArray<Instr.Instr>
@@ -6685,38 +6698,62 @@ const emitApplyCallableOperation = (
         cursor += fieldLanes.length
         continue
       }
-      const shape = LayoutPlan.callingShape(plan, field.type)
-      if (shape === undefined)
-        throw new RangeError('Wasm borrowed callable capture lost its calling shape')
       const pointer = environmentSlots.at(cursor)
       if (pointer === undefined || memory === undefined)
         throw new RangeError('Wasm borrowed callable capture lost its pointer')
       cursor += 1
-      const operands: Array<Instr.Instr> = []
-      for (const lane of shape.lanes) {
-        const offset = LayoutVerify.laneOffset(memory.plan, field.type, lane.path)
-        if (offset === undefined)
-          throw new RangeError('Wasm borrowed callable capture lost its lane offset')
-        operands.push(
-          Instr.localGet(pointer),
-          Instr.i32Const(offset),
-          Instr.op('i32.add'),
-          Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
-        )
+      if (!targetUsesEnvironmentBorrows) {
+        const shape = LayoutPlan.callingShape(plan, field.type)
+        if (shape === undefined)
+          throw new RangeError('Wasm borrowed callable capture lost its calling shape')
+        const operands: Array<Instr.Instr> = []
+        for (const lane of shape.lanes) {
+          const offset = LayoutVerify.laneOffset(memory.plan, field.type, lane.path)
+          if (offset === undefined)
+            throw new RangeError('Wasm borrowed callable capture lost its lane offset')
+          operands.push(
+            Instr.localGet(pointer),
+            Instr.i32Const(offset),
+            Instr.op('i32.add'),
+            Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
+          )
+        }
+        captureGroups.push(Object.freeze({ parameterOrdinal: field.parameterOrdinal, operands }))
+        continue
       }
       captureGroups.push(
         Object.freeze({
           parameterOrdinal: field.parameterOrdinal,
-          operands: Object.freeze(operands),
+          operands: Object.freeze([Instr.localGet(pointer)]),
         }),
       )
     }
   } else {
     for (const capture of operation.captures) {
+      let operands: ReadonlyArray<Instr.Instr>
+      if (
+        targetUsesEnvironmentBorrows &&
+        (capture.access === 'Shared' || capture.access === 'Exclusive')
+      ) {
+        const inherited = layout.borrowPointers.get(capture.source.ordinal)
+        if (inherited !== undefined) {
+          operands = Object.freeze([Instr.localGet(inherited)])
+        } else {
+          const planned = memory?.frame.roots.get(capture.source.ordinal)
+          if (planned === undefined)
+            throw new RangeError('Wasm borrowed callable capture lost its frame root')
+          operands = Object.freeze([
+            ...materializeRoot(capture.source),
+            ...frameAddress(planned.offset),
+          ])
+        }
+      } else {
+        operands = Object.freeze(slots(capture.source).map((slot) => Instr.localGet(slot)))
+      }
       captureGroups.push(
         Object.freeze({
           parameterOrdinal: capture.parameterOrdinal,
-          operands: Object.freeze(slots(capture.source).map((slot) => Instr.localGet(slot))),
+          operands,
         }),
       )
     }
@@ -7838,7 +7875,7 @@ const coroutinePayloadLanePlacements = (
   field: Mir.CoroutineFramePayloadField,
   lanes: ReadonlyArray<LayoutPlan.CallingLane>,
 ): ReadonlyArray<{ readonly lane: LayoutPlan.CallingLane; readonly offset: number }> => {
-  if (field.access._tag === 'BorrowedDependency' || field.type._tag === 'EffectBorrow') {
+  if (field.access._tag === 'BorrowedDependency' || field.type._tag === 'EnvironmentBorrow') {
     const lane = lanes.at(0)
     return lane === undefined ? Object.freeze([]) : Object.freeze([{ lane, offset: field.offset }])
   }
@@ -7993,18 +8030,18 @@ const emitBody = (
   const reserveFrame = (): ReadonlyArray<Instr.Instr> => reserveInvocationFrame(layout, memory)
   const loadBorrowedParameters = (): ReadonlyArray<Instr.Instr> => {
     if (layout.borrowPointers.size === 0) return []
-    if (memory === undefined) throw new RangeError('Wasm Effect borrow has no private memory')
+    if (memory === undefined) throw new RangeError('Wasm environment borrow has no private memory')
     return [...layout.borrowPointers].flatMap(([ordinal, pointer]) => {
       const type = layout.types.at(ordinal)
-      if (type?._tag !== 'EffectBorrow')
-        throw new RangeError(`Wasm Effect borrow %${ordinal} lost its type`)
+      if (type?._tag !== 'EnvironmentBorrow')
+        throw new RangeError(`Wasm environment borrow %${ordinal} lost its type`)
       const lanes = layout.lanes.at(ordinal) ?? []
       const slots = layout.slots.at(ordinal) ?? []
       return lanes.flatMap((lane, laneOrdinal) => {
         const offset = LayoutVerify.laneOffset(memory.plan, type.type, lane.path)
         const destination = slots.at(laneOrdinal)
         if (offset === undefined || destination === undefined)
-          throw new RangeError(`Wasm Effect borrow %${ordinal} lost lane ${laneOrdinal}`)
+          throw new RangeError(`Wasm environment borrow %${ordinal} lost lane ${laneOrdinal}`)
         return [
           Instr.localGet(pointer),
           ...(offset === 0 ? [] : [Instr.i32Const(offset), Instr.op('i32.add')]),
@@ -8016,7 +8053,7 @@ const emitBody = (
   }
 
   const resultLanes = (() => {
-    if (fn.result._tag === 'EffectBorrow') {
+    if (fn.result._tag === 'EnvironmentBorrow') {
       const shape = LayoutPlan.callingShape(plan, fn.result.type)
       return shape?.lanes ?? Object.freeze([])
     }
@@ -8747,7 +8784,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
   }
   const suspensionEnabled = program.functions.some((fn) => (fn.suspension?.regions.length ?? 0) > 0)
   const lanesFor = (type: Mir.Type): ReadonlyArray<LayoutPlan.CallingLane> => {
-    if (type._tag === 'EffectBorrow')
+    if (type._tag === 'EnvironmentBorrow')
       return Object.freeze([
         Object.freeze({
           _tag: 'CallingLane' as const,

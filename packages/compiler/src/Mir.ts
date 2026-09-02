@@ -54,7 +54,7 @@ export type Type =
   | { readonly _tag: 'Pointer'; readonly type: SilkType.Pointer }
   | { readonly _tag: 'Union'; readonly type: SilkType.StructuralUnion }
   | {
-      readonly _tag: 'EffectBorrow'
+      readonly _tag: 'EnvironmentBorrow'
       readonly type: DeclarationFacts.SemanticType
       readonly access: 'Shared' | 'Exclusive'
     }
@@ -115,7 +115,7 @@ export const semanticType = (self: Type): DeclarationFacts.SemanticType => {
     self._tag === 'Reference' ||
     self._tag === 'Pointer' ||
     self._tag === 'Union' ||
-    self._tag === 'EffectBorrow' ||
+    self._tag === 'EnvironmentBorrow' ||
     self._tag === 'EffectOutcome'
     ? self.type
     : self._tag

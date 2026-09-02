@@ -2,6 +2,7 @@ import * as Constant from '@silklang/llvm/Constant'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
+import * as Hir from './Hir.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import * as Mir from './Mir.js'
@@ -50,6 +51,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         operation.target ?? (sourceType?._tag === 'CallableValue' ? sourceType.target : undefined)
       if (target === undefined)
         throw new RangeError('Backend callable application lost its hidden identity')
+      const targetUsesEnvironmentBorrows =
+        target._tag === 'DeclarationCallableTarget' && Hir.isAnonymousCallableId(target.declaration)
       const captureGroups: Array<{
         readonly parameterOrdinal: number
         readonly values: ReadonlyArray<Value.Input>
@@ -71,46 +74,63 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             cursor += fieldLanes.length
             continue
           }
-          const shape = Layout.callingShape(program.layout, field.type)
-          if (shape === undefined)
-            throw new RangeError('Callable borrowed capture lost its semantic calling shape')
           const base = environmentValues.at(cursor)
           if (base === undefined)
             throw new RangeError('Callable borrowed environment lost its pointer')
           cursor += 1
-          const values: Array<Value.Input> = []
-          for (const [laneOrdinal, lane] of shape.lanes.entries()) {
-            const offset = LayoutVerify.laneOffset(program.layout, field.type, lane.path)
-            if (offset === undefined)
-              throw new RangeError('Callable borrowed capture lost its lane offset')
-            values.push(
-              yield* FunctionBody.load(
-                body,
-                NativeType.laneType(types, lane),
-                yield* NativeLanePointer.lanePointer(
-                  lanePointers,
+          if (!targetUsesEnvironmentBorrows) {
+            const shape = Layout.callingShape(program.layout, field.type)
+            if (shape === undefined)
+              throw new RangeError('Callable borrowed capture lost its semantic calling shape')
+            const values: Array<Value.Input> = []
+            for (const [laneOrdinal, lane] of shape.lanes.entries()) {
+              const offset = LayoutVerify.laneOffset(program.layout, field.type, lane.path)
+              if (offset === undefined)
+                throw new RangeError('Callable borrowed capture lost its lane offset')
+              values.push(
+                yield* FunctionBody.load(
                   body,
-                  base,
-                  offset,
-                  `callable${operation.destination.ordinal}_capture${field.ordinal}_${laneOrdinal}_ptr`,
+                  NativeType.laneType(types, lane),
+                  yield* NativeLanePointer.lanePointer(
+                    lanePointers,
+                    body,
+                    base,
+                    offset,
+                    `callable${operation.destination.ordinal}_capture${field.ordinal}_${laneOrdinal}_ptr`,
+                  ),
+                  `callable${operation.destination.ordinal}_capture${field.ordinal}_${laneOrdinal}`,
                 ),
-                `callable${operation.destination.ordinal}_capture${field.ordinal}_${laneOrdinal}`,
-              ),
-            )
+              )
+            }
+            captureGroups.push(Object.freeze({ parameterOrdinal: field.parameterOrdinal, values }))
+            continue
           }
           captureGroups.push(
             Object.freeze({
               parameterOrdinal: field.parameterOrdinal,
-              values: Object.freeze(values),
+              values: Object.freeze([base]),
             }),
           )
         }
       } else {
         for (const capture of operation.captures) {
+          let values: ReadonlyArray<Value.Input>
+          if (
+            targetUsesEnvironmentBorrows &&
+            (capture.access === 'Shared' || capture.access === 'Exclusive')
+          ) {
+            yield* NativeStorage.ensureAddressRoot(nativeStorage, capture.source)
+            const base = nativeStorage.addressStorage.get(capture.source.ordinal)
+            if (base === undefined)
+              throw new RangeError('Callable borrowed capture lost its address root')
+            values = Object.freeze([base])
+          } else {
+            values = NativeStorage.readLocal(nativeStorage, capture.source)
+          }
           captureGroups.push(
             Object.freeze({
               parameterOrdinal: capture.parameterOrdinal,
-              values: NativeStorage.readLocal(nativeStorage, capture.source),
+              values,
             }),
           )
         }
@@ -310,6 +330,9 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         operands,
         `callable${operation.destination.ordinal}`,
       )
+      for (const root of [...nativeStorage.addressRoots].sort((left, right) => left - right)) {
+        yield* NativeStorage.reloadAddressRoot(nativeStorage, root)
+      }
       nativeStorage.locals.set(operation.destination.ordinal, result)
       break
     }

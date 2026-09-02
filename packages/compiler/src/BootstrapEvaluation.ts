@@ -73,10 +73,9 @@ export type {
   AggregateValue,
   AllocationValue,
   ArrayValue,
-  CallableBorrowValue,
   CallableValue,
   CharacterValue,
-  EffectBorrowValue,
+  EnvironmentBorrowValue,
   EffectCompositeValue,
   EffectOutcomeValue,
   EffectValue,
@@ -425,8 +424,7 @@ function* executeFunction(
   const read = (local: Mir.LocalId): LocalState => {
     const direct = state.cells.get(cellKey(frame, local.ordinal)) ??
       locals.get(local.ordinal) ?? { value: integerValue('i32', 0), fromCall: false }
-    if (direct.value._tag !== 'EffectBorrowValue' && direct.value._tag !== 'CallableBorrowValue')
-      return direct
+    if (direct.value._tag !== 'EnvironmentBorrowValue') return direct
     return (
       state.cells.get(cellKey(direct.value.frame, direct.value.cell)) ?? {
         value: integerValue('i32', 0),
@@ -437,7 +435,7 @@ function* executeFunction(
 
   const write = (local: Mir.LocalId, next: LocalState): void => {
     const alias = locals.get(local.ordinal)?.value
-    if (alias?._tag === 'EffectBorrowValue') {
+    if (alias?._tag === 'EnvironmentBorrowValue') {
       state.cells.set(cellKey(alias.frame, alias.cell), next)
       return
     }
@@ -1703,15 +1701,9 @@ function* executeFunction(
       })
     callableState.state = consume ? 'Consumed' : 'Running'
     const parameters = Mir.applyOperands(
-      callable.captures.map((capture) => {
-        const resolved =
-          capture.value._tag === 'CallableBorrowValue'
-            ? state.cells.get(cellKey(capture.value.frame, capture.value.cell))?.value
-            : capture.value
-        if (resolved === undefined)
-          throw new RangeError('Execution callback capture references a missing evaluator cell')
-        return Object.freeze({ parameterOrdinal: capture.parameterOrdinal, items: [resolved] })
-      }),
+      callable.captures.map((capture) =>
+        Object.freeze({ parameterOrdinal: capture.parameterOrdinal, items: [capture.value] }),
+      ),
       arguments_.map((argument) => [argument]),
     )
     trace.push(
@@ -3232,16 +3224,9 @@ function* executeFunction(
                 span: operation.provenance.span,
               })
             callableState.state = 'Consumed'
-            const captureValues = selected.captures.map((capture) => {
-              const captured = capture.value
-              const resolved =
-                captured._tag === 'CallableBorrowValue'
-                  ? state.cells.get(cellKey(captured.frame, captured.cell))?.value
-                  : captured
-              if (resolved === undefined)
-                throw new RangeError('Local-shared callback capture references a missing cell')
-              return Object.freeze({ parameterOrdinal: capture.parameterOrdinal, value: resolved })
-            })
+            const captureValues = selected.captures.map((capture) =>
+              Object.freeze({ parameterOrdinal: capture.parameterOrdinal, value: capture.value }),
+            )
             let supplied: ReadonlyArray<ReadonlyArray<Value>> = Object.freeze([])
             if (selection._tag === 'Use') {
               const payloadCell = operation.payload.ordinal
@@ -4486,7 +4471,7 @@ function* executeFunction(
                       const key = cellKey(frame, capture.source.ordinal)
                       if (!state.cells.has(key)) state.cells.set(key, read(capture.source))
                       return Object.freeze({
-                        _tag: 'CallableBorrowValue' as const,
+                        _tag: 'EnvironmentBorrowValue' as const,
                         frame,
                         cell: capture.source.ordinal,
                         access: capture.access,
@@ -4565,23 +4550,16 @@ function* executeFunction(
                   capture.access === 'Take'
                     ? read(capture.source).value
                     : Object.freeze({
-                        _tag: 'CallableBorrowValue' as const,
+                        _tag: 'EnvironmentBorrowValue' as const,
                         frame,
                         cell: capture.source.ordinal,
                         access: capture.access,
                       })
                 return Object.freeze({ ...capture, value: captured })
               })
-            ).map((capture) => {
-              const captured = capture.value
-              const resolved =
-                captured._tag === 'CallableBorrowValue'
-                  ? state.cells.get(cellKey(captured.frame, captured.cell))?.value
-                  : captured
-              if (resolved === undefined)
-                throw new RangeError('Callable capture references a missing evaluator cell')
-              return Object.freeze({ parameterOrdinal: capture.parameterOrdinal, value: resolved })
-            })
+            ).map((capture) =>
+              Object.freeze({ parameterOrdinal: capture.parameterOrdinal, value: capture.value }),
+            )
             const arguments_ = Mir.applyOperands(
               captureValues.map((capture) =>
                 Object.freeze({

@@ -32,7 +32,7 @@ export const makeValue = (
     const key = context.cellKey(context.frame, capture.source.ordinal)
     if (!context.cells.has(key)) context.cells.set(key, context.read(capture.source))
     return Object.freeze({
-      _tag: 'EffectBorrowValue',
+      _tag: 'EnvironmentBorrowValue',
       frame: context.frame,
       cell: capture.source.ordinal,
       access: capture.access,

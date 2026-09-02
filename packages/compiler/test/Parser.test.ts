@@ -546,23 +546,51 @@ it('parses ordinary and effectful anonymous callables distinctly and losslessly'
 
 it('bounds anonymous callable recovery and keeps modifiers outside the callable node', () => {
   const damaged = [
-    'fn make() -> i32 { return accept(fn -> i32 { return 1 }, 42) }',
-    'fn make() -> i32 { return accept(fn(value:) -> i32 { return 1 }, 42) }',
-    'fn make() -> i32 { return accept(fn() { return 1 }, 42) }',
-    'fn make() -> i32 { return accept(fn() ->, 42) }',
-    'fn make() -> i32 { return accept(fn(), 42) }',
-    'fn make() -> i32 { return accept(effect fn() -> i32 ! { return 1 }, 42) }',
-    'fn make() -> i32 { return accept(fn() -> i32, 42) }',
-  ]
+    {
+      source: 'fn make() -> i32 { return accept(fn -> i32 { return 1 }, 42) }',
+      diagnostic: { code: 'PAR0001', start: 36, end: 36 },
+    },
+    {
+      source: 'fn make() -> i32 { return accept(fn(value:) -> i32 { return 1 }, 42) }',
+      diagnostic: { code: 'PAR0001', start: 42, end: 42 },
+    },
+    {
+      source: 'fn make() -> i32 { return accept(fn() { return 1 }, 42) }',
+      diagnostic: { code: 'PAR0001', start: 38, end: 38 },
+    },
+    {
+      source: 'fn make() -> i32 { return accept(fn() ->, 42) }',
+      diagnostic: { code: 'PAR0001', start: 40, end: 40 },
+    },
+    {
+      source: 'fn make() -> i32 { return accept(fn(), 42) }',
+      diagnostic: { code: 'PAR0001', start: 37, end: 37 },
+    },
+    {
+      source: 'fn make() -> i32 { return accept(effect fn() -> i32 ! { return 1 }, 42) }',
+      diagnostic: { code: 'PAR0001', start: 54, end: 54 },
+    },
+    {
+      source: 'fn make() -> i32 { return accept(fn() -> i32, 42) }',
+      diagnostic: { code: 'PAR0001', start: 44, end: 44 },
+    },
+  ] as const
 
-  for (const [ordinal, source] of damaged.entries()) {
+  for (const [ordinal, { source, diagnostic }] of damaged.entries()) {
     const result = parseText(`memory://damaged-anonymous-${ordinal}.silk`, source)
     const callables = descendants(result.root).filter(
       (element): element is SyntaxTree.Node =>
         SyntaxTree.isNode(element) && element.kind === 'AnonymousCallableExpression',
     )
     assert.strictEqual(callables.length, 1, source)
-    assert.isAbove(result.parserDiagnostics.length, 0)
+    assert.deepEqual(
+      result.parserDiagnostics.map((item) => ({
+        code: item.code,
+        start: item.span.start,
+        end: item.span.end,
+      })),
+      [diagnostic],
+    )
     assert.strictEqual(
       result.tokens.some(
         (token) => token.kind === 'DecimalInteger' && token.span.start === source.indexOf('42'),
@@ -585,7 +613,14 @@ it('bounds anonymous callable recovery and keeps modifiers outside the callable 
     callable === undefined ? undefined : SyntaxTree.directToken(callable, 'MutKeyword'),
     undefined,
   )
-  assert.isAbove(modified.parserDiagnostics.length, 0)
+  assert.deepEqual(
+    modified.parserDiagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      start: diagnostic.span.start,
+      end: diagnostic.span.end,
+    })),
+    [{ code: 'PAR0002', start: 32, end: 36 }],
+  )
   assertOriginalTokenTraversal(modified)
   assert.deepEqual(reconstructedBytes(modified), ascii(modifiedSource))
 

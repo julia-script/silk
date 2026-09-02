@@ -145,7 +145,7 @@ pub fn main() -> i32 {
   let extra = 40
   let shared = Token { value: 10 }
   let mut counter = 0
-  let owned = Token { value: 29 }
+  let owned = Token { value: 17 }
   let copyStep = fn(base: i32) -> i32 { return base + extra + move copied - 40 }
   let sharedStep = fn() -> i32 { return shared.value }
   let mut mutateStep = fn() -> i32 {
@@ -153,7 +153,8 @@ pub fn main() -> i32 {
     return counter
   }
   let consumeStep = fn() -> i32 { return consume(move owned) }
-  return copyStep(0) + sharedStep() + mutateStep() + consumeStep()
+  return copyStep(0) + sharedStep() + sharedStep()
+    + mutateStep() + mutateStep() + consumeStep()
 }`
 
 const anonymousEffectHandler = `import silk.effect { Effect }
@@ -185,6 +186,15 @@ pub fn main() -> i32 {
   let token = Token { value: 1 }
   let unused = fn() -> i32 { return consume(move token) }
   return 42
+}`
+
+const anonymousMovedEffect = `struct Token { value: i32 }
+fn consume(token: Token) -> i32 { return token.value }
+pub fn main() -> i32 {
+  let token = Token { value: 42 }
+  let deferred = effect fn() -> i32 { return consume(move token) }
+  let pending = deferred()
+  return run pending
 }`
 
 const borrowedCallableLoopExits = `struct Cell { value: i32 }
@@ -456,6 +466,62 @@ it.effect('executes anonymous callables and constructs anonymous effects lazily'
       assert.notInclude(artifact.wat, 'call_indirect')
       assert.notInclude(artifact.wat, '(table ')
     }
+  }),
+)
+
+it.effect('transfers an effectful moved capture only when its lazy Effect runs', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'stored-callable-runtime/anonymous-moved-effect',
+      ascii(anonymousMovedEffect),
+      Target.wasm32UnknownUnknown.id,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(completedValue(evaluated), 42)
+    const callable = evaluated.trace.filter(
+      (event): event is BootstrapEvaluation.CallableTraceEvent =>
+        event._tag === 'CallableConstruct' ||
+        event._tag === 'CallableApply' ||
+        event._tag === 'CallableCleanup' ||
+        event._tag === 'CallableRejected',
+    )
+    assert.deepEqual(
+      callable.map((event) => ({
+        tag: event._tag,
+        mode: event.mode,
+        start: event.span.start,
+      })),
+      [
+        {
+          tag: 'CallableConstruct',
+          mode: 'Take',
+          start: anonymousMovedEffect.indexOf('effect fn') - 1,
+        },
+        {
+          tag: 'CallableApply',
+          mode: 'Take',
+          start: anonymousMovedEffect.indexOf('deferred()') - 1,
+        },
+      ],
+    )
+    assert.strictEqual(callable.at(0)?.ticket, callable.at(1)?.ticket)
+
+    const calls = evaluated.trace.filter((event) => event._tag === 'Call')
+    const wrapper = calls.findIndex((event) => event.target.name.includes('$callable$'))
+    const runner = calls.findIndex((event) => event.target.name.includes('$effect$'))
+    const body = calls.findIndex((event) => event.target.name === 'consume')
+    assert.isAtLeast(wrapper, 0)
+    assert.isAbove(runner, wrapper)
+    assert.isAbove(body, runner)
+    assert.strictEqual(
+      calls.at(runner)?.span.start,
+      anonymousMovedEffect.lastIndexOf('pending') - 5,
+    )
+
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    assert.strictEqual(yield* runWasm(artifact.bytes), 42)
   }),
 )
 

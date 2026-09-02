@@ -1652,6 +1652,64 @@ const analyzeLoans = (
   const captureKey = (span: SourceSpan.SourceSpan, ordinal: number): string =>
     `${span.sourceId}:${span.start}:${span.end}:${ordinal}`
   const returnedCallableCaptures = new Set<string>()
+  const bindingInitializers = new Map(
+    fn.bindings.map((binding) => [binding.id.ordinal, binding.initializer] as const),
+  )
+  const returnedCallable = (
+    expression: Elaboration.ExpressionFact,
+    seen: ReadonlySet<number> = new Set(),
+  ): Extract<Elaboration.ExpressionFact, { readonly _tag: 'CallableSection' }> | undefined => {
+    if (expression._tag === 'Grouped') return returnedCallable(expression.expression, seen)
+    if (expression._tag === 'Move') return returnedCallable(expression.subject, seen)
+    if (expression._tag === 'CallableSection') return expression
+    const site = directSite(expression)?.site
+    if (site?._tag !== 'Let' || seen.has(site.binding.ordinal)) return undefined
+    const initializer = bindingInitializers.get(site.binding.ordinal)
+    return initializer === undefined
+      ? undefined
+      : returnedCallable(initializer, new Set(seen).add(site.binding.ordinal))
+  }
+  const returnedExpressions = (
+    statements: ReadonlyArray<Elaboration.StatementFact>,
+  ): ReadonlyArray<Elaboration.ExpressionFact> =>
+    statements.flatMap((statement): ReadonlyArray<Elaboration.ExpressionFact> => {
+      switch (statement._tag) {
+        case 'ReturnStatement':
+          return [statement.expression]
+        case 'UnsafeStatement':
+          return returnedExpressions(statement.statements)
+        case 'IfStatement':
+        case 'IfLetStatement':
+          return [
+            ...returnedExpressions(statement.taken),
+            ...returnedExpressions(statement.otherwise),
+          ]
+        case 'WhileStatement':
+          return returnedExpressions(statement.body)
+        default:
+          return []
+      }
+    })
+  const diagnosedEscapes = new Set<string>()
+  for (const returned of returnedExpressions(fn.statements)) {
+    const callable = returnedCallable(returned)
+    if (callable === undefined) continue
+    for (const capture of callable.captures) {
+      if (capture.access !== 'Shared' && capture.access !== 'Exclusive') continue
+      const key = captureKey(capture.expression.syntax.span, capture.ordinal)
+      returnedCallableCaptures.add(key)
+      if (diagnosedEscapes.has(key)) continue
+      diagnosedEscapes.add(key)
+      diagnostics.push(
+        Diagnostic.callableBorrowEscape(
+          directSite(capture.expression)?.spelling ?? '?',
+          capture.access,
+          capture.expression.syntax.span,
+          returned.syntax.span,
+        ),
+      )
+    }
+  }
   for (const binding of fn.bindings) {
     const directAlias = directSite(binding.initializer)?.site
     const callableAlias =

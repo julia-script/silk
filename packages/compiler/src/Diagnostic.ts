@@ -441,6 +441,8 @@ export const storedEffectRunAccessCode = 'OWN0015' as const
 export const localSharedAccessEscapeCode = 'OWN0016' as const
 /** Stable code for an owner consumed in only some arms of a branch merge. */
 export const incompatibleArmMergeCode = 'OWN0017' as const
+/** Stable code for returning a callable that borrows storage owned by the returning function. */
+export const callableBorrowEscapeCode = 'OWN0018' as const
 
 /** Stable code for an exact `usize` magnitude outside the selected target word. */
 export const usizeTargetOutOfRangeCode = 'LAY0001' as const
@@ -676,6 +678,7 @@ export type Code =
   | typeof storedEffectRunAccessCode
   | typeof localSharedAccessEscapeCode
   | typeof incompatibleArmMergeCode
+  | typeof callableBorrowEscapeCode
   | typeof usizeTargetOutOfRangeCode
 
 /** A semantic declaration identity carried structurally to avoid a module cycle. */
@@ -1317,6 +1320,11 @@ export type Reason =
   | { readonly _tag: 'IncompatibleLoopHeader'; readonly loop: number }
   | { readonly _tag: 'IncompatibleArmMerge'; readonly spelling: string }
   | { readonly _tag: 'MatchBorrowEscape'; readonly spelling: string }
+  | {
+      readonly _tag: 'CallableBorrowEscape'
+      readonly spelling: string
+      readonly access: 'Shared' | 'Exclusive'
+    }
   | { readonly _tag: 'ExclusiveMatchRequiresMutable'; readonly spelling: string }
   | { readonly _tag: 'GuardConsumesPattern'; readonly spelling: string }
   | { readonly _tag: 'InvalidMatchScrutineePlace'; readonly access: 'Move' | 'Exclusive' }
@@ -5311,6 +5319,26 @@ export const matchBorrowEscape = (spelling: string, span: SourceSpan.SourceSpan)
     message: `Borrowed pattern binding ${spelling} cannot escape its match arm`,
     reason: Object.freeze({ _tag: 'MatchBorrowEscape', spelling }),
     span,
+  })
+
+/** Rejects a callable environment whose borrowed root ends when its creating function returns. */
+export const callableBorrowEscape = (
+  spelling: string,
+  access: 'Shared' | 'Exclusive',
+  span: SourceSpan.SourceSpan,
+  returnSpan: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: callableBorrowEscapeCode,
+    severity: 'error',
+    message: `Callable cannot escape with a ${access.toLowerCase()} borrow of local ${spelling}`,
+    reason: Object.freeze({ _tag: 'CallableBorrowEscape', spelling, access }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'callable escapes here', span: returnSpan }),
+    ]),
   })
 
 export const exclusiveMatchRequiresMutable = (

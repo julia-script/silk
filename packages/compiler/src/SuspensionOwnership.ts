@@ -317,7 +317,7 @@ const borrowOf = (
 ): Extract<Access, { readonly _tag: 'BorrowedDependency' }> => {
   const type = fn.localTypes.at(local.ordinal)
   let access: Type.BorrowAccess
-  if (type?._tag === 'EffectBorrow') {
+  if (type?._tag === 'EnvironmentBorrow') {
     access = type.access
   } else if (type?._tag === 'Reference' || type?._tag === 'Slice') {
     access = type.type.access
@@ -382,7 +382,7 @@ const accessOf = (
   local: Mir.LocalId,
   type: Mir.Type,
 ): Access => {
-  if (type._tag === 'Reference' || type._tag === 'Slice' || type._tag === 'EffectBorrow') {
+  if (type._tag === 'Reference' || type._tag === 'Slice' || type._tag === 'EnvironmentBorrow') {
     return borrowOf(fn, definitions, local)
   }
   if (Mir.isCopy(program.layout, Mir.semanticType(type))) {

@@ -470,7 +470,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       if (sourceType === undefined) {
         throw new RangeError('Backend projection lost its source type')
       }
-      const sourceLanes = NativeType.lanesFor(types, sourceType)
+      const sourceLanes = NativeType.valueLanesFor(types, sourceType)
       const sourceValues = NativeStorage.readLocal(nativeStorage, operation.source)
       const projected = sourceLanes.flatMap((lane, index) => {
         const first = lane.path.at(0)
@@ -725,7 +725,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         checkOrdinal += 1
         break
       }
-      const sourceLanes = NativeType.lanesFor(types, sourceType)
+      const sourceLanes = NativeType.valueLanesFor(types, sourceType)
       const sourceValues = NativeStorage.readLocal(nativeStorage, operation.root)
       const destinationLanes = NativeType.lanesFor(types, operation.type)
       const runtimeSelectors = operation.selectors.flatMap((selector, ordinal) =>
@@ -1115,7 +1115,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         checkOrdinal += 1
         break
       }
-      const rootLanes = NativeType.lanesFor(types, operation.rootType)
+      const rootLanes = NativeType.valueLanesFor(types, operation.rootType)
       const rootValues = NativeStorage.readLocal(nativeStorage, operation.root)
       const sourceLanes = NativeType.lanesFor(types, operation.type)
       const sourceValues = NativeStorage.readLocal(nativeStorage, operation.source)

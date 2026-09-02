@@ -3,6 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
+import * as Hir from '../src/Hir.js'
 import * as Instances from '../src/Instances.js'
 import * as Match from '../src/Match.js'
 import type * as Mir from '../src/Mir.js'
@@ -399,6 +400,189 @@ pub fn main() -> i32 { return 40 |> add(2) }`),
       MirVerification.verify(malformed).map((violation) => violation.rule),
       'InvalidCallableOperation',
     )
+  }),
+)
+
+it.effect('retains deterministic hidden anonymous targets and exact capture ordinals', () =>
+  Effect.gen(function* () {
+    const source = `struct Token { value: i32 }
+fn consume(value: i32, token: Token) -> i32 { return value + token.value }
+pub fn main() -> i32 {
+  let copied = 1
+  let owned = Token { value: 40 }
+  let first = fn(value: i32) -> i32 { return value }
+  let second = fn(value: i32) -> i32 { return value }
+  let combined = fn(value: i32) -> i32 { return consume(value + copied, move owned) }
+  return combined(1)
+}`
+    const first = yield* snapshot(source)
+    const second = yield* snapshot(source)
+    assert.deepEqual(Analysis.diagnostics(first), [])
+    assert.deepEqual(Analysis.diagnostics(second), [])
+
+    const firstHir = Analysis.rootAnalysis(first).hir
+    const secondHir = Analysis.rootAnalysis(second).hir
+    assert.strictEqual(Hir.encode(firstHir), Hir.encode(secondHir))
+    const hiddenNames = (hir: Hir.Module) =>
+      hir.functions.flatMap((fn) =>
+        fn.declaration.canonical._tag === 'Canonical' &&
+        fn.declaration.canonical.id.name.includes('$callable$')
+          ? [fn.declaration.canonical.id.name]
+          : [],
+      )
+    assert.deepEqual(hiddenNames(firstHir), [
+      'main$callable$0',
+      'main$callable$1',
+      'main$callable$2',
+    ])
+    assert.deepEqual(hiddenNames(firstHir), hiddenNames(secondHir))
+
+    const main = firstHir.functions.find(
+      (fn) =>
+        fn.declaration.canonical._tag === 'Canonical' &&
+        fn.declaration.canonical.id.name === 'main',
+    )
+    const sections =
+      main === undefined
+        ? []
+        : main.statements
+            .flatMap(Hir.statementExpressions)
+            .flatMap(Hir.expressionTree)
+            .filter(
+              (
+                expression,
+              ): expression is Extract<Hir.Expression, { readonly _tag: 'CallableSection' }> =>
+                expression._tag === 'CallableSection',
+            )
+    assert.deepEqual(
+      sections.map((section) => ({
+        site: section.site.ordinal,
+        target:
+          section.target._tag === 'DeclarationCallableTarget'
+            ? section.target.declaration.name
+            : section.target.operation,
+        remaining: section.remainingParameters,
+        mode: section.mode,
+        captures: section.captures.map((capture) => ({
+          ordinal: capture.ordinal,
+          parameterOrdinal: capture.parameterOrdinal,
+          access: capture.access,
+          expression: capture.value._tag,
+        })),
+      })),
+      [
+        {
+          site: 0,
+          target: 'main$callable$0',
+          remaining: [0],
+          mode: 'Shared',
+          captures: [],
+        },
+        {
+          site: 1,
+          target: 'main$callable$1',
+          remaining: [0],
+          mode: 'Shared',
+          captures: [],
+        },
+        {
+          site: 2,
+          target: 'main$callable$2',
+          remaining: [0],
+          mode: 'Take',
+          captures: [
+            { ordinal: 0, parameterOrdinal: 1, access: 'Copy', expression: 'BindingReference' },
+            { ordinal: 1, parameterOrdinal: 2, access: 'Take', expression: 'Move' },
+          ],
+        },
+      ],
+    )
+
+    const hidden = firstHir.functions.find(
+      (fn) =>
+        fn.declaration.canonical._tag === 'Canonical' &&
+        fn.declaration.canonical.id.name === 'main$callable$2',
+    )
+    assert.deepEqual(
+      hidden?.declaration.parameters.map((parameter) => ({
+        ordinal: parameter.id.ordinal,
+        name: parameter.name._tag === 'Present' ? parameter.name.spelling : '_',
+      })),
+      [
+        { ordinal: 0, name: 'value' },
+        { ordinal: 1, name: 'copied' },
+        { ordinal: 2, name: 'owned' },
+      ],
+    )
+    assert.strictEqual(hidden?.contract._tag, 'Contract')
+    if (hidden?.contract._tag !== 'Contract') return
+    assert.deepEqual(hidden.contract.parameters.map(Type.encode), [
+      'i32',
+      'i32',
+      'golden/program.Token',
+    ])
+    assert.strictEqual(Type.encode(hidden.contract.result), 'i32')
+
+    const mir = Analysis.loweredMir(first)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const mainMir = mir.functions.find((fn) => fn.id.name === 'main')
+    assert.isDefined(mainMir)
+    if (mainMir === undefined) return
+    const operations = MirVerification.operations(mainMir)
+    const constructions = operations.filter(
+      (operation): operation is Extract<Mir.Operation, { readonly _tag: 'MakeCallable' }> =>
+        operation._tag === 'MakeCallable',
+    )
+    assert.deepEqual(
+      constructions.map((operation) => ({
+        target:
+          operation.target._tag === 'DeclarationCallableTarget'
+            ? operation.target.declaration.name
+            : operation.target.operation,
+        captures: operation.captures.map(({ ordinal, parameterOrdinal, access }) => ({
+          ordinal,
+          parameterOrdinal,
+          access,
+        })),
+        fields:
+          operation.type.environment?.fields.map(({ ordinal, parameterOrdinal, access }) => ({
+            ordinal,
+            parameterOrdinal,
+            access,
+          })) ?? [],
+      })),
+      [
+        { target: 'main$callable$0', captures: [], fields: [] },
+        { target: 'main$callable$1', captures: [], fields: [] },
+        {
+          target: 'main$callable$2',
+          captures: [
+            { ordinal: 0, parameterOrdinal: 1, access: 'Copy' },
+            { ordinal: 1, parameterOrdinal: 2, access: 'Take' },
+          ],
+          fields: [
+            { ordinal: 0, parameterOrdinal: 1, access: 'Copy' },
+            { ordinal: 1, parameterOrdinal: 2, access: 'Take' },
+          ],
+        },
+      ],
+    )
+    const applied = operations.find((operation) => operation._tag === 'ApplyCallable')
+    assert.deepEqual(
+      applied?._tag === 'ApplyCallable'
+        ? { access: applied.access, realization: applied.realization, captures: applied.captures }
+        : undefined,
+      { access: 'Take', realization: 'Environment', captures: [] },
+    )
+    const callableDrops = operations.flatMap((operation) => {
+      if (operation._tag !== 'Drop') return []
+      const type = mainMir.localTypes.at(operation.local.ordinal)
+      return type?._tag === 'CallableValue' && type.target._tag === 'DeclarationCallableTarget'
+        ? [type.target.declaration.name]
+        : []
+    })
+    assert.deepEqual(callableDrops, ['main$callable$1', 'main$callable$0'])
+    assert.notInclude(callableDrops, 'main$callable$2')
   }),
 )
 

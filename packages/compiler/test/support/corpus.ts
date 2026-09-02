@@ -1389,7 +1389,7 @@ pub fn main() -> i32 {
   let extra = 40
   let shared = Token { value: 10 }
   let mut counter = 0
-  let owned = Token { value: 29 }
+  let owned = Token { value: 17 }
   let copyStep = fn(base: i32) -> i32 { return base + extra + move copied - 40 }
   let sharedStep = fn() -> i32 { return shared.value }
   let mut mutateStep = fn() -> i32 {
@@ -1397,7 +1397,8 @@ pub fn main() -> i32 {
     return counter
   }
   let consumeStep = fn() -> i32 { return consume(move owned) }
-  return copyStep(0) + sharedStep() + mutateStep() + consumeStep()
+  return copyStep(0) + sharedStep() + sharedStep()
+    + mutateStep() + mutateStep() + consumeStep()
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },

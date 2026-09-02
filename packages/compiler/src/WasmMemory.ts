@@ -13,7 +13,7 @@ import { carriesBorrowAddress } from './WasmLanes.js'
 export interface FrameRoot {
   readonly local: number
   readonly offset: number
-  readonly type: Exclude<Mir.Type, { readonly _tag: 'EffectBorrow' | 'EffectOutcome' }>
+  readonly type: Exclude<Mir.Type, { readonly _tag: 'EnvironmentBorrow' | 'EffectOutcome' }>
 }
 
 export interface FramePlan {
@@ -171,7 +171,7 @@ export const framePlan = (
     ...formations.flatMap((operation) =>
       operation.sourceType._tag === 'Slice' ||
       fn.localTypes.at(operation.root.ordinal)?._tag === 'Reference' ||
-      fn.localTypes.at(operation.root.ordinal)?._tag === 'EffectBorrow'
+      fn.localTypes.at(operation.root.ordinal)?._tag === 'EnvironmentBorrow'
         ? []
         : [operation.root.ordinal],
     ),
@@ -181,7 +181,7 @@ export const framePlan = (
             (operation._tag === 'MakeEffect'
               ? operation.type.environment.fields.at(ordinal)?.representation === 'Borrow'
               : capture.access === 'Shared' || capture.access === 'Exclusive') &&
-            fn.localTypes.at(capture.source.ordinal)?._tag !== 'EffectBorrow'
+            fn.localTypes.at(capture.source.ordinal)?._tag !== 'EnvironmentBorrow'
               ? [capture.source.ordinal]
               : [],
           )
@@ -195,7 +195,7 @@ export const framePlan = (
       operationCleanupEntries(operation).flatMap((entry) =>
         entry.local !== undefined &&
         CleanupPlan.hasHook(entry.cleanup) &&
-        fn.localTypes.at(entry.local.ordinal)?._tag !== 'EffectBorrow'
+        fn.localTypes.at(entry.local.ordinal)?._tag !== 'EnvironmentBorrow'
           ? [entry.local.ordinal]
           : [],
       ),
@@ -233,7 +233,7 @@ export const framePlan = (
     }
     if (
       type === undefined ||
-      type._tag === 'EffectBorrow' ||
+      type._tag === 'EnvironmentBorrow' ||
       type._tag === 'EffectOutcome' ||
       storage === undefined
     ) {

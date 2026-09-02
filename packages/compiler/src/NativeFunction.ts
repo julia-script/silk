@@ -358,7 +358,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
         for (const root of [...mutableRoots].sort((left, right) => left - right)) {
           const logicalType = entry.fn.localTypes.at(root)
           if (logicalType === undefined) throw new RangeError(`Backend lost mutable root %${root}`)
-          if (logicalType._tag === 'EffectBorrow') continue
+          if (logicalType._tag === 'EnvironmentBorrow') continue
           const storage: Array<Value.Input> = []
           for (const [lane, callingLane] of valueLanesFor(logicalType).entries()) {
             storage.push(
@@ -467,9 +467,11 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
             values.push(yield* Value.argument(body, physicalParameter))
             physicalParameter += 1
           }
-          if (logicalType._tag === 'EffectBorrow') {
+          if (logicalType._tag === 'EnvironmentBorrow') {
             const base = values.at(0)
-            if (base === undefined) throw new RangeError(`Backend lost Effect borrow %${ordinal}`)
+            if (base === undefined)
+              throw new RangeError(`Backend lost environment borrow %${ordinal}`)
+            addressStorage.set(ordinal, base)
             const storage: Array<Value.Input> = []
             const loaded: Array<Value.Input> = []
             for (const [lane, callingLane] of valueLanesFor(logicalType).entries()) {
@@ -479,7 +481,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
                 callingLane.path,
               )
               if (offset === undefined)
-                throw new RangeError(`Backend lost Effect borrow lane ${lane}`)
+                throw new RangeError(`Backend lost environment borrow lane ${lane}`)
               const pointer = yield* FunctionBody.getElementPtr(
                 body,
                 i8,

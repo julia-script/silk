@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Type from '../src/Type.js'
 
 /**
  * The frontend/MIR contract at a stored callable (#184).
@@ -25,6 +26,13 @@ const analyzed = (name: string, source: string) =>
 
 const codes = (snapshot: Analysis.FrontendSnapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)
+
+const diagnosticView = (snapshot: Analysis.FrontendSnapshot) =>
+  Analysis.diagnostics(snapshot).map((diagnostic) => ({
+    code: diagnostic.code,
+    start: diagnostic.span.start,
+    end: diagnostic.span.end,
+  }))
 
 const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message)
@@ -288,10 +296,11 @@ it.effect('rejects a nested anonymous body without publishing an inner executabl
   return outer()
 }`
     const snapshot = yield* Analysis.ofSource('stored-callable/nested-anonymous', ascii(source))
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      ['SEM0199'],
-    )
+    const rejected = 'fn() -> i32 { return 1 }'
+    const start = source.indexOf(rejected) - 1
+    assert.deepEqual(diagnosticView(snapshot), [
+      { code: 'SEM0199', start, end: start + rejected.length + 1 },
+    ])
     assert.strictEqual(
       snapshot.results.get('stored-callable/nested-anonymous')?.hiddenFunctions.length,
       1,
@@ -301,22 +310,110 @@ it.effect('rejects a nested anonymous body without publishing an inner executabl
 
 it.effect('checks explicit anonymous contracts and derived modes against context', () =>
   Effect.gen(function* () {
-    const resultMismatch = yield* Analysis.ofSource(
-      'stored-callable/anonymous-result-mismatch',
-      ascii(`fn accept(step: fn() -> i32) -> i32 { return step() }
-pub fn main() -> i32 { return accept(fn() -> bool { return true }) }`),
-    )
-    const consumingMismatch = yield* Analysis.ofSource(
-      'stored-callable/anonymous-mode-mismatch',
-      ascii(`struct Token { value: i32 }
+    const resultSource = `fn accept(step: fn() -> i32) -> i32 { return step() }
+pub fn main() -> i32 { return accept(fn() -> bool { return true }) }`
+    const modeSource = `struct Token { value: i32 }
 fn consume(token: Token) -> i32 { return token.value }
 fn reusable(step: fn() -> i32) -> i32 { return step() }
 pub fn main() -> i32 {
   let token = Token { value: 42 }
   return reusable(fn() -> i32 { return consume(move token) })
-}`),
+}`
+    const resultMismatch = yield* Analysis.ofSource(
+      'stored-callable/anonymous-result-mismatch',
+      ascii(resultSource),
     )
-    assert.deepEqual(codes(resultMismatch), ['SEM0076'])
-    assert.deepEqual(codes(consumingMismatch), ['SEM0076'])
+    const consumingMismatch = yield* Analysis.ofSource(
+      'stored-callable/anonymous-mode-mismatch',
+      ascii(modeSource),
+    )
+    const resultCallable = 'fn() -> bool { return true }'
+    const modeCallable = 'fn() -> i32 { return consume(move token) }'
+    assert.deepEqual(diagnosticView(resultMismatch), [
+      {
+        code: 'SEM0076',
+        start: resultSource.indexOf(resultCallable),
+        end: resultSource.indexOf(resultCallable) + resultCallable.length,
+      },
+    ])
+    assert.deepEqual(diagnosticView(consumingMismatch), [
+      {
+        code: 'SEM0076',
+        start: modeSource.indexOf(modeCallable),
+        end: modeSource.indexOf(modeCallable) + modeCallable.length,
+      },
+    ])
+  }),
+)
+
+it.effect('infers a generic higher-order call from an explicit anonymous contract', () =>
+  Effect.gen(function* () {
+    const source = `fn apply<T>(transform: once fn(T) -> T, value: T) -> T {
+  return transform(move value)
+}
+pub fn main() -> i32 {
+  return apply(fn(value: i32) -> i32 { return value }, 42)
+}`
+    const snapshot = yield* Analysis.ofSource('stored-callable/anonymous-inference', ascii(source))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const result = Analysis.rootAnalysis(snapshot)
+    assert.strictEqual(result.hiddenFunctions.length, 1)
+    assert.strictEqual(result.hiddenFunctions.at(0)?.declaration.typeParameters.length, 0)
+    const hidden = result.hir.functions.find(
+      (fn) =>
+        fn.declaration.canonical._tag === 'Canonical' &&
+        fn.declaration.canonical.id.name.includes('$callable$'),
+    )
+    assert.strictEqual(hidden?.contract._tag, 'Contract')
+    if (hidden?.contract._tag !== 'Contract') return
+    assert.deepEqual(hidden.contract.parameters.map(Type.encode), ['i32'])
+    assert.strictEqual(Type.encode(hidden.contract.result), 'i32')
+  }),
+)
+
+it.effect('rejects an escaped local capture and a second once-effect invocation', () =>
+  Effect.gen(function* () {
+    const borrowSource = `fn leak() -> mut fn() -> i32 {
+  let mut cell = 40
+  return fn() -> i32 {
+    cell = cell + 1
+    return cell
+  }
+}
+pub fn main() -> i32 {
+  let mut read = leak()
+  return read()
+}`
+    const effectSource = `struct Token { value: i32 }
+fn consume(token: Token) -> i32 { return token.value }
+pub fn main() -> i32 {
+  let token = Token { value: 42 }
+  let deferred = effect fn() -> i32 { return consume(move token) }
+  let first = deferred()
+  let second = deferred()
+  return run first
+}`
+    const borrowed = yield* Analysis.ofSource(
+      'stored-callable/anonymous-escaped-borrow',
+      ascii(borrowSource),
+    )
+    const repeated = yield* Analysis.ofSource(
+      'stored-callable/anonymous-repeated-effect',
+      ascii(effectSource),
+    )
+    const capturedCell = borrowSource.indexOf('cell', borrowSource.indexOf('return fn'))
+    const capturedExpression = borrowSource.indexOf('\n    cell', borrowSource.indexOf('return fn'))
+    const firstInvocation = effectSource.indexOf('deferred()')
+    const secondInvocation = effectSource.indexOf('deferred()', firstInvocation + 1)
+    assert.deepEqual(diagnosticView(borrowed), [
+      { code: 'OWN0018', start: capturedExpression, end: capturedCell + 'cell'.length },
+    ])
+    assert.deepEqual(diagnosticView(repeated), [
+      {
+        code: 'OWN0001',
+        start: secondInvocation - 1,
+        end: secondInvocation + 'deferred'.length,
+      },
+    ])
   }),
 )

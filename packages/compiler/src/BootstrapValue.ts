@@ -187,15 +187,8 @@ export const repackFailurePayload = (
   return payload
 }
 
-export interface EffectBorrowValue {
-  readonly _tag: 'EffectBorrowValue'
-  readonly frame: number
-  readonly cell: number
-  readonly access: 'Shared' | 'Exclusive'
-}
-
-export interface CallableBorrowValue {
-  readonly _tag: 'CallableBorrowValue'
+export interface EnvironmentBorrowValue {
+  readonly _tag: 'EnvironmentBorrowValue'
   readonly frame: number
   readonly cell: number
   readonly access: 'Shared' | 'Exclusive'
@@ -294,8 +287,7 @@ export type Value =
   | ReferenceValue
   | PointerValue
   | UnionValue
-  | EffectBorrowValue
-  | CallableBorrowValue
+  | EnvironmentBorrowValue
   | EffectValue
   | EffectCompositeValue
   | CallableValue
