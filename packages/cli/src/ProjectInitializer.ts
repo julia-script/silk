@@ -168,9 +168,9 @@ const manifest = (name: string): string =>
   `[package]\nname = "${name}"\nversion = "0.1.0"\nroot = "src/main.silk"\n`
 
 const entry = `import silk.effect { Effect }
-import silk.logger { Logger }
+import silk.logger { Logger, LogError }
 
-pub effect fn main() -> () ! Logger.LogError {
+pub effect fn main() -> () ! LogError {
   let mut logger = Logger.stdoutProvider()
 
   run Effect.log("Hello, world!")

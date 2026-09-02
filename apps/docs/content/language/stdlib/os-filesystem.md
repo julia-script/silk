@@ -12,8 +12,8 @@ code. Supply an in-memory [`FileSystem`](./filesystem.md#declaration-73696c6b2f6
 ## Details
 
 Portable `/` denotes the provider root rather than the host filesystem root. The native boundary
-rejects malformed paths, root escape, and symlink traversal outside that confinement. Whole-file
-reads and writes own or commit complete contents, directory listings retry oversized entries and
+rejects malformed paths, root escape, and symlink traversal outside that confinement. Whole-FileSystem.file
+reads and writes own or commit complete contents, FileSystem.directory listings retry oversized entries and
 sort complete child paths deterministically. Low-level failures become portable [`FileError`](./filesystem.md#declaration-73696c6b2f66696c6573797374656d3a3a46696c654572726f72)
 values with retained native codes.
 
@@ -36,14 +36,14 @@ rather than inventing filesystem imports; evaluator execution requires an inject
 ### Construct a provider without accessing the filesystem
 
 ```silk
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.effect { Effect }
 
 import silk.os_filesystem { OsFileSystem }
 
 effect fn program() -> i32
-! Allocator.OutOfMemoryError {
+! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let provider = run OsFileSystem.make("/tmp")
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -51,7 +51,7 @@ effect fn program() -> i32
   return 42
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -79,6 +79,92 @@ A native [`FileSystem`](./filesystem.md#declaration-73696c6b2f66696c657379737465
 Portable absolute paths resolve inside this root. The provider never exposes the root as a
 [`Path`](./filesystem.md#declaration-73696c6b2f66696c6573797374656d3a3a50617468), and operations reject lexical or symbolic-link escape from the root.
 
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `OsFileSystem for _`
+
+```silk
+impl OsFileSystem for _
+```
+
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+
+### Operation `readFile`
+
+```silk
+readFile = _
+```
+
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a31"></a>
+
+### Operation `writeFile`
+
+```silk
+writeFile = _
+```
+
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a32"></a>
+
+### Operation `stat`
+
+```silk
+stat = _
+```
+
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a33"></a>
+
+### Operation `listDirectory`
+
+```silk
+listDirectory = _
+```
+
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a34"></a>
+
+### Operation `createTemporaryDirectory`
+
+```silk
+createTemporaryDirectory = _
+```
+
+Creates one uniquely named FileSystem.directory under `parent` and returns its complete Path.
+
+The provider chooses the name's unique part, so the created name comes back rather than going
+in. A buffer too small for that name creates nothing and reports the capacity it needs, which
+is why the retry below is safe to take.
+
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a35"></a>
+
+### Operation `createDirectory`
+
+```silk
+createDirectory = _
+```
+
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a36"></a>
+
+### Operation `removeFile`
+
+```silk
+removeFile = _
+```
+
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a37"></a>
+
+### Operation `removeDirectory`
+
+```silk
+removeDirectory = _
+```
+
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `OsFileSystem for _`
+
+```silk
+impl OsFileSystem for _
+```
+
 <a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a6d616b65"></a>
 
 ## `make`
@@ -87,24 +173,7 @@ Portable absolute paths resolve inside this root. The provider never exposes the
 pub effect fn make(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator
 ```
 
-Copies one absolute native root and creates a confined filesystem provider.
-
-### When to use
-
-Use this function at a native application edge. Provide the result as `&mut FileSystem` to code
-that uses the portable filesystem service.
-
-### Details
-
-Construction owns the root bytes but does not open the directory. Portable `/` then denotes
-this provider root instead of the host filesystem root.
-
-### Gotchas
-
-`root` must be non-empty, absolute, and NUL-free. A value that violates this precondition traps.
-Allocation failure leaves no provider value.
-
-<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a32"></a>
 
 ## Implementation `FileSystem for OsFileSystem`
 
@@ -112,7 +181,7 @@ Allocation failure leaves no provider value.
 impl FileSystem for OsFileSystem
 ```
 
-<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `readFile`
 
@@ -120,7 +189,7 @@ impl FileSystem for OsFileSystem
 readFile = OsFileSystem.readFile
 ```
 
-<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a31"></a>
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a31"></a>
 
 ### Operation `writeFile`
 
@@ -128,7 +197,7 @@ readFile = OsFileSystem.readFile
 writeFile = OsFileSystem.writeFile
 ```
 
-<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a32"></a>
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a32"></a>
 
 ### Operation `stat`
 
@@ -136,7 +205,7 @@ writeFile = OsFileSystem.writeFile
 stat = OsFileSystem.stat
 ```
 
-<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a33"></a>
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a33"></a>
 
 ### Operation `listDirectory`
 
@@ -144,7 +213,7 @@ stat = OsFileSystem.stat
 listDirectory = OsFileSystem.listDirectory
 ```
 
-<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a34"></a>
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a34"></a>
 
 ### Operation `createDirectory`
 
@@ -152,7 +221,7 @@ listDirectory = OsFileSystem.listDirectory
 createDirectory = OsFileSystem.createDirectory
 ```
 
-<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a35"></a>
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a35"></a>
 
 ### Operation `removeFile`
 
@@ -160,7 +229,7 @@ createDirectory = OsFileSystem.createDirectory
 removeFile = OsFileSystem.removeFile
 ```
 
-<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a36"></a>
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a36"></a>
 
 ### Operation `removeDirectory`
 
@@ -168,7 +237,7 @@ removeFile = OsFileSystem.removeFile
 removeDirectory = OsFileSystem.removeDirectory
 ```
 
-<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a37"></a>
+<a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a37"></a>
 
 ### Operation `createTemporaryDirectory`
 

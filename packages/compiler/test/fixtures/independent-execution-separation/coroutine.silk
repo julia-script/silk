@@ -1,8 +1,8 @@
 // Compiler fixture: alternate owner pressure evidence, not a canonical Coroutine API.
-import silk.allocator { Allocator }
-import silk.effect as Effect
-import silk.execution as Execution
-import silk.shared as Shared
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
+import silk.shared { Shared }
 
 struct Empty {}
 struct Yielded { value: i32 wake: Intrinsic.Wake }
@@ -35,7 +35,7 @@ fn readNotifications(self: &PortState) -> i32 { return self.notifications }
 
 fn register(
   wake: Intrinsic.Wake,
-  port: Shared.Shared<PortState>,
+  port: Shared<PortState>,
   value: i32,
 ) -> PortGuard {
   let installed = Shared.withMut(&port, install(move wake, value))
@@ -43,12 +43,12 @@ fn register(
   return PortGuard {}
 }
 
-effect fn yieldValue(port: Shared.Shared<PortState>, value: i32) -> () {
+effect fn yieldValue(port: Shared<PortState>, value: i32) -> () {
   let registration = register(move port, value)
   return run Execution.park(move registration)
 }
 
-effect fn body(port: Shared.Shared<PortState>) -> i32 {
+effect fn body(port: Shared<PortState>) -> i32 {
   let first = Shared.clone<PortState>(&port)
   run yieldValue(move first, 1)
   let second = Shared.clone<PortState>(&port)
@@ -57,7 +57,7 @@ effect fn body(port: Shared.Shared<PortState>) -> i32 {
   return 3
 }
 
-fn ready(port: &Shared.Shared<PortState>) -> () {
+fn ready(port: &Shared<PortState>) -> () {
   return Shared.withMut(port, markReady)
 }
 
@@ -104,7 +104,7 @@ effect fn resumeSelected(selected: Empty | Yielded, owner: &mut Owner) -> () {
   }
 }
 
-effect fn resume(port: &Shared.Shared<PortState>, owner: &mut Owner) -> () {
+effect fn resume(port: &Shared<PortState>, owner: &mut Owner) -> () {
   let selected = Shared.withMut(port, takeYield)
   return run resumeSelected(move selected, move owner)
 }
@@ -116,7 +116,7 @@ fn consumeLate(selected: Empty | Yielded) -> () {
   }
 }
 
-effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+effect fn program() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let port = run Shared.make<PortState>(PortState {
     slot: Empty {},
@@ -161,5 +161,5 @@ effect fn program() -> i32 ! Allocator.OutOfMemoryError {
   return result
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -100 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return -100 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }

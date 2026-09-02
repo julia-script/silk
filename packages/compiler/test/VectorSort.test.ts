@@ -20,9 +20,9 @@ const program = (body: string): string =>
   `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.usize as usize
-import silk.vector { Vector, make, append, sort, binarySearch, get, length }
+import silk.vector { Vector }
 import silk.option { Option }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -39,7 +39,7 @@ const fill = (name: string, values: ReadonlyArray<number>): string =>
   values
     .map(
       (value, ordinal) =>
-        `  let ${name}${ordinal} = run append<i32>(&mut ${name}, ${value}) |> Effect.provideMut(&mut allocator)`,
+        `  let ${name}${ordinal} = run Vector.append<i32>(&mut ${name}, ${value}) |> Effect.provideMut(&mut allocator)`,
     )
     .join('\n')
 
@@ -50,8 +50,8 @@ const fill = (name: string, values: ReadonlyArray<number>): string =>
 const fingerprint = (name: string, radix: number, into: string): string =>
   `  let mut ${into}Index = usize.ZERO
   let mut ${into} = 0
-  while ${into}Index < length<i32>(&${name}) {
-    ${into} = ${into} * ${radix} + get<i32>(&${name}, ${into}Index)
+  while ${into}Index < Vector.length<i32>(&${name}) {
+    ${into} = ${into} * ${radix} + Vector.get<i32>(&${name}, ${into}Index)
     ${into}Index = ${into}Index + usize.ONE
   }`
 
@@ -75,9 +75,9 @@ const evaluatedValue = (name: string, source: string) =>
 
 // [9, -3, 5, 1, 0, -8, 7, 2] sorts to [-8, -3, 0, 1, 2, 5, 7, 9], which folds to -19473 in radix 3.
 const unsorted = [9, -3, 5, 1, 0, -8, 7, 2]
-const sortEight = program(`  let mut values = make<i32>()
+const sortEight = program(`  let mut values = Vector.make<i32>()
 ${fill('values', unsorted)}
-  let sorted = run sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
+  let sorted = run Vector.sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
 ${fingerprint('values', 3, 'folded')}
   return folded`)
 
@@ -85,14 +85,14 @@ it.effect('sorts an empty vector and a one-element vector', () =>
   Effect.gen(function* () {
     const value = yield* evaluatedValue(
       'vector-sort/small',
-      program(`  let mut empty = make<i32>()
-  let emptied = run sort<i32>(&mut empty) |> Effect.provideMut(&mut allocator)
-  let mut single = make<i32>()
+      program(`  let mut empty = Vector.make<i32>()
+  let emptied = run Vector.sort<i32>(&mut empty) |> Effect.provideMut(&mut allocator)
+  let mut single = Vector.make<i32>()
 ${fill('single', [5])}
-  let singled = run sort<i32>(&mut single) |> Effect.provideMut(&mut allocator)
-  if length<i32>(&empty) == usize.ZERO {
-    if length<i32>(&single) == usize.ONE {
-      return get<i32>(&single, usize.ZERO) + 37
+  let singled = run Vector.sort<i32>(&mut single) |> Effect.provideMut(&mut allocator)
+  if Vector.length<i32>(&empty) == usize.ZERO {
+    if Vector.length<i32>(&single) == usize.ONE {
+      return Vector.get<i32>(&single, usize.ZERO) + 37
     }
   }
   return 0`),
@@ -113,13 +113,13 @@ it.effect('gives the same output for two runs over the same input', () =>
     // returned zero is the difference of their fingerprints, so any divergence is non-zero.
     const value = yield* evaluatedValue(
       'vector-sort/repeatable',
-      program(`  let mut first = make<i32>()
+      program(`  let mut first = Vector.make<i32>()
 ${fill('first', unsorted)}
-  let sortedFirst = run sort<i32>(&mut first) |> Effect.provideMut(&mut allocator)
+  let sortedFirst = run Vector.sort<i32>(&mut first) |> Effect.provideMut(&mut allocator)
 ${fingerprint('first', 3, 'firstFold')}
-  let mut second = make<i32>()
+  let mut second = Vector.make<i32>()
 ${fill('second', unsorted)}
-  let sortedSecond = run sort<i32>(&mut second) |> Effect.provideMut(&mut allocator)
+  let sortedSecond = run Vector.sort<i32>(&mut second) |> Effect.provideMut(&mut allocator)
 ${fingerprint('second', 3, 'secondFold')}
   if firstFold == secondFold { return 42 }
   return firstFold - secondFold`),
@@ -135,9 +135,9 @@ it.effect('keeps equal elements in one defined relative position', () =>
     // ordered, so a change in how equal elements are placed fails this test.
     const value = yield* evaluatedValue(
       'vector-sort/equal-elements',
-      program(`  let mut values = make<i32>()
+      program(`  let mut values = Vector.make<i32>()
 ${fill('values', [4, 1, 4, 1, 3, 4, 1])}
-  let sorted = run sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
+  let sorted = run Vector.sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
 ${fingerprint('values', 10, 'folded')}
   return folded`),
     )
@@ -151,11 +151,11 @@ it.effect('leaves an already-sorted vector with equal elements unchanged', () =>
     // could reorder them on the second pass, which this comparison would catch.
     const value = yield* evaluatedValue(
       'vector-sort/idempotent',
-      program(`  let mut values = make<i32>()
+      program(`  let mut values = Vector.make<i32>()
 ${fill('values', [4, 1, 4, 1, 3, 4, 1])}
-  let first = run sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
+  let first = run Vector.sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
 ${fingerprint('values', 10, 'firstFold')}
-  let second = run sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
+  let second = run Vector.sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
 ${fingerprint('values', 10, 'secondFold')}
   if firstFold == secondFold { return 42 }
   return 0`),
@@ -171,29 +171,29 @@ it.effect('sorts every integer width the standard library witnesses', () =>
       `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.usize as usize
-import silk.vector { Vector, make, append, sort, get, length }
+import silk.vector { Vector }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut narrow = make<u8>()
-  let n0 = run append<u8>(&mut narrow, 9) |> Effect.provideMut(&mut allocator)
-  let n1 = run append<u8>(&mut narrow, 2) |> Effect.provideMut(&mut allocator)
-  let n2 = run append<u8>(&mut narrow, 5) |> Effect.provideMut(&mut allocator)
-  let narrowed = run sort<u8>(&mut narrow) |> Effect.provideMut(&mut allocator)
-  let mut wide = make<i64>()
-  let w0 = run append<i64>(&mut wide, 30) |> Effect.provideMut(&mut allocator)
-  let w1 = run append<i64>(&mut wide, 10) |> Effect.provideMut(&mut allocator)
-  let w2 = run append<i64>(&mut wide, 20) |> Effect.provideMut(&mut allocator)
-  let widened = run sort<i64>(&mut wide) |> Effect.provideMut(&mut allocator)
-  let mut counts = make<usize>()
-  let c0 = run append<usize>(&mut counts, 7) |> Effect.provideMut(&mut allocator)
-  let c1 = run append<usize>(&mut counts, 3) |> Effect.provideMut(&mut allocator)
-  let counted = run sort<usize>(&mut counts) |> Effect.provideMut(&mut allocator)
-  if get<u8>(&narrow, usize.ZERO) == 2 {
-    if get<i64>(&wide, usize.ZERO) == 10 {
-      if get<usize>(&counts, usize.ZERO) == 3 {
+  let mut narrow = Vector.make<u8>()
+  let n0 = run Vector.append<u8>(&mut narrow, 9) |> Effect.provideMut(&mut allocator)
+  let n1 = run Vector.append<u8>(&mut narrow, 2) |> Effect.provideMut(&mut allocator)
+  let n2 = run Vector.append<u8>(&mut narrow, 5) |> Effect.provideMut(&mut allocator)
+  let narrowed = run Vector.sort<u8>(&mut narrow) |> Effect.provideMut(&mut allocator)
+  let mut wide = Vector.make<i64>()
+  let w0 = run Vector.append<i64>(&mut wide, 30) |> Effect.provideMut(&mut allocator)
+  let w1 = run Vector.append<i64>(&mut wide, 10) |> Effect.provideMut(&mut allocator)
+  let w2 = run Vector.append<i64>(&mut wide, 20) |> Effect.provideMut(&mut allocator)
+  let widened = run Vector.sort<i64>(&mut wide) |> Effect.provideMut(&mut allocator)
+  let mut counts = Vector.make<usize>()
+  let c0 = run Vector.append<usize>(&mut counts, 7) |> Effect.provideMut(&mut allocator)
+  let c1 = run Vector.append<usize>(&mut counts, 3) |> Effect.provideMut(&mut allocator)
+  let counted = run Vector.sort<usize>(&mut counts) |> Effect.provideMut(&mut allocator)
+  if Vector.get<u8>(&narrow, usize.ZERO) == 2 {
+    if Vector.get<i64>(&wide, usize.ZERO) == 10 {
+      if Vector.get<usize>(&counts, usize.ZERO) == 3 {
         return 42
       }
     }
@@ -228,12 +228,12 @@ it.effect('finds a present element and reports an absent one', () =>
     // index of the duplicated 2 is 0.
     const value = yield* evaluatedValue(
       'vector-sort/search',
-      program(`  let mut values = make<i32>()
+      program(`  let mut values = Vector.make<i32>()
 ${fill('values', [9, 2, 7, 2, 5])}
-  let sorted = run sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
-  let hit = binarySearch<i32>(&values, 7)
-  let miss = binarySearch<i32>(&values, 4)
-  let duplicate = binarySearch<i32>(&values, 2)
+  let sorted = run Vector.sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
+  let hit = Vector.binarySearch<i32>(&values, 7)
+  let miss = Vector.binarySearch<i32>(&values, 4)
+  let duplicate = Vector.binarySearch<i32>(&values, 2)
   let hitCode = match move hit { Option<usize>.Some { value } => usize.toI32(value) _ => 0 - 1 }
   let missCode = match move miss { Option<usize>.Some { value } => usize.toI32(value) _ => 0 - 1 }
   let duplicateCode = match move duplicate { Option<usize>.Some { value } => usize.toI32(value) _ => 0 - 1 }
@@ -247,12 +247,12 @@ it.effect('reports an absent value for every miss around and beyond the elements
   Effect.gen(function* () {
     const value = yield* evaluatedValue(
       'vector-sort/search-misses',
-      program(`  let mut values = make<i32>()
+      program(`  let mut values = Vector.make<i32>()
 ${fill('values', [5, 1, 9])}
-  let sorted = run sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
-  let below = binarySearch<i32>(&values, 0)
-  let between = binarySearch<i32>(&values, 4)
-  let above = binarySearch<i32>(&values, 12)
+  let sorted = run Vector.sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
+  let below = Vector.binarySearch<i32>(&values, 0)
+  let between = Vector.binarySearch<i32>(&values, 4)
+  let above = Vector.binarySearch<i32>(&values, 12)
   let mut score = 0
   let belowCode = match move below { Option<usize>.Some { value } => 1 _ => 0 }
   let betweenCode = match move between { Option<usize>.Some { value } => 1 _ => 0 }
@@ -268,8 +268,8 @@ it.effect('searches an empty vector without matching', () =>
   Effect.gen(function* () {
     const value = yield* evaluatedValue(
       'vector-sort/search-empty',
-      program(`  let mut values = make<i32>()
-  let missing = binarySearch<i32>(&values, 3)
+      program(`  let mut values = Vector.make<i32>()
+  let missing = Vector.binarySearch<i32>(&values, 3)
   return match move missing { Option<usize>.Some { value } => 0 _ => 42 }`),
     )
     assert.strictEqual(value, 42)
@@ -322,10 +322,10 @@ it.effect(
 const stableUserOrder = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.usize as usize
 import silk.order { Order }
-import silk.vector { Vector, make, append, asSlice, sort, length }
+import silk.vector { Vector }
 
 struct Item {
   key: i32
@@ -340,16 +340,16 @@ impl Order for Item { lessThan: Item.itemLess }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut items = make<Item>()
-  let a = run append<Item>(&mut items, Item { key: 1, tag: 1 }) |> Effect.provideMut(&mut allocator)
-  let b = run append<Item>(&mut items, Item { key: 0, tag: 2 }) |> Effect.provideMut(&mut allocator)
-  let c = run append<Item>(&mut items, Item { key: 1, tag: 3 }) |> Effect.provideMut(&mut allocator)
-  let d = run append<Item>(&mut items, Item { key: 0, tag: 4 }) |> Effect.provideMut(&mut allocator)
-  let ordered = run sort<Item>(&mut items) |> Effect.provideMut(&mut allocator)
-  let view = asSlice<Item>(&items)
+  let mut items = Vector.make<Item>()
+  let a = run Vector.append<Item>(&mut items, Item { key: 1, tag: 1 }) |> Effect.provideMut(&mut allocator)
+  let b = run Vector.append<Item>(&mut items, Item { key: 0, tag: 2 }) |> Effect.provideMut(&mut allocator)
+  let c = run Vector.append<Item>(&mut items, Item { key: 1, tag: 3 }) |> Effect.provideMut(&mut allocator)
+  let d = run Vector.append<Item>(&mut items, Item { key: 0, tag: 4 }) |> Effect.provideMut(&mut allocator)
+  let ordered = run Vector.sort<Item>(&mut items) |> Effect.provideMut(&mut allocator)
+  let view = Vector.asSlice<Item>(&items)
   let mut folded = 0
   let mut index = usize.ZERO
-  while index < length<Item>(&items) {
+  while index < Vector.length<Item>(&items) {
     folded = folded * 10 + view[index].tag
     index = index + usize.ONE
   }
@@ -378,10 +378,10 @@ const moveOnlyElements = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.usize as usize
 import silk.order { Order }
-import silk.vector { Vector, make, append, asSlice, sort, length }
+import silk.vector { Vector }
 
 struct Tracked {
   key: i32
@@ -395,25 +395,25 @@ fn trackedLess(left: &Tracked, right: &Tracked) -> bool {
 impl Order for Tracked { lessThan: Tracked.trackedLess }
 
 effect fn hold(key: i32) -> Tracked ! OutOfMemoryError ? &mut Allocator {
-  let mut payload = make<i32>()
-  let filled = run append<i32>(&mut payload, key)
+  let mut payload = Vector.make<i32>()
+  let filled = run Vector.append<i32>(&mut payload, key)
   return Tracked { key: key, payload: move payload }
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut items = make<Tracked>()
+  let mut items = Vector.make<Tracked>()
   let first = run hold(3) |> Effect.provideMut(&mut allocator)
-  let a = run append<Tracked>(&mut items, move first) |> Effect.provideMut(&mut allocator)
+  let a = run Vector.append<Tracked>(&mut items, move first) |> Effect.provideMut(&mut allocator)
   let second = run hold(1) |> Effect.provideMut(&mut allocator)
-  let b = run append<Tracked>(&mut items, move second) |> Effect.provideMut(&mut allocator)
+  let b = run Vector.append<Tracked>(&mut items, move second) |> Effect.provideMut(&mut allocator)
   let third = run hold(2) |> Effect.provideMut(&mut allocator)
-  let c = run append<Tracked>(&mut items, move third) |> Effect.provideMut(&mut allocator)
-  let ordered = run sort<Tracked>(&mut items) |> Effect.provideMut(&mut allocator)
-  let view = asSlice<Tracked>(&items)
+  let c = run Vector.append<Tracked>(&mut items, move third) |> Effect.provideMut(&mut allocator)
+  let ordered = run Vector.sort<Tracked>(&mut items) |> Effect.provideMut(&mut allocator)
+  let view = Vector.asSlice<Tracked>(&items)
   let mut folded = 0
   let mut index = usize.ZERO
-  while index < length<Tracked>(&items) {
+  while index < Vector.length<Tracked>(&items) {
     folded = folded * 10 + view[index].key
     index = index + usize.ONE
   }

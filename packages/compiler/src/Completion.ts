@@ -28,6 +28,8 @@ export type Kind =
   | 'Binding'
   | 'Parameter'
   | 'Function'
+  | 'Method'
+  | 'AssociatedFunction'
   | 'Constant'
   | 'Constructor'
   | 'Type'
@@ -324,13 +326,54 @@ const serviceCandidates = (service: DeclarationFacts.ServiceFact): ReadonlyArray
     ),
   )
 
+/**
+ * The owner's accessible inherent members, labeled `Method` when parameter zero is the receiver
+ * and `AssociatedFunction` otherwise. Visibility and duplicate rules are the resolver's.
+ */
+const inherentCandidates = (
+  index: DeclarationIndex.Index,
+  owner: DeclarationFacts.MemberFact,
+  module: string,
+): ReadonlyArray<Candidate> => {
+  if (owner.canonical._tag !== 'Canonical') return Object.freeze([])
+  const ownerId = owner.canonical.id
+  const names = new Set<string>()
+  for (const member of index.modules.find((headers) => headers.module === ownerId.module)
+    ?.members ?? []) {
+    const associated = member._tag === 'FunctionDeclaration' ? member.associatedMember : undefined
+    if (associated === undefined) continue
+    if ((associated.owner?.name ?? associated.ownerSpelling) === ownerId.name)
+      names.add(associated.name)
+  }
+  return Object.freeze(
+    [...names].flatMap((name): ReadonlyArray<Candidate> => {
+      const lookup = NameResolution.lookupAssociated(index, owner, name, module)
+      if (lookup._tag !== 'Inherent' || lookup.declaration._tag !== 'FunctionDeclaration') return []
+      return [
+        candidate({
+          identity: semantic(declarationIdentity(lookup.declaration)),
+          kind: lookup.declaration.associatedMember?.receiver ? 'Method' : 'AssociatedFunction',
+          label: name,
+          detail: PresentationRenderer.functionDeclaration(lookup.declaration),
+          sortGroup: 1,
+        }),
+      ]
+    }),
+  )
+}
+
 const namespaceCandidates = (
   index: DeclarationIndex.Index,
   module: string,
+  sortGroup = 0,
 ): ReadonlyArray<Candidate> =>
   (index.modules.find((headers) => headers.module === module)?.members ?? []).flatMap(
     (declaration) => {
-      if (declaration.visibility !== 'Public' || declaration.name._tag !== 'Present') {
+      if (
+        declaration.visibility !== 'Public' ||
+        declaration.name._tag !== 'Present' ||
+        (declaration._tag === 'FunctionDeclaration' && declaration.associatedMember !== undefined)
+      ) {
         return []
       }
       return [
@@ -339,7 +382,7 @@ const namespaceCandidates = (
           kind: declarationKind(declaration, 'Type'),
           label: declaration.name.spelling,
           detail: declarationDetail(declaration),
-          sortGroup: 0,
+          sortGroup,
         }),
       ]
     },
@@ -388,6 +431,96 @@ const nominalSubject = (type: Type.Type | undefined): Type.Nominal | undefined =
   if (Type.isNominal(type)) return type
   if (Type.isReference(type)) return nominalSubject(type.target)
   return undefined
+}
+
+const parameterSubjectOf = (type: Type.Type | undefined): Type.Parameter | undefined => {
+  if (type === undefined) return undefined
+  if (Type.isParameter(type)) return type
+  if (Type.isReference(type)) return parameterSubjectOf(type.target)
+  return undefined
+}
+
+/**
+ * The receiver methods a value of one nominal type can call, presented receiver-bound: parameter
+ * zero is the value itself. Associated functions are not value members and are left out.
+ */
+const receiverMethodCandidates = (
+  index: DeclarationIndex.Index,
+  type: Type.Nominal | undefined,
+  module: string,
+  scope: NameResolution.ModuleScope | undefined,
+): ReadonlyArray<Candidate> => {
+  // The subject's own arguments fix the owner binders each method presents.
+  if (type === undefined) return Object.freeze([])
+  const owner = DeclarationFacts.byCanonical(
+    index,
+    Object.freeze({ _tag: 'CanonicalDeclarationId', module: type.module, name: type.name }),
+  )
+  if (owner === undefined) return Object.freeze([])
+  return Object.freeze(
+    inherentCandidates(index, owner, module).flatMap((member) => {
+      if (member.kind !== 'Method' || member.identity._tag !== 'SemanticCandidate') return []
+      const identity = member.identity.identity
+      const declaration =
+        identity._tag === 'DeclarationIdentity' && identity.id._tag === 'CanonicalDeclarationId'
+          ? DeclarationFacts.byCanonical(index, identity.id)
+          : undefined
+      return declaration?._tag === 'FunctionDeclaration'
+        ? [
+            candidate({
+              identity: member.identity,
+              kind: 'Method',
+              label: member.label,
+              detail: PresentationRenderer.receiverMethod(
+                declaration,
+                PresentationRenderer.receiverSubstitution(declaration, type),
+                module,
+                scope,
+              ),
+              sortGroup: 1,
+            }),
+          ]
+        : []
+    }),
+  )
+}
+
+/** The receiver operations a generic value obtains from its parameter's declared bounds. */
+const boundOperationCandidates = (
+  fn: Elaboration.FunctionFact | undefined,
+  type: Type.Parameter | undefined,
+): ReadonlyArray<Candidate> => {
+  if (fn === undefined || type === undefined) return Object.freeze([])
+  const parameter = fn.declaration.typeParameters.find((candidate) =>
+    Type.equals(candidate.type, type),
+  )
+  if (parameter === undefined) return Object.freeze([])
+  return Object.freeze(
+    parameter.bounds.flatMap((bound) =>
+      bound._tag !== 'ResolvedBound'
+        ? []
+        : bound.application.operations.flatMap((operation) =>
+            operation.receiverAccess === 'Unavailable' ||
+            operation.declaration.name._tag !== 'Present' ||
+            operation.declaration.state._tag !== 'Unique'
+              ? []
+              : [
+                  candidate({
+                    identity: semantic(
+                      Object.freeze({
+                        _tag: 'ServiceOperationIdentity',
+                        id: operation.declaration.state.id,
+                      }),
+                    ),
+                    kind: 'Method',
+                    label: operation.declaration.name.spelling,
+                    detail: PresentationRenderer.receiverOperation(operation),
+                    sortGroup: 1,
+                  }),
+                ],
+          ),
+    ),
+  )
 }
 
 const fieldCandidates = (
@@ -684,14 +817,20 @@ export const complete = (options: {
         : valueLookup(qualifier, options.result, fn, options.offset)
     if (value.found) {
       const subject = nominalSubject(value.type)
+      const parameterSubject = parameterSubjectOf(value.type)
       return Object.freeze({
         _tag: 'CompletionResult',
         context: Object.freeze({
           _tag: 'ValueMemberContext',
-          state: subject === undefined ? 'Unavailable' : 'Available',
+          state:
+            subject === undefined && parameterSubject === undefined ? 'Unavailable' : 'Available',
         }),
         replacement: replacement.span,
-        candidates: stable(fieldCandidates(options.index, subject, options.module)),
+        candidates: stable([
+          ...fieldCandidates(options.index, subject, options.module),
+          ...receiverMethodCandidates(options.index, subject, options.module, scope),
+          ...boundOperationCandidates(fn, parameterSubject),
+        ]),
       })
     }
     const lookup =
@@ -705,12 +844,7 @@ export const complete = (options: {
           _tag: 'CompletionResult',
           context: Object.freeze({ _tag: 'ActorMemberContext', actor: intrinsic.spelling }),
           replacement: replacement.span,
-          candidates: stable([
-            ...actorCandidates(intrinsic),
-            ...(intrinsic.spelling === 'Effect'
-              ? namespaceCandidates(options.index, 'silk/effect')
-              : []),
-          ]),
+          candidates: stable([...actorCandidates(intrinsic)]),
         })
     }
     if (lookup?._tag === 'Namespace')
@@ -719,6 +853,27 @@ export const complete = (options: {
         context: Object.freeze({ _tag: 'ActorMemberContext', actor: lookup.module }),
         replacement: replacement.span,
         candidates: stable(namespaceCandidates(options.index, lookup.module)),
+      })
+    // Declared inherent members are the only associated candidates of a nominal qualifier.
+    const inherent =
+      lookup?._tag === 'Resolved'
+        ? inherentCandidates(
+            options.index,
+            NameResolution.erasedOwner(options.index, lookup.declaration),
+            options.module,
+          )
+        : Object.freeze([])
+    // A transparent alias qualifier offers the aliased owner's members and nothing of its own.
+    if (
+      lookup?._tag === 'Resolved' &&
+      lookup.declaration._tag === 'AliasDeclaration' &&
+      inherent.length > 0
+    )
+      return Object.freeze({
+        _tag: 'CompletionResult',
+        context: Object.freeze({ _tag: 'ActorMemberContext', actor: lookup.spelling }),
+        replacement: replacement.span,
+        candidates: stable(inherent),
       })
     if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'EnumDeclaration')
       return Object.freeze({
@@ -731,10 +886,9 @@ export const complete = (options: {
               : (qualifier ?? 'enum'),
         }),
         replacement: replacement.span,
-        candidates: stable(enumCandidates(lookup.declaration)),
+        candidates: stable([...enumCandidates(lookup.declaration), ...inherent]),
       })
     if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'UnionDeclaration') {
-      const scoped = NameResolution.scopedModule(lookup.declaration)
       return Object.freeze({
         _tag: 'CompletionResult',
         context: Object.freeze({
@@ -745,19 +899,15 @@ export const complete = (options: {
               : (qualifier ?? 'union'),
         }),
         replacement: replacement.span,
-        candidates: stable([
-          ...unionCandidates(lookup.declaration),
-          ...(scoped === undefined ? [] : namespaceCandidates(options.index, scoped)),
-        ]),
+        candidates: stable([...unionCandidates(lookup.declaration), ...inherent]),
       })
     }
     if (
       lookup?._tag === 'Resolved' &&
       (lookup.declaration._tag === 'StructDeclaration' ||
         lookup.declaration._tag === 'InterfaceDeclaration') &&
-      lookup.declaration.canonical._tag === 'Canonical' &&
-      NameResolution.scopedModule(lookup.declaration) !== undefined
-    )
+      lookup.declaration.canonical._tag === 'Canonical'
+    ) {
       return Object.freeze({
         _tag: 'CompletionResult',
         context: Object.freeze({
@@ -765,12 +915,10 @@ export const complete = (options: {
           actor: lookup.declaration.canonical.id.name,
         }),
         replacement: replacement.span,
-        candidates: stable(
-          namespaceCandidates(options.index, lookup.declaration.canonical.id.module),
-        ),
+        candidates: stable(inherent),
       })
+    }
     if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'ServiceDeclaration') {
-      const scoped = NameResolution.scopedModule(lookup.declaration)
       return Object.freeze({
         _tag: 'CompletionResult',
         context: Object.freeze({
@@ -781,10 +929,7 @@ export const complete = (options: {
               : (qualifier ?? 'service'),
         }),
         replacement: replacement.span,
-        candidates: stable([
-          ...serviceCandidates(lookup.declaration),
-          ...(scoped === undefined ? [] : namespaceCandidates(options.index, scoped)),
-        ]),
+        candidates: stable([...serviceCandidates(lookup.declaration), ...inherent]),
       })
     }
     let state: 'Ambiguous' | 'Missing' | 'Unavailable'

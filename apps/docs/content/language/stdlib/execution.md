@@ -37,30 +37,30 @@ Public declarations: 5.
 pub struct Execution
 ```
 
-The importable name of the `silk.execution` module scope.
+The owner of the execution lifecycle operations.
 
 ### Details
 
-This struct carries no data and is never constructed by the library. Importing it as
-`import silk.execution { Execution }` names the module scope, so `Execution.make(...)` and the
-other lifecycle operations resolve through it. It is unrelated to the builtin
+This struct carries no data and is never constructed by the library. Every operation is an
+inherent member declared in `impl Execution`, so `import silk.execution { Execution }` is the
+one import that reaches `Execution.make(...)` and the rest. It is unrelated to the builtin
 `Intrinsic.Execution<A>` type.
+
+<a id="declaration-73696c6b2f657865637574696f6e3a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `Execution for _`
+
+```silk
+impl Execution for _
+```
 
 <a id="declaration-73696c6b2f657865637574696f6e3a3a6d616b65"></a>
 
 ## `make`
 
 ```silk
-pub effect fn make<A, F, O, R>(body: F, readyState: O, onReady: R) -> Intrinsic.Execution<A> ! Allocator.OutOfMemoryError ? &mut Allocator
+pub effect fn make<A, F, O, R>(body: F, readyState: O, onReady: R) -> Intrinsic.Execution<A> ! OutOfMemoryError ? &mut Allocator
 ```
-
-Allocates one combined package and transfers the lazy body and fixed endpoint into it.
-
-### Details
-
-The returned Execution is `Initial`. The body does not start during this call. Allocation refusal
-produces no Execution and leaves every input under ordinary Effect cleanup. Later private stack
-growth is a fatal trap and is not a `Allocator.OutOfMemoryError`.
 
 <a id="declaration-73696c6b2f657865637574696f6e3a3a6472697665"></a>
 

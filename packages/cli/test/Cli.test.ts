@@ -41,7 +41,7 @@ it.effect(
       assert.strictEqual(Result.isSuccess(initialized), true)
       assert.strictEqual(
         yield* fileSystem.readFileString(`${projectRoot}/src/main.silk`),
-        'import silk.effect { Effect }\nimport silk.logger { Logger }\n\npub effect fn main() -> () ! Logger.LogError {\n  let mut logger = Logger.stdoutProvider()\n\n  run Effect.log("Hello, world!")\n    |> Effect.provideMut(&mut logger)\n}\n',
+        'import silk.effect { Effect }\nimport silk.logger { Logger, LogError }\n\npub effect fn main() -> () ! LogError {\n  let mut logger = Logger.stdoutProvider()\n\n  run Effect.log("Hello, world!")\n    |> Effect.provideMut(&mut logger)\n}\n',
       )
       const loaded = yield* execute(['check', '--manifest-path', `${projectRoot}/silk.toml`])
       assert.strictEqual(Result.isSuccess(loaded), true)

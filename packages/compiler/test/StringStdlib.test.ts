@@ -19,24 +19,24 @@ const diagnosticSummary = (snapshot: Analysis.Snapshot) =>
   }))
 
 const validation = `import silk.usize as usize
-import silk.string { InvalidUtf8, fromUtf8, byteLength }
+import silk.string { InvalidUtf8, String }
 import silk.result { Result }
 
 fn observe(result: Result<string, InvalidUtf8>) -> i32 {
   return match move result {
-      Result<string, InvalidUtf8>.Success { value } => usize.toI32(byteLength(value))
+      Result<string, InvalidUtf8>.Success { value } => usize.toI32(String.byteLength(value))
       Result<string, InvalidUtf8>.Failure { error } => usize.toI32(error.offset) + 100
   }
 }
 
 pub fn main() -> i32 {
-  let ascii = observe(fromUtf8(b"silk"))
-  let mixed = observe(fromUtf8(b"A\\xc2\\xa2\\xe2\\x82\\xac\\xf0\\x90\\x8d\\x88"))
-  let stray = observe(fromUtf8(b"a\\x80"))
-  let truncated = observe(fromUtf8(b"a\\xe2\\x82"))
-  let overlong = observe(fromUtf8(b"a\\xe0\\x80\\x80"))
-  let surrogate = observe(fromUtf8(b"a\\xed\\xa0\\x80"))
-  let above = observe(fromUtf8(b"a\\xf4\\x90\\x80\\x80"))
+  let ascii = observe(String.fromUtf8(b"silk"))
+  let mixed = observe(String.fromUtf8(b"A\\xc2\\xa2\\xe2\\x82\\xac\\xf0\\x90\\x8d\\x88"))
+  let stray = observe(String.fromUtf8(b"a\\x80"))
+  let truncated = observe(String.fromUtf8(b"a\\xe2\\x82"))
+  let overlong = observe(String.fromUtf8(b"a\\xe0\\x80\\x80"))
+  let surrogate = observe(String.fromUtf8(b"a\\xed\\xa0\\x80"))
+  let above = observe(String.fromUtf8(b"a\\xf4\\x90\\x80\\x80"))
   return ascii + mixed + stray + truncated + overlong + surrogate + above
 }`
 
@@ -66,9 +66,9 @@ it.effect('exposes unchecked UTF-8 construction as an unsafe source callable', (
   Effect.gen(function* () {
     const safe = yield* Analysis.ofSourceRealized(
       'string-stdlib/unchecked-safe',
-      ascii(`import silk.string { byteLength, fromUtf8Unchecked }
+      ascii(`import silk.string { String }
 import silk.usize { toI32 }
-pub fn main() -> i32 { return toI32(byteLength(fromUtf8Unchecked(b"silk"))) }`),
+pub fn main() -> i32 { return toI32(String.byteLength(String.fromUtf8Unchecked(b"silk"))) }`),
     )
     assert.deepEqual(
       diagnosticSummary(safe).map(({ code }) => code),
@@ -77,9 +77,9 @@ pub fn main() -> i32 { return toI32(byteLength(fromUtf8Unchecked(b"silk"))) }`),
 
     const acknowledged = yield* Analysis.ofSourceRealized(
       'string-stdlib/unchecked-acknowledged',
-      ascii(`import silk.string { byteLength, fromUtf8Unchecked }
+      ascii(`import silk.string { String }
 import silk.usize { toI32 }
-pub fn main() -> i32 { return toI32(byteLength(unsafe fromUtf8Unchecked(b"silk"))) }`),
+pub fn main() -> i32 { return toI32(String.byteLength(unsafe String.fromUtf8Unchecked(b"silk"))) }`),
     )
     assert.deepEqual(diagnosticSummary(acknowledged), [])
     const evaluated = Analysis.evaluate(acknowledged)
@@ -91,24 +91,18 @@ pub fn main() -> i32 { return toI32(byteLength(unsafe fromUtf8Unchecked(b"silk")
 const owned = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
-import silk.string {
-  copy,
-  append,
-  view,
-  ownedByteLength,
-  ownedUtf8Bytes
-}
+import silk.effect { Effect }
+import silk.string { String }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let copying = copy("h\\u{e9}") |> Effect.provideMut(&mut allocator)
+  let copying = String.copy("h\\u{e9}") |> Effect.provideMut(&mut allocator)
   let mut value = run copying
-  let appending = append(&mut value, " \\u{1f642}") |> Effect.provideMut(&mut allocator)
+  let appending = String.append(&mut value, " \\u{1f642}") |> Effect.provideMut(&mut allocator)
   let appended = run appending
-  if view(&value) == "h\\u{e9} \\u{1f642}" {} else { return 1 }
-  if ownedByteLength(&value) == 8 {} else { return 2 }
-  if ownedUtf8Bytes(&value).length == 8 {} else { return 3 }
+  if String.view(&value) == "h\\u{e9} \\u{1f642}" {} else { return 1 }
+  if String.ownedByteLength(&value) == 8 {} else { return 2 }
+  if String.ownedUtf8Bytes(&value).length == 8 {} else { return 3 }
   return 42
 }
 
@@ -143,9 +137,9 @@ const appendRollback = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
-import silk.string { String, copy, append, view, ownedByteLength }
+import silk.string { String }
 
 struct QuotaAllocator { remaining: i32 }
 
@@ -163,17 +157,17 @@ effect fn ignore(error: OutOfMemoryError) -> () { return () }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  // One allocation, spent by the copy. Appending grows the copied storage in place rather than
-  // copying it into fresh storage first, so starving the append takes one fewer than it used to.
+  // One allocation, spent by the String.copy. Appending grows the copied storage in place rather than
+  // copying it into fresh storage first, so starving the String.append takes one fewer than it used to.
   let mut allocator = QuotaAllocator { remaining: 1 }
-  let copying = copy("ok") |> Effect.provideMut(&mut allocator)
+  let copying = String.copy("ok") |> Effect.provideMut(&mut allocator)
   let mut value = run copying
   let recovered = run Effect.catchAll(
-    append(&mut value, "\\u{1f642}") |> Effect.provideMut(&mut allocator),
+    String.append(&mut value, "\\u{1f642}") |> Effect.provideMut(&mut allocator),
     ignore
   )
-  if view(&value) == "ok" {} else { return 1 }
-  if ownedByteLength(&value) == 2 {} else { return 2 }
+  if String.view(&value) == "ok" {} else { return 1 }
+  if String.ownedByteLength(&value) == 2 {} else { return 2 }
   return 42
 }
 
@@ -195,31 +189,22 @@ it.effect('rolls append back when growth cannot allocate', () =>
 
 const scalars = `import silk.u32 as u32
 import silk.usize as usize
-import silk.string {
-  ScalarCursor,
-  ScalarStep,
-  scalarCursor,
-  cursorByteOffset,
-  nextScalar,
-  scalarValue,
-  scalarByteOffset,
-  nextCursor
-}
+import silk.string { ScalarCursor, ScalarStep, String }
 import silk.option { Option }
 import silk.char { toU32 as charToU32 }
 
 fn walk(value: string, cursor: ScalarCursor, expectedOffset: usize) -> u32 {
-  if cursorByteOffset(&cursor) == expectedOffset {} else { return u32.toU32(1) }
-  return match move nextScalar(value, move cursor) {
+  if String.cursorByteOffset(&cursor) == expectedOffset {} else { return u32.toU32(1) }
+  return match move String.nextScalar(value, move cursor) {
     Option<ScalarStep>.Some { value: step } => continueWalk(value, move step)
     Option<ScalarStep>.None => u32.toU32(0)
   }
 }
 
 fn continueWalk(value: string, step: ScalarStep) -> u32 {
-  let offset = scalarByteOffset(&step)
-  let scalar = charToU32(scalarValue(&step))
-  let next = nextCursor(move step)
+  let offset = String.scalarByteOffset(&step)
+  let scalar = charToU32(String.scalarValue(&step))
+  let next = String.nextCursor(move step)
   return scalar + walk(value, move next, offset + stringWidth(scalar))
 }
 
@@ -231,7 +216,7 @@ fn stringWidth(scalar: u32) -> usize {
 }
 
 pub fn main() -> i32 {
-  return u32.toI32(walk("A\\u{a2}\\u{20ac}\\u{10348}", scalarCursor(), usize.toUsize(0)))
+  return u32.toI32(walk("A\\u{a2}\\u{20ac}\\u{10348}", String.scalarCursor(), usize.toUsize(0)))
 }`
 
 it.effect('traverses mixed-width Unicode scalars with explicit byte offsets', () =>
@@ -247,8 +232,8 @@ it.effect('traverses mixed-width Unicode scalars with explicit byte offsets', ()
 
 it.effect('ships String as navigable ordinary source with private storage', () =>
   Effect.gen(function* () {
-    const source = `import silk.string { String, copy, view }
-fn inspect(value: &String) -> string { return view(value) }
+    const source = `import silk.string { String }
+fn inspect(value: &String) -> string { return String.view(value) }
 pub fn main() -> i32 { return 42 }`
     const snapshot = yield* Analysis.ofSourceRealized('string-stdlib/navigation', ascii(source))
     assert.deepEqual(diagnosticSummary(snapshot), [])

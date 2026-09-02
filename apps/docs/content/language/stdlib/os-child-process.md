@@ -59,6 +59,35 @@ A stateless native [`ChildProcess`](./child-process.md#declaration-73696c6b2f636
 The provider borrows the request and transfers each completed capture into independent [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573)
 storage. The returned [`ProcessOutcome`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734f7574636f6d65) owns that storage.
 
+<a id="declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `OsChildProcess for _`
+
+```silk
+impl OsChildProcess for _
+```
+
+<a id="declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+
+### Operation `execute`
+
+```silk
+execute = _
+```
+
+Runs one request to completion and owns everything the child wrote.
+
+The boundary reports termination as a status selector plus a code, which becomes `Exited` or
+`Signaled` here. A nonzero exit code is neither: it is data inside `Exited`.
+
+<a id="declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `OsChildProcess for _`
+
+```silk
+impl OsChildProcess for _
+```
+
 <a id="declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a6d616b65"></a>
 
 ## `make`
@@ -67,19 +96,7 @@ storage. The returned [`ProcessOutcome`](./child-process.md#declaration-73696c6b
 pub fn make() -> OsChildProcess
 ```
 
-Creates a stateless provider for the native process boundary.
-
-### When to use
-
-Use this function at a native application edge. Provide the result as `&mut ChildProcess` to
-portable code that calls `ChildProcess.execute` or `silk.child_process.submit`.
-
-### Details
-
-Construction starts no process and allocates no storage. Each execution translates native
-failures into [`ProcessError`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72) and requires an allocator for owned output captures.
-
-<a id="declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a696d706c656d656e746174696f6e3a32"></a>
 
 ## Implementation `ChildProcess for OsChildProcess`
 
@@ -87,7 +104,7 @@ failures into [`ProcessError`](./child-process.md#declaration-73696c6b2f6368696c
 impl ChildProcess for OsChildProcess
 ```
 
-<a id="declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `execute`
 

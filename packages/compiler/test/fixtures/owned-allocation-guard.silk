@@ -1,10 +1,10 @@
 import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
-import silk.raw_buffer as RawBuffer
-import silk.slot as Slot
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
 // A construction guard over runtime-counted move-only elements, written without any Vector or
 // collection-specific intrinsic: the allocation substrate alone has to carry it.
 //

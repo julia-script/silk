@@ -33,30 +33,30 @@ as its entry separator, and a native provider cannot preserve an embedded NUL as
 ```silk
 import silk.bytes { Bytes }
 
-import silk.child_process { ChildProcess as Process }
+import silk.child_process { ChildProcess as Process, ProcessError, ProcessOutcome, ProcessRequest }
 
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.effect { Effect }
 
-import silk.filesystem as Path
+import silk.filesystem { Path, FileError }
 
 import silk.option { Option }
 
 struct Completed {}
 
-effect fn execute(self: &mut Completed, request: &Process.ProcessRequest) -> Process.ProcessOutcome
-! Process.ProcessError | Allocator.OutOfMemoryError
+effect fn execute(self: &mut Completed, request: &ProcessRequest) -> ProcessOutcome
+! ProcessError | OutOfMemoryError
 ? &mut Allocator {
   return Process.exited(7, Bytes.make(), Bytes.make())
 }
 
-impl Process.ChildProcess for Completed {
+impl Process for Completed {
   execute: Completed.execute
 }
 
 effect fn program() -> i32
-! Path.FileError | Allocator.OutOfMemoryError | Process.ProcessError {
+! FileError | OutOfMemoryError | ProcessError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = Completed {}
   let path = run Path.make("/tool")
@@ -64,15 +64,15 @@ effect fn program() -> i32
   let request = run Process.request(&path)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let outcome = run Process.submit(&request)
-    |> Effect.provideMut<Process.ChildProcess>(&mut provider)
+    |> Effect.provideMut<Process>(&mut provider)
     |> Effect.provideMut<Allocator>(&mut allocator)
   return match move Process.exitCode(&outcome) {
-    Option.Option<i32>.Some {value} => 35 + value
-    Option.Option<i32>.None => 1
+    Option<i32>.Some {value} => 35 + value
+    Option<i32>.None => 1
   }
 }
 
-effect fn recover(error: Path.FileError | Allocator.OutOfMemoryError | Process.ProcessError) -> i32 {
+effect fn recover(error: FileError | OutOfMemoryError | ProcessError) -> i32 {
   return 0
 }
 
@@ -162,146 +162,6 @@ pub reason: ProcessReason
 
 The portable category that callers can use for recovery.
 
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a737061776e4f7065726174696f6e"></a>
-
-## `spawnOperation`
-
-```silk
-pub fn spawnOperation() -> ProcessOperation
-```
-
-Returns the stage for preparing and starting the child process.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a776169744f7065726174696f6e"></a>
-
-## `waitOperation`
-
-```silk
-pub fn waitOperation() -> ProcessOperation
-```
-
-Returns the stage for waiting until the child process terminates.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a636170747572654f7065726174696f6e"></a>
-
-## `captureOperation`
-
-```silk
-pub fn captureOperation() -> ProcessOperation
-```
-
-Returns the stage for copying the completed output and error streams.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6f7065726174696f6e436f6465"></a>
-
-## `operationCode`
-
-```silk
-pub fn operationCode(operation: ProcessOperation) -> i32
-```
-
-Returns the stable numeric code for an execution stage.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6e6f74466f756e64"></a>
-
-## `notFound`
-
-```silk
-pub fn notFound() -> ProcessReason
-```
-
-Returns the reason used when no executable exists at the requested path.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a7065726d697373696f6e44656e696564"></a>
-
-## `permissionDenied`
-
-```silk
-pub fn permissionDenied() -> ProcessReason
-```
-
-Returns the reason used when the provider denies access to the requested executable.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a696e76616c696452657175657374"></a>
-
-## `invalidRequest`
-
-```silk
-pub fn invalidRequest() -> ProcessReason
-```
-
-Returns the reason used when the provider cannot present the request to its process boundary.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6e6f5370616365"></a>
-
-## `noSpace`
-
-```silk
-pub fn noSpace() -> ProcessReason
-```
-
-Returns the reason used when process setup or captured output exhausts provider storage.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a756e737570706f72746564"></a>
-
-## `unsupported`
-
-```silk
-pub fn unsupported() -> ProcessReason
-```
-
-Returns the reason used when the provider does not support the requested process operation.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6f74686572"></a>
-
-## `other`
-
-```silk
-pub fn other() -> ProcessReason
-```
-
-Returns the reason used when no other portable recovery category applies.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a726561736f6e436f6465"></a>
-
-## `reasonCode`
-
-```silk
-pub fn reasonCode(reason: ProcessReason) -> i32
-```
-
-Returns the stable numeric code for a portable recovery category.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6661696c757265"></a>
-
-## `failure`
-
-```silk
-pub fn failure(operation: ProcessOperation, reason: ProcessReason) -> ProcessError
-```
-
-Creates a process failure without a provider-defined numeric code.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6661696c75726557697468436f6465"></a>
-
-## `failureWithCode`
-
-```silk
-pub fn failureWithCode(operation: ProcessOperation, reason: ProcessReason, code: i32) -> ProcessError
-```
-
-Creates a process failure with a provider-defined numeric code for diagnostics.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a70726f7669646572436f6465"></a>
-
-## `providerCode`
-
-```silk
-pub fn providerCode(error: &silk/child_process.ProcessError) -> silk/option.Option<i32>
-```
-
-Returns the provider-defined numeric code, or `None` when the failure has no such code.
-
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f6365737352657175657374"></a>
 
 ## `ProcessRequest`
@@ -323,138 +183,6 @@ did not name.
 
 Argument, environment-name, and environment-value bytes must not contain NUL. NUL separates
 entries in the provider request format.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a72657175657374"></a>
-
-## `request`
-
-```silk
-pub effect fn request(program: &silk/filesystem.Path) -> ProcessRequest ! OutOfMemoryError ? &mut Allocator
-```
-
-Creates a request for `program` with no arguments, an empty environment, and the caller's
-own working directory.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a7265717565737457697468696e"></a>
-
-## `requestWithin`
-
-```silk
-pub effect fn requestWithin(program: &silk/filesystem.Path, directory: &silk/filesystem.Path) -> ProcessRequest ! OutOfMemoryError ? &mut Allocator
-```
-
-Creates a request that runs `program` in `directory` instead of the caller's
-working directory.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a616464417267756d656e74"></a>
-
-## `addArgument`
-
-```silk
-pub effect fn addArgument(self: &mut silk/child_process.ProcessRequest, value: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
-```
-
-Appends one NUL-free byte argument after all arguments already in the request.
-
-### Details
-
-The request copies `value` and preserves argument order.
-
-### Gotchas
-
-`value` must not contain NUL. NUL is the entry separator used by process providers.
-If allocation fails, do not reuse `self`; it can contain an incomplete argument entry.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a7365745661726961626c65"></a>
-
-## `setVariable`
-
-```silk
-pub effect fn setVariable(self: &mut silk/child_process.ProcessRequest, name: &[u8], value: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
-```
-
-Appends one NUL-free environment entry as `name`, `=`, and `value` bytes.
-
-### Details
-
-The request starts with an empty environment and preserves insertion order. This function does
-not read or merge the caller's environment.
-
-### Gotchas
-
-`name` and `value` must not contain NUL. The request builder does not validate environment-name
-grammar beyond this provider-format requirement.
-If allocation fails, do not reuse `self`; it can contain an incomplete environment entry.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a70726f6772616d"></a>
-
-## `program`
-
-```silk
-pub fn program(self: &silk/child_process.ProcessRequest) -> &[u8]
-```
-
-Borrows the executable path bytes for the lifetime of the request borrow.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a617267756d656e7473"></a>
-
-## `arguments`
-
-```silk
-pub fn arguments(self: &silk/child_process.ProcessRequest) -> &[u8]
-```
-
-Borrows all ordered arguments as one block of NUL-terminated entries.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a617267756d656e74436f756e74"></a>
-
-## `argumentCount`
-
-```silk
-pub fn argumentCount(self: &silk/child_process.ProcessRequest) -> usize
-```
-
-Returns the number of calls to [`addArgument`](#declaration-73696c6b2f6368696c645f70726f636573733a3a616464417267756d656e74) that completed successfully.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a656e7669726f6e6d656e74"></a>
-
-## `environment`
-
-```silk
-pub fn environment(self: &silk/child_process.ProcessRequest) -> &[u8]
-```
-
-Borrows the explicit environment as one block of NUL-terminated `name=value` entries.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a656e7669726f6e6d656e74436f756e74"></a>
-
-## `environmentCount`
-
-```silk
-pub fn environmentCount(self: &silk/child_process.ProcessRequest) -> usize
-```
-
-Returns the number of calls to [`setVariable`](#declaration-73696c6b2f6368696c645f70726f636573733a3a7365745661726961626c65) that completed successfully.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a776f726b696e674469726563746f7279"></a>
-
-## `workingDirectory`
-
-```silk
-pub fn workingDirectory(self: &silk/child_process.ProcessRequest) -> &[u8]
-```
-
-Borrows the selected working-directory bytes, or an empty view when the child inherits one.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a686173576f726b696e674469726563746f7279"></a>
-
-## `hasWorkingDirectory`
-
-```silk
-pub fn hasWorkingDirectory(self: &silk/child_process.ProcessRequest) -> bool
-```
-
-Reports whether the request selects a working directory instead of inheriting one.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a457869746564"></a>
 
@@ -593,6 +321,284 @@ Runs one request to termination and returns owned captures of both output stream
 
 This operation blocks and closes the child's standard input. A nonzero exit code returns on
 the success channel. Start, wait, and capture failures produce `ProcessError`.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `ChildProcess for _`
+
+```silk
+impl ChildProcess for _
+```
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a737061776e4f7065726174696f6e"></a>
+
+## `spawnOperation`
+
+```silk
+pub fn spawnOperation() -> ProcessOperation
+```
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a776169744f7065726174696f6e"></a>
+
+## `waitOperation`
+
+```silk
+pub fn waitOperation() -> ProcessOperation
+```
+
+Returns the stage for waiting until the child process terminates.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a636170747572654f7065726174696f6e"></a>
+
+## `captureOperation`
+
+```silk
+pub fn captureOperation() -> ProcessOperation
+```
+
+Returns the stage for copying the completed output and error streams.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6f7065726174696f6e436f6465"></a>
+
+## `operationCode`
+
+```silk
+pub fn operationCode(operation: ProcessOperation) -> i32
+```
+
+Returns the stable numeric code for an execution stage.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6e6f74466f756e64"></a>
+
+## `notFound`
+
+```silk
+pub fn notFound() -> ProcessReason
+```
+
+Returns the reason used when no executable exists at the requested path.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a7065726d697373696f6e44656e696564"></a>
+
+## `permissionDenied`
+
+```silk
+pub fn permissionDenied() -> ProcessReason
+```
+
+Returns the reason used when the provider denies access to the requested executable.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a696e76616c696452657175657374"></a>
+
+## `invalidRequest`
+
+```silk
+pub fn invalidRequest() -> ProcessReason
+```
+
+Returns the reason used when the provider cannot present the request to its process boundary.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6e6f5370616365"></a>
+
+## `noSpace`
+
+```silk
+pub fn noSpace() -> ProcessReason
+```
+
+Returns the reason used when process setup or captured output exhausts provider storage.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a756e737570706f72746564"></a>
+
+## `unsupported`
+
+```silk
+pub fn unsupported() -> ProcessReason
+```
+
+Returns the reason used when the provider does not support the requested process operation.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6f74686572"></a>
+
+## `other`
+
+```silk
+pub fn other() -> ProcessReason
+```
+
+Returns the reason used when no other portable recovery category applies.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a726561736f6e436f6465"></a>
+
+## `reasonCode`
+
+```silk
+pub fn reasonCode(reason: ProcessReason) -> i32
+```
+
+Returns the stable numeric code for a portable recovery category.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6661696c757265"></a>
+
+## `failure`
+
+```silk
+pub fn failure(operation: ProcessOperation, reason: ProcessReason) -> ProcessError
+```
+
+Creates a process failure without a provider-defined numeric code.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6661696c75726557697468436f6465"></a>
+
+## `failureWithCode`
+
+```silk
+pub fn failureWithCode(operation: ProcessOperation, reason: ProcessReason, code: i32) -> ProcessError
+```
+
+Creates a process failure with a provider-defined numeric code for diagnostics.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a70726f7669646572436f6465"></a>
+
+## `providerCode`
+
+```silk
+pub fn providerCode(error: &silk/child_process.ProcessError) -> silk/option.Option<i32>
+```
+
+Returns the provider-defined numeric code, or `None` when the failure has no such code.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a72657175657374"></a>
+
+## `request`
+
+```silk
+pub effect fn request(program: &silk/filesystem.Path) -> ProcessRequest ! OutOfMemoryError ? &mut Allocator
+```
+
+Creates a request for `program` with no arguments, an empty environment, and the caller's
+own working directory.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a7265717565737457697468696e"></a>
+
+## `requestWithin`
+
+```silk
+pub effect fn requestWithin(program: &silk/filesystem.Path, directory: &silk/filesystem.Path) -> ProcessRequest ! OutOfMemoryError ? &mut Allocator
+```
+
+Creates a request that runs `program` in `directory` instead of the caller's
+working directory.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a616464417267756d656e74"></a>
+
+## `addArgument`
+
+```silk
+pub effect fn addArgument(self: &mut silk/child_process.ProcessRequest, value: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
+```
+
+Appends one NUL-free byte argument after all arguments already in the request.
+
+### Details
+
+The request copies `value` and preserves argument order.
+
+### Gotchas
+
+`value` must not contain NUL. NUL is the entry separator used by process providers.
+If allocation fails, do not reuse `self`; it can contain an incomplete argument entry.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a7365745661726961626c65"></a>
+
+## `setVariable`
+
+```silk
+pub effect fn setVariable(self: &mut silk/child_process.ProcessRequest, name: &[u8], value: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
+```
+
+Appends one NUL-free environment entry as `name`, `=`, and `value` bytes.
+
+### Details
+
+The request starts with an empty environment and preserves insertion order. This function does
+not read or merge the caller's environment.
+
+### Gotchas
+
+`name` and `value` must not contain NUL. The request builder does not validate environment-name
+grammar beyond this provider-format requirement.
+If allocation fails, do not reuse `self`; it can contain an incomplete environment entry.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a70726f6772616d"></a>
+
+## `program`
+
+```silk
+pub fn program(self: &silk/child_process.ProcessRequest) -> &[u8]
+```
+
+Borrows the executable path bytes for the lifetime of the request borrow.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a617267756d656e7473"></a>
+
+## `arguments`
+
+```silk
+pub fn arguments(self: &silk/child_process.ProcessRequest) -> &[u8]
+```
+
+Borrows all ordered arguments as one block of NUL-terminated entries.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a617267756d656e74436f756e74"></a>
+
+## `argumentCount`
+
+```silk
+pub fn argumentCount(self: &silk/child_process.ProcessRequest) -> usize
+```
+
+Returns the number of calls to [`addArgument`](#declaration-73696c6b2f6368696c645f70726f636573733a3a616464417267756d656e74) that completed successfully.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a656e7669726f6e6d656e74"></a>
+
+## `environment`
+
+```silk
+pub fn environment(self: &silk/child_process.ProcessRequest) -> &[u8]
+```
+
+Borrows the explicit environment as one block of NUL-terminated `name=value` entries.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a656e7669726f6e6d656e74436f756e74"></a>
+
+## `environmentCount`
+
+```silk
+pub fn environmentCount(self: &silk/child_process.ProcessRequest) -> usize
+```
+
+Returns the number of calls to [`setVariable`](#declaration-73696c6b2f6368696c645f70726f636573733a3a7365745661726961626c65) that completed successfully.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a776f726b696e674469726563746f7279"></a>
+
+## `workingDirectory`
+
+```silk
+pub fn workingDirectory(self: &silk/child_process.ProcessRequest) -> &[u8]
+```
+
+Borrows the selected working-directory bytes, or an empty view when the child inherits one.
+
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a686173576f726b696e674469726563746f7279"></a>
+
+## `hasWorkingDirectory`
+
+```silk
+pub fn hasWorkingDirectory(self: &silk/child_process.ProcessRequest) -> bool
+```
+
+Reports whether the request selects a working directory instead of inheriting one.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a657869746564"></a>
 

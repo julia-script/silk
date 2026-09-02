@@ -42,6 +42,54 @@ A stateless Unix-family native provider of monotonic marks and blocking deadline
 A failed, invalid, or unrepresentable clock result traps. Direct WebAssembly does not support a
 reachable operation on this provider.
 
+<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `OsMonotonicClock for _`
+
+```silk
+impl OsMonotonicClock for _
+```
+
+<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+
+### Operation `now`
+
+```silk
+now = _
+```
+
+<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a31"></a>
+
+### Operation `getResolution`
+
+```silk
+getResolution = _
+```
+
+<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a32"></a>
+
+### Operation `waitUntil`
+
+```silk
+waitUntil = _
+```
+
+<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a33"></a>
+
+### Operation `waitFor`
+
+```silk
+waitFor = _
+```
+
+<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `OsMonotonicClock for _`
+
+```silk
+impl OsMonotonicClock for _
+```
+
 <a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a6d616b65"></a>
 
 ## `make`
@@ -50,17 +98,15 @@ reachable operation on this provider.
 pub fn make() -> OsMonotonicClock
 ```
 
-Creates a native monotonic-clock provider without reading the clock or installing a default.
+<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a32"></a>
 
-<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a30"></a>
-
-## Implementation `MonotonicClock.MonotonicClock for OsMonotonicClock`
+## Implementation `MonotonicClock for OsMonotonicClock`
 
 ```silk
-impl MonotonicClock.MonotonicClock for OsMonotonicClock
+impl MonotonicClock for OsMonotonicClock
 ```
 
-<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `now`
 
@@ -68,7 +114,7 @@ impl MonotonicClock.MonotonicClock for OsMonotonicClock
 now = OsMonotonicClock.now
 ```
 
-<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a31"></a>
+<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a31"></a>
 
 ### Operation `getResolution`
 
@@ -76,7 +122,7 @@ now = OsMonotonicClock.now
 getResolution = OsMonotonicClock.getResolution
 ```
 
-<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a32"></a>
+<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a32"></a>
 
 ### Operation `waitUntil`
 
@@ -84,7 +130,7 @@ getResolution = OsMonotonicClock.getResolution
 waitUntil = OsMonotonicClock.waitUntil
 ```
 
-<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a33"></a>
+<a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a33"></a>
 
 ### Operation `waitFor`
 

@@ -14,14 +14,14 @@
 //! ```silk
 //! import silk.bytes { Bytes }
 //!
-//! import silk.allocator { Allocator }
+//! import silk.allocator { Allocator, OutOfMemoryError }
 //!
 //! import silk.effect { Effect }
 //!
 //! import silk.u8
 //!
 //! effect fn build() -> i32
-//! ! Allocator.OutOfMemoryError {
+//! ! OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
 //!   let source = b"AB"
 //!   let copying = Bytes.copy(&source)
@@ -37,7 +37,7 @@
 //!   return u8.toI32(readable[0]) - u8.toI32(readable[1]) + u8.toI32(readable[2]) - 42
 //! }
 //!
-//! effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+//! effect fn recover(error: OutOfMemoryError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -46,19 +46,11 @@
 //! }
 //! ```
 
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 import silk.allocator { OutOfMemoryError }
 import silk.u8 as u8
 import silk.usize as usize
-import silk.vector {
-  Vector,
-  make as vectorMake,
-  append as vectorAppend,
-  appendBytes as vectorAppendBytes,
-  length as vectorLength,
-  asSlice as vectorAsSlice,
-  asMutSlice as vectorAsMutSlice
-}
+import silk.vector { Vector, appendBytes as vectorAppendBytes }
 
 /// An owned encoding-neutral sequence of arbitrary octets.
 ///
@@ -70,58 +62,61 @@ pub struct Bytes {
   values: Vector<u8>
 }
 
-/// Creates an empty `Bytes` value without allocating storage.
-pub fn make() -> Bytes {
-  return Bytes { values: vectorMake<u8>() }
-}
-
-/// Allocates an owned initialized byte buffer of exactly `length` zero octets.
-///
-/// # Details
-///
-/// A zero length returns an empty value without an allocation.
-pub effect fn zeroed(length: usize) -> Bytes ! OutOfMemoryError ? &mut Allocator {
-  let mut result = make()
-  let mut index = usize.ZERO
-  while index < length {
-    let appended = run vectorAppend<u8>(&mut result.values, u8.toU8(0))
-    index = index + usize.ONE
+impl Bytes {
+  /// Creates an empty `Bytes` value without allocating storage.
+  pub fn make() -> Bytes {
+    return Bytes { values: Vector.make<u8>() }
   }
-  return move result
+
+  /// Allocates an owned initialized byte buffer of exactly `length` zero octets.
+  ///
+  /// # Details
+  ///
+  /// A zero length returns an empty value without an allocation.
+  pub effect fn zeroed(length: usize) -> Bytes ! OutOfMemoryError ? &mut Allocator {
+    let mut result = Bytes.make()
+    let mut index = usize.ZERO
+    while index < length {
+      let appended = run Vector.append<u8>(&mut result.values, u8.toU8(0))
+      index = index + usize.ONE
+    }
+    return move result
+  }
+
+  /// Returns the initialized byte count.
+  pub fn length(self: &Self) -> usize {
+    return Vector.length<u8>(&self.values)
+  }
+
+  /// Copies a complete borrowed byte sequence into independently owned storage.
+  pub effect fn copy(values: &[u8]) -> Bytes ! OutOfMemoryError ? &mut Allocator {
+    let mut result = Bytes.make()
+    let appended = run Bytes.append(&mut result, values)
+    return move result
+  }
+
+  /// Appends a complete borrowed byte sequence in source order.
+  ///
+  /// # Details
+  ///
+  /// If growth fails, the original bytes and their length remain unchanged.
+  pub effect fn append(self: &mut Self, values: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator {
+    let appended = run vectorAppendBytes(&mut self.values, values)
+    return ()
+  }
+
+  /// Borrows all initialized octets as one shared lexical slice.
+  pub fn asSlice(self: &Self) -> &[u8] {
+    return Vector.asSlice<u8>(&self.values)
+  }
+
+  /// Borrows all initialized octets as one exclusive lexical slice.
+  ///
+  /// # Gotchas
+  ///
+  /// Do not retain this slice across [`append`], because an append can replace the allocation.
+  pub fn asMutSlice(self: &mut Self) -> &mut [u8] {
+    return Vector.asMutSlice<u8>(&mut self.values)
+  }
 }
 
-/// Returns the initialized byte count.
-pub fn length(self: &Bytes) -> usize {
-  return vectorLength<u8>(&self.values)
-}
-
-/// Copies a complete borrowed byte sequence into independently owned storage.
-pub effect fn copy(values: &[u8]) -> Bytes ! OutOfMemoryError ? &mut Allocator {
-  let mut result = make()
-  let appended = run append(&mut result, values)
-  return move result
-}
-
-/// Appends a complete borrowed byte sequence in source order.
-///
-/// # Details
-///
-/// If growth fails, the original bytes and their length remain unchanged.
-pub effect fn append(self: &mut Bytes, values: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator {
-  let appended = run vectorAppendBytes(&mut self.values, values)
-  return ()
-}
-
-/// Borrows all initialized octets as one shared lexical slice.
-pub fn asSlice(self: &Bytes) -> &[u8] {
-  return vectorAsSlice<u8>(&self.values)
-}
-
-/// Borrows all initialized octets as one exclusive lexical slice.
-///
-/// # Gotchas
-///
-/// Do not retain this slice across [`append`], because an append can replace the allocation.
-pub fn asMutSlice(self: &mut Bytes) -> &mut [u8] {
-  return vectorAsMutSlice<u8>(&mut self.values)
-}

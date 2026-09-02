@@ -167,13 +167,13 @@ pub fn main() -> i32 { return 0 }`),
  */
 const stringConstantSource = (initializer: string, binding: string) =>
   `import silk.usize as usize
-import silk.string { byteLength }
+import silk.string { String }
 
 const pattern: string = ${initializer}
 
 pub fn main() -> i32 {
   let inline = ${binding}
-  return usize.toI32(byteLength(pattern)) + usize.toI32(byteLength(inline))
+  return usize.toI32(String.byteLength(pattern)) + usize.toI32(String.byteLength(inline))
 }`
 
 const staticStringIds = (hir: string): ReadonlyArray<string> =>
@@ -233,9 +233,9 @@ it.effect('resolves a public string constant across a module boundary', () =>
     const strings = 'pub const greeting: string = "hi"'
     const main = `import silk.usize as usize
 import strings { greeting }
-import silk.string { byteLength }
+import silk.string { String }
 
-pub fn main() -> i32 { return usize.toI32(byteLength(greeting)) }`
+pub fn main() -> i32 { return usize.toI32(String.byteLength(greeting)) }`
     const snapshot = yield* Analysis.makeRealized({
       root: SourceFile.make('main', encoder.encode(main)),
     }).pipe(Effect.provide(SourceResolver.memory(new Map([['strings', encoder.encode(strings)]]))))

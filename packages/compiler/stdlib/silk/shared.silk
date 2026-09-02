@@ -1,31 +1,31 @@
-//! Explicitly allocated, single-threaded shared ownership with callback-scoped access.
+//! Explicitly allocated, single-threaded shared ownership Shared.with callback-scoped access.
 //!
 //! # When to use
 //! Use [`Shared`] when several independently owned local values or dormant computations must retain
 //! one mutable state without retaining a lexical borrow for their whole lifetimes. Construction is
-//! the only implicit storage boundary: [`make`] allocates once, while [`clone`], [`with`], and
-//! [`withMut`] allocate nothing themselves.
+//! the only implicit storage boundary: [`Shared.make`] allocates once, while [`Shared.clone`], [`Shared.with`], and
+//! [`Shared.withMut`] allocate nothing themselves.
 //!
 //! # Details
 //! Every handle is affine and local to one execution thread. Cloning adds one strong obligation;
 //! dropping a non-last handle preserves the value and allocation, while dropping the last handle
 //! cleans the value and then releases the allocation. Access is callback-scoped and exclusive even
-//! through [`with`]: nesting `with` under `with`, `withMut` under `with`, `with` under `withMut`, or
-//! `withMut` under `withMut` through an alias traps before the nested callback receives a reference.
+//! through [`Shared.with`]: nesting `Shared.with` under `Shared.with`, `Shared.withMut` under `Shared.with`, `Shared.with` under `Shared.withMut`, or
+//! `Shared.withMut` under `Shared.withMut` through an alias traps before the nested callback receives a reference.
 //!
 //! # Gotchas
 //! Strong-reference cycles leak until ordinary source breaks them. This module does not expose weak
 //! handles, allocation identity, raw addresses, thread transfer, or post-trap cleanup guarantees.
-//! Extract work under [`withMut`] and invoke external callbacks only after the access call returns.
+//! Extract work under [`Shared.withMut`] and invoke external callbacks only after the access call returns.
 //!
 //! # Examples
 //! ## Share and update one local value
 //! ```silk
-//! import silk.allocator { Allocator }
+//! import silk.allocator { Allocator, OutOfMemoryError }
 //!
 //! import silk.effect { Effect }
 //!
-//! import silk.shared { clone, make, with, withMut }
+//! import silk.shared { Shared }
 //!
 //! struct Counter { value: i32 }
 //!
@@ -37,17 +37,17 @@
 //! fn read(value: &Counter) -> i32 { return value.value }
 //!
 //! effect fn useCell() -> i32
-//! ! Allocator.OutOfMemoryError {
+//! ! OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
-//!   let creating = make<Counter>(Counter { value: 20 })
+//!   let creating = Shared.make<Counter>(Counter { value: 20 })
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let cell = run creating
-//!   let alias = clone<Counter>(&cell)
-//!   let updated = withMut<Counter, i32>(&alias, increment)
-//!   return with<Counter, i32>(&cell, read)
+//!   let alias = Shared.clone<Counter>(&cell)
+//!   let updated = Shared.withMut<Counter, i32>(&alias, increment)
+//!   return Shared.with<Counter, i32>(&cell, read)
 //! }
 //!
-//! effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+//! effect fn recover(error: OutOfMemoryError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -56,7 +56,7 @@
 //! }
 //! ```
 
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 import silk.allocator { OutOfMemoryError }
 
 /// An affine, non-thread-transferable strong handle to one local value.
@@ -69,38 +69,60 @@ pub struct Shared<T> {
   core: Intrinsic.SharedCore<T>
 }
 
+impl<T> Shared<T> {
+  /// Allocates one control block and transfers `value` into a new strong handle.
+  ///
+  /// # Details
+  ///
+  /// Allocation failure leaves `value` under ordinary Effect-frame cleanup and produces no handle.
+  /// The returned handle carries no allocator requirement after construction completes.
+  pub effect fn make(value: T) -> Shared<T> ! OutOfMemoryError ? &mut Allocator {
+    let layout = Intrinsic.sharedLayout<T>()
+    let recipe = Allocator.allocate(move layout)
+    let allocation = run recipe
+    unsafe {
+      let core = Intrinsic.sharedFromAllocation<T>(move allocation, move value)
+      return Shared<T> { core: move core }
+    }
+    return absurd<Shared<T>>()
+  }
+
+  /// Adds one strong handle without allocating or touching the stored value.
+  ///
+  /// # Details
+  ///
+  /// Count exhaustion traps before mutation and does not produce a partial handle.
+  pub fn clone(self: &Self) -> Shared<T> {
+    let core = Intrinsic.sharedClone<T>(&self.core)
+    return Shared<T> { core: move core }
+  }
+
+  /// Runs one take-once callback Shared.with exclusive access to the stored value.
+  ///
+  /// # Details
+  ///
+  /// The borrow cannot escape the callback or remain live across suspension. Reentrant access through
+  /// any alias traps before the nested callback receives a reference.
+  pub fn withMut<A>(self: &Self, use: once fn(&mut T) -> A) -> A {
+    return Intrinsic.sharedWithMut<T, A>(&self.core, move use, conflict)
+  }
+
+  /// Runs one take-once callback Shared.with shared access to the stored value.
+  ///
+  /// # Details
+  ///
+  /// Inspection delegates through [`Shared.withMut`], so it has the same exclusive runtime access state and
+  /// the same four-way reentrant conflict policy. The callback cannot mutate through its `&T`.
+  pub fn with<A>(self: &Self, use: once fn(&T) -> A) -> A {
+    return Shared.withMut<T, A>(self, inspect<T, A>(move use))
+  }
+}
+
 // Diverges after the scalar trap. Recursion makes the helper polymorphic without requiring a
 // compiler-owned generic trap intrinsic; execution never reaches the recursive call.
 fn absurd<T>() -> T {
   let boom = 1 / 0
   return absurd<T>()
-}
-
-/// Allocates one control block and transfers `value` into a new strong handle.
-///
-/// # Details
-///
-/// Allocation failure leaves `value` under ordinary Effect-frame cleanup and produces no handle.
-/// The returned handle carries no allocator requirement after construction completes.
-pub effect fn make<T>(value: T) -> Shared<T> ! OutOfMemoryError ? &mut Allocator {
-  let layout = Intrinsic.sharedLayout<T>()
-  let recipe = Allocator.allocate(move layout)
-  let allocation = run recipe
-  unsafe {
-    let core = Intrinsic.sharedFromAllocation<T>(move allocation, move value)
-    return Shared<T> { core: move core }
-  }
-  return absurd<Shared<T>>()
-}
-
-/// Adds one strong handle without allocating or touching the stored value.
-///
-/// # Details
-///
-/// Count exhaustion traps before mutation and does not produce a partial handle.
-pub fn clone<T>(self: &Shared<T>) -> Shared<T> {
-  let core = Intrinsic.sharedClone<T>(&self.core)
-  return Shared<T> { core: move core }
 }
 
 // Public conflict policy is ordinary source. The selected callback never starts when this path is
@@ -110,28 +132,9 @@ fn conflict() -> never {
   return conflict()
 }
 
-/// Runs one take-once callback with exclusive access to the stored value.
-///
-/// # Details
-///
-/// The borrow cannot escape the callback or remain live across suspension. Reentrant access through
-/// any alias traps before the nested callback receives a reference.
-pub fn withMut<T, A>(self: &Shared<T>, use: once fn(&mut T) -> A) -> A {
-  return Intrinsic.sharedWithMut<T, A>(&self.core, move use, conflict)
-}
-
 // Named ordinary-source adapter for shared inspection. It consumes the caller's take-once callback
 // and narrows the exclusive callback parameter to a shared borrow for exactly this invocation.
 fn inspect<T, A>(value: &mut T, use: once fn(&T) -> A) -> A {
   return use(move value)
 }
 
-/// Runs one take-once callback with shared access to the stored value.
-///
-/// # Details
-///
-/// Inspection delegates through [`withMut`], so it has the same exclusive runtime access state and
-/// the same four-way reentrant conflict policy. The callback cannot mutate through its `&T`.
-pub fn with<T, A>(self: &Shared<T>, use: once fn(&T) -> A) -> A {
-  return withMut<T, A>(self, inspect<T, A>(move use))
-}

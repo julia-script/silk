@@ -100,7 +100,7 @@ const dropHook = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct Guard {
   tag: i32
@@ -135,9 +135,9 @@ const unionCleanup = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.usize as usize
-import silk.box { Box, make as boxMake, get as boxGet }
+import silk.box { Box }
 
 pub struct Leaf {}
 
@@ -160,8 +160,8 @@ effect fn leaf(value: i32) -> Tree ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn branch(left: Tree, right: Tree, value: i32) -> Tree ! OutOfMemoryError ? &mut Allocator {
-  let boxedLeft = run boxMake<Tree>(move left)
-  let boxedRight = run boxMake<Tree>(move right)
+  let boxedLeft = run Box.make<Tree>(move left)
+  let boxedRight = run Box.make<Tree>(move right)
   return Tree {
     shape: Shape { kind: Branch { left: move boxedLeft, right: move boxedRight } },
     value: value
@@ -175,7 +175,7 @@ fn total(self: &Tree) -> i32 {
 fn shapeTotal(self: &Shape) -> i32 {
   return match &self.kind {
     Leaf nothing => 0
-    Branch { left, right } => boxTotal(boxGet<Tree>(&left)) + boxTotal(boxGet<Tree>(&right))
+    Branch { left, right } => boxTotal(Box.get<Tree>(&left)) + boxTotal(Box.get<Tree>(&right))
   }
 }
 

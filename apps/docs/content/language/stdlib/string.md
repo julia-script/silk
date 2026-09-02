@@ -27,15 +27,15 @@ began. Start with [`scalarCursor`](#declaration-73696c6b2f737472696e673a3a736361
 ```silk
 import silk.result { Result }
 
-import silk.string { String }
+import silk.string { String, ScalarStep, InvalidUtf8 }
 
 import silk.usize
 
 pub fn main() -> i32 {
   let valid = String.fromUtf8(b"Silk")
-    |> Result.unwrapOr<string, String.InvalidUtf8>("")
+    |> Result.unwrapOr<string, InvalidUtf8>("")
   let rejected = String.fromUtf8(b"a\x80")
-    |> Result.unwrapOr<string, String.InvalidUtf8>("")
+    |> Result.unwrapOr<string, InvalidUtf8>("")
   let length = String.byteLength(valid)
     |> usize.toI32
   let rejectedLength = String.byteLength(rejected)
@@ -49,24 +49,24 @@ pub fn main() -> i32 {
 ```silk
 import silk.char
 
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.effect { Effect }
 
 import silk.option { Option }
 
-import silk.string { String }
+import silk.string { String, ScalarStep, InvalidUtf8 }
 
 import silk.u32
 
-fn scalarCode(step: String.ScalarStep) -> i32 {
+fn scalarCode(step: ScalarStep) -> i32 {
   return String.scalarValue(&step)
     |> char.toU32
     |> u32.toI32
 }
 
 effect fn build() -> i32
-! Allocator.OutOfMemoryError {
+! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let copying = String.copy("é")
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -75,12 +75,12 @@ effect fn build() -> i32
     |> Effect.provideMut<Allocator>(&mut allocator)
   let appended = run appending
   let stepped = String.nextScalar(String.view(&text), String.scalarCursor())
-  let mapped = Option.map<String.ScalarStep, i32>(move stepped, scalarCode)
+  let mapped = Option.map<ScalarStep, i32>(move stepped, scalarCode)
   let scalar = Option.unwrapOr<i32>(move mapped, 0)
   return scalar - 191
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -103,45 +103,13 @@ pub struct String
 
 An owned sequence of valid UTF-8 bytes that releases its storage on drop.
 
-<a id="declaration-73696c6b2f737472696e673a3a496e76616c696455746638"></a>
+<a id="declaration-73696c6b2f737472696e673a3a696d706c656d656e746174696f6e3a30"></a>
 
-## `InvalidUtf8`
-
-```silk
-pub struct InvalidUtf8
-```
-
-The first byte offset at which UTF-8 validation failed.
-
-<a id="declaration-73696c6b2f737472696e673a3a496e76616c6964557466383a3a6669656c643a30"></a>
-
-### Field `offset`
+## Implementation `String for _`
 
 ```silk
-pub offset: usize
+impl String for _
 ```
-
-The zero-based offset of the first byte that cannot continue a valid UTF-8 sequence.
-
-<a id="declaration-73696c6b2f737472696e673a3a5363616c6172437572736f72"></a>
-
-## `ScalarCursor`
-
-```silk
-pub struct ScalarCursor
-```
-
-An opaque UTF-8 position used for scalar-by-scalar traversal.
-
-<a id="declaration-73696c6b2f737472696e673a3a5363616c617253746570"></a>
-
-## `ScalarStep`
-
-```silk
-pub struct ScalarStep
-```
-
-One decoded Unicode scalar, its byte offset, and the cursor after it.
 
 <a id="declaration-73696c6b2f737472696e673a3a66726f6d55746638556e636865636b6564"></a>
 
@@ -151,24 +119,12 @@ One decoded Unicode scalar, its byte offset, and the cursor after it.
 pub unsafe fn fromUtf8Unchecked(values: &[u8]) -> string
 ```
 
-Borrows caller-validated UTF-8 bytes as text without runtime validation.
-
-### When to use
-
-Use this function only when an earlier operation proves that the complete byte view is UTF-8.
-Use [`fromUtf8`](#declaration-73696c6b2f737472696e673a3a66726f6d55746638) when the bytes have not been validated.
-
-### Gotchas
-
-The caller must guarantee that the complete byte view is valid UTF-8 for the lifetime of the
-returned string view. Invalid bytes violate the safety contract.
-
 <a id="declaration-73696c6b2f737472696e673a3a66726f6d55746638"></a>
 
 ## `fromUtf8`
 
 ```silk
-pub fn fromUtf8(values: &[u8]) -> silk/result.Result<string, silk/string.InvalidUtf8>
+pub fn fromUtf8(values: &[u8]) -> Result<string,InvalidUtf8>
 ```
 
 Validates a complete byte view and borrows it as text without allocating.
@@ -203,7 +159,7 @@ Copies valid borrowed text into independently owned storage.
 ## `copyUtf8`
 
 ```silk
-pub effect fn copyUtf8(values: &[u8]) -> silk/result.Result<silk/string.String, silk/string.InvalidUtf8> ! OutOfMemoryError ? &mut Allocator
+pub effect fn copyUtf8(values: &[u8]) -> Result<String,InvalidUtf8> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Validates complete UTF-8 bytes and copies them into independently owned storage.
@@ -223,7 +179,7 @@ Effect failure channel. No owned string is returned in either failure case.
 ## `append`
 
 ```silk
-pub effect fn append(self: &mut silk/string.String, value: string) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect fn append(self: &mut unavailable, value: string) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends complete valid text atomically with respect to allocation failure.
@@ -241,7 +197,7 @@ If growth fails, `self` keeps its prior contents and byte length.
 ## `appendOwned`
 
 ```silk
-pub effect fn appendOwned(self: &mut silk/string.String, value: String) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect fn appendOwned(self: &mut unavailable, value: String) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends another owned String atomically with respect to allocation failure.
@@ -259,7 +215,7 @@ This function consumes `value`. If growth fails, `self` keeps its prior contents
 ## `view`
 
 ```silk
-pub fn view(self: &silk/string.String) -> string
+pub fn view(self: &unavailable) -> string
 ```
 
 Borrows the complete owned contents as valid text without allocating or copying.
@@ -289,7 +245,7 @@ Returns a string's UTF-8 byte length.
 ## `ownedUtf8Bytes`
 
 ```silk
-pub fn ownedUtf8Bytes(self: &silk/string.String) -> &[u8]
+pub fn ownedUtf8Bytes(self: &unavailable) -> &[u8]
 ```
 
 Borrows an owned String's immutable UTF-8 encoding.
@@ -299,7 +255,7 @@ Borrows an owned String's immutable UTF-8 encoding.
 ## `ownedByteLength`
 
 ```silk
-pub fn ownedByteLength(self: &silk/string.String) -> usize
+pub fn ownedByteLength(self: &unavailable) -> usize
 ```
 
 Returns an owned String's initialized UTF-8 byte length.
@@ -372,3 +328,31 @@ does not allocate.
 ### Gotchas
 
 The cursor must come from [`scalarCursor`](#declaration-73696c6b2f737472696e673a3a7363616c6172437572736f72) or [`nextCursor`](#declaration-73696c6b2f737472696e673a3a6e657874437572736f72) for the same unchanged string.
+
+<a id="declaration-73696c6b2f737472696e673a3a496e76616c696455746638"></a>
+
+## `InvalidUtf8`
+
+```silk
+pub fn InvalidUtf8(offset: usize) -> _
+```
+
+<a id="declaration-73696c6b2f737472696e673a3a5363616c6172437572736f72"></a>
+
+## `ScalarCursor`
+
+```silk
+pub struct ScalarCursor
+```
+
+An opaque UTF-8 position used for scalar-by-scalar traversal.
+
+<a id="declaration-73696c6b2f737472696e673a3a5363616c617253746570"></a>
+
+## `ScalarStep`
+
+```silk
+pub struct ScalarStep
+```
+
+One decoded Unicode scalar, its byte offset, and the cursor after it.

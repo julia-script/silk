@@ -531,7 +531,7 @@ it('bounds damaged effect-block recovery before the following declaration', () =
 it('parses Effect.retry in direct and pipeline insertion forms', () => {
   const result = parseText(
     'memory://effect-retry.silk',
-    `import silk.effect as Effect
+    `import silk.effect { Effect }
 fn main() -> i32 {
   let direct = Effect.retry(work(), policy)
   let piped = work() |> Effect.retry(policy)
@@ -553,7 +553,7 @@ fn main() -> i32 {
 })
 
 it('rejects the removed bare role-selector argument without retaining role syntax', () => {
-  const source = `import silk.effect as Effect
+  const source = `import silk.effect { Effect }
 fn main() -> i32 {
   let selected = work() |> Effect.provideMut(&mut provider, @Audit)
   return 0
@@ -1837,9 +1837,9 @@ pub fn main() -> i32 { return 42 }`
 })
 
 it('parses reserved import-path segments without changing their token kinds', () => {
-  const source = `import silk.effect as Effect
+  const source = `import silk.effect { Effect }
 import toolkit.effect.helpers as Helpers
-import silk.effect { map }
+import silk.effect { Effect }
 import app.type as Types
 fn main() -> i32 { return 42 }`
   const result = parseText('fixture://reserved-import-paths.silk', source)
@@ -2763,7 +2763,7 @@ fn use(operation: fn(i32) -> i32, value: i32) -> i32 {
 })
 
 it('gives pipelines a complete callable expression and run the complete following expression', () => {
-  const source = `import silk.effect as Effect
+  const source = `import silk.effect { Effect }
 fn use(attempt: Effect<i32>, operation: fn(i32) -> i32) -> i32 {
   let a = 1 |> operation
   let b = 2 |> (operation)
@@ -3972,4 +3972,71 @@ it('keeps a comparison against a star in expression position unchanged', () => {
     ['PAR0002'],
   )
   assertOriginalTokenTraversal(result)
+})
+
+it('parses inherent impl declarations losslessly beside conformances', () => {
+  const source = `pub union Option<T> { None, Some { pub value: T } }
+impl<T> Option<T> {
+  pub fn none() -> Self { return Option<T>.None }
+  pub fn some(value: T) -> Self { return Option.Some { value: move value } }
+  fn map<U>(self: Self, transform: once fn(T) -> U) -> Option<U> { return Option<U>.None }
+  pub static fn arity() -> i32 { return 2 }
+  pub unsafe fn raw(self: &Self) -> i32 { return 0 }
+}
+impl Counter { }
+impl<T> Display for Option<T> { fn display(value: &Self) -> i32 { return 0 } }
+fn main() -> i32 { return 42 }`
+  const result = parseText('memory://inherent-impl.silk', source)
+  assert.deepEqual(result.parserDiagnostics, [])
+  const impls = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'ImplDeclaration',
+  )
+  assert.strictEqual(impls.length, 3)
+  const [inherent, empty, conformance] = impls
+  assert.isDefined(inherent)
+  assert.isDefined(empty)
+  assert.isDefined(conformance)
+  const forTokens = (node: SyntaxTree.Node | undefined): number =>
+    node === undefined
+      ? -1
+      : SyntaxTree.tokens(node).filter((token) => token.kind === 'ForKeyword').length
+  assert.strictEqual(forTokens(inherent), 0)
+  assert.strictEqual(forTokens(empty), 0)
+  assert.strictEqual(forTokens(conformance), 1)
+  const memberKinds = (inherent?.children ?? []).filter(SyntaxTree.isNode).map((node) => node.kind)
+  assert.deepEqual(memberKinds, [
+    'TypeParameterList',
+    'AppliedType',
+    'FunctionDeclaration',
+    'FunctionDeclaration',
+    'FunctionDeclaration',
+    'FunctionDeclaration',
+    'FunctionDeclaration',
+  ])
+  assert.deepEqual(Array.from(reconstructedBytes(result)), result.source.bytes)
+})
+
+it('recovers inside a malformed inherent impl and keeps parsing the next declaration', () => {
+  const unclosed = `impl Counter {
+  pub fn value(self: &Self) -> i32 { return 1
+}
+fn main() -> i32 { return 42 }`
+  const unclosedResult = parseText('memory://inherent-unclosed.silk', unclosed)
+  assert.notDeepEqual(unclosedResult.parserDiagnostics, [])
+  assert.deepEqual(Array.from(reconstructedBytes(unclosedResult)), unclosedResult.source.bytes)
+  const binders = `impl<T, Option<T> { fn none() -> Self { return Option<T>.None } }
+fn main() -> i32 { return 42 }`
+  const bindersResult = parseText('memory://inherent-binders.silk', binders)
+  assert.notDeepEqual(bindersResult.parserDiagnostics, [])
+  const kinds = descendants(bindersResult.root)
+    .filter(SyntaxTree.isNode)
+    .map((node) => node.kind)
+  assert.include(kinds, 'ImplDeclaration')
+  const mainDeclarations = bindersResult.root.children.filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'FunctionDeclaration',
+  )
+  assert.strictEqual(mainDeclarations.length, 1)
+  assert.deepEqual(Array.from(reconstructedBytes(bindersResult)), bindersResult.source.bytes)
 })

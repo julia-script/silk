@@ -1,43 +1,43 @@
 import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect as Effect
-import silk.execution as Execution
-import silk.fiber as Fiber
+import silk.effect { Effect }
+import silk.execution { Execution }
+import silk.fiber { Fiber, Cancelled, Failure, Outcome, PreparedFiber, Success }
 
 struct Problem { code: i32 }
 
-fn outcomeCode(outcome: Fiber.Outcome<i32, Problem>) -> i32 {
-  let Fiber.Outcome<i32, Problem> { value } = move outcome
+fn outcomeCode(outcome: Outcome<i32, Problem>) -> i32 {
+  let Outcome<i32, Problem> { value } = move outcome
   return match move value {
-    Fiber.Success<i32> { value: success } => move success
-    Fiber.Failure<Problem> { error } => error.code
-    Fiber.Cancelled {} => 3
+    Success<i32> { value: success } => move success
+    Failure<Problem> { error } => error.code
+    Cancelled {} => 3
   }
 }
 
-effect fn joinFailure(error: Problem | Fiber.Cancelled) -> i32 {
+effect fn joinFailure(error: Problem | Cancelled) -> i32 {
   return match move error {
     Problem { code } => code
-    Fiber.Cancelled {} => -1
+    Cancelled {} => -1
   }
 }
 
-effect fn joinCancellation(error: Problem | Fiber.Cancelled) -> i32 {
+effect fn joinCancellation(error: Problem | Cancelled) -> i32 {
   return match move error {
     Problem { code } => 0 - code
-    Fiber.Cancelled {} => 6
+    Cancelled {} => 6
   }
 }
 
-effect fn observePending(fiber: Fiber.Fiber<i32, Problem>) -> i32 {
+effect fn observePending(fiber: Fiber<i32, Problem>) -> i32 {
   let outcome = run Fiber.await<i32, Problem>(move fiber)
   return outcomeCode(move outcome)
 }
 
-effect fn joinAsFailureCode(fiber: Fiber.Fiber<i32, Problem>) -> i32 {
+effect fn joinAsFailureCode(fiber: Fiber<i32, Problem>) -> i32 {
   return run Effect.catchAll(Fiber.join<i32, Problem>(move fiber), joinFailure)
 }
 
-effect fn joinAsCancellationCode(fiber: Fiber.Fiber<i32, Problem>) -> i32 {
+effect fn joinAsCancellationCode(fiber: Fiber<i32, Problem>) -> i32 {
   return run Effect.catchAll(Fiber.join<i32, Problem>(move fiber), joinCancellation)
 }
 
@@ -95,7 +95,7 @@ effect fn scenario() -> i32 ! OutOfMemoryError {
   let pendingCancellation = run Fiber.prepare<i32, Problem>()
     |> Effect.provideMut<Allocator>(&mut allocator)
 
-  let Fiber.PreparedFiber<i32, Problem> {
+  let PreparedFiber<i32, Problem> {
     producer: successProducer,
     canceller: successCanceller,
     fiber: successFiber,
@@ -103,7 +103,7 @@ effect fn scenario() -> i32 ! OutOfMemoryError {
   Fiber.completeSuccess<i32, Problem>(move successProducer, 1)
   Fiber.cancel(move successCanceller)
 
-  let Fiber.PreparedFiber<i32, Problem> {
+  let PreparedFiber<i32, Problem> {
     producer: failureProducer,
     canceller: failureCanceller,
     fiber: failureFiber,
@@ -111,7 +111,7 @@ effect fn scenario() -> i32 ! OutOfMemoryError {
   Fiber.completeFailure<i32, Problem>(move failureProducer, Problem { code: 2 })
   Fiber.cancel(move failureCanceller)
 
-  let Fiber.PreparedFiber<i32, Problem> {
+  let PreparedFiber<i32, Problem> {
     producer: cancelledProducer,
     canceller: cancelledCanceller,
     fiber: cancelledFiber,
@@ -119,7 +119,7 @@ effect fn scenario() -> i32 ! OutOfMemoryError {
   Fiber.cancel(move cancelledCanceller)
   Fiber.completeSuccess<i32, Problem>(move cancelledProducer, 99)
 
-  let Fiber.PreparedFiber<i32, Problem> {
+  let PreparedFiber<i32, Problem> {
     producer: joinProducer,
     canceller: joinCanceller,
     fiber: joinFiber,
@@ -127,7 +127,7 @@ effect fn scenario() -> i32 ! OutOfMemoryError {
   Fiber.completeSuccess<i32, Problem>(move joinProducer, 4)
   drop joinCanceller
 
-  let Fiber.PreparedFiber<i32, Problem> {
+  let PreparedFiber<i32, Problem> {
     producer: joinFailureProducer,
     canceller: joinFailureCanceller,
     fiber: joinFailureFiber,
@@ -138,7 +138,7 @@ effect fn scenario() -> i32 ! OutOfMemoryError {
   )
   drop joinFailureCanceller
 
-  let Fiber.PreparedFiber<i32, Problem> {
+  let PreparedFiber<i32, Problem> {
     producer: joinCancelledProducer,
     canceller: joinCancelledCanceller,
     fiber: joinCancelledFiber,
@@ -146,12 +146,12 @@ effect fn scenario() -> i32 ! OutOfMemoryError {
   Fiber.cancel(move joinCancelledCanceller)
   drop joinCancelledProducer
 
-  let Fiber.PreparedFiber<i32, Problem> {
+  let PreparedFiber<i32, Problem> {
     producer: pendingProducer,
     canceller: pendingCanceller,
     fiber: pendingFiber,
   } = move pending
-  let Fiber.PreparedFiber<i32, Problem> {
+  let PreparedFiber<i32, Problem> {
     producer: pendingCancellationProducer,
     canceller: pendingCancellationCanceller,
     fiber: pendingCancellationFiber,

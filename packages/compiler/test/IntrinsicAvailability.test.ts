@@ -745,7 +745,7 @@ pub fn main() -> i32 { return 0 }`)
           diagnostic.reason._tag,
           diagnostic.relatedSpans?.map((related) => related.label),
         ]),
-        [['SEM0194', 'ExportSuspends', ['suspending call']]],
+        [['SEM0201', 'ExportSuspends', ['suspending call']]],
       )
     const synchronous = yield* snapshot(exportSource)
     if (synchronous.target._tag !== 'Resolved') return assert.fail('expected a resolved target')
@@ -825,7 +825,7 @@ it('plans exports over MIR: symbol map, non-native rejection, and suspension', (
   }
   assert.deepEqual(
     summarize(ForeignPlanning.check(suspending, 'LLVM', Target.aarch64AppleDarwin)),
-    [['SEM0194', 'planning/d', undefined]],
+    [['SEM0201', 'planning/d', undefined]],
   )
   assert.deepEqual(ForeignPlanning.check(sample, 'Wasm', Target.wasm32UnknownUnknown), [])
 })

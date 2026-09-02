@@ -306,12 +306,12 @@ const quotaSweepSourceFor = (input: string, id: string): string => {
   const generated = sourceFor(input, id).source
   const withAllocator = replaceExactlyOnce(
     generated,
-    'import silk.vector { Vector, make, append, get, length }',
+    'import silk.vector { Vector }',
     `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { SystemAllocator }
 import silk.layout { Layout }
-import silk.vector { Vector, make, append, get, length }
+import silk.vector { Vector }
 
 struct QuotaAllocator { remaining: i32 }
 

@@ -27,7 +27,7 @@ still stored in it; a container must clear initialized `Slot` values before rele
 ### Initialize and read a raw byte buffer
 
 ```silk
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.effect { Effect }
 
@@ -38,7 +38,7 @@ import silk.raw_buffer { RawBuffer }
 import silk.u8
 
 effect fn build() -> i32
-! Allocator.OutOfMemoryError {
+! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let acquiring = Allocator.allocate(Layout.of<[u8; 3]>())
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -52,7 +52,7 @@ effect fn build() -> i32
   return 0
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -73,14 +73,22 @@ Public declarations: 9.
 pub struct RawBuffer
 ```
 
-The importable name of the `silk.raw_buffer` module scope.
+The owner of the raw storage operations.
 
 ### Details
 
-This struct carries no data and is never constructed by the library. Importing it as
-`import silk.raw_buffer { RawBuffer }` names the module scope, so `RawBuffer.from(...)` and the
-other storage operations resolve through it. It is unrelated to the builtin `RawBuffer<T>`
-type.
+This struct carries no data and is never constructed by the library. Every operation is an
+inherent member declared in `impl RawBuffer`, so `import silk.raw_buffer { RawBuffer }` is the
+one import that reaches `RawBuffer.from(...)` and the rest. It is unrelated to the builtin
+`RawBuffer<T>` type.
+
+<a id="declaration-73696c6b2f7261775f6275666665723a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `RawBuffer for _`
+
+```silk
+impl RawBuffer for _
+```
 
 <a id="declaration-73696c6b2f7261775f6275666665723a3a66726f6d"></a>
 
@@ -89,12 +97,6 @@ type.
 ```silk
 pub fn from<T>(allocation: Allocation, count: usize) -> silk/core.RawBuffer<T>
 ```
-
-Adopts an allocation as typed raw storage with the specified element capacity.
-
-### Gotchas
-
-The caller must prove that the allocation has the size and alignment for `count` values of `T`.
 
 <a id="declaration-73696c6b2f7261775f6275666665723a3a736c6f74"></a>
 

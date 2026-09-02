@@ -992,7 +992,7 @@ it('keeps a Slot loan active until the lexical Slot is consumed', () => {
 it('reports moves and double drops inside lazy effect bodies', () => {
   const doubled = check(
     'ownership://effect-body-double-drop.silk',
-    `import silk.effect as Effect
+    `import silk.effect { Effect }
 struct Token { value: i32 }
 struct Problem { code: i32 }
 effect fn store() -> i32 ! Problem {
@@ -1013,7 +1013,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
   // exits and bindings belong to its own compiled function, not to the enclosing one.
   const healthy = check(
     'ownership://effect-body-healthy.silk',
-    `import silk.effect as Effect
+    `import silk.effect { Effect }
 struct Token { value: i32 }
 struct Problem { code: i32 }
 effect fn store() -> i32 ! Problem {

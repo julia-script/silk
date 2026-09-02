@@ -11,7 +11,7 @@ const fallthrough = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct Guard {
   tag: i32
@@ -40,7 +40,7 @@ const earlyDrop = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct Guard {
   tag: i32
@@ -70,7 +70,7 @@ const failurePropagation = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct Guard {
   tag: i32
@@ -112,7 +112,7 @@ const recursiveReturn = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct Guard {
   tag: i32
@@ -184,7 +184,7 @@ const parametric = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct Guard<T> {
   value: T

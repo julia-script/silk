@@ -217,12 +217,13 @@ const quotaSweepSourceFor = (bytecode: ReadonlyArray<number>): string => {
   const generated = sourceFor(bytecode).source
   const withAllocator = replaceExactlyOnce(
     generated,
-    'import silk.logger { length as logLength }',
-    `import silk.allocator { Allocator }
+    'import silk.vector { Vector }\nimport silk.logger { Logger }',
+    `import silk.vector { Vector }
+import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { SystemAllocator }
 import silk.layout { Layout }
-import silk.logger { length as logLength }
+import silk.logger { Logger }
 
 struct QuotaAllocator { remaining: i32 }
 
@@ -258,7 +259,7 @@ effect fn attemptQuota(quota: i32, bytecode: &[u8]) -> bool ! OutOfMemoryError |
     |> Effect.tap(logVerified)
     |> Effect.provideMut(&mut allocator)
     |> Effect.provideMut(&mut logger)
-  if logLength(&logger) != 1 { let mismatch = 1 / 0 }
+  if Logger.length(&logger) != 1 { let mismatch = 1 / 0 }
   return true
 }
 
@@ -273,7 +274,7 @@ pub effect fn main() -> () ! OutOfMemoryError | LogError {
     |> Effect.tap(logVerified)
     |> Effect.provideMut(&mut allocator)
     |> Effect.provideMut(&mut logger)
-  if logLength(&logger) != 1 { let mismatch = 1 / 0 }
+  if Logger.length(&logger) != 1 { let mismatch = 1 / 0 }
   return ()
 }`,
     `  let mut quota = 0

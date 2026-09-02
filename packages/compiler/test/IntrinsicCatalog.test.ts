@@ -97,10 +97,10 @@ pub fn main() -> i32 {
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
-import silk.raw_buffer as RawBuffer
-import silk.slot as Slot
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
 fn useShared(value: &mut i32) -> i32 { return 42 }
 fn conflictShared() -> i32 { return 0 }
 effect fn storage() -> i32 ! OutOfMemoryError {
@@ -142,7 +142,7 @@ effect fn storage() -> i32 ! OutOfMemoryError {
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(storage(), recover) }`,
   `import silk.allocator { Allocator, OutOfMemoryError }
-import silk.execution as Execution
+import silk.execution { Execution }
 fn ready(state: &()) -> () { return () }
 fn complete(state: (), value: i32) -> () { return () }
 fn suspend(state: (), execution: Intrinsic.Execution<i32>) -> () { drop execution return () }
@@ -151,7 +151,7 @@ effect fn packaged() -> () ! OutOfMemoryError ? &mut Allocator {
   return run Execution.drive(move execution, (), complete, suspend)
 }
 pub fn main() -> i32 { return 42 }`,
-  `import silk.execution as Execution
+  `import silk.execution { Execution }
 struct Guard {}
 fn register(wake: Intrinsic.Wake) -> Guard {
   Intrinsic.wake(move wake)
@@ -159,7 +159,7 @@ fn register(wake: Intrinsic.Wake) -> Guard {
 }
 effect fn parking() -> () { return run Execution.park(register) }
 pub fn main() -> i32 { return 42 }`,
-  `import silk.effect as Effect
+  `import silk.effect { Effect }
 import silk.i32 as i32
 struct Problem {}
 service Clock {}
@@ -218,7 +218,7 @@ pub fn main() -> i32 {
   }
   return false
 }`,
-  `import silk.effect as Effect
+  `import silk.effect { Effect }
 import silk.result { Result }
 struct ResultProblem {}
 effect fn succeed() -> i32 ! ResultProblem { return 42 }
@@ -245,20 +245,20 @@ effect fn suspendDirect(
   return run Intrinsic.suspendEffect(move deferred)
 }
 pub fn main() -> i32 { return 42 }`,
-  `import silk.writer as Streams
+  `import silk.writer { Writer, WriterError, StdoutWriter }
 import silk.writer { Writer, WriterError }
-import silk.effect as Effect
+import silk.effect { Effect }
 pub effect fn main() -> () ! WriterError {
-  let mut native = Streams.stdoutWriterProvider()
+  let mut native = Writer.stdoutWriterProvider()
   let first = run Effect.provideMut(Writer.writeAll(b"out"), &mut native)
   let second = run Effect.provideMut(Writer.writeAll(b"error"), &mut native)
   return ()
 }`,
   `import silk.usize as usize
-import silk.option { Option, none, some }
+import silk.option { Option }
 fn absurd<T>() -> T { let boom = 1 / 0 return absurd<T>() }
-fn opened(handle: OsHandle) -> Option<OsHandle> { return some<OsHandle>(move handle) }
-fn refused() -> Option<OsHandle> { return none<OsHandle>() }
+fn opened(handle: OsHandle) -> Option<OsHandle> { return Option.some<OsHandle>(move handle) }
+fn refused() -> Option<OsHandle> { return Option.none<OsHandle>() }
 effect fn systemClockNow(seconds: &mut i64, nanoseconds: &mut i64) -> bool {
   unsafe { return run Intrinsic.osSystemClockNow(seconds, nanoseconds) }
   return false
@@ -285,7 +285,7 @@ effect fn randomFill(output: &mut [u8]) -> bool {
 }
 effect fn fileOpen(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> Option<OsHandle> {
   unsafe { return run Intrinsic.osFileOpen<Option<OsHandle>>(root, path, 0, reason, code, opened, refused) }
-  return none<OsHandle>()
+  return Option.none<OsHandle>()
 }
 effect fn fileRead(handle: &mut OsHandle, output: &mut [u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
   unsafe { return run Intrinsic.osFileRead(handle, output, count, reason, code) }
@@ -297,7 +297,7 @@ effect fn fileWrite(handle: &mut OsHandle, input: &[u8], count: &mut usize, reas
 }
 effect fn directoryOpen(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> Option<OsHandle> {
   unsafe { return run Intrinsic.osDirectoryOpen<Option<OsHandle>>(root, path, reason, code, opened, refused) }
-  return none<OsHandle>()
+  return Option.none<OsHandle>()
 }
 effect fn directoryNext(handle: &mut OsHandle, output: &mut [u8], count: &mut usize, kind: &mut i32, required: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
   unsafe { return run Intrinsic.osDirectoryNext(handle, output, count, kind, required, reason, code) }
@@ -481,7 +481,7 @@ it.effect('does not retain provideWith as a compatibility alias', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'effect/no-provide-with-alias',
-      encoder.encode(`import silk.effect as Effect
+      encoder.encode(`import silk.effect { Effect }
 service Clock {}
 struct FixedClock {}
 impl Clock for FixedClock {}
@@ -491,7 +491,7 @@ pub fn main() -> i32 { return run (read() |> Effect.provideWith(acquire())) }`),
     )
     assert.include(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      'SEM0014',
+      'SEM0010',
     )
   }),
 )

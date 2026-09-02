@@ -26,7 +26,7 @@ fn double(value: i32) -> i32 {
   return value * 2
 }
 
-fn positive(value: i32) -> Option.Option<i32> {
+fn positive(value: i32) -> Option<i32> {
   if value > 0 {
     return Option.some<i32>(value)
   }
@@ -94,22 +94,28 @@ pub value: T
 
 The value moved through present-only combinator branches.
 
+<a id="declaration-73696c6b2f6f7074696f6e3a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `silk/option.Option<T> for _`
+
+```silk
+impl silk/option.Option<T> for _
+```
+
 <a id="declaration-73696c6b2f6f7074696f6e3a3a6e6f6e65"></a>
 
 ## `none`
 
 ```silk
-pub fn none<T>() -> silk/option.Option<T>
+pub fn none() -> Option<T>
 ```
-
-Constructs an absent optional value of the requested element type.
 
 <a id="declaration-73696c6b2f6f7074696f6e3a3a736f6d65"></a>
 
 ## `some`
 
 ```silk
-pub fn some<T>(value: T) -> silk/option.Option<T>
+pub fn some(value: T) -> Option<T>
 ```
 
 Constructs a present option by moving `value` into it.
@@ -119,7 +125,7 @@ Constructs a present option by moving `value` into it.
 ## `map`
 
 ```silk
-pub fn map<T, U>(self: silk/option.Option<T>, transform: once fn(T) -> U) -> silk/option.Option<U>
+pub fn map<U>(self: Self, transform: once fn(...)) -> silk/option.Option<U>
 ```
 
 Applies `transform` once to a present value and keeps an absent value absent.
@@ -134,7 +140,7 @@ The callback is not called for [`None`](#declaration-73696c6b2f6f7074696f6e3a3a4
 ## `flatMap`
 
 ```silk
-pub fn flatMap<T, U>(self: silk/option.Option<T>, transform: once fn(T) -> silk/option.Option<U>) -> silk/option.Option<U>
+pub fn flatMap<U>(self: Self, transform: once fn(...)) -> silk/option.Option<U>
 ```
 
 Continues a present value with a transform that itself answers with an Option, so the
@@ -150,7 +156,7 @@ reject the value without needing to explain why; use a `Result` when rejection n
 ## `unwrapOr`
 
 ```silk
-pub fn unwrapOr<T>(self: silk/option.Option<T>, fallback: T) -> T
+pub fn unwrapOr(self: Self, fallback: T) -> T
 ```
 
 Returns the present value, or the fallback value when the option is absent.

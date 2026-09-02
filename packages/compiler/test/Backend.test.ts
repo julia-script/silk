@@ -545,7 +545,7 @@ it.effect('rejects a foreign declaration of a symbol the native backend declares
       ascii(`import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 unsafe extern "C" fn malloc(size: i32) -> i32
 effect fn store() -> i32 ! OutOfMemoryError {

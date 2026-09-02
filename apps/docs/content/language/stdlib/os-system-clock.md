@@ -38,6 +38,38 @@ A stateless Unix-family native provider of Unix-epoch time.
 A failed, invalid, or unrepresentable clock result traps. Direct WebAssembly does not support a
 reachable operation on this provider.
 
+<a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `OsSystemClock for _`
+
+```silk
+impl OsSystemClock for _
+```
+
+<a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+
+### Operation `now`
+
+```silk
+now = _
+```
+
+<a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a31"></a>
+
+### Operation `getResolution`
+
+```silk
+getResolution = _
+```
+
+<a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `OsSystemClock for _`
+
+```silk
+impl OsSystemClock for _
+```
+
 <a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a6d616b65"></a>
 
 ## `make`
@@ -46,17 +78,15 @@ reachable operation on this provider.
 pub fn make() -> OsSystemClock
 ```
 
-Creates a native system-clock provider without reading the clock or installing it as a default.
+<a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a696d706c656d656e746174696f6e3a32"></a>
 
-<a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a696d706c656d656e746174696f6e3a30"></a>
-
-## Implementation `SystemClock.SystemClock for OsSystemClock`
+## Implementation `SystemClock for OsSystemClock`
 
 ```silk
-impl SystemClock.SystemClock for OsSystemClock
+impl SystemClock for OsSystemClock
 ```
 
-<a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `now`
 
@@ -64,7 +94,7 @@ impl SystemClock.SystemClock for OsSystemClock
 now = OsSystemClock.now
 ```
 
-<a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a31"></a>
+<a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a31"></a>
 
 ### Operation `getResolution`
 

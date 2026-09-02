@@ -56,19 +56,19 @@ it('declares the shared usize counts once and ships no private counted identity'
 const growth = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
-import silk.vector { Vector, make, append, get, length, capacity }
+import silk.effect { Effect }
+import silk.vector { Vector }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut values = make<i32>()
-  let pending0 = append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
+  let mut values = Vector.make<i32>()
+  let pending0 = Vector.append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
   let appended0 = run pending0
-  let pending1 = append<i32>(&mut values, 32) |> Effect.provideMut(&mut allocator)
+  let pending1 = Vector.append<i32>(&mut values, 32) |> Effect.provideMut(&mut allocator)
   let appended1 = run pending1
-  if length<i32>(&values) == 2 {} else { return 0 }
-  if capacity<i32>(&values) == 4 {} else { return 1 }
-  return get<i32>(&values, 0) + get<i32>(&values, 1)
+  if Vector.length<i32>(&values) == 2 {} else { return 0 }
+  if Vector.capacity<i32>(&values) == 4 {} else { return 1 }
+  return Vector.get<i32>(&values, 0) + Vector.get<i32>(&values, 1)
 }
 
 effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
@@ -103,7 +103,7 @@ it.effect(
       // `make` still builds the same value: an empty storage union plus two `usize` zeroes. The
       // identity call that produced each zero is gone; the typed immediate it returned is not.
       const made = mir.functions.find(
-        (fn) => fn.id.module === 'silk/vector' && fn.id.name === 'make',
+        (fn) => fn.id.module === 'silk/vector' && fn.id.name === 'Vector.make',
       )
       assert.isDefined(made)
       if (made === undefined) return
@@ -140,44 +140,33 @@ it.effect(
 const scalars = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.u32 as u32
-import silk.string {
-  ScalarCursor,
-  ScalarStep,
-  copy,
-  view,
-  scalarCursor,
-  nextScalar,
-  scalarValue,
-  nextCursor,
-  fromUtf8,
-  utf8Bytes
-}
+import silk.string { ScalarCursor, ScalarStep, String }
 import silk.option { Option }
 import silk.char { toU32 as charToU32 }
 
 fn scalarSum(value: string, cursor: ScalarCursor) -> u32 {
-  return match move nextScalar(value, move cursor) {
+  return match move String.nextScalar(value, move cursor) {
     Option<ScalarStep>.Some { value: step } => continueSum(value, move step)
     Option<ScalarStep>.None => u32.toU32(0)
   }
 }
 
 fn continueSum(value: string, step: ScalarStep) -> u32 {
-  let scalar = charToU32(scalarValue(&step))
-  let cursor = nextCursor(move step)
+  let scalar = charToU32(String.scalarValue(&step))
+  let cursor = String.nextCursor(move step)
   return scalar + scalarSum(value, move cursor)
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let copying = copy("A\\u{a2}\\u{20ac}\\u{10348}") |> Effect.provideMut(&mut allocator)
+  let copying = String.copy("A\\u{a2}\\u{20ac}\\u{10348}") |> Effect.provideMut(&mut allocator)
   let mut owned = run copying
-  let borrowed = view(&owned)
-  let decoded = fromUtf8(utf8Bytes(borrowed))
+  let borrowed = String.view(&owned)
+  let decoded = String.fromUtf8(String.utf8Bytes(borrowed))
   drop decoded
-  if scalarSum(borrowed, scalarCursor()) == u32.toU32(74967) {} else { return 1 }
+  if scalarSum(borrowed, String.scalarCursor()) == u32.toU32(74967) {} else { return 1 }
   return 42
 }
 

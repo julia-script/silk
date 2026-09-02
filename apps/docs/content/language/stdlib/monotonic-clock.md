@@ -29,16 +29,16 @@ channel.
 ### Wait for one fixed duration on the active provider
 
 ```silk
-import silk.monotonic_clock as MonotonicClock
+import silk.monotonic_clock { MonotonicClock }
 
-effect fn pause() -> () ? &mut MonotonicClock.MonotonicClock {
+effect fn pause() -> () ? &mut MonotonicClock {
   return run MonotonicClock.waitFor(300ms)
 }
 ```
 
 Import as `MonotonicClock` with `import silk.monotonic_clock { MonotonicClock }`.
 
-Public declarations: 6.
+Public declarations: 2.
 
 <a id="declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a4d6f6e6f746f6e6963436c6f636b"></a>
 
@@ -107,51 +107,13 @@ Waits for at least `howLong` nanoseconds on the provider's logical timeline.
 A zero duration requires no positive timeline advance. An implementation traps rather than
 wrapping when the derived absolute deadline cannot be represented.
 
-<a id="declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a6e6f77"></a>
+<a id="declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a30"></a>
 
-## `now`
-
-```silk
-pub effect fn now() -> Instant ? &mut MonotonicClock
-```
-
-Reads a canonical mark from the active [`MonotonicClock`](#declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a4d6f6e6f746f6e6963436c6f636b) provider's unspecified timeline.
-Successive reads are non-decreasing and can be equal. An invalid or unrepresentable result traps.
-
-<a id="declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a6765745265736f6c7574696f6e"></a>
-
-## `getResolution`
+## Implementation `MonotonicClock for _`
 
 ```silk
-pub effect fn getResolution() -> u64 ? &mut MonotonicClock
+impl MonotonicClock for _
 ```
-
-Returns the active provider's positive nominal resolution in whole nanoseconds.
-The result may be a lower bound on observable precision. An invalid or unrepresentable result
-traps.
-
-<a id="declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a77616974556e74696c"></a>
-
-## `waitUntil`
-
-```silk
-pub effect fn waitUntil(when: Instant) -> () ? &mut MonotonicClock
-```
-
-Waits until the active provider reaches the same-provider mark `when`.
-A reached or past mark returns immediately. A native OS provider blocks the calling host thread.
-
-<a id="declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a77616974466f72"></a>
-
-## `waitFor`
-
-```silk
-pub effect fn waitFor(howLong: u64) -> () ? &mut MonotonicClock
-```
-
-Waits for `howLong` nanoseconds on the active provider's logical timeline.
-A zero duration needs no positive timeline advance. An unrepresentable absolute deadline traps
-instead of wrapping.
 
 <a id="declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a646561646c696e654166746572"></a>
 
@@ -160,17 +122,3 @@ instead of wrapping.
 ```silk
 pub fn deadlineAfter(start: &silk/system_clock.Instant, howLong: u64) -> Instant
 ```
-
-Derives the canonical absolute deadline `howLong` nanoseconds after `start`.
-
-### Details
-
-The addition is performed in split seconds and nanoseconds so every `u64` duration is accepted
-whenever the resulting signed-seconds [`Instant`](./system-clock.md#declaration-73696c6b2f73797374656d5f636c6f636b3a3a496e7374616e74) remains representable. Fractional overflow
-carries exactly once into seconds.
-
-### Gotchas
-
-This operation traps rather than wrapping when the resulting whole seconds exceed the
-representable `i64` range. `start` must belong to the provider timeline on which the deadline
-will be used.

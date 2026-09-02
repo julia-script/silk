@@ -5,7 +5,9 @@ import type {
   ConformanceFact,
   ConstantFact,
   DeclarationFact,
+  DeclaredName,
   EnumFact,
+  InherentImplFact,
   InterfaceFact,
   MemberFact,
   ModuleHeaders,
@@ -23,6 +25,7 @@ import {
   returnedBorrow,
 } from './DeclarationFacts.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
+import * as NameResolution from './NameResolution.js'
 import {
   attachExposure,
   canonicalKey,
@@ -67,6 +70,24 @@ const withResolvedRepresentationParameters = (
       ? current
       : ResolutionSeams.withRepresentationBinding(current, parameter.type, closed.type)
   }, resolvers)
+
+/** The declaration an inherent impl owner names: any nominal declaration kind, including enums. */
+const nominalOwnerDeclaration = (
+  modules: ReadonlyArray<ModuleHeaders>,
+  nominal: Type.Nominal,
+): MemberFact | undefined =>
+  modules
+    .find((module) => module.module === nominal.module)
+    ?.members.find(
+      (member) =>
+        member.canonical._tag === 'Canonical' &&
+        member.canonical.id.name === nominal.name &&
+        (member._tag === 'StructDeclaration' ||
+          member._tag === 'UnionDeclaration' ||
+          member._tag === 'EnumDeclaration' ||
+          member._tag === 'ServiceDeclaration' ||
+          member._tag === 'InterfaceDeclaration'),
+    )
 
 /** The one source module allowed to own an interface or service implementation. */
 const sourceConformanceOwner = (
@@ -480,14 +501,211 @@ export const complete = (
           : [],
       ),
     )
+    // An inherent head resolves its owner exactly as a conformance resolves its provider. The
+    // checks that need scope run here: the owner must be a nominal of this module named directly
+    // (not through an alias), or the head publishes no members.
+    const inherentImpls = module.inherentImpls.map((head): InherentImplFact => {
+      const owner = resolveDeclaredType(module.module, head.owner, resolvers, self.modules)
+      // A head already rejected at collection keeps only that diagnostic; its owner is resolved
+      // for closing `Self` in its members, not for a second report.
+      if (head.validity._tag === 'Invalid') return Object.freeze({ ...head, owner: owner.fact })
+      // The owner is a declaration of this module named by its own spelling. A local declaration
+      // wins over the type resolver's answer because a zero-data owner struct may share its
+      // spelling with a builtin storage type (`Slot`, `RawBuffer`), and the impl names the
+      // declaration. Only when no local declaration matches does the resolver's answer tell a
+      // foreign owner from an alias or a non-nominal.
+      const localOwner = module.members.find(
+        (member) =>
+          member.canonical._tag === 'Canonical' &&
+          member.canonical.id.name === head.ownerSpelling &&
+          NameResolution.isNominalOwner(member),
+      )
+      if (
+        localOwner !== undefined &&
+        localOwner.canonical._tag === 'Canonical' &&
+        owner.fact._tag === 'Resolved'
+      ) {
+        // The resolver's fact keeps the head's argument facts for tooling; only its type is replaced
+        // by the local declaration's nominal, and its diagnostics stand unless they came from the
+        // builtin that shadows the local spelling.
+        if (Type.isNominal(owner.fact.type)) diagnostics.push(...owner.diagnostics)
+        const binders = head.typeParameters.filter(
+          (parameter) => parameter.duplicateOf === undefined,
+        )
+        const ownerType = Type.nominal(
+          module.module,
+          localOwner.canonical.id.name,
+          binders.map((parameter) => parameter.type),
+        )
+        return Object.freeze({ ...head, owner: Object.freeze({ ...owner.fact, type: ownerType }) })
+      }
+      const ownerType = owner.fact._tag === 'Resolved' ? owner.fact.type : undefined
+      const nominal = ownerType !== undefined && Type.isNominal(ownerType) ? ownerType : undefined
+      const ownerDeclaration =
+        nominal === undefined ? undefined : nominalOwnerDeclaration(self.modules, nominal)
+      const localAlias = module.members.some(
+        (member) =>
+          member._tag === 'AliasDeclaration' &&
+          member.name._tag === 'Present' &&
+          member.name.spelling === head.ownerSpelling,
+      )
+      let problem: 'ForeignOwner' | 'AliasOwner' | 'NotNominal' | undefined
+      if (nominal === undefined || ownerDeclaration === undefined) {
+        problem = owner.fact._tag === 'Resolved' ? 'NotNominal' : undefined
+      } else if (localAlias || nominal.name !== head.ownerSpelling) {
+        problem = 'AliasOwner'
+      } else if (nominal.module !== module.module) {
+        problem = 'ForeignOwner'
+      } else {
+        problem = undefined
+      }
+      if (problem === undefined) return Object.freeze({ ...head, owner: owner.fact })
+      const diagnostic = Diagnostic.invalidInherentHead(
+        head.ownerSpelling,
+        problem,
+        head.owner._tag === 'Unavailable' ? head.syntax.span : head.owner.syntax.span,
+      )
+      diagnostics.push(diagnostic)
+      return Object.freeze({
+        ...head,
+        owner: owner.fact,
+        validity: Object.freeze({
+          _tag: 'Invalid' as const,
+          cause: Diagnostic.identity(diagnostic),
+        }),
+      })
+    })
+    // Every head whose owner resolved closes `Self` on its members, even a rejected one, so a
+    // rejected member's body reports only the head's diagnostic and not a cascade about `Self`.
+    const resolvedOwners = new Map(
+      inherentImpls.flatMap((head) =>
+        head.owner._tag === 'Resolved' && Type.isNominal(head.owner.type)
+          ? [[head.ordinal, head.owner.type] as const]
+          : [],
+      ),
+    )
+    const inherentOwners = new Map(
+      inherentImpls.flatMap((head) =>
+        head.validity._tag === 'Valid' &&
+        head.owner._tag === 'Resolved' &&
+        Type.isNominal(head.owner.type)
+          ? [[head.ordinal, head.owner.type] as const]
+          : [],
+      ),
+    )
+    interface OwnerItem {
+      readonly kind: string
+      readonly span: SourceSpan.SourceSpan
+    }
+    const ownerItemNames = (owner: Type.Nominal): ReadonlyMap<string, OwnerItem> => {
+      const declaration = nominalOwnerDeclaration(self.modules, owner)
+      const names = new Map<string, OwnerItem>()
+      const add = (name: DeclaredName, kind: string): void => {
+        if (name._tag === 'Present') names.set(name.spelling, { kind, span: name.token.span })
+      }
+      if (declaration?._tag === 'StructDeclaration')
+        for (const field of declaration.fields) add(field.name, 'field')
+      if (declaration?._tag === 'UnionDeclaration')
+        for (const variant of declaration.variants) add(variant.name, 'variant')
+      if (declaration?._tag === 'EnumDeclaration') {
+        for (const member of declaration.members) add(member.name, 'member')
+        names.set('value', { kind: 'generated operation', span: declaration.syntax.span })
+      }
+      if (
+        declaration?._tag === 'ServiceDeclaration' ||
+        declaration?._tag === 'InterfaceDeclaration'
+      )
+        for (const operation of declaration.operations) add(operation.name, 'operation')
+      return names
+    }
     const closedMembers = members.map((member): MemberFact => {
-      if (member._tag !== 'FunctionDeclaration' || member.conformanceImplementation === undefined)
-        return member
-      const provider = conformanceProviders.get(member.conformanceImplementation.ordinal)
-      return provider === undefined ? member : closeConformanceSelf(member, provider)
+      if (member._tag !== 'FunctionDeclaration') return member
+      if (member.conformanceImplementation !== undefined) {
+        const provider = conformanceProviders.get(member.conformanceImplementation.ordinal)
+        return provider === undefined
+          ? member
+          : closeConformanceSelf(member, member.conformanceImplementation.self, provider)
+      }
+      const association = member.associatedMember
+      if (association === undefined) return member
+      const owner = inherentOwners.get(association.ordinal)
+      const unpublished = (): MemberFact => {
+        const resolvedOwner = resolvedOwners.get(association.ordinal)
+        const closed =
+          resolvedOwner === undefined
+            ? member
+            : closeConformanceSelf(member, association.self, resolvedOwner)
+        return member.canonical._tag === 'Canonical'
+          ? Object.freeze({
+              ...closed,
+              canonical: Object.freeze({ _tag: 'Unidentified' as const }),
+            })
+          : closed
+      }
+      if (owner === undefined) return unpublished()
+      const collision = ownerItemNames(owner).get(association.name)
+      if (collision !== undefined && member.canonical._tag === 'Canonical') {
+        diagnostics.push(
+          Diagnostic.invalidInherentMember(
+            association.ownerSpelling,
+            association.name,
+            'Collision',
+            member.name._tag === 'Present' ? member.name.token.span : member.syntax.span,
+            collision.kind,
+            collision.span,
+          ),
+        )
+        return unpublished()
+      }
+      const closed = closeConformanceSelf(member, association.self, owner)
+      // A member bound may name `Self` too (`U: Like<Self>`); close it to the owner and rebuild
+      // the application so proof search sees the concrete capability.
+      const selfSubstitution: Type.Substitution = new Map<string, Type.GenericArgument>([
+        [Type.key(association.self), owner],
+      ])
+      const typeParameters = closed.typeParameters.map((parameter) =>
+        parameter.bounds.length === 0
+          ? parameter
+          : Object.freeze({
+              ...parameter,
+              bounds: Object.freeze(
+                parameter.bounds.map((bound) => {
+                  if (bound._tag !== 'ResolvedBound') return bound
+                  const capability = Type.substitute(bound.application.capability, selfSubstitution)
+                  if (
+                    !Type.isNominal(capability) ||
+                    Type.equals(capability, bound.application.capability)
+                  )
+                    return bound
+                  const declaration = memberByNominal(self.modules, capability)
+                  const application =
+                    declaration?._tag === 'InterfaceDeclaration' ||
+                    declaration?._tag === 'ServiceDeclaration'
+                      ? interfaceApplication(declaration, capability, parameter.type)
+                      : undefined
+                  return application === undefined
+                    ? bound
+                    : Object.freeze({ ...bound, application })
+                }),
+              ),
+            }),
+      )
+      return Object.freeze({
+        ...closed,
+        typeParameters: Object.freeze(typeParameters),
+        associatedMember: Object.freeze({
+          ...association,
+          owner: Object.freeze({
+            _tag: 'CanonicalDeclarationId' as const,
+            module: owner.module,
+            name: owner.name,
+          }),
+        }),
+      })
     })
     return Object.freeze({
       ...module,
+      inherentImpls: Object.freeze(inherentImpls),
       members: Object.freeze(closedMembers),
       declarations: Object.freeze(
         closedMembers.filter(

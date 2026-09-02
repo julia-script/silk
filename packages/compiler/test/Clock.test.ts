@@ -14,7 +14,7 @@ const encoder = new TextEncoder()
 const snapshot = (source: string, target = 'aarch64-apple-darwin') =>
   Analysis.ofSourceRealized('clock/main', encoder.encode(source), target)
 
-const fixedSystemClock = `import silk.system_clock as SystemClock
+const fixedSystemClock = `import silk.system_clock { SystemClock, Instant }
 import silk.u64 as u64
 
 struct FixedSystemClock {
@@ -23,7 +23,7 @@ struct FixedSystemClock {
   resolution: u64
 }
 
-effect fn fixedSystemNow(self: &mut FixedSystemClock) -> SystemClock.Instant {
+effect fn fixedSystemNow(self: &mut FixedSystemClock) -> Instant {
   return SystemClock.make(self.seconds, self.nanoseconds)
 }
 
@@ -31,14 +31,14 @@ effect fn fixedSystemResolution(self: &mut FixedSystemClock) -> u64 {
   return self.resolution
 }
 
-impl SystemClock.SystemClock for FixedSystemClock {
+impl SystemClock for FixedSystemClock {
   now: FixedSystemClock.fixedSystemNow
   getResolution: FixedSystemClock.fixedSystemResolution
 }
 `
 
-const scriptedMonotonicClock = `import silk.monotonic_clock as MonotonicClock
-import silk.system_clock as SystemClock
+const scriptedMonotonicClock = `import silk.monotonic_clock { MonotonicClock }
+import silk.system_clock { SystemClock, Instant }
 import silk.u64 as u64
 
 struct ScriptedMonotonicClock {
@@ -50,7 +50,7 @@ struct ScriptedMonotonicClock {
 
 effect fn scriptedMonotonicNow(
   self: &mut ScriptedMonotonicClock
-) -> SystemClock.Instant {
+) -> Instant {
   return SystemClock.make(self.seconds, self.nanoseconds)
 }
 
@@ -60,7 +60,7 @@ effect fn scriptedMonotonicResolution(self: &mut ScriptedMonotonicClock) -> u64 
 
 effect fn scriptedWaitUntil(
   self: &mut ScriptedMonotonicClock,
-  when: SystemClock.Instant
+  when: Instant
 ) -> () {
   let mut deadline = move when
   let targetSeconds = SystemClock.seconds(&deadline)
@@ -93,7 +93,7 @@ effect fn scriptedWaitFor(self: &mut ScriptedMonotonicClock, howLong: u64) -> ()
   return ()
 }
 
-impl MonotonicClock.MonotonicClock for ScriptedMonotonicClock {
+impl MonotonicClock for ScriptedMonotonicClock {
   now: ScriptedMonotonicClock.scriptedMonotonicNow
   getResolution: ScriptedMonotonicClock.scriptedMonotonicResolution
   waitUntil: ScriptedMonotonicClock.scriptedWaitUntil
@@ -101,9 +101,9 @@ impl MonotonicClock.MonotonicClock for ScriptedMonotonicClock {
 }
 `
 
-const nativeSystemProgram = `import silk.effect as Effect
-import silk.os_system_clock as OsSystemClock
-import silk.system_clock as SystemClock
+const nativeSystemProgram = `import silk.effect { Effect }
+import silk.os_system_clock { OsSystemClock }
+import silk.system_clock { SystemClock }
 pub fn main() -> i32 {
   let mut provider = OsSystemClock.make()
   let instant = run Effect.provideMut(SystemClock.now(), &mut provider)
@@ -114,9 +114,9 @@ pub fn main() -> i32 {
   return 42
 }`
 
-const nativeMonotonicWaitProgram = `import silk.effect as Effect
-import silk.monotonic_clock as MonotonicClock
-import silk.os_monotonic_clock as OsMonotonicClock
+const nativeMonotonicWaitProgram = `import silk.effect { Effect }
+import silk.monotonic_clock { MonotonicClock }
+import silk.os_monotonic_clock { OsMonotonicClock }
 pub fn main() -> i32 {
   let mut provider = OsMonotonicClock.make()
   run Effect.provideMut(MonotonicClock.waitFor(0), &mut provider)
@@ -125,9 +125,9 @@ pub fn main() -> i32 {
   return 42
 }`
 
-const nativeSystemReadProgram = `import silk.effect as Effect
-import silk.os_system_clock as OsSystemClock
-import silk.system_clock as SystemClock
+const nativeSystemReadProgram = `import silk.effect { Effect }
+import silk.os_system_clock { OsSystemClock }
+import silk.system_clock { SystemClock }
 pub fn main() -> i32 {
   let mut provider = OsSystemClock.make()
   let instant = run Effect.provideMut(SystemClock.now(), &mut provider)
@@ -296,8 +296,8 @@ it('registers the clock modules, namespaces, and shared Instant alias', () => {
 it.effect('constructs unused native providers on direct Wasm without retaining host calls', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      `import silk.os_monotonic_clock as OsMonotonicClock
-import silk.os_system_clock as OsSystemClock
+      `import silk.os_monotonic_clock { OsMonotonicClock }
+import silk.os_system_clock { OsSystemClock }
 pub fn main() -> i32 {
   let system = OsSystemClock.make()
   let monotonic = OsMonotonicClock.make()
@@ -323,11 +323,11 @@ pub fn main() -> i32 {
 it.effect('rejects every reachable clock intrinsic before direct-Wasm emission', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      `import silk.effect as Effect
-import silk.monotonic_clock as MonotonicClock
-import silk.os_monotonic_clock as OsMonotonicClock
-import silk.os_system_clock as OsSystemClock
-import silk.system_clock as SystemClock
+      `import silk.effect { Effect }
+import silk.monotonic_clock { MonotonicClock }
+import silk.os_monotonic_clock { OsMonotonicClock }
+import silk.os_system_clock { OsSystemClock }
+import silk.system_clock { SystemClock }
 pub fn main() -> i32 {
   let mut system = OsSystemClock.make()
   let wall = run Effect.provideMut(SystemClock.now(), &mut system)
@@ -370,9 +370,9 @@ pub fn main() -> i32 {
 
 it.effect('lowers each native clock provider only to its own intrinsic operations', () =>
   Effect.gen(function* () {
-    const system = yield* snapshot(`import silk.effect as Effect
-import silk.os_system_clock as OsSystemClock
-import silk.system_clock as SystemClock
+    const system = yield* snapshot(`import silk.effect { Effect }
+import silk.os_system_clock { OsSystemClock }
+import silk.system_clock { SystemClock }
 import silk.i64 as i64
 pub fn main() -> i32 {
   let mut provider = OsSystemClock.make()
@@ -396,9 +396,9 @@ pub fn main() -> i32 {
       'silk_os_system_clock_resolution_v1',
     ])
 
-    const monotonic = yield* snapshot(`import silk.effect as Effect
-import silk.monotonic_clock as MonotonicClock
-import silk.os_monotonic_clock as OsMonotonicClock
+    const monotonic = yield* snapshot(`import silk.effect { Effect }
+import silk.monotonic_clock { MonotonicClock }
+import silk.os_monotonic_clock { OsMonotonicClock }
 pub fn main() -> i32 {
   let mut provider = OsMonotonicClock.make()
   run Effect.provideMut(MonotonicClock.waitFor(18446744073709551615), &mut provider)
@@ -493,8 +493,8 @@ it.effect('derives zero, carry, and maximum monotonic waits from one read each',
 
 it.effect('derives canonical monotonic deadlines through the public pure helper', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.monotonic_clock as MonotonicClock
-import silk.system_clock as SystemClock
+    const self = yield* snapshot(`import silk.monotonic_clock { MonotonicClock }
+import silk.system_clock { SystemClock }
 import silk.u64 as u64
 pub fn main() -> i32 {
   let negative = SystemClock.make(-1, 900000000)
@@ -520,9 +520,9 @@ it.effect('preserves negative scripted marks through source-derived absolute wai
     const built = MonotonicClockHost.scripted([{ seconds: -1n, nanoseconds: 0n }], 1n)
     assert.strictEqual(built._tag, 'Constructed')
     if (built._tag !== 'Constructed') return
-    const self = yield* snapshot(`import silk.effect as Effect
-import silk.monotonic_clock as MonotonicClock
-import silk.os_monotonic_clock as OsMonotonicClock
+    const self = yield* snapshot(`import silk.effect { Effect }
+import silk.monotonic_clock { MonotonicClock }
+import silk.os_monotonic_clock { OsMonotonicClock }
 pub fn main() -> i32 {
   let mut provider = OsMonotonicClock.make()
   run Effect.provideMut(MonotonicClock.waitFor(0), &mut provider)
@@ -556,9 +556,9 @@ it.effect('traps on a source-derived monotonic deadline overflow before waiting'
     )
     assert.strictEqual(built._tag, 'Constructed')
     if (built._tag !== 'Constructed') return
-    const self = yield* snapshot(`import silk.effect as Effect
-import silk.monotonic_clock as MonotonicClock
-import silk.os_monotonic_clock as OsMonotonicClock
+    const self = yield* snapshot(`import silk.effect { Effect }
+import silk.monotonic_clock { MonotonicClock }
+import silk.os_monotonic_clock { OsMonotonicClock }
 pub fn main() -> i32 {
   let mut provider = OsMonotonicClock.make()
   run Effect.provideMut(MonotonicClock.waitFor(1), &mut provider)
@@ -629,11 +629,11 @@ it.effect('blocks only the absent matching clock host after retaining preceding 
     const system = SystemClockHost.fixed({ seconds: 20n, nanoseconds: 0n }, 1n)
     assert.strictEqual(system._tag, 'Constructed')
     if (system._tag !== 'Constructed') return
-    const self = yield* snapshot(`import silk.effect as Effect
-import silk.monotonic_clock as MonotonicClock
-import silk.os_monotonic_clock as OsMonotonicClock
-import silk.os_system_clock as OsSystemClock
-import silk.system_clock as SystemClock
+    const self = yield* snapshot(`import silk.effect { Effect }
+import silk.monotonic_clock { MonotonicClock }
+import silk.os_monotonic_clock { OsMonotonicClock }
+import silk.os_system_clock { OsSystemClock }
+import silk.system_clock { SystemClock }
 fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 {
   let mut system = OsSystemClock.make()
@@ -681,7 +681,7 @@ pub fn main() -> i32 {
 it.effect('reads canonical pre-epoch system time through an ordinary provider', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`${fixedSystemClock}
-import silk.effect as Effect
+import silk.effect { Effect }
 
 pub fn main() -> i32 {
   let mut epoch = SystemClock.make(0, 0)
@@ -709,7 +709,7 @@ pub fn main() -> i32 {
 it.effect('traps on noncanonical Instant fractions and keeps its fields private', () =>
   Effect.gen(function* () {
     for (const fraction of ['-1', '1000000000']) {
-      const self = yield* snapshot(`import silk.system_clock as SystemClock
+      const self = yield* snapshot(`import silk.system_clock { SystemClock }
 pub fn main() -> i32 {
   let instant = SystemClock.make(0, ${fraction})
   drop instant
@@ -719,7 +719,7 @@ pub fn main() -> i32 {
       assert.strictEqual(Analysis.evaluate(self)._tag, 'Trap')
     }
 
-    const privateField = yield* snapshot(`import silk.system_clock as SystemClock
+    const privateField = yield* snapshot(`import silk.system_clock { SystemClock }
 pub fn main() -> i32 {
   let instant = SystemClock.make(0, 1)
   return instant.seconds
@@ -734,7 +734,7 @@ pub fn main() -> i32 {
 it.effect('advances a scripted monotonic timeline and delegates Effect.sleep', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`${scriptedMonotonicClock}
-import silk.effect as Effect
+import silk.effect { Effect }
 
 pub fn main() -> i32 {
   let mut provider = ScriptedMonotonicClock {
@@ -780,10 +780,10 @@ it.effect('keeps the two portable clock requirements independent on direct Wasm'
     const self = yield* snapshot(
       `${fixedSystemClock}
 ${scriptedMonotonicClock}
-import silk.effect as Effect
+import silk.effect { Effect }
 
 effect fn useBoth() -> i32
-? &mut SystemClock.SystemClock | &mut MonotonicClock.MonotonicClock {
+? &mut SystemClock | &mut MonotonicClock {
   let wall = run SystemClock.now()
   let mark = run MonotonicClock.now()
   if SystemClock.seconds(&wall) != 20 { return 1 }
@@ -803,8 +803,8 @@ pub fn main() -> i32 {
     resolution: u64.toU64(1),
     waits: u64.toU64(0)
   }
-  let withSystem = Effect.provideMut<SystemClock.SystemClock>(useBoth(), &mut system)
-  return run Effect.provideMut<MonotonicClock.MonotonicClock>(move withSystem, &mut monotonic)
+  let withSystem = Effect.provideMut<SystemClock>(useBoth(), &mut system)
+  return run Effect.provideMut<MonotonicClock>(move withSystem, &mut monotonic)
 }`,
       'wasm32-unknown-unknown',
     )

@@ -19,12 +19,12 @@
 //! ```silk
 //! import silk.box { Box }
 //!
-//! import silk.allocator { Allocator }
+//! import silk.allocator { Allocator, OutOfMemoryError }
 //!
 //! import silk.effect { Effect }
 //!
 //! effect fn build() -> i32
-//! ! Allocator.OutOfMemoryError {
+//! ! OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
 //!   let creating = Box.make<i32>(42)
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -36,7 +36,7 @@
 //!   return Box.into<i32>(move boxed)
 //! }
 //!
-//! effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+//! effect fn recover(error: OutOfMemoryError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -59,11 +59,11 @@
 // over T: a `[T; 0]` anchor of the kind Vector uses would be an inline reach into T and would make
 // a struct holding `Box` of itself recursive again.
 
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 import silk.allocator { OutOfMemoryError }
 import silk.layout { Layout }
-import silk.raw_buffer as RawBuffer
-import silk.slot as Slot
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
 import silk.usize as usize
 
 /// A marker for a box whose element has been transferred to its caller.
@@ -78,24 +78,54 @@ pub struct Box<T> {
   state: Vacant | Occupied
 }
 
+impl<T> Box<T> {
+  /// Moves one value into a new box with storage for exactly one element.
+  ///
+  /// # Details
+  ///
+  /// The returned box owns the value and the allocation. Allocation failure produces
+  /// `OutOfMemoryError` and does not produce a partial box.
+  pub effect fn make(value: T) -> Box<T> ! OutOfMemoryError ? &mut Allocator {
+    let layout = Layout.of<T>()
+    let recipe = Allocator.allocate(move layout)
+    let allocation = run recipe
+    let buffer = freshBuffer<T>(move allocation)
+    return Box<T> { buffer: writeFirst<T>(move buffer, move value), state: Occupied {} }
+  }
+
+  /// Borrows the held value as a shared slice of length one.
+  ///
+  /// # Details
+  ///
+  /// The slice borrows the box and remains valid only for the lexical borrow.
+  pub fn get(self: &Self) -> &[T] {
+    return RawBuffer.view<T>(&self.buffer, usize.ZERO, usize.ONE)
+  }
+
+  /// Borrows the held value as an exclusive slice of length one.
+  ///
+  /// # Details
+  ///
+  /// The slice permits mutation of the element and remains valid only for the lexical borrow.
+  pub fn getMut(self: &mut Self) -> &mut [T] {
+    return RawBuffer.viewMut<T>(&mut self.buffer, usize.ZERO, usize.ONE)
+  }
+
+  /// Consumes the box, returns its owned value, and releases its allocation.
+  pub fn into(self: Self) -> T {
+    let mut owned = move self
+    let state = Intrinsic.replace(owned.state, Vacant {})
+    return match move state {
+      Vacant nothing => absurd<T>()
+      Occupied held => takeElement<T>(&mut owned.buffer)
+    }
+  }
+}
+
 // Diverges on the arms the surrounding logic has already proven impossible.
 fn absurd<T>() -> T {
   let boom = 1 / 0
   return absurd<T>()
-}
-
-/// Moves one value into a new box with storage for exactly one element.
-///
-/// # Details
-///
-/// The returned box owns the value and the allocation. Allocation failure produces
-/// `OutOfMemoryError` and does not produce a partial box.
-pub effect fn make<T>(value: T) -> Box<T> ! OutOfMemoryError ? &mut Allocator {
-  let layout = Layout.of<T>()
-  let recipe = Allocator.allocate(move layout)
-  let allocation = run recipe
-  let buffer = freshBuffer<T>(move allocation)
-  return Box<T> { buffer: writeFirst<T>(move buffer, move value), state: Occupied {} }
 }
 
 fn freshBuffer<T>(allocation: Allocation) -> RawBuffer<T> {
@@ -118,35 +148,9 @@ fn writeFirst<T>(buffer: RawBuffer<T>, value: T) -> RawBuffer<T> {
 
 // The held value is borrowed as a one-element view rather than as a bare reference: a function
 // may return a lexical slice borrowed from one parameter, and no Silk function may return `&T`.
-/// Borrows the held value as a shared slice of length one.
-///
-/// # Details
-///
-/// The slice borrows the box and remains valid only for the lexical borrow.
-pub fn get<T>(self: &Box<T>) -> &[T] {
-  return RawBuffer.view<T>(&self.buffer, usize.ZERO, usize.ONE)
-}
-
-/// Borrows the held value as an exclusive slice of length one.
-///
-/// # Details
-///
-/// The slice permits mutation of the element and remains valid only for the lexical borrow.
-pub fn getMut<T>(self: &mut Box<T>) -> &mut [T] {
-  return RawBuffer.viewMut<T>(&mut self.buffer, usize.ZERO, usize.ONE)
-}
 
 // Marking the box vacant first is what keeps the value from being dropped twice: the box still
 // runs its hook when this scope ends, and by then it holds nothing to drop.
-/// Consumes the box, returns its owned value, and releases its allocation.
-pub fn into<T>(self: Box<T>) -> T {
-  let mut owned = move self
-  let state = Intrinsic.replace(owned.state, Vacant {})
-  return match move state {
-    Vacant nothing => absurd<T>()
-    Occupied held => takeElement<T>(&mut owned.buffer)
-  }
-}
 
 fn takeElement<T>(buffer: &mut RawBuffer<T>) -> T {
   unsafe {

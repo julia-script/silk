@@ -34,19 +34,13 @@ A reusable deterministic single-threaded Scheduler provider.
 
 Each call to [`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a65786563757465) creates fresh task storage and readiness state.
 
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a5374616c6c65644572726f72"></a>
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a30"></a>
 
-## `StalledError`
+## Implementation `LocalScheduler for _`
 
 ```silk
-pub struct StalledError
+impl LocalScheduler for _
 ```
-
-Reports that no task is ready and no event registration remains while the root is incomplete.
-
-### Details
-
-[`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a65786563757465) cancels and releases the incomplete task tree before it raises this error.
 
 <a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a6d616b65"></a>
 
@@ -56,110 +50,12 @@ Reports that no task is ready and no event registration remains while the root i
 pub fn make() -> LocalScheduler
 ```
 
-Constructs a reusable local Scheduler value.
-
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a30"></a>
-
-## Implementation `Copy for NoLink`
-
-```silk
-impl Copy for NoLink
-```
-
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a31"></a>
-
-## Implementation `Copy for TaskLink`
-
-```silk
-impl Copy for TaskLink
-```
-
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a32"></a>
-
-## Implementation `Copy for ClockSnapshot`
-
-```silk
-impl Copy for ClockSnapshot
-```
-
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a33"></a>
-
-## Implementation `MonotonicClock.MonotonicClock for TaskClockClient`
-
-```silk
-impl MonotonicClock.MonotonicClock for TaskClockClient
-```
-
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a30"></a>
-
-### Operation `now`
-
-```silk
-now = TaskClockClient.taskNow
-```
-
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a31"></a>
-
-### Operation `getResolution`
-
-```silk
-getResolution = TaskClockClient.taskResolution
-```
-
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a32"></a>
-
-### Operation `waitUntil`
-
-```silk
-waitUntil = TaskClockClient.taskWaitUntil
-```
-
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a33"></a>
-
-### Operation `waitFor`
-
-```silk
-waitFor = TaskClockClient.taskWaitFor
-```
-
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a34"></a>
-
-## Implementation `Scheduler.Scheduler for SchedulerClient`
-
-```silk
-impl Scheduler.Scheduler for SchedulerClient
-```
-
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a30"></a>
-
-### Operation `prepare`
-
-```silk
-prepare = SchedulerClient.prepareChild
-```
-
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a35"></a>
-
-## Implementation `Drop for CompletionCancellation`
-
-```silk
-impl Drop for CompletionCancellation
-```
-
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a36"></a>
-
-## Implementation `Copy for TimerEntry`
-
-```silk
-impl Copy for TimerEntry
-```
-
 <a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a65786563757465"></a>
 
 ## `execute`
 
 ```silk
-pub effect fn execute<A, E>(self: &mut silk/local_scheduler.LocalScheduler, program: once Effect<A ! E ? &mut silk/monotonic_clock.MonotonicClock | &mut silk/scheduler.Scheduler>) -> A ! E | OutOfMemoryError | StalledError ? &mut MonotonicClock.MonotonicClock
+pub effect fn execute<A, E>(self: &mut unavailable, program: once Effect<A ! E ? &mut silk/monotonic_clock.MonotonicClock | &mut silk/scheduler.Scheduler>) -> A ! E | OutOfMemoryError | StalledError ? &mut MonotonicClock
 ```
 
 Runs one lazy root program under this Scheduler and returns its typed outcome.
@@ -173,3 +69,147 @@ are resumed in deadline and registration order. When the ready queue is empty, t
 through its required parent MonotonicClock for the earliest timer; it raises [`StalledError`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a5374616c6c65644572726f72)
 only when no task is ready and no timer registration remains. Before any typed return or failure,
 it cancels every unfinished descendant and releases the complete run state.
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a5374616c6c65644572726f72"></a>
+
+## `StalledError`
+
+```silk
+pub fn StalledError(_: TaskLink, identity: TaskId) -> _
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `Copy for NoLink`
+
+```silk
+impl Copy for NoLink
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a32"></a>
+
+## Implementation `Copy for TaskLink`
+
+```silk
+impl Copy for TaskLink
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a33"></a>
+
+## Implementation `Copy for ClockSnapshot`
+
+```silk
+impl Copy for ClockSnapshot
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a34"></a>
+
+## Implementation `TaskClockClient for _`
+
+```silk
+impl TaskClockClient for _
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a30"></a>
+
+### Operation `taskNow`
+
+```silk
+taskNow = _
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a31"></a>
+
+### Operation `taskResolution`
+
+```silk
+taskResolution = _
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a32"></a>
+
+### Operation `taskWaitUntil`
+
+```silk
+taskWaitUntil = _
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a33"></a>
+
+### Operation `taskWaitFor`
+
+```silk
+taskWaitFor = _
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a35"></a>
+
+## Implementation `MonotonicClock for TaskClockClient`
+
+```silk
+impl MonotonicClock for TaskClockClient
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a353a3a6f7065726174696f6e3a30"></a>
+
+### Operation `now`
+
+```silk
+now = TaskClockClient.taskNow
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a353a3a6f7065726174696f6e3a31"></a>
+
+### Operation `getResolution`
+
+```silk
+getResolution = TaskClockClient.taskResolution
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a353a3a6f7065726174696f6e3a32"></a>
+
+### Operation `waitUntil`
+
+```silk
+waitUntil = TaskClockClient.taskWaitUntil
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a353a3a6f7065726174696f6e3a33"></a>
+
+### Operation `waitFor`
+
+```silk
+waitFor = TaskClockClient.taskWaitFor
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a36"></a>
+
+## Implementation `Scheduler for SchedulerClient`
+
+```silk
+impl Scheduler for SchedulerClient
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a363a3a6f7065726174696f6e3a30"></a>
+
+### Operation `prepare`
+
+```silk
+prepare = SchedulerClient.prepareChild
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a37"></a>
+
+## Implementation `Drop for CompletionCancellation`
+
+```silk
+impl Drop for CompletionCancellation
+```
+
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a696d706c656d656e746174696f6e3a38"></a>
+
+## Implementation `Copy for TimerEntry`
+
+```silk
+impl Copy for TimerEntry
+```

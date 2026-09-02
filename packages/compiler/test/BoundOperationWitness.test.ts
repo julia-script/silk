@@ -370,7 +370,7 @@ it.effect('preserves ownership and Effect rows through applied interface calls',
     const module = 'interface-operation-witness/applied-contract-shapes'
     const snapshot = yield* analyzed(
       module,
-      `import silk.effect as Effect
+      `import silk.effect { Effect }
 
 service Clock {}
 struct Problem {}
@@ -679,7 +679,7 @@ it.effect(
     Effect.gen(function* () {
       const outcome = yield* twoEngineValue(
         'bound-operation-witness/fallible-weaker-access',
-        `import silk.effect as Effect
+        `import silk.effect { Effect }
 import silk.result { Result }
 
 pub struct Problem { code: i32 }
@@ -722,7 +722,7 @@ pub fn main() -> i32 {
 it.effect('runs an effectful inline scalar witness with its failure and requirement rows', () =>
   Effect.gen(function* () {
     const module = 'bound-operation-witness/inline-scalar-effect'
-    const source = `import silk.effect as Effect
+    const source = `import silk.effect { Effect }
 import silk.result { Result }
 
 pub struct Problem { code: i32 }
@@ -874,7 +874,7 @@ pub fn main() -> i32 {
 it.effect('widens a pure source witness to the exact interface Effect contract', () =>
   Effect.gen(function* () {
     const module = 'bound-operation-witness/pure-effect-boundary'
-    const source = `import silk.effect as Effect
+    const source = `import silk.effect { Effect }
 import silk.result { Result }
 
 pub struct Problem {}
@@ -1001,7 +1001,7 @@ it.effect('widens a smaller Effect witness row at the interface boundary', () =>
   Effect.gen(function* () {
     const value = yield* evaluatedValue(
       'bound-operation-witness/smaller-effect-row',
-      `import silk.effect as Effect
+      `import silk.effect { Effect }
 import silk.result { Result }
 
 pub struct Problem {}
@@ -1045,7 +1045,7 @@ it.effect('retains exact caller requirements while widening witness access and r
     const module = 'bound-operation-witness/requirement-access-widening'
     const snapshot = yield* analyzed(
       module,
-      `import silk.effect as Effect
+      `import silk.effect { Effect }
 service Clock {}
 service Meter {}
 struct FixedClock { token: i32 }

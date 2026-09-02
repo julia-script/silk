@@ -27,7 +27,7 @@ locale-sensitive comparison, grapheme segmentation, or case folding.
 ### Make canonically equivalent text compare equal
 
 ```silk
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.effect { Effect }
 
@@ -36,7 +36,7 @@ import silk.string { String }
 import silk.unicode { Unicode }
 
 effect fn normalize() -> i32
-! Allocator.OutOfMemoryError {
+! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let composing = Unicode.normalizeNfc("e\u{301}")
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -53,7 +53,7 @@ effect fn normalize() -> i32
   return 42
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -74,13 +74,20 @@ Public declarations: 6.
 pub struct Unicode
 ```
 
-The importable name of the `silk.unicode` module scope.
+The owner of the normalization and Unicode-data operations.
 
 ### Details
 
-This struct carries no data and is never constructed by the library. Importing it as
-`import silk.unicode { Unicode }` names the module scope, so normalization and Unicode-data
-operations resolve through `Unicode`.
+This struct carries no data and is never constructed by the library. Every operation is an
+inherent member declared in `impl Unicode`, reached through `import silk.unicode { Unicode }`.
+
+<a id="declaration-73696c6b2f756e69636f64653a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `Unicode for _`
+
+```silk
+impl Unicode for _
+```
 
 <a id="declaration-73696c6b2f756e69636f64653a3a6461746156657273696f6e"></a>
 
@@ -89,13 +96,6 @@ operations resolve through `Unicode`.
 ```silk
 pub fn dataVersion() -> string
 ```
-
-Returns the Unicode version that defines this module's normalization results.
-
-### Details
-
-The version is data, not identity: a later database changes what this returns and what the
-tables contain, and changes neither a compiler type nor a target ABI.
 
 <a id="declaration-73696c6b2f756e69636f64653a3a6c6f6e676573744465636f6d706f736974696f6e"></a>
 

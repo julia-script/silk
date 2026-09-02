@@ -1299,6 +1299,33 @@ it.effect('formats pointer types canonically and idempotently', () =>
     )
     const second = yield* SyntaxFormatter.format(parse('memory://pointer-types.silk', text))
     assert.deepEqual(second.bytes, first.bytes)
+  }),
+)
+
+it.effect('formats inherent impl declarations canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source =
+      'impl<T>   Option<T>{\n/// Absent.\npub fn none()->Self{return Option<T>.None}\n\n\n/// Present.\npub fn some(value:T)->Self{return Option<T>.None}}\nimpl Counter{}'
+    const first = yield* SyntaxFormatter.format(parse('memory://inherent-format.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `impl<T> Option<T> {
+  /// Absent.
+  pub fn none() -> Self {
+    return Option<T>.None
+  }
+  /// Present.
+  pub fn some(value: T) -> Self {
+    return Option<T>.None
+  }
+}
+
+impl Counter {}
+`,
+    )
+    const second = yield* SyntaxFormatter.format(parse('memory://inherent-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
     assert.strictEqual(second.changed, false)
   }),
 )

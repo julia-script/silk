@@ -236,9 +236,9 @@ Days and weeks are fixed spans: one day is exactly 24 hours and one week is exac
 They do not represent calendar days, time zones, daylight-saving transitions, or leap seconds.
 
 ```silk
-import silk.monotonic_clock as MonotonicClock
+import silk.monotonic_clock { MonotonicClock }
 
-effect fn pause() -> () ? &mut MonotonicClock.MonotonicClock {
+effect fn pause() -> () ? &mut MonotonicClock {
   return run MonotonicClock.waitFor(1h30m)
 }
 ```

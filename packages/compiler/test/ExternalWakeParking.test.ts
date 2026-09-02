@@ -151,16 +151,16 @@ const assertNativeDriveAdmissionBeforeCallbacks = (
   }
 }
 
-const source = `import silk.allocator { Allocator }
-import silk.allocator { Allocator }
-import silk.effect as Effect
-import silk.execution as Execution
+const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
 import silk.layout { Layout }
-import silk.shared as Shared
+import silk.shared { Shared }
 struct Empty {}
 struct Waiting { wake: Intrinsic.Wake }
 struct WaiterState { slot: Empty | Waiting }
-struct Guard { storage: Allocation state: Shared.Shared<WaiterState> }
+struct Guard { storage: Allocation state: Shared<WaiterState> }
 fn install(state: &mut WaiterState, wake: Intrinsic.Wake) -> () {
   let previous = Intrinsic.replace(state.slot, Waiting { wake: move wake })
   drop previous
@@ -169,7 +169,7 @@ fn install(state: &mut WaiterState, wake: Intrinsic.Wake) -> () {
 fn extract(state: &mut WaiterState) -> Empty | Waiting {
   return Intrinsic.replace(state.slot, Empty {})
 }
-fn signal(state: &Shared.Shared<WaiterState>) -> () {
+fn signal(state: &Shared<WaiterState>) -> () {
   let selected = Shared.withMut(state, extract)
   return match move selected {
     Empty {} => ()
@@ -179,14 +179,14 @@ fn signal(state: &Shared.Shared<WaiterState>) -> () {
 fn register(
   wake: Intrinsic.Wake,
   storage: Allocation,
-  state: Shared.Shared<WaiterState>
+  state: Shared<WaiterState>
 ) -> Guard {
   let installing = install(move wake)
   let installed = Shared.withMut(&state, move installing)
   signal(&state)
   return Guard { storage: move storage, state: move state }
 }
-effect fn parked(storage: Allocation, state: Shared.Shared<WaiterState>) -> () {
+effect fn parked(storage: Allocation, state: Shared<WaiterState>) -> () {
   let retained = Shared.clone(&state)
   let registration = register(move storage, move state)
   let resumed = run Execution.park(move registration)
@@ -194,7 +194,7 @@ effect fn parked(storage: Allocation, state: Shared.Shared<WaiterState>) -> () {
   return ()
 }
 fn ready(state: &()) -> () { return () }
-effect fn program() -> () ! Allocator.OutOfMemoryError {
+effect fn program() -> () ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let guardStorage = run Allocator.allocate(Layout.of<i32>())
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -206,7 +206,7 @@ effect fn program() -> () ! Allocator.OutOfMemoryError {
   drop execution
   return ()
 }
-effect fn recover(error: Allocator.OutOfMemoryError) -> () { return () }
+effect fn recover(error: OutOfMemoryError) -> () { return () }
 pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
 
 it.effect('seals Wake and lowers ordinary-source park and wake through verified MIR', () =>
@@ -306,10 +306,10 @@ it.effect('evaluates a latched park through an execution-owned root and later ow
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'external-wake-parking/evaluator-resume',
-      new TextEncoder().encode(`import silk.allocator { Allocator }
-import silk.allocator { Allocator }
-import silk.effect as Effect
-import silk.execution as Execution
+      new TextEncoder().encode(`import silk.allocator { Allocator, OutOfMemoryError }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
 struct Empty {}
 struct Stored { execution: Intrinsic.Execution<i32> }
 struct Owner { slot: Empty | Stored result: i32 }
@@ -344,7 +344,7 @@ effect fn finish(selected: Empty | Stored, owner: &mut Owner) -> () {
 effect fn finishStored(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
   return run Execution.drive(move execution, move owner, complete, suspend)
 }
-effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+effect fn program() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut owner = Owner { slot: Empty {}, result: 0 }
   let mut execution = run Execution.make(body(), (), ready)
@@ -355,7 +355,7 @@ effect fn program() -> i32 ! Allocator.OutOfMemoryError {
   run finish(move selected, &mut owner)
   return owner.result
 }
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -2 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
       'wasm32-unknown-unknown',
     )
@@ -689,11 +689,11 @@ it.effect('cancels a latched Wake when onSuspend destroys the execution', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'independent-execution/latched-on-suspend-destroy',
-      new TextEncoder().encode(`import silk.allocator { Allocator }
-import silk.allocator { Allocator }
-import silk.effect as Effect
-import silk.execution as Execution
-import silk.shared as Shared
+      new TextEncoder().encode(`import silk.allocator { Allocator, OutOfMemoryError }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
+import silk.shared { Shared }
 struct Guard {}
 struct ReadyState { called: i32 }
 fn register(wake: Intrinsic.Wake) -> Guard {
@@ -702,7 +702,7 @@ fn register(wake: Intrinsic.Wake) -> Guard {
 }
 effect fn body() -> i32 { run Execution.park(register) return 1 }
 fn markReady(state: &mut ReadyState) -> () { state.called = 1 return () }
-fn ready(state: &Shared.Shared<ReadyState>) -> () {
+fn ready(state: &Shared<ReadyState>) -> () {
   Shared.withMut(state, markReady)
   return ()
 }
@@ -715,7 +715,7 @@ fn suspend(state: &mut (), execution: Intrinsic.Execution<i32>) -> () {
 effect fn driveOnce(execution: Intrinsic.Execution<i32>, state: &mut ()) -> () {
   return run Execution.drive(move execution, move state, complete, suspend)
 }
-effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+effect fn program() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let readyState = run Shared.make<ReadyState>(ReadyState { called: 0 })
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -728,7 +728,7 @@ effect fn program() -> i32 ! Allocator.OutOfMemoryError {
   drop readyState
   return 42 + called * 1000
 }
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -2 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
       'wasm32-unknown-unknown',
     )
@@ -918,7 +918,7 @@ it.effect('assigns only the sealed nominal Wake the local-execution affinity see
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'external-wake-parking/affinity',
-      new TextEncoder().encode(`import silk.shared as Shared
+      new TextEncoder().encode(`import silk.shared { Shared }
 struct Wake {}
 struct Empty {}
 struct Holder { wake: Intrinsic.Wake }
@@ -927,7 +927,7 @@ fn ordinary(value: Wake) -> () { drop value return () }
 fn aggregate(value: Holder) -> () { drop value return () }
 fn unionValue(value: Intrinsic.Wake | Empty) -> () { drop value return () }
 fn array(value: [Intrinsic.Wake; 1]) -> () { drop value return () }
-fn shared(value: Shared.Shared<Holder>) -> () { drop value return () }
+fn shared(value: Shared<Holder>) -> () { drop value return () }
 pub fn main() -> i32 { return 42 }`),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
@@ -969,7 +969,7 @@ it.effect('rejects external parking at a complete entry without an explicit Exec
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'external-wake-parking/unowned-entry',
-      new TextEncoder().encode(`import silk.execution as Execution
+      new TextEncoder().encode(`import silk.execution { Execution }
 struct Guard {}
 fn register(wake: Intrinsic.Wake) -> Guard { drop wake return Guard {} }
 pub fn main() -> () { return run Execution.park(register) }`),
@@ -1003,7 +1003,7 @@ it.effect('rejects a registration callback that transitively parks', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'external-wake-parking/non-parking-registration',
-      new TextEncoder().encode(`import silk.execution as Execution
+      new TextEncoder().encode(`import silk.execution { Execution }
 struct Guard {}
 fn harmless(wake: Intrinsic.Wake) -> Guard { drop wake return Guard {} }
 effect fn nested() -> () { return run Execution.park(harmless) }
@@ -1051,13 +1051,13 @@ fn selected(value: &mut Pair) -> i32 { return parks() }`,
     for (const [ordinal, variant] of variants.entries()) {
       const snapshot = yield* Analysis.ofSourceRealized(
         `external-wake-parking/shared-access-${ordinal}`,
-        new TextEncoder().encode(`import silk.execution as Execution
-import silk.shared as Shared
+        new TextEncoder().encode(`import silk.execution { Execution }
+import silk.shared { Shared }
 struct Guard {}
 struct Pair { value: i32 }
 fn register(wake: Intrinsic.Wake) -> Guard { drop wake return Guard {} }
 ${variant.callback}
-fn access(self: &Shared.Shared<Pair>) -> i32 { return Shared.${variant.access}(self, selected) }
+fn access(self: &Shared<Pair>) -> i32 { return Shared.${variant.access}(self, selected) }
 pub fn main() -> i32 { return 42 }`),
       )
       assert.deepEqual(
@@ -1071,7 +1071,7 @@ pub fn main() -> i32 { return 42 }`),
 
     const wakeSnapshot = yield* Analysis.ofSourceRealized(
       'external-wake-parking/shared-access-wake',
-      new TextEncoder().encode(`import silk.shared as Shared
+      new TextEncoder().encode(`import silk.shared { Shared }
 struct Empty {}
 struct Armed { wake: Intrinsic.Wake }
 struct State { slot: Empty | Armed }
@@ -1082,7 +1082,7 @@ fn signalInside(state: &mut State) -> () {
     Armed { wake } => Intrinsic.wake(move wake)
   }
 }
-fn access(self: &Shared.Shared<State>) -> () {
+fn access(self: &Shared<State>) -> () {
   return Shared.withMut(self, signalInside)
 }
 pub fn main() -> i32 { return 42 }`),
@@ -1097,10 +1097,10 @@ pub fn main() -> i32 { return 42 }`),
 it.effect('retains represented callable registration guards in ExecutionPark cleanup facts', () =>
   Effect.gen(function* () {
     const module = 'external-wake-parking/callable-guard'
-    const source = `import silk.allocator { Allocator }
-import silk.allocator { Allocator }
-import silk.effect as Effect
-import silk.execution as Execution
+    const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
 import silk.layout { Layout }
 fn use(value: (), holder: &Allocation) -> () { return () }
 fn register(wake: Intrinsic.Wake, holder: &Allocation) -> once fn(()) -> () {
@@ -1114,7 +1114,7 @@ effect fn parked(holder: Allocation) -> () {
   return ()
 }
 fn ready(state: &()) -> () { return () }
-effect fn program() -> () ! Allocator.OutOfMemoryError {
+effect fn program() -> () ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let holder = run Allocator.allocate(Layout.of<i32>())
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -1123,7 +1123,7 @@ effect fn program() -> () ! Allocator.OutOfMemoryError {
   drop execution
   return ()
 }
-effect fn recover(error: Allocator.OutOfMemoryError) -> () { return () }
+effect fn recover(error: OutOfMemoryError) -> () { return () }
 pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
     const snapshot = yield* Analysis.ofSourceRealized(module, new TextEncoder().encode(source))
     const capture = snapshot.ownership
@@ -1201,12 +1201,12 @@ it.effect(
     Effect.gen(function* () {
       const snapshot = yield* Analysis.ofSourceRealized(
         'external-wake-parking/timer-shaped',
-        new TextEncoder().encode(`import silk.execution as Execution
-import silk.shared as Shared
+        new TextEncoder().encode(`import silk.execution { Execution }
+import silk.shared { Shared }
 struct Empty {}
 struct Armed { wake: Intrinsic.Wake }
 struct TimerState { registration: Empty | Armed }
-struct Unlink { state: Shared.Shared<TimerState> }
+struct Unlink { state: Shared<TimerState> }
 fn install(state: &mut TimerState, wake: Intrinsic.Wake) -> () {
   let previous = Intrinsic.replace(state.registration, Armed { wake: move wake })
   drop previous
@@ -1215,19 +1215,19 @@ fn install(state: &mut TimerState, wake: Intrinsic.Wake) -> () {
 fn take(state: &mut TimerState) -> Empty | Armed {
   return Intrinsic.replace(state.registration, Empty {})
 }
-fn fire(state: &Shared.Shared<TimerState>) -> () {
+fn fire(state: &Shared<TimerState>) -> () {
   let selected = Shared.withMut(state, take)
   return match move selected {
     Empty {} => ()
     Armed { wake } => Intrinsic.wake(move wake)
   }
 }
-fn register(wake: Intrinsic.Wake, state: Shared.Shared<TimerState>) -> Unlink {
+fn register(wake: Intrinsic.Wake, state: Shared<TimerState>) -> Unlink {
   let installing = install(move wake)
   let installed = Shared.withMut(&state, move installing)
   return Unlink { state: move state }
 }
-effect fn sleep(state: Shared.Shared<TimerState>) -> () {
+effect fn sleep(state: Shared<TimerState>) -> () {
   let retained = Shared.clone(&state)
   let registration = register(move state)
   let resumed = run Execution.park(move registration)

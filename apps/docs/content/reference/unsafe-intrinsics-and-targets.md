@@ -1112,7 +1112,7 @@ other than synchronous is rejected even when every header check passes.
 
 **Diagnostics:** A parameter or result outside the subset reports `SEM0187` at the offending
 type. Retained Silk-only syntax, `static`, or `unsafe` reports `SEM0188` at the offending syntax.
-A suspending body reports `SEM0194` at the declaration, naming the suspending call; planning
+A suspending body reports `SEM0201` at the declaration, naming the suspending call; planning
 constructs no artifact. A rejected export publishes no thunk.
 
 **Current compiler:** Aligned. Completion runs the shared foreign admission and restriction checks

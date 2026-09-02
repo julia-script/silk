@@ -49,83 +49,21 @@ Public declarations: 8.
 pub struct UnicodeTables
 ```
 
-The importable name of the `silk.unicode_tables` module scope.
+The owner of the generated Unicode lookup operations.
 
 ### Details
 
-This struct carries no data and is never constructed by the library. Importing it as
-`import silk.unicode_tables { UnicodeTables }` names the module scope, so generated lookup
-operations resolve through `UnicodeTables`.
+This struct carries no data and is never constructed by the library. Every generated lookup is
+an inherent member declared in `impl UnicodeTables`, reached through
+`import silk.unicode_tables { UnicodeTables }`.
 
-<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a4465636f6d706f736974696f6e"></a>
+<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a696d706c656d656e746174696f6e3a30"></a>
 
-## `Decomposition`
-
-```silk
-pub struct Decomposition
-```
-
-One canonical decomposition with zero sentinels for an absent mapping or second scalar.
-
-<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a4465636f6d706f736974696f6e3a3a6669656c643a30"></a>
-
-### Field `first`
+## Implementation `UnicodeTables for _`
 
 ```silk
-pub first: u32
+impl UnicodeTables for _
 ```
-
-The first mapped scalar, or zero when the input has no table mapping.
-
-<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a4465636f6d706f736974696f6e3a3a6669656c643a31"></a>
-
-### Field `second`
-
-```silk
-pub second: u32
-```
-
-The second mapped scalar, or zero when the mapping contains one scalar.
-
-<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a506169725265636f7264"></a>
-
-## `PairRecord`
-
-```silk
-pub struct PairRecord
-```
-
-One two-scalar canonical decomposition and its composed scalar.
-
-<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a506169725265636f72643a3a6669656c643a30"></a>
-
-### Field `composed`
-
-```silk
-pub composed: u32
-```
-
-The scalar whose canonical mapping is this pair.
-
-<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a506169725265636f72643a3a6669656c643a31"></a>
-
-### Field `first`
-
-```silk
-pub first: u32
-```
-
-First scalar of the canonical mapping.
-
-<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a506169725265636f72643a3a6669656c643a32"></a>
-
-### Field `second`
-
-```silk
-pub second: u32
-```
-
-Second scalar of the canonical mapping.
 
 <a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a6461746156657273696f6e"></a>
 
@@ -134,8 +72,6 @@ Second scalar of the canonical mapping.
 ```silk
 pub fn dataVersion() -> string
 ```
-
-Returns the Unicode data version that defines all lookup results in this module.
 
 <a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a6d6178696d756d4465636f6d706f736974696f6e4c656e677468"></a>
 
@@ -185,3 +121,51 @@ Excluded composition pairs are absent. A nonzero result is always a primary comp
 ### Gotchas
 
 Hangul composition is algorithmic and is not included in this lookup.
+
+<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a4465636f6d706f736974696f6e"></a>
+
+## `Decomposition`
+
+```silk
+pub fn Decomposition(first: u32) -> _
+```
+
+<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a506169725265636f7264"></a>
+
+## `PairRecord`
+
+```silk
+pub struct PairRecord
+```
+
+One two-scalar canonical decomposition and its composed scalar.
+
+<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a506169725265636f72643a3a6669656c643a30"></a>
+
+### Field `composed`
+
+```silk
+pub composed: u32
+```
+
+The scalar whose canonical mapping is this pair.
+
+<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a506169725265636f72643a3a6669656c643a31"></a>
+
+### Field `first`
+
+```silk
+pub first: u32
+```
+
+First scalar of the canonical mapping.
+
+<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a506169725265636f72643a3a6669656c643a32"></a>
+
+### Field `second`
+
+```silk
+pub second: u32
+```
+
+Second scalar of the canonical mapping.

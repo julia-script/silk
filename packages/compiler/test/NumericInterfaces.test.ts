@@ -10,9 +10,9 @@ const snapshot = (source: string) =>
 
 it.effect('specializes generic integer addition to one concrete primitive', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.numeric { add }
+    const self = yield* snapshot(`import silk.numeric { Numeric }
 pub fn main() -> i32 {
-  return add(20, 22)
+  return Numeric.add(20, 22)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
@@ -38,9 +38,9 @@ pub fn main() -> i32 {
 
 it.effect('rejects a type without the static Integer conformance', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.numeric { add }
+    const self = yield* snapshot(`import silk.numeric { Numeric }
 pub fn main() -> bool {
-  return add(true, false)
+  return Numeric.add(true, false)
 }`)
     assert.isTrue(
       Analysis.diagnostics(self).some((diagnostic) =>

@@ -47,11 +47,11 @@ effect fn scriptedArgument(
   self: &mut Scripted,
   index: usize
 ) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
-  if index >= self.count { return none<Bytes>() }
+  if index >= self.count { return Option.none<Bytes>() }
   let source = [u8.toU8(97), u8.toU8(98), u8.toU8(99)]
   let one = [source[index]]
-  let owned = run bytesCopy(&one)
-  return some<Bytes>(move owned)
+  let owned = run Bytes.copy(&one)
+  return Option.some<Bytes>(move owned)
 }
 
 // The scripted environment holds exactly one four-byte name whose value is not valid UTF-8.
@@ -59,17 +59,17 @@ effect fn scriptedVariable(
   self: &mut Scripted,
   name: &[u8]
 ) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
-  if name.length != usize.add(0, 4) { return none<Bytes>() }
+  if name.length != usize.add(0, 4) { return Option.none<Bytes>() }
   let value = [u8.toU8(200), u8.toU8(201)]
-  let owned = run bytesCopy(&value)
-  return some<Bytes>(move owned)
+  let owned = run Bytes.copy(&value)
+  return Option.some<Bytes>(move owned)
 }
 
 effect fn scriptedDirectory(
   self: &mut Scripted
 ) -> Bytes ! HostInputError | OutOfMemoryError ? &mut Allocator {
   let value = [u8.toU8(47), u8.toU8(119)]
-  return run bytesCopy(&value)
+  return run Bytes.copy(&value)
 }
 
 impl HostInput for Scripted {
@@ -82,27 +82,27 @@ impl HostInput for Scripted {
 struct Broken {}
 
 effect fn brokenCount(self: &mut Broken) -> usize ! HostInputError {
-  fail inputFailure()
+  fail HostInput.inputFailure()
 }
 
 effect fn brokenArgument(
   self: &mut Broken,
   index: usize
 ) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
-  fail inputFailure()
+  fail HostInput.inputFailure()
 }
 
 effect fn brokenVariable(
   self: &mut Broken,
   name: &[u8]
 ) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
-  fail inputFailure()
+  fail HostInput.inputFailure()
 }
 
 effect fn brokenDirectory(
   self: &mut Broken
 ) -> Bytes ! HostInputError | OutOfMemoryError ? &mut Allocator {
-  fail inputFailure()
+  fail HostInput.inputFailure()
 }
 
 impl HostInput for Broken {
@@ -121,11 +121,11 @@ import silk.result { Result }
 import silk.string { InvalidUtf8 }
 import silk.usize as usize
 fn firstOf(entry: &Bytes) -> u8 {
-  return bytesSlice(entry)[usize.ZERO]
+  return Bytes.asSlice(entry)[usize.ZERO]
 }
 
 fn byteAt(entry: &Bytes, index: usize) -> u8 {
-  return bytesSlice(entry)[index]
+  return Bytes.asSlice(entry)[index]
 }
 
 fn present(value: Option<Bytes>) -> bool {
@@ -136,14 +136,14 @@ fn present(value: Option<Bytes>) -> bool {
 }
 
 fn decodes(entry: &Bytes) -> bool {
-  return match move text(bytesSlice(entry)) {
+  return match move HostInput.text(Bytes.asSlice(entry)) {
       Result<string, InvalidUtf8>.Success { value: view } => true
       Result<string, InvalidUtf8>.Failure { error: invalid } => false
   }
 }
 
 effect fn raiseMissing() -> never ! HostInputError {
-  fail inputFailure()
+  fail HostInput.inputFailure()
 }
 
 effect fn required(found: Option<Bytes>) -> Bytes ! HostInputError {
@@ -154,23 +154,12 @@ effect fn required(found: Option<Bytes>) -> Bytes ! HostInputError {
 }
 `
 
-const preamble = `import silk.bytes { Bytes, asSlice as bytesSlice, copy as bytesCopy, length as bytesLength }
-import silk.host_input {
-  HostInput,
-  HostInputError,
-  argument,
-  argumentCount,
-  arguments as hostArguments,
-  inputFailure,
-  text,
-  variable,
-  variableNamed,
-  workingDirectory
-}
-import silk.option { Option, none, some }
+const preamble = `import silk.bytes { Bytes }
+import silk.host_input { HostInput, HostInputError }
+import silk.option { Option }
 import silk.result { Result }
 import silk.string { InvalidUtf8 }
-import silk.vector { Vector, length as vectorLength, remove as vectorRemove }
+import silk.vector { Vector }
 
 `
 
@@ -190,26 +179,26 @@ it.effect('returns the command-line arguments in the order the process received 
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.host_input { HostInputError }
 import silk.u8 as u8
 import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = scripted(usize.add(0, 3))
-  let total = run Effect.provideMut(argumentCount(), &mut provider)
+  let total = run Effect.provideMut(HostInput.argumentCount(), &mut provider)
   if total != usize.add(0, 3) { return 1 }
   let collected = run Effect.provideMut(
-    Effect.provideMut(hostArguments(), &mut allocator),
+    Effect.provideMut(HostInput.arguments(), &mut allocator),
     &mut provider
   )
   let mut owned = move collected
-  if vectorLength<Bytes>(&owned) != usize.add(0, 3) { return 2 }
-  let first = vectorRemove<Bytes>(&mut owned, usize.ZERO)
+  if Vector.length<Bytes>(&owned) != usize.add(0, 3) { return 2 }
+  let first = Vector.remove<Bytes>(&mut owned, usize.ZERO)
   if firstOf(&first) != u8.toU8(97) { return 3 }
-  let second = vectorRemove<Bytes>(&mut owned, usize.ZERO)
+  let second = Vector.remove<Bytes>(&mut owned, usize.ZERO)
   if firstOf(&second) != u8.toU8(98) { return 4 }
-  let third = vectorRemove<Bytes>(&mut owned, usize.ZERO)
+  let third = Vector.remove<Bytes>(&mut owned, usize.ZERO)
   if firstOf(&third) != u8.toU8(99) { return 5 }
   return 42
 }
@@ -231,24 +220,24 @@ it.effect('reports an argument past the end and an unset variable as absence, no
       scriptedSource(`import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.host_input { HostInputError }
 import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = scripted(usize.ONE)
   let past = run Effect.provideMut(
-    Effect.provideMut(argument(usize.add(0, 9)), &mut allocator),
+    Effect.provideMut(HostInput.argument(usize.add(0, 9)), &mut allocator),
     &mut provider
   )
   if present(move past) { return 1 }
   let unset = run Effect.provideMut(
-    Effect.provideMut(variableNamed("NO"), &mut allocator),
+    Effect.provideMut(HostInput.variableNamed("NO"), &mut allocator),
     &mut provider
   )
   if present(move unset) { return 2 }
   let set = run Effect.provideMut(
-    Effect.provideMut(variableNamed("PATH"), &mut allocator),
+    Effect.provideMut(HostInput.variableNamed("PATH"), &mut allocator),
     &mut provider
   )
   if present(move set) == false { return 3 }
@@ -273,7 +262,7 @@ it.effect('keeps a value that is not valid UTF-8 readable as its exact bytes', (
       scriptedSource(`import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.host_input { HostInputError }
 import silk.u8 as u8
 import silk.usize as usize
@@ -281,18 +270,18 @@ effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = scripted(usize.ONE)
   let found = run Effect.provideMut(
-    Effect.provideMut(variableNamed("PATH"), &mut allocator),
+    Effect.provideMut(HostInput.variableNamed("PATH"), &mut allocator),
     &mut provider
   )
   let owned = run required(move found)
-  if bytesLength(&owned) != usize.add(0, 2) { return 1 }
+  if Bytes.length(&owned) != usize.add(0, 2) { return 1 }
   // 0xC8 0xC9 is not a UTF-8 sequence, and both bytes survive the service exactly.
   if byteAt(&owned, usize.ZERO) != u8.toU8(200) { return 2 }
   if byteAt(&owned, usize.ONE) != u8.toU8(201) { return 3 }
   // The textual view is checked, so it refuses those bytes rather than replacing them.
   if decodes(&owned) { return 4 }
   let directory = run Effect.provideMut(
-    Effect.provideMut(workingDirectory(), &mut allocator),
+    Effect.provideMut(HostInput.workingDirectory(), &mut allocator),
     &mut provider
   )
   if firstOf(&directory) != u8.toU8(47) { return 5 }
@@ -315,11 +304,11 @@ it.effect('routes an in-source provider error into the typed failure channel', (
   Effect.gen(function* () {
     const self = yield* snapshot(
       scriptedSource(`import silk.allocator { OutOfMemoryError }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.host_input { HostInputError }
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
   let mut provider = Broken {}
-  let total = run Effect.provideMut(argumentCount(), &mut provider)
+  let total = run Effect.provideMut(HostInput.argumentCount(), &mut provider)
   return 1
 }
 
@@ -337,7 +326,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
 const nativeProgram = nativeSource(`import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.host_input { HostInputError }
 import silk.os_host_input { OsHostInput }
 import silk.u8 as u8
@@ -345,29 +334,29 @@ import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = OsHostInput.make()
-  let total = run Effect.provideMut(argumentCount(), &mut provider)
+  let total = run Effect.provideMut(HostInput.argumentCount(), &mut provider)
   if total != usize.add(0, 3) { return 1 }
   let found = run Effect.provideMut(
-    Effect.provideMut(argument(usize.ONE), &mut allocator),
+    Effect.provideMut(HostInput.argument(usize.ONE), &mut allocator),
     &mut provider
   )
   let owned = run required(move found)
-  if bytesLength(&owned) != usize.add(0, 3) { return 2 }
+  if Bytes.length(&owned) != usize.add(0, 3) { return 2 }
   if byteAt(&owned, usize.ONE) != u8.toU8(255) { return 3 }
   let unset = run Effect.provideMut(
-    Effect.provideMut(variableNamed("SILK_UNSET"), &mut allocator),
+    Effect.provideMut(HostInput.variableNamed("SILK_UNSET"), &mut allocator),
     &mut provider
   )
   if present(move unset) { return 4 }
   let set = run Effect.provideMut(
-    Effect.provideMut(variableNamed("SILK_MODE"), &mut allocator),
+    Effect.provideMut(HostInput.variableNamed("SILK_MODE"), &mut allocator),
     &mut provider
   )
   let value = run required(move set)
-  if bytesLength(&value) != usize.add(0, 2) { return 5 }
+  if Bytes.length(&value) != usize.add(0, 2) { return 5 }
   if byteAt(&value, usize.ZERO) != u8.toU8(200) { return 6 }
   let directory = run Effect.provideMut(
-    Effect.provideMut(workingDirectory(), &mut allocator),
+    Effect.provideMut(HostInput.workingDirectory(), &mut allocator),
     &mut provider
   )
   if firstOf(&directory) != u8.toU8(47) { return 7 }
@@ -415,7 +404,7 @@ it.effect('copies a value longer than the provider buffer completely', () =>
       nativeSource(`import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.host_input { HostInputError }
 import silk.os_host_input { OsHostInput }
 import silk.u8 as u8
@@ -424,11 +413,11 @@ effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = OsHostInput.make()
   let found = run Effect.provideMut(
-    Effect.provideMut(argument(usize.ZERO), &mut allocator),
+    Effect.provideMut(HostInput.argument(usize.ZERO), &mut allocator),
     &mut provider
   )
   let owned = run required(move found)
-  if bytesLength(&owned) != usize.add(0, 300) { return 1 }
+  if Bytes.length(&owned) != usize.add(0, 300) { return 1 }
   if byteAt(&owned, usize.ZERO) != u8.toU8(1) { return 2 }
   if byteAt(&owned, usize.add(0, 299)) != u8.toU8(49) { return 3 }
   return 42
@@ -542,7 +531,7 @@ it.effect(
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.host_input { HostInputError }
 import silk.os_host_input { OsHostInput }
 import silk.u8 as u8
@@ -550,36 +539,36 @@ import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = OsHostInput.make()
-  let total = run Effect.provideMut(argumentCount(), &mut provider)
+  let total = run Effect.provideMut(HostInput.argumentCount(), &mut provider)
   if total != usize.add(0, 4) { return 1 }
   // The three passed arguments follow the program name, in the order the process received them.
   let collected = run Effect.provideMut(
-    Effect.provideMut(hostArguments(), &mut allocator),
+    Effect.provideMut(HostInput.arguments(), &mut allocator),
     &mut provider
   )
   let mut owned = move collected
-  if vectorLength<Bytes>(&owned) != usize.add(0, 4) { return 2 }
-  let program = vectorRemove<Bytes>(&mut owned, usize.ZERO)
-  let first = vectorRemove<Bytes>(&mut owned, usize.ZERO)
+  if Vector.length<Bytes>(&owned) != usize.add(0, 4) { return 2 }
+  let program = Vector.remove<Bytes>(&mut owned, usize.ZERO)
+  let first = Vector.remove<Bytes>(&mut owned, usize.ZERO)
   if firstOf(&first) != u8.toU8(97) { return 3 }
-  let second = vectorRemove<Bytes>(&mut owned, usize.ZERO)
+  let second = Vector.remove<Bytes>(&mut owned, usize.ZERO)
   if firstOf(&second) != u8.toU8(98) { return 8 }
-  if bytesLength(&second) != usize.add(0, 4) { return 10 }
-  let third = vectorRemove<Bytes>(&mut owned, usize.ZERO)
+  if Bytes.length(&second) != usize.add(0, 4) { return 10 }
+  let third = Vector.remove<Bytes>(&mut owned, usize.ZERO)
   if firstOf(&third) != u8.toU8(103) { return 11 }
   let unset = run Effect.provideMut(
-    Effect.provideMut(variableNamed("SILK_ABSENT_NAME"), &mut allocator),
+    Effect.provideMut(HostInput.variableNamed("SILK_ABSENT_NAME"), &mut allocator),
     &mut provider
   )
   if present(move unset) { return 4 }
   let set = run Effect.provideMut(
-    Effect.provideMut(variableNamed("SILK_EXIT_MARK"), &mut allocator),
+    Effect.provideMut(HostInput.variableNamed("SILK_EXIT_MARK"), &mut allocator),
     &mut provider
   )
   let mark = run required(move set)
-  if bytesLength(&mark) != usize.ONE { return 5 }
+  if Bytes.length(&mark) != usize.ONE { return 5 }
   let directory = run Effect.provideMut(
-    Effect.provideMut(workingDirectory(), &mut allocator),
+    Effect.provideMut(HostInput.workingDirectory(), &mut allocator),
     &mut provider
   )
   if firstOf(&directory) != u8.toU8(47) { return 6 }

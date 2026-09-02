@@ -20,7 +20,7 @@ implementation lexically. Allocation failure is typed as [`OutOfMemoryError`](#d
 ### Provide the process allocator
 
 ```silk
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.bytes { Bytes }
 
@@ -29,7 +29,7 @@ import silk.effect { Effect }
 import silk.usize
 
 effect fn copyMessage() -> i32
-! Allocator.OutOfMemoryError {
+! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let source = b"Silk"
   let copying = Bytes.copy(&source)
@@ -39,7 +39,7 @@ effect fn copyMessage() -> i32
     |> usize.toI32
 }
 
-effect fn recoverAllocation(error: Allocator.OutOfMemoryError) -> i32 {
+effect fn recoverAllocation(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -62,20 +62,6 @@ pub struct OutOfMemoryError
 
 A failure that reports that an allocator cannot satisfy a storage request.
 
-<a id="declaration-73696c6b2f616c6c6f6361746f723a3a6f75744f664d656d6f7279"></a>
-
-## `outOfMemory`
-
-```silk
-pub effect fn outOfMemory() -> never ! OutOfMemoryError
-```
-
-Fails immediately with `OutOfMemoryError`.
-
-### When to use
-
-Use this function to translate a checked size failure into the standard allocation failure.
-
 <a id="declaration-73696c6b2f616c6c6f6361746f723a3a416c6c6f6361746f72"></a>
 
 ## `Allocator`
@@ -96,15 +82,21 @@ effect fn allocate(layout: LayoutValue) -> Allocation ! OutOfMemoryError ? &mut 
 
 Acquires one allocation for `layout`, or fails without returning partial storage.
 
-<a id="declaration-73696c6b2f616c6c6f6361746f723a3a53797374656d416c6c6f6361746f72"></a>
+<a id="declaration-73696c6b2f616c6c6f6361746f723a3a696d706c656d656e746174696f6e3a30"></a>
 
-## `SystemAllocator`
+## Implementation `Allocator for _`
 
 ```silk
-pub struct SystemAllocator
+impl Allocator for _
 ```
 
-A process-backed provider for [`Allocator`](#declaration-73696c6b2f616c6c6f6361746f723a3a416c6c6f6361746f72).
+<a id="declaration-73696c6b2f616c6c6f6361746f723a3a6f75744f664d656d6f7279"></a>
+
+## `outOfMemory`
+
+```silk
+pub effect fn outOfMemory() -> never ! OutOfMemoryError
+```
 
 <a id="declaration-73696c6b2f616c6c6f6361746f723a3a73797374656d416c6c6f6361746f7250726f7669646572"></a>
 
@@ -116,7 +108,15 @@ pub fn systemAllocatorProvider() -> SystemAllocator
 
 Creates a process-backed allocator provider without allocating storage.
 
-<a id="declaration-73696c6b2f616c6c6f6361746f723a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f616c6c6f6361746f723a3a53797374656d416c6c6f6361746f72"></a>
+
+## `SystemAllocator`
+
+```silk
+pub fn SystemAllocator(_: fn(...), layout: LayoutValue) -> Allocation ! OutOfMemoryError
+```
+
+<a id="declaration-73696c6b2f616c6c6f6361746f723a3a696d706c656d656e746174696f6e3a31"></a>
 
 ## Implementation `Allocator for SystemAllocator`
 
@@ -124,7 +124,7 @@ Creates a process-backed allocator provider without allocating storage.
 impl Allocator for SystemAllocator
 ```
 
-<a id="declaration-73696c6b2f616c6c6f6361746f723a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f616c6c6f6361746f723a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `allocate`
 

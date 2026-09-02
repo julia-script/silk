@@ -27,11 +27,11 @@ terminates.
 ```silk
 import silk.allocator { OutOfMemoryError }
 import silk.effect { Effect }
-import silk.fiber { Fiber }
-import silk.local_scheduler { LocalScheduler }
-import silk.monotonic_clock as MonotonicClock
-import silk.scheduler { Scheduler }
-import silk.system_clock as SystemClock
+import silk.fiber { Fiber, Cancelled, Outcome }
+import silk.local_scheduler { LocalScheduler, StalledError }
+import silk.monotonic_clock { MonotonicClock }
+import silk.scheduler { Scheduler, TaskIdExhaustedError }
+import silk.system_clock { SystemClock }
 import silk.system_clock { Instant }
 
 struct ParentClock {
@@ -57,7 +57,7 @@ effect fn parentWaitFor(self: &mut ParentClock, duration: u64) -> () {
   return run parentWaitUntil(move self, move deadline)
 }
 
-impl MonotonicClock.MonotonicClock for ParentClock {
+impl MonotonicClock for ParentClock {
   now: ParentClock.parentNow
   getResolution: ParentClock.parentResolution
   waitUntil: ParentClock.parentWaitUntil
@@ -69,17 +69,17 @@ effect fn work() -> i32 {
 }
 
 effect fn program() -> i32
-! OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
-? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+! OutOfMemoryError | TaskIdExhaustedError | Cancelled
+? &mut Scheduler | &mut MonotonicClock {
   let child = run Fiber.forkChild<i32, never>(work())
   return run Fiber.join<i32, never>(move child)
 }
 
 effect fn recover(
   error: OutOfMemoryError
-    | Scheduler.TaskIdExhaustedError
-    | Fiber.Cancelled
-    | LocalScheduler.StalledError,
+    | TaskIdExhaustedError
+    | Cancelled
+    | StalledError,
 ) -> i32 {
   drop error
   return -1
@@ -91,7 +91,7 @@ pub fn main() -> i32 {
   let scheduled = Effect.catchAll(
     LocalScheduler.execute(&mut scheduler, program()),
     recover,
-  ) |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+  ) |> Effect.provideMut<MonotonicClock>(&mut clock)
   return run move scheduled
 }
 ```
@@ -139,7 +139,7 @@ response and notifies the parent first. It then reports the stored child's initi
 Deterministic FIFO order lets `forkChild` return the Fiber before the child's first body activation.
 
 **Boundary:** Preparation failure or task-store insertion refusal returns no Fiber and leaves no
-runnable child. Task identity exhaustion raises `Scheduler.TaskIdExhaustedError`; allocation refusal
+runnable child. Task identity exhaustion raises `TaskIdExhaustedError`; allocation refusal
 raises `Allocator.OutOfMemoryError`. Neither failure is converted to a child outcome.
 
 **Diagnostics:** A child Effect with additional unresolved runtime requirements fails ordinary
@@ -153,9 +153,9 @@ Effect-contract compatibility. No declaration receives special behavior from the
 
 **Status:** Confirmed
 
-`Fiber.await` consumes one `Fiber<A, E>` and returns `Fiber.Outcome<A, E>` containing success,
+`Fiber.await` consumes one `Fiber<A, E>` and returns `Outcome<A, E>` containing success,
 typed failure, or cancellation. `Fiber.join` consumes the same authority, returns `A` on success,
-and raises either the original `E` or `Fiber.Cancelled`.
+and raises either the original `E` or `Cancelled`.
 
 Observation of a terminal Fiber completes immediately. Observation of an incomplete Fiber parks
 the current Execution and installs at most one Wake. Completion and resumption allocate no storage,
@@ -178,7 +178,7 @@ Every child remains linked to the task that created it. Parent success, typed fa
 cancellation, or stalled shutdown cancels and releases every unfinished descendant before the
 driver dispatches another task that can observe the parent's terminal outcome.
 
-Cancellation publishes `Fiber.Cancelled` through the type-erased completion signal and destroys
+Cancellation publishes `Cancelled` through the type-erased completion signal and destroys
 the child's Execution. A Fiber returned through its terminating parent's result remains a valid
 observer, but it observes cancellation when the child was unfinished.
 
@@ -217,7 +217,7 @@ name a task from a later `execute` call.
 
 `LocalScheduler.execute` returns the root's exact success value or raises its exact typed failure.
 If no task is ready and no event registration remains while the root is incomplete, it cancels the
-remaining task tree and raises `LocalScheduler.StalledError`. An active timer keeps the scheduler
+remaining task tree and raises `StalledError`. An active timer keeps the scheduler
 waiting for progress. Setup or task-store allocation refusal raises `Allocator.OutOfMemoryError`.
 Fatal traps remain outside typed recovery.
 

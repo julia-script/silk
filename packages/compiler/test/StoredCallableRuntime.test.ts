@@ -190,7 +190,7 @@ const cleanupProgram = (dropBody: string, exit: CleanupExit) => `import silk.all
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
 struct Guard {
   tag: i32
@@ -217,7 +217,7 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 const hookOnlyCleanupProgram = (exit: CleanupExit) => `import silk.allocator { OutOfMemoryError }
-import silk.effect as Effect
+import silk.effect { Effect }
 struct Guard<F: once fn(i32) -> i32> {
   tag: i32
   marker: F
@@ -245,7 +245,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 const cleanupExits = ['uncalled', 'consuming', 'moved', 'typed-failure'] as const
 
 const typedFailure = `import silk.allocator { OutOfMemoryError }
-import silk.effect as Effect
+import silk.effect { Effect }
 ${takeDeclarations}effect fn build() -> i32 ! OutOfMemoryError {
   let token = Token { value: 2 }
   let holder = Holder { step: consume(move token) }
@@ -256,12 +256,12 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 const callableLaneMutationCleanup = `import silk.allocator { Allocator }
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect as Effect
-import silk.shared as Shared
+import silk.effect { Effect }
+import silk.shared { Shared }
 struct Cell { value: i32 }
 struct Guard {
-  primary: Shared.Shared<Cell>
-  replacement: Shared.Shared<Cell>
+  primary: Shared<Cell>
+  replacement: Shared<Cell>
 }
 impl Drop for Guard {
   fn drop(self: &mut Guard) -> () {

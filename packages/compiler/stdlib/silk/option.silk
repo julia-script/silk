@@ -18,7 +18,7 @@
 //!   return value * 2
 //! }
 //!
-//! fn positive(value: i32) -> Option.Option<i32> {
+//! fn positive(value: i32) -> Option<i32> {
 //!   if value > 0 {
 //!     return Option.some<i32>(value)
 //!   }
@@ -53,75 +53,77 @@ pub union Option<T> {
   }
 }
 
-/// Constructs an absent optional value of the requested element type.
-pub fn none<T>() -> Option<T> {
-  return Option<T>.None
-}
-
-/// Constructs a present option by moving `value` into it.
-pub fn some<T>(value: T) -> Option<T> {
-  return Option.Some { value: move value }
-}
-
-/// Applies `transform` once to a present value and keeps an absent value absent.
-///
-/// # Details
-///
-/// The callback is not called for [`None`]. This operation consumes `self`; use a shared borrow and
-/// `match` instead when the original option must remain available.
-pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> Option<U> {
-  return match move self {
-    Option<T>.Some { value } => some<U>(transform(move value))
-    Option<T>.None => none<U>()
+impl<T> Option<T> {
+  /// Constructs an absent optional value of the requested element type.
+  pub fn none() -> Option<T> {
+    return Option<T>.None
   }
-}
 
-/// Continues a present value with a transform that itself answers with an Option, so the
-/// outcome stays one Option deep instead of nesting.
-///
-/// # Details
-///
-/// The callback runs once for [`Some`] and not at all for [`None`]. Use this when the next step may
-/// reject the value without needing to explain why; use a `Result` when rejection needs an error.
-pub fn flatMap<T, U>(self: Option<T>, transform: once fn(T) -> Option<U>) -> Option<U> {
-  return match move self {
-    Option<T>.Some { value } => transform(move value)
-    Option<T>.None => none<U>()
+  /// Constructs a present option by moving `value` into it.
+  pub fn some(value: T) -> Option<T> {
+    return Option.Some { value: move value }
   }
-}
 
-/// Returns the present value, or the fallback value when the option is absent.
-///
-/// # Details
-///
-/// Only the absent arm consumes the fallback. The present arm releases it, so exactly one of the
-/// two owned values leaves this call and the other drops.
-///
-/// # Examples
-///
-/// ## Choose between a present value and a fallback
-///
-/// ```silk
-/// import silk.option { Option }
-///
-/// pub fn main() -> i32 {
-///   let present = Option.some<i32>(7)
-///   let absent = Option.none<i32>()
-///   let first = move present
-///     |> Option.unwrapOr<i32>(0)
-///   let second = move absent
-///     |> Option.unwrapOr<i32>(5)
-///   return first + second
-/// }
-/// ```
-pub fn unwrapOr<T>(
-  self: Option<T>,
-  /// The owned alternative consumed only when `self` is absent.
-  fallback: T,
-) -> T {
-  return match move self {
-    Option<T>.Some { value } => keepPresent<T>(move value, move fallback)
-    Option<T>.None => move fallback
+  /// Applies `transform` once to a present value and keeps an absent value absent.
+  ///
+  /// # Details
+  ///
+  /// The callback is not called for [`None`]. This operation consumes `self`; use a shared borrow and
+  /// `match` instead when the original option must remain available.
+  pub fn map<U>(self: Self, transform: once fn(T) -> U) -> Option<U> {
+    return match move self {
+      Option<T>.Some { value } => Option.some<U>(transform(move value))
+      Option<T>.None => Option.none<U>()
+    }
+  }
+
+  /// Continues a present value with a transform that itself answers with an Option, so the
+  /// outcome stays one Option deep instead of nesting.
+  ///
+  /// # Details
+  ///
+  /// The callback runs once for [`Some`] and not at all for [`None`]. Use this when the next step may
+  /// reject the value without needing to explain why; use a `Result` when rejection needs an error.
+  pub fn flatMap<U>(self: Self, transform: once fn(T) -> Option<U>) -> Option<U> {
+    return match move self {
+      Option<T>.Some { value } => transform(move value)
+      Option<T>.None => Option.none<U>()
+    }
+  }
+
+  /// Returns the present value, or the fallback value when the option is absent.
+  ///
+  /// # Details
+  ///
+  /// Only the absent arm consumes the fallback. The present arm releases it, so exactly one of the
+  /// two owned values leaves this call and the other drops.
+  ///
+  /// # Examples
+  ///
+  /// ## Choose between a present value and a fallback
+  ///
+  /// ```silk
+  /// import silk.option { Option }
+  ///
+  /// pub fn main() -> i32 {
+  ///   let present = Option.some<i32>(7)
+  ///   let absent = Option.none<i32>()
+  ///   let first = move present
+  ///     |> Option.unwrapOr<i32>(0)
+  ///   let second = move absent
+  ///     |> Option.unwrapOr<i32>(5)
+  ///   return first + second
+  /// }
+  /// ```
+  pub fn unwrapOr(
+    self: Self,
+    /// The owned alternative consumed only when `self` is absent.
+    fallback: T,
+  ) -> T {
+    return match move self {
+      Option<T>.Some { value } => keepPresent<T>(move value, move fallback)
+      Option<T>.None => move fallback
+    }
   }
 }
 

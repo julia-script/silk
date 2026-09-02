@@ -22,14 +22,14 @@ later appends can reallocate, so do not retain a view across a mutation.
 ```silk
 import silk.bytes { Bytes }
 
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.effect { Effect }
 
 import silk.u8
 
 effect fn build() -> i32
-! Allocator.OutOfMemoryError {
+! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let source = b"AB"
   let copying = Bytes.copy(&source)
@@ -45,7 +45,7 @@ effect fn build() -> i32
   return u8.toI32(readable[0]) - u8.toI32(readable[1]) + u8.toI32(readable[2]) - 42
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -73,6 +73,14 @@ An owned encoding-neutral sequence of arbitrary octets.
 A value owns its initialized bytes and releases their storage on drop. Its length can grow with
 [`append`](#declaration-73696c6b2f62797465733a3a617070656e64), and its capacity is not part of the public contract.
 
+<a id="declaration-73696c6b2f62797465733a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `Bytes for _`
+
+```silk
+impl Bytes for _
+```
+
 <a id="declaration-73696c6b2f62797465733a3a6d616b65"></a>
 
 ## `make`
@@ -80,8 +88,6 @@ A value owns its initialized bytes and releases their storage on drop. Its lengt
 ```silk
 pub fn make() -> Bytes
 ```
-
-Creates an empty `Bytes` value without allocating storage.
 
 <a id="declaration-73696c6b2f62797465733a3a7a65726f6564"></a>
 
@@ -102,7 +108,7 @@ A zero length returns an empty value without an allocation.
 ## `length`
 
 ```silk
-pub fn length(self: &silk/bytes.Bytes) -> usize
+pub fn length(self: &unavailable) -> usize
 ```
 
 Returns the initialized byte count.
@@ -122,7 +128,7 @@ Copies a complete borrowed byte sequence into independently owned storage.
 ## `append`
 
 ```silk
-pub effect fn append(self: &mut silk/bytes.Bytes, values: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect fn append(self: &mut unavailable, values: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends a complete borrowed byte sequence in source order.
@@ -136,7 +142,7 @@ If growth fails, the original bytes and their length remain unchanged.
 ## `asSlice`
 
 ```silk
-pub fn asSlice(self: &silk/bytes.Bytes) -> &[u8]
+pub fn asSlice(self: &unavailable) -> &[u8]
 ```
 
 Borrows all initialized octets as one shared lexical slice.
@@ -146,7 +152,7 @@ Borrows all initialized octets as one shared lexical slice.
 ## `asMutSlice`
 
 ```silk
-pub fn asMutSlice(self: &mut silk/bytes.Bytes) -> &mut [u8]
+pub fn asMutSlice(self: &mut unavailable) -> &mut [u8]
 ```
 
 Borrows all initialized octets as one exclusive lexical slice.

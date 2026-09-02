@@ -92,10 +92,10 @@ const agrees = (
 const ORDER_UNDER_12345 = 971199974
 const ORDER_UNDER_6789 = 434552010
 
-const mapImports = `import silk.hash as Hash
+const mapImports = `import silk.hash { Hash }
 import silk.hash { HashKey, HashSeed, Word }
 import silk.i32 as i32
-import silk.hash_map { HashMap, bucketCount, insert, keyAt, length, make, occupiedAt }
+import silk.hash_map { HashMap }
 import silk.option { Option }
 import silk.u64 as u64
 import silk.usize as usize`
@@ -108,9 +108,9 @@ import silk.usize as usize`
 const foldOrder = (map: string, into: string): string =>
   `  let mut ${into}Index = usize.ZERO
   let mut ${into} = u64.toU64(0)
-  while ${into}Index < bucketCount<Word, i32>(&${map}) {
-    if occupiedAt<Word, i32>(&${map}, ${into}Index) {
-      let held = keyAt<Word, i32>(&${map}, ${into}Index)
+  while ${into}Index < HashMap.bucketCount<Word, i32>(&${map}) {
+    if HashMap.occupiedAt<Word, i32>(&${map}, ${into}Index) {
+      let held = HashMap.keyAt<Word, i32>(&${map}, ${into}Index)
       ${into} = u64.wrappingAdd(u64.wrappingMultiply(${into}, 131), held.value)
     }
     ${into}Index = ${into}Index + usize.ONE
@@ -120,7 +120,7 @@ const foldOrder = (map: string, into: string): string =>
 const fill = (map: string): string =>
   `  let mut ${map}Key = 0
   while ${map}Key < 12 {
-    let previous = run insert<Word, i32>(&mut ${map}, Hash.word(i32.toU64(${map}Key * 7 + 1)), ${map}Key)
+    let previous = run HashMap.insert<Word, i32>(&mut ${map}, Hash.word(i32.toU64(${map}Key * 7 + 1)), ${map}Key)
       |> Effect.provideMut(&mut allocator)
     drop previous
     ${map}Key = ${map}Key + 1
@@ -136,8 +136,8 @@ const ordered = (seed: number, digest: number): string =>
   `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
-import silk.hash as Hash
+import silk.effect { Effect }
+import silk.hash { Hash }
 import silk.hash { HashKey }
 import silk.hash { Word }
 import silk.u64 as u64
@@ -145,7 +145,7 @@ ${mapImports}
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut map = make<Word, i32>(Hash.seed(${seed}))
+  let mut map = HashMap.make<Word, i32>(Hash.seed(${seed}))
 ${fill('map')}
 ${foldOrder('map', 'folded')}
   if u64.toI32(u64.remainder(folded, 1000000007)) != ${digest} { return 1 }

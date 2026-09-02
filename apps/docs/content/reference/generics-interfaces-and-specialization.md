@@ -1044,6 +1044,43 @@ explicit-marker rule defined by OP-009.
 [bound-operation tests](../../../../packages/compiler/test/BoundOperationWitness.test.ts),
 [explicit operator eligibility](expressions-and-operators.md#op-009--an-interface-operation-may-opt-into-one-existing-operator-explicitly).
 
+### INTF-007 — A bounded generic receiver calls its bound's operations as methods
+
+**Status:** Confirmed
+
+Inside a generic body, a value whose type is a bounded parameter calls a receiver operation of its
+declared bounds as a method: `value.print()` in `fn show<T: Printable>(value: &T)` is the same
+bound operation `Printable.print(value)` names, specialized once per instantiation.
+
+```silk
+interface Printable { fn print(value: &Self) -> i32 }
+
+struct Document { size: i32 }
+
+impl Printable for Document {
+  fn print(value: &Self) -> i32 { return value.size }
+}
+
+fn show<T: Printable>(value: &T) -> i32 { return value.print() }
+
+pub fn main() -> i32 {
+  let document = Document { size: 42 }
+  return show(&document)
+}
+```
+
+**Boundary:** A generic receiver obtains members only from its declared bounds: an unbounded `T`
+has none, and a concrete receiver never reaches an interface operation through a conformance
+(`document.print()` outside a bounded body is an unknown member; write `Printable.print(&document)`
+where the explicit form applies). An operation declaring its own type parameters is not a member
+through either spelling.
+
+**Diagnostics:** An operation declared by more than one bound of the same parameter reports
+`SEM0200` naming the bounds; the explicit `Bound.op(value)` form still resolves.
+
+**Evidence:** [bound receiver resolution](../../../../packages/compiler/src/ExpressionAnalysis.ts),
+[method-call specification](../../../../openspec/specs/bootstrap-method-calls/spec.md).
+
 ## Conformance declarations and implementations
 
 ### IMPL-001 — `impl Interface<Arguments> for Provider` binds `Self` to the provider
@@ -1254,7 +1291,7 @@ offer to move the conformance into a module the author cannot modify.
 module defining its provider's outer nominal type; compiler-sealed intrinsic contracts retain their
 own explicitly privileged rules.
 
-**Evidence:** [actor and conformance style](style-guide.md#style-002--public-apis-prefer-qualified-data-first-functions).
+**Evidence:** [member and conformance style](style-guide.md#style-002--operations-intrinsic-to-one-type-are-inherent-members-with-the-receiver-first).
 
 ### IMPL-005 — Conformances have no independent import or visibility modifier
 
@@ -1493,7 +1530,7 @@ The later interface rules must preserve decisions already confirmed elsewhere:
 - A service is an interface with dependency eligibility and no other distinct conformance behavior.
   See [SERV-003](requirements-and-services.md#serv-003--a-service-is-a-dependency-eligible-interface).
 - Only the module defining a nominal provider type may declare its conformances. See
-  [STYLE-002](style-guide.md#style-002--public-apis-prefer-qualified-data-first-functions).
+  [STYLE-002](style-guide.md#style-002--operations-intrinsic-to-one-type-are-inherent-members-with-the-receiver-first).
 - Interface operation operands retain their declared move or borrow modes. They do not receive
   blanket reference adaptation.
 - Effectful operations preserve ordinary failure types, requirement rows, and explicit Effect

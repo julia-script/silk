@@ -159,6 +159,14 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
     scopesAt('impl Allocator for Mine { unsafe {} }', 'Allocator'),
     'entity.name.type.silk',
   )
+  assert.include(
+    scopesAt('impl<T> Option<T> { pub fn none() -> Self {} }', 'impl'),
+    'storage.type.silk',
+  )
+  assert.include(
+    scopesAt('impl<T> Option<T> { pub fn none() -> Self {} }', 'Option'),
+    'entity.name.type.silk',
+  )
   assert.include(scopesAt(program, '42'), 'constant.numeric.integer.silk')
   assert.include(scopesAt('let ok = true', 'true'), 'constant.language.boolean.silk')
   assert.include(scopesAt('fn stop() -> never', 'never'), 'support.type.builtin.silk')

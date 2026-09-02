@@ -20,17 +20,10 @@ const encoder = new TextEncoder()
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
-const memorySource = String.raw`import silk.effect as Effect
+const memorySource = String.raw`import silk.effect { Effect }
 import silk.logger { Logger }
 import silk.logger { LogError }
 import silk.logger { LogLevel }
-import silk.logger {
-  attempts,
-  length,
-  levelAt,
-  messageByteAt,
-  messageLengthAt
-}
 
 effect fn program() -> i32 ! LogError {
   let mut logger = Logger.inMemoryProvider()
@@ -44,7 +37,7 @@ effect fn program() -> i32 ! LogError {
     Effect.logAt(LogLevel.Warning, "second\nline"),
     &mut logger
   )
-  if length(&logger) != 7 { return 1 }
+  if Logger.length(&logger) != 7 { return 1 }
   if Logger.levelAt(&logger, 0) != LogLevel.Trace { return 2 }
   if Logger.levelAt(&logger, 1) != LogLevel.Debug { return 3 }
   if Logger.levelAt(&logger, 2) != LogLevel.Info { return 4 }
@@ -52,10 +45,10 @@ effect fn program() -> i32 ! LogError {
   if Logger.levelAt(&logger, 4) != LogLevel.Warning { return 6 }
   if Logger.levelAt(&logger, 5) != LogLevel.Error { return 7 }
   if Logger.levelAt(&logger, 6) != LogLevel.Warning { return 8 }
-  if messageLengthAt(&logger, 0) != 5 { return 9 }
-  if messageByteAt(&logger, 0, 0) != 116 { return 10 }
-  if messageLengthAt(&logger, 6) != 11 { return 11 }
-  if messageByteAt(&logger, 6, 6) != 10 { return 12 }
+  if Logger.messageLengthAt(&logger, 0) != 5 { return 9 }
+  if Logger.messageByteAt(&logger, 0, 0) != 116 { return 10 }
+  if Logger.messageLengthAt(&logger, 6) != 11 { return 11 }
+  if Logger.messageByteAt(&logger, 6, 6) != 10 { return 12 }
   return 42
 }
 
@@ -106,12 +99,11 @@ it.effect('dispatches complete ordered messages through an ordinary source Logge
 
 it.effect('composes direct, piped, stored, tapped, flat-mapped, caught, and provided logs', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 import silk.logger { InMemoryLogger }
 import silk.logger { LogError }
 import silk.logger { LogLevel }
 import silk.logger { Logger }
-import silk.logger { length }
 
 effect fn logAndKeep(value: i32) -> i32 ! LogError ? &mut Logger {
   let logged = run Effect.logDebug("composed")
@@ -133,7 +125,7 @@ effect fn program() -> i32 ! LogError {
   let storedValue = run Effect.provideMut(stored, &mut logger)
   let tapped = run (value(20) |> Effect.tap(logAndKeep) |> Effect.provideMut(&mut logger))
   let flatMapped = run (value(21) |> Effect.flatMap(logAndKeep) |> Effect.provideMut(&mut logger))
-  if length(&logger) != 5 { return 0 }
+  if Logger.length(&logger) != 5 { return 0 }
   return storedValue + tapped + flatMapped
 }
 
@@ -148,12 +140,12 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`)
 
 it.effect('accepts a user-authored Logger implementation without compiler registration', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 import silk.logger { LogError }
 import silk.logger { LogLevel }
 import silk.logger { Logger }
 import silk.usize as usize
-import silk.string { byteLength }
+import silk.string { String }
 struct CountingLogger { calls: i32 bytes: usize }
 effect fn record(
   self: &mut CountingLogger,
@@ -161,7 +153,7 @@ effect fn record(
   message: string
 ) -> () {
   self.calls = self.calls + 1
-  self.bytes = self.bytes + byteLength(message)
+  self.bytes = self.bytes + String.byteLength(message)
   return ()
 }
 impl Logger for CountingLogger { log: CountingLogger.record }
@@ -179,7 +171,7 @@ pub effect fn main() -> () ! LogError {
 
 it.effect('keeps missing providers and invalid message inputs explicit', () =>
   Effect.gen(function* () {
-    const missing = yield* snapshot(`import silk.effect as Effect
+    const missing = yield* snapshot(`import silk.effect { Effect }
 import silk.logger { LogError }
 pub effect fn main() -> () ! LogError {
   return run Effect.log("missing")
@@ -189,14 +181,14 @@ pub effect fn main() -> () ! LogError {
       'SEM0071',
     )
 
-    const invalidMessage = yield* snapshot(`import silk.effect as Effect
+    const invalidMessage = yield* snapshot(`import silk.effect { Effect }
 pub fn main() -> i32 {
   let effect = Effect.log(42)
   return 0
 }`)
     assert.isAbove(Analysis.diagnostics(invalidMessage).length, 0)
 
-    const invalidLevel = yield* snapshot(`import silk.effect as Effect
+    const invalidLevel = yield* snapshot(`import silk.effect { Effect }
 pub fn main() -> i32 {
   let effect = Effect.logAt(42, "message")
   return 0
@@ -207,10 +199,9 @@ pub fn main() -> i32 {
 
 it.effect('stops after deterministic provider failure without recording the rejected message', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 import silk.logger { Logger }
 import silk.logger { LogError }
-import silk.logger { attempts, length }
 effect fn ignore(error: LogError) -> () { return () }
 effect fn program() -> i32 ! LogError {
   let mut logger = Logger.inMemoryProviderFailAt(1)
@@ -219,8 +210,8 @@ effect fn program() -> i32 ! LogError {
   let second = run attempted
   let skipped = false
   if skipped { let third = run Effect.provideMut(Effect.log("third"), &mut logger) }
-  if length(&logger) != 1 { return 0 }
-  if attempts(&logger) != 2 { return 0 }
+  if Logger.length(&logger) != 1 { return 0 }
+  if Logger.attempts(&logger) != 2 { return 0 }
   return 42
 }
 effect fn recover(error: LogError) -> i32 { return 0 }
@@ -232,10 +223,9 @@ pub fn main() -> i32 {
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
 
-    const capacity = yield* snapshot(`import silk.effect as Effect
+    const capacity = yield* snapshot(`import silk.effect { Effect }
 import silk.logger { Logger }
 import silk.logger { LogError }
-import silk.logger { attempts, length }
 effect fn ignore(error: LogError) -> () { return () }
 pub fn main() -> i32 {
   let mut logger = Logger.inMemoryProvider()
@@ -244,8 +234,8 @@ pub fn main() -> i32 {
     &mut logger
   ) |> Effect.catchAll(ignore)
   let completed = run attempted
-  if attempts(&logger) != 1 { return 0 }
-  if length(&logger) != 0 { return 0 }
+  if Logger.attempts(&logger) != 1 { return 0 }
+  if Logger.length(&logger) != 0 { return 0 }
   return 42
 }`)
     assert.deepEqual(Analysis.diagnostics(capacity), [])
@@ -259,7 +249,9 @@ it.effect('keeps evaluator native and direct Wasm behavior aligned', () =>
   Effect.gen(function* () {
     const native = yield* snapshot(memorySource)
     const llvm = yield* Analysis.codegen(native, { mode: 'release' })
-    assert.notInclude(llvm.ir, 'Logger')
+    // Silk's own lowered logger functions are named by their owner (`Logger.inMemoryProvider`,
+    // `InMemoryLogger.record`); nothing else in the native artifact may name a Logger.
+    assert.notInclude(llvm.ir.replace(/@silk_silk_logger_\w+/g, ''), 'Logger')
 
     const wasm = yield* snapshot(memorySource, 'wasm32-unknown-unknown')
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
@@ -273,7 +265,7 @@ it.effect('keeps evaluator native and direct Wasm behavior aligned', () =>
 
 it.effect('adapts complete messages to stdout without making formatting semantic', () =>
   Effect.gen(function* () {
-    const source = String.raw`import silk.effect as Effect
+    const source = String.raw`import silk.effect { Effect }
 import silk.logger { LogError }
 import silk.logger { LogLevel }
 import silk.logger { Logger }
@@ -304,7 +296,7 @@ pub effect fn main() -> () ! LogError {
 it.effect('provideMut removes the Logger requirement and preserves Clock', () =>
   Effect.gen(function* () {
     const program = (bind: string) => `import silk.logger { StdoutLogger }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.logger { Logger, LogError }
 
 struct Clock {}
@@ -356,7 +348,7 @@ pub effect fn main() -> ()
     assertUnsatisfiedClock(directPipeline, '(read() |> Intrinsic.bindRequirementMut(&mut logger))')
 
     const executablePipeline = yield* snapshot(`import silk.logger { InMemoryLogger }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.logger { Logger, LogError }
 pub effect fn main() -> () ! LogError {
   let mut logger = Logger.inMemoryProvider()
@@ -366,7 +358,7 @@ pub effect fn main() -> () ! LogError {
     assert.strictEqual(Analysis.evaluate(executablePipeline)._tag, 'Completed')
 
     const storedIntrinsic = yield* snapshot(`import silk.logger { InMemoryLogger }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.logger { Logger, LogError }
 pub effect fn main() -> () ! LogError {
   let mut logger = Logger.inMemoryProvider()
@@ -381,7 +373,7 @@ pub effect fn main() -> () ! LogError {
 it.effect('forwards provider-selection evidence only from an exact enclosing constraint', () =>
   Effect.gen(function* () {
     const wrapper = (constraint: string) => `import silk.logger { StdoutLogger }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.logger { Logger, LogError }
 
 effect fn bind<?S, A, P, E, ?R>(
@@ -470,7 +462,7 @@ it.effect('applies direct constrained sections through local move aliases', () =
       ['multiple hops', 'let first = move direct\n  let mut bind = move first'],
     ] as const) {
       const frontend = yield* snapshot(`import silk.logger { InMemoryLogger }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.logger { Logger }
 
 effect fn read() -> i32 ? &mut Logger { return 42 }
@@ -502,7 +494,7 @@ pub fn main() -> i32 {
 it.effect('rejects a callable relay whose leading binding has observable work', () =>
   Effect.gen(function* () {
     const frontend = yield* snapshot(`import silk.logger { InMemoryLogger }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.logger { Logger }
 
 fn observeThenForward<F>(value: F) -> F {
@@ -543,7 +535,7 @@ it.effect('erases dropped constrained provider sections without materializing a 
       ],
     ] as const) {
       const frontend = yield* snapshot(`import silk.logger { InMemoryLogger }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.logger { Logger }
 
 fn forward<F>(value: F) -> F { return move value }
@@ -574,7 +566,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const cases = [
-        `import silk.effect as Effect
+        `import silk.effect { Effect }
 import silk.logger { InMemoryLogger }
 import silk.logger { Logger }
 fn store<F>(value: F) -> [F; 1] {
@@ -585,7 +577,7 @@ pub fn main() -> i32 {
   let escaped = store(Effect.provideMut<Logger>(&mut logger))
   return 42
 }`,
-        `import silk.effect as Effect
+        `import silk.effect { Effect }
 import silk.logger { InMemoryLogger }
 import silk.logger { Logger }
 fn consume<F>(value: F) -> () { return () }
@@ -594,7 +586,7 @@ pub fn main() -> i32 {
   let consumed = consume(Effect.provideMut<Logger>(&mut logger))
   return 42
 }`,
-        `import silk.effect as Effect
+        `import silk.effect { Effect }
 import silk.logger { InMemoryLogger }
 import silk.logger { Logger }
 fn invoke<A, E, ?R, F: fn(once Effect<A ! E ? R>) -> Effect<A ! E>>(operation: F, value: once Effect<A ! E ? R>) -> Effect<A ! E> {
@@ -605,7 +597,7 @@ pub fn main() -> i32 {
   let operation = invoke(Effect.provideMut<Logger>(&mut logger), Effect.log("indirect"))
   return 42
 }`,
-        `import silk.effect as Effect
+        `import silk.effect { Effect }
 import silk.logger { InMemoryLogger }
 import silk.logger { Logger }
 union Store<F> { Empty, Stored { value: F } }
@@ -616,7 +608,7 @@ pub fn main() -> i32 {
 }`,
       ]
       for (const [ordinal, body] of cases.entries()) {
-        const frontend = yield* snapshot(`import silk.effect as Effect
+        const frontend = yield* snapshot(`import silk.effect { Effect }
 import silk.logger { Logger, LogError }
 ${body}`)
         assert.include(

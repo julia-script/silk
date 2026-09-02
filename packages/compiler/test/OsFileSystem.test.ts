@@ -84,9 +84,9 @@ it.effect('loads the ordinary canonical OS provider without compiler-known libra
       'os-filesystem/importer',
       ascii(`import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
-import silk.os_filesystem { OsFileSystem, make }
+import silk.os_filesystem { OsFileSystem }
 pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
-  return run make(root)
+  return run OsFileSystem.make(root)
 }`),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
@@ -102,15 +102,15 @@ it.effect(
         ascii(`import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
-import silk.os_filesystem { OsFileSystem, make as osMake }
-import silk.filesystem { DirectoryEntry, FileError, FileSystem, Path, root as pathRoot }
+import silk.effect { Effect }
+import silk.os_filesystem { OsFileSystem }
+import silk.filesystem { DirectoryEntry, FileError, FileSystem, Path }
 import silk.vector { Vector }
 
 pub effect fn main() -> () ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut fs = run osMake("/tmp") |> Effect.provideMut(&mut allocator)
-  let path = run pathRoot() |> Effect.provideMut(&mut allocator)
+  let mut fs = run OsFileSystem.make("/tmp") |> Effect.provideMut(&mut allocator)
+  let path = run Path.root() |> Effect.provideMut(&mut allocator)
   let entries = run Intrinsic.bindRequirementMut(
     Intrinsic.bindRequirementMut(FileSystem.listDirectory(&path), &mut fs),
     &mut allocator
@@ -251,25 +251,25 @@ it.effect(
       const source = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.u8 as u8
 import silk.usize as usize
-import silk.os_filesystem { make as osMake }
-import silk.bytes { asSlice as bytesSlice }
-import silk.filesystem { FileError, FileSystem, make as pathMake }
+import silk.os_filesystem { OsFileSystem }
+import silk.bytes { Bytes }
+import silk.filesystem { FileError, FileSystem, Path }
 import silk.result { Result }
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
-  let path = run pathMake("/message") |> Effect.provideMut(&mut allocator)
+  let mut fs = run OsFileSystem.make("/root") |> Effect.provideMut(&mut allocator)
+  let path = run Path.make("/message") |> Effect.provideMut(&mut allocator)
   let input = [u8.toU8(104), u8.toU8(101), u8.toU8(108), u8.toU8(108), u8.toU8(111)]
   let written = run Intrinsic.bindRequirementMut(FileSystem.writeFile(&path, &input), &mut fs)
   let owned = run Intrinsic.bindRequirementMut(
     Intrinsic.bindRequirementMut(FileSystem.readFile(&path), &mut fs),
     &mut allocator
   )
-  if bytesSlice(&owned).length == usize.add(0, 5) { return 42 }
+  if Bytes.asSlice(&owned).length == usize.add(0, 5) { return 42 }
   return 1
 }
 
@@ -363,28 +363,28 @@ it.effect('retries oversized directory entries without advancing and sorts compl
     const source = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.usize as usize
-import silk.os_filesystem { make as osMake }
-import silk.filesystem { DirectoryEntry, FileError, FileSystem, root as pathRoot, view as pathView }
+import silk.os_filesystem { OsFileSystem }
+import silk.filesystem { DirectoryEntry, FileError, FileSystem, Path }
 import silk.result { Result }
-import silk.vector { asSlice as vectorSlice }
+import silk.vector { Vector }
 
 fn pathMatches(entries: &[DirectoryEntry], index: usize, expected: string) -> bool {
   return match &entries[index] {
-    DirectoryEntry { path, kind } => pathView(&path) == expected
+    DirectoryEntry { path, kind } => Path.view(&path) == expected
   }
 }
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
-  let root = run pathRoot() |> Effect.provideMut(&mut allocator)
+  let mut fs = run OsFileSystem.make("/root") |> Effect.provideMut(&mut allocator)
+  let root = run Path.root() |> Effect.provideMut(&mut allocator)
   let entries = run Intrinsic.bindRequirementMut(
     Intrinsic.bindRequirementMut(FileSystem.listDirectory(&root), &mut fs),
     &mut allocator
   )
-  let listed = vectorSlice<DirectoryEntry>(&entries)
+  let listed = Vector.asSlice<DirectoryEntry>(&entries)
   if listed.length != usize.add(0, 3) { return 1 }
   if pathMatches(listed, usize.add(0, 0), "/a") == false { return 2 }
   if pathMatches(listed, usize.add(0, 2), "/z") == false { return 3 }
@@ -560,9 +560,9 @@ it.effect('navigates provider policy to Silk source and low-level calls to Intri
 import silk.allocator { OutOfMemoryError }
 import silk.u32 as u32
 import silk.usize as usize
-import silk.os_filesystem { OsFileSystem, make as osMake }
+import silk.os_filesystem { OsFileSystem }
 pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
-  return run osMake(root)
+  return run OsFileSystem.make(root)
 }
 pub fn main() -> i32 {
   let mut kind = 0
@@ -579,7 +579,7 @@ pub fn main() -> i32 {
     const providerOccurrence = Analysis.semanticOccurrenceAt(
       snapshot,
       'os-filesystem/navigation',
-      source.indexOf('osMake(root)'),
+      source.indexOf('make(root)'),
     )
     assert.strictEqual(providerOccurrence?.declaration?.module, 'silk/os_filesystem')
     const intrinsicOccurrence = Analysis.semanticOccurrenceAt(
@@ -694,30 +694,30 @@ it.effect(
       const source = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.u32 as u32
 import silk.u8 as u8
 import silk.usize as usize
-import silk.os_filesystem { make as osMake }
-import silk.bytes { asSlice as bytesSlice }
-import silk.filesystem { FileError, FileSystem, make as pathMake }
+import silk.os_filesystem { OsFileSystem }
+import silk.bytes { Bytes }
+import silk.filesystem { FileError, FileSystem, Path }
 import silk.result { Result }
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
-  let path = run pathMake("/hello.txt") |> Effect.provideMut(&mut allocator)
+  let mut fs = run OsFileSystem.make("${nativeRoot}") |> Effect.provideMut(&mut allocator)
+  let path = run Path.make("/hello.txt") |> Effect.provideMut(&mut allocator)
   let input = [u8.toU8(104), u8.toU8(101), u8.toU8(108), u8.toU8(108), u8.toU8(111)]
   let written = run Intrinsic.bindRequirementMut(FileSystem.writeFile(&path, &input), &mut fs)
   let owned = run Intrinsic.bindRequirementMut(
     Intrinsic.bindRequirementMut(FileSystem.readFile(&path), &mut fs),
     &mut allocator
   )
-  let bytes = bytesSlice(&owned)
+  let bytes = Bytes.asSlice(&owned)
   if bytes.length != usize.add(0, 5) { return 1 }
   if bytes[usize.add(0, 0)] != u8.toU8(104) { return 2 }
   let removed = run Intrinsic.bindRequirementMut(FileSystem.removeFile(&path), &mut fs)
-  let empty = run pathMake("/empty") |> Effect.provideMut(&mut allocator)
+  let empty = run Path.make("/empty") |> Effect.provideMut(&mut allocator)
   let created = run Intrinsic.bindRequirementMut(FileSystem.createDirectory(&empty), &mut fs)
   let removedEmpty = run Intrinsic.bindRequirementMut(FileSystem.removeDirectory(&empty), &mut fs)
   let mut kind = 0

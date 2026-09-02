@@ -733,17 +733,26 @@ const printImplDeclaration = (
   const nodes = directNodes(node)
   const typeParameters = nodes[0]?.kind === 'TypeParameterList' ? nodes[0] : undefined
   const positional = typeParameters === undefined ? nodes : nodes.slice(1)
+  // An inherent impl has one type node before its members; a conformance has two around `for`.
+  const forKeyword = directTokens(node).find((token) => token.kind === 'ForKeyword')
   const capability = positional[0] ?? nodeOf(node, 'TypePath')
-  const target = positional[1] ?? nodeOf(node, 'TypePath', 1)
-  const members = positional.slice(2)
+  const target =
+    forKeyword === undefined
+      ? undefined
+      : { keyword: forKeyword, node: positional[1] ?? nodeOf(node, 'TypePath', 1) }
+  const members = positional.slice(target === undefined ? 1 : 2)
   const open = tokenOf(node, 'LeftBrace')
   const close = tokenOf(node, 'RightBrace')
   const head = FormatDocument.concat(
     printToken(context, tokenOf(node, 'ImplKeyword'), prefix),
     ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
     printNode(context, capability, FormatDocument.text(' ')),
-    printToken(context, tokenOf(node, 'ForKeyword'), FormatDocument.text(' ')),
-    printNode(context, target, FormatDocument.text(' ')),
+    ...(target === undefined
+      ? []
+      : [
+          printToken(context, target.keyword, FormatDocument.text(' ')),
+          printNode(context, target.node, FormatDocument.text(' ')),
+        ]),
     printToken(context, open, FormatDocument.text(' ')),
   )
   if (members.length === 0) return FormatDocument.concat(head, printToken(context, close))

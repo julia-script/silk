@@ -20,16 +20,16 @@
 //! ```silk
 //! import silk.effect { Effect }
 //!
-//! import silk.writer { Writer }
+//! import silk.writer { Writer, WriterError }
 //!
 //! effect fn writeMessage() -> ()
-//! ! Writer.WriterError {
+//! ! WriterError {
 //!   let mut writer = Writer.stdoutWriterProvider()
 //!   return run Writer.writeAll(b"Silk\n")
 //!     |> Effect.provideMut<Writer>(&mut writer)
 //! }
 //!
-//! effect fn ignoreWriteFailure(error: Writer.WriterError) -> () {
+//! effect fn ignoreWriteFailure(error: WriterError) -> () {
 //!   return ()
 //! }
 //!
@@ -58,6 +58,37 @@ pub service Writer {
   effect fn flush() -> () ! WriterError ? &mut Writer
 }
 
+impl Writer {
+  /// Creates a process-backed Writer provider for standard output.
+  pub fn stdoutWriterProvider() -> StdoutWriter {
+    return StdoutWriter { stream: false }
+  }
+
+  /// Creates a process-backed Writer provider for standard error.
+  pub fn stderrWriterProvider() -> StderrWriter {
+    return StderrWriter { stream: true }
+  }
+
+  /// Runs one Effect and converts its typed failure to unit while it preserves a successful value.
+  ///
+  /// # Details
+  ///
+  /// This function consumes `self` one time and preserves its provider requirements. It discards the
+  /// error value when the Effect fails.
+  pub effect fn ignoreError<A, E, ?R>(self: once Effect<A ! E ? R>) -> A | () ? R {
+    let result = run Effect.result(move self)
+    return match move result {
+      Result<A, E>.Success { value } => move value
+      Result<A, E>.Failure { error: _ } => ()
+    }
+  }
+
+  /// Writes the UTF-8 bytes of `val` through the active Writer provider.
+  pub effect fn writeString(val: string) -> () ! WriterError ? &mut Writer {
+    run Writer.writeAll(String.utf8Bytes(val))
+  }
+}
+
 /// A Writer provider that writes to process standard output.
 pub struct StdoutWriter {
   stream: bool
@@ -66,30 +97,6 @@ pub struct StdoutWriter {
 /// A Writer provider that writes to process standard error.
 pub struct StderrWriter {
   stream: bool
-}
-
-/// Creates a process-backed Writer provider for standard output.
-pub fn stdoutWriterProvider() -> StdoutWriter {
-  return StdoutWriter { stream: false }
-}
-
-/// Creates a process-backed Writer provider for standard error.
-pub fn stderrWriterProvider() -> StderrWriter {
-  return StderrWriter { stream: true }
-}
-
-/// Runs one Effect and converts its typed failure to unit while it preserves a successful value.
-///
-/// # Details
-///
-/// This function consumes `self` one time and preserves its provider requirements. It discards the
-/// error value when the Effect fails.
-pub effect fn ignoreError<A, E, ?R>(self: once Effect<A ! E ? R>) -> A | () ? R {
-  let result = run Effect.result(move self)
-  return match move result {
-    Result.Result<A, E>.Success { value } => move value
-    Result.Result<A, E>.Failure { error: _ } => ()
-  }
 }
 
 impl Writer for StdoutWriter {
@@ -110,7 +117,3 @@ impl Writer for StderrWriter {
   }
 }
 
-/// Writes the UTF-8 bytes of `val` through the active Writer provider.
-pub effect fn writeString(val: string) -> () ! Writer.WriterError ? &mut Writer {
-  run Writer.writeAll(String.utf8Bytes(val))
-}

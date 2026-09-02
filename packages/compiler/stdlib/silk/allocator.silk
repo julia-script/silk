@@ -12,7 +12,7 @@
 //! # Examples
 //! ## Provide the process allocator
 //! ```silk
-//! import silk.allocator { Allocator }
+//! import silk.allocator { Allocator, OutOfMemoryError }
 //!
 //! import silk.bytes { Bytes }
 //!
@@ -21,7 +21,7 @@
 //! import silk.usize
 //!
 //! effect fn copyMessage() -> i32
-//! ! Allocator.OutOfMemoryError {
+//! ! OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
 //!   let source = b"Silk"
 //!   let copying = Bytes.copy(&source)
@@ -31,7 +31,7 @@
 //!     |> usize.toI32
 //! }
 //!
-//! effect fn recoverAllocation(error: Allocator.OutOfMemoryError) -> i32 {
+//! effect fn recoverAllocation(error: OutOfMemoryError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -45,27 +45,38 @@ import silk.layout { Layout as LayoutValue }
 /// A failure that reports that an allocator cannot satisfy a storage request.
 pub struct OutOfMemoryError {}
 
-/// Fails immediately with `OutOfMemoryError`.
-///
-/// # When to use
-///
-/// Use this function to translate a checked size failure into the standard allocation failure.
-pub effect fn outOfMemory() -> never ! OutOfMemoryError {
-  fail OutOfMemoryError {}
-}
-
 /// A mutable service that acquires owned storage described by a layout.
 pub service Allocator {
   /// Acquires one allocation for `layout`, or fails without returning partial storage.
   effect fn allocate(layout: LayoutValue) -> Allocation ! OutOfMemoryError ? &mut Allocator
 }
 
+impl Allocator {
+  /// Fails immediately with `OutOfMemoryError`.
+  ///
+  /// # When to use
+  ///
+  /// Use this function to translate a checked size failure into the standard allocation failure.
+  pub effect fn outOfMemory() -> never ! OutOfMemoryError {
+    fail OutOfMemoryError {}
+  }
+
+  /// Creates a process-backed allocator provider without allocating storage.
+  pub fn systemAllocatorProvider() -> SystemAllocator {
+    return SystemAllocator {}
+  }
+}
+
 /// A process-backed provider for [`Allocator`].
 pub struct SystemAllocator {}
 
-/// Creates a process-backed allocator provider without allocating storage.
-pub fn systemAllocatorProvider() -> SystemAllocator {
-  return SystemAllocator {}
+impl SystemAllocator {
+  effect fn systemAllocate(self: &mut Self, layout: LayoutValue) -> Allocation ! OutOfMemoryError {
+    return run Intrinsic.catchFailure<Intrinsic.StorageFailure>(
+      rawSystemAllocate(move self, move layout),
+      storageRefused
+    )
+  }
 }
 
 effect fn storageRefused(error: Intrinsic.StorageFailure) -> Allocation ! OutOfMemoryError {
@@ -78,13 +89,6 @@ effect fn rawSystemAllocate(
   layout: LayoutValue
 ) -> Allocation ! Intrinsic.StorageFailure {
   return run Intrinsic.systemAllocationAcquire(move layout)
-}
-
-effect fn systemAllocate(self: &mut SystemAllocator, layout: LayoutValue) -> Allocation ! OutOfMemoryError {
-  return run Intrinsic.catchFailure<Intrinsic.StorageFailure>(
-    rawSystemAllocate(move self, move layout),
-    storageRefused
-  )
 }
 
 impl Allocator for SystemAllocator {

@@ -6,7 +6,7 @@ Compile-time ordering witnesses and a three-way result derived from strict compa
 
 ## When to use
 
-Add an [`Order`](#declaration-73696c6b2f6f726465723a3a4f72646572) bound when a generic algorithm needs `<`, as sorting and binary search do. Use
+Add an `Order` bound when a generic algorithm needs `<`, as sorting and binary search do. Use
 [`compare`](#declaration-73696c6b2f6f726465723a3a636f6d70617265) when all three outcomes matter, or [`less`](#declaration-73696c6b2f6f726465723a3a6c657373) and [`equal`](#declaration-73696c6b2f6f726465723a3a657175616c) for predicates.
 
 ## Details
@@ -135,19 +135,75 @@ total order so different values are not incomparable.
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a30"></a>
 
-## Implementation `Order for u8`
+## Implementation `Order for _`
 
 ```silk
-impl Order for u8
+impl Order for _
 ```
 
-<a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6f726465723a3a636f6d70617265"></a>
 
-### Operation `lessThan`
+## `compare`
 
 ```silk
-lessThan = Intrinsic.u8LessThan
+pub fn compare<T>(left: T, right: T) -> Ordering
 ```
+
+<a id="declaration-73696c6b2f6f726465723a3a6c657373"></a>
+
+## `less`
+
+```silk
+pub fn less<T>(left: T, right: T) -> bool
+```
+
+Reports whether `left` orders strictly before `right` under the selected `Order` witness. The
+function calls the witness once and then consumes both owned arguments.
+
+<a id="declaration-73696c6b2f6f726465723a3a657175616c"></a>
+
+## `equal`
+
+```silk
+pub fn equal<T>(left: T, right: T) -> bool
+```
+
+Reports whether neither value orders before the other under the selected `Order` witness. The
+function calls the witness once or twice and then consumes both owned arguments.
+
+### Gotchas
+
+If the witness leaves different values incomparable, this function reports them as equal.
+
+<a id="declaration-73696c6b2f6f726465723a3a69734c657373"></a>
+
+## `isLess`
+
+```silk
+pub fn isLess(ordering: &silk/order.Ordering) -> bool
+```
+
+Reports whether an ordering is `Less`.
+
+<a id="declaration-73696c6b2f6f726465723a3a6973457175616c"></a>
+
+## `isEqual`
+
+```silk
+pub fn isEqual(ordering: &silk/order.Ordering) -> bool
+```
+
+Reports whether an ordering is `Equal`.
+
+<a id="declaration-73696c6b2f6f726465723a3a697347726561746572"></a>
+
+## `isGreater`
+
+```silk
+pub fn isGreater(ordering: &silk/order.Ordering) -> bool
+```
+
+Reports whether an ordering is `Greater`.
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a31"></a>
 
@@ -292,83 +348,3 @@ impl Order for isize
 ```silk
 lessThan = Intrinsic.isizeLessThan
 ```
-
-<a id="declaration-73696c6b2f6f726465723a3a636f6d70617265"></a>
-
-## `compare`
-
-```silk
-pub fn compare<T>(left: T, right: T) -> Ordering
-```
-
-Compares two values three ways using the concrete comparison selected during specialization.
-
-### When to use
-
-Use this function when the caller needs to distinguish less, equal, and greater outcomes.
-
-### Details
-
-Calls the selected strict comparison with `left, right`. If that result is false, it calls the
-comparison with `right, left`. The function then consumes both owned arguments.
-
-### Gotchas
-
-If neither comparison is true, this function returns [`Equal`](#declaration-73696c6b2f6f726465723a3a457175616c). The witness must not leave two
-different values incomparable.
-
-<a id="declaration-73696c6b2f6f726465723a3a6c657373"></a>
-
-## `less`
-
-```silk
-pub fn less<T>(left: T, right: T) -> bool
-```
-
-Reports whether `left` orders strictly before `right` under the selected [`Order`](#declaration-73696c6b2f6f726465723a3a4f72646572) witness. The
-function calls the witness once and then consumes both owned arguments.
-
-<a id="declaration-73696c6b2f6f726465723a3a657175616c"></a>
-
-## `equal`
-
-```silk
-pub fn equal<T>(left: T, right: T) -> bool
-```
-
-Reports whether neither value orders before the other under the selected [`Order`](#declaration-73696c6b2f6f726465723a3a4f72646572) witness. The
-function calls the witness once or twice and then consumes both owned arguments.
-
-### Gotchas
-
-If the witness leaves different values incomparable, this function reports them as equal.
-
-<a id="declaration-73696c6b2f6f726465723a3a69734c657373"></a>
-
-## `isLess`
-
-```silk
-pub fn isLess(ordering: &silk/order.Ordering) -> bool
-```
-
-Reports whether an ordering is `Less`.
-
-<a id="declaration-73696c6b2f6f726465723a3a6973457175616c"></a>
-
-## `isEqual`
-
-```silk
-pub fn isEqual(ordering: &silk/order.Ordering) -> bool
-```
-
-Reports whether an ordering is `Equal`.
-
-<a id="declaration-73696c6b2f6f726465723a3a697347726561746572"></a>
-
-## `isGreater`
-
-```silk
-pub fn isGreater(ordering: &silk/order.Ordering) -> bool
-```
-
-Reports whether an ordering is `Greater`.

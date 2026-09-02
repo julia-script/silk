@@ -29,13 +29,13 @@ In-memory accessors require an event index less than [`length`](#declaration-736
 ```silk
 import silk.effect { Effect }
 
-import silk.logger { Logger }
+import silk.logger { Logger, LogError }
 import silk.logger { LogLevel }
 
 import silk.usize
 
 effect fn program() -> i32
-! Logger.LogError {
+! LogError {
   let mut logger = Logger.inMemoryProvider()
   let logged = run Effect.logWarning("cache miss")
     |> Effect.provideMut(&mut logger)
@@ -48,7 +48,7 @@ effect fn program() -> i32
   return 42
 }
 
-effect fn recover(error: Logger.LogError) -> i32 {
+effect fn recover(error: LogError) -> i32 {
   return 0
 }
 
@@ -136,21 +136,6 @@ A typed failure reported by one [`Logger`](#declaration-73696c6b2f6c6f676765723a
 The numeric code belongs to the provider. Portable code can recover from `LogError` without
 assigning one meaning to that code across different providers.
 
-<a id="declaration-73696c6b2f6c6f676765723a3a6572726f72436f6465"></a>
-
-## `errorCode`
-
-```silk
-pub fn errorCode(error: LogError) -> i32
-```
-
-Returns the provider-defined failure code for diagnostics.
-
-### Gotchas
-
-Interpret this code only with knowledge of the selected provider. Different providers can use
-the same code for different failures.
-
 <a id="declaration-73696c6b2f6c6f676765723a3a4c6f67676572"></a>
 
 ## `Logger`
@@ -186,20 +171,21 @@ Submits one complete UTF-8 message at one severity to the active provider.
 The call preserves the message bytes exactly. It does not add a newline, severity label,
 timestamp, or other formatting. A provider failure produces [`LogError`](#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72).
 
-<a id="declaration-73696c6b2f6c6f676765723a3a5374646f75744c6f67676572"></a>
+<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a30"></a>
 
-## `StdoutLogger`
+## Implementation `Logger for _`
 
 ```silk
-pub struct StdoutLogger
+impl Logger for _
 ```
 
-A [`Logger`](#declaration-73696c6b2f6c6f676765723a3a4c6f67676572) provider that writes each complete message to process standard output.
+<a id="declaration-73696c6b2f6c6f676765723a3a6572726f72436f6465"></a>
 
-### Details
+## `errorCode`
 
-The provider ignores the severity for physical formatting and writes only the UTF-8 message
-bytes. It adds no newline and performs no message allocation.
+```silk
+pub fn errorCode(error: LogError) -> i32
+```
 
 <a id="declaration-73696c6b2f6c6f676765723a3a7374646f757450726f7669646572"></a>
 
@@ -215,43 +201,6 @@ Creates a logger that forwards each complete message to process standard output.
 
 The caller must include a newline in `message` when line separation is required. A standard-
 output write failure becomes a provider-defined [`LogError`](#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72).
-
-<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a30"></a>
-
-## Implementation `Logger for StdoutLogger`
-
-```silk
-impl Logger for StdoutLogger
-```
-
-<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
-
-### Operation `log`
-
-```silk
-log = StdoutLogger.writeStdout
-```
-
-<a id="declaration-73696c6b2f6c6f676765723a3a496e4d656d6f72794c6f67676572"></a>
-
-## `InMemoryLogger`
-
-```silk
-pub struct InMemoryLogger
-```
-
-A deterministic [`Logger`](#declaration-73696c6b2f6c6f676765723a3a4c6f67676572) provider that retains up to eight events and 64 total message bytes.
-
-### When to use
-
-Use this provider in tests that must inspect event order, severity, message bytes, or failure
-behavior without process output.
-
-### Details
-
-The provider copies each committed message into fixed internal storage. It records attempted
-calls separately from committed events. Capacity failure and configured failure do not commit an
-event.
 
 <a id="declaration-73696c6b2f6c6f676765723a3a696e4d656d6f727950726f7669646572"></a>
 
@@ -283,22 +232,6 @@ Creates an in-memory logger that rejects one zero-based attempted-call ordinal.
 The configured attempt increases [`attempts`](#declaration-73696c6b2f6c6f676765723a3a617474656d707473) but does not increase [`length`](#declaration-73696c6b2f6c6f676765723a3a6c656e677468) or consume
 message capacity. Other attempts retain the eight-event and 64-byte limits of
 [`inMemoryProvider`](#declaration-73696c6b2f6c6f676765723a3a696e4d656d6f727950726f7669646572).
-
-<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a31"></a>
-
-## Implementation `Logger for InMemoryLogger`
-
-```silk
-impl Logger for InMemoryLogger
-```
-
-<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
-
-### Operation `log`
-
-```silk
-log = InMemoryLogger.record
-```
 
 <a id="declaration-73696c6b2f6c6f676765723a3a6c656e677468"></a>
 
@@ -370,3 +303,80 @@ pub fn attempts(self: &silk/logger.InMemoryLogger) -> usize
 ```
 
 Returns the number of calls attempted, including calls that produced [`LogError`](#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72).
+
+<a id="declaration-73696c6b2f6c6f676765723a3a5374646f75744c6f67676572"></a>
+
+## `StdoutLogger`
+
+```silk
+pub fn StdoutLogger(_: fn(...), level: LogLevel, message: string) -> () ! LogError
+```
+
+<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `Logger for StdoutLogger`
+
+```silk
+impl Logger for StdoutLogger
+```
+
+<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
+
+### Operation `log`
+
+```silk
+log = StdoutLogger.writeStdout
+```
+
+<a id="declaration-73696c6b2f6c6f676765723a3a496e4d656d6f72794c6f67676572"></a>
+
+## `InMemoryLogger`
+
+```silk
+pub struct InMemoryLogger
+```
+
+A deterministic [`Logger`](#declaration-73696c6b2f6c6f676765723a3a4c6f67676572) provider that retains up to eight events and 64 total message bytes.
+
+### When to use
+
+Use this provider in tests that must inspect event order, severity, message bytes, or failure
+behavior without process output.
+
+### Details
+
+The provider copies each committed message into fixed internal storage. It records attempted
+calls separately from committed events. Capacity failure and configured failure do not commit an
+event.
+
+<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a32"></a>
+
+## Implementation `InMemoryLogger for _`
+
+```silk
+impl InMemoryLogger for _
+```
+
+<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
+
+### Operation `record`
+
+```silk
+record = _
+```
+
+<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a33"></a>
+
+## Implementation `Logger for InMemoryLogger`
+
+```silk
+impl Logger for InMemoryLogger
+```
+
+<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a30"></a>
+
+### Operation `log`
+
+```silk
+log = InMemoryLogger.record
+```

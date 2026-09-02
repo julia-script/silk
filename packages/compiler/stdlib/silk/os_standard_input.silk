@@ -7,7 +7,7 @@
 //! # Details
 //! The provider owns no persistent state and commits each host read directly into the caller's
 //! buffer. For a non-empty buffer, a zero-length host transfer becomes the outcome selected by
-//! [`endOfInput`]. Only a host read error becomes [`StreamReadError`]. Partial transfer counts are
+//! [`StandardInput.endOfInput`]. Only a host read error becomes [`StreamReadError`]. Partial transfer counts are
 //! preserved exactly.
 //!
 //! Constructing the provider performs no read. Portable code reads after the application supplies
@@ -32,14 +32,7 @@
 //! ```
 
 import silk.i32 as i32
-import silk.standard_input {
-  ReadOutcome,
-  StandardInput,
-  StreamReadError,
-  endOfInput,
-  filled,
-  readFailure
-}
+import silk.standard_input { ReadOutcome, StandardInput, StreamReadError }
 import silk.u32 as u32
 import silk.u8 as u8
 import silk.usize as usize
@@ -52,19 +45,40 @@ import silk.usize as usize
 /// buffer and preserves the host transfer count.
 pub struct OsStandardInput {}
 
-/// Creates a stateless provider for native standard-input bytes.
-///
-/// # When to use
-///
-/// Use this function at a native application edge. Provide the result as `&mut StandardInput` to
-/// portable code that calls `silk.standard_input.receive`.
-///
-/// # Details
-///
-/// Construction performs no read and cannot fail. For a non-empty read buffer, a later zero-byte
-/// host transfer becomes end-of-input data. A host read error becomes [`StreamReadError`].
-pub fn make() -> OsStandardInput {
-  return OsStandardInput {}
+impl OsStandardInput {
+  /// Commits one host read into the caller's buffer.
+  ///
+  /// The low-level boundary reports a zero-length transfer for the end of input, which becomes
+  /// `EndOfInput` data rather than a typed failure. Only a host error becomes `StreamReadError`.
+  ///
+  /// The caller must use a non-empty `buffer`. With no capacity, the host also reports a zero-length
+  /// transfer and cannot prove permanent end-of-input.
+  effect fn read(self: &mut Self, buffer: &mut [u8]) -> ReadOutcome ! StreamReadError {
+    let mut lowReason = 0
+    let mut nativeCode = u32.toU32(0)
+    let mut length = usize.ZERO
+    let received = run rawRead(move buffer, &mut length, &mut lowReason, &mut nativeCode)
+    if received == false { return run raise() }
+    if length == usize.ZERO { return StandardInput.endOfInput() }
+    return StandardInput.filled(length)
+  }
+}
+
+impl OsStandardInput {
+  /// Creates a stateless provider for native standard-input bytes.
+  ///
+  /// # When to use
+  ///
+  /// Use this function at a native application edge. Provide the result as `&mut StandardInput` to
+  /// portable code that calls `silk.standard_input.receive`.
+  ///
+  /// # Details
+  ///
+  /// Construction performs no read and cannot fail. For a non-empty read buffer, a later zero-byte
+  /// host transfer becomes end-of-input data. A host read error becomes [`StreamReadError`].
+  pub fn make() -> OsStandardInput {
+    return OsStandardInput {}
+  }
 }
 
 effect fn rawRead(
@@ -78,24 +92,7 @@ effect fn rawRead(
 }
 
 effect fn raise() -> never ! StreamReadError {
-  fail readFailure()
-}
-
-/// Commits one host read into the caller's buffer.
-///
-/// The low-level boundary reports a zero-length transfer for the end of input, which becomes
-/// `EndOfInput` data rather than a typed failure. Only a host error becomes `StreamReadError`.
-///
-/// The caller must use a non-empty `buffer`. With no capacity, the host also reports a zero-length
-/// transfer and cannot prove permanent end-of-input.
-effect fn read(self: &mut OsStandardInput, buffer: &mut [u8]) -> ReadOutcome ! StreamReadError {
-  let mut lowReason = 0
-  let mut nativeCode = u32.toU32(0)
-  let mut length = usize.ZERO
-  let received = run rawRead(move buffer, &mut length, &mut lowReason, &mut nativeCode)
-  if received == false { return run raise() }
-  if length == usize.ZERO { return endOfInput() }
-  return filled(length)
+  fail StandardInput.readFailure()
 }
 
 impl StandardInput for OsStandardInput {

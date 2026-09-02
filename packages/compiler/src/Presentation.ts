@@ -7,6 +7,7 @@ import * as Operator from './Operator.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Type from './Type.js'
+import * as TypeInference from './internal/TypeInference.js'
 
 interface Base {
   readonly text: string
@@ -142,6 +143,86 @@ export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Pre
     name,
     functionKind: self.functionKind,
     text: `${visibility}${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}${symbol}`,
+  })
+}
+
+/**
+ * Renders an inherent receiver method as the value side sees it: parameter zero is the receiver
+ * the call supplies, so only the written parameters are listed, and the owner binders the receiver
+ * type fixes are substituted and dropped from the binder list. Without a substitution the declared
+ * binders are kept; the type side presents the complete contract.
+ */
+export const receiverMethod = (
+  self: DeclarationFacts.DeclarationFact,
+  substitution: Type.Substitution = new Map(),
+  module = '',
+  scope?: NameResolution.ModuleScope,
+): Presentation => {
+  const name = self.name._tag === 'Present' ? self.name.spelling : '_'
+  const kind = `${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
+  const bound = (parameter: DeclarationFacts.TypeParameterFact): boolean =>
+    substitution.has(Type.key(parameter.type))
+  const free = self.typeParameters.filter((parameter) => !bound(parameter))
+  const typeParameters = free.length === 0 ? '' : `<${free.map(typeParameterName).join(', ')}>`
+  const rendered = (fact: DeclarationFacts.DeclaredTypeFact): string =>
+    fact._tag === 'Resolved' && substitution.size > 0
+      ? type(Type.substitute(fact.type, substitution), module, scope)
+      : declaredType(fact)
+  const parameters = self.parameters
+    .slice(1)
+    .map((parameter) => {
+      const parameterName = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
+      const mutability = parameter.bindingMutability === 'Mutable' ? 'mut ' : ''
+      return `${mutability}${parameterName}: ${rendered(parameter.declaredType)}`
+    })
+    .join(', ')
+  return Object.freeze({
+    _tag: 'FunctionPresentation',
+    name,
+    functionKind: self.functionKind,
+    text: `${kind}${typeParameters}(${parameters}) -> ${rendered(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}`,
+  })
+}
+
+/**
+ * The owner binders a receiver's static type fixes, inferred by matching parameter zero's declared
+ * type against the receiver: `Option<i32>` against `self: Option<T>` binds `T`.
+ */
+export const receiverSubstitution = (
+  self: DeclarationFacts.DeclarationFact,
+  receiverType: Type.Type | undefined,
+): Type.Substitution => {
+  const substitution = new Map<string, Type.GenericArgument>()
+  const receiver = self.parameters.at(0)
+  if (receiverType === undefined || receiver?.declaredType._tag !== 'Resolved') return substitution
+  const pattern = receiver.declaredType.type
+  const declared = Type.isReference(pattern) ? pattern.target : pattern
+  const actual = Type.isReference(receiverType) ? receiverType.target : receiverType
+  TypeInference.infer(declared, actual, substitution)
+  return substitution
+}
+
+/**
+ * Renders a bound's receiver operation as a generic value sees it: operand zero is the receiver the
+ * call supplies, so only the written operands are listed.
+ */
+export const receiverOperation = (
+  self: DeclarationFacts.InterfaceOperationApplicationFact,
+): Presentation => {
+  const name = self.declaration.name._tag === 'Present' ? self.declaration.name.spelling : '_'
+  const kind = `${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
+  const parameters = self.operands
+    .slice(1)
+    .map((operand) => {
+      const parameterName =
+        operand.parameter.name._tag === 'Present' ? operand.parameter.name.spelling : '_'
+      return `${parameterName}: ${declaredType(operand.type)}`
+    })
+    .join(', ')
+  return Object.freeze({
+    _tag: 'ServiceOperationPresentation',
+    name,
+    text: `${kind}(${parameters}) -> ${declaredType(self.success)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}`,
   })
 }
 

@@ -123,6 +123,8 @@ export type ItemKind =
   | 'Field'
   | 'Implementation'
   | 'Operation'
+  | 'Method'
+  | 'AssociatedFunction'
 
 export type Visibility = 'Public' | 'Private' | 'Inherited'
 
@@ -436,6 +438,8 @@ const itemKindOf = (value: unknown): ItemKind | undefined => {
     case 'Field':
     case 'Implementation':
     case 'Operation':
+    case 'Method':
+    case 'AssociatedFunction':
       return value
     default:
       return undefined

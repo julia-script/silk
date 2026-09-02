@@ -19,7 +19,7 @@ have stable source-defined byte consumption and do not select a concrete provide
 
 A provider claiming this service must return fresh unpredictable bytes and must treat failure as
 fatal. An environment without such a source must omit the capability, never substitute
-deterministic data. [`fillBytes`](#declaration-73696c6b2f72616e646f6d3a3a66696c6c4279746573) performs no provider call for empty storage.
+deterministic data. `Random.fillBytes` performs no provider call for empty storage.
 
 ## Examples
 
@@ -29,14 +29,14 @@ deterministic data. [`fillBytes`](#declaration-73696c6b2f72616e646f6d3a3a66696c6
 import silk.random { Random }
 
 effect fn tokenWord() -> u64
-? &mut Random.Random {
+? &mut Random {
   return run Random.nextU64()
 }
 ```
 
 Import as `Random` with `import silk.random { Random }`.
 
-Public declarations: 5.
+Public declarations: 4.
 
 <a id="declaration-73696c6b2f72616e646f6d3a3a52616e646f6d"></a>
 
@@ -63,19 +63,13 @@ effect fn fillBytes(output: &mut [u8]) -> () ? &mut Random
 
 Fills the complete exclusive byte slice with fresh unpredictable data.
 
-<a id="declaration-73696c6b2f72616e646f6d3a3a66696c6c4279746573"></a>
+<a id="declaration-73696c6b2f72616e646f6d3a3a696d706c656d656e746174696f6e3a30"></a>
 
-## `fillBytes`
+## Implementation `Random for _`
 
 ```silk
-pub effect fn fillBytes(output: &mut [u8]) -> () ? &mut Random
+impl Random for _
 ```
-
-Fills `output` through the active secure provider.
-
-### Details
-
-Empty output succeeds without dispatching the provider.
 
 <a id="declaration-73696c6b2f72616e646f6d3a3a6e657874553634"></a>
 
@@ -84,8 +78,6 @@ Empty output succeeds without dispatching the provider.
 ```silk
 pub effect fn nextU64() -> u64 ? &mut Random
 ```
-
-Returns one secure `u64` decoded least-significant byte first from exactly eight provider bytes.
 
 <a id="declaration-73696c6b2f72616e646f6d3a3a6e657874426f6f6c"></a>
 

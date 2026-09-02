@@ -107,22 +107,28 @@ pub error: F
 
 The produced failure value.
 
+<a id="declaration-73696c6b2f726573756c743a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `silk/result.Result<A, F> for _`
+
+```silk
+impl silk/result.Result<A, F> for _
+```
+
 <a id="declaration-73696c6b2f726573756c743a3a73756363656564"></a>
 
 ## `succeed`
 
 ```silk
-pub fn succeed<A, F>(value: A) -> silk/result.Result<A, F>
+pub fn succeed(value: A) -> Result<A,F>
 ```
-
-Constructs a completed success by moving `value` into the success arm.
 
 <a id="declaration-73696c6b2f726573756c743a3a6661696c526573756c74"></a>
 
 ## `failResult`
 
 ```silk
-pub fn failResult<A, F>(error: F) -> silk/result.Result<A, F>
+pub fn failResult(error: F) -> Result<A,F>
 ```
 
 Constructs a completed failure by moving `error` into the failure arm.
@@ -132,7 +138,7 @@ Constructs a completed failure by moving `error` into the failure arm.
 ## `map`
 
 ```silk
-pub fn map<A, B, F>(self: silk/result.Result<A, F>, transform: once fn(A) -> B) -> silk/result.Result<B, F>
+pub fn map<B>(self: Self, transform: once fn(...)) -> Result<B,F>
 ```
 
 Applies `transform` once to a success value and carries a failure through unchanged.
@@ -147,7 +153,7 @@ success type; use [`mapError`](#declaration-73696c6b2f726573756c743a3a6d61704572
 ## `mapError`
 
 ```silk
-pub fn mapError<A, F, G>(self: silk/result.Result<A, F>, transform: once fn(F) -> G) -> silk/result.Result<A, G>
+pub fn mapError<G>(self: Self, transform: once fn(...)) -> Result<A,G>
 ```
 
 Applies `transform` once to a failure value and carries a success through unchanged.
@@ -162,7 +168,7 @@ failure type.
 ## `flatMap`
 
 ```silk
-pub fn flatMap<A, B, F>(self: silk/result.Result<A, F>, transform: once fn(A) -> silk/result.Result<B, F>) -> silk/result.Result<B, F>
+pub fn flatMap<B>(self: Self, transform: once fn(...)) -> Result<B,F>
 ```
 
 Continues a success with a transform that answers with a Result of its own, so the outcome
@@ -178,7 +184,7 @@ use [`mapError`](#declaration-73696c6b2f726573756c743a3a6d61704572726f72) before
 ## `unwrapOr`
 
 ```silk
-pub fn unwrapOr<A, F>(self: silk/result.Result<A, F>, fallback: A) -> A
+pub fn unwrapOr(self: Self, fallback: A) -> A
 ```
 
 Returns the success value, or the fallback value when the outcome is a failure.

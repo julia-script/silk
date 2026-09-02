@@ -28,12 +28,12 @@ Ordinary recursive destruction uses the call stack. For a very deep chain, consu
 ```silk
 import silk.box { Box }
 
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.effect { Effect }
 
 effect fn build() -> i32
-! Allocator.OutOfMemoryError {
+! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let creating = Box.make<i32>(42)
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -45,7 +45,7 @@ effect fn build() -> i32
   return Box.into<i32>(move boxed)
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -88,27 +88,28 @@ pub struct Box<T>
 
 Owns one heap-allocated `T` and releases both the value and its allocation on drop.
 
+<a id="declaration-73696c6b2f626f783a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `silk/box.Box<T> for _`
+
+```silk
+impl silk/box.Box<T> for _
+```
+
 <a id="declaration-73696c6b2f626f783a3a6d616b65"></a>
 
 ## `make`
 
 ```silk
-pub effect fn make<T>(value: T) -> silk/box.Box<T> ! OutOfMemoryError ? &mut Allocator
+pub effect fn make(value: T) -> Box<T> ! OutOfMemoryError ? &mut Allocator
 ```
-
-Moves one value into a new box with storage for exactly one element.
-
-### Details
-
-The returned box owns the value and the allocation. Allocation failure produces
-`OutOfMemoryError` and does not produce a partial box.
 
 <a id="declaration-73696c6b2f626f783a3a676574"></a>
 
 ## `get`
 
 ```silk
-pub fn get<T>(self: &silk/box.Box<T>) -> &[T]
+pub fn get(self: &unavailable) -> &[unavailable]
 ```
 
 Borrows the held value as a shared slice of length one.
@@ -122,7 +123,7 @@ The slice borrows the box and remains valid only for the lexical borrow.
 ## `getMut`
 
 ```silk
-pub fn getMut<T>(self: &mut silk/box.Box<T>) -> &mut [T]
+pub fn getMut(self: &mut unavailable) -> &mut[unavailable]
 ```
 
 Borrows the held value as an exclusive slice of length one.
@@ -136,12 +137,12 @@ The slice permits mutation of the element and remains valid only for the lexical
 ## `into`
 
 ```silk
-pub fn into<T>(self: silk/box.Box<T>) -> T
+pub fn into(self: Self) -> T
 ```
 
 Consumes the box, returns its owned value, and releases its allocation.
 
-<a id="declaration-73696c6b2f626f783a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f626f783a3a696d706c656d656e746174696f6e3a31"></a>
 
 ## Implementation `Drop for silk/box.Box<T>`
 

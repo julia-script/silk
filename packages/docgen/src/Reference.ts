@@ -212,6 +212,10 @@ const itemLabel = (item: Project.Item): string => {
       return `Operation \`${item.name}\``
     case 'Implementation':
       return `Implementation \`${item.name}\``
+    case 'Method':
+      return `Method \`${item.name}\``
+    case 'AssociatedFunction':
+      return `Associated function \`${item.name}\``
     default:
       return `\`${item.name}\``
   }

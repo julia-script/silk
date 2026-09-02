@@ -31,28 +31,28 @@ const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
 const usingAMap = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.i32 as i32
-import silk.hash as Hash
+import silk.hash { Hash }
 import silk.hash { HashKey, HashSeed, Word }
-import silk.hash_map { HashMap, contains, get, insert, length, make, remove }
-import silk.option { Option, unwrapOr }
+import silk.hash_map { HashMap }
+import silk.option { Option }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut map = make<Word, i32>(Hash.seed(12345))
+  let mut map = HashMap.make<Word, i32>(Hash.seed(12345))
   let mut key = 0
   while key < 20 {
-    let previous = run insert<Word, i32>(&mut map, Hash.word(i32.toU64(key)), key)
+    let previous = run HashMap.insert<Word, i32>(&mut map, Hash.word(i32.toU64(key)), key)
       |> Effect.provideMut(&mut allocator)
     drop previous
     key = key + 1
   }
-  let taken = remove<Word, i32>(&mut map, Hash.word(3))
-  let removed = unwrapOr<i32>(move taken, -1)
+  let taken = HashMap.remove<Word, i32>(&mut map, Hash.word(3))
+  let removed = Option.unwrapOr<i32>(move taken, -1)
   if removed != 3 { return 1 }
-  if !contains<Word, i32>(&map, Hash.word(4)) { return 2 }
-  let held = unwrapOr<i32>(get<Word, i32>(&map, Hash.word(4)), -1)
+  if !HashMap.contains<Word, i32>(&map, Hash.word(4)) { return 2 }
+  let held = Option.unwrapOr<i32>(HashMap.get<Word, i32>(&map, Hash.word(4)), -1)
   if held != 4 { return 3 }
   return 42
 }
@@ -118,7 +118,7 @@ it.effect('computes every hash as an ordinary call to a witness’s own Silk fun
     // function — so it has a body in the MIR rather than being a name the backend recognizes.
     const lowered = mir.value.functions.map((fn) => `${fn.id.module}.${fn.id.name}`)
     assert.include(lowered, 'silk/hash.wordHash', `lowered functions: ${lowered.join(', ')}`)
-    assert.include(lowered, 'silk/hash.mix')
+    assert.include(lowered, 'silk/hash.Hash.mix')
 
     // And it is reached the ordinary way: a `Call` naming that declaration, not an operation of its
     // own. This is the positive half of the constraint — the hash exists, and it is Silk.
@@ -156,10 +156,10 @@ it.effect('treats HashKey as an ordinary interface rather than by its spelling',
     // spelling `HashKey`, this program and the one above would not agree.
     const snapshot = yield* analyzed(
       'hashed-privilege/renamed',
-      `import silk.hash as Hash
+      `import silk.hash { Hash }
 import silk.hash { HashKey }
 import silk.u64 as u64
-import silk.hash as Hash
+import silk.hash { Hash }
 import silk.hash { HashSeed }
 
 interface Whatever {

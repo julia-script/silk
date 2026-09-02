@@ -30,9 +30,9 @@ const tree = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.usize as usize
-import silk.box { Box, make as boxMake, get as boxGet }
+import silk.box { Box }
 
 pub struct Leaf {}
 
@@ -55,8 +55,8 @@ effect fn leaf(value: i32) -> Tree ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn branch(left: Tree, right: Tree, value: i32) -> Tree ! OutOfMemoryError ? &mut Allocator {
-  let boxedLeft = run boxMake<Tree>(move left)
-  let boxedRight = run boxMake<Tree>(move right)
+  let boxedLeft = run Box.make<Tree>(move left)
+  let boxedRight = run Box.make<Tree>(move right)
   return Tree {
     shape: Shape { kind: Branch { left: move boxedLeft, right: move boxedRight } },
     value: value
@@ -70,7 +70,7 @@ fn total(self: &Tree) -> i32 {
 fn shapeTotal(self: &Shape) -> i32 {
   return match &self.kind {
     Leaf nothing => 0
-    Branch { left, right } => boxTotal(boxGet<Tree>(&left)) + boxTotal(boxGet<Tree>(&right))
+    Branch { left, right } => boxTotal(Box.get<Tree>(&left)) + boxTotal(Box.get<Tree>(&right))
   }
 }
 
@@ -142,14 +142,14 @@ it.effect('releases only the active nominal union variant payload', () =>
     const snapshot = yield* Analysis.ofSourceRealized(
       'box-heap-indirection/nominal-union',
       ascii(`import silk.allocator { OutOfMemoryError, Allocator, SystemAllocator }
-import silk.effect as Effect
-import silk.box { Box, make as boxMake }
+import silk.effect { Effect }
+import silk.box { Box }
 
 union Owner { Empty, Full { boxed: Box<i32> } }
 
 effect fn useOwner() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let boxed = run boxMake<i32>(42) |> Effect.provideMut(&mut allocator)
+  let boxed = run Box.make<i32>(42) |> Effect.provideMut(&mut allocator)
   let owner = Owner.Full { boxed: move boxed }
   drop owner
   return 42
@@ -203,24 +203,24 @@ it.effect('carries the same release count through the Wasm backend under both pr
 const accessors = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.usize as usize
-import silk.box { Box, make as boxMake, get as boxGet, getMut as boxGetMut, into as boxInto }
+import silk.box { Box }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut boxed = run boxMake<i32>(20) |> Effect.provideMut(&mut allocator)
+  let mut boxed = run Box.make<i32>(20) |> Effect.provideMut(&mut allocator)
 
-  let borrowed = boxGet<i32>(&boxed)
+  let borrowed = Box.get<i32>(&boxed)
   if borrowed[usize.ZERO] == 20 {} else { return 1 }
 
-  let mut exclusive = boxGetMut<i32>(&mut boxed)
+  let mut exclusive = Box.getMut<i32>(&mut boxed)
   exclusive[usize.ZERO] = 22
 
-  let confirmed = boxGet<i32>(&boxed)
+  let confirmed = Box.get<i32>(&boxed)
   if confirmed[usize.ZERO] == 22 {} else { return 2 }
 
-  let taken = boxInto<i32>(move boxed)
+  let taken = Box.into<i32>(move boxed)
   return taken + 20
 }
 
@@ -262,17 +262,17 @@ it.effect('borrows, mutates, and consumes a boxed value without unsafe code', ()
 const nested = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
-import silk.box { Box, make as boxMake, into as boxInto }
-import silk.vector { Vector, make as vectorMake, append as vectorAppend, length as vectorLength }
+import silk.effect { Effect }
+import silk.box { Box }
+import silk.vector { Vector }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut values = vectorMake<i32>()
-  let first = run vectorAppend<i32>(&mut values, 21) |> Effect.provideMut(&mut allocator)
-  let boxed = run boxMake<Vector<i32>>(move values) |> Effect.provideMut(&mut allocator)
-  let recovered = boxInto<Vector<i32>>(move boxed)
-  let answer = vectorLength<i32>(&recovered)
+  let mut values = Vector.make<i32>()
+  let first = run Vector.append<i32>(&mut values, 21) |> Effect.provideMut(&mut allocator)
+  let boxed = run Box.make<Vector<i32>>(move values) |> Effect.provideMut(&mut allocator)
+  let recovered = Box.into<Vector<i32>>(move boxed)
+  let answer = Vector.length<i32>(&recovered)
   drop recovered
   return 42
 }
@@ -314,8 +314,8 @@ const chain = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
-import silk.box { Box, make as boxMake, into as boxInto }
+import silk.effect { Effect }
+import silk.box { Box }
 
 pub struct End {}
 
@@ -332,7 +332,7 @@ effect fn extend(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
     return Chain { step: End {} }
   }
   let inner = run extend(depth - 1)
-  let boxed = run boxMake<Chain>(move inner)
+  let boxed = run Box.make<Chain>(move inner)
   return Chain { step: Link { next: move boxed } }
 }
 
@@ -539,8 +539,8 @@ it.effect('stops a box chain at the call stack rather than in the cleanup plan',
  */
 it.effect('rejects a polymorphically recursive box shape', () =>
   Effect.gen(function* () {
-    const polymorphic = `import silk.box { Box, make as boxMake }
-import silk.vector { Vector, make as vectorMake }
+    const polymorphic = `import silk.box { Box }
+import silk.vector { Vector }
 
 pub struct Bad<T> {
   value: T
@@ -548,7 +548,7 @@ pub struct Bad<T> {
 }
 
 pub fn main() -> i32 {
-  let held = vectorMake<Bad<i32>>()
+  let held = Vector.make<Bad<i32>>()
   return 0
 }`
     const snapshot = yield* Analysis.ofSourceRealized(

@@ -1790,6 +1790,16 @@ const declaration = (value: DeclarationFacts.DeclarationFact): string =>
         ? undefined
         : record('FunctionBodyTemplate', [value.bodyTemplate.canonical]),
     ),
+    optional(
+      value.associatedMember === undefined
+        ? undefined
+        : record('AssociatedMember', [
+            number(value.associatedMember.ordinal),
+            value.associatedMember.ownerSpelling,
+            value.associatedMember.name,
+            boolean(value.associatedMember.receiver),
+          ]),
+    ),
   ])
 
 const fieldState = (value: DeclarationFacts.FieldState): string => {
@@ -2109,6 +2119,16 @@ const conformance = (value: DeclarationFacts.ConformanceFact): string =>
     record('ConformanceValidity', [value.validity._tag]),
   ])
 
+const inherentImpl = (value: DeclarationFacts.InherentImplFact): string =>
+  record('InherentImpl', [
+    value.module,
+    number(value.ordinal),
+    array(value.typeParameters.map(typeParameter)),
+    value.ownerSpelling,
+    declaredType(value.owner),
+    record('InherentImplValidity', [value.validity._tag]),
+  ])
+
 /** Construct the exact surface for one module's completed headers. */
 export const make = (headers: DeclarationFacts.ModuleHeaders): ModuleSurface =>
   Object.freeze({
@@ -2118,6 +2138,7 @@ export const make = (headers: DeclarationFacts.ModuleHeaders): ModuleSurface =>
       headers.module,
       array(headers.members.map(member)),
       array(headers.conformances.map(conformance)),
+      array(headers.inherentImpls.map(inherentImpl)),
     ]),
   })
 

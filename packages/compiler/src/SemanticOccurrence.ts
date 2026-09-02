@@ -46,7 +46,15 @@ export type Identity =
   | { readonly _tag: 'IntrinsicActorIdentity'; readonly id: Intrinsic.ActorId }
   | { readonly _tag: 'IntrinsicOperationIdentity'; readonly id: Intrinsic.OperationId }
 
-export type Role = 'Declaration' | 'Value' | 'Type' | 'Field' | 'Actor' | 'Operation' | 'Import'
+export type Role =
+  | 'Declaration'
+  | 'Value'
+  | 'Type'
+  | 'Field'
+  | 'Actor'
+  | 'Operation'
+  | 'Method'
+  | 'Import'
 
 export type Resolution =
   | { readonly _tag: 'Available'; readonly identity: Identity }
@@ -768,17 +776,27 @@ const collectCallReference = (
   }
   const selected = 'token' in reference ? reference.token : tokens.at(-1)
   const resolved = callResolution(reference, index)
-  push(
-    pending,
-    selected?.span,
+  // A receiver-syntax call names its member without a qualifier token; the member keeps its
+  // identity and gains the method role, so hover presents the receiver-bound contract.
+  const receiverSyntax =
+    path?._tag === 'ReferencePath' &&
+    path.qualifier === undefined &&
+    reference._tag === 'Resolved' &&
+    reference.declaration._tag === 'FunctionDeclaration' &&
+    reference.declaration.associatedMember?.receiver === true
+  let role: Role
+  if (
     reference._tag === 'ResolvedBuiltin' ||
-      reference._tag === 'ResolvedServiceOperation' ||
-      reference._tag === 'ResolvedInterfaceOperation'
-      ? 'Operation'
-      : 'Value',
-    resolved.resolution,
-    resolved.declaration,
-  )
+    reference._tag === 'ResolvedServiceOperation' ||
+    reference._tag === 'ResolvedInterfaceOperation'
+  ) {
+    role = 'Operation'
+  } else if (receiverSyntax) {
+    role = 'Method'
+  } else {
+    role = 'Value'
+  }
+  push(pending, selected?.span, role, resolved.resolution, resolved.declaration)
 }
 
 const collectIntrinsicReference = (
@@ -1221,6 +1239,9 @@ const collectMember = (
       declaration,
     )
   for (const typeParameter of member.typeParameters) {
+    // An inherent member carries its impl head's binders ahead of its own; the head declares
+    // those once (see `collectInherentImpl`), so only binders spelled inside the member count.
+    if (typeParameter.syntax.span.start < member.syntax.span.start) continue
     const parameterLocation = locationOfTypeParameter(typeParameter)
     if (typeParameter.name._tag === 'Present')
       push(
@@ -1368,6 +1389,25 @@ const collectMember = (
   }
 }
 
+/** The head `impl<Binders> Owner<Binders>` declares the binders once and references the owner. */
+const collectInherentImpl = (
+  head: DeclarationFacts.InherentImplFact,
+  index: DeclarationIndex.Index,
+  scope: NameResolution.ModuleScope | undefined,
+  pending: Array<Pending>,
+): void => {
+  for (const typeParameter of head.typeParameters)
+    if (typeParameter.name._tag === 'Present')
+      push(
+        pending,
+        typeParameter.name.token.span,
+        'Declaration',
+        available(Object.freeze({ _tag: 'TypeParameterIdentity', id: typeParameter.type })),
+        locationOfTypeParameter(typeParameter),
+      )
+  collectDeclaredType(head.owner, index, scope, pending)
+}
+
 const collectImports = (
   scope: NameResolution.ModuleScope | undefined,
   index: DeclarationIndex.Index,
@@ -1442,6 +1482,7 @@ export const makeModule = (
   const scope = NameResolution.scopeOf(resolution, module)
   const headers = index.modules.find((candidate) => candidate.module === module)
   for (const member of headers?.members ?? []) collectMember(member, index, scope, pending)
+  for (const head of headers?.inherentImpls ?? []) collectInherentImpl(head, index, scope, pending)
   for (const fn of result.functions)
     for (const statement of fn.statements) collectStatement(statement, index, scope, pending)
   collectImports(scope, index, pending)

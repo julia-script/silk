@@ -8,37 +8,37 @@ import silk.effect {Effect}
 
 import silk.i32
 
-import silk.vector {Vector, make, append, get, length, capacity}
+import silk.vector {Vector}
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut values = make<i32>()
-  let pending0 = append<i32>(&mut values, 10)
+  let mut values = Vector.make<i32>()
+  let pending0 = Vector.append<i32>(&mut values, 10)
     |> Effect.provideMut(&mut allocator)
   let appended0 = run pending0
-  let pending1 = append<i32>(&mut values, 11)
+  let pending1 = Vector.append<i32>(&mut values, 11)
     |> Effect.provideMut(&mut allocator)
   let appended1 = run pending1
-  let pending2 = append<i32>(&mut values, 12)
+  let pending2 = Vector.append<i32>(&mut values, 12)
     |> Effect.provideMut(&mut allocator)
   let appended2 = run pending2
-  let pending3 = append<i32>(&mut values, 13)
+  let pending3 = Vector.append<i32>(&mut values, 13)
     |> Effect.provideMut(&mut allocator)
   let appended3 = run pending3
-  let pending4 = append<i32>(&mut values, 14)
+  let pending4 = Vector.append<i32>(&mut values, 14)
     |> Effect.provideMut(&mut allocator)
   let appended4 = run pending4
-  let pending5 = append<i32>(&mut values, 15)
+  let pending5 = Vector.append<i32>(&mut values, 15)
     |> Effect.provideMut(&mut allocator)
   let appended5 = run pending5
-  if length<i32>(&values) == 6 {} else {
+  if Vector.length<i32>(&values) == 6 {} else {
     return 0
   }
-  if capacity<i32>(&values) == 8 {} else {
+  if Vector.capacity<i32>(&values) == 8 {} else {
     return 1
   }
-  let first = get<i32>(&values, 0)
-  let last = get<i32>(&values, 5)
+  let first = Vector.get<i32>(&values, 0)
+  let last = Vector.get<i32>(&values, 5)
   return first + last + 17
 }
 
@@ -63,7 +63,7 @@ import silk.i32
 
 import silk.layout {Layout}
 
-import silk.vector {Vector, make, append, get, length, capacity}
+import silk.vector {Vector}
 
 struct QuotaAllocator {
   remaining: i32
@@ -86,7 +86,7 @@ impl Allocator for QuotaAllocator {
 }
 
 effect fn grow(values: &mut Vector<i32>) -> i32 ! OutOfMemoryError ? &mut Allocator {
-  let appended = run append<i32>(move values, 14)
+  let appended = run Vector.append<i32>(move values, 14)
   return 1
 }
 
@@ -96,17 +96,17 @@ effect fn recover(error: OutOfMemoryError) -> i32 {
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = QuotaAllocator {remaining: 1}
-  let mut values = make<i32>()
-  let pending0 = append<i32>(&mut values, 10)
+  let mut values = Vector.make<i32>()
+  let pending0 = Vector.append<i32>(&mut values, 10)
     |> Effect.provideMut(&mut allocator)
   let appended0 = run pending0
-  let pending1 = append<i32>(&mut values, 11)
+  let pending1 = Vector.append<i32>(&mut values, 11)
     |> Effect.provideMut(&mut allocator)
   let appended1 = run pending1
-  let pending2 = append<i32>(&mut values, 12)
+  let pending2 = Vector.append<i32>(&mut values, 12)
     |> Effect.provideMut(&mut allocator)
   let appended2 = run pending2
-  let pending3 = append<i32>(&mut values, 13)
+  let pending3 = Vector.append<i32>(&mut values, 13)
     |> Effect.provideMut(&mut allocator)
   let appended3 = run pending3
   let marker = run grow(&mut values)
@@ -115,14 +115,14 @@ effect fn build() -> i32 ! OutOfMemoryError {
   if marker == 7 {} else {
     return 0
   }
-  if length<i32>(&values) == 4 {} else {
+  if Vector.length<i32>(&values) == 4 {} else {
     return 1
   }
-  if capacity<i32>(&values) == 4 {} else {
+  if Vector.capacity<i32>(&values) == 4 {} else {
     return 2
   }
-  let first = get<i32>(&values, 0)
-  let last = get<i32>(&values, 3)
+  let first = Vector.get<i32>(&values, 0)
+  let last = Vector.get<i32>(&values, 3)
   return first + last + 19
 }
 
@@ -145,7 +145,7 @@ import silk.effect {Effect}
 
 import silk.i32
 
-import silk.vector {Vector, make, append, capacity}
+import silk.vector {Vector}
 
 struct Entry {
   value: i32
@@ -164,20 +164,20 @@ impl Drop for Entry {
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut values = make<Entry>()
-  let entry0 = Entry {value: 3, marker: make<i32>()}
-  let pending0 = append<Entry>(&mut values, move entry0)
+  let mut values = Vector.make<Entry>()
+  let entry0 = Entry {value: 3, marker: Vector.make<i32>()}
+  let pending0 = Vector.append<Entry>(&mut values, move entry0)
     |> Effect.provideMut(&mut allocator)
   let appended0 = run pending0
-  let entry1 = Entry {value: 5, marker: make<i32>()}
-  let pending1 = append<Entry>(&mut values, move entry1)
+  let entry1 = Entry {value: 5, marker: Vector.make<i32>()}
+  let pending1 = Vector.append<Entry>(&mut values, move entry1)
     |> Effect.provideMut(&mut allocator)
   let appended1 = run pending1
-  let entry2 = Entry {value: 7, marker: make<i32>()}
-  let pending2 = append<Entry>(&mut values, move entry2)
+  let entry2 = Entry {value: 7, marker: Vector.make<i32>()}
+  let pending2 = Vector.append<Entry>(&mut values, move entry2)
     |> Effect.provideMut(&mut allocator)
   let appended2 = run pending2
-  if capacity<Entry>(&values) == 4 {} else {
+  if Vector.capacity<Entry>(&values) == 4 {} else {
     return 0
   }
   return 42
@@ -202,7 +202,7 @@ import silk.effect {Effect}
 
 import silk.i32
 
-import silk.vector {Vector, make, append}
+import silk.vector {Vector}
 
 struct Entry {
   value: i32
@@ -226,13 +226,13 @@ fn consume(values: Vector<Entry>) -> i32 {
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut values = make<Entry>()
-  let entry0 = Entry {value: 11, marker: make<i32>()}
-  let pending0 = append<Entry>(&mut values, move entry0)
+  let mut values = Vector.make<Entry>()
+  let entry0 = Entry {value: 11, marker: Vector.make<i32>()}
+  let pending0 = Vector.append<Entry>(&mut values, move entry0)
     |> Effect.provideMut(&mut allocator)
   let appended0 = run pending0
-  let entry1 = Entry {value: 13, marker: make<i32>()}
-  let pending1 = append<Entry>(&mut values, move entry1)
+  let entry1 = Entry {value: 13, marker: Vector.make<i32>()}
+  let pending1 = Vector.append<Entry>(&mut values, move entry1)
     |> Effect.provideMut(&mut allocator)
   let appended1 = run pending1
   let consumed = consume(move values)
@@ -258,7 +258,7 @@ import silk.effect {Effect}
 
 import silk.usize
 
-import silk.vector {Vector, make, append, get, length, capacity}
+import silk.vector {Vector}
 
 struct U8 {
   value: i32
@@ -275,7 +275,7 @@ fn observe(kind: i32) -> i32 {
 }
 
 effect fn scan(source: &[U8]) -> Vector<Token> ! OutOfMemoryError ? &mut Allocator {
-  let mut tokens = make<Token>()
+  let mut tokens = Vector.make<Token>()
   let mut index = usize.add(0, 0)
   while index < source.length {
     let byte = source[index].value
@@ -287,7 +287,7 @@ effect fn scan(source: &[U8]) -> Vector<Token> ! OutOfMemoryError ? &mut Allocat
       kind = 2
     }
     let token = Token {kind: kind}
-    let appended = run append<Token>(&mut tokens, move token)
+    let appended = run Vector.append<Token>(&mut tokens, move token)
     index = index + 1
   }
   return move tokens
@@ -310,22 +310,22 @@ effect fn build() -> i32 ! OutOfMemoryError {
   let pending = scan(&source)
     |> Effect.provideMut(&mut allocator)
   let mut tokens = run pending
-  if length<Token>(&tokens) == 10 {} else {
+  if Vector.length<Token>(&tokens) == 10 {} else {
     return 0
   }
-  if capacity<Token>(&tokens) == 16 {} else {
+  if Vector.capacity<Token>(&tokens) == 16 {} else {
     return 1
   }
-  let token0 = get<Token>(&tokens, 0)
-  let token1 = get<Token>(&tokens, 1)
-  let token2 = get<Token>(&tokens, 2)
-  let token3 = get<Token>(&tokens, 3)
-  let token4 = get<Token>(&tokens, 4)
-  let token5 = get<Token>(&tokens, 5)
-  let token6 = get<Token>(&tokens, 6)
-  let token7 = get<Token>(&tokens, 7)
-  let token8 = get<Token>(&tokens, 8)
-  let token9 = get<Token>(&tokens, 9)
+  let token0 = Vector.get<Token>(&tokens, 0)
+  let token1 = Vector.get<Token>(&tokens, 1)
+  let token2 = Vector.get<Token>(&tokens, 2)
+  let token3 = Vector.get<Token>(&tokens, 3)
+  let token4 = Vector.get<Token>(&tokens, 4)
+  let token5 = Vector.get<Token>(&tokens, 5)
+  let token6 = Vector.get<Token>(&tokens, 6)
+  let token7 = Vector.get<Token>(&tokens, 7)
+  let token8 = Vector.get<Token>(&tokens, 8)
+  let token9 = Vector.get<Token>(&tokens, 9)
   let kind0 = observe(token0.kind)
   let kind1 = observe(token1.kind)
   let kind2 = observe(token2.kind)

@@ -7,13 +7,13 @@ pub fn main() -> i32 {
 }`
 
 export const effectHandlerSource = `import silk.allocator { OutOfMemoryError }
-import silk.effect as Effect
+import silk.effect { Effect }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   return run Effect.catchAll(store(), recover)
 }`
 
-export const pipedCatchSource = `import silk.effect as Effect
+export const pipedCatchSource = `import silk.effect { Effect }
 struct Problem {}
 effect fn recover(error: Problem) -> i32 { return 0 }
 pub fn main() -> i32 {
@@ -35,7 +35,7 @@ export const nestedBindingSource = `pub fn main() -> i32 {
 
 export const recoveredMemberSource = `import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 pub fn main() -> i32 {
   let mut allocator = Allocator.systemAllocatorProvider()
   return Effect.

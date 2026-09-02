@@ -7,7 +7,7 @@ and controlling sequencing and cleanup.
 
 ## When to use
 
-An `Effect<A ! E ? R>` describes a computation with three visible channels: it can succeed with
+An `Effect<A ! E ? R>` describes a computation with three visible channels: it can Result.succeed with
 `A`, fail with typed value `E`, and require providers `R`. Use [`map`](#declaration-73696c6b2f6566666563743a3a6d6170) and [`flatMap`](#declaration-73696c6b2f6566666563743a3a666c61744d6170) to continue
 success, [`mapError`](#declaration-73696c6b2f6566666563743a3a6d61704572726f72), [`catch`](#declaration-73696c6b2f6566666563743a3a6361746368), or [`catchAll`](#declaration-73696c6b2f6566666563743a3a6361746368416c6c) for typed failures, [`provide`](#declaration-73696c6b2f6566666563743a3a70726f76696465) or [`provideMut`](#declaration-73696c6b2f6566666563743a3a70726f766964654d7574)
 for lexical services, and [`ensuring`](#declaration-73696c6b2f6566666563743a3a656e737572696e67) for typed-outcome cleanup. Direct `run` remains clearest
@@ -23,7 +23,7 @@ produces the unions `! E | F` and `? R | S`.
 
 A provider operation removes one exact capability, role, and access entry from the requirement
 row. When one provider could satisfy multiple entries, select the intended entry explicitly as
-the first generic argument, for example `provideMut<Logger at Audit>`. Shared, exclusive, and
+the first generic argument, for example `Effect.provideMut<Logger at Audit>`. Shared, exclusive, and
 owned provider bindings have distinct borrowing and capture behavior.
 
 ## Gotchas
@@ -139,14 +139,22 @@ Public declarations: 33.
 pub struct Effect
 ```
 
-The importable name of the `silk.effect` module scope.
+The owner of the Effect combinators.
 
 ### Details
 
-This struct carries no data and is never constructed by the library. Importing it as
-`import silk.effect { Effect }` names the module scope, so `Effect.map(...)` and every other
-combinator resolve through it exactly as through a module alias. It is unrelated to the builtin
-`Effect<A ! E ? R>` type, which needs no import.
+This struct carries no data and is never constructed by the library. Every combinator is an
+inherent member declared in `impl Effect`, so `import silk.effect { Effect }` is the one import
+that reaches `Effect.map(...)`, `Effect.catchAll(...)`, and the rest. It is unrelated to the
+builtin `Effect<A ! E ? R>` type, which needs no import.
+
+<a id="declaration-73696c6b2f6566666563743a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `Effect for _`
+
+```silk
+impl Effect for _
+```
 
 <a id="declaration-73696c6b2f6566666563743a3a6c6f67"></a>
 
@@ -155,13 +163,6 @@ combinator resolve through it exactly as through a module alias. It is unrelated
 ```silk
 pub effect fn log(message: string) -> () ! LogError ? &mut Logger
 ```
-
-Sends one complete message at `LogLevel.Info` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
-
-### Details
-
-The logger decides where the message goes. Logging may fail with [`LogError`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72), and this wrapper
-neither buffers nor recovers that failure. Use [`logAt`](#declaration-73696c6b2f6566666563743a3a6c6f674174) when the level is not Info.
 
 <a id="declaration-73696c6b2f6566666563743a3a6c6f674174"></a>
 
@@ -265,8 +266,8 @@ effect fn load() -> i32
 pub fn main() -> i32 {
   let completed = run Effect.result(load())
   return match move completed {
-    Result.Result<i32, Problem>.Success {value} => value
-    Result.Result<i32, Problem>.Failure {error} => error.answer
+    Result<i32, Problem>.Success {value} => value
+    Result<i32, Problem>.Failure {error} => error.answer
   }
 }
 ```
@@ -345,77 +346,7 @@ Runs an outer Effect and then the inner Effect it produces.
 ### Details
 
 If the outer Effect fails, no inner Effect is available or run. The two failure rows and the two
-requirement rows are joined. `flatten(nested)` is the nested-Effect form of [`flatMap`](#declaration-73696c6b2f6566666563743a3a666c61744d6170).
-
-<a id="declaration-73696c6b2f6566666563743a3a50616972"></a>
-
-## `Pair`
-
-```silk
-pub struct Pair<A, B>
-```
-
-Two success values collected in operand order by [`zip`](#declaration-73696c6b2f6566666563743a3a7a6970).
-
-<a id="declaration-73696c6b2f6566666563743a3a506169723a3a6669656c643a30"></a>
-
-### Field `first`
-
-```silk
-pub first: A
-```
-
-The first Effect's success value.
-
-<a id="declaration-73696c6b2f6566666563743a3a506169723a3a6669656c643a31"></a>
-
-### Field `second`
-
-```silk
-pub second: B
-```
-
-The second Effect's success value.
-
-<a id="declaration-73696c6b2f6566666563743a3a547269706c65"></a>
-
-## `Triple`
-
-```silk
-pub struct Triple<A, B, C>
-```
-
-Three success values collected in operand order by [`zip3`](#declaration-73696c6b2f6566666563743a3a7a697033).
-
-<a id="declaration-73696c6b2f6566666563743a3a547269706c653a3a6669656c643a30"></a>
-
-### Field `first`
-
-```silk
-pub first: A
-```
-
-The first Effect's success value.
-
-<a id="declaration-73696c6b2f6566666563743a3a547269706c653a3a6669656c643a31"></a>
-
-### Field `second`
-
-```silk
-pub second: B
-```
-
-The second Effect's success value.
-
-<a id="declaration-73696c6b2f6566666563743a3a547269706c653a3a6669656c643a32"></a>
-
-### Field `third`
-
-```silk
-pub third: C
-```
-
-The third Effect's success value.
+requirement rows are joined. `Effect.flatten(nested)` is the nested-Effect form of [`flatMap`](#declaration-73696c6b2f6566666563743a3a666c61744d6170).
 
 <a id="declaration-73696c6b2f6566666563743a3a7a6970"></a>
 
@@ -761,3 +692,73 @@ The provider decides whether the wait blocks a host thread or advances virtual t
 ### Gotchas
 
 A zero duration needs no positive timeline advance. An unrepresentable absolute deadline traps.
+
+<a id="declaration-73696c6b2f6566666563743a3a50616972"></a>
+
+## `Pair`
+
+```silk
+pub struct Pair<A, B>
+```
+
+Two success values collected in operand order by [`zip`](#declaration-73696c6b2f6566666563743a3a7a6970).
+
+<a id="declaration-73696c6b2f6566666563743a3a506169723a3a6669656c643a30"></a>
+
+### Field `first`
+
+```silk
+pub first: A
+```
+
+The first Effect's success value.
+
+<a id="declaration-73696c6b2f6566666563743a3a506169723a3a6669656c643a31"></a>
+
+### Field `second`
+
+```silk
+pub second: B
+```
+
+The second Effect's success value.
+
+<a id="declaration-73696c6b2f6566666563743a3a547269706c65"></a>
+
+## `Triple`
+
+```silk
+pub struct Triple<A, B, C>
+```
+
+Three success values collected in operand order by [`zip3`](#declaration-73696c6b2f6566666563743a3a7a697033).
+
+<a id="declaration-73696c6b2f6566666563743a3a547269706c653a3a6669656c643a30"></a>
+
+### Field `first`
+
+```silk
+pub first: A
+```
+
+The first Effect's success value.
+
+<a id="declaration-73696c6b2f6566666563743a3a547269706c653a3a6669656c643a31"></a>
+
+### Field `second`
+
+```silk
+pub second: B
+```
+
+The second Effect's success value.
+
+<a id="declaration-73696c6b2f6566666563743a3a547269706c653a3a6669656c643a32"></a>
+
+### Field `third`
+
+```silk
+pub third: C
+```
+
+The third Effect's success value.

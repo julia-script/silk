@@ -32,11 +32,11 @@ move-only elements without taking them out.
 ### Insert one unique element and remove it
 
 ```silk
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.effect { Effect }
 
-import silk.hash { Hash }
+import silk.hash { Hash, Word }
 
 import silk.hash_set { HashSet }
 
@@ -45,21 +45,21 @@ import silk.option { Option }
 import silk.u64
 
 effect fn build() -> i32
-! Allocator.OutOfMemoryError {
+! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut set = HashSet.make<Hash.Word>(Hash.seed(17))
-  let inserting = HashSet.insert<Hash.Word>(&mut set, Hash.word(42))
+  let mut set = HashSet.make<Word>(Hash.seed(17))
+  let inserting = HashSet.insert<Word>(&mut set, Hash.word(42))
     |> Effect.provideMut<Allocator>(&mut allocator)
   let existed = run inserting
-  if existed || !HashSet.contains<Hash.Word>(&set, Hash.word(42)) {
+  if existed || !HashSet.contains<Word>(&set, Hash.word(42)) {
     return 0
   }
-  let removed = HashSet.remove<Hash.Word>(&mut set, Hash.word(42))
-    |> Option.unwrapOr<Hash.Word>(Hash.word(0))
+  let removed = HashSet.remove<Word>(&mut set, Hash.word(42))
+    |> Option.unwrapOr<Word>(Hash.word(0))
   return u64.toI32(removed.value)
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -125,26 +125,28 @@ Owns one representative of each equivalence class under one hash witness and see
 An equivalent insertion keeps the representative already stored. The seed and operation
 sequence determine bucket presentation order, which is not insertion order.
 
+<a id="declaration-73696c6b2f686173685f7365743a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `silk/hash_set.HashSet<T> for _`
+
+```silk
+impl silk/hash_set.HashSet<T> for _
+```
+
 <a id="declaration-73696c6b2f686173685f7365743a3a6d616b65"></a>
 
 ## `make`
 
 ```silk
-pub fn make<T>(seed: HashSeed) -> silk/hash_set.HashSet<T>
+pub fn make(seed: HashSeed) -> HashSet<T>
 ```
-
-Creates an empty set whose every hash is computed under one seed.
-
-### Details
-
-An empty set allocates no storage. The seed fixes bucket order for the same operation sequence.
 
 <a id="declaration-73696c6b2f686173685f7365743a3a6c656e677468"></a>
 
 ## `length`
 
 ```silk
-pub fn length<T>(self: &silk/hash_set.HashSet<T>) -> usize
+pub fn length(self: &unavailable) -> usize
 ```
 
 Returns the number of elements the set holds.
@@ -154,7 +156,7 @@ Returns the number of elements the set holds.
 ## `bucketCount`
 
 ```silk
-pub fn bucketCount<T>(self: &silk/hash_set.HashSet<T>) -> usize
+pub fn bucketCount(self: &unavailable) -> usize
 ```
 
 Returns the number of buckets the set presents, which is the range `occupiedAt` accepts.
@@ -164,25 +166,17 @@ Returns the number of buckets the set presents, which is the range `occupiedAt` 
 ## `occupiedAt`
 
 ```silk
-pub fn occupiedAt<T>(self: &silk/hash_set.HashSet<T>, index: usize) -> bool
+pub fn occupiedAt(self: &unavailable, index: usize) -> bool
 ```
 
 Reports whether one bucket holds an element. Out-of-range buckets hold nothing.
-
-<a id="declaration-73696c6b2f686173685f7365743a3a696d706c656d656e746174696f6e3a31"></a>
-
-## Implementation `Drop for silk/hash_set.HashSet<T>`
-
-```silk
-impl Drop for silk/hash_set.HashSet<T>
-```
 
 <a id="declaration-73696c6b2f686173685f7365743a3a696e73657274"></a>
 
 ## `insert`
 
 ```silk
-pub effect fn insert<T>(self: &mut silk/hash_set.HashSet<T>, value: T) -> bool ! OutOfMemoryError ? &mut Allocator
+pub effect fn insert<T>(self: &mut unavailable, value: T) -> bool ! OutOfMemoryError ? &mut Allocator
 ```
 
 Inserts one owned element, reporting whether an equivalent element was already held.
@@ -200,7 +194,7 @@ leaves every prior element present, and leaves the length and the bucket count u
 ## `contains`
 
 ```silk
-pub fn contains<T>(self: &silk/hash_set.HashSet<T>, value: T) -> bool
+pub fn contains<T>(self: &unavailable, value: T) -> bool
 ```
 
 Reports whether the set holds an element equivalent to one probe element.
@@ -214,7 +208,7 @@ This function consumes the probe element. It does not change the set or move a s
 ## `indexOf`
 
 ```silk
-pub fn indexOf<T>(self: &silk/hash_set.HashSet<T>, value: T) -> silk/option.Option<usize>
+pub fn indexOf<T>(self: &unavailable, value: T) -> silk/option.Option<usize>
 ```
 
 Returns the bucket holding an element equivalent to one probe element, or an absent value.
@@ -229,7 +223,7 @@ This function consumes the probe element.
 ## `remove`
 
 ```silk
-pub fn remove<T>(self: &mut silk/hash_set.HashSet<T>, value: T) -> silk/option.Option<T>
+pub fn remove<T>(self: &mut unavailable, value: T) -> silk/option.Option<T>
 ```
 
 Removes the element equivalent to one probe element and answers with it.
@@ -243,7 +237,7 @@ Ownership passes to the caller; the set does not also release it. The probe elem
 ## `elementAt`
 
 ```silk
-pub fn elementAt<T>(self: &silk/hash_set.HashSet<T>, index: usize) -> T
+pub fn elementAt<T>(self: &unavailable, index: usize) -> T
 ```
 
 Returns the element held in one bucket. Traps on a bucket that holds no element.
@@ -255,3 +249,11 @@ Reads a copy out of the set, so it answers for a set whose element type is `Copy
 ### Gotchas
 
 If `index` is out of range or [`occupiedAt`](#declaration-73696c6b2f686173685f7365743a3a6f636375706965644174) returns `false`, the program traps.
+
+<a id="declaration-73696c6b2f686173685f7365743a3a696d706c656d656e746174696f6e3a32"></a>
+
+## Implementation `Drop for silk/hash_set.HashSet<T>`
+
+```silk
+impl Drop for silk/hash_set.HashSet<T>
+```

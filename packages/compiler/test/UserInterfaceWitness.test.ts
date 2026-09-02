@@ -291,13 +291,13 @@ it.effect('keeps the standard library Order and Integer witnesses selecting thei
     // through `Intrinsic.*` for every scalar the standard library maps.
     const value = yield* evaluatedValue(
       'user-witness/intrinsic-unchanged',
-      `import silk.order { less }
-import silk.numeric { add }
+      `import silk.order { Order }
+import silk.numeric { Numeric }
 pub fn main() -> i32 {
   let mut score = 0
-  if less<i32>(1, 2) { score = score + 1 }
-  if less<u8>(2, 1) { score = score + 10 }
-  return score + add<i32>(20, 21)
+  if Order.less<i32>(1, 2) { score = score + 1 }
+  if Order.less<u8>(2, 1) { score = score + 10 }
+  return score + Numeric.add<i32>(20, 21)
 }`,
     )
     assert.strictEqual(value, 42)
@@ -310,7 +310,7 @@ it.effect('lets a user witness and an intrinsic witness serve the same interface
     // reaches ordinary Silk, so the two witness kinds coexist under one bound.
     const value = yield* evaluatedValue(
       'user-witness/mixed-witnesses',
-      `import silk.order { Order, less }
+      `import silk.order { Order }
 
 struct Cell {
   weight: i32
@@ -326,9 +326,9 @@ impl Order for Cell {
 
 pub fn main() -> i32 {
   let mut score = 0
-  if less<i32>(1, 2) { score = score + 1 }
-  if less<Cell>(Cell { weight: 5 }, Cell { weight: 4 }) { score = score + 10 }
-  if less<Cell>(Cell { weight: 4 }, Cell { weight: 5 }) { score = score + 100 }
+  if Order.less<i32>(1, 2) { score = score + 1 }
+  if Order.less<Cell>(Cell { weight: 5 }, Cell { weight: 4 }) { score = score + 10 }
+  if Order.less<Cell>(Cell { weight: 4 }, Cell { weight: 5 }) { score = score + 100 }
   return score
 }`,
     )

@@ -1,8 +1,8 @@
 // Compiler fixture: cancellation after onSuspend returns and before a retained Wake.
-import silk.allocator { Allocator }
-import silk.effect as Effect
-import silk.execution as Execution
-import silk.shared as Shared
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
+import silk.shared { Shared }
 
 struct Empty {}
 struct Armed { wake: Intrinsic.Wake }
@@ -15,10 +15,10 @@ struct State {
   endpointDrops: i32
   cleanupOrder: i32
 }
-struct Guard { state: Shared.Shared<State> }
-struct BodyToken { state: Shared.Shared<State> }
-struct FrameToken { state: Shared.Shared<State> }
-struct Endpoint { state: Shared.Shared<State> }
+struct Guard { state: Shared<State> }
+struct BodyToken { state: Shared<State> }
+struct FrameToken { state: Shared<State> }
+struct Endpoint { state: Shared<State> }
 
 fn install(self: &mut State, wake: Intrinsic.Wake) -> () {
   let previous = Intrinsic.replace(self.slot, Armed { wake: move wake })
@@ -80,11 +80,11 @@ impl Drop for Endpoint {
   }
 }
 
-fn register(wake: Intrinsic.Wake, state: Shared.Shared<State>) -> Guard {
+fn register(wake: Intrinsic.Wake, state: Shared<State>) -> Guard {
   let installed = Shared.withMut(&state, install(move wake))
   return Guard { state: move state }
 }
-effect fn body(state: Shared.Shared<State>, bodyToken: BodyToken) -> i32 {
+effect fn body(state: Shared<State>, bodyToken: BodyToken) -> i32 {
   let frameState = Shared.clone<State>(&state)
   let frame = FrameToken { state: move frameState }
   let registrationState = Shared.clone<State>(&state)
@@ -115,7 +115,7 @@ fn signal(selected: Empty | Armed) -> () {
   }
 }
 
-effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+effect fn program() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let state = run Shared.make<State>(State {
     slot: Empty {},
@@ -145,5 +145,5 @@ effect fn program() -> i32 ! Allocator.OutOfMemoryError {
   drop state
   return observed
 }
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }

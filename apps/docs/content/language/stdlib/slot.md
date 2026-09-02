@@ -27,7 +27,7 @@ on a runtime check.
 ### Copy and then take one initialized value
 
 ```silk
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.effect { Effect }
 
@@ -38,7 +38,7 @@ import silk.raw_buffer { RawBuffer }
 import silk.slot { Slot }
 
 effect fn build() -> i32
-! Allocator.OutOfMemoryError {
+! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let acquiring = Allocator.allocate(Layout.of<i32>())
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -53,7 +53,7 @@ effect fn build() -> i32
   return 0
 }
 
-effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+effect fn recover(error: OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -74,13 +74,21 @@ Public declarations: 5.
 pub struct Slot
 ```
 
-The importable name of the `silk.slot` module scope.
+The owner of the slot operations.
 
 ### Details
 
-This struct carries no data and is never constructed by the library. Importing it as
-`import silk.slot { Slot }` names the module scope, so `Slot.write(...)` and the other slot
-operations resolve through it. It is unrelated to the builtin `Slot<T>` place type.
+This struct carries no data and is never constructed by the library. Every operation is an
+inherent member declared in `impl Slot`, so `import silk.slot { Slot }` is the one import that
+reaches `Slot.write(...)` and the rest. It is unrelated to the builtin `Slot<T>` place type.
+
+<a id="declaration-73696c6b2f736c6f743a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `Slot for _`
+
+```silk
+impl Slot for _
+```
 
 <a id="declaration-73696c6b2f736c6f743a3a7772697465"></a>
 
@@ -89,13 +97,6 @@ operations resolve through it. It is unrelated to the builtin `Slot<T>` place ty
 ```silk
 pub fn write<T>(slot: silk/core.Slot<T>, value: T) -> ()
 ```
-
-Moves one value into a selected uninitialized raw slot.
-
-### Gotchas
-
-The slot must be in bounds and uninitialized. A second write without a state transition is
-invalid.
 
 <a id="declaration-73696c6b2f736c6f743a3a74616b65"></a>
 

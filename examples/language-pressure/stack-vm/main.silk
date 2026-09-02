@@ -7,8 +7,8 @@ import silk.logger { LogError }
 import silk.logger { Logger }
 import silk.u8
 import silk.usize
-import silk.vector { Vector, make, append, get, length }
-import silk.logger { length as logLength }
+import silk.vector { Vector }
+import silk.logger { Logger }
 
 const opcodeHalt: u8 = 0
 const opcodePush: u8 = 1
@@ -60,7 +60,7 @@ effect fn pushStep(
   fingerprint: i32
 ) -> i32 ! OutOfMemoryError ? &mut Allocator {
   let step = Step { pc: pc, opcode: opcode, depth: depth, top: top }
-  let added = run append<Step | VmDiagnostic>(move events, move step)
+  let added = run Vector.append<Step | VmDiagnostic>(move events, move step)
   let observedPc = observeStepPc(pc)
   let observedOpcode = observeStepOpcode(opcode)
   let observedDepth = observeStepDepth(depth)
@@ -78,7 +78,7 @@ effect fn pushDiagnostic(
   fingerprint: i32
 ) -> i32 ! OutOfMemoryError ? &mut Allocator {
   let diagnostic = VmDiagnostic { pc: pc, code: code }
-  let added = run append<Step | VmDiagnostic>(move events, move diagnostic)
+  let added = run Vector.append<Step | VmDiagnostic>(move events, move diagnostic)
   let observedPc = observeDiagnosticPc(pc)
   let observedCode = observeDiagnosticCode(code)
   return (
@@ -106,7 +106,7 @@ effect fn execute(bytecode: &[u8]) -> Executed ! OutOfMemoryError ? &mut Allocat
   let mut attempted = zero()
   let mut currentTop = 0
   let mut fingerprint = 0
-  let mut events = make<Step | VmDiagnostic>()
+  let mut events = Vector.make<Step | VmDiagnostic>()
 
   while pc < bytecode.length {
     if attempted >= stepLimit {
@@ -272,8 +272,8 @@ fn observeDiagnosticCode(value: usize) -> usize { return value }
 fn fingerprintEvents(events: &Vector<Step | VmDiagnostic>, result: i32, expected: i32) -> i32 {
   let mut observed = 0
   let mut index = zero()
-  while index < length<Step | VmDiagnostic>(events) {
-    let event = get<Step | VmDiagnostic>(events, index)
+  while index < Vector.length<Step | VmDiagnostic>(events) {
+    let event = Vector.get<Step | VmDiagnostic>(events, index)
     observed = match move event {
       Step { pc: stepPc, opcode, depth, top } => (
         observed * 17 + usize.toI32(stepPc) * 3 + u8.toI32(opcode) * 5 +
@@ -318,6 +318,6 @@ pub effect fn main() -> () ! OutOfMemoryError | LogError {
     |> Effect.tap(logVerified)
     |> Effect.provideMut(&mut allocator)
     |> Effect.provideMut(&mut logger)
-  if logLength(&logger) != 1 { let mismatch = 1 / 0 }
+  if Logger.length(&logger) != 1 { let mismatch = 1 / 0 }
   return ()
 }

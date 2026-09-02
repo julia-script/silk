@@ -41,13 +41,13 @@ const localSchedulerTimerBasicText = localSchedulerTimerBasic.toString('utf8')
 const invalidTimerChildRequirementSource = localSchedulerTimerBasicText
   .replace('struct ParentClock {', 'service Extra {}\n\nstruct ParentClock {')
   .replace(
-    '? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {\n  run MonotonicClock.waitFor(1)',
-    '? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock | &mut Extra {\n  run MonotonicClock.waitFor(1)',
+    '? &mut Scheduler | &mut MonotonicClock {\n  run MonotonicClock.waitFor(1)',
+    '? &mut Scheduler | &mut MonotonicClock | &mut Extra {\n  run MonotonicClock.waitFor(1)',
   )
 const missingParentClockSource = localSchedulerTimerBasicText.replace(
   `  let mut clock = ParentClock { mark: SystemClock.make(0, 0) }
   let program = LocalScheduler.execute(&mut scheduler, root())
-    |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
   return run move program`,
   '  return run LocalScheduler.execute(&mut scheduler, root())',
 )
@@ -107,10 +107,11 @@ const ascii = (value: string): Uint8Array =>
 
 const ordinalAllocator = `
 import silk.allocator { Allocator as AllocationService }
-import silk.hash as Hash
-import silk.hash_map as HashMap
-import silk.layout as Layout
-import silk.option as Option
+import silk.fiber { Outcome, Success, Failure, Cancelled }
+import silk.hash { Hash }
+import silk.hash_map { HashMap }
+import silk.layout { Layout }
+import silk.option { Option }
 import silk.usize as usize
 
 fn claimAllocation(self: &mut Audit) -> bool {
@@ -123,14 +124,14 @@ fn claimAllocation(self: &mut Audit) -> bool {
   return true
 }
 
-struct QuotaAllocator { control: Shared.Shared<Audit> }
+struct QuotaAllocator { control: Shared<Audit> }
 
 effect fn allocate(
   self: &mut QuotaAllocator,
-  layout: Layout.Layout,
-) -> Allocation ! Allocator.OutOfMemoryError {
+  layout: Layout,
+) -> Allocation ! OutOfMemoryError {
   let admitted = Shared.withMut(&self.control, claimAllocation)
-  if !admitted { fail Allocator.OutOfMemoryError {} }
+  if !admitted { fail OutOfMemoryError {} }
   let mut system = Allocator.systemAllocatorProvider()
   let pending = AllocationService.allocate(move layout)
     |> Effect.provideMut<AllocationService>(&mut system)
@@ -147,7 +148,7 @@ fn publicationStoreEmpty() -> () { return () }
 fn publicationStoreLeaked() -> () { return () }
 
 struct OrdinalReadyNode { identity: u64 }
-struct OrdinalReadyEndpoint { node: Shared.Shared<OrdinalReadyNode> }
+struct OrdinalReadyEndpoint { node: Shared<OrdinalReadyNode> }
 struct OrdinalRootCompleted {}
 struct OrdinalRootNeverFailed {}
 
@@ -157,13 +158,13 @@ fn ordinalReady(endpoint: &OrdinalReadyEndpoint) -> () {
 `
 
 const originalRejectPrepared = `fn rejectPrepared(
-  mailbox: &Shared.Shared<Scheduler.TaskMailbox>,
-  submission: &Shared.Shared<Scheduler.SubmissionSlot>,
-  audit: &Shared.Shared<Audit>,
+  mailbox: &Shared<TaskMailbox>,
+  submission: &Shared<SubmissionSlot>,
+  audit: &Shared<Audit>,
 ) -> () {
   let response = Shared.with<
-    Scheduler.TaskMailbox,
-    Shared.Shared<Scheduler.PublicationResponse>
+    TaskMailbox,
+    Shared<PublicationResponse>
   >(
     mailbox,
     responseHandle,
@@ -176,8 +177,8 @@ const originalRejectPrepared = `fn rejectPrepared(
 }`
 
 const ordinalRejectPrepared = `fn finishPublicationRejection(
-  response: Shared.Shared<Scheduler.PublicationResponse>,
-  audit: Shared.Shared<Audit>,
+  response: Shared<PublicationResponse>,
+  audit: Shared<Audit>,
   wake: Intrinsic.Wake,
 ) -> () {
   let rejected = Shared.withMut(&response, rejectResponse)
@@ -189,20 +190,20 @@ const ordinalRejectPrepared = `fn finishPublicationRejection(
 }
 
 fn finishPublicationInsertion(
-  store: &mut HashMap.HashMap<Scheduler.TaskId, Scheduler.PreparedTask>,
-  identity: Scheduler.TaskId,
-  response: Shared.Shared<Scheduler.PublicationResponse>,
-  audit: Shared.Shared<Audit>,
+  store: &mut HashMap<TaskId, PreparedTask>,
+  identity: TaskId,
+  response: Shared<PublicationResponse>,
+  audit: Shared<Audit>,
   wake: Intrinsic.Wake,
-  outcome: Result.Result<
-    Option.Option<Scheduler.PreparedTask>,
-    Allocator.OutOfMemoryError
+  outcome: Result<
+    Option<PreparedTask>,
+    OutOfMemoryError
   >,
 ) -> () {
   return match move outcome {
-    Result.Result<
-      Option.Option<Scheduler.PreparedTask>,
-      Allocator.OutOfMemoryError
+    Result<
+      Option<PreparedTask>,
+      OutOfMemoryError
     >.Success { value: previous } =>
       finishAcceptedPublicationInsertion(
         move store,
@@ -212,9 +213,9 @@ fn finishPublicationInsertion(
         move wake,
         move previous,
       )
-    Result.Result<
-      Option.Option<Scheduler.PreparedTask>,
-      Allocator.OutOfMemoryError
+    Result<
+      Option<PreparedTask>,
+      OutOfMemoryError
     >.Failure { error } =>
       finishRefusedPublicationInsertion(
         move store,
@@ -227,16 +228,16 @@ fn finishPublicationInsertion(
 }
 
 fn finishAcceptedPublicationInsertion(
-  store: &mut HashMap.HashMap<Scheduler.TaskId, Scheduler.PreparedTask>,
-  identity: Scheduler.TaskId,
-  response: Shared.Shared<Scheduler.PublicationResponse>,
-  audit: Shared.Shared<Audit>,
+  store: &mut HashMap<TaskId, PreparedTask>,
+  identity: TaskId,
+  response: Shared<PublicationResponse>,
+  audit: Shared<Audit>,
   wake: Intrinsic.Wake,
-  previous: Option.Option<Scheduler.PreparedTask>,
+  previous: Option<PreparedTask>,
 ) -> () {
   drop previous
   publicationInsertionAccepted()
-  let removed = HashMap.remove<Scheduler.TaskId, Scheduler.PreparedTask>(move store, identity)
+  let removed = HashMap.remove<TaskId, PreparedTask>(move store, identity)
   drop removed
   publicationStoreEmpty()
   finishPublicationRejection(move response, move audit, move wake)
@@ -244,15 +245,15 @@ fn finishAcceptedPublicationInsertion(
 }
 
 fn finishRefusedPublicationInsertion(
-  store: &HashMap.HashMap<Scheduler.TaskId, Scheduler.PreparedTask>,
-  response: Shared.Shared<Scheduler.PublicationResponse>,
-  audit: Shared.Shared<Audit>,
+  store: &HashMap<TaskId, PreparedTask>,
+  response: Shared<PublicationResponse>,
+  audit: Shared<Audit>,
   wake: Intrinsic.Wake,
-  error: Allocator.OutOfMemoryError,
+  error: OutOfMemoryError,
 ) -> () {
   drop error
   publicationInsertionRefused()
-  if HashMap.length<Scheduler.TaskId, Scheduler.PreparedTask>(store) == usize.ZERO {
+  if HashMap.length<TaskId, PreparedTask>(store) == usize.ZERO {
     publicationStoreEmpty()
   } else {
     publicationStoreLeaked()
@@ -262,14 +263,14 @@ fn finishRefusedPublicationInsertion(
 }
 
 effect fn rejectPrepared(
-  mailbox: &Shared.Shared<Scheduler.TaskMailbox>,
-  submission: &Shared.Shared<Scheduler.SubmissionSlot>,
-  audit: &Shared.Shared<Audit>,
-  control: &Shared.Shared<Audit>,
+  mailbox: &Shared<TaskMailbox>,
+  submission: &Shared<SubmissionSlot>,
+  audit: &Shared<Audit>,
+  control: &Shared<Audit>,
 ) -> () {
   let response = Shared.with<
-    Scheduler.TaskMailbox,
-    Shared.Shared<Scheduler.PublicationResponse>
+    TaskMailbox,
+    Shared<PublicationResponse>
   >(
     mailbox,
     responseHandle,
@@ -278,13 +279,13 @@ effect fn rejectPrepared(
   let prepared = Shared.withMut(submission, takeSubmission)
   let PreparedSelection { task, wake } = move selectPrepared(move request, move prepared)
   let identity = task.identity
-  let mut store = HashMap.make<Scheduler.TaskId, Scheduler.PreparedTask>(Hash.seed(19))
+  let mut store = HashMap.make<TaskId, PreparedTask>(Hash.seed(19))
   let mut allocator = QuotaAllocator { control: Shared.clone<Audit>(control) }
-  let insertion = HashMap.insert<Scheduler.TaskId, Scheduler.PreparedTask>(
+  let insertion = HashMap.insert<TaskId, PreparedTask>(
     &mut store,
     identity,
     move task,
-  ) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+  ) |> Effect.provideMut<Allocator>(&mut allocator)
   let outcome = run Effect.result(move insertion)
   finishPublicationInsertion(
     &mut store,
@@ -334,10 +335,10 @@ const allocationOrdinalSweepSource: string = (() => {
     ),
     (),
     ready,
-  ) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)`,
+  ) |> Effect.provideMut<Allocator>(&mut allocator)`,
       `  let node = run Shared.make<OrdinalReadyNode>(OrdinalReadyNode {
     identity: identity.value,
-  }) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
   let endpoint = OrdinalReadyEndpoint { node: move node }
   let execution = run Execution.make(
     runChild<A, E>(
@@ -349,7 +350,7 @@ const allocationOrdinalSweepSource: string = (() => {
     ),
     move endpoint,
     ordinalReady,
-  ) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)`,
+  ) |> Effect.provideMut<Allocator>(&mut allocator)`,
     )
     .replace(
       '  providerPreparationFinished()\n  return move pending',
@@ -357,26 +358,26 @@ const allocationOrdinalSweepSource: string = (() => {
     )
     .replace(originalRejectPrepared, ordinalRejectPrepared)
     .replace(
-      `effect fn rootWork(audit: Shared.Shared<Audit>) -> ()
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
-? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+      `effect fn rootWork(audit: Shared<Audit>) -> ()
+! OutOfMemoryError | TaskIdExhaustedError
+? &mut Scheduler | &mut MonotonicClock {
   let child = run Fiber.forkChild<
     i32,
-    Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError,
+    OutOfMemoryError | TaskIdExhaustedError,
   >(nestedWork())
   rootForkReturned()
   let outcome = run Fiber.await<
     i32,
-    Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError,
+    OutOfMemoryError | TaskIdExhaustedError,
   >(move child)
   let nested = match move outcome {
-    Fiber.Outcome<
+    Outcome<
       i32,
-      Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError,
+      OutOfMemoryError | TaskIdExhaustedError,
     > { value } => match move value {
-      Fiber.Success<i32> { value: success } => success
-      Fiber.Failure<Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError> { error } => -200
-      Fiber.Cancelled {} => -300
+      Success<i32> { value: success } => success
+      Failure<OutOfMemoryError | TaskIdExhaustedError> { error } => -200
+      Cancelled {} => -300
     }
   }
   let rejected = run Effect.catchAll(forkRejected(), recoverRejected)
@@ -384,9 +385,9 @@ const allocationOrdinalSweepSource: string = (() => {
   drop audit
   return ()
 }`,
-      `effect fn rootWork(audit: Shared.Shared<Audit>) -> ()
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
-? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+      `effect fn rootWork(audit: Shared<Audit>) -> ()
+! OutOfMemoryError | TaskIdExhaustedError
+? &mut Scheduler | &mut MonotonicClock {
   let rejected = run Effect.catchAll(forkRejected(), recoverRejected)
   let stored = Shared.withMut(&audit, recordResult(41 + rejected))
   drop audit
@@ -405,10 +406,10 @@ const allocationOrdinalSweepSource: string = (() => {
       `fn auditResult(self: &Audit) -> i32 { return self.result }`,
     )
     .replace(
-      `effect fn scenario() -> i32 ! Allocator.OutOfMemoryError {
+      `effect fn scenario() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let audit =`,
-      `effect fn scenario(quota: i32) -> i32 ! Allocator.OutOfMemoryError {
+      `effect fn scenario(quota: i32) -> i32 ! OutOfMemoryError {
   let mut bootstrap = Allocator.systemAllocatorProvider()
   let audit =`,
     )
@@ -422,31 +423,31 @@ const allocationOrdinalSweepSource: string = (() => {
     rootPreparations: 0,`,
     )
     .replace(
-      `  }) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+      `  }) |> Effect.provideMut<Allocator>(&mut allocator)
   let identities`,
-      `  }) |> Effect.provideMut<Allocator.Allocator>(&mut bootstrap)
+      `  }) |> Effect.provideMut<Allocator>(&mut bootstrap)
   let mut allocator = QuotaAllocator { control: Shared.clone<Audit>(&audit) }
   let identities`,
     )
     .replace(
       `  let identities = run Shared.make<TaskIdentitySource>(TaskIdentitySource { next: 1 })
-    |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let rootMailbox`,
       `  let identities = run Shared.make<TaskIdentitySource>(TaskIdentitySource { next: 1 })
-    |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let rootCompletion = run Fiber.prepare<OrdinalRootCompleted, OrdinalRootNeverFailed>()
-    |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
-  let Fiber.PreparedFiber<OrdinalRootCompleted, OrdinalRootNeverFailed> {
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let PreparedFiber<OrdinalRootCompleted, OrdinalRootNeverFailed> {
     producer: rootProducer,
     canceller: rootCanceller,
     fiber: rootFiber,
   } = move rootCompletion
-  let mut rootStore = HashMap.make<Scheduler.TaskId, bool>(Hash.seed(11))
-  let rootInsertion = HashMap.insert<Scheduler.TaskId, bool>(
+  let mut rootStore = HashMap.make<TaskId, bool>(Hash.seed(11))
+  let rootInsertion = HashMap.insert<TaskId, bool>(
     &mut rootStore,
-    Scheduler.TaskId { value: 0 },
+    TaskId { value: 0 },
     true,
-  ) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+  ) |> Effect.provideMut<Allocator>(&mut allocator)
   let rootPrevious = run rootInsertion
   drop rootPrevious
   let rootMailbox`,
@@ -462,18 +463,18 @@ const allocationOrdinalSweepSource: string = (() => {
     completed: false,
   }
   let rootNode = run Shared.make<OrdinalReadyNode>(OrdinalReadyNode { identity: 0 })
-    |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let rootEndpoint = OrdinalReadyEndpoint { node: move rootNode }
   let rootProgram`,
     )
     .replace(
       `  let mut rootExecution = run Execution.make(move root, (), ready)
-    |> Effect.provideMut<Allocator.Allocator>(&mut allocator)`,
+    |> Effect.provideMut<Allocator>(&mut allocator)`,
       `  let mut rootExecution = run Execution.make(
     move root,
     move rootEndpoint,
     ordinalReady,
-  ) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)`,
+  ) |> Effect.provideMut<Allocator>(&mut allocator)`,
     )
     .replace(
       / {2}run driveExecution\(move rootExecution, &mut rootState\)[\s\S]*? {2}drop nested/,
@@ -487,9 +488,9 @@ const allocationOrdinalSweepSource: string = (() => {
       `  drop rootDriverSubmission
   let result =`,
       `  drop rootDriverSubmission
-  let rootRemoved = HashMap.remove<Scheduler.TaskId, bool>(
+  let rootRemoved = HashMap.remove<TaskId, bool>(
     &mut rootStore,
-    Scheduler.TaskId { value: 0 },
+    TaskId { value: 0 },
   )
   drop rootRemoved
   drop rootStore
@@ -504,11 +505,11 @@ const allocationOrdinalSweepSource: string = (() => {
     )
     .replace('  drop audit\n  return result', '  drop allocator\n  drop audit\n  return result')
     .replace(
-      `effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+      `effect fn recover(error: OutOfMemoryError) -> i32 {
   drop error
   return -99
 }`,
-      `effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+      `effect fn recover(error: OutOfMemoryError) -> i32 {
   drop error
   allocationRefusalObserved()
   return 7

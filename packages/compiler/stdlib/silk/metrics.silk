@@ -55,14 +55,79 @@
 import silk.allocator { Allocator }
 import silk.usize as usize
 
-/// The importable name of the `silk.metrics` module scope.
+/// The owner of the allocation-ledger operations.
 ///
 /// # Details
 ///
-/// This struct carries no data and is never constructed by the library. Importing it as
-/// `import silk.metrics { Metrics }` names the module scope, so ledger construction, updates, and
-/// snapshots resolve through `Metrics`.
+/// This struct carries no data and is never constructed by the library. Ledger construction,
+/// updates, and snapshots are inherent members declared in `impl Metrics`, reached through
+/// `import silk.metrics { Metrics }`.
 pub struct Metrics {}
+
+impl Metrics {
+  /// Creates a ledger with zero acquisitions, zero releases, and a zero peak.
+  pub fn make() -> AllocationMetrics {
+    return AllocationMetrics { acquired: usize.ZERO, released: usize.ZERO, peakLive: usize.ZERO }
+  }
+
+  /// Copies the current counters without moving or changing the provider's ledger.
+  ///
+  /// # When to use
+  ///
+  /// Use this function when a provider must publish metrics while it keeps the mutable ledger.
+  pub fn copy(self: &AllocationMetrics) -> AllocationMetrics {
+    return AllocationMetrics {
+      acquired: self.acquired,
+      released: self.released,
+      peakLive: self.peakLive
+    }
+  }
+
+  /// Returns `acquired - released`, which is the number of recorded live allocations.
+  ///
+  /// # Gotchas
+  ///
+  /// If `released` is greater than `acquired`, the unsigned subtraction traps. Record each release
+  /// only after its matching successful acquisition.
+  pub fn live(self: &AllocationMetrics) -> usize {
+    return self.acquired - self.released
+  }
+
+  /// Adds one successful acquisition and updates the peak live count.
+  ///
+  /// # Details
+  ///
+  /// Call this function only after the provider acquires the allocation. A failed acquisition must
+  /// not change the counters.
+  ///
+  /// # Gotchas
+  ///
+  /// The operation traps if `acquired` overflows `usize`. An unbalanced prior release can also make
+  /// the live-count subtraction trap.
+  pub fn recordAcquire(self: &mut AllocationMetrics) -> () {
+    self.acquired = self.acquired + usize.ONE
+    let current = self.acquired - self.released
+    if current > self.peakLive {
+      self.peakLive = current
+    }
+    return ()
+  }
+
+  /// Adds one release without changing the historical peak live count.
+  ///
+  /// # Details
+  ///
+  /// Call this function after the provider releases one allocation that it previously recorded.
+  ///
+  /// # Gotchas
+  ///
+  /// This function does not check that a matching acquisition exists. If releases become greater
+  /// than acquisitions, [`live`] traps.
+  pub fn recordRelease(self: &mut AllocationMetrics) -> () {
+    self.released = self.released + usize.ONE
+    return ()
+  }
+}
 
 /// Copyable counters for one provider's successful allocation acquisitions and releases.
 ///
@@ -81,65 +146,3 @@ pub struct AllocationMetrics {
 
 impl Copy for AllocationMetrics {}
 
-/// Creates a ledger with zero acquisitions, zero releases, and a zero peak.
-pub fn make() -> AllocationMetrics {
-  return AllocationMetrics { acquired: usize.ZERO, released: usize.ZERO, peakLive: usize.ZERO }
-}
-
-/// Copies the current counters without moving or changing the provider's ledger.
-///
-/// # When to use
-///
-/// Use this function when a provider must publish metrics while it keeps the mutable ledger.
-pub fn copy(self: &AllocationMetrics) -> AllocationMetrics {
-  return AllocationMetrics {
-    acquired: self.acquired,
-    released: self.released,
-    peakLive: self.peakLive
-  }
-}
-
-/// Returns `acquired - released`, which is the number of recorded live allocations.
-///
-/// # Gotchas
-///
-/// If `released` is greater than `acquired`, the unsigned subtraction traps. Record each release
-/// only after its matching successful acquisition.
-pub fn live(self: &AllocationMetrics) -> usize {
-  return self.acquired - self.released
-}
-
-/// Adds one successful acquisition and updates the peak live count.
-///
-/// # Details
-///
-/// Call this function only after the provider acquires the allocation. A failed acquisition must
-/// not change the counters.
-///
-/// # Gotchas
-///
-/// The operation traps if `acquired` overflows `usize`. An unbalanced prior release can also make
-/// the live-count subtraction trap.
-pub fn recordAcquire(self: &mut AllocationMetrics) -> () {
-  self.acquired = self.acquired + usize.ONE
-  let current = self.acquired - self.released
-  if current > self.peakLive {
-    self.peakLive = current
-  }
-  return ()
-}
-
-/// Adds one release without changing the historical peak live count.
-///
-/// # Details
-///
-/// Call this function after the provider releases one allocation that it previously recorded.
-///
-/// # Gotchas
-///
-/// This function does not check that a matching acquisition exists. If releases become greater
-/// than acquisitions, [`live`] traps.
-pub fn recordRelease(self: &mut AllocationMetrics) -> () {
-  self.released = self.released + usize.ONE
-  return ()
-}

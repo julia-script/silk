@@ -37,7 +37,7 @@ fn recordParcelCleanup(self: &mut SignalBox) -> i32 {
 
 struct Parcel {
   value: i32
-  inbox: Shared.Shared<SignalBox>
+  inbox: Shared<SignalBox>
 }
 
 impl Drop for Parcel {
@@ -48,7 +48,7 @@ impl Drop for Parcel {
   }
 }
 
-fn signal(payload: i32, inbox: Shared.Shared<SignalBox>, identifier: i32) -> i32 {
+fn signal(payload: i32, inbox: Shared<SignalBox>, identifier: i32) -> i32 {
   let pushed = Shared.withMut<SignalBox, i32>(&inbox, appendFixed(identifier))
   drop inbox
   return payload + pushed - identifier
@@ -59,7 +59,7 @@ struct Retained<F: once fn(i32) -> i32> {
 }
 
 pub struct SignalCapture {
-  inbox: Shared.Shared<SignalBox>
+  inbox: Shared<SignalBox>
   identifier: i32
 }
 
@@ -96,11 +96,11 @@ struct FutureCell<A, F: once fn(i32) -> i32> {
 }
 
 struct Sender<F: once fn(i32) -> i32> {
-  state: Shared.Shared<FutureCell<Parcel, F>>
+  state: Shared<FutureCell<Parcel, F>>
 }
 
 struct Reader<T> {
-  state: Shared.Shared<T>
+  state: Shared<T>
 }
 
 struct Removed<F: once fn(i32) -> i32> {
@@ -191,7 +191,7 @@ fn lifecycleSignalFingerprint(self: &SignalBox) -> i32 {
   return self.cleanupFingerprint
 }
 
-fn observeOwnedSignals(inbox: Shared.Shared<SignalBox>) -> i32 {
+fn observeOwnedSignals(inbox: Shared<SignalBox>) -> i32 {
   let result = Shared.with<SignalBox, i32>(&inbox, signalFingerprint)
   drop inbox
   return result
@@ -210,8 +210,8 @@ effect fn refuse(
 impl Allocator for EmptyAllocator { allocate: EmptyAllocator.refuse }
 
 fn linked(
-  inbox: &Shared.Shared<SignalBox>,
-  state: &Shared.Shared<FutureCell<Parcel, typeof(markReady)>>,
+  inbox: &Shared<SignalBox>,
+  state: &Shared<FutureCell<Parcel, typeof(markReady)>>,
   unusedParcel: Parcel,
   firstCallback: SignalCallback<typeof(markReady)>,
   secondCallback: SignalCallback<typeof(markReady)>,

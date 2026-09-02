@@ -10,10 +10,10 @@ const ascii = (value: string): Uint8Array =>
 const parity = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.u8 as u8
 import silk.usize as usize
-import silk.bytes { Bytes, copy, append, asMutSlice, asSlice, length }
+import silk.bytes { Bytes }
 
 fn octet(value: u8) -> u8 { return value }
 
@@ -30,15 +30,15 @@ fn checksum(values: &[u8]) -> i32 {
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let source = [octet(0), octet(255), octet(128), octet(1)]
-  let copying = copy(&source) |> Effect.provideMut(&mut allocator)
+  let copying = Bytes.copy(&source) |> Effect.provideMut(&mut allocator)
   let mut bytes = run copying
   let suffix = [octet(42), octet(7)]
-  let appending = append(&mut bytes, &suffix) |> Effect.provideMut(&mut allocator)
+  let appending = Bytes.append(&mut bytes, &suffix) |> Effect.provideMut(&mut allocator)
   let appended = run appending
-  let mut writable = asMutSlice(&mut bytes)
+  let mut writable = Bytes.asMutSlice(&mut bytes)
   writable[1] = octet(2)
-  let readable = asSlice(&bytes)
-  if length(&bytes) == 6 {} else { return 1 }
+  let readable = Bytes.asSlice(&bytes)
+  if Bytes.length(&bytes) == 6 {} else { return 1 }
   return checksum(move readable)
 }
 
@@ -95,9 +95,9 @@ const failedCopy = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
-import silk.bytes { Bytes, copy }
+import silk.bytes { Bytes }
 
 struct QuotaAllocator { remaining: i32 }
 
@@ -116,7 +116,7 @@ fn octet(value: u8) -> u8 { return value }
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = QuotaAllocator { remaining: 0 }
   let source = [octet(255)]
-  let copying = copy(&source) |> Effect.provideMut(&mut allocator)
+  let copying = Bytes.copy(&source) |> Effect.provideMut(&mut allocator)
   let bytes = run copying
   return 1
 }
@@ -154,11 +154,11 @@ it.effect(
       const moved = yield* Analysis.ofSourceRealized(
         'bytes-acceptance/moved',
         ascii(`import silk.usize as usize
-import silk.bytes { make, length }
+import silk.bytes { Bytes }
 pub fn main() -> i32 {
-  let first = make()
+  let first = Bytes.make()
   let second = move first
-  return usize.toI32(length(&first))
+  return usize.toI32(Bytes.length(&first))
 }`),
       )
       assert.include(

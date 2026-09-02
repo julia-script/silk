@@ -20,15 +20,15 @@ it does not allocate or initialize it.
 ### Size storage for repeated values
 
 ```silk
-import silk.layout { Layout }
+import silk.layout { Layout, LayoutOverflow }
 
 import silk.usize
 
 pub fn main() -> i32 {
   let element = Layout.of<i32>()
   return match move Layout.repeat(move element, 3) {
-    Layout.Layout {bytes, alignment} => usize.toI32(bytes) + 30
-    Layout.LayoutOverflow {} => 0
+    Layout {bytes, alignment} => usize.toI32(bytes) + 30
+    LayoutOverflow {} => 0
   }
 }
 ```
@@ -67,35 +67,13 @@ pub alignment: usize
 
 The required non-zero power-of-two byte alignment.
 
-<a id="declaration-73696c6b2f6c61796f75743a3a496e76616c6964416c69676e6d656e74"></a>
+<a id="declaration-73696c6b2f6c61796f75743a3a696d706c656d656e746174696f6e3a30"></a>
 
-## `InvalidAlignment`
-
-```silk
-pub struct InvalidAlignment
-```
-
-Reports the rejected alignment supplied to [`make`](#declaration-73696c6b2f6c61796f75743a3a6d616b65).
-
-<a id="declaration-73696c6b2f6c61796f75743a3a496e76616c6964416c69676e6d656e743a3a6669656c643a30"></a>
-
-### Field `alignment`
+## Implementation `Layout for _`
 
 ```silk
-pub alignment: usize
+impl Layout for _
 ```
-
-The zero or non-power-of-two alignment that was rejected.
-
-<a id="declaration-73696c6b2f6c61796f75743a3a4c61796f75744f766572666c6f77"></a>
-
-## `LayoutOverflow`
-
-```silk
-pub struct LayoutOverflow
-```
-
-Reports that [`repeat`](#declaration-73696c6b2f6c61796f75743a3a726570656174) could not represent the aggregate byte size as `usize`.
 
 <a id="declaration-73696c6b2f6c61796f75743a3a6f66"></a>
 
@@ -105,14 +83,12 @@ Reports that [`repeat`](#declaration-73696c6b2f6c61796f75743a3a726570656174) cou
 pub fn of<T>() -> Layout
 ```
 
-Returns the byte size and alignment required to store one value of `T`.
-
 <a id="declaration-73696c6b2f6c61796f75743a3a6d616b65"></a>
 
 ## `make`
 
 ```silk
-pub fn make(size: usize, alignment: usize) -> silk/layout.InvalidAlignment | silk/layout.Layout
+pub fn make(size: usize, alignment: usize) -> unavailable | unavailable
 ```
 
 Creates a layout from an explicit byte size and alignment.
@@ -138,3 +114,21 @@ The result keeps the input alignment and multiplies its byte size by `count`.
 ### Gotchas
 
 If the total byte size does not fit in `usize`, returns `LayoutOverflow`.
+
+<a id="declaration-73696c6b2f6c61796f75743a3a496e76616c6964416c69676e6d656e74"></a>
+
+## `InvalidAlignment`
+
+```silk
+pub fn InvalidAlignment(alignment: usize) -> _
+```
+
+<a id="declaration-73696c6b2f6c61796f75743a3a4c61796f75744f766572666c6f77"></a>
+
+## `LayoutOverflow`
+
+```silk
+pub struct LayoutOverflow
+```
+
+Reports that [`repeat`](#declaration-73696c6b2f6c61796f75743a3a726570656174) could not represent the aggregate byte size as `usize`.

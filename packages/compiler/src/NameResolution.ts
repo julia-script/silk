@@ -237,7 +237,16 @@ export const resolve = (
         const alias = aliasName(source, member)
         const declaration = canonicalDeclaration(index, target, sourceName)
         if (declaration === undefined) {
-          const diagnostic = Diagnostic.unknownImportedMember(target, sourceName, sourceToken.span)
+          const associated = associatedMemberNamed(index, target, sourceName)
+          const diagnostic =
+            associated?.associatedMember === undefined
+              ? Diagnostic.unknownImportedMember(target, sourceName, sourceToken.span)
+              : Diagnostic.importedInherentMember(
+                  target,
+                  sourceName,
+                  associated.associatedMember.ownerSpelling,
+                  sourceToken.span,
+                )
           diagnostics.push(diagnostic)
           created.push(
             Object.freeze({
@@ -377,28 +386,111 @@ export const lookup = (
     : Object.freeze({ _tag: 'Resolved', spelling, declaration })
 }
 
-/**
- * A nominal declaration doubles as its module's scope only when its name matches the module's
- * basename — case-insensitively, ignoring underscores, so `hash_map` names `HashMap`. Returns the
- * module it scopes, or undefined for every other declaration.
- */
-export const scopedModule = (declaration: DeclarationFacts.MemberFact): string | undefined => {
-  if (
-    declaration._tag !== 'StructDeclaration' &&
-    declaration._tag !== 'EnumDeclaration' &&
-    declaration._tag !== 'UnionDeclaration' &&
-    declaration._tag !== 'ServiceDeclaration' &&
-    declaration._tag !== 'InterfaceDeclaration'
-  )
-    return undefined
-  if (declaration.canonical._tag !== 'Canonical') return undefined
-  const module = declaration.canonical.id.module
-  const basename = module.slice(module.lastIndexOf('/') + 1)
-  return basename.replaceAll('_', '').toLowerCase() ===
-    declaration.canonical.id.name.replaceAll('_', '').toLowerCase()
-    ? module
-    : undefined
+/** The outcome of looking one associated member up on a nominal owner declaration. */
+export type AssociatedLookup =
+  | { readonly _tag: 'Inherent'; readonly declaration: DeclarationFacts.DeclarationFact }
+  | {
+      readonly _tag: 'Inaccessible'
+      readonly declaration: DeclarationFacts.DeclarationFact
+    }
+  | { readonly _tag: 'Duplicate'; readonly cause: Diagnostic.Identity }
+  | { readonly _tag: 'Missing' }
+
+const associatedCache = new WeakMap<
+  ReadonlyArray<DeclarationFacts.MemberFact>,
+  Map<string, ReadonlyArray<DeclarationFacts.DeclarationFact>>
+>()
+
+const associatedMembersOf = (
+  index: DeclarationIndex.Index,
+  owner: DeclarationFacts.CanonicalId,
+): ReadonlyArray<DeclarationFacts.DeclarationFact> => {
+  const members = index.modules.find((headers) => headers.module === owner.module)?.members
+  if (members === undefined) return Object.freeze([])
+  let byOwner = associatedCache.get(members)
+  if (byOwner === undefined) {
+    byOwner = new Map()
+    for (const member of members) {
+      if (member._tag !== 'FunctionDeclaration' || member.associatedMember === undefined) continue
+      const key = member.associatedMember.owner?.name ?? member.associatedMember.ownerSpelling
+      const bucket = byOwner.get(key)
+      byOwner.set(key, bucket === undefined ? [member] : [...bucket, member])
+    }
+    associatedCache.set(members, byOwner)
+  }
+  return byOwner.get(owner.name) ?? Object.freeze([])
 }
+
+/**
+ * Erases a transparent alias qualifier to the nominal declaration it names, so `Maybe.some`
+ * reaches `Option`'s members. Any other declaration is returned unchanged.
+ */
+export const erasedOwner = (
+  index: DeclarationIndex.Index,
+  declaration: DeclarationFacts.MemberFact,
+): DeclarationFacts.MemberFact => {
+  if (declaration._tag !== 'AliasDeclaration') return declaration
+  const target = declaration.target
+  if (target._tag !== 'Resolved' || !Type.isNominal(target.type)) return declaration
+  return (
+    DeclarationFacts.byCanonical(index, {
+      _tag: 'CanonicalDeclarationId',
+      module: target.type.module,
+      name: target.type.name,
+    }) ?? declaration
+  )
+}
+
+/** Whether a declaration can own inherent members. */
+export const isNominalOwner = (declaration: DeclarationFacts.MemberFact): boolean =>
+  declaration._tag === 'StructDeclaration' ||
+  declaration._tag === 'UnionDeclaration' ||
+  declaration._tag === 'EnumDeclaration' ||
+  declaration._tag === 'ServiceDeclaration' ||
+  declaration._tag === 'InterfaceDeclaration'
+
+/**
+ * Resolves `Owner.member` through the owner's declared inherent members. Membership is decided by
+ * the impl declarations of the owner's module, never by the module's basename. A private member
+ * is reachable only from the owner's own module.
+ */
+export const lookupAssociated = (
+  index: DeclarationIndex.Index,
+  owner: DeclarationFacts.MemberFact,
+  member: string,
+  requestingModule: string,
+): AssociatedLookup => {
+  const declaration = erasedOwner(index, owner)
+  if (!isNominalOwner(declaration) || declaration.canonical._tag !== 'Canonical')
+    return Object.freeze({ _tag: 'Missing' })
+  const candidates = associatedMembersOf(index, declaration.canonical.id).filter(
+    (candidate) => candidate.associatedMember?.name === member,
+  )
+  const canonical = candidates.filter((candidate) => candidate.canonical._tag === 'Canonical')
+  const selected = canonical.at(0)
+  if (selected === undefined) {
+    const duplicate = candidates.find((candidate) => candidate.canonical._tag === 'Duplicate')
+    return duplicate !== undefined && duplicate.canonical._tag === 'Duplicate'
+      ? Object.freeze({ _tag: 'Duplicate', cause: duplicate.canonical.cause })
+      : Object.freeze({ _tag: 'Missing' })
+  }
+  if (selected.visibility === 'Private' && declaration.canonical.id.module !== requestingModule)
+    return Object.freeze({ _tag: 'Inaccessible', declaration: selected })
+  return Object.freeze({ _tag: 'Inherent', declaration: selected })
+}
+
+/** The inherent member a selective import wrongly names, when one exists under any owner. */
+export const associatedMemberNamed = (
+  index: DeclarationIndex.Index,
+  module: string,
+  member: string,
+): DeclarationFacts.DeclarationFact | undefined =>
+  index.modules
+    .find((headers) => headers.module === module)
+    ?.declarations.find(
+      (declaration) =>
+        declaration.associatedMember?.name === member && declaration.canonical._tag === 'Canonical',
+    )
 
 export const lookupQualified = (
   scope: ModuleScope,
@@ -414,6 +506,32 @@ export const lookupQualified = (
     qualifier._tag === 'Missing'
   )
     return qualifier
+  if (qualifier._tag === 'Resolved') {
+    const associated = lookupAssociated(index, qualifier.declaration, member, scope.module)
+    if (associated._tag === 'Inherent')
+      return Object.freeze({
+        _tag: 'Resolved',
+        spelling: member,
+        declaration: associated.declaration,
+      })
+    if (associated._tag === 'Inaccessible') {
+      const diagnostic = Diagnostic.inaccessibleImportedMember(
+        associated.declaration.canonical._tag === 'Canonical'
+          ? associated.declaration.canonical.id.module
+          : namespace,
+        member,
+        token.span,
+      )
+      return Object.freeze({
+        _tag: 'Inaccessible',
+        spelling: member,
+        declaration: associated.declaration,
+        cause: Diagnostic.identity(diagnostic),
+      })
+    }
+    if (associated._tag === 'Duplicate')
+      return Object.freeze({ _tag: 'Unavailable', spelling: member, cause: associated.cause })
+  }
   if (qualifier._tag === 'Resolved' && qualifier.declaration._tag === 'EnumDeclaration') {
     const selected = DeclarationFacts.lookupEnumMember(qualifier.declaration.members, member)
     if (selected._tag === 'Resolved')
@@ -431,16 +549,9 @@ export const lookupQualified = (
       declaration: qualifier.declaration,
     })
   }
-  let module: string | undefined
-  if (qualifier._tag === 'Namespace') {
-    module = qualifier.module
-  } else if (qualifier._tag === 'Resolved') {
-    module = scopedModule(qualifier.declaration)
-  } else {
-    module = undefined
-  }
-  if (module === undefined)
+  if (qualifier._tag !== 'Namespace')
     return Object.freeze({ _tag: 'Missing', spelling: `${namespace}.${member}` })
+  const module = qualifier.module
   const declaration = canonicalDeclaration(index, module, member)
   if (declaration === undefined) {
     const diagnostic = Diagnostic.unknownImportedMember(module, member, token.span)

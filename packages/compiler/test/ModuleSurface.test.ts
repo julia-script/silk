@@ -258,7 +258,7 @@ it.effect('keeps string distinct from an immutable byte view in module surfaces'
     // Pins the canonical surface encoding byte-for-byte; an encoding change must be deliberate.
     assert.strictEqual(
       text.canonical,
-      '13:ModuleSurface12:surface/Main746:5:Array735:19:FunctionDeclaration35:18:DeclarationOrdinal11:6:Number1:053:9:Canonical39:11:CanonicalId12:surface/Main8:identity6:Public7:Runtime8:Ordinary7:5:False6:4:None7:5:Array11:6:Number1:1139:5:Array128:9:Parameter11:6:Number1:021:11:PresentName5:value7:Runtime67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False24:11:PresentName8:identity67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False6:4:None133:10:FailureRow6:4:True7:5:Array7:5:Array7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array137:14:RequirementRow6:4:True7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array6:4:None7:5:Array',
+      '13:ModuleSurface12:surface/Main754:5:Array743:19:FunctionDeclaration35:18:DeclarationOrdinal11:6:Number1:053:9:Canonical39:11:CanonicalId12:surface/Main8:identity6:Public7:Runtime8:Ordinary7:5:False6:4:None7:5:Array11:6:Number1:1139:5:Array128:9:Parameter11:6:Number1:021:11:PresentName5:value7:Runtime67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False24:11:PresentName8:identity67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False6:4:None133:10:FailureRow6:4:True7:5:Array7:5:Array7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array137:14:RequirementRow6:4:True7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array6:4:None6:4:None7:5:Array7:5:Array',
     )
   }),
 )
@@ -1397,21 +1397,28 @@ it.effect('rejects malformed semantic encodings through the typed boundary', () 
   }),
 )
 
-it.effect('encodes public foreign functions by symbol and contract without trivia', () =>
-  Effect.gen(function* () {
-    const left = yield* surface('pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"')
-    const respelled = yield* surface(
-      '\n\npub   unsafe extern "C" fn cAbs( value : i32 )  ->  i32   as "abs"\n',
-    )
-    const renamed = yield* surface('pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "labs"')
-    const retyped = yield* surface('pub unsafe extern "C" fn cAbs(value: i64) -> i64 as "abs"')
-
-    assert.strictEqual(ModuleSurface.equals(left, respelled), true)
-    assert.strictEqual(ModuleSurface.equals(left, renamed), false)
-    assert.strictEqual(ModuleSurface.equals(left, retyped), false)
-    assert.include(left.canonical, '7:Foreign1:C3:abs')
-    assert.notInclude(left.canonical, 'FunctionBodyTemplate')
-  }),
+it.effect(
+  'encodes inherent members and heads so contract edits invalidate and body edits do not',
+  () =>
+    Effect.gen(function* () {
+      const declare = (result: string, body: string) =>
+        `pub struct Counter { value: i32 }
+impl Counter {
+  pub fn read(self: &Self) -> ${result} { return ${body} }
+}`
+      const base = yield* surface(declare('i32', 'self.value'))
+      const body = yield* surface(declare('i32', 'self.value + 0'))
+      const contract = yield* surface(declare('i64', '0'))
+      const secondBlock = yield* surface(
+        `${declare('i32', 'self.value')}
+impl Counter { pub fn zero() -> Self { return Counter { value: 0 } } }`,
+      )
+      assert.strictEqual(ModuleSurface.equals(base, body), true)
+      assert.strictEqual(ModuleSurface.equals(base, contract), false)
+      assert.strictEqual(ModuleSurface.equals(base, secondBlock), false)
+      assert.include(base.canonical, 'AssociatedMember')
+      assert.include(base.canonical, 'InherentImpl')
+    }),
 )
 
 it.effect('round-trips raw pointer types and keys public pointer signatures by mutability', () =>

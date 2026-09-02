@@ -85,7 +85,7 @@ it.effect(
       assert.include(option.contents, 'unwrapOr')
       assert.include(
         option.contents,
-        'pub fn unwrapOr&lt;T&gt;(self: silk/option.Option&lt;T&gt;, fallback: T) -&gt; T',
+        'pub fn unwrapOr&lt;T&gt;(self: Option&lt;T&gt;, fallback: T) -&gt; T',
         'a signature must be escaped, not emitted as markup',
       )
       assert.notInclude(
@@ -166,7 +166,7 @@ it.effect(
       assert.isAbove(loaded.length, 0)
 
       const found = Search.query(loaded, 'unwrapOr').at(0)
-      assert.strictEqual(found?.name, 'unwrapOr')
+      assert.strictEqual(found?.name, 'Option.unwrapOr')
       assert.strictEqual(found?.module, 'silk/option')
 
       const [page, anchor] = (found?.href ?? '').split('#')

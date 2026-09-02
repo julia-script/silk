@@ -170,7 +170,7 @@ it.effect('realizes a suspending stored runner with exact rows and no structural
   Effect.gen(function* () {
     const snapshot = yield* realized(
       'effect-field/suspending',
-      `import silk.effect as Effect
+      `import silk.effect { Effect }
 struct Deferred<F: Effect<i32>> { operation: F }
 effect fn delayed() -> i32 {
   return run Effect.suspend(effect { return 42 })

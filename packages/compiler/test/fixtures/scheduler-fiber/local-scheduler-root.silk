@@ -1,9 +1,9 @@
-import silk.allocator as Allocator
-import silk.effect as Effect
-import silk.local_scheduler as LocalScheduler
-import silk.monotonic_clock as MonotonicClock
-import silk.scheduler as Scheduler
-import silk.system_clock as SystemClock
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.local_scheduler { LocalScheduler, StalledError }
+import silk.monotonic_clock { MonotonicClock }
+import silk.scheduler { Scheduler }
+import silk.system_clock { SystemClock }
 import silk.system_clock { Instant }
 
 struct ParentClock { mark: Instant }
@@ -19,7 +19,7 @@ effect fn parentWaitFor(self: &mut ParentClock, duration: u64) -> () {
   let deadline = MonotonicClock.deadlineAfter(&self.mark, duration)
   return run parentWaitUntil(move self, move deadline)
 }
-impl MonotonicClock.MonotonicClock for ParentClock {
+impl MonotonicClock for ParentClock {
   now: ParentClock.parentNow
   getResolution: ParentClock.parentResolution
   waitUntil: ParentClock.parentWaitUntil
@@ -31,29 +31,29 @@ struct RootProblem { code: i32 }
 fn successStarted() -> () { return () }
 fn failureStarted() -> () { return () }
 
-effect fn success() -> i32 ? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+effect fn success() -> i32 ? &mut Scheduler | &mut MonotonicClock {
   successStarted()
   return 42
 }
 
-effect fn failure() -> bool ! RootProblem ? &mut Scheduler.Scheduler | &mut MonotonicClock.MonotonicClock {
+effect fn failure() -> bool ! RootProblem ? &mut Scheduler | &mut MonotonicClock {
   failureStarted()
   fail RootProblem { code: 7 }
 }
 
 effect fn recoverFailure(
-  error: RootProblem | Allocator.OutOfMemoryError | LocalScheduler.StalledError,
+  error: RootProblem | OutOfMemoryError | StalledError,
 ) -> bool {
   return match move error {
     RootProblem { code } => code == 7
-    Allocator.OutOfMemoryError {} => false
-    LocalScheduler.StalledError {} => false
+    OutOfMemoryError {} => false
+    StalledError {} => false
   }
 }
 
 effect fn scenario() -> i32
-! Allocator.OutOfMemoryError | LocalScheduler.StalledError
-? &mut MonotonicClock.MonotonicClock {
+! OutOfMemoryError | StalledError
+? &mut MonotonicClock {
   let mut scheduler = LocalScheduler.make()
   let value = run LocalScheduler.execute(&mut scheduler, success())
   let failed = run Effect.catchAll(
@@ -65,7 +65,7 @@ effect fn scenario() -> i32
 }
 
 effect fn recoverScenario(
-  error: Allocator.OutOfMemoryError | LocalScheduler.StalledError,
+  error: OutOfMemoryError | StalledError,
 ) -> i32 {
   drop error
   return -2
@@ -74,6 +74,6 @@ effect fn recoverScenario(
 pub fn main() -> i32 {
   let mut clock = ParentClock { mark: SystemClock.make(0, 0) }
   let program = Effect.catchAll(scenario(), recoverScenario)
-    |> Effect.provideMut<MonotonicClock.MonotonicClock>(&mut clock)
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
   return run move program
 }

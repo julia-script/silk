@@ -795,24 +795,34 @@ export const parseImplOperation = (initial: State): NodeResult => {
   })
 }
 
+/**
+ * An impl declaration is either a conformance `impl [<T>] Contract for Provider { ... }` or an
+ * inherent member block `impl [<T>] Owner { ... }`. Both share one node kind; the absence of the
+ * `for` token after the first type is what makes the declaration inherent.
+ */
 export const parseImplDeclaration = (initial: State): NodeResult => {
   const keyword = expect(initial, 'ImplKeyword', ['Identifier', 'ForKeyword', ...topLevelFollowing])
   const typeParameters =
     nextSignificantKind(keyword.state) === 'Less'
-      ? parseTypeParameterList(keyword.state, ['ForKeyword', ...topLevelFollowing])
+      ? parseTypeParameterList(keyword.state, ['ForKeyword', 'LeftBrace', ...topLevelFollowing])
       : undefined
   const capability = parseType(typeParameters?.state ?? keyword.state, [
     'ForKeyword',
-    ...topLevelFollowing,
-  ])
-  const forKeyword = expect(capability.state, 'ForKeyword', [
-    ...typeStarts,
     'LeftBrace',
     ...topLevelFollowing,
   ])
-  const target = parseType(forKeyword.state, ['LeftBrace', ...topLevelFollowing])
-  const hasBody = nextSignificantKind(target.state) === 'LeftBrace'
-  const left = expect(target.state, 'LeftBrace', [
+  const inherent = nextSignificantKind(capability.state) !== 'ForKeyword'
+  const forKeyword = inherent
+    ? Object.freeze({ state: capability.state, elements: Object.freeze([]) })
+    : expect(capability.state, 'ForKeyword', [...typeStarts, 'LeftBrace', ...topLevelFollowing])
+  const target = inherent
+    ? undefined
+    : parseType(forKeyword.state, ['LeftBrace', ...topLevelFollowing])
+  const bodyStart = target?.state ?? forKeyword.state
+  const hasBody = nextSignificantKind(bodyStart) === 'LeftBrace'
+  const left = expect(bodyStart, 'LeftBrace', [
+    'PubKeyword',
+    'StaticKeyword',
     'FnKeyword',
     'Identifier',
     'RightBrace',
@@ -824,13 +834,15 @@ export const parseImplDeclaration = (initial: State): NodeResult => {
     ...(typeParameters === undefined ? [] : [typeParameters.node]),
     capability.node,
     ...forKeyword.elements,
-    target.node,
+    ...(target === undefined ? [] : [target.node]),
     ...left.elements,
   ])
 
   if (hasBody) {
     while (
       nextSignificantKind(state) === 'Identifier' ||
+      nextSignificantKind(state) === 'PubKeyword' ||
+      nextSignificantKind(state) === 'StaticKeyword' ||
       nextSignificantKind(state) === 'UnsafeKeyword' ||
       nextSignificantKind(state) === 'FnKeyword' ||
       nextSignificantKind(state) === 'EffectKeyword'

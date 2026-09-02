@@ -89,7 +89,7 @@ the weight:
   next link out of the value it holds has to swap a sentinel into the place it took from.
 
 ```silk
-import silk.box { Box, make as boxMake, into as boxInto }
+import silk.box { Box }
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.usize
@@ -130,7 +130,7 @@ fn unlinkStep(step: Step) -> Unlinked {
 fn unlinkKind(kind: End | Link) -> Unlinked {
   return match move kind {
     End nothing => Unlinked { chain: Chain { step: Step { kind: End {} } }, more: false }
-    Link { next } => Unlinked { chain: boxInto<Chain>(move next), more: true }
+    Link { next } => Unlinked { chain: Box.into<Chain>(move next), more: true }
   }
 }
 
@@ -140,7 +140,7 @@ effect fn build(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
   let mut remaining = depth
   while remaining > 0 {
     let taken = Intrinsic.replace(current, Chain { step: Step { kind: End {} } })
-    let boxed = run boxMake<Chain>(move taken)
+    let boxed = run Box.make<Chain>(move taken)
     current = Chain { step: Step { kind: Link { next: move boxed } } }
     remaining = remaining - 1
   }
@@ -183,7 +183,7 @@ For comparison, this is the recursive walk that the boundary applies to — corr
 bounded by the stack:
 
 ```silk
-import silk.box { Box, make as boxMake, get as boxGet }
+import silk.box { Box }
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.usize
@@ -206,7 +206,7 @@ pub struct Chain {
 fn stepDepth(step: &Step) -> i32 {
   return match &step.kind {
     End nothing => 0
-    Link { next } => viewDepth(boxGet<Chain>(&next))
+    Link { next } => viewDepth(Box.get<Chain>(&next))
   }
 }
 
@@ -221,7 +221,7 @@ effect fn build(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
   let mut remaining = depth
   while remaining > 0 {
     let taken = Intrinsic.replace(current, Chain { step: Step { kind: End {} } })
-    let boxed = run boxMake<Chain>(move taken)
+    let boxed = run Box.make<Chain>(move taken)
     current = Chain { step: Step { kind: Link { next: move boxed } } }
     remaining = remaining - 1
   }

@@ -26,7 +26,7 @@ const outcomes = (self: ProvisionalMir.Module): ReadonlyArray<ProvisionalMir.Out
 
 it.effect('separates the canonical suspension origin from complete-or-relay callers', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 effect fn delayed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
@@ -59,7 +59,7 @@ pub fn main() -> i32 {
 
 it.effect('uses ordinary propagation for source-defined combinators', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 effect fn seed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
@@ -83,7 +83,7 @@ pub fn main() -> i32 {
 
 it.effect('classifies a selected suspending service implementation on the provided runner', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 service Value {
   effect fn get() -> i32 ? &Value
 }
@@ -118,7 +118,7 @@ pub fn main() -> i32 {
 
 it.effect('does not contaminate a generic service provider with another specialization', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 service Value<S> {
   effect fn get(value: &S) -> i32 ? &Value<S>
 }
@@ -209,7 +209,7 @@ pub fn main() -> i32 {
 
 it.effect('specializes generic suspension captures without retaining type parameters', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 struct Owner { value: i32 }
 effect fn delayed<T>(value: T) -> T {
   return run Effect.suspend(effect { return move value })
@@ -246,7 +246,7 @@ pub fn main() -> i32 {
 
 it.effect('emits no suspension control for a closed synchronous corpus', () =>
   Effect.gen(function* () {
-    const source = `import silk.effect as Effect
+    const source = `import silk.effect { Effect }
 effect fn seed(value: i32) -> i32 { return value }
 fn increment(value: i32) -> i32 { return value + 1 }
 pub fn main() -> i32 { return run seed(41) |> Effect.map(increment) }`
@@ -263,7 +263,7 @@ pub fn main() -> i32 { return run seed(41) |> Effect.map(increment) }`
 
 it.effect('converges through a deep suspension chain independently of discovery order', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 effect fn level0(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
@@ -316,7 +316,7 @@ pub fn main() -> i32 {
 
 it.effect('terminates a synchronous recursive provider-forwarding worklist', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const self = yield* snapshot(`import silk.effect { Effect }
 service Value {
   effect fn read() -> i32 ? &Value
 }

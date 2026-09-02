@@ -31,7 +31,7 @@ available input from end-of-input.
 ```silk
 import silk.effect { Effect }
 
-import silk.standard_input { StandardInput as Input }
+import silk.standard_input { StandardInput as Input, ReadOutcome, StreamReadError }
 
 import silk.u8
 
@@ -41,8 +41,8 @@ struct OneByte {
   complete: bool
 }
 
-effect fn read(self: &mut OneByte, buffer: &mut [u8]) -> Input.ReadOutcome
-! Input.StreamReadError {
+effect fn read(self: &mut OneByte, buffer: &mut [u8]) -> ReadOutcome
+! StreamReadError {
   if self.complete {
     return Input.endOfInput()
   }
@@ -51,28 +51,28 @@ effect fn read(self: &mut OneByte, buffer: &mut [u8]) -> Input.ReadOutcome
   return Input.filled(usize.ONE)
 }
 
-impl Input.StandardInput for OneByte {
+impl Input for OneByte {
   read: OneByte.read
 }
 
 effect fn program() -> i32
-! Input.StreamReadError {
+! StreamReadError {
   let mut provider = OneByte {complete: false}
   let mut buffer = [u8.toU8(0)]
   let first = run Input.receive(&mut buffer)
-    |> Effect.provideMut<Input.StandardInput>(&mut provider)
+    |> Effect.provideMut<Input>(&mut provider)
   if Input.count(&first) != usize.ONE {
     return 1
   }
   let second = run Input.receive(&mut buffer)
-    |> Effect.provideMut<Input.StandardInput>(&mut provider)
+    |> Effect.provideMut<Input>(&mut provider)
   if Input.isEndOfInput(&second) == false {
     return 2
   }
   return u8.toI32(buffer[usize.ZERO])
 }
 
-effect fn recover(error: Input.StreamReadError) -> i32 {
+effect fn recover(error: StreamReadError) -> i32 {
   return 0
 }
 
@@ -94,16 +94,6 @@ pub struct StreamReadError
 ```
 
 A typed failure from a standard-input provider that could not complete one read.
-
-<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a726561644661696c757265"></a>
-
-## `readFailure`
-
-```silk
-pub fn readFailure() -> StreamReadError
-```
-
-Creates a standard-input failure for a provider that cannot complete one read.
 
 <a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a46696c6c6564"></a>
 
@@ -201,6 +191,22 @@ Bytes after a [`Filled`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a
 
 `buffer` must be non-empty. A native provider cannot distinguish a zero-capacity read from
 end-of-input.
+
+<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `StandardInput for _`
+
+```silk
+impl StandardInput for _
+```
+
+<a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a726561644661696c757265"></a>
+
+## `readFailure`
+
+```silk
+pub fn readFailure() -> StreamReadError
+```
 
 <a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a66696c6c6564"></a>
 

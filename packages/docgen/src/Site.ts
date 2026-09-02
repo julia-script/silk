@@ -219,14 +219,22 @@ ${body}
 </html>
 `
 
-const memberRows = (items: ReadonlyArray<Model.Item>, links: Prose.Links): string => {
+const memberRows = (
+  module: Model.Module,
+  items: ReadonlyArray<Model.Item>,
+  layout: Layout,
+  links: Prose.Links,
+): string => {
   const described = items.filter((item) => item.name !== '')
   if (described.length === 0) return ''
+  // Every row carries the anchor the search index and cross-references point at, so a member
+  // reached by name lands on its own row rather than on the owner's heading.
   const rows = described
-    .map(
-      (item) =>
-        `<tr><td><code>${Html.escapeText(item.signature === '' ? item.name : item.signature)}</code></td><td>${Prose.document(item.documentation?.blocks, links)}</td></tr>`,
-    )
+    .map((item) => {
+      const anchor = layout.anchors.get(anchorKey(module.name, item))
+      const id = anchor === undefined ? '' : ` id="${Html.escapeText(anchor)}"`
+      return `<tr${id}><td><code>${Html.escapeText(item.signature === '' ? item.name : item.signature)}</code></td><td>${Prose.document(item.documentation?.blocks, links)}</td></tr>`
+    })
     .join('\n        ')
   return `<table class="members">
         ${rows}
@@ -246,7 +254,7 @@ const declaration = (
       <p class="badge">${Html.escapeText(item.visibility)} ${Html.escapeText(item.kind)}</p>
       <pre><code class="language-silk">${Html.escapeText(item.signature)}</code></pre>
       ${documentation}
-      ${memberRows(item.children, links)}
+      ${memberRows(module, item.children, layout, links)}
     </section>`
 }
 

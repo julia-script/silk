@@ -353,7 +353,7 @@ recover(problem)
 
 it.effect('distinguishes Effect, catch, and a nominal type argument', () =>
   Effect.gen(function* () {
-    const source = `import silk.effect as Effect
+    const source = `import silk.effect { Effect }
 struct Problem {}
 effect fn recover(error: Problem) -> i32 { return 0 }
 pub fn main() -> i32 {
@@ -368,7 +368,12 @@ pub fn main() -> i32 {
         ? hover.contents.value
         : undefined
     }
-    assert.strictEqual(text('Effect'), '```silk\nimport silk/effect as Effect\n```')
+    // The imported owner hovers as the struct that declares the combinators, doc and all.
+    const owner = text('Effect') ?? ''
+    assert.strictEqual(
+      owner.slice(0, owner.indexOf('\n\n***')),
+      '```silk\npub struct Effect\n```\n\nThe owner of the Effect combinators.',
+    )
     assert.include(text('catch') ?? '', 'pub effect fn catch')
     assert.strictEqual(text('Problem', 1), '```silk\nstruct Problem\n```')
   }),
@@ -402,11 +407,10 @@ pub fn main() -> i32 {
 
 it.effect('renders proved hover contracts and inferred provider selectors', () =>
   Effect.gen(function* () {
-    const source = `import silk.writer as Streams
-import silk.writer { Writer }
-import silk.effect as Effect
+    const source = `import silk.writer { Writer, WriterError, StdoutWriter }
+import silk.effect { Effect }
 
-pub effect fn main() -> () ! Streams.WriterError {
+pub effect fn main() -> () ! WriterError {
   let mut streams = Writer.stdoutWriterProvider()
   // π🙂 keeps the selector position on UTF-16 coordinates
   return run Writer.writeAll(b"Hello\\n")
@@ -416,7 +420,7 @@ pub effect fn main() -> () ! Streams.WriterError {
     const hover = Document.hover(document, snapshot, positionOf(source, 'streams', 1))
     assert.deepEqual(hover?.contents, {
       kind: 'markdown',
-      value: '```silk\nlet mut streams: Streams.StdoutWriter\n```\n\n**Implements**\n\n- `Writer`',
+      value: '```silk\nlet mut streams: StdoutWriter\n```\n\n**Implements**\n\n- `Writer`',
     })
 
     const selectorOffset = source.indexOf('provideMut(') + 'provideMut'.length
@@ -429,7 +433,7 @@ pub effect fn main() -> () ! Streams.WriterError {
       [
         {
           position: positionAt(source, bindingEnd),
-          label: ': Streams.StdoutWriter',
+          label: ': StdoutWriter',
           kind: 1,
           paddingLeft: false,
           paddingRight: false,
@@ -448,7 +452,7 @@ pub effect fn main() -> () ! Streams.WriterError {
         start: { line: 0, character: 0 },
         end: positionAt(source, selectorOffset),
       }).map((hint) => hint.label),
-      [': Streams.StdoutWriter'],
+      [': StdoutWriter'],
     )
     const selectorRange = {
       start: positionAt(source, selectorOffset),
@@ -521,13 +525,12 @@ pub fn broken() -> i32 { return missing() }`
 
 it.effect('does not duplicate an explicitly written provider selector', () =>
   Effect.gen(function* () {
-    const source = `import silk.writer as Streams
-import silk.writer { Writer }
-import silk.effect as Effect
-pub effect fn main() -> () ! Streams.WriterError {
+    const source = `import silk.writer { Writer, WriterError, StdoutWriter }
+import silk.effect { Effect }
+pub effect fn main() -> () ! WriterError {
   let mut streams = Writer.stdoutWriterProvider()
   return run Writer.writeAll(b"ok\\n")
-    |> Effect.provideMut<Streams.Writer>(&mut streams)
+    |> Effect.provideMut<Writer>(&mut streams)
 }`
     const { document, snapshot } = yield* open(source)
     assert.deepEqual(
@@ -535,7 +538,7 @@ pub effect fn main() -> () ! Streams.WriterError {
         start: { line: 0, character: 0 },
         end: positionAt(source, source.length),
       }).map((hint) => hint.label),
-      [': Streams.StdoutWriter'],
+      [': StdoutWriter'],
     )
   }),
 )
@@ -577,7 +580,7 @@ pub fn main() -> i32 {
 
 it.effect('completes standard-library namespace and source service operations', () =>
   Effect.gen(function* () {
-    const source = `import silk.effect as Effect
+    const source = `import silk.effect { Effect }
 pub fn main() -> i32 {
   return Effect.
 }`
@@ -830,6 +833,50 @@ pub fn main() -> i32 {
     }),
 )
 
+it.effect('nests inherent members under their impl symbol and hovers the full contract', () =>
+  Effect.gen(function* () {
+    const source = `pub struct Counter { count: i32 }
+impl Counter {
+  pub fn make(count: i32) -> Self { return Counter { count: count } }
+  pub fn value(self: &Self) -> i32 { return self.count }
+}
+pub fn main() -> i32 { let counter = Counter.make(1) return Counter.value(&counter) }`
+    const { document, snapshot } = yield* open(source)
+    const symbols = Document.symbols(document, snapshot)
+    assert.deepEqual(
+      symbols.map((symbol) => [
+        symbol.name,
+        symbol.kind,
+        symbol.children?.map((child) => [child.name, child.kind]),
+      ]),
+      [
+        ['Counter', SymbolKind.Struct, [['count', SymbolKind.Field]]],
+        [
+          'impl Counter',
+          SymbolKind.Object,
+          [
+            ['make', SymbolKind.Function],
+            ['value', SymbolKind.Method],
+          ],
+        ],
+        ['main', SymbolKind.Function, undefined],
+      ],
+    )
+    const expected = {
+      kind: 'markdown' as const,
+      value: '```silk\npub fn value(self: &Counter) -> i32\n```',
+    }
+    assert.deepEqual(
+      Document.hover(document, snapshot, positionOf(source, 'value(self'))?.contents,
+      expected,
+    )
+    assert.deepEqual(
+      Document.hover(document, snapshot, positionOf(source, 'value(&counter)'))?.contents,
+      expected,
+    )
+  }),
+)
+
 it.effect(
   'uses canonical nominal union identities for editor navigation and constructor help',
   () =>
@@ -1006,7 +1053,7 @@ pub fn main() -> i32 { return identity(42) }`
 it.effect('navigates imported module paths', () =>
   Effect.gen(function* () {
     const source = `import silk.vector { Vector }
-import silk.effect as Effect`
+import silk.effect { Effect }`
     const { document, snapshot } = yield* open(source)
     const definitionAt = (spelling: string, occurrence = 0) =>
       Document.definition(document, snapshot, positionOf(source, spelling, occurrence), uriOfModule)
@@ -1020,8 +1067,8 @@ import silk.effect as Effect`
 
 it.effect('navigates higher-order callable references to their declaration', () =>
   Effect.gen(function* () {
-    const source = `import silk.vector {Vector}
-import silk.effect as Effect
+    const source = `import silk.vector { Vector }
+import silk.effect { Effect }
 
 fn identity(value: Vector<i32>) -> Vector<i32> {
   return move value
@@ -1548,10 +1595,11 @@ it.effect('still lists the toolchain declaration among a standard-library name r
 )
 
 const stdlibAliases =
-  'import silk.bytes { make as bytesMake }\nimport silk.vector { make as vectorMake }\npub fn main() -> i32 { return 0 }'
-// `make` is a prefix of neither alias, but the alias spellings repeat across the standard library,
-// so the offsets are taken from the clause itself rather than searched for by spelling.
-const vectorAliasBinding = stdlibAliases.indexOf('make as vectorMake') + 'make as '.length
+  'import silk.vector { appendBytes as vectorAppendBytes }\npub fn main() -> i32 { return 0 }'
+// The alias spelling repeats across the standard library, so the offset is taken from the clause
+// itself rather than searched for by spelling.
+const vectorAliasBinding =
+  stdlibAliases.indexOf('appendBytes as vectorAppendBytes') + 'appendBytes as '.length
 
 it.effect('renames the project alias of a standard-library member the toolchain also aliases', () =>
   Effect.gen(function* () {
@@ -1560,9 +1608,9 @@ it.effect('renames the project alias of a standard-library member the toolchain 
       'main',
     )
     const position = positionAt(stdlibAliases, vectorAliasBinding)
-    // `silk/bytes` and `silk/os_filesystem` spell their own alias of `silk.vector.make`
-    // `vectorMake` too: identity and spelling both coincide, and only the module that wrote the
-    // clause owns this binding.
+    // `silk/bytes` spells its own alias of `silk.vector.appendBytes` `vectorAppendBytes` too:
+    // identity and spelling both coincide, and only the module that wrote the clause owns this
+    // binding.
     const renamed = Document.rename(document, snapshot, position, 'newVector', uriOfModule)
     assert.strictEqual(renamed?._tag, 'RenameEdit')
     if (renamed?._tag !== 'RenameEdit') return
@@ -1578,9 +1626,12 @@ it.effect('renames the project alias of a standard-library member the toolchain 
     assert.deepEqual(Document.prepareRename(document, snapshot, position), {
       range: {
         start: position,
-        end: { line: position.line, character: position.character + 'vectorMake'.length },
+        end: {
+          line: position.line,
+          character: position.character + 'vectorAppendBytes'.length,
+        },
       },
-      placeholder: 'vectorMake',
+      placeholder: 'vectorAppendBytes',
     })
     // Confining the *rename* leaves the read-only reference list whole: every occurrence of the
     // declaration, standard-library ones included, is still worth showing.
@@ -2419,7 +2470,7 @@ it.effect('colors one duration literal as a single numeric semantic token', () =
 it.effect('colors contextual import path segments as namespaces', () =>
   Effect.gen(function* () {
     const source = `import silk.vector { Vector }
-import silk.effect as Effect
+import silk.effect { Effect }
 effect fn value() -> i32 { return 1 }
 `
     const { document, snapshot } = yield* open(source)
