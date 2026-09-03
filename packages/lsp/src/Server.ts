@@ -417,7 +417,7 @@ export const start = (options: Options = {}): void => {
       ])
 
       connection.onCodeActionResolve(async (action, token) => {
-        const data = Document.parseAutoImportData(action.data)
+        const data = Document.parseCodeActionData(action.data)
         if (data === undefined)
           return Document.disableCodeAction(action, 'The source action descriptor is invalid')
         return ready(
