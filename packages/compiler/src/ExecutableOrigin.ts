@@ -1054,6 +1054,16 @@ export const make = (operations: Operations) => {
     readonly index: DeclarationIndex.Index
     readonly resolving: ReadonlySet<string>
     readonly resolveEffectIdentity?: (identity: Type.EffectIdentityArgument) => string | undefined
+    /** The call whose callee body is being traced, so a parameter resolves to its argument. */
+    readonly parameterArguments?: {
+      readonly arguments: ReadonlyArray<Hir.Expression>
+      readonly context: EffectOriginContext
+    }
+    /** Resolves the success identity of an already-minted effect identity (post-discovery). */
+    readonly successOfIdentity?: (
+      identity: string,
+      resolving: ReadonlySet<string>,
+    ) => string | undefined
     readonly serviceRecipesOfIdentity?: (
       identity: string,
       resolving: ReadonlySet<string>,
@@ -1666,6 +1676,7 @@ export const make = (operations: Operations) => {
       return expression.conversion === 'EffectJoin'
         ? undefined
         : effectOriginOf(expression.source, context)
+    if (expression._tag === 'Run') return successEffectOriginOf(expression.subject, context)
     if (expression._tag === 'Match') {
       const identities = expression.arms.flatMap((arm) => {
         if (!arm.reachable) return []
@@ -1705,12 +1716,116 @@ export const make = (operations: Operations) => {
     )
   }
 
+  /**
+   * The hidden identity of the Effect one Effect value succeeds with: what `run expression` yields
+   * when the success itself is an Effect. Traced through the producer's body; a parameter resolves
+   * to the caller's argument while a call chain is open, otherwise through the minted identity.
+   */
+  const successEffectOriginOf = (
+    expression: Hir.Expression,
+    context: EffectOriginContext,
+  ): string | undefined => {
+    if (expression._tag === 'EffectBlock') {
+      const terminal = expression.statements.at(-1)
+      return terminal?._tag === 'Return' ? effectOriginOf(terminal.expression, context) : undefined
+    }
+    if (expression._tag === 'BindingReference') {
+      const initializer = callableBindings(context.fn).get(expression.binding.ordinal)
+      return initializer === undefined ? undefined : successEffectOriginOf(initializer, context)
+    }
+    if (expression._tag === 'Move') return successEffectOriginOf(expression.subject, context)
+    if (expression._tag === 'UnionConvert') return successEffectOriginOf(expression.source, context)
+    if (expression._tag === 'EffectBindRequirement')
+      return successEffectOriginOf(expression.protected, context)
+    if (expression._tag === 'Match') {
+      const identities = expression.arms.flatMap((arm) => {
+        if (!arm.reachable) return []
+        const identity = successEffectOriginOf(arm.result, context)
+        return identity === undefined ? [] : [identity]
+      })
+      return identities.length !== 0 && new Set(identities).size === 1
+        ? identities.at(0)
+        : undefined
+    }
+    if (expression._tag === 'ParameterReference') {
+      const ordinal = expression.parameter.ordinal
+      const argument = context.parameterArguments?.arguments.at(ordinal)
+      if (context.parameterArguments !== undefined && argument !== undefined)
+        return successEffectOriginOf(argument, context.parameterArguments.context)
+      const identity = parameterEffectIdentity(context.fn, context.owner, ordinal)
+      return identity === undefined
+        ? undefined
+        : context.successOfIdentity?.(identity, context.resolving)
+    }
+    if (expression._tag !== 'Call' && expression._tag !== 'EffectConstruct') return undefined
+    const targetKey = targetKeyOfCall(expression, context)
+    const target =
+      targetKey === undefined ? undefined : targetFunction(context.results, expression.target)
+    if (targetKey === undefined || target === undefined) return undefined
+    const substitution = instanceSubstitution(target, targetKey)
+    const returned = returnedExpression(target)
+    if (substitution === undefined || returned === undefined) return undefined
+    const marker = `success:${keyText(targetKey)}`
+    if (context.resolving.has(marker)) return undefined
+    return successEffectOriginOf(returned, {
+      fn: target,
+      owner: targetKey,
+      substitution,
+      results: context.results,
+      index: context.index,
+      resolving: new Set(context.resolving).add(marker),
+      ...(context.resolveEffectIdentity === undefined
+        ? {}
+        : { resolveEffectIdentity: context.resolveEffectIdentity }),
+      ...(context.successOfIdentity === undefined
+        ? {}
+        : { successOfIdentity: context.successOfIdentity }),
+      parameterArguments: { arguments: expression.arguments, context },
+    })
+  }
+
+  /**
+   * Resolves a minted effect identity to its success identity once every instance is known: a block
+   * whose success is a parameter's success has no caller to trace through, so the parameter's
+   * identity is followed to the block that minted it, in that block's own instance.
+   */
+  const successIdentityResolver = (
+    instances: ReadonlyArray<Pick<Instance, 'key' | 'function' | 'substitution'>>,
+    results: ReadonlyMap<string, Elaboration.Result>,
+    index: DeclarationIndex.Index,
+  ): NonNullable<EffectOriginContext['successOfIdentity']> => {
+    const successOfIdentity = (
+      identity: string,
+      resolving: ReadonlySet<string>,
+    ): string | undefined => {
+      if (resolving.has(identity)) return undefined
+      for (const instance of instances) {
+        for (const block of callableExpressions(instance.function)) {
+          if (block._tag !== 'EffectBlock' || effectIdentity(instance.key, block.site) !== identity)
+            continue
+          return successEffectOriginOf(block, {
+            fn: instance.function,
+            owner: instance.key,
+            substitution: instance.substitution,
+            results,
+            index,
+            resolving: new Set(resolving).add(identity),
+            successOfIdentity,
+          })
+        }
+      }
+      return undefined
+    }
+    return successOfIdentity
+  }
+
   const effectSuccesses = (
     fn: Hir.HirFunction,
     owner: InstanceKey,
     substitution: Type.Substitution,
     results: ReadonlyMap<string, Elaboration.Result>,
     index: DeclarationIndex.Index,
+    instances: ReadonlyArray<Pick<Instance, 'key' | 'function' | 'substitution'>>,
   ): NonNullable<Instance['effectSuccesses']> => {
     const context: EffectOriginContext = {
       fn,
@@ -1719,20 +1834,16 @@ export const make = (operations: Operations) => {
       results,
       index,
       resolving: new Set<string>(),
+      successOfIdentity: successIdentityResolver(instances, results, index),
     }
     return Object.freeze(
-      fn.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
-        .flatMap((expression) => {
-          if (expression._tag !== 'EffectBlock') return []
-          const success = Type.substitute(expression.type.success, substitution)
-          if (!Type.isEffect(success)) return []
-          const terminal = expression.statements.at(-1)
-          const identity =
-            terminal?._tag === 'Return' ? effectOriginOf(terminal.expression, context) : undefined
-          return identity === undefined ? [] : [Object.freeze({ site: expression.site, identity })]
-        }),
+      callableExpressions(fn).flatMap((expression) => {
+        if (expression._tag !== 'EffectBlock') return []
+        const success = Type.substitute(expression.type.success, substitution)
+        if (!Type.isEffect(success)) return []
+        const identity = successEffectOriginOf(expression, context)
+        return identity === undefined ? [] : [Object.freeze({ site: expression.site, identity })]
+      }),
     )
   }
 
@@ -2702,6 +2813,7 @@ export const make = (operations: Operations) => {
       )
       return visible.length === 1 ? visible.at(0)?.identity : undefined
     }
+    const successOfIdentity = successIdentityResolver(instances, results, index)
     const serviceRecipesOfIdentity = (
       identity: string,
       resolving: ReadonlySet<string>,
@@ -2720,6 +2832,7 @@ export const make = (operations: Operations) => {
         index,
         resolving: new Set(resolving).add(identity),
         resolveEffectIdentity,
+        successOfIdentity,
         serviceRecipesOfIdentity,
       }
       return serviceEffectRecipes(expression, recipeContext)
@@ -2754,6 +2867,7 @@ export const make = (operations: Operations) => {
         index,
         resolving: new Set<string>(),
         resolveEffectIdentity,
+        successOfIdentity,
         serviceRecipesOfIdentity,
       }
       const bindings = callableBindings(instance.function)

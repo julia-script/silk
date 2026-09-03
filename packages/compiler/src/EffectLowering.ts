@@ -126,13 +126,11 @@ export const lowerRunEffectValue = (
   span: SourceSpan.SourceSpan,
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.providedRequirements,
 ): LoweredExpression | undefined => {
-  const successType = fn.type(success)
-  if (
-    successType === undefined ||
-    successType._tag === 'EffectOutcome' ||
-    successType._tag === 'EffectValue'
-  )
-    return undefined
+  // A success that is itself an Effect is the value the environment's success identity names.
+  const successType = Type.isEffect(fn.semantic(success))
+    ? effectValueByIdentity(fn.layout, effectType.environment.successEffectIdentity ?? '')
+    : fn.type(success)
+  if (successType === undefined || successType._tag === 'EffectOutcome') return undefined
   const outcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
     _tag: 'EffectOutcome',
     type: effectType.type,

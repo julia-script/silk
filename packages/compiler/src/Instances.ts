@@ -1321,7 +1321,6 @@ export const discover = (
               function: fn,
               substitution,
               specialization,
-              effectSuccesses: effectSuccesses(fn, key, substitution, results, index),
               ...(resultCallable === undefined ? {} : { resultCallable }),
               ...(resultEffect === undefined ? {} : { resultEffect }),
             }),
@@ -1562,6 +1561,9 @@ export const discover = (
     }
   }
 
+  // Success identities may resolve through another instance's block, so they are traced only once
+  // every instance is prepared.
+  const preparedInstances = [...prepared.values()].map((candidate) => candidate.instance)
   const instances = Object.freeze(
     [...prepared.values()].map(({ instance, fact }) => {
       const checked = Ownership.checkResidualFunction(
@@ -1575,7 +1577,18 @@ export const discover = (
           `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
           diagnostic,
         )
-      return Object.freeze({ ...instance, ownership: checked.ownership })
+      return Object.freeze({
+        ...instance,
+        effectSuccesses: effectSuccesses(
+          instance.function,
+          instance.key,
+          instance.substitution,
+          results,
+          index,
+          preparedInstances,
+        ),
+        ownership: checked.ownership,
+      })
     }),
   )
   const unavailableOwnership = Object.freeze(
