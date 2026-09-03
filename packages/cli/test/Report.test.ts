@@ -136,6 +136,7 @@ it('names the executable, target, and symbol count on success', () => {
       success: 'ReturnedStatus',
       failures: [],
       logicalFrames: [],
+      report: { frames: [], failureSites: [], trapSites: [] },
     },
     diagnostics: [],
     report: [],

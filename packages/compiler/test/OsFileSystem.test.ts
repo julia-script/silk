@@ -11,7 +11,7 @@ import type * as OsFileSystemHost from '../src/OsFileSystemHost.js'
 import * as OsRuntime from '../src/OsRuntime.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
-import type * as Termination from '../src/Termination.js'
+import * as Termination from '../src/Termination.js'
 import * as ToolchainPlan from '../src/ToolchainPlan.js'
 import * as WasmBackend from '../src/WasmBackend.js'
 import * as Driver from './support/TestDriver.js'
@@ -63,6 +63,7 @@ const returnedStatusTermination: Termination.Contract = Object.freeze({
   success: 'ReturnedStatus',
   failures: Object.freeze([]),
   logicalFrames: Object.freeze([]),
+  report: Termination.emptyReport,
 })
 const provider: OsFileSystemHost.Provider = Object.freeze({
   fileOpen: () => unsupported,

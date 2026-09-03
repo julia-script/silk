@@ -1,4 +1,3 @@
-import type * as LlvmBlock from '@silklang/llvm/Block'
 import * as Effect from 'effect/Effect'
 import * as CleanupPlan from './CleanupPlan.js'
 import type * as Mir from './Mir.js'
@@ -13,6 +12,7 @@ import type * as NativeOperationContext from './NativeOperationContext.js'
 import * as NativePlaceOperation from './NativePlaceOperation.js'
 import * as NativePointerOperation from './NativePointerOperation.js'
 import * as NativeScalarOperation from './NativeScalarOperation.js'
+import type * as NativeTermination from './NativeTermination.js'
 import * as NativeValueOperation from './NativeValueOperation.js'
 /** Whether one MIR operation requires the native allocation ABI. */
 export const needsAllocation = (operation: Mir.Operation): boolean =>
@@ -46,8 +46,7 @@ export interface LoweringContext {
   readonly call: NativeOperationContext.Context
 }
 /** Mutable per-function dispatch state shared by cohesive operation actors. */
-export interface State {
-  trapBlock: LlvmBlock.Block | undefined
+export interface State extends NativeTermination.TrapState {
   checkOrdinal: number
 }
 
