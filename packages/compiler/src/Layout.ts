@@ -3067,6 +3067,9 @@ export const plan = (
     if (Type.isSharedCore(type)) {
       const element = Type.typeArgumentAt(type, 0)
       if (element !== undefined) add(element)
+      // The control block embeds the allocation that backs it, so releasing a shared core that
+      // nothing in the program ever made (a union alternative, an absent Option) still needs it.
+      add(Type.allocation)
     }
     if (
       Type.isRepresented(type) &&
