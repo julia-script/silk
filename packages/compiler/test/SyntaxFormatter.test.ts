@@ -116,6 +116,8 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'FixedArrayType',
   'FunctionDeclaration',
   'ForeignFunctionDeclaration',
+  'ForeignStaticDeclaration',
+  'ExportStaticDeclaration',
   'GroupedExpression',
   'IdentifierExpression',
   'ImportAlias',
@@ -137,6 +139,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'PipelineExpression',
   'PointerType',
   'CallableType',
+  'ForeignFunctionType',
   'ExactRepresentationType',
   'ExpressionStatement',
   'PrefixExpression',
@@ -1259,6 +1262,9 @@ fn helper(value: i32, other: i32) -> i32 {
 pub unsafe fn unchecked(value: i32) -> i32 { return value }
 pub unsafe extern "C" fn cAbs(value:i32)->i32 as "abs"
 pub export "C" fn double(value:i32)->i32 as "silk_test_double_v1" { return value * 2 }
+unsafe extern "C" static environment:*mut *mut u8 as "environ"
+export "C" static answer:i32 as "silk_answer"=42
+fn useCallback(callback:extern "C"fn(i32)->i32) {}
 fn inspect(event: Token | End) -> i32 {
   return match &mut event { Token { span: Span { start: offset, .. }, .. } if true => offset _ => 0 }
 }

@@ -607,6 +607,18 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       })
     return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
   }
+  if (fact._tag === 'ForeignStatic') {
+    return fact.type._tag === 'Available' && fact.declaration.canonical._tag === 'Canonical'
+      ? Object.freeze({
+          _tag: 'ForeignStaticLoad',
+          declaration: fact.declaration.canonical.id,
+          direction: fact.declaration.direction,
+          symbol: fact.declaration.foreign.symbol,
+          type: fact.type.type,
+          span: fact.syntax.span,
+        })
+      : Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+  }
   if (fact._tag === 'EnumMember') {
     if (
       fact.enum.canonical._tag !== 'Canonical' ||
@@ -1185,7 +1197,17 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
   if (fact._tag === 'Grouped') return hirExpression(fact.expression, borrow)
   if (fact._tag === 'FunctionItem') {
     const target = hirCallableTarget(fact.reference)
-    if (target === undefined || fact.type._tag !== 'Available' || !Type.isCallable(fact.type.type))
+    if (target === undefined || fact.type._tag !== 'Available')
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    if (fact.foreignAddress !== undefined && Type.isForeignFunction(fact.type.type))
+      return Object.freeze({
+        _tag: 'ForeignFunctionAddress',
+        target,
+        symbol: fact.foreignAddress.symbol,
+        type: fact.type.type,
+        span: fact.syntax.span,
+      })
+    if (!Type.isCallable(fact.type.type))
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
     return Object.freeze({
       _tag: 'FunctionItem',
@@ -1892,6 +1914,7 @@ export const directExpressionChildren = (
     case 'Unit':
     case 'Boolean':
     case 'Constant':
+    case 'ForeignStatic':
     case 'EnumMember':
     case 'Identifier':
     case 'FunctionItem':

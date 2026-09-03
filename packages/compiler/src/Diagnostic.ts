@@ -425,6 +425,10 @@ export const suppliedOperationValueCode = 'SEM0203' as const
 export const genericCLayoutRecordCode = 'SEM0204' as const
 /** Stable code for a C-layout record field outside the closed C object subset. */
 export const unsupportedCLayoutFieldCode = 'SEM0205' as const
+/** Stable code for a value that cannot become an exact noncapturing C callback address. */
+export const invalidForeignCallbackCode = 'SEM0206' as const
+/** Stable code for reachable C data on an execution surface without native symbol linkage. */
+export const foreignStaticTargetUnavailableCode = 'SEM0207' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -674,6 +678,8 @@ export type Code =
   | typeof suppliedOperationValueCode
   | typeof genericCLayoutRecordCode
   | typeof unsupportedCLayoutFieldCode
+  | typeof invalidForeignCallbackCode
+  | typeof foreignStaticTargetUnavailableCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -1140,6 +1146,12 @@ export type Reason =
   | { readonly _tag: 'ForeignTypeNotAdmitted'; readonly type: string; readonly abi: string }
   | { readonly _tag: 'ForeignDeclarationRestriction'; readonly restriction: string }
   | { readonly _tag: 'ForeignFunctionNotFirstClass'; readonly name: string }
+  | { readonly _tag: 'InvalidForeignCallback'; readonly name: string; readonly detail: string }
+  | {
+      readonly _tag: 'ForeignStaticTargetUnavailable'
+      readonly symbol: string
+      readonly surface: string
+    }
   | { readonly _tag: 'InvalidForeignSymbol'; readonly symbol: string }
   | { readonly _tag: 'ReservedForeignSymbol'; readonly symbol: string }
   | {
@@ -2531,6 +2543,36 @@ export const foreignFunctionNotFirstClass = (
     severity: 'error',
     message: `Foreign function ${name} can only be called; it cannot be used as a first-class value`,
     reason: Object.freeze({ _tag: 'ForeignFunctionNotFirstClass', name }),
+    span,
+  })
+
+export const invalidForeignCallback = (
+  name: string,
+  detail: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidForeignCallbackCode,
+    severity: 'error',
+    message: `${name} cannot be used as a C callback: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidForeignCallback', name, detail }),
+    span,
+  })
+
+export const foreignStaticTargetUnavailable = (
+  symbol: string,
+  surface: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: foreignStaticTargetUnavailableCode,
+    severity: 'error',
+    message: `Foreign static ${symbol} is unavailable on ${surface}; C data symbols require native LLVM linkage`,
+    reason: Object.freeze({ _tag: 'ForeignStaticTargetUnavailable', symbol, surface }),
     span,
   })
 

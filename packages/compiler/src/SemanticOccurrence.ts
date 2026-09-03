@@ -537,7 +537,7 @@ const collectDeclaredType = (
     collectDeclaredType(fact.pointee, index, scope, pending)
     return
   }
-  if (fact._tag === 'Callable') {
+  if (fact._tag === 'Callable' || fact._tag === 'ForeignFunction') {
     for (const parameter of fact.parameters) collectDeclaredType(parameter, index, scope, pending)
     collectDeclaredType(fact.result, index, scope, pending)
     return
@@ -1305,7 +1305,7 @@ const collectMember = (
       collectConstraint(constraint, index, scope, pending)
     return
   }
-  if (member._tag === 'ConstantDeclaration') {
+  if (member._tag === 'ConstantDeclaration' || member._tag === 'ForeignStaticDeclaration') {
     collectDeclaredType(member.declaredType, index, scope, pending)
     return
   }

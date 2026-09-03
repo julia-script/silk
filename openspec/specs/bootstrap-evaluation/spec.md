@@ -1099,3 +1099,19 @@ before executing the entry function.
 
 - **WHEN** a host binding declared as `() -> i32` returns a value outside the evaluator's `i32` representation
 - **THEN** evaluation returns a symbol-specific blocked outcome instead of writing an invalid MIR local
+
+### Requirement: Evaluation refuses unsupported callback and data-symbol operations before entry
+
+Bootstrap evaluation SHALL detect reachable C callback conversions and foreign data-symbol reads
+before executing the entry. It SHALL return the foreign-surface blocked outcome with an empty trace
+and SHALL NOT synthesize process addresses, native globals, or ambient callback registrations.
+
+#### Scenario: Block a foreign static read
+
+- **WHEN** the executable closure reads an imported or exported C static during evaluation
+- **THEN** evaluation blocks before entry with an empty trace naming the data symbol
+
+#### Scenario: Block a callback conversion
+
+- **WHEN** the executable closure converts an exported function to a C callback during evaluation
+- **THEN** evaluation blocks before entry with an empty trace naming the exported callback symbol

@@ -177,6 +177,27 @@ it('keys pointer mutability so `*const u8` and `*mut u8` name different signatur
   )
 })
 
+it('admits recursively C-compatible function pointers and keys their full signature', () => {
+  const compare = Type.foreignFunction(
+    [Type.pointer(false, 'i32'), Type.pointer(false, 'i32')],
+    'i32',
+  )
+  assert.strictEqual(CAbi.admit(compare, 'Parameter')._tag, 'Admitted')
+  assert.strictEqual(
+    CAbi.typeText(CAbi.classify(compare, Target.aarch64AppleDarwin, 'Parameter')),
+    'extern "C" fn(*const,*const)->i32',
+  )
+  assert.strictEqual(
+    CAbi.signatureKey(CAbi.signature([compare, 'usize'], Type.unit, Target.aarch64AppleDarwin)),
+    '(extern "C" fn(*const,*const)->i32,u64)->void',
+  )
+
+  const invalidParameter = Type.foreignFunction([Type.unit], 'i32')
+  const invalidResult = Type.foreignFunction(['i32'], 'bool')
+  assert.strictEqual(CAbi.admit(invalidParameter, 'Parameter')._tag, 'NotAdmitted')
+  assert.strictEqual(CAbi.admit(invalidResult, 'Parameter')._tag, 'NotAdmitted')
+})
+
 it('validates native symbol spelling', () => {
   for (const symbol of ['abs', '_start', 'silk_test_add', 'A1']) {
     assert.isTrue(ForeignSymbol.isValidSpelling(symbol), symbol)

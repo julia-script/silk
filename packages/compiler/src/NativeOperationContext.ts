@@ -57,6 +57,8 @@ export interface Context {
     }
   >
   readonly foreignFunctions: ReadonlyMap<string, NativeForeignOperation.Declaration>
+  readonly foreignStatics: ReadonlyMap<string, NativeForeignOperation.StaticDeclaration>
+  readonly foreignCallbacks: ReadonlyMap<string, Constant.Constant>
   readonly lanePointers: NativeLanePointer.Context
   readonly suspensionRegions: ReadonlyMap<Mir.Operation, Mir.SuspensionRegion>
   readonly types: NativeType.LoweringContext

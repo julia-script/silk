@@ -834,6 +834,50 @@ export const analyzeConstantReference = (
       })
 }
 
+export const analyzeForeignStaticReference = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  resolution: ResolutionContext,
+): ExpressionResult | undefined => {
+  const identifiers = SyntaxTree.tokens(node).filter((token) => token.kind === 'Identifier')
+  const first = identifiers.at(0)
+  const second = identifiers.at(1)
+  if (first === undefined || identifiers.length > 2) return undefined
+  const lookup =
+    second === undefined
+      ? NameResolution.lookup(resolution.scope, resolution.index, spelling(source, first))
+      : NameResolution.lookupQualified(
+          resolution.scope,
+          resolution.index,
+          spelling(source, first),
+          spelling(source, second),
+          second,
+        )
+  if (lookup._tag !== 'Resolved' || lookup.declaration._tag !== 'ForeignStaticDeclaration')
+    return undefined
+  const type =
+    lookup.declaration.declaredType._tag === 'Resolved'
+      ? availableExpressionType(lookup.declaration.declaredType.type)
+      : unavailableExpressionType
+  const unsafeDiagnostic = unsafeCallDiagnostic(
+    lookup.declaration.direction === 'Import',
+    lookup.declaration.foreign.symbol,
+    node,
+    resolution,
+  )
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'ForeignStatic',
+      declaration: lookup.declaration,
+      token: second ?? first,
+      type,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze(unsafeDiagnostic === undefined ? [] : [unsafeDiagnostic]),
+    type: type._tag === 'Available' ? type.type : undefined,
+  })
+}
+
 export interface MoveResult {
   readonly fact: MoveExpressionFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -4064,7 +4108,16 @@ export function analyzePlaceReplace(
   }
   diagnostics.push(...value.diagnostics)
   const root = assignmentRoot(destination.fact)
-  if (root === undefined) {
+  if (destination.fact._tag === 'ForeignStatic') {
+    diagnostics.push(
+      Diagnostic.immutableAssignment(
+        destination.fact.declaration.name._tag === 'Present'
+          ? destination.fact.declaration.name.spelling
+          : '?',
+        destinationNode.span,
+      ),
+    )
+  } else if (root === undefined) {
     if (SyntaxTree.isAvailableSyntax(destinationNode) && destination.diagnostics.length === 0) {
       diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
     }
@@ -7790,6 +7843,7 @@ export const effectCaptureFacts = (
       case 'Boolean':
       case 'Character':
       case 'Constant':
+      case 'ForeignStatic':
       case 'StaticText':
       case 'Unit':
       case 'EnumMember':
@@ -8587,6 +8641,7 @@ export function analyzeExpression(
       return value
     return (
       analyzeConstantReference(source, node, resolution) ??
+      analyzeForeignStaticReference(source, node, resolution) ??
       analyzeFunctionItem(source, node, declarations, resolution, expected) ??
       value
     )
@@ -8795,6 +8850,7 @@ export function analyzeExpression(
     return (
       analyzeEnumMember(source, node, resolution, expected) ??
       analyzeConstantReference(source, node, resolution) ??
+      analyzeForeignStaticReference(source, node, resolution) ??
       analyzeFunctionItem(source, node, declarations, resolution, expected) ??
       analyzeProjection(source, node, declarations, declaration, scope, resolution)
     )

@@ -6,6 +6,7 @@ import type {
   ConformanceFact,
   ConstantFact,
   DeclarationFact,
+  DeclaredTypeFact,
   DeclaredName,
   EnumFact,
   InherentImplFact,
@@ -55,6 +56,7 @@ import * as InterfaceWitnessCompatibility from './InterfaceWitnessCompatibility.
 import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as ResolutionSeams from './ResolutionSeams.js'
+import * as Scalar from './Scalar.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import * as Type from './Type.js'
@@ -138,6 +140,18 @@ const foreignAdmission = (
     },
   )
 
+/** C function pointers are ABI contracts even when their enclosing declaration is ordinary Silk. */
+const foreignFunctionPointerAdmission = (
+  declared: DeclaredTypeFact,
+): ReadonlyArray<Diagnostic.Diagnostic> => {
+  if (declared._tag !== 'Resolved') return []
+  return Type.foreignFunctions(declared.type).flatMap((type) =>
+    CAbi.admit(type, 'Parameter')._tag === 'Admitted'
+      ? []
+      : [Diagnostic.foreignTypeNotAdmitted(Type.encode(type), 'C', tightSpan(declared.syntax))],
+  )
+}
+
 export const complete = (
   self: DeclarationIndex.Index,
   resolvers: ResolutionSeams.ResolutionSeams,
@@ -151,9 +165,10 @@ export const complete = (
         const resolved = resolvers.alias?.(member)
         if (resolved === undefined) return member
         diagnostics.push(...resolved.diagnostics)
+        diagnostics.push(...foreignFunctionPointerAdmission(resolved.fact))
         return Object.freeze({ ...member, target: resolved.fact })
       }
-      if (member._tag === 'ConstantDeclaration') {
+      if (member._tag === 'ConstantDeclaration' || member._tag === 'ForeignStaticDeclaration') {
         const resolved = resolveDeclaredType(
           module.module,
           member.declaredType,
@@ -161,7 +176,58 @@ export const complete = (
           self.modules,
         )
         diagnostics.push(...resolved.diagnostics)
-        return Object.freeze({ ...member, declaredType: resolved.fact })
+        if (member._tag === 'ConstantDeclaration') {
+          diagnostics.push(...foreignFunctionPointerAdmission(resolved.fact))
+          return Object.freeze({ ...member, declaredType: resolved.fact })
+        }
+        const admission =
+          resolved.fact._tag === 'Resolved'
+            ? CAbi.admit(resolved.fact.type, 'Parameter')
+            : undefined
+        if (admission?._tag === 'NotAdmitted')
+          diagnostics.push(
+            Diagnostic.foreignTypeNotAdmitted(
+              Type.encode(admission.type),
+              'C',
+              resolved.fact.syntax.span,
+            ),
+          )
+        let invalidInitializer = false
+        if (member.direction === 'Export') {
+          const type = resolved.fact._tag === 'Resolved' ? resolved.fact.type : undefined
+          const literal = member.literal
+          const scalar = typeof type === 'string' ? Scalar.find(type) : undefined
+          const integerRange = scalar?.category === 'Integer' ? Scalar.range(scalar, 64) : undefined
+          const integerInitializer =
+            literal?._tag === 'IntegerLiteral' &&
+            integerRange !== undefined &&
+            literal.value >= integerRange.minimum &&
+            literal.value <= integerRange.maximum
+          const floatingValue =
+            literal?._tag === 'FloatingLiteral' ? Number(literal.spelling) : undefined
+          const floatingInitializer =
+            scalar?.category === 'Floating' &&
+            floatingValue !== undefined &&
+            Number.isFinite(floatingValue) &&
+            (scalar.spelling !== 'f32' || Number.isFinite(Math.fround(floatingValue)))
+          const scalarInitializer = integerInitializer || floatingInitializer
+          if (!scalarInitializer) {
+            invalidInitializer = true
+            diagnostics.push(
+              Diagnostic.invalidConstant(
+                'an exported C static requires one matching integer or floating-point scalar literal',
+                member.initializer?.span ?? member.syntax.span,
+              ),
+            )
+          }
+        }
+        return Object.freeze({
+          ...member,
+          declaredType:
+            admission?._tag === 'NotAdmitted' || invalidInitializer
+              ? Object.freeze({ _tag: 'Unavailable' as const, syntax: resolved.fact.syntax })
+              : resolved.fact,
+        })
       }
       if (member._tag === 'FunctionDeclaration') {
         const resolvedTypeParameters = resolveBounds(
@@ -238,7 +304,16 @@ export const complete = (
           member.foreign === undefined && member.foreignExport === undefined
             ? []
             : foreignAdmission(parameters, result.fact)
-        diagnostics.push(...admission)
+        const pointerAdmission =
+          member.foreign === undefined && member.foreignExport === undefined
+            ? [
+                ...parameters.flatMap((parameter) =>
+                  foreignFunctionPointerAdmission(parameter.declaredType),
+                ),
+                ...foreignFunctionPointerAdmission(result.fact),
+              ]
+            : []
+        diagnostics.push(...admission, ...pointerAdmission)
         const { foreignExport, ...retained } = member
         return Object.freeze({
           ...retained,
@@ -354,6 +429,10 @@ export const complete = (
             ...failureRow.diagnostics,
             ...requirementRow.diagnostics,
             ...constraints.diagnostics,
+            ...parameters.flatMap((parameter) =>
+              foreignFunctionPointerAdmission(parameter.declaredType),
+            ),
+            ...foreignFunctionPointerAdmission(result.fact),
           )
           return Object.freeze({
             ...operation,
@@ -388,6 +467,7 @@ export const complete = (
               self.modules,
             )
             diagnostics.push(...resolved.diagnostics)
+            diagnostics.push(...foreignFunctionPointerAdmission(resolved.fact))
             return Object.freeze({ ...field, declaredType: resolved.fact })
           }),
         )
@@ -1626,7 +1706,8 @@ export const complete = (
       if (
         member._tag === 'RoleDeclaration' ||
         member._tag === 'EnumDeclaration' ||
-        member._tag === 'AliasDeclaration'
+        member._tag === 'AliasDeclaration' ||
+        member._tag === 'ForeignStaticDeclaration'
       )
         continue
       const fields =

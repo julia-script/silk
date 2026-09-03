@@ -76,25 +76,27 @@ const backendEmissionCacheKey = (
 }
 
 interface CachedEmissionHeader {
-  readonly schema: 2
+  readonly schema: 3
   readonly module: string
   readonly symbols: Backend.LlvmBitcodeArtifact['symbols']
   readonly nativeRuntimeSymbols: ReadonlyArray<string>
   readonly runtimeFeatures: Backend.LlvmBitcodeArtifact['runtimeFeatures']
   readonly foreignImports: Backend.LlvmBitcodeArtifact['foreignImports']
   readonly foreignExports: Backend.LlvmBitcodeArtifact['foreignExports']
+  readonly foreignStatics: Backend.LlvmBitcodeArtifact['foreignStatics']
 }
 
 const encodeCachedEmission = (artifact: Backend.LlvmBitcodeArtifact): Uint8Array | undefined => {
   try {
     const header: CachedEmissionHeader = {
-      schema: 2,
+      schema: 3,
       module: artifact.module,
       symbols: artifact.symbols,
       nativeRuntimeSymbols: artifact.nativeRuntimeSymbols,
       runtimeFeatures: artifact.runtimeFeatures,
       foreignImports: artifact.foreignImports,
       foreignExports: artifact.foreignExports,
+      foreignStatics: artifact.foreignStatics,
     }
     const json = new TextEncoder().encode(JSON.stringify(header))
     const bytes = new Uint8Array(4 + json.length + artifact.bitcode.length)
@@ -120,7 +122,7 @@ const decodeCachedEmission = (
     const header: CachedEmissionHeader = JSON.parse(
       new TextDecoder().decode(bytes.subarray(4, 4 + jsonLength)),
     )
-    if (header.schema !== 2) return undefined
+    if (header.schema !== 3) return undefined
     const bitcode = bytes.slice(4 + jsonLength)
     // `control` and `ir` are never read on the driver path; the cast records that this artifact
     // stays internal to the driver rather than flowing back out through Backend.emit.
@@ -135,6 +137,7 @@ const decodeCachedEmission = (
       runtimeFeatures: header.runtimeFeatures,
       foreignImports: header.foreignImports,
       foreignExports: header.foreignExports,
+      foreignStatics: header.foreignStatics,
       control: Object.freeze([]),
       bitcode,
       ir: '',
@@ -171,6 +174,7 @@ export interface Compiled {
   readonly target: Target.Target
   readonly symbols: ReadonlyArray<Backend.SymbolEntry>
   readonly foreignExports: ReadonlyArray<Backend.ForeignExport>
+  readonly foreignStatics: ReadonlyArray<Backend.ForeignStatic>
   readonly termination?: Backend.Termination
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<DriverPhaseReport>
@@ -541,6 +545,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
         target: committed.target,
         symbols: artifact.symbols,
         foreignExports: artifact.foreignExports,
+        foreignStatics: artifact.foreignStatics,
         ...(ArtifactKind.isLibrary(cacheKind) ? {} : { termination: artifact.termination }),
         diagnostics,
         report: Object.freeze([...report]),
@@ -571,6 +576,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
             target: committed.target,
             symbols: artifact.symbols,
             foreignExports: artifact.foreignExports,
+            foreignStatics: artifact.foreignStatics,
             termination: artifact.termination,
             diagnostics,
             report: Object.freeze([...report]),
@@ -606,6 +612,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
             target: finalized.target,
             symbols: artifact.symbols,
             foreignExports: artifact.foreignExports,
+            foreignStatics: artifact.foreignStatics,
             termination: artifact.termination,
             diagnostics,
             report: Object.freeze([...report]),
@@ -680,6 +687,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
           target: linked.target,
           symbols: artifact.symbols,
           foreignExports: artifact.foreignExports,
+          foreignStatics: artifact.foreignStatics,
           ...(ArtifactKind.isLibrary(cacheKind) ? {} : { termination: artifact.termination }),
           diagnostics,
           report: Object.freeze([...report]),

@@ -250,6 +250,7 @@ const isTypeArgumentNode = (element: SyntaxTree.Element): element is SyntaxTree.
     element.kind === 'ReferenceType' ||
     element.kind === 'PointerType' ||
     element.kind === 'CallableType' ||
+    element.kind === 'ForeignFunctionType' ||
     element.kind === 'ParenthesizedType' ||
     element.kind === 'UnionType')
 
@@ -941,19 +942,27 @@ export const analyzeCallContract = (
         argument.type._tag === 'Available' &&
         !typesCompatible(argument.type.type, expected)
       ) {
-        const mismatch =
-          Type.isCallable(expected) && Type.isCallable(argument.type.type)
-            ? Diagnostic.incompatibleCallableSignature(
-                Type.encode(expected),
-                Type.encode(argument.type.type),
-                argument.syntax.span,
-              )
-            : (unionConversionDiagnostic(argument.type.type, expected, argument.syntax.span) ??
-              Diagnostic.argumentTypeMismatch(
-                Type.encode(expected),
-                Type.encode(argument.type.type),
-                argument.syntax.span,
-              ))
+        let mismatch: Diagnostic.Diagnostic
+        if (Type.isForeignFunction(expected) && !Type.isForeignFunction(argument.type.type))
+          mismatch = Diagnostic.invalidForeignCallback(
+            Type.encode(argument.type.type),
+            'capturing and anonymous Silk callables do not have an exported C address',
+            argument.syntax.span,
+          )
+        else if (Type.isCallable(expected) && Type.isCallable(argument.type.type))
+          mismatch = Diagnostic.incompatibleCallableSignature(
+            Type.encode(expected),
+            Type.encode(argument.type.type),
+            argument.syntax.span,
+          )
+        else
+          mismatch =
+            unionConversionDiagnostic(argument.type.type, expected, argument.syntax.span) ??
+            Diagnostic.argumentTypeMismatch(
+              Type.encode(expected),
+              Type.encode(argument.type.type),
+              argument.syntax.span,
+            )
         return Object.freeze({
           mappings: Object.freeze([]),
           fact: Object.freeze({
@@ -1285,7 +1294,13 @@ export const analyzeCallContract = (
       !contextualIntegerCompatible(argument.expression, expectedValue)
     ) {
       let mismatch: Diagnostic.Diagnostic
-      if (Type.isCallable(expectedValue) && Type.isCallable(suppliedValue)) {
+      if (Type.isForeignFunction(expectedValue) && !Type.isForeignFunction(suppliedValue)) {
+        mismatch = Diagnostic.invalidForeignCallback(
+          Type.encode(suppliedValue),
+          'capturing and anonymous Silk callables do not have an exported C address',
+          argument.syntax.span,
+        )
+      } else if (Type.isCallable(expectedValue) && Type.isCallable(suppliedValue)) {
         mismatch = Diagnostic.incompatibleCallableSignature(
           Type.encode(expectedValue),
           Type.encode(suppliedValue),
@@ -1812,6 +1827,60 @@ export const analyzeFunctionItem = (
     })
   }
   const unresolvedCallable = callableTypeOfReference(reference)
+  if (expected !== undefined && Type.isForeignFunction(expected)) {
+    const declaration = reference._tag === 'Resolved' ? reference.declaration : undefined
+    let detail: string | undefined
+    if (declaration === undefined) {
+      detail = 'only a named exported Silk function has a stable native address'
+    } else if (declaration.foreignExport === undefined) {
+      detail = 'the function must be declared with export "C"'
+    } else if (declaration.typeParameters.length > 0) {
+      detail = 'generic functions do not have one monomorphic C address'
+    } else if (declaration.functionKind !== 'Ordinary') {
+      detail = 'effect functions cannot cross the synchronous C callback boundary'
+    } else if (
+      unresolvedCallable === undefined ||
+      unresolvedCallable.parameters.length !== expected.parameters.length ||
+      !unresolvedCallable.parameters.every((parameter, ordinal) => {
+        const expectedParameter = expected.parameters.at(ordinal)
+        return expectedParameter !== undefined && Type.equals(parameter, expectedParameter)
+      }) ||
+      !Type.equals(unresolvedCallable.result, expected.result)
+    ) {
+      detail = `the exported signature must exactly match ${Type.encode(expected)}`
+    }
+    if (detail !== undefined) {
+      const name = reference._tag === 'Unavailable' ? '<expression>' : reference.spelling
+      const diagnostic = Diagnostic.invalidForeignCallback(name, detail, node.span)
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'FunctionItem',
+          reference,
+          path: referencePath(node),
+          typeArguments: Object.freeze([]),
+          type: unavailableExpressionType,
+          syntax: node,
+        }),
+        diagnostics: Object.freeze([diagnostic]),
+        type: undefined,
+      })
+    }
+    const symbol = declaration?.foreignExport?.symbol
+    if (symbol === undefined) throw new RangeError('validated C callback lost its exported symbol')
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'FunctionItem',
+        reference,
+        path: referencePath(node),
+        typeArguments: Object.freeze([]),
+        foreignAddress: Object.freeze({ symbol }),
+        type: availableExpressionType(expected),
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([]),
+      type: expected,
+    })
+  }
   const contract = resolvedCallableContract(reference)
   const contextual = new Map<string, Type.GenericArgument>()
   const expectedCallable =
@@ -2522,7 +2591,15 @@ export const finishCallableApplication = (
       }
       if (!TypeInference.infer(expected, argument.type.type, inferred)) {
         const rowFailure = TypeInference.rowInferenceFailure(expected, argument.type.type)
-        if (rowFailure !== undefined) {
+        if (Type.isForeignFunction(expected) && !Type.isForeignFunction(argument.type.type)) {
+          diagnostics.push(
+            Diagnostic.invalidForeignCallback(
+              Type.encode(argument.type.type),
+              'capturing and anonymous Silk callables do not have an exported C address',
+              argument.syntax.span,
+            ),
+          )
+        } else if (rowFailure !== undefined) {
           diagnostics.push(Diagnostic.contractRowInference(rowFailure, argument.syntax.span))
         } else if (Type.isCallable(expected) && Type.isCallable(argument.type.type)) {
           diagnostics.push(
@@ -2546,19 +2623,26 @@ export const finishCallableApplication = (
       }
       const specialized = Type.substitute(expected, inferred)
       if (Type.isConcrete(specialized) && !typesCompatible(argument.type.type, specialized)) {
-        diagnostics.push(
-          Type.isCallable(specialized) && Type.isCallable(argument.type.type)
-            ? Diagnostic.incompatibleCallableSignature(
-                Type.encode(specialized),
-                Type.encode(argument.type.type),
-                argument.syntax.span,
-              )
-            : Diagnostic.argumentTypeMismatch(
-                Type.encode(specialized),
-                Type.encode(argument.type.type),
-                argument.syntax.span,
-              ),
-        )
+        let mismatch: Diagnostic.Diagnostic
+        if (Type.isForeignFunction(specialized) && !Type.isForeignFunction(argument.type.type))
+          mismatch = Diagnostic.invalidForeignCallback(
+            Type.encode(argument.type.type),
+            'capturing and anonymous Silk callables do not have an exported C address',
+            argument.syntax.span,
+          )
+        else if (Type.isCallable(specialized) && Type.isCallable(argument.type.type))
+          mismatch = Diagnostic.incompatibleCallableSignature(
+            Type.encode(specialized),
+            Type.encode(argument.type.type),
+            argument.syntax.span,
+          )
+        else
+          mismatch = Diagnostic.argumentTypeMismatch(
+            Type.encode(specialized),
+            Type.encode(argument.type.type),
+            argument.syntax.span,
+          )
+        diagnostics.push(mismatch)
         valid = false
       }
     }

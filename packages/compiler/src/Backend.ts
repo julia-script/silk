@@ -76,6 +76,13 @@ export interface ForeignExport {
   readonly result: string
 }
 
+/** One native C data symbol retained by an artifact, with its scalar C class. */
+export interface ForeignStatic {
+  readonly symbol: string
+  readonly type: string
+  readonly direction: 'Import' | 'Export'
+}
+
 interface ArtifactBase {
   readonly module: string
   readonly backend: Id
@@ -88,6 +95,8 @@ interface ArtifactBase {
   readonly foreignImports: ReadonlyArray<ForeignImport>
   /** Exported C-callable symbols with their classified signatures, sorted by symbol. */
   readonly foreignExports: ReadonlyArray<ForeignExport>
+  /** Imported and exported C data symbols, sorted by symbol and direction. */
+  readonly foreignStatics: ReadonlyArray<ForeignStatic>
   readonly control: ReadonlyArray<ControlProvenance>
 }
 
@@ -162,6 +171,15 @@ export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
   program: Mir.Module,
   request: CodegenRequest,
 ): Effect.fn.Return<A, BackendError> {
+  const violations = MirVerification.verify(program)
+  if (violations.length > 0) {
+    return yield* new BackendError({
+      operation: 'Backend.emit',
+      backend: self.name,
+      message: `${self.name} cannot emit invalid MIR`,
+      reason: { _tag: 'InvalidMir', violations },
+    })
+  }
   const availability = IntrinsicAvailability.select(
     program.intrinsics,
     IntrinsicAvailability.backendTarget(self.id),
@@ -178,6 +196,9 @@ export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
     program.foreignCalls,
     IntrinsicAvailability.backendTarget(self.id),
     program.layout.target,
+    program.foreignStatics,
+    ForeignAvailability.callbackAddresses(program),
+    ForeignAvailability.staticLoads(program),
   )
   const planning = ForeignPlanning.check(
     program,
@@ -190,15 +211,6 @@ export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
       backend: self.name,
       message: `${self.name} cannot emit a program with unavailable foreign functions`,
       reason: { _tag: 'UnsupportedForeignFunction', diagnostics: [...foreign, ...planning] },
-    })
-  }
-  const violations = MirVerification.verify(program)
-  if (violations.length > 0) {
-    return yield* new BackendError({
-      operation: 'Backend.emit',
-      backend: self.name,
-      message: `${self.name} cannot emit invalid MIR`,
-      reason: { _tag: 'InvalidMir', violations },
     })
   }
   if (!self.targets.includes(program.layout.target.id)) {

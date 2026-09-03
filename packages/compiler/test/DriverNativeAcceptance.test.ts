@@ -118,11 +118,13 @@ const shardedCorpus =
     : nativeCorpus.filter((_, index) => index % Number(shard[2]) === Number(shard[1]) - 1)
 
 const librarySource = `fn helper(value: i32) -> i32 { return value + 1 }
-export "C" fn increment(value: i32) -> i32 { return helper(value) }`
+export "C" fn increment(value: i32) -> i32 { return helper(value) }
+export "C" static silk_abi_version: u32 = 1`
 
 const consumerSource = `#include <stdint.h>
 int32_t increment(int32_t value);
-int main(void) { return increment(41); }
+extern const uint32_t silk_abi_version;
+int main(void) { return increment(40) + (int32_t)silk_abi_version; }
 `
 
 it.effect(
@@ -140,6 +142,9 @@ it.effect(
         shared.foreignExports.map((export_) => export_.symbol),
         ['increment'],
       )
+      assert.deepStrictEqual(shared.foreignStatics, [
+        { symbol: 'silk_abi_version', type: 'u32', direction: 'Export' },
+      ])
       assert.strictEqual('termination' in shared, false)
 
       const symbolDump =
@@ -153,8 +158,9 @@ it.effect(
         .filter((symbol) => symbol.length > 0)
         .map((symbol) => (platform() === 'darwin' ? symbol.replace(/^_/, '') : symbol))
       assert.include(visible, 'increment')
+      assert.include(visible, 'silk_abi_version')
       assert.deepStrictEqual(
-        visible.filter((symbol) => symbol.startsWith('silk_')),
+        visible.filter((symbol) => symbol.startsWith('silk_') && symbol !== 'silk_abi_version'),
         [],
       )
 
@@ -232,7 +238,11 @@ it.each(shardedCorpus)(
       }
 
       if (outcome._tag === 'Rejected') {
-        assert.strictEqual(program.expected._tag, 'Trap', program.name)
+        assert.strictEqual(
+          program.expected._tag,
+          'Trap',
+          `${program.name}: ${outcome.diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`).join('; ')}`,
+        )
         assert.strictEqual(outcome.diagnostics.length > 0, true, program.name)
         return
       }

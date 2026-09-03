@@ -14,6 +14,7 @@ import * as SourceResolver from '../src/SourceResolver.js'
 import * as SourceSpan from '../src/SourceSpan.js'
 import * as Target from '../src/Target.js'
 import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
+import * as Type from '../src/Type.js'
 import * as MirSamples from './support/mirSamples.js'
 import { unreachable } from './support/raise.js'
 
@@ -392,11 +393,17 @@ it('rejects foreign calls off native LLVM and conflicting signatures per pair', 
 it.effect('keeps an uncalled foreign declaration out of the inventory and off Wasm gates', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      foreignSource.replace('return unsafe abs(-42)', 'return 0'),
+      `${foreignSource.replace('return unsafe abs(-42)', 'return 0')}
+unsafe extern "C" fn install(callback: extern "C" fn(i32) -> i32) -> ()
+unsafe extern "C" static environment: *mut *mut u8 as "environ"`,
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.deepEqual(self.instances.foreignCalls, [])
+    const program = Analysis.loweredMir(self)
+    assert.deepEqual(program.foreignStatics, [])
+    assert.deepEqual(ForeignAvailability.callbackAddresses(program), [])
+    assert.deepEqual(ForeignAvailability.staticLoads(program), [])
     assert.strictEqual(Analysis.evaluate(self)._tag, 'Completed')
     const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
     assert.notInclude(wasm.wat, 'abs')
@@ -596,37 +603,42 @@ it.effect('seeds native discovery with an uncalled export and records it on MIR'
   }),
 )
 
-it.effect(
-  'adds no export roots for a Wasm target and rejects the export under either backend',
-  () =>
-    Effect.gen(function* () {
-      const self = yield* snapshot(exportSource, 'wasm32-unknown-unknown')
-      assert.deepEqual(Analysis.diagnostics(self), [])
-      assert.deepEqual(
-        self.instances.instances.map((instance) => instance.key.declaration.name),
-        ['main'],
+it.effect('keeps export bodies inactive before rejecting a Wasm export surface', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(
+      `unsafe extern "C" fn unavailable() -> usize
+export "C" fn silk_test_double_v1() -> usize { return unsafe unavailable() + 4294967296 }
+pub fn main() -> i32 { return 0 }`,
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(
+      self.instances.instances.map((instance) => instance.key.declaration.name),
+      ['main'],
+    )
+    assert.deepEqual(
+      exportInventory(self).map((record) => record.symbol),
+      ['silk_test_double_v1'],
+    )
+    assert.deepEqual(self.instances.foreignCalls, [])
+    assert.strictEqual(Analysis.evaluate(self)._tag, 'Completed')
+    const surfaces = (diagnostics: ReadonlyArray<Diagnostic.Diagnostic>) =>
+      diagnostics.map((diagnostic) =>
+        diagnostic.reason._tag === 'ForeignFunctionTargetUnavailable'
+          ? `${diagnostic.code}:${diagnostic.reason.symbol}@${diagnostic.reason.surface}`
+          : diagnostic.code,
       )
-      assert.deepEqual(
-        exportInventory(self).map((record) => record.symbol),
-        ['silk_test_double_v1'],
-      )
-      const surfaces = (diagnostics: ReadonlyArray<Diagnostic.Diagnostic>) =>
-        diagnostics.map((diagnostic) =>
-          diagnostic.reason._tag === 'ForeignFunctionTargetUnavailable'
-            ? `${diagnostic.code}:${diagnostic.reason.symbol}@${diagnostic.reason.surface}`
-            : diagnostic.code,
-        )
-      const direct = yield* Effect.flip(Analysis.codegenWasm(self, { mode: 'release' }))
-      assert.strictEqual(direct._tag, 'CodegenUnavailable')
-      if (direct._tag === 'CodegenUnavailable')
-        assert.deepEqual(surfaces(direct.diagnostics), ['SEM0193:silk_test_double_v1@Wasm'])
-      const llvm = yield* Effect.flip(Analysis.codegen(self, { mode: 'release' }))
-      assert.strictEqual(llvm._tag, 'CodegenUnavailable')
-      if (llvm._tag === 'CodegenUnavailable')
-        assert.deepEqual(surfaces(llvm.diagnostics), [
-          'SEM0193:silk_test_double_v1@wasm32-unknown-unknown',
-        ])
-    }),
+    const direct = yield* Effect.flip(Analysis.codegenWasm(self, { mode: 'release' }))
+    assert.strictEqual(direct._tag, 'CodegenUnavailable')
+    if (direct._tag === 'CodegenUnavailable')
+      assert.deepEqual(surfaces(direct.diagnostics), ['SEM0193:silk_test_double_v1@Wasm'])
+    const llvm = yield* Effect.flip(Analysis.codegen(self, { mode: 'release' }))
+    assert.strictEqual(llvm._tag, 'CodegenUnavailable')
+    if (llvm._tag === 'CodegenUnavailable')
+      assert.deepEqual(surfaces(llvm.diagnostics), [
+        'SEM0193:silk_test_double_v1@wasm32-unknown-unknown',
+      ])
+  }),
 )
 
 const exportModules = (root: string, dependency: string, main = 'Dep.viaDep()') =>
@@ -743,6 +755,34 @@ pub fn main() -> i32 { return 0 }`)
   }),
 )
 
+it.effect('rejects a suspending export at its C callback conversion site', () =>
+  Effect.gen(function* () {
+    const callbackSource = `import silk.effect { Effect }
+unsafe extern "C" fn install(callback: extern "C" fn() -> i32) -> ()
+export "C" fn silk_test_wait_v1() -> i32 { return run Effect.suspend(effect { return 2 }) }
+pub fn main() -> i32 { unsafe install(silk_test_wait_v1) return 0 }`
+    const self = yield* snapshot(callbackSource)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const failure = yield* Effect.flip(Analysis.codegen(self, { mode: 'release' }))
+    assert.strictEqual(failure._tag, 'CodegenUnavailable')
+    if (failure._tag !== 'CodegenUnavailable') return
+    assert.deepEqual(
+      failure.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.reason._tag]),
+      [
+        ['SEM0201', 'ExportSuspends'],
+        ['SEM0206', 'InvalidForeignCallback'],
+      ],
+    )
+    const callback = failure.diagnostics.find((diagnostic) => diagnostic.code === 'SEM0206')
+    assert.strictEqual(
+      callback === undefined
+        ? undefined
+        : callbackSource.slice(callback.span.start, callback.span.end),
+      'silk_test_wait_v1',
+    )
+  }),
+)
+
 it('plans exports over MIR: symbol map, non-native rejection, and suspension', () => {
   const sample = MirSamples.foreignCallSample(Target.aarch64AppleDarwin)
   const key = Mir.machineEntry(sample)
@@ -751,6 +791,7 @@ it('plans exports over MIR: symbol map, non-native rejection, and suspension', (
     Object.freeze({
       _tag: 'ForeignExport',
       symbol,
+      type: Type.foreignFunction(['i32'], 'i32'),
       signature: Object.freeze({ parameters: Object.freeze([i32]), result: i32 }),
       key,
       declaration: Object.freeze({

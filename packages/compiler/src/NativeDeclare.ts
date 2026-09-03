@@ -112,7 +112,11 @@ export interface ExportContext {
  */
 export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
   context: ExportContext,
-): Effect.fn.Return<void, BackendError | LlvmError.LlvmError> {
+): Effect.fn.Return<
+  ReadonlyMap<string, FunctionActor.Function>,
+  BackendError | LlvmError.LlvmError
+> {
+  const thunks = new Map<string, FunctionActor.Function>()
   for (const record of context.program.foreignExports) {
     const implementation = context.declared.find((entry) =>
       Mir.matchesInstanceKey(entry.fn, record.key),
@@ -164,7 +168,9 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
         return yield* FunctionBody.returnValue(body, result)
       }),
     )
+    thunks.set(record.symbol, thunk)
   }
+  return thunks
 })
 
 /** Stable C ABI symbol for one sealed OS intrinsic. */

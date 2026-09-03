@@ -13,6 +13,7 @@ import type {
   CodegenRequest,
   ForeignExport,
   ForeignImport,
+  ForeignStatic,
   RuntimeFeature,
   SymbolEntry,
 } from './Backend.js'
@@ -53,6 +54,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     readonly runtimeFeatures: ReadonlyArray<RuntimeFeature>
     readonly foreignImports: ReadonlyArray<ForeignImport>
     readonly foreignExports: ReadonlyArray<ForeignExport>
+    readonly foreignStatics: ReadonlyArray<ForeignStatic>
     /** Renders the textual IR on demand; most compiles never read it. */
     readonly renderIr: () => string
     readonly bitcode: Uint8Array
@@ -327,6 +329,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   // Foreign symbols are declared once each under the default (C) calling convention with the
   // LLVM types the classified C signature selects; agreeing redeclarations share one entry.
   const foreignFunctions = new Map<string, NativeForeignOperation.Declaration>()
+  const foreignStatics = new Map<string, NativeForeignOperation.StaticDeclaration>()
   const cType = (type: CAbi.CAbiType): LlvmType.Type | undefined => {
     switch (type._tag) {
       case 'Void':
@@ -336,6 +339,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       case 'Integer':
         return integerTypes.get(type.bits)
       case 'Pointer':
+      case 'FunctionPointer':
         return pointer
     }
   }
@@ -365,6 +369,47 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     )
     foreignFunctions.set(call.symbol, Object.freeze({ handle, signature: call.signature }))
   }
+  for (const record of program.foreignStatics) {
+    const classified = CAbi.classify(record.type, program.layout.target, 'Parameter')
+    const valueType = cType(classified)
+    if (valueType === undefined)
+      throw new RangeError(`LLVM foreign static ${record.symbol} has a void type`)
+    let initializer: Constant.Constant | undefined
+    if (record.direction === 'Export' && record.literal?._tag === 'IntegerLiteral') {
+      initializer =
+        classified._tag === 'Integer' && classified.signed
+          ? yield* Constant.integerSigned(builder, valueType, record.literal.value)
+          : yield* Constant.integerUnsigned(builder, valueType, record.literal.value)
+    } else if (record.direction === 'Export' && record.literal?._tag === 'FloatingLiteral') {
+      initializer =
+        classified._tag === 'Float' && classified.bits === 32
+          ? yield* Constant.floatFromNumber(builder, valueType, Number(record.literal.spelling))
+          : yield* Constant.doubleFromNumber(builder, valueType, Number(record.literal.spelling))
+    }
+    const variable = yield* Variable.make(builder, record.symbol, valueType, {
+      ...(initializer === undefined ? {} : { initializer }),
+      constant: record.direction === 'Export',
+      linkage: 'external',
+      externallyInitialized: record.direction === 'Import',
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new BackendError({
+            operation: 'Backend.emit',
+            backend: 'LLVM',
+            message: `foreign static ${record.symbol} conflicts with another native symbol: ${cause.message}`,
+            reason: { _tag: 'ForeignSymbolConflict', symbol: record.symbol },
+          }),
+      ),
+    )
+    foreignStatics.set(
+      record.symbol,
+      Object.freeze({
+        address: yield* Constant.fromGlobal(builder, yield* Variable.global(builder, variable)),
+        valueType,
+      }),
+    )
+  }
 
   const functionDeclarations = yield* NativeDeclare.functions(
     Object.freeze({ builder, program, i32, pointer, lanesFor, laneType }),
@@ -377,7 +422,15 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     pointer,
     voidType,
   )
-  yield* NativeDeclare.exportThunks(Object.freeze({ builder, program, declared, cType }))
+  const exportThunks = yield* NativeDeclare.exportThunks(
+    Object.freeze({ builder, program, declared, cType }),
+  )
+  const foreignCallbacks = new Map<string, Constant.Constant>()
+  for (const [symbol, thunk] of exportThunks)
+    foreignCallbacks.set(
+      symbol,
+      yield* Constant.fromGlobal(builder, yield* FunctionActor.global(builder, thunk)),
+    )
   const childThunkType = suspensionEnabled
     ? yield* LlvmType.functionType(builder, i32, [pointer])
     : undefined
@@ -523,6 +576,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ...(standardWrite === undefined ? {} : { standardWrite }),
       osRuntimes,
       foreignFunctions,
+      foreignStatics,
+      foreignCallbacks,
       declared,
       originThunks,
       resumeThunks,
@@ -623,6 +678,21 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
             symbol: record.symbol,
             parameters: Object.freeze(record.signature.parameters.map(CAbi.typeText)),
             result: CAbi.typeText(record.signature.result),
+          }),
+        ),
+    ),
+    foreignStatics: Object.freeze(
+      [...program.foreignStatics]
+        .sort(
+          (left, right) =>
+            left.symbol.localeCompare(right.symbol, 'en') ||
+            left.direction.localeCompare(right.direction, 'en'),
+        )
+        .map((record) =>
+          Object.freeze({
+            symbol: record.symbol,
+            type: CAbi.typeText(CAbi.classify(record.type, program.layout.target, 'Parameter')),
+            direction: record.direction,
           }),
         ),
     ),

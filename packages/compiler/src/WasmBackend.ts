@@ -7700,6 +7700,10 @@ const emitOperationWithContext = (
   context: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
   switch (operation._tag) {
+    case 'ForeignStaticLoad':
+      throw new RangeError(`foreign static ${operation.symbol} is unavailable to WebAssembly`)
+    case 'ForeignFunctionAddress':
+      throw new RangeError(`C callback ${operation.symbol} is unavailable to WebAssembly`)
     case 'EnumConstant':
       return emitEnumConstantOperation(operation, context)
     case 'EnumValue':
@@ -10148,6 +10152,7 @@ export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = O
       runtimeFeatures: output.runtimeFeatures,
       foreignImports,
       foreignExports: Object.freeze([]),
+      foreignStatics: Object.freeze([]),
       control: controlProvenance(program),
       bytes: output.bitcode,
       wat: output.ir,

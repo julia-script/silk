@@ -1495,3 +1495,23 @@ it.effect('round-trips raw pointer types and keys public pointer signatures by m
     assert.include(constant.canonical, '"tag":"Pointer","mutable":false')
   }),
 )
+
+it.effect('round-trips C function pointers and data-symbol declarations in module surfaces', () =>
+  Effect.gen(function* () {
+    const callback = Type.foreignFunction([Type.pointer(false, 'i32')], 'i32')
+    const decoded = yield* ModuleSurface.decodeSemanticType(
+      ModuleSurface.encodeSemanticType(callback),
+    )
+    assert.strictEqual(Type.key(decoded), Type.key(callback))
+    assert.strictEqual(Type.encode(decoded), 'extern "C" fn(*const i32) -> i32')
+
+    const original = yield* surface(`unsafe extern "C" static environment: *mut *mut u8 as "environ"
+export "C" static silk_abi_version: u32 = 1`)
+    const changed = yield* surface(`unsafe extern "C" static environment: *mut *mut u8 as "environ"
+export "C" static silk_abi_version: u32 = 2`)
+    assert.include(original.canonical, 'ForeignStaticDeclaration')
+    assert.include(original.canonical, 'environ')
+    assert.include(original.canonical, 'silk_abi_version')
+    assert.strictEqual(ModuleSurface.equals(original, changed), false)
+  }),
+)

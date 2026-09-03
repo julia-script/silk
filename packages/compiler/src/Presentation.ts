@@ -437,6 +437,18 @@ export const constantDeclaration = (self: DeclarationFacts.ConstantFact): Presen
   })
 }
 
+/** Renders one imported or exported native data binding. */
+export const foreignStaticDeclaration = (
+  self: DeclarationFacts.ForeignStaticFact,
+): Presentation => {
+  const name = self.name._tag === 'Present' ? self.name.spelling : '_'
+  return Object.freeze({
+    _tag: 'ConstantPresentation',
+    name,
+    text: `${self.direction === 'Import' ? 'unsafe extern' : 'export'} "C" static ${name}: ${declaredType(self.declaredType)}`,
+  })
+}
+
 /** Renders an alias by its erased target: the alias name never survives resolution. */
 export const aliasDeclaration = (self: DeclarationFacts.AliasFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
@@ -564,6 +576,7 @@ export const type = (
     return `Effect<${type(self.success, module, scope)}${failures}${requirements}>`
   }
   if (Type.isRepresented(self)) return type(self.contract, module, scope)
+  if (Type.isForeignFunction(self)) return Type.encode(self)
   return self.members.map((member) => type(member, module, scope)).join(' | ')
 }
 

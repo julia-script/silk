@@ -856,7 +856,9 @@ distinct from Silk type compatibility. The admitted subset is:
 - `isize` and `usize` as pointer-width integers of the selected target;
 - `f32` and `f64` as the C `float` and `double` classes; and
 - `*const T` and `*mut T` for any pointee `T` as the C pointer class, without requiring the
-  pointee itself to be admitted.
+  pointee itself to be admitted; and
+- `extern "C" fn(P...) -> R` as one C function-pointer class when every parameter and result is
+  admitted recursively.
 
 ```silk,ignore
 struct Opaque {}
@@ -867,7 +869,7 @@ unsafe extern "C" fn use(handle: *mut Opaque) -> i32
 ```
 
 Parameters are passed by value. Every other type is rejected: `bool`, `char`, `string`,
-references, slices, fixed arrays, structs, unions, enums, callable types, and type parameters.
+references, slices, fixed arrays, structs, unions, enums, Silk callable types, and type parameters.
 
 Admission is judged on the type spelling alone, so a foreign header is admitted or rejected once
 per module, independent of the target. The C classification of `isize`, `usize`, and pointers
@@ -916,7 +918,9 @@ argument, storing it, or partially applying it is rejected.
 **Boundary:** This restriction is narrower than
 [UNSAFE-007](#unsafe-007--partial-application-preserves-unsafety-but-does-not-invoke-it), which
 lets ordinary unsafe source callables be taken as values. A foreign function has no Silk callable
-representation in this change; a later proposal may lift the first-class restriction.
+representation. An exact `export "C"` function may instead become a C address under
+[FFI-012](#ffi-012--c-function-pointers-are-exact-exported-addresses); that does not make imported
+foreign functions first class.
 
 **Diagnostics:** Retained Silk-only syntax reports `SEM0188` at the offending syntax and publishes
 no callable. A first-class use reports `SEM0189` at the use.
@@ -1112,8 +1116,8 @@ defines no native symbol named `add`. A native executable requires `main` and tr
 additional roots. A native shared or static library instead requires at least one export, roots
 reachability at all exports, and synthesizes no process entry. Only export thunks have default
 visibility in a shared library; their compiler implementations and runtime support stay hidden.
-Generated C headers, records, callbacks, and data symbols are separate proposals; pointer
-parameters and results are forwarded through the thunk unchanged. There is no `unsafe export`:
+Generated C headers remain a separate proposal. Pointer and function-pointer parameters and
+results are forwarded through the thunk unchanged. There is no `unsafe export`:
 unsafety is a caller-side Silk contract that a C caller cannot acknowledge.
 
 **Diagnostics:** An ABI string other than `"C"` reports `SEM0185` at the string and publishes no
@@ -1239,4 +1243,90 @@ module.
 **Evidence:** [export specification](../../../../openspec/changes/add-export-c-functions/specs/bootstrap-foreign-functions/spec.md),
 [symbol spelling and reservation](../../../../packages/compiler/src/ForeignSymbol.ts),
 [foreign planning](../../../../packages/compiler/src/ForeignPlanning.ts),
+[native program emission](../../../../packages/compiler/src/NativeProgram.ts).
+
+### FFI-012 — C function pointers are exact exported addresses
+
+**Status:** Confirmed
+
+`extern "C" fn(P...) -> R` is a distinct Copy type represented by one native address. It is not a
+Silk `fn(P...) -> R` value: it has no environment, dynamic dispatch record, or ownership-bearing
+capture. A named `export "C" fn` item contextually converts to the C function-pointer type only
+when its parameter and result types match exactly and its body is nongeneric and synchronous.
+
+```silk,ignore
+import silk.pointer { Pointer }
+
+unsafe extern "C" fn qsort(
+  base: *mut i32,
+  count: usize,
+  size: usize,
+  compare: extern "C" fn(*const i32, *const i32) -> i32,
+) -> ()
+
+export "C" fn compare(left: *const i32, right: *const i32) -> i32 {
+  let a = unsafe Pointer.read(left)
+  let b = unsafe Pointer.read(right)
+  if a < b { return -1 }
+  if a > b { return 1 }
+  return 0
+}
+```
+
+The native backend supplies the address of the same C-ABI thunk published for external callers.
+The address passes unchanged through the foreign call. Ordinary functions, generic functions,
+effect or suspending functions, and anonymous or capturing callables never acquire a C address.
+
+**Boundary:** Callback conversion is contextual; naming `compare` where a Silk callable is expected
+still produces its ordinary Silk callable value. Imported foreign functions remain callable-only.
+The evaluator and direct WebAssembly reject any reachable call whose signature contains a C
+function pointer before entry and do not invent host addresses.
+
+**Diagnostics:** A C function-pointer type containing any parameter or result outside the admitted
+C subset reports `SEM0187` at that type wherever it is declared. An ineligible value at a C
+callback conversion reports `SEM0206` at the value. An otherwise valid callback operation on a
+non-native execution surface reports `SEM0193` with the foreign symbol and surface.
+
+**Current compiler:** Aligned. Semantic analysis records the contextual address conversion, MIR
+retains a dedicated foreign-address operation, and native lowering resolves it to the generated
+export thunk. The native corpus calls libc `qsort` through a Silk comparator.
+
+**Evidence:** [callback specification](../../../../openspec/specs/bootstrap-foreign-functions/spec.md),
+[call resolution](../../../../packages/compiler/src/CallResolution.ts),
+[native foreign lowering](../../../../packages/compiler/src/NativeForeignOperation.ts).
+
+### FFI-013 — C statics are immutable bindings to native data symbols
+
+**Status:** Confirmed
+
+An imported data symbol is declared with `unsafe extern "C" static`; an exported definition uses
+`export "C" static`. The optional `as` tail changes only the native symbol. The Silk binding cannot
+be assigned, while a pointer stored in it retains the pointee mutability written by its type.
+
+```silk,ignore
+unsafe extern "C" static environment: *mut *mut u8 as "environ"
+export "C" static silk_abi_version: u32 = 1
+```
+
+Reading an imported static requires a lexical unsafe boundary and loads the current value from the
+external global. An exported static requires one matching integer or floating-point literal and
+becomes an externally visible constant global. Native artifacts record imported and exported data
+symbols, their C class, and direction in deterministic symbol order.
+
+**Boundary:** C statics are native-only. The evaluator and direct WebAssembly report a reachable
+read before entry and never synthesize ambient data. Unreferenced imports do not enter MIR or the
+artifact; exports remain roots because an external C consumer can read them without Silk code doing
+so.
+
+**Diagnostics:** Invalid ABI types report `SEM0187`; invalid initializers report `SEM0086`; reads
+outside an unsafe boundary report `SEM0082`; and reachable statics on non-native surfaces report
+`SEM0207` naming the symbol and surface. Symbol spelling, reservation, and closure-wide collision
+rules reuse `SEM0190`–`SEM0192`.
+
+**Current compiler:** Aligned. The declaration surface, HIR/MIR, availability planner, LLVM global
+emission, artifact metadata, and native shared/static-library acceptance all retain the same symbol
+and C type.
+
+**Evidence:** [data-symbol specification](../../../../openspec/specs/bootstrap-foreign-functions/spec.md),
+[foreign-static lowering](../../../../packages/compiler/src/LowerExpression.ts),
 [native program emission](../../../../packages/compiler/src/NativeProgram.ts).

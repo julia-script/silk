@@ -1,9 +1,48 @@
-/** Availability and signature coherence for reachable foreign (`extern "C"`) calls. */
+/** Availability and signature coherence for reachable foreign C functions and data. */
 import * as CAbi from './CAbi.js'
 import * as Diagnostic from './Diagnostic.js'
 import type * as Instances from './Instances.js'
 import type * as Intrinsic from './Intrinsic.js'
+import type * as Mir from './Mir.js'
+import * as MirVerification from './MirVerification.js'
+import type * as SourceSpan from './SourceSpan.js'
 import type * as Target from './Target.js'
+
+/** One reachable conversion whose generated export thunk supplies a raw C function address. */
+export interface CallbackAddress {
+  readonly symbol: string
+  readonly span: SourceSpan.SourceSpan
+}
+
+/** One reachable MIR load of a C data symbol. */
+export interface StaticLoad {
+  readonly symbol: string
+  readonly span: SourceSpan.SourceSpan
+}
+
+/** Collects callback-address operations in deterministic MIR function/operation order. */
+export const callbackAddresses = (program: Mir.Module): ReadonlyArray<CallbackAddress> =>
+  Object.freeze(
+    program.functions.flatMap((fn) =>
+      MirVerification.operations(fn).flatMap((operation) =>
+        operation._tag === 'ForeignFunctionAddress'
+          ? [Object.freeze({ symbol: operation.symbol, span: operation.provenance.span })]
+          : [],
+      ),
+    ),
+  )
+
+/** Collects reachable data-symbol loads in deterministic MIR function/operation order. */
+export const staticLoads = (program: Mir.Module): ReadonlyArray<StaticLoad> =>
+  Object.freeze(
+    program.functions.flatMap((fn) =>
+      MirVerification.operations(fn).flatMap((operation) =>
+        operation._tag === 'ForeignStaticLoad'
+          ? [Object.freeze({ symbol: operation.symbol, span: operation.provenance.span })]
+          : [],
+      ),
+    ),
+  )
 
 /**
  * Rejects LLVM emission of a non-native target (one diagnostic per symbol at its first call) and
@@ -14,17 +53,55 @@ export const select = (
   calls: ReadonlyArray<Instances.ForeignCall>,
   executionTarget: Intrinsic.ExecutionTarget,
   target: Target.Target,
+  statics: Mir.Module['foreignStatics'] = Object.freeze([]),
+  callbacks: ReadonlyArray<CallbackAddress> = Object.freeze([]),
+  loads: ReadonlyArray<StaticLoad> = Object.freeze([]),
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
-  if (calls.length === 0) return Object.freeze([])
-  const surface = executionTarget === 'LLVM' && target.kind !== 'Native' ? target.id : undefined
+  if (calls.length === 0 && statics.length === 0 && callbacks.length === 0 && loads.length === 0)
+    return Object.freeze([])
+  const native = executionTarget === 'LLVM' && target.kind === 'Native'
+  const surface = executionTarget === 'LLVM' ? target.id : executionTarget
   const unavailable = new Map<string, Diagnostic.Diagnostic>()
-  if (surface !== undefined)
-    for (const call of calls)
+  for (const call of calls) {
+    const hasFunctionPointer = [...call.signature.parameters, call.signature.result].some(
+      (type) => type._tag === 'FunctionPointer',
+    )
+    if ((!native && executionTarget === 'LLVM') || (!native && hasFunctionPointer))
       if (!unavailable.has(call.symbol))
         unavailable.set(
           call.symbol,
           Diagnostic.foreignFunctionTargetUnavailable(call.symbol, surface, call.callSpan),
         )
+  }
+  if (!native) {
+    for (const callback of callbacks) {
+      if (!unavailable.has(callback.symbol)) {
+        unavailable.set(
+          callback.symbol,
+          Diagnostic.foreignFunctionTargetUnavailable(callback.symbol, surface, callback.span),
+        )
+      }
+    }
+  }
+  if (!native) {
+    for (const record of statics) {
+      if (executionTarget === 'Evaluator' && record.direction === 'Export') continue
+      if (!unavailable.has(record.symbol)) {
+        unavailable.set(
+          record.symbol,
+          Diagnostic.foreignStaticTargetUnavailable(record.symbol, surface, record.declarationSpan),
+        )
+      }
+    }
+    for (const load of loads) {
+      if (!unavailable.has(load.symbol)) {
+        unavailable.set(
+          load.symbol,
+          Diagnostic.foreignStaticTargetUnavailable(load.symbol, surface, load.span),
+        )
+      }
+    }
+  }
   const conflicts: Array<Diagnostic.Diagnostic> = []
   for (const [ordinal, call] of calls.entries())
     for (const other of calls.slice(ordinal + 1))

@@ -1,3 +1,4 @@
+import * as CAbi from './CAbi.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Type from './Type.js'
 
@@ -93,6 +94,10 @@ const validateType = (type: Type.Type, state: ValidationState): Admission => {
     return admitsScalar(type) ? admitted(type) : rejected(type, 'UnsupportedType')
   // Raw pointers deliberately preserve opaque-pointee interoperability.
   if (Type.isPointer(type)) return admitted(type)
+  if (Type.isForeignFunction(type))
+    return CAbi.admit(type, 'Parameter')._tag === 'Admitted'
+      ? admitted(type)
+      : rejected(type, 'UnsupportedType')
   if (Type.isFixedArray(type)) {
     if (type.length === 0) return rejected(type, 'ZeroLengthArray')
     return validateType(type.element, state)._tag === 'Admitted'

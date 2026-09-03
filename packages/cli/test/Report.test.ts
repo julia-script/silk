@@ -132,6 +132,7 @@ it('names the executable, target, and symbol count on success', () => {
       },
     ],
     foreignExports: [],
+    foreignStatics: [],
     termination: {
       _tag: 'EntryTermination',
       success: 'ReturnedStatus',

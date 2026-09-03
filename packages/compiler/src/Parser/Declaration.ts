@@ -62,6 +62,22 @@ const externBeginsStruct = (state: State, offset: number): boolean => {
   )
 }
 
+/** Recognizes either foreign-static spelling without treating ordinary static functions as data. */
+const beginsForeignStatic = (state: State): boolean => {
+  const kind = nextSignificantKind(state)
+  if (kind === 'UnsafeKeyword')
+    return (
+      peek(state, 1) === 'ExternKeyword' &&
+      peek(state, 2) === 'TextLiteral' &&
+      peek(state, 3) === 'StaticKeyword'
+    )
+  return (
+    kind === 'ExportKeyword' &&
+    peek(state, 1) === 'TextLiteral' &&
+    peek(state, 2) === 'StaticKeyword'
+  )
+}
+
 export const beginsTopLevelDeclaration = (state: State): boolean => {
   const kind = nextSignificantKind(state)
   if (kind === 'StaticKeyword') return staticBeginsFunction(state, 1)
@@ -167,6 +183,53 @@ export const parseConstantDeclaration = (initial: State): NodeResult => {
       ...name.elements,
       ...colon.elements,
       type.node,
+      ...equals.elements,
+      initializer.node,
+    ]),
+  })
+}
+
+/** Parses an imported or exported C data symbol. Both forms are immutable Silk bindings. */
+export const parseForeignStaticDeclaration = (initial: State): NodeResult => {
+  const imported = nextSignificantKind(initial) === 'UnsafeKeyword'
+  const unsafeKeyword = imported
+    ? expect(initial, 'UnsafeKeyword', ['ExternKeyword', 'TextLiteral', 'StaticKeyword'])
+    : Object.freeze({ state: initial, elements: Object.freeze([]) })
+  const markerKind = imported ? 'ExternKeyword' : 'ExportKeyword'
+  const marker = expect(unsafeKeyword.state, markerKind, ['TextLiteral', 'StaticKeyword'])
+  const abi = expect(marker.state, 'TextLiteral', ['StaticKeyword', 'Identifier'])
+  const staticKeyword = expect(abi.state, 'StaticKeyword', ['Identifier', 'Colon'])
+  const name = expect(staticKeyword.state, 'Identifier', ['Colon', ...typeStarts])
+  const colon = expect(name.state, 'Colon', [...typeStarts, 'AsKeyword', 'Equals'])
+  const type = parseType(colon.state, ['AsKeyword', 'Equals', ...topLevelFollowing])
+  const symbol = parseSymbolTail(type.state, ['Equals', ...topLevelFollowing])
+  if (imported) {
+    return Object.freeze({
+      state: symbol.state,
+      node: syntaxNode(symbol.state, 'ForeignStaticDeclaration', [
+        ...unsafeKeyword.elements,
+        ...marker.elements,
+        ...abi.elements,
+        ...staticKeyword.elements,
+        ...name.elements,
+        ...colon.elements,
+        type.node,
+        ...symbol.elements,
+      ]),
+    })
+  }
+  const equals = expect(symbol.state, 'Equals', [...expressionStarts, ...topLevelFollowing])
+  const initializer = parseExpression(equals.state, 0, 'Integer', false, ExpressionNesting.root)
+  return Object.freeze({
+    state: initializer.state,
+    node: syntaxNode(initializer.state, 'ExportStaticDeclaration', [
+      ...marker.elements,
+      ...abi.elements,
+      ...staticKeyword.elements,
+      ...name.elements,
+      ...colon.elements,
+      type.node,
+      ...symbol.elements,
       ...equals.elements,
       initializer.node,
     ]),
@@ -888,6 +951,7 @@ export const parseImplDeclaration = (initial: State): NodeResult => {
 export const parseTopLevelDeclaration = (state: State): NodeResult => {
   const kind = nextSignificantKind(state)
   const following = kind === 'PubKeyword' ? peek(state, 1) : undefined
+  if (beginsForeignStatic(state)) return parseForeignStaticDeclaration(state)
   if (
     (kind === 'StaticKeyword' && !staticBeginsFunction(state, 1)) ||
     (kind === 'PubKeyword' && following === 'StaticKeyword' && !staticBeginsFunction(state, 2))
@@ -1083,11 +1147,14 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
 }
 
 /** The optional `as <symbol>` tail shared by foreign and exported function headers. */
-const parseSymbolTail = (initial: State): ElementsResult => {
+const parseSymbolTail = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind> = ['LeftBrace', ...topLevelFollowing],
+): ElementsResult => {
   if (nextSignificantKind(initial) !== 'AsKeyword')
     return Object.freeze({ state: initial, elements: Object.freeze([]) })
-  const asKeyword = expect(initial, 'AsKeyword', ['TextLiteral', 'LeftBrace', ...topLevelFollowing])
-  const symbol = expect(asKeyword.state, 'TextLiteral', ['LeftBrace', ...topLevelFollowing])
+  const asKeyword = expect(initial, 'AsKeyword', ['TextLiteral', ...following])
+  const symbol = expect(asKeyword.state, 'TextLiteral', following)
   return Object.freeze({
     state: symbol.state,
     elements: Object.freeze([...asKeyword.elements, ...symbol.elements]),

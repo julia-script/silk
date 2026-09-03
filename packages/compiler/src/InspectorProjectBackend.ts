@@ -50,6 +50,8 @@ const typeText = (type: Type.Type): string => {
     }
     case 'CallableType':
       return `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
+    case 'ForeignFunctionType':
+      return Type.encode(type)
     case 'ReferenceType':
       return `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
     case 'PointerType':
@@ -147,6 +149,8 @@ const memberSignature = (member: DeclarationFacts.MemberFact): string => {
   }
   if (member._tag === 'ConstantDeclaration')
     return `${member.visibility === 'Public' ? 'pub ' : ''}const · ${declaredTypeText(member.declaredType)}`
+  if (member._tag === 'ForeignStaticDeclaration')
+    return `${member.direction === 'Import' ? 'extern' : 'export'} static · ${declaredTypeText(member.declaredType)} · ${member.foreign.symbol}`
   if (member._tag === 'AliasDeclaration')
     return `${member.visibility === 'Public' ? 'pub ' : ''}type · ${declaredTypeText(member.target)}`
   if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration')
@@ -788,6 +792,10 @@ const placeText = (root: Mir.LocalId, selectors: ReadonlyArray<Mir.PlaceSelector
 
 const operationLabel = (operation: Mir.Operation): string => {
   switch (operation._tag) {
+    case 'ForeignStaticLoad':
+      return `${localText(operation.destination)} = foreign static ${operation.symbol}`
+    case 'ForeignFunctionAddress':
+      return `${localText(operation.destination)} = foreign address ${operation.symbol}`
     case 'Literal':
       return `${localText(operation.destination)} = const ${operation.value}`
     case 'EnumConstant':

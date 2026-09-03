@@ -27,6 +27,8 @@ const typeText = (type: Type.Type): string => {
     }
     case 'CallableType':
       return `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
+    case 'ForeignFunctionType':
+      return Type.encode(type)
     case 'ReferenceType':
       return `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
     case 'PointerType':

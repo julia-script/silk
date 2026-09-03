@@ -20,6 +20,7 @@ import {
   callingShapes,
   catalogEntry,
   entry,
+  foreignFunctionEntry,
   neverEntry,
   pointerEntry,
   referenceEntry,
@@ -462,6 +463,21 @@ const verifyEntry = (
             'InvalidScalar',
             candidate.type,
             `${Type.encode(candidate.type)} does not match the canonical pointer layout`,
+          ),
+        ])
+  }
+  if (Type.isForeignFunction(candidate.type)) {
+    const expected = foreignFunctionEntry(target, candidate.type)
+    return candidate.size === expected.size &&
+      candidate.alignment === expected.alignment &&
+      candidate.copy === expected.copy &&
+      representationEquals(candidate.representation, expected.representation)
+      ? Object.freeze([])
+      : Object.freeze([
+          invalid(
+            'InvalidScalar',
+            candidate.type,
+            `${Type.encode(candidate.type)} does not match the canonical C function-pointer layout`,
           ),
         ])
   }

@@ -686,6 +686,48 @@ const printConstantDeclaration = (
   )
 }
 
+const printForeignStaticDeclaration = (
+  context: Context,
+  node: SyntaxTree.Node,
+  prefix: FormatDocument.Document,
+): FormatDocument.Document => {
+  const tokens = directTokens(node)
+  const type = directNodes(node).at(0) ?? nodeOf(node, 'TypePath')
+  const initializer = directNodes(node).at(1)
+  const asIndex = tokens.findIndex((token) => token.kind === 'AsKeyword')
+  const equals = tokens.find((token) => token.kind === 'Equals')
+  return FormatDocument.concat(
+    ...tokens
+      .slice(0, tokens.findIndex((token) => token.kind === 'StaticKeyword') + 1)
+      .map((token, index) =>
+        printToken(context, token, index === 0 ? prefix : FormatDocument.text(' ')),
+      ),
+    printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+    printToken(context, tokenOf(node, 'Colon')),
+    printNode(context, type, FormatDocument.text(' ')),
+    ...(asIndex < 0
+      ? []
+      : [
+          printToken(
+            context,
+            tokens[asIndex] ?? tokenOf(node, 'AsKeyword'),
+            FormatDocument.text(' '),
+          ),
+          printToken(
+            context,
+            tokens[asIndex + 1] ?? tokenOf(node, 'TextLiteral'),
+            FormatDocument.text(' '),
+          ),
+        ]),
+    ...(equals === undefined || initializer === undefined
+      ? []
+      : [
+          printToken(context, equals, FormatDocument.text(' ')),
+          printNode(context, initializer, FormatDocument.text(' ')),
+        ]),
+  )
+}
+
 const printFunctionDeclaration = (
   context: Context,
   node: SyntaxTree.Node,
@@ -1014,6 +1056,9 @@ const printNode = (
       return printTypeAliasDeclaration(context, node, prefix)
     case 'ConstantDeclaration':
       return printConstantDeclaration(context, node, prefix)
+    case 'ForeignStaticDeclaration':
+    case 'ExportStaticDeclaration':
+      return printForeignStaticDeclaration(context, node, prefix)
     case 'ImplDeclaration':
       return printImplDeclaration(context, node, prefix)
     case 'ImplOperation':
@@ -1161,14 +1206,24 @@ const printNode = (
         printNode(context, directNodes(node)[0] ?? nodeOf(node, 'TypePath')),
       )
     }
-    case 'CallableType': {
+    case 'CallableType':
+    case 'ForeignFunctionType': {
       const nodes = directNodes(node)
       const result = nodes.at(-1) ?? nodeOf(node, 'TypePath')
       const parameters = nodes.slice(0, -1)
       const mut = directTokens(node).find((token) => token.kind === 'MutKeyword')
       const once = directTokens(node).find((token) => token.kind === 'OnceKeyword')
       const unsafe = directTokens(node).find((token) => token.kind === 'UnsafeKeyword')
+      const externKeyword = directTokens(node).find((token) => token.kind === 'ExternKeyword')
+      const abi = directTokens(node).find((token) => token.kind === 'TextLiteral')
       return FormatDocument.concat(
+        ...(externKeyword === undefined
+          ? []
+          : [
+              printToken(context, externKeyword, prefix, preserveBlank),
+              ...(abi === undefined ? [] : [printToken(context, abi, FormatDocument.text(' '))]),
+              FormatDocument.text(' '),
+            ]),
         ...(unsafe === undefined
           ? []
           : [printToken(context, unsafe, prefix, preserveBlank), FormatDocument.text(' ')]),
@@ -1181,7 +1236,10 @@ const printNode = (
         printToken(
           context,
           tokenOf(node, 'FnKeyword'),
-          unsafe === undefined && mut === undefined && once === undefined
+          unsafe === undefined &&
+            mut === undefined &&
+            once === undefined &&
+            externKeyword === undefined
             ? prefix
             : FormatDocument.empty,
           preserveBlank,

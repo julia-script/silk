@@ -169,6 +169,8 @@ export interface ForeignCall {
 export interface ForeignExport {
   readonly _tag: 'ForeignExport'
   readonly symbol: string
+  /** Exact source-level C function-pointer type, including pointer pointees. */
+  readonly type: Type.ForeignFunction
   readonly signature: CAbi.CAbiSignature
   readonly key: InstanceKey
   readonly declaration: DeclarationFacts.CanonicalId
@@ -1013,10 +1015,15 @@ const exportRoots = (
             fact.returnType._tag !== 'Resolved'
           )
             return []
+          const parameters = fact.parameters.flatMap((parameter) =>
+            parameter.declaredType._tag === 'Resolved' ? [parameter.declaredType.type] : [],
+          )
+          if (parameters.length !== fact.parameters.length) return []
           return [
             Object.freeze({
               _tag: 'ForeignExport',
               symbol: fact.foreignExport.symbol,
+              type: Type.foreignFunction(parameters, fact.returnType.type),
               signature: ExecutableOrigin.foreignSignature(fact, target),
               key: keyOf(fact.canonical.id, Hir.contractOf(fact)),
               declaration: fact.canonical.id,
@@ -1166,7 +1173,7 @@ export const discover = (
     })
   const pending: Array<WorkItem> = entry._tag === 'Resolved' ? [rootItem(entry.key)] : []
   // The export inventory is recorded for every target so planning can reject it off native;
-  // only a native target seeds the worklist with it.
+  // only a native target seeds the executable worklist with its implementation body.
   if (target.kind === 'Native')
     for (const record of foreignExports) pending.push(rootItem(record.key))
   const violations: Array<PolymorphicRecursion> = []

@@ -353,6 +353,15 @@ export type DeclaredTypeFact =
       readonly cause?: Diagnostic.Identity
     }
   | {
+      readonly _tag: 'ForeignFunction'
+      readonly parameters: ReadonlyArray<DeclaredTypeFact>
+      readonly result: DeclaredTypeFact
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly syntax: SyntaxTree.Node
+      readonly cause?: Diagnostic.Identity
+    }
+  | {
       readonly _tag: 'Applied'
       readonly target: DeclaredTypeFact
       readonly arguments: ReadonlyArray<DeclaredTypeFact>
@@ -606,6 +615,23 @@ export interface ConstantFact {
   readonly initializerTemplate: StaticExpressionTemplate
   readonly literal: ConstantLiteralFact
   readonly initializer: SyntaxTree.Node
+  readonly syntax: SyntaxTree.Node
+}
+
+/** One immutable Silk binding backed by an imported or exported C data symbol. */
+export interface ForeignStaticFact {
+  readonly _tag: 'ForeignStaticDeclaration'
+  readonly id: DeclarationId
+  readonly canonical: CanonicalState
+  readonly visibility: 'Private'
+  readonly typeParameters: ReadonlyArray<TypeParameterFact>
+  readonly name: DeclaredName
+  readonly direction: 'Import' | 'Export'
+  readonly foreign: { readonly abi: 'C'; readonly symbol: string }
+  readonly declaredType: DeclaredTypeFact
+  readonly initializerTemplate?: StaticExpressionTemplate
+  readonly literal?: ConstantLiteralFact
+  readonly initializer?: SyntaxTree.Node
   readonly syntax: SyntaxTree.Node
 }
 
@@ -1599,6 +1625,7 @@ export type MemberFact =
   | ServiceFact
   | InterfaceFact
   | ConstantFact
+  | ForeignStaticFact
   | RoleFact
   | AliasFact
 

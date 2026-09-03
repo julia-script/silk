@@ -1549,6 +1549,7 @@ const analyzeLoans = (
       case 'Boolean':
       case 'Character':
       case 'Constant':
+      case 'ForeignStatic':
       case 'StaticText':
       case 'Unit':
       case 'EnumMember':

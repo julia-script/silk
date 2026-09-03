@@ -1892,6 +1892,69 @@ pub fn plain(value: i32) -> i32 { return value }`,
   }),
 )
 
+it.effect('indexes imported and exported C statics as immutable typed data symbols', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `unsafe extern "C" static environment: *mut *mut u8 as "environ"
+export "C" static answer: i32 = 42`,
+      ],
+    ])
+    const [environment, answer] = index.modules.at(0)?.members ?? []
+
+    assert.deepEqual(index.diagnostics, [])
+    assert.strictEqual(environment?._tag, 'ForeignStaticDeclaration')
+    assert.strictEqual(answer?._tag, 'ForeignStaticDeclaration')
+    if (
+      environment?._tag !== 'ForeignStaticDeclaration' ||
+      answer?._tag !== 'ForeignStaticDeclaration'
+    )
+      return
+    assert.strictEqual(environment.direction, 'Import')
+    assert.deepEqual(environment.foreign, { abi: 'C', symbol: 'environ' })
+    assert.strictEqual(environment.declaredType._tag, 'Resolved')
+    assert.strictEqual(answer.direction, 'Export')
+    assert.deepEqual(answer.foreign, { abi: 'C', symbol: 'answer' })
+    assert.deepEqual(answer.literal?._tag, 'IntegerLiteral')
+    assert.strictEqual(answer.declaredType._tag, 'Resolved')
+  }),
+)
+
+it.effect('rejects a non-C function-pointer ABI at its type declaration', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      ['root', 'fn install(callback: extern "system" fn(i32) -> i32) -> () {}'],
+    ])
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0185'],
+    )
+  }),
+)
+
+it.effect('rejects exported C statics without a matching scalar literal', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        'export "C" static pointer: *mut u8 = 0\nexport "C" static count: i32 = 1.5\nexport "C" static byte: u8 = 256',
+      ],
+    ])
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0086', 'SEM0086', 'SEM0086'],
+    )
+    assert.deepEqual(
+      index.modules
+        .at(0)
+        ?.members.filter((declaration) => declaration._tag === 'ForeignStaticDeclaration')
+        .map((declaration) => declaration.declaredType._tag),
+      ['Unavailable', 'Unavailable', 'Unavailable'],
+    )
+  }),
+)
+
 it.effect(
   'rejects exported headers outside the C contract and publishes no callable or export',
   () =>

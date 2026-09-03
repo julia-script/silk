@@ -2623,6 +2623,9 @@ function* executeFunction(
               case 'Pointer':
                 valid = value?._tag === 'PointerValue' && Type.isPointer(expected)
                 break
+              case 'FunctionPointer':
+                valid = false
+                break
             }
             if (!valid)
               return blockedStep({
@@ -5352,53 +5355,6 @@ export const evaluate = (
     options.maxExecutionStackBytes,
     defaultMaxExecutionStackBytes,
   )
-  const availability = IntrinsicAvailability.select(program.intrinsics, 'Evaluator')
-  if (availability._tag === 'Unavailable') {
-    return Object.freeze({
-      _tag: 'Blocked',
-      entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
-      reason: Object.freeze({
-        _tag: 'IntrinsicTargetUnavailable',
-        diagnostics: availability.diagnostics,
-      }),
-      trace: Object.freeze([]),
-    })
-  }
-  const foreign = ForeignAvailability.select(
-    program.foreignCalls,
-    'Evaluator',
-    program.layout.target,
-  )
-  if (foreign.length > 0) {
-    return Object.freeze({
-      _tag: 'Blocked',
-      entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
-      reason: Object.freeze({ _tag: 'ForeignPlanningUnavailable', diagnostics: foreign }),
-      trace: Object.freeze([]),
-    })
-  }
-  const foreignHost = options.foreignHost ?? ForeignHost.empty
-  for (const call of program.foreignCalls) {
-    const expected = ForeignHost.signature(
-      call.signature.parameters.map(CAbi.typeText),
-      CAbi.typeText(call.signature.result),
-    )
-    const binding = ForeignHost.resolve(foreignHost, call.symbol)
-    if (binding === undefined || !ForeignHost.matches(binding.signature, expected)) {
-      return Object.freeze({
-        _tag: 'Blocked',
-        entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
-        reason: Object.freeze({
-          _tag: 'ForeignHostUnavailable',
-          symbol: call.symbol,
-          expected: ForeignHost.key(expected),
-          ...(binding === undefined ? {} : { provided: ForeignHost.key(binding.signature) }),
-          span: call.callSpan,
-        }),
-        trace: Object.freeze([]),
-      })
-    }
-  }
   if (discovery.entry._tag !== 'Resolved') {
     return Object.freeze({
       _tag: 'Blocked',
@@ -5418,6 +5374,70 @@ export const evaluate = (
       reason: Object.freeze({ _tag: 'InvalidMir', violations }),
       trace: Object.freeze([]),
     })
+  }
+  const availability = IntrinsicAvailability.select(program.intrinsics, 'Evaluator')
+  if (availability._tag === 'Unavailable') {
+    return Object.freeze({
+      _tag: 'Blocked',
+      entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
+      reason: Object.freeze({
+        _tag: 'IntrinsicTargetUnavailable',
+        diagnostics: availability.diagnostics,
+      }),
+      trace: Object.freeze([]),
+    })
+  }
+  const foreign = ForeignAvailability.select(
+    program.foreignCalls,
+    'Evaluator',
+    program.layout.target,
+    program.foreignStatics,
+    ForeignAvailability.callbackAddresses(program),
+    ForeignAvailability.staticLoads(program),
+  )
+  if (foreign.length > 0) {
+    return Object.freeze({
+      _tag: 'Blocked',
+      entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
+      reason: Object.freeze({ _tag: 'ForeignPlanningUnavailable', diagnostics: foreign }),
+      trace: Object.freeze([]),
+    })
+  }
+  const foreignHost = options.foreignHost ?? ForeignHost.empty
+  for (const call of program.foreignCalls) {
+    const parameters = call.signature.parameters.map(CAbi.typeText)
+    const result = CAbi.typeText(call.signature.result)
+    const isHostClass = (value: CAbi.TypeText): value is ForeignHost.Class =>
+      !value.startsWith('extern "C" fn(')
+    if (!parameters.every(isHostClass) || !isHostClass(result)) {
+      return Object.freeze({
+        _tag: 'Blocked',
+        entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
+        reason: Object.freeze({
+          _tag: 'ForeignHostUnavailable',
+          symbol: call.symbol,
+          expected: CAbi.signatureKey(call.signature),
+          span: call.callSpan,
+        }),
+        trace: Object.freeze([]),
+      })
+    }
+    const expected = ForeignHost.signature(parameters, result)
+    const binding = ForeignHost.resolve(foreignHost, call.symbol)
+    if (binding === undefined || !ForeignHost.matches(binding.signature, expected)) {
+      return Object.freeze({
+        _tag: 'Blocked',
+        entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
+        reason: Object.freeze({
+          _tag: 'ForeignHostUnavailable',
+          symbol: call.symbol,
+          expected: ForeignHost.key(expected),
+          ...(binding === undefined ? {} : { provided: ForeignHost.key(binding.signature) }),
+          span: call.callSpan,
+        }),
+        trace: Object.freeze([]),
+      })
+    }
   }
   const machine = Mir.machineEntry(program)
   const entry = machine.declaration
