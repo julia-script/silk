@@ -86,9 +86,15 @@ const endpointVisible = (
 /**
  * Returns the proved, endpoint-visible contracts implemented by one concrete nominal provider.
  *
- * This is an editor query over the same conformance authority used by semantic analysis. Merely
+ * This is the shared authority over the same conformance evidence semantic analysis uses. Merely
  * matching a declared header is insufficient: conditional, invalid, incoherent, and ambiguous
  * conformances are admitted only when the ordinary proof selects that exact source declaration.
+ *
+ * Receiver-call resolution selects a concrete receiver's interface operations through this query,
+ * and completion offers the same set, so the two cannot drift into offering a member the resolver
+ * then rejects. Changing this filter therefore changes what compiles, not only what an editor
+ * shows. Endpoint visibility is applied to the interface declaration rather than the conformance,
+ * because coherence is a whole-program property and a conformance carries no module visibility.
  */
 export const implementedContracts = (
   self: Index,
