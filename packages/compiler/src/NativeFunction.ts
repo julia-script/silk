@@ -309,6 +309,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           (candidate) =>
             Instances.keyText(candidate.function) === Instances.keyText(entry.fn.instance),
         )
+        yield* LlvmBlock.make(body, 'entry')
         const dispatchBlock = entry.suspendable
           ? yield* LlvmBlock.make(body, 'suspend_dispatch')
           : undefined
@@ -534,6 +535,9 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
         const resumePath = entry.suspendable
           ? yield* Value.argument(body, physicalParameter + 2)
           : undefined
+        const initialBlock = blocks.get(entry.fn.entry.ordinal)
+        if (initialBlock === undefined) throw new RangeError('Native function has no entry block')
+        yield* FunctionBody.branch(body, dispatchBlock ?? initialBlock)
         if (entry.suspendable) {
           const entryBlock = blocks.get(entry.fn.entry.ordinal)
           if (
@@ -543,6 +547,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
             entryBlock === undefined
           )
             throw new RangeError('LLVM suspension dispatch lost its entry state')
+          yield* LlvmBlock.setInsertionPoint(body, dispatchBlock)
           if (coroutineFrame !== undefined) {
             if (
               invocationFrameStorage === undefined ||
