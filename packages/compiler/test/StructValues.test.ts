@@ -1058,7 +1058,7 @@ it.effect('keeps LLVM, WebAssembly, and evaluation in aggregate parity', () =>
 
     assert.strictEqual(Analysis.evaluate(native)._tag, 'Completed')
     assert.strictEqual(main(), 3)
-    assert.include(nativeArtifact.ir, 'define i32 @silk_main')
+    assert.include(nativeArtifact.ir, 'define hidden i32 @silk_main')
     assert.include(nativeArtifact.ir, 'extractvalue')
     assert.include(wasmArtifact.wat, '(result i32 i32)')
   }),

@@ -348,8 +348,9 @@ it.effect('returns source and toolchain failure classes without leaving executab
       entry: project.entry,
       backend: LlvmBackend.LlvmBackend,
       profile: 'debug',
+      artifactKind: 'NativeExecutable',
       destination,
-      toolchain: { _tag: 'Toolchain', clang: '/silk-test/missing-clang' },
+      toolchain: { _tag: 'Toolchain', clang: '/silk-test/missing-clang', llvmAr: 'llvm-ar' },
       scopeName: 'broken-toolchain',
     })
     assert.deepStrictEqual(attempted, { _tag: 'NotBuilt', status: 2 })

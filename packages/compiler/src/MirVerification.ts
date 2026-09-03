@@ -37,6 +37,7 @@ import {
   conformanceWitnessMatches,
   isCopy,
   matchesInstance,
+  matchesInstanceKey,
   operationChildren,
   operationsOf,
   operationTree,
@@ -2669,7 +2670,10 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         })`,
       }),
     )
-  const availableEntry = self.entry._tag === 'UnavailableEntry' ? undefined : self.entry
+  const availableEntry =
+    self.entry._tag === 'UnavailableEntry' || self.entry._tag === 'LibraryEntry'
+      ? undefined
+      : self.entry
   const target = self.functions.find(
     (fn) =>
       availableEntry !== undefined &&
@@ -2691,54 +2695,59 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
       .flatMap(operationTree)
       .filter((operation) => operation._tag === 'Call') ?? []
   const entryValid =
-    availableEntry !== undefined &&
-    target !== undefined &&
-    machine !== undefined &&
-    machine.parameterCount === 0 &&
-    machine.result._tag === 'i32' &&
-    (availableEntry._tag === 'OrdinaryEntry'
-      ? (instanceText(availableEntry.target) === instanceText(availableEntry.machine) &&
-          target.result._tag === 'i32' &&
-          machineClosures.length === 0) ||
-        (availableEntry.machine.declaration.name === '$unit-entry' &&
-          SilkType.equals(semanticType(target.result), SilkType.unit) &&
-          machineClosures.length === 0 &&
-          machineCalls.length === 1 &&
-          machineCalls.some(
-            (call) =>
-              call.target.module === availableEntry.target.declaration.module &&
-              call.target.name === availableEntry.target.declaration.name,
-          ))
-      : target.result._tag === 'EffectValue' &&
-        target.parameterCount === 0 &&
-        machineClosures.length === 1 &&
-        availableEntry.requirements.length ===
-          SilkType.requirementMembers(target.result.type).length &&
-        availableEntry.requirements.every((requirement, ordinal) => {
-          const expected =
-            target.result._tag === 'EffectValue'
-              ? SilkType.requirementMembers(target.result.type).at(ordinal)
-              : undefined
-          return (
-            expected !== undefined &&
-            requirement.access === expected.access &&
-            requirement.role === expected.role &&
-            SilkType.equals(requirement.capability, expected.capability)
-          )
-        }) &&
-        availableEntry.failures.length === SilkType.failureMembers(target.result.type).length &&
-        availableEntry.failures.every((failure, ordinal) => {
-          const expected =
-            target.result._tag === 'EffectValue'
-              ? SilkType.failureCarrierMember(target.result.type, failure.tag, 'OneBased')
-              : undefined
-          return (
-            expected !== undefined &&
-            failure.tag === ordinal + 1 &&
-            SilkType.equals(failure.type, expected) &&
-            failure.identity === SilkType.encode(expected)
-          )
-        }))
+    self.entry._tag === 'LibraryEntry'
+      ? self.foreignExports.length > 0 &&
+        self.foreignExports.every((export_) =>
+          self.functions.some((fn) => matchesInstanceKey(fn, export_.key)),
+        )
+      : availableEntry !== undefined &&
+        target !== undefined &&
+        machine !== undefined &&
+        machine.parameterCount === 0 &&
+        machine.result._tag === 'i32' &&
+        (availableEntry._tag === 'OrdinaryEntry'
+          ? (instanceText(availableEntry.target) === instanceText(availableEntry.machine) &&
+              target.result._tag === 'i32' &&
+              machineClosures.length === 0) ||
+            (availableEntry.machine.declaration.name === '$unit-entry' &&
+              SilkType.equals(semanticType(target.result), SilkType.unit) &&
+              machineClosures.length === 0 &&
+              machineCalls.length === 1 &&
+              machineCalls.some(
+                (call) =>
+                  call.target.module === availableEntry.target.declaration.module &&
+                  call.target.name === availableEntry.target.declaration.name,
+              ))
+          : target.result._tag === 'EffectValue' &&
+            target.parameterCount === 0 &&
+            machineClosures.length === 1 &&
+            availableEntry.requirements.length ===
+              SilkType.requirementMembers(target.result.type).length &&
+            availableEntry.requirements.every((requirement, ordinal) => {
+              const expected =
+                target.result._tag === 'EffectValue'
+                  ? SilkType.requirementMembers(target.result.type).at(ordinal)
+                  : undefined
+              return (
+                expected !== undefined &&
+                requirement.access === expected.access &&
+                requirement.role === expected.role &&
+                SilkType.equals(requirement.capability, expected.capability)
+              )
+            }) &&
+            availableEntry.failures.length === SilkType.failureMembers(target.result.type).length &&
+            availableEntry.failures.every((failure, ordinal) => {
+              const expected =
+                target.result._tag === 'EffectValue'
+                  ? SilkType.failureCarrierMember(target.result.type, failure.tag, 'OneBased')
+                  : undefined
+              return (
+                expected !== undefined &&
+                failure.tag === ordinal + 1 &&
+                SilkType.equals(failure.type, expected) &&
+                failure.identity === SilkType.encode(expected)
+              )
+            }))
   if (!entryValid) {
     violations.push(
       Object.freeze({

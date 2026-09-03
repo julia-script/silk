@@ -54,7 +54,7 @@ const strictSyntaxCheck = (source: string): void => {
   assert.strictEqual(checked.status, 0, checked.stderr)
 }
 
-it('keeps clock-only runtime source minimal and owns feature macros in the complete shim', () => {
+it('keeps clock-only runtime source minimal and owns feature macros in the complete unit', () => {
   const nowOnly = OsRuntime.source(['silk_os_system_clock_now_v1'])
   assert.include(nowOnly, 'silk_os_system_clock_now_v1')
   assert.include(nowOnly, 'silk_clock_read')
@@ -73,7 +73,7 @@ it('keeps clock-only runtime source minimal and owns feature macros in the compl
   assert.notInclude(clockOnly, 'silk_reason_from_errno')
   assert.notInclude(clockOnly, 'silk_os_path_inspect_v1')
 
-  const combined = ToolchainPlan.shimSource(termination(), [
+  const combined = ToolchainPlan.executableSource(termination(), [
     ...clockSymbols,
     'silk_standard_stream_write_v1',
   ])
@@ -82,7 +82,7 @@ it('keeps clock-only runtime source minimal and owns feature macros in the compl
   assert.isBelow(combined.indexOf('_POSIX_C_SOURCE'), combined.indexOf('#include'))
   strictSyntaxCheck(combined)
 
-  const typedFailure = ToolchainPlan.shimSource(termination('clock.Failure'), clockSymbols)
+  const typedFailure = ToolchainPlan.executableSource(termination('clock.Failure'), clockSymbols)
   assert.isBelow(typedFailure.indexOf(featureMacro), typedFailure.indexOf('#include'))
   strictSyntaxCheck(typedFailure)
 })

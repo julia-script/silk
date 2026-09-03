@@ -11,6 +11,7 @@ import * as TestClock from 'effect/testing/TestClock'
 import * as Analysis from '../src/Analysis.js'
 import type * as Backend from '../src/Backend.js'
 import * as LlvmBackend from '../src/LlvmBackend.js'
+import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as PhaseReport from '../src/PhaseReport.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -32,7 +33,8 @@ const clang = Effect.runSync(
 const toolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
   clang,
-  shimCache: NativeToolchain.makeShimCache(),
+  llvmAr: 'llvm-ar',
+  runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
 })
 
 const ascii = (value: string): Uint8Array =>
@@ -58,6 +60,7 @@ const compileSource = (
     // This file asserts exact phase reports, so it builds uncached unless a test opts back in.
     cache: false,
     ...overrides,
+    artifactKind: overrides.artifactKind ?? 'NativeExecutable',
   }).pipe(Effect.provide(SourceResolver.empty))
 
 const expectedPhases = [
@@ -76,7 +79,7 @@ const expectedPhases = [
   'toolchain-target',
   'backend',
   'object',
-  'shim',
+  'runtime',
   'link',
 ]
 
@@ -121,6 +124,7 @@ it.effect('compiles a three-module call chain to native execution matching the i
       compilation: { root: SourceFile.make('app/Main', root) },
       toolchain,
       profile: 'release',
+      artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'cross-module'),
       cache: false,
     }).pipe(Effect.provide(layer))
@@ -278,6 +282,7 @@ it.effect('gates source rejection and operational resolution failure before back
         },
         toolchain,
         profile: 'release',
+        artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'resolution-failed'),
         backend: spy,
       }).pipe(Effect.provide(resolver)),
@@ -325,6 +330,7 @@ it.effect('rejects a mismatched distribution before resolving user imports', () 
       },
       toolchain,
       profile: 'release',
+      artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'mismatched-distribution'),
       distribution: mismatched,
     }).pipe(Effect.provide(resolver))
@@ -385,7 +391,11 @@ it.effect('names the failing native stage with command provenance', () =>
   Effect.gen(function* () {
     const outcome = yield* Effect.result(
       compileSource('bad-toolchain', 'pub fn main() -> i32 { return 42 }', {
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/nonexistent/clang' }),
+        toolchain: Object.freeze({
+          _tag: 'Toolchain',
+          clang: '/nonexistent/clang',
+          llvmAr: 'llvm-ar',
+        }),
       }),
     )
 
@@ -511,10 +521,12 @@ it.effect(
             root: SourceFile.make('memory/driver', ascii(source)),
             target: 'wasm32-unknown-unknown',
           },
+          artifactKind: 'WebAssemblyModule',
           backend,
           toolchain: Object.freeze({
             _tag: 'Toolchain',
             clang: backend.id === 'llvm' ? clang : '/nonexistent/direct-wasm-must-not-run-clang',
+            llvmAr: 'llvm-ar',
           }),
         })
         assert.strictEqual(outcome._tag, 'Compiled', backend.id)
@@ -558,8 +570,9 @@ it.effect(
             root: SourceFile.make('memory/driver', ascii(source)),
             target: 'wasm32-unknown-unknown',
           },
+          artifactKind: 'WebAssemblyModule',
           backend,
-          toolchain: Object.freeze({ _tag: 'Toolchain', clang }),
+          toolchain: Object.freeze({ _tag: 'Toolchain', clang, llvmAr: 'llvm-ar' }),
         })
         assert.strictEqual(outcome._tag, 'Compiled', backend.id)
         if (outcome._tag !== 'Compiled') continue
@@ -581,7 +594,8 @@ it.effect('serves identical bitcode from the artifact cache without invoking the
     const cachingToolchain: NativeToolchain.Toolchain = Object.freeze({
       _tag: 'Toolchain',
       clang,
-      shimCache: NativeToolchain.makeShimCache(),
+      llvmAr: 'llvm-ar',
+      runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
       artifactCache: NativeToolchain.makeDiskArtifactCache(cacheDirectory),
     })
     const source = 'pub fn main() -> i32 { return 42 }'
@@ -614,6 +628,42 @@ it.effect('serves identical bitcode from the artifact cache without invoking the
   }),
 )
 
+it.effect('treats a corrupted finalized-artifact cache entry as a miss', () =>
+  Effect.gen(function* () {
+    const writes: Array<string> = []
+    const artifactCache: NativeToolchain.ArtifactCache = Object.freeze({
+      _tag: 'ArtifactCache',
+      get: () => Effect.succeed(Uint8Array.from([0x7f, 0x45, 0x4c, 0x46])),
+      set: (key: string) =>
+        Effect.sync(() => {
+          writes.push(key)
+        }),
+    })
+    const outcome = yield* compileSource(
+      'corrupted-artifact-cache',
+      'pub fn main() -> i32 { return 42 }',
+      {
+        toolchain: Object.freeze({ ...toolchain, artifactCache }),
+        cache: true,
+      },
+    )
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    assert.strictEqual(
+      outcome.report.some((entry) => entry.phase === 'artifact-cache'),
+      false,
+    )
+    assert.strictEqual(
+      outcome.report.some((entry) => entry.phase === 'link'),
+      true,
+    )
+    assert.strictEqual(
+      writes.some((key) => key.endsWith('.bin')),
+      true,
+    )
+  }),
+)
+
 it.effect('reports a missing request-supplied object as linker input even when cached', () =>
   Effect.gen(function* () {
     const missing = join(destinationRoot, 'missing-extra.o')
@@ -621,8 +671,10 @@ it.effect('reports a missing request-supplied object as linker input even when c
     const result = yield* Effect.result(
       compileSource('native-link-inputs', 'pub fn main() -> i32 { return 42 }', {
         cache: true,
-        nativeObjects: [missing],
-        nativeLibraries: ['c'],
+        nativeLinkInputs: [
+          NativeLinkInput.object(missing),
+          NativeLinkInput.library('c', 'Dynamic'),
+        ],
       }),
     )
     assert.strictEqual(result._tag, 'Failure')
@@ -635,7 +687,7 @@ it.effect('reports a missing request-supplied object as linker input even when c
     assert.strictEqual(result.failure.reason.status, null)
     assert.strictEqual(result.failure.reason.output, `missing linker input: ${missing}`)
     const args = result.failure.reason.planned.arguments
-    assert.deepEqual(args.slice(args.indexOf(missing)), [missing, '-lm', '-lc', '-o', destination])
+    assert.deepEqual(args.slice(args.indexOf(missing)), [missing, '-lc', '-lm', '-o', destination])
   }),
 )
 
@@ -646,7 +698,8 @@ it.effect('keys the artifact cache on request-supplied object bytes', () =>
     const cachingToolchain: NativeToolchain.Toolchain = Object.freeze({
       _tag: 'Toolchain',
       clang,
-      shimCache: NativeToolchain.makeShimCache(),
+      llvmAr: 'llvm-ar',
+      runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
       artifactCache: NativeToolchain.makeDiskArtifactCache(cacheDirectory),
     })
     const objectFor = (name: string, value: number) =>
@@ -677,7 +730,7 @@ it.effect('keys the artifact cache on request-supplied object bytes', () =>
         yield* compileSource(name, source, {
           toolchain: cachingToolchain,
           cache: true,
-          nativeObjects: [object],
+          nativeLinkInputs: [NativeLinkInput.object(object)],
         }),
       )
     }
@@ -761,11 +814,11 @@ it.effect('selects the durable disk cache from SILK_NATIVE_CACHE_DIR by default'
         // so nothing is shared between them but the directory.
         const source = 'pub fn main() -> i32 { return 40 + 2 }'
         const first = yield* compileSource('default-cache-first', source, {
-          toolchain: Object.freeze({ _tag: 'Toolchain', clang }),
+          toolchain: Object.freeze({ _tag: 'Toolchain', clang, llvmAr: 'llvm-ar' }),
           cache: true,
         })
         const second = yield* compileSource('default-cache-second', source, {
-          toolchain: Object.freeze({ _tag: 'Toolchain', clang }),
+          toolchain: Object.freeze({ _tag: 'Toolchain', clang, llvmAr: 'llvm-ar' }),
           cache: true,
         })
         assert.strictEqual(first._tag, 'Compiled')

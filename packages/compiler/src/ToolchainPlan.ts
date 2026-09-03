@@ -1,11 +1,13 @@
 /**
  * Pure planning for the pinned native toolchain: fixed optimization profiles, the exact
  * structured commands the orchestration issues (never a shell string), and the minimal C runtime
- * shim source. Browser-safe by construction — execution lives in `NativeToolchain`.
+ * runtime source. Browser-safe by construction — execution lives in `NativeToolchain`.
  */
 
 import type * as Backend from './Backend.js'
+import type * as ArtifactKind from './ArtifactKind.js'
 import * as CoroutineRuntime from './CoroutineRuntime.js'
+import * as NativeLinkInput from './NativeLinkInput.js'
 import * as OsRuntime from './OsRuntime.js'
 import type * as Target from './Target.js'
 
@@ -53,38 +55,120 @@ export const objectCommand = (
       '-x',
       'ir',
       bitcodePath,
+      '-fPIC',
       ...profileArguments(profile),
       '-o',
       objectPath,
     ]),
   })
 
-/** Plans the pinned Clang driver invocation that links objects into an executable. */
-export const linkCommand = (
-  clang: string,
+export type NativeArtifactKind = Exclude<ArtifactKind.ArtifactKind, 'WebAssemblyModule'>
+
+/** A target or artifact combination that cannot preserve the requested typed link semantics. */
+export interface UnsupportedNativePlan {
+  readonly _tag: 'UnsupportedNativePlan'
+  readonly artifactKind: NativeArtifactKind
+  readonly target: Target.Target
+  readonly input: NativeLinkInput.NativeLinkInput
+  readonly reason:
+    | 'FrameworkTarget'
+    | 'StaticLibraryTarget'
+    | 'StaticArchiveInput'
+    | 'PathNotAbsolute'
+}
+
+export type NativePlan = PlannedCommand | UnsupportedNativePlan
+
+const unsupported = (
+  artifactKind: NativeArtifactKind,
   target: Target.Target,
-  objects: ReadonlyArray<string>,
-  libraries: ReadonlyArray<string>,
+  input: NativeLinkInput.NativeLinkInput,
+  reason: UnsupportedNativePlan['reason'],
+): UnsupportedNativePlan =>
+  Object.freeze({ _tag: 'UnsupportedNativePlan', artifactKind, target, input, reason })
+
+const clangInputArguments = (
+  artifactKind: 'NativeExecutable' | 'NativeSharedLibrary',
+  target: Target.Target,
+  input: NativeLinkInput.NativeLinkInput,
+): ReadonlyArray<string> | UnsupportedNativePlan => {
+  switch (input._tag) {
+    case 'Object':
+    case 'StaticArchive':
+      return [input.path]
+    case 'SearchPath':
+      return [`-L${input.path}`]
+    case 'Framework':
+      return target.id === 'aarch64-apple-darwin'
+        ? ['-framework', input.name]
+        : unsupported(artifactKind, target, input, 'FrameworkTarget')
+    case 'Library':
+      if (input.mode === 'Dynamic') return [`-l${input.name}`]
+      return target.id === 'aarch64-apple-darwin'
+        ? unsupported(artifactKind, target, input, 'StaticLibraryTarget')
+        : ['-Wl,-Bstatic', `-l${input.name}`, '-Wl,-Bdynamic']
+  }
+}
+
+const fileName = (path: string): string => path.split(/[/\\]/).at(-1) ?? path
+
+/** Plans one native executable/shared link or deterministic static archive. */
+export const nativeCommand = (
+  tools: { readonly clang: string; readonly llvmAr: string },
+  artifactKind: NativeArtifactKind,
+  target: Target.Target,
+  generatedObjects: ReadonlyArray<string>,
+  inputs: ReadonlyArray<NativeLinkInput.NativeLinkInput>,
   destination: string,
-): PlannedCommand =>
-  Object.freeze({
+): NativePlan => {
+  for (const input of inputs) {
+    if (!NativeLinkInput.hasAbsolutePath(input))
+      return unsupported(artifactKind, target, input, 'PathNotAbsolute')
+  }
+  if (artifactKind === 'NativeStaticLibrary') {
+    const members = [...generatedObjects]
+    for (const input of inputs) {
+      if (input._tag !== 'Object')
+        return unsupported(artifactKind, target, input, 'StaticArchiveInput')
+      members.push(input.path)
+    }
+    return Object.freeze({
+      _tag: 'PlannedCommand',
+      target,
+      command: tools.llvmAr,
+      arguments: Object.freeze(['rcsD', destination, ...members]),
+    })
+  }
+  let sharedArguments: ReadonlyArray<string> = []
+  if (artifactKind === 'NativeSharedLibrary')
+    sharedArguments =
+      target.id === 'aarch64-apple-darwin'
+        ? ['-dynamiclib', `-Wl,-install_name,@rpath/${fileName(destination)}`]
+        : ['-shared']
+  const arguments_: Array<string> = [
+    `--target=${target.id}`,
+    ...sharedArguments,
+    ...generatedObjects,
+  ]
+  for (const input of inputs) {
+    const encoded = clangInputArguments(artifactKind, target, input)
+    if ('_tag' in encoded) return encoded
+    arguments_.push(...encoded)
+  }
+  arguments_.push('-o', destination)
+  return Object.freeze({
     _tag: 'PlannedCommand',
     target,
-    command: clang,
-    arguments: Object.freeze([
-      `--target=${target.id}`,
-      ...objects,
-      ...libraries.map((library) => `-l${library}`),
-      '-o',
-      destination,
-    ]),
+    command: tools.clang,
+    arguments: Object.freeze(arguments_),
   })
+}
 
-/** Plans the pinned Clang invocation that compiles the runtime shim. */
-export const shimCommand = (
+/** Plans the pinned Clang invocation that compiles one runtime translation unit. */
+export const cObjectCommand = (
   clang: string,
   target: Target.Target,
-  shimSourcePath: string,
+  sourcePath: string,
   objectPath: string,
 ): PlannedCommand =>
   Object.freeze({
@@ -96,8 +180,10 @@ export const shimCommand = (
       '-c',
       '-x',
       'c',
-      shimSourcePath,
+      sourcePath,
       '-O2',
+      '-fPIC',
+      '-fvisibility=hidden',
       '-o',
       objectPath,
     ]),
@@ -130,8 +216,8 @@ export const wasmCommand = (
   })
 
 /**
- * The minimal C runtime shim: a private, compiler-versioned scalar ABI reaching a closed native
- * entry. The shim's `main` receives the process command line, holds it for the host-input runtime,
+ * The minimal C runtime boundary: a private, compiler-versioned scalar ABI reaching a closed
+ * native entry. The executable source's `main` receives the process command line, holds it for the host-input runtime,
  * and returns `silk_main`'s `i32` result as the process exit status. Silk `main` itself keeps its
  * zero-parameter shape: arguments reach a program through a service, never through the entry
  * signature. Not user-facing FFI; issue 07 owns the ABI's growth.
@@ -179,10 +265,9 @@ const translationUnitPreamble = `#if defined(__APPLE__)
 const failureBytes = (identity: string): ReadonlyArray<number> =>
   Array.from(new TextEncoder().encode(`Error: ${identity}\n`))
 
-/** Generates the private native adapter for the artifact's exact termination contract. */
-export const shimSource = (
-  termination: Backend.Termination,
+const runtimeSourceFor = (
   nativeRuntimeSymbols: ReadonlyArray<string> = Object.freeze([]),
+  forceStandardStreams = false,
 ): string => {
   const osRuntime = OsRuntime.source(nativeRuntimeSymbols)
   const coroutineRuntime = CoroutineRuntime.source(nativeRuntimeSymbols)
@@ -190,19 +275,39 @@ export const shimSource = (
     (symbol) =>
       symbol === 'silk_os_host_argument_count_v1' || symbol === 'silk_os_host_argument_v1',
   )
-  const needsStandardStreams = nativeRuntimeSymbols.includes('silk_standard_stream_write_v1')
+  const needsStandardStreams =
+    forceStandardStreams || nativeRuntimeSymbols.includes('silk_standard_stream_write_v1')
   const commandLine = needsCommandLine ? commandLineStateSource : ''
-  const mainParameters = needsCommandLine ? 'int argc, char **argv' : 'void'
-  const initializeCommandLine = needsCommandLine
-    ? '  silk_host_argc_v1 = argc;\n  silk_host_argv_v1 = argv;\n'
-    : ''
-  if (termination.failures.length === 0)
-    return `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
+  return `/* silk-effect native runtime — private, compiler-versioned. */
 ${translationUnitPreamble}
 ${needsStandardStreams ? standardStreamsShimSource : ''}
 ${commandLine}
 ${osRuntime}
 ${coroutineRuntime}
+`
+}
+
+/** Generates only the hidden runtime definitions required by a native library. */
+export const runtimeSource = (
+  nativeRuntimeSymbols: ReadonlyArray<string> = Object.freeze([]),
+): string => runtimeSourceFor(nativeRuntimeSymbols)
+
+/** Generates the private process adapter and required runtime definitions for an executable. */
+export const executableSource = (
+  termination: Backend.Termination,
+  nativeRuntimeSymbols: ReadonlyArray<string> = Object.freeze([]),
+): string => {
+  const runtime = runtimeSourceFor(nativeRuntimeSymbols, termination.failures.length > 0)
+  const needsCommandLine = nativeRuntimeSymbols.some(
+    (symbol) =>
+      symbol === 'silk_os_host_argument_count_v1' || symbol === 'silk_os_host_argument_v1',
+  )
+  const mainParameters = needsCommandLine ? 'int argc, char **argv' : 'void'
+  const initializeCommandLine = needsCommandLine
+    ? '  silk_host_argc_v1 = argc;\n  silk_host_argv_v1 = argv;\n'
+    : ''
+  if (termination.failures.length === 0)
+    return `${runtime}
 extern int silk_main(void);
 
 int main(${mainParameters}) {
@@ -218,13 +323,7 @@ ${initializeCommandLine}
     (failure) =>
       `    case ${failure.tag}:\n      return silk_write_all(silk_failure_${failure.tag}, sizeof(silk_failure_${failure.tag})) ? 1 : 2;`,
   )
-  return `/* silk-effect bootstrap runtime shim — private, compiler-versioned. */
-${translationUnitPreamble}
-${standardStreamsShimSource}
-${commandLine}
-${osRuntime}
-${coroutineRuntime}
-
+  return `${runtime}
 extern int silk_main(void);
 ${declarations.join('\n')}
 

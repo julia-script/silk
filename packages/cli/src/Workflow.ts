@@ -1,10 +1,12 @@
 import * as Analysis from '@silklang/compiler/Analysis'
+import type * as ArtifactKind from '@silklang/compiler/ArtifactKind'
 import type * as Backend from '@silklang/compiler/Backend'
 import * as Diagnostic from '@silklang/compiler/Diagnostic'
 import * as Driver from '@silklang/compiler/Driver'
 import * as FileSourceResolver from '@silklang/compiler/FileSourceResolver'
 import type * as HeapObservation from '@silklang/compiler/HeapObservation'
 import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
+import type * as NativeLinkInput from '@silklang/compiler/NativeLinkInput'
 import * as Project from '@silklang/compiler/Project'
 import type * as SourceEntry from '@silklang/compiler/SourceEntry'
 import * as SourceFile from '@silklang/compiler/SourceFile'
@@ -44,6 +46,7 @@ export interface ProjectSelection extends ProjectOptions.ProjectOptions {
   readonly workingDirectory?: string
   /** Test/application-edge toolchain injection; ordinary project commands intentionally omit it. */
   readonly clang?: string
+  readonly llvmAr?: string
 }
 
 export interface CompileOptions {
@@ -51,9 +54,10 @@ export interface CompileOptions {
   readonly backend: Backend.Backend
   readonly target?: string
   readonly profile: ToolchainPlan.OptimizationProfile
+  readonly artifactKind: ArtifactKind.ArtifactKind
   readonly destination: string
   readonly toolchain: NativeToolchain.Toolchain
-  readonly nativeLibraries?: ReadonlyArray<string>
+  readonly nativeLinkInputs?: ReadonlyArray<NativeLinkInput.NativeLinkInput>
   readonly scopeName: string
   readonly saveTemps?: boolean
   readonly timings?: boolean
@@ -79,6 +83,7 @@ const planBatch = (
     profile: options.profile,
     purpose,
     ...(options.clang === undefined ? {} : { clang: options.clang }),
+    ...(options.llvmAr === undefined ? {} : { llvmAr: options.llvmAr }),
   })
 
 const reportPreparationFailure = Effect.fnUntraced(function* (error: { readonly message: string }) {
@@ -133,9 +138,10 @@ export const compile = Effect.fn('Workflow.compile')(function* (
       },
       backend: options.backend,
       toolchain: options.toolchain,
-      ...(options.nativeLibraries === undefined
+      artifactKind: options.artifactKind,
+      ...(options.nativeLinkInputs === undefined
         ? {}
-        : { nativeLibraries: options.nativeLibraries }),
+        : { nativeLinkInputs: options.nativeLinkInputs }),
       profile: options.profile,
       destination: options.destination,
       scopeName: options.scopeName,
@@ -272,9 +278,10 @@ export const buildProject = Effect.fn('Workflow.buildProject')(function* (
         backend: plan.backend,
         target: plan.target.id,
         profile: plan.profile,
+        artifactKind: plan.artifactKind,
         destination: plan.destination,
         toolchain: plan.toolchain,
-        nativeLibraries: plan.nativeLibraries,
+        nativeLinkInputs: plan.nativeLinkInputs,
         scopeName: `${plan.project.name}-${plan.backend.id}-${plan.target.id}`,
       }),
     { concurrency: 1 },
@@ -390,7 +397,7 @@ const sourceFingerprint = Effect.fnUntraced(function* (
         onNone: () => 'unknown',
         onSome: (at) => `${at.getTime()}`,
       })
-      entries.push(`${candidate} ${info.success.size} ${modified}`)
+      entries.push(`${candidate}\u0000${info.success.size}\u0000${modified}`)
     }
   }
   return entries.sort().join('\n')
@@ -566,9 +573,10 @@ export const run = Effect.fn('Workflow.run')(function* (
     backend: plan.backend,
     target: plan.target.id,
     profile: plan.profile,
+    artifactKind: plan.artifactKind,
     destination: plan.destination,
     toolchain: plan.toolchain,
-    nativeLibraries: plan.nativeLibraries,
+    nativeLinkInputs: plan.nativeLinkInputs,
     scopeName: plan.project.name,
   })
   if (attempted._tag === 'NotBuilt') return attempted.status

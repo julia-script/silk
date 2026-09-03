@@ -131,6 +131,7 @@ it('names the executable, target, and symbol count on success', () => {
         symbol: 'silk_main',
       },
     ],
+    foreignExports: [],
     termination: {
       _tag: 'EntryTermination',
       success: 'ReturnedStatus',
@@ -207,7 +208,7 @@ it('renders unsupported intrinsic diagnostics beneath the backend error', () => 
 
 it('keeps the failing command so a toolchain failure is reproducible by hand', () => {
   const failure = new NativeToolchain.ToolchainError({
-    operation: 'NativeToolchain.ClangLinker.link',
+    operation: 'NativeToolchain.NativeFinalizer.finalize',
     stage: 'link',
     message: 'link failed',
     reason: {

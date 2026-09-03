@@ -204,6 +204,9 @@ export type Entry =
       readonly requirements: ReadonlyArray<Type.Requirement>
     }
   | {
+      readonly _tag: 'Library'
+    }
+  | {
       readonly _tag: 'Unavailable'
       readonly reason:
         | 'MissingEntry'
@@ -216,6 +219,7 @@ export type Entry =
         | 'InvalidOrdinaryEntryResult'
         | 'InvalidEffectEntryResult'
         | 'EffectEntryRequirements'
+        | 'MissingLibraryExport'
         | 'InvalidSource'
       readonly requirements?: ReadonlyArray<Type.Requirement>
     }
@@ -1033,13 +1037,19 @@ export const discover = (
   index: DeclarationIndex.Index,
   target: Target.Target,
   resolution: NameResolution.Resolution,
+  rootPolicy: 'Executable' | 'Library' = 'Executable',
 ): Discovery => {
   const root = results.get(rootModule)
   if (root === undefined) {
     throw new RangeError(`Instance discovery lost its root module ${rootModule}`)
   }
-  const entry = resolveEntry(root)
-  if (entry._tag !== 'Resolved') {
+  const foreignExports = exportRoots(index, target)
+  let entry: Entry
+  if (rootPolicy === 'Executable') entry = resolveEntry(root)
+  else if (foreignExports.length === 0)
+    entry = Object.freeze({ _tag: 'Unavailable', reason: 'MissingLibraryExport' })
+  else entry = Object.freeze({ _tag: 'Library' })
+  if (entry._tag === 'Unavailable') {
     return Object.freeze({
       _tag: 'InstanceDiscovery',
       rootModule,
@@ -1051,7 +1061,7 @@ export const discover = (
       calls: Object.freeze([]),
       intrinsics: Object.freeze([]),
       foreignCalls: Object.freeze([]),
-      foreignExports: Object.freeze([]),
+      foreignExports,
       constants: Object.freeze([]),
       suspension: Object.freeze([]),
       residualizationDiagnostics: Object.freeze([]),
@@ -1154,10 +1164,9 @@ export const discover = (
       ancestors: new Map([[declarationText(key), Object.freeze({ key })]]),
       cleanupReachable: false,
     })
-  const pending: Array<WorkItem> = [rootItem(entry.key)]
+  const pending: Array<WorkItem> = entry._tag === 'Resolved' ? [rootItem(entry.key)] : []
   // The export inventory is recorded for every target so planning can reject it off native;
   // only a native target seeds the worklist with it.
-  const foreignExports = exportRoots(index, target)
   if (target.kind === 'Native')
     for (const record of foreignExports) pending.push(rootItem(record.key))
   const violations: Array<PolymorphicRecursion> = []
@@ -1315,7 +1324,9 @@ export const discover = (
       const cleanupTargets = [
         ...slotDropHookTargets(fn, index, substitution),
         ...cleanupHooks,
-        ...(entry.kind === 'Effect' && keyText(key) === keyText(entry.key)
+        ...(entry._tag === 'Resolved' &&
+        entry.kind === 'Effect' &&
+        keyText(key) === keyText(entry.key)
           ? entry.failures.flatMap((failure) =>
               hookCalls(CleanupPlan.cleanupPlan(index, failure.type), index),
             )

@@ -34,6 +34,8 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
 > {
   let voidType: LlvmType.Type | undefined
   const declared: Array<NativeLoweringContext.DeclaredFunction> = []
+  const machineEntry =
+    context.program.entry._tag === 'LibraryEntry' ? undefined : Mir.machineEntry(context.program)
   for (const fn of context.program.functions) {
     const resultLanes = context.lanesFor(fn.result)
     const resultLaneCount = resultLanes.length
@@ -57,7 +59,7 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
             .flatMap((type) => context.lanesFor(type).map(context.laneType))
     const suspendable =
       fn.suspension !== undefined && fn.suspension.classification !== 'Synchronous'
-    const publicSymbol = symbolFor(fn, Mir.machineEntry(context.program))
+    const publicSymbol = symbolFor(fn, machineEntry)
     const emittedResultType = suspendable
       ? yield* LlvmType.structure(context.builder, [
           context.i32,
@@ -78,7 +80,9 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
         fn,
         symbol,
         publicSymbol,
-        handle: yield* FunctionActor.declare(context.builder, symbol, signature),
+        handle: yield* FunctionActor.declare(context.builder, symbol, signature, {
+          visibility: 'hidden',
+        }),
         resultType,
         emittedResultType,
         resultLaneCount,

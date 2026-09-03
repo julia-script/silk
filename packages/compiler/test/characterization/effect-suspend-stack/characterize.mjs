@@ -227,8 +227,10 @@ try {
         toolchain: Object.freeze({
           _tag: 'Toolchain',
           clang,
+          llvmAr: 'llvm-ar',
         }),
         profile: 'release',
+        artifactKind: 'NativeExecutable',
         destination,
       }).pipe(Effect.provide(Layer.mergeAll(SourceResolver.empty, NodeHeapObservation.layer))),
     )

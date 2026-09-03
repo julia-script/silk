@@ -5314,7 +5314,10 @@ export const evaluate = (
     return Object.freeze({
       _tag: 'Blocked',
       entry: undefined,
-      reason: Object.freeze({ _tag: 'UnavailableEntry', reason: discovery.entry.reason }),
+      reason: Object.freeze({
+        _tag: 'UnavailableEntry',
+        reason: discovery.entry._tag === 'Library' ? 'MissingEntry' : discovery.entry.reason,
+      }),
       trace: Object.freeze([]),
     })
   }

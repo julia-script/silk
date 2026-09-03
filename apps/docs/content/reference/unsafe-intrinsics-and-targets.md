@@ -978,14 +978,20 @@ crosses the boundary as one address lane, and every place a pointer was formed f
 after the call, so a native write through the pointer is observed by later Silk reads under
 [PTR-003](values-and-types.md#ptr-003--formation-ends-no-loan-and-validity-is-the-callers-obligation).
 
-Link inputs are the program object, the toolchain shim, and the libraries the project manifest
-names. The optional `[build]` table's `native-libraries` list reaches the link command as `-l`
-arguments; a name with a path separator, whitespace, NUL, or leading `-` is rejected when the
-manifest is read. Arbitrary linker flags stay out of source and manifest.
+Link inputs are compiler-generated objects followed by the ordered structured inputs the project
+manifest names. The optional `[build]` table's `native-link-inputs` array accepts object paths,
+static-archive paths, named libraries with an explicit static or dynamic mode, search paths, and
+Apple frameworks. Paths are resolved relative to the manifest and may not escape the project; a
+name with a path separator, whitespace, NUL, or leading `-` is rejected. Arbitrary linker flags
+stay out of source and manifest.
 
 ```toml
 [build]
-native-libraries = ["m"]
+native-link-inputs = [
+  { search-path = "vendor/lib" },
+  { library = "m", mode = "dynamic" },
+  { static-archive = "vendor/libsupport.a" },
+]
 ```
 
 **Boundary:** The compiler does not verify that a link input defines the symbol or that its real
@@ -1069,11 +1075,13 @@ and is neither implied by nor implies native export: a private exported function
 symbol, and a `pub` function without `export` is not.
 
 **Boundary:** Renaming with `as` creates no declaration under the symbol's spelling; `add` above
-defines no native symbol named `add`. Exports live in executables in this change; a native
-executable still requires `main` and its exports are additional symbols beside the entry. Library
-artifacts, generated C headers, records, callbacks, and data symbols are separate proposals;
-pointer parameters and results are forwarded through the thunk unchanged. There is no `unsafe export`: unsafety is a caller-side Silk contract that a C caller
-cannot acknowledge.
+defines no native symbol named `add`. A native executable requires `main` and treats exports as
+additional roots. A native shared or static library instead requires at least one export, roots
+reachability at all exports, and synthesizes no process entry. Only export thunks have default
+visibility in a shared library; their compiler implementations and runtime support stay hidden.
+Generated C headers, records, callbacks, and data symbols are separate proposals; pointer
+parameters and results are forwarded through the thunk unchanged. There is no `unsafe export`:
+unsafety is a caller-side Silk contract that a C caller cannot acknowledge.
 
 **Diagnostics:** An ABI string other than `"C"` reports `SEM0185` at the string and publishes no
 callable. A missing body is a parser diagnostic, because the exported form has no bodiless shape.
@@ -1167,7 +1175,7 @@ emission header.
 
 An export symbol obeys the spelling and reservation rules of
 [FFI-005](#ffi-005--foreign-symbols-are-valid-unreserved-and-unique-per-executable): a non-empty
-ASCII identifier that is not a symbol the compiler owns. Within one executable closure, two
+ASCII identifier that is not a symbol the compiler owns. Within one native artifact closure, two
 exported declarations of one symbol are rejected, and an exported symbol equal to a reachable
 foreign import's symbol is rejected, because the executable would both define and import one name.
 

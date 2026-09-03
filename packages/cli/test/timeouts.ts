@@ -1,6 +1,6 @@
 /**
  * Wall-clock budget for a test that drives the native toolchain: Clang emits objects for the
- * program and every shim, links them, and the test then executes the result.
+ * program and every runtime object, links them, and the test then executes the result.
  *
  * The value is sized from measurement, not from feel. On an idle 4-core machine the slowest
  * such test in this package (`Cli.test.ts > initializes a project that loads, checks, builds,

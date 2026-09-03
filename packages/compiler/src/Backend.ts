@@ -234,6 +234,7 @@ export const terminationOf = (program: Mir.Module): Termination => {
   return Object.freeze({
     _tag: 'EntryTermination',
     success:
+      program.entry._tag !== 'LibraryEntry' &&
       program.entry._tag === 'OrdinaryEntry' &&
       program.entry.machine.declaration.name !== '$unit-entry'
         ? 'ReturnedStatus'
@@ -257,8 +258,8 @@ const injectivePart = (value: string): string => {
   )}`
 }
 
-export const symbolFor = (fn: Mir.MirFunction, entry: Instances.InstanceKey): string =>
-  Mir.matchesInstanceKey(fn, entry)
+export const symbolFor = (fn: Mir.MirFunction, entry: Instances.InstanceKey | undefined): string =>
+  entry !== undefined && Mir.matchesInstanceKey(fn, entry)
     ? 'silk_main'
     : `silk_${sanitize(fn.id.module)}_${sanitize(fn.id.name)}__${[
         fn.instance.declaration.module,

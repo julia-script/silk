@@ -27,7 +27,8 @@ class CLayoutOracleError extends Data.TaggedError('CLayoutOracleError')<{
 const cLayoutOracleToolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
   clang: Effect.runSync(Config.string('SILK_TEST_CLANG').pipe(Config.withDefault('clang'))),
-  shimCache: NativeToolchain.makeShimCache(),
+  llvmAr: 'llvm-ar',
+  runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
 })
 
 it('plans opaque local-shared blocks without exposing field offsets to source layout data', () => {
@@ -1049,9 +1050,10 @@ int main(void) {
 }
 `,
         )
-        const executable = yield* NativeToolchain.ClangLinker.link(
+        const executable = yield* NativeToolchain.NativeFinalizer.finalize(
           cLayoutOracleToolchain,
           scope,
+          'NativeExecutable',
           host,
           [object.artifact],
           [],

@@ -105,8 +105,9 @@ const program = Effect.gen(function* () {
   const compiler = yield* clang()
   const compiled = yield* Driver.compile({
     compilation: { root: SourceFile.make(moduleName, bytes) },
-    toolchain: Object.freeze({ _tag: 'Toolchain', clang: compiler }),
+    toolchain: Object.freeze({ _tag: 'Toolchain', clang: compiler, llvmAr: 'llvm-ar' }),
     profile: 'release',
+    artifactKind: 'NativeExecutable',
     destination: path.join(destinationRoot, 'program'),
   }).pipe(Effect.provide(SourceResolver.empty))
   const nativeRun =

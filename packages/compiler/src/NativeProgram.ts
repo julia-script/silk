@@ -417,6 +417,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
               builder,
               `silk_suspend_child_${suffix}`,
               childThunkType,
+              { visibility: 'hidden' },
             ),
           }),
         )
@@ -442,13 +443,15 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
             builder,
             `silk_suspend_resume_${suffix}`,
             resumeThunkType,
+            { visibility: 'hidden' },
           ),
         }),
       )
     }
   }
-  const machine = declared.find((entry) =>
-    Mir.matchesInstanceKey(entry.fn, Mir.machineEntry(program)),
+  const machineKey = program.entry._tag === 'LibraryEntry' ? undefined : Mir.machineEntry(program)
+  const machine = declared.find(
+    (entry) => machineKey !== undefined && Mir.matchesInstanceKey(entry.fn, machineKey),
   )
   const driver =
     machine?.suspendable === true
@@ -460,6 +463,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
             machine.resultType,
             machine.parameterTypes.slice(0, -3),
           ),
+          { visibility: 'hidden' },
         )
       : undefined
 

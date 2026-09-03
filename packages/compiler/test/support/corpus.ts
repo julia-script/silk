@@ -71,9 +71,9 @@ export interface CorpusProgram {
   readonly nativeSource?: string
   readonly nativeImports?: Readonly<Record<string, string>>
   readonly nativeEnvironment?: Readonly<Record<string, string>>
-  /** C translation units compiled with `compileCObject` and linked through `nativeObjects`. */
+  /** C translation units compiled with `compileCObject` and linked as structured object inputs. */
   readonly nativeCSources?: Readonly<Record<string, string>>
-  readonly nativeLibraries?: ReadonlyArray<string>
+  readonly nativeDynamicLibraries?: ReadonlyArray<string>
   readonly nativeStdout?: string
   readonly expected:
     | { readonly _tag: 'Completes'; readonly result: number }
@@ -3450,6 +3450,20 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
 pub fn main() -> i32 { return magnitude(-42) }`,
     nativeSource: `unsafe extern "C" fn abs(value: i32) -> i32
 pub fn main() -> i32 { return unsafe abs(-42) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'foreign-object-libm-order',
+    source: 'pub fn main() -> i32 { return 42 }',
+    nativeSource: `import silk.i32 as i32
+unsafe extern "C" fn silk_test_libm_order(value: f64) -> i32
+pub fn main() -> i32 { return unsafe silk_test_libm_order(i32.toF64(85)) }`,
+    nativeCSources: {
+      silk_test_libm_order: `#include <stdint.h>
+#include <math.h>
+int32_t silk_test_libm_order(double value) { return (int32_t)fmod(value, 43.0); }
+`,
+    },
     expected: { _tag: 'Completes', result: 42 },
   },
   {

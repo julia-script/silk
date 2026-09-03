@@ -402,6 +402,9 @@ export const encode = (self: Module): string => {
     case 'UnavailableEntry':
       entry = `entry unavailable reason=${self.entry.reason}`
       break
+    case 'LibraryEntry':
+      entry = `entry library exports=${self.foreignExports.map((export_) => export_.symbol).join(',')}`
+      break
     case 'OrdinaryEntry':
       entry = `entry ordinary target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)}`
       break

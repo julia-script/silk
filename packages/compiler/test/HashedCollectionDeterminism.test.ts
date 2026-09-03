@@ -60,8 +60,9 @@ const threeEngineValue = (name: string, source: string, artifact: string) =>
 
     const compiled = yield* Driver.compile({
       compilation: { root: SourceFile.make(name, ascii(source)) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
       profile: 'release',
+      artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, artifact),
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(compiled._tag, 'Compiled')

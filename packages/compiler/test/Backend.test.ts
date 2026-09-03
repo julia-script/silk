@@ -71,10 +71,10 @@ it.effect('lowers scalar enums to exact native integer lanes and declared discri
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
 
-    assert.match(artifact.ir, /define i8 @silk_.*identity8.*\(i8/)
-    assert.match(artifact.ir, /define i16 @silk_.*identity16.*\(i16/)
-    assert.match(artifact.ir, /define i32 @silk_.*identity32.*\(i32/)
-    assert.match(artifact.ir, /define i64 @silk_.*identity64.*\(i64/)
+    assert.match(artifact.ir, /define hidden i8 @silk_.*identity8.*\(i8/)
+    assert.match(artifact.ir, /define hidden i16 @silk_.*identity16.*\(i16/)
+    assert.match(artifact.ir, /define hidden i32 @silk_.*identity32.*\(i32/)
+    assert.match(artifact.ir, /define hidden i64 @silk_.*identity64.*\(i64/)
     assert.match(artifact.ir, /i8 -1/)
     assert.match(artifact.ir, /i16 -300/)
     assert.match(artifact.ir, /i32 70000/)
@@ -236,7 +236,7 @@ pub fn main() -> i32 {
         const evaluated = Analysis.evaluate(native)
         assert.strictEqual(evaluated._tag, 'Completed')
         assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
-        assert.include(llvm.ir, 'define i32 @silk_main')
+        assert.include(llvm.ir, 'define hidden i32 @silk_main')
       }
     }),
 )

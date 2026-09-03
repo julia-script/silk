@@ -488,6 +488,24 @@ export const lowerProgram = (
     }),
   )
   if (discovery.entry._tag !== 'Resolved') {
+    if (discovery.entry._tag === 'Library') {
+      return Object.freeze({
+        _tag: 'MirModule',
+        module: discovery.rootModule,
+        intrinsics: discovery.intrinsics,
+        foreignCalls: discovery.foreignCalls,
+        foreignExports: discovery.foreignExports,
+        entry: Object.freeze({ _tag: 'LibraryEntry' }),
+        layout,
+        staticData,
+        executionTransitions: Object.freeze(
+          layout.executionPackages.plans.map((plan, ordinal) =>
+            ExecutionTransition.authority(ordinal, ordinal + 1, plan.readinessStorage),
+          ),
+        ),
+        functions: withLocalSharedDropPlans(layout, functions),
+      })
+    }
     return Object.freeze({
       _tag: 'MirModule',
       module: discovery.rootModule,

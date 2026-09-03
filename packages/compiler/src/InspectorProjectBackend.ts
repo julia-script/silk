@@ -562,16 +562,19 @@ export const ownershipRows = (facts: Ownership.ModuleOwnership): ReadonlyArray<R
 }
 
 export const instanceRows = (discovery: Instances.Discovery): ReadonlyArray<RowModel> => {
+  let entryDetail: string
+  if (discovery.entry._tag === 'Resolved')
+    entryDetail = `${discovery.entry.key.declaration.module}.${discovery.entry.key.declaration.name}`
+  else if (discovery.entry._tag === 'Library')
+    entryDetail = `library · ${discovery.foreignExports.length} exports`
+  else entryDetail = `unavailable · ${discovery.entry.reason}`
   const rows: Array<RowModel> = [
     {
       key: 'entry',
       label: 'entry',
-      detail:
-        discovery.entry._tag === 'Resolved'
-          ? `${discovery.entry.key.declaration.module}.${discovery.entry.key.declaration.name}`
-          : `unavailable · ${discovery.entry.reason}`,
+      detail: entryDetail,
       head: true,
-      ...(discovery.entry._tag === 'Resolved' ? {} : { tone: 'warning' as const }),
+      ...(discovery.entry._tag === 'Unavailable' ? { tone: 'warning' as const } : {}),
     },
     {
       key: 'reachable',

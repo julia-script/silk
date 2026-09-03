@@ -3,7 +3,9 @@ import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
 import { parse, TomlDate, type TomlTable, type TomlValue } from 'smol-toml'
+import * as ArtifactKind from './ArtifactKind.js'
 import type * as Backend from './Backend.js'
+import * as NativeLinkInput from './NativeLinkInput.js'
 import * as SourceEntry from './SourceEntry.js'
 import * as TargetSelector from './TargetSelector.js'
 
@@ -26,8 +28,8 @@ export interface BuildConfiguration {
   readonly backend: Backend.Id
   readonly targets: ReadonlyArray<TargetSelector.TargetSelector>
   readonly outputDirectory: string
-  /** Library names the native link passes as `-l<name>`; ignored for WebAssembly targets. */
-  readonly nativeLibraries: ReadonlyArray<string>
+  readonly artifact: Exclude<ArtifactKind.ArtifactKind, 'WebAssemblyModule'>
+  readonly nativeLinkInputs: ReadonlyArray<NativeLinkInput.NativeLinkInput>
 }
 
 export type ProjectErrorReason =
@@ -59,7 +61,7 @@ export const isPackageName = (name: string): boolean => packageNamePattern.test(
 /** Whether a package version is a complete Semantic Versioning 2.0.0 value. */
 export const isSemanticVersion = (version: string): boolean => semanticVersionPattern.test(version)
 
-const isLibraryName = (value: TomlValue): value is string =>
+const isNativeName = (value: TomlValue | undefined): value is string =>
   typeof value === 'string' &&
   value.length > 0 &&
   !value.startsWith('-') &&
@@ -70,6 +72,67 @@ const isTable = (value: TomlValue | undefined): value is TomlTable =>
   value !== null &&
   !Array.isArray(value) &&
   !(value instanceof TomlDate)
+
+const isSafeRelativePath = (value: TomlValue | undefined): value is string => {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.includes('\0') ||
+    value.startsWith('/') ||
+    /^[A-Za-z]:[\\/]/.test(value)
+  )
+    return false
+  let depth = 0
+  for (const segment of value.split(/[\\/]+/)) {
+    if (segment === '' || segment === '.') continue
+    depth += segment === '..' ? -1 : 1
+    if (depth < 0) return false
+  }
+  return true
+}
+
+const hasExactKeys = (table: TomlTable, keys: ReadonlyArray<string>): boolean => {
+  const actual = Object.keys(table).sort()
+  const expected = [...keys].sort()
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index])
+}
+
+const decodeNativeLinkInput = (value: TomlValue): NativeLinkInput.NativeLinkInput | undefined => {
+  if (!isTable(value)) return undefined
+  if (hasExactKeys(value, ['object']) && isSafeRelativePath(value.object))
+    return NativeLinkInput.object(value.object)
+  if (hasExactKeys(value, ['static-archive']) && isSafeRelativePath(value['static-archive']))
+    return NativeLinkInput.staticArchive(value['static-archive'])
+  if (hasExactKeys(value, ['search-path']) && isSafeRelativePath(value['search-path']))
+    return NativeLinkInput.searchPath(value['search-path'])
+  if (hasExactKeys(value, ['framework']) && isNativeName(value.framework))
+    return NativeLinkInput.framework(value.framework)
+  if (
+    hasExactKeys(value, ['library', 'mode']) &&
+    isNativeName(value.library) &&
+    (value.mode === 'static' || value.mode === 'dynamic')
+  )
+    return NativeLinkInput.library(value.library, value.mode === 'static' ? 'Static' : 'Dynamic')
+  return undefined
+}
+
+const resolveNativeLinkInput = (
+  directory: string,
+  input: NativeLinkInput.NativeLinkInput,
+  resolvePath: (...paths: ReadonlyArray<string>) => string,
+): NativeLinkInput.NativeLinkInput => {
+  switch (input._tag) {
+    case 'Object':
+      return NativeLinkInput.object(resolvePath(directory, input.path))
+    case 'StaticArchive':
+      return NativeLinkInput.staticArchive(resolvePath(directory, input.path))
+    case 'SearchPath':
+      return NativeLinkInput.searchPath(resolvePath(directory, input.path))
+    case 'Library':
+    case 'Framework':
+      return input
+  }
+}
 
 const invalidManifest = (manifestPath: string, detail: string): ProjectError =>
   new ProjectError({
@@ -160,11 +223,23 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
       'build.output-dir must be a non-empty manifest-relative directory that does not escape the project',
     )
   }
-  const nativeLibraries = buildTable?.['native-libraries'] ?? []
-  if (!Array.isArray(nativeLibraries) || !nativeLibraries.every(isLibraryName)) {
+  const artifactValue = buildTable?.artifact ?? 'executable'
+  const artifact =
+    typeof artifactValue === 'string' ? ArtifactKind.fromManifest(artifactValue) : undefined
+  if (artifact === undefined || artifact === 'WebAssemblyModule') {
     return yield* invalidManifest(
       manifestPath,
-      'build.native-libraries must be an array of library names without path separators, whitespace, NUL, or a leading -',
+      'build.artifact must be executable, shared-library, or static-library',
+    )
+  }
+  const nativeLinkInputsValue = buildTable?.['native-link-inputs'] ?? []
+  if (!Array.isArray(nativeLinkInputsValue))
+    return yield* invalidManifest(manifestPath, 'build.native-link-inputs must be an array')
+  const nativeLinkInputs = nativeLinkInputsValue.map(decodeNativeLinkInput)
+  if (nativeLinkInputs.some((input) => input === undefined)) {
+    return yield* invalidManifest(
+      manifestPath,
+      'build.native-link-inputs entries must be exactly one object, static-archive, search-path, or framework value, or one library with static or dynamic mode',
     )
   }
   return {
@@ -175,7 +250,10 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
     backend,
     targets: Object.freeze([...targetsValue]) as ReadonlyArray<TargetSelector.TargetSelector>,
     outputDirectory,
-    nativeLibraries: Object.freeze([...nativeLibraries]),
+    artifact,
+    nativeLinkInputs: Object.freeze(
+      nativeLinkInputs.flatMap((input) => (input === undefined ? [] : [input])),
+    ),
   }
 })
 
@@ -267,7 +345,12 @@ export const load = Effect.fn('Project.load')(function* (
       backend: manifest.backend,
       targets: manifest.targets,
       outputDirectory: path.resolve(directory, manifest.outputDirectory),
-      nativeLibraries: manifest.nativeLibraries,
+      artifact: manifest.artifact,
+      nativeLinkInputs: Object.freeze(
+        manifest.nativeLinkInputs.map((input) =>
+          resolveNativeLinkInput(directory, input, path.resolve),
+        ),
+      ),
     }),
   })
 })

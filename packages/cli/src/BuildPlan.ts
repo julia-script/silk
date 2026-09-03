@@ -1,10 +1,12 @@
 import { join } from 'node:path'
+import * as ArtifactKind from '@silklang/compiler/ArtifactKind'
 import type * as Backend from '@silklang/compiler/Backend'
 import * as BackendRegistry from '@silklang/compiler/BackendRegistry'
 import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
+import type * as NativeLinkInput from '@silklang/compiler/NativeLinkInput'
 import * as Project from '@silklang/compiler/Project'
 import * as Target from '@silklang/compiler/Target'
-import type * as ToolchainPlan from '@silklang/compiler/ToolchainPlan'
+import * as ToolchainPlan from '@silklang/compiler/ToolchainPlan'
 import * as Data from 'effect/Data'
 import * as Result from 'effect/Result'
 
@@ -15,11 +17,12 @@ export interface BuildPlan {
   readonly project: Project.Project
   readonly backend: Backend.Backend
   readonly target: Target.Target
+  readonly artifactKind: ArtifactKind.ArtifactKind
   readonly profile: ToolchainPlan.OptimizationProfile
   readonly destination: string
   readonly toolchain: NativeToolchain.Toolchain
-  /** The manifest's native libraries for a native target; empty for WebAssembly. */
-  readonly nativeLibraries: ReadonlyArray<string>
+  /** The manifest's ordered native inputs for a native target; empty for WebAssembly. */
+  readonly nativeLinkInputs: ReadonlyArray<NativeLinkInput.NativeLinkInput>
 }
 
 export type BuildPlanErrorReason =
@@ -29,6 +32,17 @@ export type BuildPlanErrorReason =
       readonly error: BackendRegistry.BackendRegistryError
     }
   | { readonly _tag: 'NonNativeRunBackend'; readonly backend: Backend.Id }
+  | { readonly _tag: 'NonExecutableRunArtifact'; readonly artifactKind: ArtifactKind.ArtifactKind }
+  | {
+      readonly _tag: 'IncompatibleArtifactTarget'
+      readonly artifactKind: ArtifactKind.ArtifactKind
+      readonly target: Target.Id
+    }
+  | { readonly _tag: 'NativeInputsForWebAssembly'; readonly target: Target.Id }
+  | {
+      readonly _tag: 'UnsupportedNativePlan'
+      readonly plan: ToolchainPlan.UnsupportedNativePlan
+    }
   | { readonly _tag: 'ForeignRunTarget'; readonly target: Target.Id; readonly host: Target.Id }
   | { readonly _tag: 'HostUnavailable'; readonly error: Target.TargetError }
 
@@ -45,6 +59,7 @@ export interface Options {
   readonly profile: ToolchainPlan.OptimizationProfile
   readonly purpose?: Purpose
   readonly clang?: string
+  readonly llvmAr?: string
 }
 
 /** Creates one immutable, already-resolved build plan with a backend-qualified destination. */
@@ -72,6 +87,18 @@ export const make = (
     )
   }
   if (options.purpose === 'run') {
+    if (project.build.artifact !== 'NativeExecutable') {
+      return Result.fail(
+        new BuildPlanError({
+          operation: 'BuildPlan.make',
+          message: `Cannot run ${ArtifactKind.manifestSpelling(project.build.artifact)} artifact`,
+          reason: {
+            _tag: 'NonExecutableRunArtifact',
+            artifactKind: project.build.artifact,
+          },
+        }),
+      )
+    }
     if (options.backend.id !== 'llvm' || !Target.isNative(options.target)) {
       return Result.fail(
         new BuildPlanError({
@@ -106,24 +133,74 @@ export const make = (
     }
   }
 
-  const fileName = options.target.kind === 'WebAssembly' ? `${project.name}.wasm` : project.name
+  const artifactKind = Target.isNative(options.target)
+    ? project.build.artifact
+    : ArtifactKind.webAssemblyModule
+  if (!Target.isNative(options.target) && project.build.artifact !== 'NativeExecutable') {
+    return Result.fail(
+      new BuildPlanError({
+        operation: 'BuildPlan.make',
+        message: `Artifact ${ArtifactKind.manifestSpelling(project.build.artifact)} is incompatible with target ${options.target.id}`,
+        reason: {
+          _tag: 'IncompatibleArtifactTarget',
+          artifactKind: project.build.artifact,
+          target: options.target.id,
+        },
+      }),
+    )
+  }
+  if (!Target.isNative(options.target) && project.build.nativeLinkInputs.length > 0) {
+    return Result.fail(
+      new BuildPlanError({
+        operation: 'BuildPlan.make',
+        message: `Native link inputs are incompatible with target ${options.target.id}`,
+        reason: { _tag: 'NativeInputsForWebAssembly', target: options.target.id },
+      }),
+    )
+  }
+  const destination = join(
+    project.build.outputDirectory,
+    options.backend.id,
+    options.target.id,
+    options.profile,
+    ArtifactKind.fileName(artifactKind, project.name, options.target),
+  )
+  const toolchain = Object.freeze({
+    _tag: 'Toolchain' as const,
+    clang: options.clang ?? 'clang',
+    llvmAr: options.llvmAr ?? 'llvm-ar',
+  })
+  if (Target.isNative(options.target)) {
+    const nativePlan = ToolchainPlan.nativeCommand(
+      toolchain,
+      project.build.artifact,
+      options.target,
+      Object.freeze([]),
+      project.build.nativeLinkInputs,
+      destination,
+    )
+    if (nativePlan._tag === 'UnsupportedNativePlan') {
+      return Result.fail(
+        new BuildPlanError({
+          operation: 'BuildPlan.make',
+          message: `Native link input ${nativePlan.input._tag} is unsupported for ${ArtifactKind.manifestSpelling(artifactKind)} on ${options.target.id}`,
+          reason: { _tag: 'UnsupportedNativePlan', plan: nativePlan },
+        }),
+      )
+    }
+  }
   return Result.succeed(
     Object.freeze({
       _tag: 'BuildPlan' as const,
       project,
       backend: options.backend,
       target: options.target,
+      artifactKind,
       profile: options.profile,
-      destination: join(
-        project.build.outputDirectory,
-        options.backend.id,
-        options.target.id,
-        options.profile,
-        fileName,
-      ),
-      toolchain: Object.freeze({ _tag: 'Toolchain' as const, clang: options.clang ?? 'clang' }),
-      nativeLibraries: Target.isNative(options.target)
-        ? project.build.nativeLibraries
+      destination,
+      toolchain,
+      nativeLinkInputs: Target.isNative(options.target)
+        ? project.build.nativeLinkInputs
         : Object.freeze([]),
     }),
   )

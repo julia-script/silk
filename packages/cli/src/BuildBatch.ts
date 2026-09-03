@@ -32,6 +32,7 @@ export interface Options {
   readonly profile: ToolchainPlan.OptimizationProfile
   readonly purpose?: BuildPlan.Purpose
   readonly clang?: string
+  readonly llvmAr?: string
 }
 
 /** Resolves one backend and all targets before returning any executable build work. */
@@ -68,6 +69,7 @@ export const make = (
       profile: options.profile,
       ...(options.purpose === undefined ? {} : { purpose: options.purpose }),
       ...(options.clang === undefined ? {} : { clang: options.clang }),
+      ...(options.llvmAr === undefined ? {} : { llvmAr: options.llvmAr }),
     })
     if (Result.isFailure(plan)) {
       return Result.fail(

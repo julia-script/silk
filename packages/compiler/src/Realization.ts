@@ -38,18 +38,18 @@ const instanceViolationDiagnostics = (
 function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
-  options: Options,
+  options: Options & { readonly artifactKind?: ArtifactKind.ArtifactKind },
 ): Realization
 function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
-  options: Options,
+  options: Options & { readonly artifactKind?: ArtifactKind.ArtifactKind },
   backend: Backend.Backend,
 ): Preparation
 function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
-  options: Options,
+  options: Options & { readonly artifactKind?: ArtifactKind.ArtifactKind },
   backend?: Backend.Backend,
 ): Realization | Preparation {
   const report = [...self.report]
@@ -79,6 +79,9 @@ function discoverAndLower(
             self.index,
             targetSelection.target,
             self.resolution,
+            ArtifactKind.isLibrary(options.artifactKind ?? ArtifactKind.nativeExecutable)
+              ? 'Library'
+              : 'Executable',
           ),
     (value) => value.instances.length,
     (value) => value.violations.length,
@@ -347,10 +350,11 @@ export const prepare = (
   self: Frontend,
   backend: Backend.Backend,
   targetId: string | undefined = self.requestedTarget,
-  options: Options = {},
+  options: Options & { readonly artifactKind?: ArtifactKind.ArtifactKind } = {},
 ): Preparation => discoverAndLower(self, targetId, options, backend)
 
 import { AnalysisUnavailable } from './AnalysisUnavailable.js'
+import * as ArtifactKind from './ArtifactKind.js'
 import * as Backend from './Backend.js'
 import * as BackendRegistry from './BackendRegistry.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
