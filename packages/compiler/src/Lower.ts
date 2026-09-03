@@ -536,6 +536,26 @@ export const lowerProgram = (
           left.declarationSpan.end - right.declarationSpan.end,
       ),
   )
+  const unavailableEntryModule = (
+    reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason'],
+  ): Mir.Module =>
+    Object.freeze({
+      _tag: 'MirModule',
+      module: discovery.rootModule,
+      intrinsics: discovery.intrinsics,
+      foreignCalls: discovery.foreignCalls,
+      foreignExports: discovery.foreignExports,
+      foreignStatics,
+      entry: Object.freeze({ _tag: 'UnavailableEntry', reason }),
+      layout,
+      staticData,
+      executionTransitions: Object.freeze(
+        layout.executionPackages.plans.map((plan, ordinal) =>
+          ExecutionTransition.authority(ordinal, ordinal + 1, plan.readinessStorage),
+        ),
+      ),
+      functions: withLocalSharedDropPlans(layout, functions),
+    })
   if (discovery.entry._tag !== 'Resolved') {
     if (discovery.entry._tag === 'Library') {
       return Object.freeze({
@@ -556,23 +576,7 @@ export const lowerProgram = (
         functions: withLocalSharedDropPlans(layout, functions),
       })
     }
-    return Object.freeze({
-      _tag: 'MirModule',
-      module: discovery.rootModule,
-      intrinsics: discovery.intrinsics,
-      foreignCalls: discovery.foreignCalls,
-      foreignExports: discovery.foreignExports,
-      foreignStatics,
-      entry: Object.freeze({ _tag: 'UnavailableEntry', reason: discovery.entry.reason }),
-      layout,
-      staticData,
-      executionTransitions: Object.freeze(
-        layout.executionPackages.plans.map((plan, ordinal) =>
-          ExecutionTransition.authority(ordinal, ordinal + 1, plan.readinessStorage),
-        ),
-      ),
-      functions: withLocalSharedDropPlans(layout, functions),
-    })
+    return unavailableEntryModule(discovery.entry.reason)
   }
   const resolvedEntry = discovery.entry
   let entry: Mir.Entry
@@ -673,7 +677,7 @@ export const lowerProgram = (
             Mir.matchesInstance(fn, runnerSpec.id, resolvedEntry.key.typeArguments),
           )
     if (target?.result._tag !== 'EffectValue' || runner?.result._tag !== 'EffectOutcome') {
-      throw new RangeError('Effect entry lowering lost its constructor or runner')
+      return unavailableEntryModule('UnavailableEntryBody')
     }
     const adapterId = effectEntryAdapterId(discovery.rootModule)
     const adapterKey: Instances.InstanceKey = Object.freeze({
