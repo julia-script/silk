@@ -310,6 +310,15 @@ export type EffectEnvironment =
       readonly reason: string
     }
 
+/**
+ * Whether one shared or exclusive capture stores a pointer to its source slot. Slice and
+ * reference values are already stable borrow descriptors, so a capture of one stores the
+ * descriptor inline: the loan it carries survives the short-lived slot it was read from, and the
+ * hidden body receives the reference itself rather than a pointer to it.
+ */
+const borrowedCapture = (access: Type.CaptureAccess, type: Type.Type): boolean =>
+  (access === 'Shared' || access === 'Exclusive') && !Type.isSlice(type) && !Type.isReference(type)
+
 const sameExactOwner = (
   left: Instances.InstanceKey,
   right: Type.ExecutableSpecializationOwner,
@@ -876,12 +885,10 @@ export const catalog = (
           : discovery?.callables.find((candidate) =>
               FieldRealization.matchesIdentity(callableIdentity, candidate),
             )
-      const stableDescriptor = Type.isSlice(slot.type) || Type.isReference(slot.type)
       const borrowed =
-        (slot.access === 'Shared' || slot.access === 'Exclusive') &&
+        borrowedCapture(slot.access, slot.type) &&
         nestedEffect === undefined &&
-        nestedCallable === undefined &&
-        !stableDescriptor
+        nestedCallable === undefined
       let nestedLayout:
         | { readonly size: number; readonly alignment: number; readonly copy: boolean }
         | undefined
@@ -895,7 +902,7 @@ export const catalog = (
         let callableCopy = true
         const captureInputs: Array<Packing.Input<undefined>> = []
         for (const capture of nestedCallable.captures) {
-          const captureBorrowed = capture.access === 'Shared' || capture.access === 'Exclusive'
+          const captureBorrowed = borrowedCapture(capture.access, capture.type)
           const captureLayout = captureBorrowed ? undefined : layoutType(capture.type)
           if (captureLayout?._tag === 'UnavailableLayoutEntry') return undefined
           const size = captureBorrowed ? target.pointerSize : (captureLayout?.size ?? 0)
@@ -977,7 +984,7 @@ export const catalog = (
     const inputs: Array<Packing.Input<Omit<CallableEnvironmentField, keyof Packing.PlacedField>>> =
       []
     for (const capture of realization.captures) {
-      const borrowed = capture.access === 'Shared' || capture.access === 'Exclusive'
+      const borrowed = borrowedCapture(capture.access, capture.type)
       const valueLayout = borrowed ? undefined : layoutType(capture.type)
       if (valueLayout?._tag === 'UnavailableLayoutEntry') {
         const result = unavailable(
@@ -1671,7 +1678,7 @@ export const catalog = (
         })
       let copy = true
       const fieldInputs = (callable?.captures ?? []).flatMap((capture) => {
-        const borrowed = capture.access === 'Shared' || capture.access === 'Exclusive'
+        const borrowed = borrowedCapture(capture.access, capture.type)
         const valueLayout = borrowed ? undefined : layoutType(capture.type)
         if (valueLayout?._tag === 'UnavailableLayoutEntry') return []
         const fieldSize = borrowed ? target.pointerSize : (valueLayout?.size ?? 0)
@@ -2573,16 +2580,11 @@ const effectEnvironments = (
             capturedEffectEnvironment?.effect.access ??
             capturedCallableEnvironment?.callable.mode ??
             (capturedCallableIdentity === undefined ? capture.access : 'Shared')
-          // Slice and reference values are already stable borrow descriptors. Capturing their
-          // descriptor inline preserves the underlying loan without retaining a pointer to the
-          // effect factory's short-lived stack slot.
           const callable = capturedCallableIdentity !== undefined
           const borrowed =
-            (access === 'Shared' || access === 'Exclusive') &&
+            borrowedCapture(access, fieldType) &&
             capturedEffectEnvironment === undefined &&
-            !callable &&
-            !Type.isSlice(fieldType) &&
-            !Type.isReference(fieldType)
+            !callable
           const valueLayout =
             borrowed || callable
               ? undefined
@@ -2830,8 +2832,7 @@ const callableEnvironments = (
     > = []
     for (const capture of callable.captures) {
       const callableCapture = capture.callableIdentity !== undefined
-      const borrowed =
-        !callableCapture && (capture.access === 'Shared' || capture.access === 'Exclusive')
+      const borrowed = !callableCapture && borrowedCapture(capture.access, capture.type)
       const callableIdentity = capture.callableIdentity
       const nestedCallable =
         callableIdentity?.environment === undefined

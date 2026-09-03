@@ -7503,6 +7503,16 @@ export const effectExpressionAccess = (
     return expression.type.type.access
   if (expression.type._tag === 'Available' && Type.isCallable(expression.type.type))
     return expression.type.type.mode
+  // An owned affine value (a fresh temporary or a call result) enters the environment by
+  // ownership whether or not the source spelled `move`, so running consumes it.
+  if (
+    expression.type._tag === 'Available' &&
+    index !== undefined &&
+    !Type.isReference(expression.type.type) &&
+    !Type.isSlice(expression.type.type) &&
+    !ConformanceProof.copyType(index, expression.type.type, assumptions)
+  )
+    return 'Take'
   return 'Shared'
 }
 
@@ -7676,12 +7686,16 @@ export const effectCaptureFacts = (
     } else {
       reference = undefined
     }
+    // A shared callable or Effect value duplicates freely (CALLABLE-002 / EFFECT-OWN-002), so a
+    // body reading one captures a copy rather than a loan on the outer binding.
     const copy =
       fact.type._tag === 'Available' &&
       !Type.containsViewBorrow(fact.type.type) &&
-      (index === undefined
-        ? typeof fact.type.type === 'string'
-        : ConformanceProof.copyType(index, fact.type.type, assumptions))
+      ((Type.isCallable(fact.type.type) && fact.type.type.mode === 'Shared') ||
+        (Type.isEffect(fact.type.type) && fact.type.type.access === 'Shared') ||
+        (index === undefined
+          ? typeof fact.type.type === 'string'
+          : ConformanceProof.copyType(index, fact.type.type, assumptions)))
     if (fact.reference._tag === 'ResolvedPattern') {
       const owner = fact.reference.binding.id.arm.match.function
       if (
@@ -8193,7 +8207,11 @@ const analyzeAnonymousCallable = (
       retainedDependencies: Object.freeze([]),
       typeArguments: Object.freeze(declaration.typeParameters.map((parameter) => parameter.type)),
       ...(environmentOwner === undefined ? {} : { environmentOwner }),
-      substitution: new Map(),
+      // The hidden body is generic over exactly the owner's parameters; naming each as itself
+      // lets an owner instance's substitution specialize the section like any other call site.
+      substitution: new Map(
+        declaration.typeParameters.map((parameter) => [Type.key(parameter.type), parameter.type]),
+      ),
       mode,
       type: callable === undefined ? unavailableExpressionType : availableExpressionType(callable),
       syntax: node,
@@ -9416,19 +9434,9 @@ export const finishDeclarationCall = (
                 ? callContract.fact.substitution
                 : new Map<string, Type.GenericArgument>()
             const success = Type.substitute(callable.returnType.type, substitution)
-            if (callable.functionKind !== 'Effect')
-              return Type.isEffect(success)
-                ? Type.effectWithRows(
-                    success.success,
-                    success.failureRow,
-                    effectCaptureAccess(
-                      argumentsResult.facts,
-                      resolution.index,
-                      copyAssumptionsOf(caller),
-                    ),
-                    success.requirementRow,
-                  )
-                : success
+            // An ordinary function's declared result is its contract; the Effect it returns
+            // carries the run access the declaration spelled, not one derived from the call.
+            if (callable.functionKind !== 'Effect') return success
             return Type.effectWithRows(
               success,
               Type.substituteFailureRow(callable.failureRow.row, substitution),

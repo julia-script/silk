@@ -444,6 +444,33 @@ function* executeFunction(
     if (state.cells.has(key)) state.cells.set(key, next)
   }
 
+  /**
+   * The cell one root local names: its own slot, or the outer cell an environment borrow
+   * aliases. A loan or capture rooted at an aliased parameter must reach that outer cell, or the
+   * body would borrow a snapshot and its writes would never reach the captured owner.
+   */
+  const rootCell = (local: Mir.LocalId): { readonly frame: number; readonly cell: number } => {
+    const alias = locals.get(local.ordinal)?.value
+    return alias?._tag === 'EnvironmentBorrowValue'
+      ? { frame: alias.frame, cell: alias.cell }
+      : { frame, cell: local.ordinal }
+  }
+
+  /**
+   * The access one capture aliases its source cell with, or `undefined` when the environment
+   * copies the source instead. A reference or slice source is already a stable borrow descriptor,
+   * so the environment stores that descriptor, matching the target layouts' inline representation
+   * of such captures.
+   */
+  const aliasedCaptureAccess = (capture: {
+    readonly source: Mir.LocalId
+    readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+  }): 'Shared' | 'Exclusive' | undefined => {
+    if (capture.access === 'Copy' || capture.access === 'Take') return undefined
+    const type = fn.localTypes.at(capture.source.ordinal)
+    return type?._tag === 'Reference' || type?._tag === 'Slice' ? undefined : capture.access
+  }
+
   const cell = (slice: SliceValue): LocalState => {
     const found = state.cells.get(cellKey(slice.frame, slice.cell))
     if (found === undefined) throw new RangeError('MIR slice references a missing evaluator cell')
@@ -2298,8 +2325,7 @@ function* executeFunction(
                   ? source.value
                   : Object.freeze({
                       _tag: 'ReferenceValue' as const,
-                      frame,
-                      cell: operation.root.ordinal,
+                      ...rootCell(operation.root),
                       selectors: Object.freeze([]),
                       indexes: Object.freeze([]),
                     })
@@ -2331,12 +2357,12 @@ function* executeFunction(
                     if (resolved._tag === 'Blocked') return resolved
                     if (resolved.selected._tag !== 'ArrayValue')
                       throw new RangeError('MIR verifier allowed borrowing a non-array place')
-                    const key = cellKey(frame, operation.root.ordinal)
+                    const root = rootCell(operation.root)
+                    const key = cellKey(root.frame, root.cell)
                     if (!state.cells.has(key)) state.cells.set(key, source)
                     return Object.freeze({
                       _tag: 'SliceValue' as const,
-                      frame,
-                      cell: operation.root.ordinal,
+                      ...root,
                       base: 0,
                       length: operation.sourceType.type.length,
                       selectors: Object.freeze(
@@ -4376,8 +4402,12 @@ function* executeFunction(
             const root = read(operation.root)
             const replacement = read(operation.source)
             // A reference root writes through the borrow: replace within the referenced cell
-            // and store it back where the loan began, leaving the reference local untouched.
-            if (root.value._tag === 'ReferenceValue' && operation.selectors.length > 0) {
+            // and store it back where the loan began, leaving the reference local untouched. A
+            // whole-referent write (`r.* = v`) selects nothing yet still writes through.
+            if (
+              root.value._tag === 'ReferenceValue' &&
+              (operation.selectors.length > 0 || operation.rootType._tag === 'Reference')
+            ) {
               const key = cellKey(root.value.frame, root.value.cell)
               const target = state.cells.get(key)
               if (target === undefined)
@@ -4464,17 +4494,18 @@ function* executeFunction(
             state.nextCallable += 1
             state.callables.set(ticket, { state: 'Available' })
             const captures = operation.captures.map((capture) => {
+              const aliased = aliasedCaptureAccess(capture)
               const captured: Value =
-                capture.access === 'Copy' || capture.access === 'Take'
+                aliased === undefined
                   ? read(capture.source).value
                   : (() => {
-                      const key = cellKey(frame, capture.source.ordinal)
+                      const root = rootCell(capture.source)
+                      const key = cellKey(root.frame, root.cell)
                       if (!state.cells.has(key)) state.cells.set(key, read(capture.source))
                       return Object.freeze({
                         _tag: 'EnvironmentBorrowValue' as const,
-                        frame,
-                        cell: capture.source.ordinal,
-                        access: capture.access,
+                        ...root,
+                        access: aliased,
                       })
                     })()
               return Object.freeze({
@@ -4544,16 +4575,15 @@ function* executeFunction(
             const captureValues = (
               stored?.captures ??
               operation.captures.map((capture) => {
+                const aliased =
+                  operation.callable === undefined ? undefined : aliasedCaptureAccess(capture)
                 const captured: Value =
-                  operation.callable === undefined ||
-                  capture.access === 'Copy' ||
-                  capture.access === 'Take'
+                  aliased === undefined
                     ? read(capture.source).value
                     : Object.freeze({
                         _tag: 'EnvironmentBorrowValue' as const,
-                        frame,
-                        cell: capture.source.ordinal,
-                        access: capture.access,
+                        ...rootCell(capture.source),
+                        access: aliased,
                       })
                 return Object.freeze({ ...capture, value: captured })
               })

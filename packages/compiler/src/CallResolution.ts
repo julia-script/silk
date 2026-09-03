@@ -2101,6 +2101,16 @@ export const captureAccess = (
     return expression.type.type.mode === 'Shared' ? 'Copy' : expression.type.type.mode
   if (expression.type._tag === 'Available' && Type.isEffect(expression.type.type))
     return expression.type.type.access === 'Shared' ? 'Copy' : expression.type.type.access
+  // An owned affine value (a fresh temporary or a call result) is captured by ownership whether
+  // or not the source spelled `move`; the environment then cleans it exactly once.
+  if (
+    expression.type._tag === 'Available' &&
+    index !== undefined &&
+    !Type.isReference(expression.type.type) &&
+    !Type.isSlice(expression.type.type) &&
+    !ConformanceProof.copyType(index, expression.type.type, assumptions)
+  )
+    return 'Take'
   return 'Copy'
 }
 
