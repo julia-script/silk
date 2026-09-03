@@ -252,17 +252,32 @@ export interface UnavailableEntry {
 export type CatalogEntry = Entry | UnavailableEntry
 
 /** One valid target-word constant awaiting the selected target's exact range verdict. */
-export interface UsizeConstantLiteral {
+export interface WordConstantLiteral {
+  readonly type: WordType
   readonly value: bigint
   readonly span: SourceSpan.SourceSpan
 }
+
+/** The integer types whose width is the selected target's word. */
+export type WordType = 'usize' | 'isize'
+
+export const isWordType = (type: unknown): type is WordType => type === 'usize' || type === 'isize'
+
+/** The inclusive exact range one word type spans on a target of the given width. */
+export const wordRange = (
+  type: WordType,
+  bits: 32 | 64,
+): { readonly minimum: bigint; readonly maximum: bigint } =>
+  type === 'usize'
+    ? { minimum: 0n, maximum: (1n << BigInt(bits)) - 1n }
+    : { minimum: -(1n << BigInt(bits - 1)), maximum: (1n << BigInt(bits - 1)) - 1n }
 
 /** Every canonical nominal declaration laid out for one selected target. */
 export interface Catalog {
   readonly _tag: 'LayoutCatalog'
   readonly target: Target.Target
   readonly entries: ReadonlyArray<CatalogEntry>
-  readonly usizeConstants: ReadonlyArray<UsizeConstantLiteral>
+  readonly wordConstants: ReadonlyArray<WordConstantLiteral>
 }
 
 /** The concrete layouts reached by one target-aware MIR program. */
@@ -274,7 +289,7 @@ export interface Plan {
   readonly callableEnvironments: ReadonlyArray<CallableEnvironment>
   readonly callingShapes: ReadonlyArray<CallingShape>
   readonly staticData?: ReadonlyArray<StaticDataPlacement>
-  readonly literalVerdicts: ReadonlyArray<UsizeLiteralVerdict>
+  readonly literalVerdicts: ReadonlyArray<WordLiteralVerdict>
   readonly localSharedAllocationProvenance: LocalSharedAllocationProvenance.Plan
   readonly executionPackages: ExecutionPackage.Module
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -447,16 +462,18 @@ export interface CallableView {
   readonly pointerBits: 32 | 64
 }
 
-/** A target-owned verdict for one reachable exact contextual `usize` literal. */
-export type UsizeLiteralVerdict =
+/** A target-owned verdict for one reachable exact contextual `usize` or `isize` literal. */
+export type WordLiteralVerdict =
   | {
-      readonly _tag: 'AvailableUsizeLiteral'
+      readonly _tag: 'AvailableWordLiteral'
+      readonly type: WordType
       readonly value: bigint
       readonly bits: 32 | 64
       readonly span: SourceSpan.SourceSpan
     }
   | {
-      readonly _tag: 'UnavailableUsizeLiteral'
+      readonly _tag: 'UnavailableWordLiteral'
+      readonly type: WordType
       readonly value: bigint
       readonly bits: 32 | 64
       readonly span: SourceSpan.SourceSpan
@@ -2050,14 +2067,20 @@ export const catalog = (
     entries: Object.freeze(
       [...completed.values()].sort((left, right) => Type.compare(left.type, right.type)),
     ),
-    usizeConstants: Object.freeze(
+    wordConstants: Object.freeze(
       index.modules.flatMap((module) =>
         module.constants.flatMap((constant) => {
-          if (constant.declaredType._tag !== 'Resolved' || constant.declaredType.type !== 'usize')
+          if (constant.declaredType._tag !== 'Resolved' || !isWordType(constant.declaredType.type))
             return []
           const literal = constant.literal
           if (literal._tag !== 'IntegerLiteral') return []
-          return [Object.freeze({ value: literal.value, span: literal.token.span })]
+          return [
+            Object.freeze({
+              type: constant.declaredType.type,
+              value: literal.value,
+              span: literal.token.span,
+            }),
+          ]
         }),
       ),
     ),
@@ -2089,10 +2112,11 @@ const addExpressionTypes = (
     addExpressionTypes(types, expression.left, substitution)
     addExpressionTypes(types, expression.right, substitution)
   }
-  if (expression._tag === 'StringEquality') {
+  if (expression._tag === 'StringEquality' || expression._tag === 'EnumEquality') {
     addExpressionTypes(types, expression.left, substitution)
     addExpressionTypes(types, expression.right, substitution)
   }
+  if (expression._tag === 'EnumValue') addExpressionTypes(types, expression.value, substitution)
   if (expression._tag === 'UnionConvert') {
     const sourceType = Type.substitute(expression.sourceType, substitution)
     types.set(Type.key(sourceType), sourceType)
@@ -2900,27 +2924,28 @@ const callableEnvironments = (
   return Object.freeze(discovery.callables.map(plan))
 }
 
-const usizeLiteralVerdicts = (
+const wordLiteralVerdicts = (
   target: Target.Target,
   discovery: Instances.Discovery,
-  constants: ReadonlyArray<UsizeConstantLiteral>,
+  constants: ReadonlyArray<WordConstantLiteral>,
 ): {
-  readonly verdicts: ReadonlyArray<UsizeLiteralVerdict>
+  readonly verdicts: ReadonlyArray<WordLiteralVerdict>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
   const bits: 32 | 64 = target.pointerSize === 4 ? 32 : 64
-  const maximum = bits === 32 ? 4294967295n : 18446744073709551615n
-  const verdicts: Array<UsizeLiteralVerdict> = []
+  const verdicts: Array<WordLiteralVerdict> = []
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const seen = new Set<string>()
-  const add = (value: bigint, span: SourceSpan.SourceSpan): void => {
-    const key = `${span.sourceId}:${span.start}:${span.end}:${value}`
+  const add = (type: WordType, value: bigint, span: SourceSpan.SourceSpan): void => {
+    const key = `${span.sourceId}:${span.start}:${span.end}:${type}:${value}`
     if (seen.has(key)) return
     seen.add(key)
-    if (value <= maximum) {
+    const range = wordRange(type, bits)
+    if (value >= range.minimum && value <= range.maximum) {
       verdicts.push(
         Object.freeze({
-          _tag: 'AvailableUsizeLiteral',
+          _tag: 'AvailableWordLiteral',
+          type,
           value,
           bits,
           span,
@@ -2928,11 +2953,18 @@ const usizeLiteralVerdicts = (
       )
       return
     }
-    const diagnostic = Diagnostic.usizeTargetOutOfRange(value.toString(), target.id, bits, span)
+    const diagnostic = Diagnostic.wordLiteralTargetOutOfRange(
+      type,
+      value.toString(),
+      target.id,
+      bits,
+      span,
+    )
     diagnostics.push(diagnostic)
     verdicts.push(
       Object.freeze({
-        _tag: 'UnavailableUsizeLiteral',
+        _tag: 'UnavailableWordLiteral',
+        type,
         value,
         bits,
         span,
@@ -2940,21 +2972,16 @@ const usizeLiteralVerdicts = (
       }),
     )
   }
-  for (const constant of constants) add(constant.value, constant.span)
+  for (const constant of constants) add(constant.type, constant.value, constant.span)
   for (const instance of discovery.instances) {
     const expressions = instance.function.statements
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)
     for (const expression of expressions) {
-      if (
-        expression._tag !== 'IntegerLiteral' ||
-        expression.constant !== undefined ||
-        Type.substitute(expression.type, instance.substitution) !== 'usize'
-      ) {
-        continue
-      }
-      const value = BigInt(expression.value)
-      add(value, expression.span)
+      if (expression._tag !== 'IntegerLiteral' || expression.constant !== undefined) continue
+      const type = Type.substitute(expression.type, instance.substitution)
+      if (!isWordType(type)) continue
+      add(type, BigInt(expression.value), expression.span)
     }
   }
   return Object.freeze({
@@ -3076,7 +3103,7 @@ export const plan = (
   const orderedEntries = Object.freeze(
     [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
   )
-  const literals = usizeLiteralVerdicts(self.target, discovery, self.usizeConstants)
+  const literals = wordLiteralVerdicts(self.target, discovery, self.wordConstants)
   const localSharedAllocationProvenance = LocalSharedAllocationProvenance.plan(discovery, index)
   const localSharedDiagnostics: Array<Diagnostic.Diagnostic> = []
   for (const instance of discovery.instances) {

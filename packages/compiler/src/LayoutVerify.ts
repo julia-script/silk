@@ -25,6 +25,7 @@ import {
   sliceEntry,
   stringEntry,
   unionEntry,
+  wordRange,
 } from './Layout.js'
 import * as Scalar from './Scalar.js'
 import * as Target from './Target.js'
@@ -1261,22 +1262,22 @@ const verifyCallingShapes = (self: Plan): ReadonlyArray<Violation> => {
 
 const verifyLiteralVerdicts = (self: Plan): ReadonlyArray<Violation> => {
   const bits: 32 | 64 = self.target.pointerSize === 4 ? 32 : 64
-  const maximum = bits === 32 ? 4294967295n : 18446744073709551615n
   const violations: Array<Violation> = []
   const unavailable = self.literalVerdicts.filter(
-    (verdict) => verdict._tag === 'UnavailableUsizeLiteral',
+    (verdict) => verdict._tag === 'UnavailableWordLiteral',
   )
   for (const verdict of self.literalVerdicts) {
+    const range = wordRange(verdict.type, bits)
     const expectedTag =
-      verdict.value >= 0n && verdict.value <= maximum
-        ? 'AvailableUsizeLiteral'
-        : 'UnavailableUsizeLiteral'
+      verdict.value >= range.minimum && verdict.value <= range.maximum
+        ? 'AvailableWordLiteral'
+        : 'UnavailableWordLiteral'
     if (verdict.bits !== bits || verdict._tag !== expectedTag) {
       violations.push(
         Object.freeze({
           _tag: 'LayoutViolation',
           rule: 'InvalidLiteralVerdict',
-          type: 'usize',
+          type: verdict.type,
           detail: `${verdict.value.toString()} has a non-canonical ${verdict.bits}-bit verdict`,
         }),
       )
@@ -1287,11 +1288,12 @@ const verifyLiteralVerdicts = (self: Plan): ReadonlyArray<Violation> => {
     unavailable.some((verdict) =>
       self.diagnostics.every(
         (diagnostic) =>
-          diagnostic.code !== Diagnostic.usizeTargetOutOfRangeCode ||
+          diagnostic.code !== Diagnostic.wordLiteralOutOfRangeCode ||
           diagnostic.span.sourceId !== verdict.span.sourceId ||
           diagnostic.span.start !== verdict.span.start ||
           diagnostic.span.end !== verdict.span.end ||
-          diagnostic.reason._tag !== 'UsizeTargetOutOfRange' ||
+          diagnostic.reason._tag !== 'WordLiteralOutOfRange' ||
+          diagnostic.reason.type !== verdict.type ||
           diagnostic.reason.spelling !== verdict.value.toString() ||
           diagnostic.reason.target !== self.target.id ||
           diagnostic.reason.bits !== bits,

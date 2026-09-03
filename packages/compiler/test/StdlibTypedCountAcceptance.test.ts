@@ -189,7 +189,7 @@ it.effect('types every reachable standard-library count as usize, never as the i
     const verdicts = plan.value.literalVerdicts
     assert.isAbove(verdicts.length, 0)
     assert.deepEqual(
-      verdicts.filter((verdict) => verdict._tag !== 'AvailableUsizeLiteral'),
+      verdicts.filter((verdict) => verdict._tag !== 'AvailableWordLiteral'),
       [],
     )
 

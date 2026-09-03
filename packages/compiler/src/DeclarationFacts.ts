@@ -530,6 +530,26 @@ export interface ReturnedBorrowFact {
 }
 
 /**
+ * An ordinary function returning a shared position-restricted view with no borrowed parameter:
+ * every returned view must then be a program-lifetime literal (or derive from one).
+ */
+export const returnsStaticView = (declaration: DeclarationFact): boolean => {
+  const result =
+    declaration.returnType._tag === 'Resolved' ? declaration.returnType.type : undefined
+  return (
+    declaration.functionKind === 'Ordinary' &&
+    result !== undefined &&
+    (Type.isSlice(result) || Type.isReference(result)) &&
+    result.access === 'Shared' &&
+    !declaration.parameters.some(
+      (parameter) =>
+        parameter.declaredType._tag === 'Resolved' &&
+        Type.isViewBorrow(parameter.declaredType.type),
+    )
+  )
+}
+
+/**
  * Derives the deliberately conservative returned-view contract from an ordinary function header.
  * No lifetime names are inferred: a valid header has one, and only one, possible borrowed source.
  */
