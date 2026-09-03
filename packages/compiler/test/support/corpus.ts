@@ -261,6 +261,21 @@ pub fn main() -> i32 {
   return inspect(Option<i32>.Some { value: 42 }) + inspect(Option<i32>.None)
 }`
 
+/** A top-level loop header must remain distinct from the LLVM function entry block. */
+export const whileEntryBackedgeAcceptance = `import silk.option { Option }
+
+pub fn main() -> i32 {
+  while true {
+    let taken = Option<i32>.None
+    if let Option<i32>.Some { value: i } = move taken {
+      if i == 0 { break }
+    } else {
+      break
+    }
+  }
+  return 42
+}`
+
 /** Two independent roots resume in reverse suspension order without sharing a frame stack. */
 export const independentExecutionNonLifo = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.allocator { Allocator, OutOfMemoryError }
@@ -1311,6 +1326,11 @@ pub fn main() -> i32 {
   {
     name: 'retained-if-let-match-binding',
     source: retainedIfLetMatchAcceptance,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'while-entry-backedge',
+    source: whileEntryBackedgeAcceptance,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
