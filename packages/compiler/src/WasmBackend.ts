@@ -8690,10 +8690,14 @@ const emitBody = (
           ]
         })
       })
-      const retainedRoots = [
+      // Every address-taken root restored by value goes back into its private frame slot: a
+      // post-call reload through any borrow that reaches it reads the slot, and the resumed
+      // invocation's slot is fresh stack that only holds whatever the last occupant left there.
+      const restoredRoots = [
         ...new Map(
           targetLayout.payload.flatMap((field) => {
-            const root = retainedBorrowRoot(targetLayout, field)
+            if (field.access._tag === 'BorrowedDependency') return []
+            const root = memory?.frame.roots.get(field.local.ordinal)
             return root === undefined ? [] : ([[root.local, root]] as const)
           }),
         ).values(),
@@ -8807,15 +8811,7 @@ const emitBody = (
         Instr.i32Const(0),
         Instr.globalSet(suspensionRuntime.resumePath),
         ...restorePayload,
-        ...retainedRoots.flatMap((root) =>
-          targetLayout.payload.some(
-            (field) =>
-              retainedBorrowRoot(targetLayout, field)?.local === root.local &&
-              retainedBorrowFormation(field) === undefined,
-          )
-            ? materializeRetainedRoot(root)
-            : [],
-        ),
+        ...restoredRoots.flatMap(materializeRetainedRoot),
         ...restoreRetainedBorrows,
         ...restoreOutcome,
         ...continuation,
