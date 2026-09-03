@@ -417,6 +417,10 @@ export const nestedAnonymousCallableCode = 'SEM0199' as const
 export const ambiguousReceiverOperationCode = 'SEM0200' as const
 /** Stable code for an `export "C"` function whose body may suspend. */
 export const exportSuspendsCode = 'SEM0201' as const
+/** Stable code for a receiver operation supplied by more than one of the receiver's conformances. */
+export const ambiguousSuppliedOperationCode = 'SEM0202' as const
+/** Stable code for naming a conformance-supplied receiver operation as a value instead of calling it. */
+export const suppliedOperationValueCode = 'SEM0203' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -662,6 +666,8 @@ export type Code =
   | typeof nestedAnonymousCallableCode
   | typeof ambiguousReceiverOperationCode
   | typeof exportSuspendsCode
+  | typeof ambiguousSuppliedOperationCode
+  | typeof suppliedOperationValueCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -1372,6 +1378,17 @@ export type Reason =
   | {
       readonly _tag: 'AmbiguousReceiverOperation'
       readonly parameter: string
+      readonly member: string
+      readonly interfaces: ReadonlyArray<string>
+    }
+  | {
+      readonly _tag: 'SuppliedOperationValue'
+      readonly receiver: string
+      readonly member: string
+    }
+  | {
+      readonly _tag: 'AmbiguousSuppliedOperation'
+      readonly receiver: string
       readonly member: string
       readonly interfaces: ReadonlyArray<string>
     }
@@ -2686,6 +2703,58 @@ export const ambiguousReceiverOperation = (
       member,
       interfaces: Object.freeze([...interfaces]),
     }),
+    span,
+  })
+
+/**
+ * Creates the diagnostic for a receiver operation more than one of the receiver's conformances
+ * supplies.
+ *
+ * The receiver spelling names only the operation, so a type conforming to two interfaces that both
+ * declare that name leaves the call naming no single application. Both operations are real and both
+ * conformances are proved; what is missing is which one the call means. Arguments must not choose,
+ * so the qualified spelling is the answer.
+ */
+export const ambiguousSuppliedOperation = (
+  receiver: string,
+  member: string,
+  interfaces: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: ambiguousSuppliedOperationCode,
+    severity: 'error',
+    message: `${member} is supplied to ${receiver} by more than one interface (${interfaces.join(', ')}); call it through one, as ${interfaces.at(0) ?? 'Interface'}.${member}(...)`,
+    reason: Object.freeze({
+      _tag: 'AmbiguousSuppliedOperation',
+      receiver,
+      member,
+      interfaces: Object.freeze([...interfaces]),
+    }),
+    span,
+  })
+
+/**
+ * Creates the diagnostic for naming a conformance-supplied receiver operation as a value.
+ *
+ * The operation is a real member and calling it resolves, but a first-class value of it would have
+ * to carry the conformance witness its call selects statically. That is a separate capability, so
+ * the operation is available only in callee position.
+ */
+export const suppliedOperationValue = (
+  receiver: string,
+  member: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: suppliedOperationValueCode,
+    severity: 'error',
+    message: `${member} is supplied to ${receiver} by an interface and must be called; it has no value form`,
+    reason: Object.freeze({ _tag: 'SuppliedOperationValue', receiver, member }),
     span,
   })
 

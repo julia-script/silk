@@ -1065,18 +1065,31 @@ fn show<T: Printable>(value: &T) -> i32 { return value.print() }
 
 pub fn main() -> i32 {
   let document = Document { size: 42 }
-  return show(&document)
+  return show(&document) + document.print() - 42
 }
 ```
 
-**Boundary:** A generic receiver obtains members only from its declared bounds: an unbounded `T`
-has none, and a concrete receiver never reaches an interface operation through a conformance
-(`document.print()` outside a bounded body is an unknown member; write `Printable.print(&document)`
-where the explicit form applies). An operation declaring its own type parameters is not a member
-through either spelling.
+The last call is the same operation reached from a concrete receiver: `Document` conforms to exactly
+one visible interface supplying `print`, so `document.print()` selects the `Printable` witness for
+`Document` and adapts the receiver to the declared `&Self` exactly as the generic body does.
+
+**Boundary:** A generic receiver obtains members only from its declared bounds, so an unbounded `T`
+has none. A runtime-concrete receiver instead reaches the receiver operations its conformances
+supply: `document.print()` selects the same witness as the qualified call whenever exactly one
+interface application supplies `print`. Only an interface the calling module can name participates,
+so a dependency's private interface never contributes a member. An operation declaring its own type
+parameters is not a member through either spelling.
+
+Interface lookup runs only where the receiver's own type has no member of that name. A callable
+field, an accessible inherent method, an inaccessible inherent member, a duplicate declaration, and
+a receiver-less associated function all keep their existing outcome, whether that is a resolved call
+or a diagnostic; a conformance never rescues a name an inherent declaration already claimed.
 
 **Diagnostics:** An operation declared by more than one bound of the same parameter reports
-`SEM0200` naming the bounds; the explicit `Bound.op(value)` form still resolves.
+`SEM0200` naming the bounds; the explicit `Bound.op(value)` form still resolves. An operation
+supplied to a concrete receiver by more than one interface reports `SEM0202` naming the receiver and
+each supplying application; write one applied qualified call such as `Printed<i32>.print(&report)`
+to select it. Arguments never select among supplying applications.
 
 **Evidence:** [bound receiver resolution](../../../../packages/compiler/src/ExpressionAnalysis.ts),
 [method-call specification](../../../../openspec/specs/bootstrap-method-calls/spec.md).

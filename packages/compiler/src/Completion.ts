@@ -1,4 +1,5 @@
 import * as Option from 'effect/Option'
+import * as ConformanceProof from './ConformanceProof.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Elaboration from './Elaboration.js'
@@ -494,6 +495,61 @@ const receiverMethodCandidates = (
   )
 }
 
+/**
+ * The receiver operations a concrete value obtains from the conformances it provably has.
+ *
+ * This mirrors what the resolver admits at the same position: `implementedContracts` applies the
+ * same proof, coherence, and interface-visibility filter, an inherent member of that name already
+ * claimed the call, and a name two applications supply would be reported rather than resolved, so
+ * neither is offered as a callable member.
+ */
+const suppliedOperationCandidates = (
+  index: DeclarationIndex.Index,
+  type: Type.Nominal | undefined,
+  module: string,
+  inherent: ReadonlyArray<Candidate>,
+): ReadonlyArray<Candidate> => {
+  if (type === undefined) return Object.freeze([])
+  const claimed = new Set(inherent.map((member) => member.label))
+  const supplied = ConformanceProof.implementedContracts(index, module, type).flatMap(
+    (capability) => {
+      const contract = ConformanceProof.contractByCapability(index, capability)
+      if (contract === undefined || contract.dependencyEligible) return []
+      const application = DeclarationFacts.interfaceApplication(contract, capability, type)
+      if (application?.available !== true) return []
+      return application.operations.flatMap((operation) =>
+        operation.receiverAccess === 'Unavailable' ||
+        operation.declaration.name._tag !== 'Present' ||
+        operation.declaration.state._tag !== 'Unique' ||
+        claimed.has(operation.declaration.name.spelling)
+          ? []
+          : [Object.freeze({ label: operation.declaration.name.spelling, operation })],
+      )
+    },
+  )
+  return Object.freeze(
+    supplied.flatMap(({ label, operation }) =>
+      supplied.filter((other) => other.label === label).length > 1 ||
+      operation.declaration.state._tag !== 'Unique'
+        ? []
+        : [
+            candidate({
+              identity: semantic(
+                Object.freeze({
+                  _tag: 'ServiceOperationIdentity',
+                  id: operation.declaration.state.id,
+                }),
+              ),
+              kind: 'Method',
+              label,
+              detail: PresentationRenderer.receiverOperation(operation),
+              sortGroup: 1,
+            }),
+          ],
+    ),
+  )
+}
+
 /** The receiver operations a generic value obtains from its parameter's declared bounds. */
 const boundOperationCandidates = (
   fn: Elaboration.FunctionFact | undefined,
@@ -827,6 +883,7 @@ export const complete = (options: {
     if (value.found) {
       const subject = nominalSubject(value.type)
       const parameterSubject = parameterSubjectOf(value.type)
+      const inherent = receiverMethodCandidates(options.index, subject, options.module, scope)
       return Object.freeze({
         _tag: 'CompletionResult',
         context: Object.freeze({
@@ -837,7 +894,8 @@ export const complete = (options: {
         replacement: replacement.span,
         candidates: stable([
           ...fieldCandidates(options.index, subject, options.module),
-          ...receiverMethodCandidates(options.index, subject, options.module, scope),
+          ...inherent,
+          ...suppliedOperationCandidates(options.index, subject, options.module, inherent),
           ...boundOperationCandidates(fn, parameterSubject),
         ]),
       })

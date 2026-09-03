@@ -581,12 +581,14 @@ pub fn main() -> i32 {
     assert.deepEqual(codes(ambiguous), ['SEM0200'])
     assert.include(described(ambiguous).at(0) ?? '', 'Printable')
     assert.include(described(ambiguous).at(0) ?? '', 'Debug')
+    // A concrete receiver reaches the one operation its visible proved conformance supplies, and
+    // selects the same witness the qualified spelling selects.
     const concrete = yield* analyze(`${printable}
 pub fn main() -> i32 {
   let document = Document { size: 42 }
   return document.print()
 }`)
-    assert.deepEqual(codes(concrete), ['SEM0027'])
+    assert.strictEqual(evaluated(concrete), 42n)
     // A bound operation has no first-class form, so a generic receiver does not bind it.
     const unbound = yield* analyze(`${printable}
 fn show<T: Printable>(value: &T) -> i32 {
@@ -700,6 +702,125 @@ pub fn main() -> i32 {
         .length,
     )
     assert.strictEqual(typeSide?.presentation.text, 'pub fn read(self: &Counter) -> i32')
+  }),
+)
+
+it.effect('supplies a concrete receiver only from one visible proved conformance', () =>
+  Effect.gen(function* () {
+    // An exclusive receiver takes the loan the qualified spelling makes the author write, and an
+    // effectful operation keeps its rows through the receiver spelling.
+    const adapted = yield* analyze(`interface Advancing { fn advance(value: &mut Self) -> i32 }
+interface Reading { effect fn read(value: &Self) -> i32 }
+struct Range { at: i32 }
+impl Advancing for Range {
+  fn advance(value: &mut Self) -> i32 {
+    value.at = value.at + 1
+    return value.at
+  }
+}
+impl Reading for Range { effect fn read(value: &Self) -> i32 { return value.at } }
+pub fn main() -> i32 {
+  let mut range = Range { at: 41 }
+  let stepped = range.advance()
+  return stepped + (run range.read()) - 42
+}`)
+    assert.strictEqual(evaluated(adapted), 42n)
+
+    // Two supplying interfaces name no single operation. The applied qualified spelling the
+    // diagnostic points at recovers the call.
+    const applied = `interface Printed<A> { fn print(value: &Self) -> A }
+interface Shown<A> { fn print(value: &Self) -> A }
+struct Report { size: i32 }
+impl Printed<i32> for Report { fn print(value: &Self) -> i32 { return value.size } }
+impl Shown<i32> for Report { fn print(value: &Self) -> i32 { return value.size } }
+`
+    const ambiguous = yield* analyze(`${applied}
+pub fn main() -> i32 {
+  let report = Report { size: 42 }
+  return report.print()
+}`)
+    assert.deepEqual(codes(ambiguous), ['SEM0202'])
+    // The message names both suppliers and points at a qualified call that resolves.
+    assert.include(described(ambiguous).at(0) ?? '', 'Printed')
+    assert.include(described(ambiguous).at(0) ?? '', 'Shown')
+    assert.include(described(ambiguous).at(0) ?? '', '.print(...)')
+
+    // An inherent member claims the name first, whether it resolves or fails.
+    const inherent = yield* analyze(`${printable}
+impl Document { fn print(self: &Self) -> i32 { return self.size + 1 } }
+pub fn main() -> i32 {
+  let document = Document { size: 41 }
+  return document.print()
+}`)
+    assert.strictEqual(evaluated(inherent), 42n)
+    const receiverless = yield* analyze(`${printable}
+impl Document { fn print() -> i32 { return 0 } }
+pub fn main() -> i32 {
+  let document = Document { size: 42 }
+  return document.print()
+}`)
+    assert.deepEqual(codes(receiverless), ['SEM0198'])
+
+    // Completion and semantic identity read the same selection the call does.
+    const toolingSource = `interface Printed<A> { fn print(value: &Self) -> A }
+struct Report { size: i32 }
+impl Printed<i32> for Report { fn print(value: &Self) -> i32 { return value.size } }
+fn shown<T: Printed<i32>>(value: &T) -> i32 { return value.print() }
+pub fn main() -> i32 {
+  let report = Report { size: 42 }
+  let more = report.
+  return report.print() + shown(&report) - 42
+}`
+    const tooling = yield* analyze(toolingSource)
+    const completion = Analysis.completionAt(
+      tooling,
+      'main',
+      toolingSource.indexOf('report.\n') + 7,
+    )
+    assert.deepEqual(
+      completion?.candidates.map((candidate) => [candidate.label, candidate.kind]),
+      [
+        ['size', 'Field'],
+        ['print', 'Method'],
+      ],
+    )
+    // The receiver spelling names the operation the bounded spelling and the declaration name.
+    // `print(` occurs first in the interface declaration, then the conformance, the bounded body,
+    // and the receiver call, so the ordinals name each spelling of the one operation.
+    const operationKey = identityAt(tooling, toolingSource, 'print(', 0)
+    assert.isDefined(operationKey)
+    assert.strictEqual(identityAt(tooling, toolingSource, 'print(', 2), operationKey)
+    assert.strictEqual(identityAt(tooling, toolingSource, 'print(', 3), operationKey)
+
+    // A supplied operation is a real member with no value form; naming it says so.
+    const asValue = yield* analyze(`${printable}
+pub fn main() -> i32 {
+  let document = Document { size: 42 }
+  let bound = document.print
+  return 0
+}`)
+    assert.deepEqual(codes(asValue), ['SEM0203'])
+
+    // An interface the calling module cannot name supplies nothing, so a dependency that declares
+    // a private interface cannot add or ambiguate a receiver call.
+    const invisible = yield* analyzeModules('main', [
+      [
+        'other',
+        `pub struct Document { pub size: i32 }
+interface Hidden { fn print(value: &Self) -> i32 }
+impl Hidden for Document { fn print(value: &Self) -> i32 { return value.size } }
+`,
+      ],
+      [
+        'main',
+        `import other { Document }
+pub fn main() -> i32 {
+  let document = Document { size: 42 }
+  return document.print()
+}`,
+      ],
+    ])
+    assert.deepEqual(codes(invisible), ['SEM0027'])
   }),
 )
 

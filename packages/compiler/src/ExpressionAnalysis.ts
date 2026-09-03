@@ -3855,6 +3855,14 @@ export const analyzeProjection = (
         )
       } else if (candidate._tag === 'Unavailable' && candidate.diagnostic !== undefined) {
         diagnostic = candidate.diagnostic
+      } else if (candidate._tag === 'Conformance' || candidate._tag === 'AmbiguousConformance') {
+        // A supplied operation is a real member that this spelling cannot bind: a first-class value
+        // would have to carry its witness, which the qualified call does not need either.
+        diagnostic = Diagnostic.suppliedOperationValue(
+          Type.display(nominal),
+          fieldName,
+          fieldToken.span,
+        )
       } else {
         diagnostic = Diagnostic.unknownProjectedField(
           Type.display(nominal),
@@ -6375,12 +6383,65 @@ type MethodCandidate =
       readonly parameter: string
       readonly interfaces: ReadonlyArray<string>
     }
+  | {
+      readonly _tag: 'Conformance'
+      readonly reference: Extract<
+        CallReferenceFact,
+        { readonly _tag: 'ResolvedInterfaceOperation' }
+      >
+    }
+  | {
+      readonly _tag: 'AmbiguousConformance'
+      readonly receiver: string
+      readonly interfaces: ReadonlyArray<string>
+    }
   | { readonly _tag: 'Missing' }
 
 /**
+ * The receiver operations of one name that a concrete receiver's proved conformances supply.
+ *
+ * `implementedContracts` is the shared authority: it admits an application only when the ordinary
+ * proof selects that exact source conformance and the interface itself is visible to the calling
+ * module, so an interface the caller cannot name never contributes a member. Selecting the operation
+ * through the applied interface is the same pair the qualified spelling uses once it knows `Self`;
+ * because the provider is already concrete here, no `Self` inference is needed. An operation
+ * declaring its own binders has no contract, and one with no operand of the provider's type is not
+ * a receiver operation; neither supplies a candidate through any spelling.
+ */
+const conformanceOperationCandidates = (
+  receiverType: Type.Nominal,
+  member: string,
+  resolution: ResolutionContext,
+): ReadonlyArray<{
+  readonly capability: Type.Nominal
+  readonly operation: DeclarationFacts.InterfaceOperationApplicationFact
+}> =>
+  Object.freeze(
+    ConformanceProof.implementedContracts(
+      resolution.index,
+      resolution.scope.module,
+      receiverType,
+    ).flatMap((capability) => {
+      const contract = ConformanceProof.contractByCapability(resolution.index, capability)
+      if (contract === undefined || contract.dependencyEligible) return []
+      const application = DeclarationFacts.interfaceApplication(contract, capability, receiverType)
+      const operation = application?.operations.find(
+        (candidate) =>
+          candidate.declaration.name._tag === 'Present' &&
+          candidate.declaration.name.spelling === member &&
+          candidate.receiverAccess !== 'Unavailable',
+      )
+      return application?.available === true && operation !== undefined
+        ? [Object.freeze({ capability, operation })]
+        : []
+    }),
+  )
+
+/**
  * Resolves the member a value-side spelling `receiver.member(...)` names, mirroring the type-side
- * `lookupAssociated`: an inherent member of a nominal receiver, or the unique receiver operation
- * among a type parameter's declared bounds. A concrete receiver never reaches interface operations.
+ * `lookupAssociated`: an inherent member of a nominal receiver, the unique receiver operation among
+ * a type parameter's declared bounds, or — only where the receiver's own type has no such member at
+ * all — the unique receiver operation its visible proved conformances supply.
  */
 export const resolveMethodCandidate = (
   subjectType: SemanticType,
@@ -6449,7 +6510,36 @@ export const resolveMethodCandidate = (
           cause: associated.cause,
         }),
       })
-    return Object.freeze({ _tag: 'Missing' })
+    // Only a name the receiver's own type does not claim at all falls through to its conformances.
+    // An inaccessible or duplicate inherent member has already answered above, so a conformance
+    // never rescues a name an inherent declaration claimed and failed.
+    const supplied = conformanceOperationCandidates(subjectType, member, resolution)
+    if (supplied.length === 0) return Object.freeze({ _tag: 'Missing' })
+    if (supplied.length > 1)
+      return Object.freeze({
+        _tag: 'AmbiguousConformance',
+        receiver: Type.encode(subjectType),
+        interfaces: Object.freeze(supplied.map(({ capability }) => Type.encode(capability))),
+      })
+    const selectedConformance = supplied.at(0)
+    if (selectedConformance === undefined) return Object.freeze({ _tag: 'Missing' })
+    const suppliedContract = interfaceOperationContract(selectedConformance.operation)
+    if (suppliedContract === undefined) return Object.freeze({ _tag: 'Missing' })
+    return Object.freeze({
+      _tag: 'Conformance',
+      reference: Object.freeze({
+        _tag: 'ResolvedInterfaceOperation' as const,
+        spelling: `${Type.encode(selectedConformance.capability)}.${member}`,
+        token: memberToken,
+        capability: selectedConformance.capability,
+        provider: subjectType,
+        operation: member,
+        declaration: suppliedContract.declaration,
+        interfaceContract: suppliedContract.contract,
+        parameters: suppliedContract.parameters,
+        result: suppliedContract.result,
+      }),
+    })
   }
   if (!Type.isParameter(subjectType)) return Object.freeze({ _tag: 'Missing' })
   const parameter = caller.typeParameters.find((candidate) =>
@@ -6827,6 +6917,25 @@ const analyzeMethodCall = (
       diagnostic,
     )
   }
+  // Two supplying applications are reported before the arguments are analyzed against either, so
+  // no written argument can select the operation the call names.
+  if (candidate._tag === 'AmbiguousConformance') {
+    const diagnostic = Diagnostic.ambiguousSuppliedOperation(
+      candidate.receiver,
+      member,
+      candidate.interfaces,
+      memberToken.span,
+    )
+    return rejected(
+      Object.freeze({
+        _tag: 'Missing',
+        spelling: `${candidate.receiver}.${member}`,
+        token: memberToken,
+        cause: Diagnostic.identity(diagnostic),
+      }),
+      diagnostic,
+    )
+  }
   const parameterTypes: ReadonlyArray<SemanticType | undefined> =
     candidate._tag === 'Inherent'
       ? candidate.declaration.parameters.map(declaredParameterType)
@@ -6863,7 +6972,7 @@ const analyzeMethodCall = (
     ]),
     diagnostics: Object.freeze([...receiver.diagnostics, ...written.diagnostics]),
   })
-  if (candidate._tag === 'Bound')
+  if (candidate._tag === 'Bound' || candidate._tag === 'Conformance')
     return finishInterfaceOperationCall(
       node,
       candidate.reference,

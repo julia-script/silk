@@ -16,11 +16,11 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | `LEX`  | Lexical   | 12    |
 | `PAR`  | Parser    | 5     |
 | `MOD`  | Module    | 3     |
-| `SEM`  | Semantic  | 193   |
+| `SEM`  | Semantic  | 195   |
 | `OWN`  | Ownership | 17    |
 | `LAY`  | Layout    | 1     |
 
-There are 231 codes in total.
+There are 233 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -254,6 +254,8 @@ There are 231 codes in total.
 | `SEM0199` | Stable code for nesting one anonymous callable body inside another in the first language slice.              | `Anonymous callable bodies cannot be nested in this language slice`                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `SEM0200` | Stable code for a receiver operation declared by more than one bound of one type parameter.                  | `<member> is declared by more than one bound of <parameter> (<join>); call it through the bound, as <at0Bound>.<member>(...)`                                                                                                                                                                                                                                                                                                                                              |
 | `SEM0201` | Stable code for an `export "C"` function whose body may suspend.                                             | `Exported function <symbol> may suspend; a C-callable body must be synchronous`                                                                                                                                                                                                                                                                                                                                                                                            |
+| `SEM0202` | Stable code for a receiver operation supplied by more than one of the receiver's conformances.               | `<member> is supplied to <receiver> by more than one interface (<join>); call it through one, as <at0Interface>.<member>(...)`                                                                                                                                                                                                                                                                                                                                             |
+| `SEM0203` | Stable code for naming a conformance-supplied receiver operation as a value instead of calling it.           | `<member> is supplied to <receiver> by an interface and must be called; it has no value form`                                                                                                                                                                                                                                                                                                                                                                              |
 
 ## Ownership (`OWN`)
 
