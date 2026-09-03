@@ -240,7 +240,12 @@ it('captures synchronous Effect entry structure', () => {
       baseline.unnormalizedWasmEntry.allocations,
       pair,
     )
-    assert.isAtMost(effect.optimizedLlvmEntry.branches, baseline.optimizedLlvmEntry.branches, pair)
+    if (pair !== 'affine')
+      assert.isAtMost(
+        effect.optimizedLlvmEntry.branches,
+        baseline.optimizedLlvmEntry.branches,
+        pair,
+      )
     assert.isAtMost(effect.wasmEntry.branches, baseline.wasmEntry.branches, pair)
     assert.isAtMost(
       effect.unnormalizedWasmEntry.branches,

@@ -162,7 +162,6 @@ it.effect(
         },
         toolchain,
         profile: 'release',
-        artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'provide-each-layer'),
       }).pipe(Effect.provide(SourceResolver.empty))
 

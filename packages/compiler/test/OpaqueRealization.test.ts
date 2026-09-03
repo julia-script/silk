@@ -75,7 +75,14 @@ pub fn make(value: i32) -> some<F: fn(i32) -> i32> F { return add(value) }`,
     assert.strictEqual(definition?.access, 'Shared')
     assert.strictEqual(definition?.cleanup, 'Trivial')
     assert.strictEqual(definition?.suspendable, false)
-    assert.include(definition?.targetFingerprint ?? '', 'exact-representation:')
+    assert.include(
+      definition?.targetFingerprint ?? '',
+      definition === undefined ? '' : Type.genericArgumentKey(definition.target),
+    )
+    assert.include(
+      definition?.targetFingerprint ?? '',
+      definition === undefined ? '' : Type.key(definition.instance.contract),
+    )
   }),
 )
 

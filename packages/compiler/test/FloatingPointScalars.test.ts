@@ -139,7 +139,8 @@ it.effect('guards native float-to-integer conversion against out-of-range and Na
     assert.include(llvm.ir, 'fptosi')
     assert.include(llvm.ir, '_below')
     assert.include(llvm.ir, '_above')
-    assert.include(llvm.ir, 'arith_trap')
+    assert.include(llvm.ir, 'trap_site')
+    assert.include(llvm.ir, '@silk_trap_report_v1')
   }),
 )
 

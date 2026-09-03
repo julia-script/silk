@@ -2075,29 +2075,66 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
     fact.declaration.returnType._tag === 'Resolved' &&
     baseContract._tag === 'Contract'
   ) {
-    const captures = effectCaptureFacts(
+    const referenced = effectCaptureFacts(
       fact.statements,
       0,
       index,
       copyAssumptionsOf(fact.declaration),
-    ).map((capture) => {
-      if (capture.reference._tag !== 'ParameterDeclaration') return capture
-      const declared = capture.reference.declaredType
-      if (declared._tag !== 'Resolved' || Type.isSlice(declared.type)) return capture
-      return Object.freeze({
-        ...capture,
-        access: ConformanceProof.copyType(index, declared.type, copyAssumptionsOf(fact.declaration))
-          ? ('Copy' as const)
-          : ('Take' as const),
+    )
+    // Every runtime argument enters the deferred environment at construction, even when the body
+    // never reads it. Retaining declaration order also retains reverse-argument cleanup order.
+    const referencedParameterOrdinals = new Set(
+      referenced.flatMap((capture): ReadonlyArray<number> =>
+        capture.reference._tag === 'ParameterDeclaration' ? [capture.reference.id.ordinal] : [],
+      ),
+    )
+    const unreferenced = fact.declaration.parameters.flatMap(
+      (parameter): ReadonlyArray<EffectCaptureFact> => {
+        if (parameter.phase !== 'Runtime' || referencedParameterOrdinals.has(parameter.id.ordinal))
+          return []
+        const declared = parameter.declaredType
+        return [
+          Object.freeze({
+            _tag: 'EffectCapture',
+            reference: parameter,
+            access:
+              declared._tag === 'Resolved' && Type.isSlice(declared.type)
+                ? declared.type.access
+                : 'Take',
+            span: parameter.syntax.span,
+          }),
+        ]
+      },
+    )
+    const captures = [...referenced, ...unreferenced]
+      .sort(
+        (left, right) =>
+          left.reference.id.ordinal - right.reference.id.ordinal ||
+          left.span.start - right.span.start,
+      )
+      .map((capture) => {
+        if (capture.reference._tag !== 'ParameterDeclaration') return capture
+        const declared = capture.reference.declaredType
+        if (declared._tag !== 'Resolved' || Type.isSlice(declared.type)) return capture
+        return Object.freeze({
+          ...capture,
+          access: ConformanceProof.copyType(
+            index,
+            declared.type,
+            copyAssumptionsOf(fact.declaration),
+          )
+            ? ('Copy' as const)
+            : ('Take' as const),
+        })
       })
-    })
     const semanticCaptureAccess = (capture: EffectCaptureFact): Type.Effect['access'] | 'Copy' => {
       if (capture.reference._tag !== 'ParameterDeclaration') return capture.access
       const declared = capture.reference.declaredType
       if (declared._tag !== 'Resolved') return capture.access
       if (Type.isEffect(declared.type)) return declared.type.access
       if (Type.isCallable(declared.type)) return declared.type.mode
-      if (Type.isReference(declared.type)) return declared.type.access
+      if (Type.isReference(declared.type) || Type.isSlice(declared.type))
+        return declared.type.access
       return capture.access
     }
     const semanticAccesses = captures.map(semanticCaptureAccess)

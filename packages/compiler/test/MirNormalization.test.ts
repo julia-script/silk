@@ -432,39 +432,39 @@ pub fn main() -> i32 {
   return run program() |> Effect.provideMut(&mut provider)
 }`
 
-it.effect(
-  'folds a direct service operation whose outer function only drops its borrowed self',
-  () =>
-    Effect.gen(function* () {
-      // The witness operation's constructor ends in a cleanup region that drops `self`; the fold
-      // treats that drop as nothing lost, so the provided instance runs the operation statically
-      // instead of becoming a suspendable constructor with a coroutine frame.
-      const normalized = yield* Analysis.ofSourceRealized(
-        'test/mir-normalization-provided-operation',
-        encoder.encode(providedOperationSource),
-        'wasm32-unknown-unknown',
-        { normalizeMir: true },
-      )
-      assert.deepEqual(Analysis.diagnostics(normalized), [])
-      const program = Analysis.loweredMir(normalized)
-      const provided = program.functions.filter((fn) => fn.id.name.startsWith('program$effect$'))
-      assert.isNotEmpty(provided)
-      assert.isTrue(
-        provided.every((fn) =>
-          MirVerification.operations(fn).some((operation) => operation._tag === 'RunStaticEffect'),
-        ),
-      )
-      assert.deepEqual(
-        (program.normalization ?? []).filter(
-          (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'ComplexConstructor',
-        ),
-        [],
-      )
-      assert.deepEqual(MirVerification.verify(program), [])
-      const evaluated = Analysis.evaluate(normalized)
-      assert.strictEqual(evaluated._tag, 'Completed')
-      if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
-    }),
+it.effect('retains an unused borrowed service receiver in the deferred environment', () =>
+  Effect.gen(function* () {
+    // Every supplied effect-function argument enters the deferred environment. The unused
+    // exclusive receiver therefore remains an affine capture and cannot be folded into a static
+    // run that would end its loan at construction.
+    const normalized = yield* Analysis.ofSourceRealized(
+      'test/mir-normalization-provided-operation',
+      encoder.encode(providedOperationSource),
+      'wasm32-unknown-unknown',
+      { normalizeMir: true },
+    )
+    assert.deepEqual(Analysis.diagnostics(normalized), [])
+    const program = Analysis.loweredMir(normalized)
+    const provided = program.functions.filter((fn) => fn.id.name.startsWith('program$effect$'))
+    assert.isNotEmpty(provided)
+    assert.isTrue(
+      provided.every((fn) =>
+        MirVerification.operations(fn).some((operation) => operation._tag === 'RunEffectValue'),
+      ),
+    )
+    assert.isTrue(
+      (program.normalization ?? []).some(
+        (verdict) =>
+          verdict._tag === 'Rejected' &&
+          verdict.reason === 'AffineCapture' &&
+          verdict.function.name.startsWith('program$effect$'),
+      ),
+    )
+    assert.deepEqual(MirVerification.verify(program), [])
+    const evaluated = Analysis.evaluate(normalized)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+  }),
 )
 
 const sectionProvidedSource = `import silk.effect { Effect }
@@ -533,8 +533,8 @@ pub fn main() -> i32 {
 
 it.effect('refuses to fold a constructor whose parameter drop has a cleanup effect', () =>
   Effect.gen(function* () {
-    // The witness operation drops an owned `Vector` parameter it never captured; that release is
-    // real work the fold would lose, so the constructor stays complex.
+    // The unused owned `Vector` argument remains in the deferred environment. Folding through that
+    // affine capture would release it at construction instead of Effect execution or drop.
     const normalized = yield* Analysis.ofSourceRealized(
       'test/mir-normalization-owning-parameter',
       encoder.encode(owningParameterSource),
@@ -547,7 +547,7 @@ it.effect('refuses to fold a constructor whose parameter drop has a cleanup effe
       (program.normalization ?? []).some(
         (verdict) =>
           verdict._tag === 'Rejected' &&
-          verdict.reason === 'ComplexConstructor' &&
+          verdict.reason === 'AffineCapture' &&
           verdict.function.name.startsWith('program$effect$'),
       ),
     )

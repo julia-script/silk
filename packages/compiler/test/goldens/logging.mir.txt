@@ -13,7 +13,7 @@ normalization rejected reason=EffectEscapes function=logging/main.main region=r0
 normalization accepted kind=DirectStaticRun function=logging/main.main region=r0 local=%4 guards=DirectTarget,SingleRegion,SingleUse,Synchronous,CopyOrShared [1611, 1651)
 normalization rejected reason=EffectEscapes function=silk/effect.Effect.catchAll region=r0 local=%2 [13678, 13752)
 normalization rejected reason=EffectEscapes function=logging/main.program region=r0 local=%0 [162, 1522)
-normalization rejected reason=CrossRegionUse function=logging/main.recover region=r0 local=%1 [1565, 1578)
+normalization rejected reason=EffectEscapes function=logging/main.recover region=r0 local=%1 [1565, 1578)
 normalization rejected reason=EffectEscapes function=silk/effect.Effect.provideMut region=r0 local=%2 [22508, 22604)
 normalization rejected reason=EffectEscapes function=silk/effect.Effect.logTrace region=r0 local=%1 [5345, 5404)
 normalization rejected reason=EffectEscapes function=silk/effect.Effect.provideMut region=r0 local=%2 [22508, 22604)
@@ -101,7 +101,7 @@ layout string size=16 align=8 repr=string storage=Utf8:i64@0/8/8 byte-length=usi
   byte-length usize offset=8 size=8
 layout never size=0 align=1 repr=aggregate cleanup-hook=none tail-padding=0
 effect-environment logging/main.program@effect:declaration:logging/main:program:site:-1 size=0 align=1 fields=none
-effect-environment logging/main.recover@effect:declaration:logging/main:recover:site:-1 size=0 align=1 fields=none
+effect-environment logging/main.recover@effect:declaration:logging/main:recover:site:-1 size=4 align=4 fields=parameter0:take:value@0
 effect-environment silk/effect.Effect.catchAll@effect:declaration:silk/effect:Effect.catchAll:site:-1 size=0 align=1 fields=parameter0:shared:value@0,parameter1:shared:callable@0
 effect-environment silk/effect.Effect.catchAll@effect:declaration:silk/effect:Effect.catchAll:site:1073755519 size=0 align=1 fields=binding0:shared:value@0,binding1:shared:callable@0
 effect-environment silk/effect.Effect.log@effect:declaration:silk/effect:Effect.log:site:-1 size=16 align=8 fields=parameter0:copy:value@0
@@ -216,12 +216,9 @@ fn logging/main.program params=0 locals=1 -> Effect<i32 ! silk/logger.LogError> 
   r0 operation:
     %0 = make-effect logging/main.program$effect$-1 captures=none : Effect<i32 ! silk/logger.LogError> [162, 1522)
     return %0 [162, 1522)
-fn logging/main.recover params=1 locals=2 -> Effect<i32> entry=r0
+fn logging/main.recover params=1 locals=2 -> once Effect<i32> entry=r0
   r0 operation:
-    %1 = make-effect logging/main.recover$effect$-1 captures=none : Effect<i32> [1565, 1578)
-    forward r1 [1565, 1578) generated
-  r1 cleanup:
-    drop %0 cleanup=StructCleanup [1542, 1557) generated
+    %1 = make-effect logging/main.recover$effect$-1 captures=%0:take : once Effect<i32> [1565, 1578)
     return %1 [1565, 1578)
 fn silk/logger.Logger.inMemoryProvider params=0 locals=18 -> silk/logger.InMemoryLogger entry=r0
   r0 operation:
@@ -502,7 +499,7 @@ fn silk/effect.Effect.catchAll$effect$-1<i32, i32, silk/logger.LogError, never, 
           arm #0 silk/logger.LogError before=silk/logger.LogError after=empty [13695, 13748) generated
             bind #0 %6 <- payload : silk/logger.LogError access=Move [13695, 13748) generated
             selected access=Move result=%9 end-borrow=false
-              %7 = apply-callable %1(%6) captures=none access=shared evaluation=CalleeThenArguments realization=Environment : Effect<i32> [13695, 13748) generated
+              %7 = apply-callable %1(%6) captures=none access=shared evaluation=CalleeThenArguments realization=Environment : once Effect<i32> [13695, 13748) generated
               %9 = run-effect-value %7 runner=logging/main.recover$effect$-1 providers=none arguments=none propagate= : i32 [13691, 13748)
     %12 = effect-outcome tag=0 %11 : Effect<i32> [13691, 13748)
     return %12 [13691, 13748)
@@ -876,11 +873,14 @@ fn logging/main.program$effect$-1 params=0 locals=132 -> Effect<i32 ! silk/logge
     drop %7 [209, 284) generated
     drop %1 cleanup=StructCleanup [164, 209) generated
     return %131 [1517, 1520)
-fn logging/main.recover$effect$-1 params=0 locals=2 -> Effect<i32> entry=r0
+fn logging/main.recover$effect$-1 params=1 locals=3 -> once Effect<i32> entry=r0
   r0 operation:
-    %0 = literal 0 : i32 [1574, 1576)
-    %1 = effect-outcome tag=0 %0 : Effect<i32> [1574, 1576)
-    return %1 [1574, 1576)
+    %1 = literal 0 : i32 [1574, 1576)
+    %2 = effect-outcome tag=0 %1 : once Effect<i32> [1574, 1576)
+    forward r1 [1574, 1576) generated
+  r1 cleanup:
+    drop %0 cleanup=StructCleanup [1542, 1557) generated
+    return %2 [1574, 1576)
 fn silk/effect.Effect.provideMut$effect$-1<? &mut silk/logger.Logger, (), silk/logger.InMemoryLogger, silk/logger.LogError, ? &mut silk/logger.Logger, effect@silk/effect Effect.logTrace string result:effect:Shared<nominal:silk/core.Unit<>!10:RowAlgebra67:8:Concrete54:9:FiniteRow40:5:Array30:nominal:silk/logger.LogError<>7:5:Array?10:RowAlgebra87:8:Concrete74:9:FiniteRow60:5:Array50:nominal:silk/logger.Logger<>@DefaultRole:Exclusive7:5:Array>effect declaration:silk/effect:Effect.logTrace site:-1> params=2 locals=5 -> once Effect<() ! silk/logger.LogError> entry=r0
   r0 operation:
     forward r1 [22510, 22579) generated

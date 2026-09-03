@@ -313,6 +313,7 @@ const constructionOf = (
 }
 
 const fingerprints = (
+  instance: Type.OpaqueRepresentationArgument,
   realization: Type.RepresentationArgument,
   captures: ReadonlyArray<Capture>,
   access: Definition['access'],
@@ -320,7 +321,10 @@ const fingerprints = (
   suspendable: boolean,
 ): Pick<Definition, 'targetFingerprint' | 'layoutFingerprint'> =>
   Object.freeze({
-    targetFingerprint: Canonical.record('OpaqueTarget', [Type.genericArgumentKey(realization)]),
+    targetFingerprint: Canonical.record('OpaqueTarget', [
+      Type.genericArgumentKey(targetOf(realization)),
+      Type.key(instance.contract),
+    ]),
     layoutFingerprint: Canonical.record('OpaqueLayout', [
       access,
       cleanup,
@@ -349,7 +353,14 @@ const definition = (
   const cleanup = captures.some((capture) => capture.access === 'Take') ? 'Required' : 'Trivial'
   const suspendable =
     source === undefined ? (inherited?.suspendable ?? false) : expressionSuspends(source)
-  const computedFingerprints = fingerprints(realization, captures, access, cleanup, suspendable)
+  const computedFingerprints = fingerprints(
+    producer.instance,
+    realization,
+    captures,
+    access,
+    cleanup,
+    suspendable,
+  )
   return Object.freeze({
     _tag: 'OpaqueRealizationDefinition',
     family: producer.instance.family,
@@ -420,7 +431,7 @@ const specializeDefinition = (
     captures,
     access,
     cleanup,
-    ...fingerprints(realization, captures, access, cleanup, found.suspendable),
+    ...fingerprints(instance, realization, captures, access, cleanup, found.suspendable),
   })
 }
 

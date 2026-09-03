@@ -101,7 +101,7 @@ const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\
 const assertTrapOnlyBlock = (block: string): void => {
   assert.match(block, /call void @llvm\.trap\(\)/)
   assert.match(block, /unreachable/)
-  assert.notMatch(block, /call (?!void @llvm\.trap\(\))/)
+  assert.notMatch(block, /call (?!void @(?:llvm\.trap|silk_trap_report_v1)\()/)
   assert.notMatch(block, /on_(?:complete|suspend)/)
 }
 
@@ -139,7 +139,7 @@ const assertNativeDriveAdmissionBeforeCallbacks = (
         assert.isDefined(callIndex)
         const admissions = [
           ...fn.matchAll(
-            /br i1 %drive\d+_valid, label %drive\d+_accepted, label %(drive\d+_rejected)/g,
+            /br i1 %drive\d+_valid, label %drive\d+_accepted, label %(drive\d+_rejected|trap_site\d+)/g,
           ),
         ].filter((match) => match.index < (callIndex ?? 0))
         assert.isNotEmpty(admissions, `callback @${symbol} is reachable before drive admission`)
