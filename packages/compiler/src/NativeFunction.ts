@@ -104,6 +104,11 @@ export const discoverRoots = (
           : [],
       ),
     ),
+    ...blocks.flatMap((block) =>
+      block.operations.flatMap((operation) =>
+        operation._tag === 'BindMatch' ? [operation.destination.ordinal] : [],
+      ),
+    ),
     ...[...assignments].flatMap(([ordinal, count]) => (count > 1 ? [ordinal] : [])),
     ...continuationLocals,
     ...runtimeContinuationDestinations,

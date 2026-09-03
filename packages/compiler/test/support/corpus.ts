@@ -246,6 +246,21 @@ pub fn main() -> i32 {
   return update(&mut buffer, usize.ONE)
 }`
 
+/** Statement-form `if let` keeps pattern bindings live on every native success branch. */
+export const retainedIfLetMatchAcceptance = `import silk.option { Option }
+
+fn inspect(taken: Option<i32>) -> i32 {
+  if let Option<i32>.Some { value: i } = move taken {
+    return i
+  } else {
+    return 0
+  }
+}
+
+pub fn main() -> i32 {
+  return inspect(Option<i32>.Some { value: 42 }) + inspect(Option<i32>.None)
+}`
+
 /** Two independent roots resume in reverse suspension order without sharing a frame stack. */
 export const independentExecutionNonLifo = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.allocator { Allocator, OutOfMemoryError }
@@ -1291,6 +1306,11 @@ pub fn main() -> i32 {
   {
     name: 'template-formatting',
     source: templateFormattingAcceptance,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'retained-if-let-match-binding',
+    source: retainedIfLetMatchAcceptance,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
