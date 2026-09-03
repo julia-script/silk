@@ -1820,11 +1820,12 @@ it.effect('attributes import use to the exact authored binding', () =>
 
 it.effect('counts conformance heads and mappings as import uses', () =>
   Effect.gen(function* () {
-    const library = 'pub interface Printable { fn print(value: &Self) -> i32 }'
-    const source = `import library { Printable }
+    const library = `pub interface Printable { fn print(value: &Self) -> i32 }
+pub struct Witness {}
+impl Witness { pub fn printItem(value: &Witness) -> i32 { return 1 } }`
+    const source = `import library { Printable, Witness }
 pub struct Item {}
-pub fn printItem(value: &Item) -> i32 { return 1 }
-impl Printable for Item { print: Item.printItem }`
+impl Printable for Item { print: Witness.printItem }`
     const { snapshot } = yield* openProject(
       [
         { module: 'library', text: library },
@@ -1832,7 +1833,12 @@ impl Printable for Item { print: Item.printItem }`
       ],
       'main',
     )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    // The incompatible witness is intentional: a rejected mapping still semantically references
+    // its authored target and must not cascade into an unrelated unused-import warning.
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map(({ code }) => code),
+      ['SEM0083'],
+    )
     assert.deepEqual(Analysis.unusedImports(snapshot, 'main'), [])
   }),
 )
