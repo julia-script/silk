@@ -194,6 +194,8 @@ const entryReason = (entry: Driver.NoEntry): string => {
       return 'effectful `main` must succeed with `()`'
     case 'EffectEntryRequirements':
       return `effectful \`main\` has unresolved dependencies: ${entry.requirements?.map((requirement) => Type.encodeRequirement(requirement)).join(', ') ?? 'unknown'}`
+    case 'UnavailableEntryBody':
+      return 'source diagnostics prevented lowering the body of `main`'
     case 'InvalidSource':
       return 'source diagnostics prevented entry discovery'
   }

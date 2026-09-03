@@ -1699,13 +1699,24 @@ export const topologicalRegions = (self: MirFunction): ReadonlyArray<Region> => 
   const byId = new Map(self.regions.map((region) => [region.id.ordinal, region] as const))
   const visited = new Set<number>()
   const ordered: Array<Region> = []
-  const visit = (id: RegionId): void => {
-    if (visited.has(id.ordinal)) return
-    visited.add(id.ordinal)
-    const region = byId.get(id.ordinal)
-    if (region === undefined) return
-    ordered.push(region)
-    for (const [target] of regionTargets(region)) visit(target)
+  // Explicit stack: a straight-line function is one region per statement, so region depth is
+  // authored length and must not become JavaScript stack depth.
+  const visit = (root: RegionId): void => {
+    const pending: Array<Array<RegionId>> = [[root]]
+    while (pending.length > 0) {
+      const frame = pending.at(-1) ?? []
+      const id = frame.shift()
+      if (id === undefined) {
+        pending.pop()
+        continue
+      }
+      if (visited.has(id.ordinal)) continue
+      visited.add(id.ordinal)
+      const region = byId.get(id.ordinal)
+      if (region === undefined) continue
+      ordered.push(region)
+      pending.push(regionTargets(region).map(([target]) => target))
+    }
   }
   visit(self.entry)
   for (const region of [...self.regions].sort(

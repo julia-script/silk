@@ -2894,9 +2894,21 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
     }
 
     const color = new Map<number, 0 | 1 | 2>()
-    const visit = (region: Region): void => {
-      color.set(region.id.ordinal, 1)
-      for (const [target] of regionTargets(region)) {
+    // Explicit stack: region depth is authored statement count, not JavaScript stack depth.
+    const visit = (root: Region): void => {
+      const pending: Array<{ readonly region: Region; readonly targets: Array<RegionId> }> = [
+        { region: root, targets: regionTargets(root).map(([target]) => target) },
+      ]
+      color.set(root.id.ordinal, 1)
+      while (pending.length > 0) {
+        const frame = pending.at(-1)
+        if (frame === undefined) break
+        const target = frame.targets.shift()
+        if (target === undefined) {
+          color.set(frame.region.id.ordinal, 2)
+          pending.pop()
+          continue
+        }
         const targetRegion = byId.get(target.ordinal)
         if (targetRegion === undefined) continue
         if (color.get(target.ordinal) === 1) {
@@ -2905,13 +2917,18 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               _tag: 'Violation',
               rule: 'StructuralCycle',
               function: fn.id,
-              region: region.id,
-              detail: `structural edge r${region.id.ordinal} -> r${target.ordinal} forms a cycle`,
+              region: frame.region.id,
+              detail: `structural edge r${frame.region.id.ordinal} -> r${target.ordinal} forms a cycle`,
             }),
           )
-        } else if (color.get(target.ordinal) !== 2) visit(targetRegion)
+        } else if (color.get(target.ordinal) !== 2) {
+          color.set(target.ordinal, 1)
+          pending.push({
+            region: targetRegion,
+            targets: regionTargets(targetRegion).map(([candidate]) => candidate),
+          })
+        }
       }
-      color.set(region.id.ordinal, 2)
     }
     for (const region of [...fn.regions].sort((a, b) => a.id.ordinal - b.id.ordinal)) {
       if (color.get(region.id.ordinal) === undefined) visit(region)
