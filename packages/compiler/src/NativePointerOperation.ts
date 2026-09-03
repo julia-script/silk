@@ -152,6 +152,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         )
       }
       storage.locals.set(destination, Object.freeze([]))
+      yield* NativeStorage.reloadAddressRoots(storage)
       return
     }
   }

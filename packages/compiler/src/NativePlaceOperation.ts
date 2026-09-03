@@ -1040,6 +1040,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             ),
           )
         }
+        yield* NativeStorage.reloadAddressRoots(nativeStorage)
         break
       }
       if (operation.rootType._tag === 'Slice') {
@@ -1113,6 +1114,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           )
         }
         checkOrdinal += 1
+        yield* NativeStorage.reloadAddressRoots(nativeStorage)
         break
       }
       const rootLanes = NativeType.valueLanesFor(types, operation.rootType)

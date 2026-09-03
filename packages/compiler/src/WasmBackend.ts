@@ -721,8 +721,17 @@ const saturatingSubwordArithmetic = (
   unsigned: boolean,
 ): ReadonlyArray<Instr.Instr> => {
   const operation = arithmeticMnemonic(shape, 'i32')
-  const lessThan: Instr.PlainMnemonic = unsigned ? 'i32.lt_u' : 'i32.lt_s'
   const greaterThan: Instr.PlainMnemonic = unsigned ? 'i32.gt_u' : 'i32.gt_s'
+  // An unsigned lane never sits below zero, but an unsigned subtraction that borrows wraps to a
+  // huge lane value that would otherwise read as "above maximum": test the operands instead.
+  let belowMinimum: ReadonlyArray<Instr.Instr>
+  if (!unsigned) {
+    belowMinimum = [Instr.localGet(scratch), Instr.i32Const(Number(minimum)), Instr.op('i32.lt_s')]
+  } else if (shape === 'Subtract') {
+    belowMinimum = [Instr.localGet(left), Instr.localGet(right), Instr.op('i32.lt_u')]
+  } else {
+    belowMinimum = [Instr.i32Const(0)]
+  }
   return [
     Instr.localGet(left),
     Instr.localGet(right),
@@ -730,9 +739,7 @@ const saturatingSubwordArithmetic = (
     Instr.localSet(scratch),
     Instr.i32Const(Number(minimum)),
     Instr.localGet(scratch),
-    Instr.localGet(scratch),
-    Instr.i32Const(Number(minimum)),
-    Instr.op(lessThan),
+    ...belowMinimum,
     Instr.op('select'),
     Instr.localSet(scratch),
     Instr.i32Const(Number(maximum)),
@@ -4398,11 +4405,10 @@ const emitExecutionParkOperation = (
 ): ReadonlyArray<Instr.Instr> => {
   state.emitter.runtimeFeatures.add('DormantContinuation')
   state.emitter.runtimeFeatures.add('ExternalWakeCell')
-  const { emitter, layout, suspension, skipInvocation } = state
-  // The execution package, not the resumed coroutine frame, owns the registration guard after
-  // parking. Eligibility consumes it before this resume label is entered, so the skipped
-  // invocation must not materialize or release the transferred local a second time.
-  if (skipInvocation) return []
+  const { emitter, layout, suspension, skipInvocation, releaseInstructions } = state
+  // The resumed frame restores the registration guard it retained across the park; the wake
+  // that made this execution eligible is spent, so the guard drops before the body continues.
+  if (skipInvocation) return releaseInstructions(operation.guardCleanup, operation.guard)
   const runtime = emitter.suspensionRuntime
   const region = suspension?.regions.get(operation)
   const registerType = layout.types.at(operation.register.ordinal)
@@ -4834,6 +4840,16 @@ const emitPointerOffsetOperation = (
   ]
 }
 
+/**
+ * Linear memory maps address zero, so a null dereference would silently read the static area
+ * where the evaluator traps and native faults: check the address before the access.
+ */
+const nullPointerTrap = (address: number): ReadonlyArray<Instr.Instr> => [
+  Instr.localGet(address),
+  Instr.op('i32.eqz'),
+  Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+]
+
 const emitPointerReadOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'PointerRead' }>,
   state: WasmOperationContext,
@@ -4843,35 +4859,42 @@ const emitPointerReadOperation = (
   const pointee = Mir.semanticType(operation.type)
   const shape = LayoutPlan.callingShape(plan, pointee)
   if (shape === undefined) throw new RangeError('Wasm pointer read lost its pointee shape')
-  return shape.lanes.flatMap((lane, ordinal) => {
-    const destination = slots(operation.destination).at(ordinal)
-    const offset = LayoutVerify.laneOffset(plan, pointee, lane.path)
-    if (destination === undefined || offset === undefined) {
-      throw new RangeError('Wasm pointer read lost a pointee lane')
-    }
-    return [...loadAt(address, offset, lane), Instr.localSet(destination)]
-  })
+  return [
+    ...nullPointerTrap(address),
+    ...shape.lanes.flatMap((lane, ordinal) => {
+      const destination = slots(operation.destination).at(ordinal)
+      const offset = LayoutVerify.laneOffset(plan, pointee, lane.path)
+      if (destination === undefined || offset === undefined) {
+        throw new RangeError('Wasm pointer read lost a pointee lane')
+      }
+      return [...loadAt(address, offset, lane), Instr.localSet(destination)]
+    }),
+  ]
 }
 
 const emitPointerWriteOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'PointerWrite' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
-  const { layout, plan, slots, scalar, storeAt } = state
+  const { layout, plan, slots, scalar, storeAt, reloadReachableRoots } = state
   const address = scalar(operation.pointer)
   const pointer = layout.types.at(operation.pointer.ordinal)
   if (pointer?._tag !== 'Pointer') throw new RangeError('Wasm pointer write lost its pointer type')
   const pointee = pointer.type.pointee
   const shape = LayoutPlan.callingShape(plan, pointee)
   if (shape === undefined) throw new RangeError('Wasm pointer write lost its pointee shape')
-  return shape.lanes.flatMap((lane, ordinal) => {
-    const value = slots(operation.value).at(ordinal)
-    const offset = LayoutVerify.laneOffset(plan, pointee, lane.path)
-    if (value === undefined || offset === undefined) {
-      throw new RangeError('Wasm pointer write lost a pointee lane')
-    }
-    return storeAt(address, value, offset, lane)
-  })
+  return [
+    ...nullPointerTrap(address),
+    ...shape.lanes.flatMap((lane, ordinal) => {
+      const value = slots(operation.value).at(ordinal)
+      const offset = LayoutVerify.laneOffset(plan, pointee, lane.path)
+      if (value === undefined || offset === undefined) {
+        throw new RangeError('Wasm pointer write lost a pointee lane')
+      }
+      return storeAt(address, value, offset, lane)
+    }),
+    ...reloadReachableRoots([operation.pointer]),
+  ]
 }
 
 const emitSlotWriteOperation = (
@@ -5734,8 +5757,20 @@ const emitWritePlaceOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'WritePlace' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
-  const { layout, plan, memory, slots, scalar, copy, storeAt, flushBorrowRoot } = state
+  const {
+    layout,
+    plan,
+    memory,
+    slots,
+    scalar,
+    copy,
+    storeAt,
+    flushBorrowRoot,
+    reloadReachableRoots,
+  } = state
 
+  // A write through a view lands in frame memory; the root it aliases keeps its lanes, so
+  // those reload exactly as they do after a callee wrote through the same pointer.
   if (operation.rootType._tag === 'Reference') {
     if (operation.rootType.type.access !== 'Exclusive')
       throw new RangeError('Wasm reference write requires exclusive access')
@@ -5797,7 +5832,7 @@ const emitWritePlaceOperation = (
         throw new RangeError('Wasm reference write lost a lane offset')
       instructions.push(...storeAt(layout.scratch, value, offset, lane))
     }
-    return instructions
+    return [...instructions, ...reloadReachableRoots([operation.root])]
   }
   if (operation.rootType._tag === 'Slice') {
     if (memory === undefined) throw new RangeError('Wasm slice write has no private memory')
@@ -5826,27 +5861,30 @@ const emitWritePlaceOperation = (
     }
     const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
     const sourceSlots = slots(operation.source)
-    return sourceLanes.flatMap((lane, ordinal) => {
-      const staticOffset = LayoutVerify.laneOffset(
-        memory.plan,
-        sliceType.element,
-        Object.freeze([...staticSelectors, ...lane.path]),
-      )
-      const source = sourceSlots.at(ordinal)
-      if (staticOffset === undefined || source === undefined) {
-        throw new RangeError(`Wasm slice write lost lane ${ordinal}`)
-      }
-      return [
-        Instr.localGet(base),
-        Instr.localGet(scalar(selector.index)),
-        Instr.i32Const(sliceRepresentation.stride),
-        Instr.op('i32.mul'),
-        Instr.op('i32.add'),
-        ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
-        Instr.localGet(source),
-        Instr.memoryAccess(laneStoreMnemonic(memory.plan, lane), memory.memory),
-      ]
-    })
+    return [
+      ...sourceLanes.flatMap((lane, ordinal) => {
+        const staticOffset = LayoutVerify.laneOffset(
+          memory.plan,
+          sliceType.element,
+          Object.freeze([...staticSelectors, ...lane.path]),
+        )
+        const source = sourceSlots.at(ordinal)
+        if (staticOffset === undefined || source === undefined) {
+          throw new RangeError(`Wasm slice write lost lane ${ordinal}`)
+        }
+        return [
+          Instr.localGet(base),
+          Instr.localGet(scalar(selector.index)),
+          Instr.i32Const(sliceRepresentation.stride),
+          Instr.op('i32.mul'),
+          Instr.op('i32.add'),
+          ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
+          Instr.localGet(source),
+          Instr.memoryAccess(laneStoreMnemonic(memory.plan, lane), memory.memory),
+        ]
+      }),
+      ...reloadReachableRoots([operation.root]),
+    ]
   }
   if (operation.selectors.length === 0) {
     return [
@@ -7852,6 +7890,12 @@ interface WasmSuspensionRuntime {
   readonly transferHeaderSize: number
   readonly transferResultOffset: number
   readonly origins: ReadonlyMap<string, number>
+  /**
+   * Transfer-area offsets of the address lanes each origin's pending payload carries, by origin
+   * id. A relay that moves a root into its coroutine frame patches these alongside the retained
+   * frames: the child about to run reads its borrow from here.
+   */
+  readonly originAddressLanes: ReadonlyMap<number, ReadonlyArray<number>>
   readonly resumes: ReadonlyMap<string, number>
   readonly frames: ReadonlyMap<string, Mir.CoroutineFrameTargetLayout>
   readonly layouts: ReadonlyMap<string, Mir.CoroutineFrameTargetStateLayout>
@@ -8196,6 +8240,66 @@ const emitBody = (
         ),
       ]
     }
+    const patchTransferLane = (
+      oldRoot: FrameRoot,
+      newOffset: number,
+      laneOffset: number,
+    ): ReadonlyArray<Instr.Instr> => {
+      const rootLayout = LayoutPlan.entry(plan, Mir.semanticType(oldRoot.type))
+      if (rootLayout === undefined)
+        throw new RangeError('Wasm coroutine borrow lost its retained root layout')
+      const lane = suspensionRuntime.transferAddress + laneOffset
+      return [
+        Instr.i32Const(lane),
+        Instr.memoryAccess('i32.load', suspensionRuntime.memory),
+        Instr.localTee(layout.scratch),
+        ...privateFrameAddress(oldRoot.offset),
+        Instr.op('i32.ge_u'),
+        Instr.localGet(layout.scratch),
+        ...privateFrameAddress(oldRoot.offset),
+        Instr.i32Const(rootLayout.size),
+        Instr.op('i32.add'),
+        Instr.op('i32.lt_u'),
+        Instr.op('i32.and'),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          [
+            Instr.i32Const(lane),
+            Instr.localGet(frame),
+            ...(newOffset === 0 ? [] : [Instr.i32Const(newOffset), Instr.op('i32.add')]),
+            Instr.localGet(layout.scratch),
+            ...privateFrameAddress(oldRoot.offset),
+            Instr.op('i32.sub'),
+            Instr.op('i32.add'),
+            Instr.memoryAccess('i32.store', suspensionRuntime.memory),
+          ],
+          [],
+        ),
+      ]
+    }
+    const originEntries = [...suspensionRuntime.originAddressLanes].filter(
+      ([, lanes]) => lanes.length > 0,
+    )
+    const patchPendingOrigin = (
+      oldRoot: FrameRoot,
+      newOffset: number,
+      ordinal = 0,
+    ): ReadonlyArray<Instr.Instr> => {
+      const selected = originEntries.at(ordinal)
+      if (selected === undefined) return []
+      const [id, lanes] = selected
+      return [
+        Instr.i32Const(suspensionRuntime.transferAddress),
+        Instr.memoryAccess('i32.load', suspensionRuntime.memory),
+        Instr.i32Const(id),
+        Instr.op('i32.eq'),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          lanes.flatMap((laneOffset) => patchTransferLane(oldRoot, newOffset, laneOffset)),
+          patchPendingOrigin(oldRoot, newOffset, ordinal + 1),
+        ),
+      ]
+    }
     return state.payload.flatMap((field) => {
       if (field.access._tag !== 'AffineTransfer') return []
       const root = memory.frame.roots.get(field.local.ordinal)
@@ -8216,6 +8320,7 @@ const emitBody = (
             Instr.br(0),
           ]),
         ]),
+        ...patchPendingOrigin(root, field.offset),
       ]
     })
   }
@@ -8902,11 +9007,19 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
       return semantic === 'f32' || semantic === 'f64'
     }),
   )
+  // A raw pointer access loads or stores through private memory even when nothing in the program
+  // ever allocates: a null dereference must reach the trap, not a missing memory.
+  const needsPointerAccess = program.functions.some((fn) =>
+    MirVerification.operations(fn).some(
+      (operation) => operation._tag === 'PointerRead' || operation._tag === 'PointerWrite',
+    ),
+  )
   const needsMemory =
     staticOffsets.size > 0 ||
     needsHeap ||
     suspensionEnabled ||
     needsHostWrite ||
+    needsPointerAccess ||
     [...frames.values()].some((frame) => frame.roots.size > 0)
   const initialMemoryPages = needsHeap ? 2 : 1
   const privateMemory = needsMemory
@@ -9206,6 +9319,23 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
           transferHeaderSize,
           transferResultOffset,
           origins: originIds,
+          originAddressLanes: new Map(
+            originRecords.map((record, ordinal) => {
+              const inputLanes = suspensionOperationInputs(record.region.operation).flatMap(
+                (local) => {
+                  const type = record.fn.localTypes.at(local.ordinal)
+                  return type === undefined ? [] : [...lanesFor(type)]
+                },
+              )
+              const packed = packWasmLanes(inputLanes, program.layout, transferHeaderSize)
+              return [
+                ordinal + 1,
+                packed.lanes.flatMap((lane, laneOrdinal) =>
+                  typeof inputLanes.at(laneOrdinal)?.type === 'string' ? [] : [lane.offset],
+                ),
+              ] as const
+            }),
+          ),
           resumes: resumeIds,
           frames: coroutineFrames,
           layouts: coroutineFrameStates,

@@ -168,6 +168,15 @@ export const ensureAddressRoot = Effect.fnUntraced(function* (context: Context, 
   yield* materializeAddressRoot(context, root)
 })
 
+/**
+ * Reloads every addressable root after memory it may alias was written — by a callee, or by
+ * a store through a view or pointer in this body.
+ */
+export const reloadAddressRoots = Effect.fnUntraced(function* (context: Context) {
+  for (const root of [...context.addressRoots].sort((left, right) => left - right))
+    yield* reloadAddressRoot(context, root)
+})
+
 /** Reloads one addressable root into SSA and mirrors it to mutable storage. */
 export const reloadAddressRoot = Effect.fnUntraced(function* (context: Context, root: number) {
   const reloadId = context.sequences.reload++
