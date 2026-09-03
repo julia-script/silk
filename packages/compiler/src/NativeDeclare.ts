@@ -81,6 +81,7 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
           context.builder,
           isMachine ? publicSymbol : `${publicSymbol}$drive`,
           yield* LlvmType.functionType(context.builder, resultType, parameters),
+          { visibility: 'hidden' },
         )
       : undefined
     declared.push(
