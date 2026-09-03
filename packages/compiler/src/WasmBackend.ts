@@ -6635,12 +6635,16 @@ const emitCallOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'Call' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
-  const { resolve, slots, reloadReachableRoots } = state
+  const { resolveIndependent, slots, reloadReachableRoots } = state
+  // An ordinary call has no suspension control: a suspendable target is driven to completion
+  // through its independent root, the way the machine entry is.
   return [
     ...operation.arguments.flatMap((argument) =>
       slots(argument).map((slot) => Instr.localGet(slot)),
     ),
-    Instr.call(resolve(operation.target, operation.typeArguments, operation.staticArguments)),
+    Instr.call(
+      resolveIndependent(operation.target, operation.typeArguments, operation.staticArguments),
+    ),
     ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
     ...reloadReachableRoots(operation.arguments),
   ]

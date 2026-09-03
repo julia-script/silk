@@ -7832,9 +7832,18 @@ export const effectCaptureFacts = (
           visit(statement.body)
           break
         case 'ReturnStatement':
+          // A returned owned value leaves with the outcome; a returned borrow is only read.
+          expression(
+            statement.expression,
+            statement.expression.type._tag === 'Available' &&
+              Type.containsViewBorrow(statement.expression.type.type)
+              ? 'Shared'
+              : 'Take',
+          )
+          break
         case 'FailStatement':
         case 'DropStatement':
-          expression(statement.expression)
+          expression(statement.expression, 'Take')
           break
         case 'BreakStatement':
         case 'ContinueStatement':

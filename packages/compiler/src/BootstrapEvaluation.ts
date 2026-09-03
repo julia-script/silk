@@ -370,6 +370,20 @@ function* executeFunction(
     return result
   }
 
+  /**
+   * An ordinary call has no suspension control of its own: when the callee transfers, the caller
+   * stays parked as a stateless relay until the transferred chain completes, exactly like the
+   * machine root does for an Effect entry. Returning the transfer instead would unwind this
+   * activation and hand the caller's frame to whichever relay resumes next.
+   */
+  const callSynchronousBoundary = function* (
+    target: Mir.MirFunction,
+    arguments_: ReadonlyArray<Value>,
+    span: SourceSpan.SourceSpan,
+  ): FunctionExecution {
+    return yield* relayTransfers(yield* callFunction(target, arguments_, span))
+  }
+
   const suspensionFor = (
     operation: Mir.Operation,
   ): Mir.SuspendEffectRegion | Mir.RunSuspendableEffectRegion | undefined =>
@@ -1022,7 +1036,7 @@ function* executeFunction(
           selectors: Object.freeze([]),
           indexes: Object.freeze([]),
         })
-        const result = yield* callFunction(target, [reference], provenance.span)
+        const result = yield* callSynchronousBoundary(target, [reference], provenance.span)
         if (result._tag === 'Blocked') return result
         if (result._tag === 'Transfer') return result
         const updated = state.cells.get(key)?.value ?? owner
@@ -1147,7 +1161,7 @@ function* executeFunction(
           }),
         )
       })
-      return yield* callFunction(callee, arguments_, span)
+      return yield* callSynchronousBoundary(callee, arguments_, span)
     }
 
     const operation = target.operation
@@ -4761,7 +4775,7 @@ function* executeFunction(
                 }),
               )
             })
-            const result = yield* callFunction(
+            const result = yield* callSynchronousBoundary(
               target,
               argumentStates.map((state) => state.value),
               operation.provenance.span,
