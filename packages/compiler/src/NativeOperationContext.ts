@@ -16,6 +16,7 @@ import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import type * as NativeOperation from './NativeOperation.js'
 import type * as NativeStorage from './NativeStorage.js'
 import type * as NativeSuspension from './NativeSuspension.js'
+import type * as NativeTermination from './NativeTermination.js'
 import type * as NativeType from './NativeType.js'
 
 interface OverflowSignature {
@@ -68,5 +69,6 @@ export interface Context {
   readonly arith: NativeArith.OperationContext
   readonly call: NativeCall.Context
   readonly suspension: NativeSuspension.OperationContext
+  readonly termination: NativeTermination.FunctionContext
   readonly state: NativeOperation.State
 }

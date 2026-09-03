@@ -13,6 +13,7 @@ import * as NativeCall from './NativeCall.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeSuspension from './NativeSuspension.js'
+import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
 import * as SilkType from './Type.js'
 
@@ -52,8 +53,6 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     suspensionRegions,
     types,
   } = context
-  const initialTrapBlock = context.state.trapBlock
-  let trapBlock = initialTrapBlock
   const checkOrdinal = context.state.checkOrdinal
   switch (operation._tag) {
     case 'Drop': {
@@ -126,6 +125,24 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       if (sourceType === undefined) throw new RangeError('LLVM effect outcome lost its source type')
       const sourceLanes = NativeType.valueLanesFor(types, sourceType)
       const targetLanes = NativeType.lanesFor(types, operation.type)
+      if (operation.tag === 0) {
+        yield* NativeTermination.clearCause(context.termination)
+      } else {
+        yield* NativeTermination.storeProduced(
+          context.termination,
+          yield* Constant.integerSigned(
+            builder,
+            i32,
+            BigInt(
+              NativeTermination.registerFailureSite(
+                context.termination,
+                NativeTermination.identityOf(operation.type.type, operation.tag),
+                operation.provenance.span,
+              ),
+            ),
+          ),
+        )
+      }
       const values: Array<Value.Input> = [
         yield* Constant.integerSigned(builder, i32, BigInt(operation.tag)),
       ]
@@ -152,6 +169,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const sourceTag = source.at(0)
       if (sourceTag === undefined) throw new RangeError('Effect failure union lost its tag lane')
       let mappedTag: Value.Input = yield* Constant.integerSigned(builder, i32, -1n)
+      let site: Value.Input = yield* Constant.integerSigned(builder, i32, 0n)
       for (const [ordinal, mapping] of operation.mappings.entries()) {
         const matches = yield* FunctionBody.integerCompare(
           body,
@@ -167,7 +185,25 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           mappedTag,
           `effect_failure_union${operation.destination.ordinal}_${ordinal}_tag`,
         )
+        site = yield* FunctionBody.select(
+          body,
+          matches,
+          yield* Constant.integerSigned(
+            builder,
+            i32,
+            BigInt(
+              NativeTermination.registerFailureSite(
+                context.termination,
+                NativeTermination.identityOf(operation.type.type, mapping.target),
+                operation.provenance.span,
+              ),
+            ),
+          ),
+          site,
+          `effect_failure_union${operation.destination.ordinal}_${ordinal}_site`,
+        )
       }
+      yield* NativeTermination.storeProduced(context.termination, site)
       const values: Array<Value.Input> = [
         mappedTag,
         ...(yield* NativeAggregate.failurePayload(
@@ -260,6 +296,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       yield* FunctionBody.branch(body, followingBlock)
       yield* LlvmBlock.setInsertionPoint(body, failureBlock)
+      yield* NativeTermination.storePropagated(context.termination)
       let mappedTag: Value.Input = yield* Constant.integerSigned(builder, i32, -1n)
       for (const [ordinal, mapping] of operation.tagMappings.entries()) {
         const source = yield* Constant.integerSigned(builder, i32, BigInt(mapping.source))
@@ -461,9 +498,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* FunctionBody.branch(body, following)
         yield* LlvmBlock.setInsertionPoint(body, otherwise)
       }
-      if (trapBlock === undefined)
-        trapBlock = yield* LlvmBlock.make(body, 'effect_composite_invalid_tag')
-      yield* FunctionBody.branch(body, trapBlock)
+      yield* FunctionBody.branch(
+        body,
+        yield* NativeTermination.trapBlock(
+          context.termination,
+          'invalid effect outcome tag',
+          operation.provenance.span,
+        ),
+      )
       yield* LlvmBlock.setInsertionPoint(body, following)
       yield* NativeStorage.reloadRoots(
         nativeStorage,
@@ -524,6 +566,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       yield* FunctionBody.branch(body, completed)
       yield* LlvmBlock.setInsertionPoint(body, failureBlock)
+      yield* NativeTermination.storePropagated(context.termination)
       let propagatedTag: Value.Input = yield* Constant.integerSigned(builder, i32, -1n)
       for (const [ordinal, mapping] of operation.tagMappings.entries()) {
         const matches = yield* FunctionBody.integerCompare(
@@ -718,6 +761,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       yield* FunctionBody.branch(body, followingBlock)
       yield* LlvmBlock.setInsertionPoint(body, failureBlock)
+      yield* NativeTermination.storePropagated(context.termination)
       let mappedTag: Value.Input = yield* Constant.integerSigned(builder, i32, -1n)
       for (const [ordinal, mapping] of operation.tagMappings.entries()) {
         const source = yield* Constant.integerSigned(builder, i32, BigInt(mapping.source))
@@ -850,6 +894,21 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         zero,
         `effect_result_success${operation.destination.ordinal}`,
       )
+      if (context.termination.module.enabled) {
+        const caught = yield* LlvmBlock.make(
+          body,
+          `effect_result_caught${operation.destination.ordinal}`,
+        )
+        const following = yield* LlvmBlock.make(
+          body,
+          `effect_result_following${operation.destination.ordinal}`,
+        )
+        yield* FunctionBody.conditionalBranch(body, succeeded, following, caught)
+        yield* LlvmBlock.setInsertionPoint(body, caught)
+        yield* NativeTermination.storeCaught(context.termination)
+        yield* FunctionBody.branch(body, following)
+        yield* LlvmBlock.setInsertionPoint(body, following)
+      }
       nativeStorage.locals.set(
         operation.destination.ordinal,
         Object.freeze([
@@ -1004,6 +1063,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             `effect_entry_cleanup${failure.tag}`,
           )
         }
+        yield* NativeTermination.storeFailureTag(context.termination, failure.tag)
         yield* NativeStorage.storeMutable(
           nativeStorage,
           operation.destination,
@@ -1012,15 +1072,25 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* FunctionBody.branch(body, following)
         yield* LlvmBlock.setInsertionPoint(body, otherwise)
         if (ordinal === operation.failures.length - 1) {
-          if (trapBlock === undefined)
-            trapBlock = yield* LlvmBlock.make(body, 'effect_entry_invalid_tag')
-          yield* FunctionBody.branch(body, trapBlock)
+          yield* FunctionBody.branch(
+            body,
+            yield* NativeTermination.trapBlock(
+              context.termination,
+              'invalid effect outcome tag',
+              operation.provenance.span,
+            ),
+          )
         }
       }
       if (operation.failures.length === 0) {
-        if (trapBlock === undefined)
-          trapBlock = yield* LlvmBlock.make(body, 'effect_entry_invalid_tag')
-        yield* FunctionBody.branch(body, trapBlock)
+        yield* FunctionBody.branch(
+          body,
+          yield* NativeTermination.trapBlock(
+            context.termination,
+            'invalid effect outcome tag',
+            operation.provenance.span,
+          ),
+        )
       }
       yield* LlvmBlock.setInsertionPoint(body, following)
       // The success arm and every failure-tag arm reach here, so no arm's cached
@@ -1040,6 +1110,5 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
   }
-  if (trapBlock !== initialTrapBlock) context.state.trapBlock = trapBlock
   context.state.checkOrdinal = checkOrdinal
 })

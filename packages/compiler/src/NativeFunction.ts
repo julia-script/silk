@@ -30,6 +30,7 @@ import * as NativeOperation from './NativeOperation.js'
 import type * as NativeOperationContext from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
 import type * as NativeSuspension from './NativeSuspension.js'
+import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
 
 export interface MutableRoots {
@@ -219,6 +220,7 @@ export interface EmissionContext {
   readonly file: LlvmMetadata.Optional
   readonly table: ReturnType<typeof lineTable>
   readonly debugContext: NativeDebug.LoweringContext
+  readonly termination: NativeTermination.ModuleContext
 }
 
 /** Emits every declared native function body from explicit program lowering state. */
@@ -264,6 +266,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
     file,
     table,
     debugContext,
+    termination,
   } = context
   for (const entry of declared) {
     let subprogram: LlvmMetadata.Optional
@@ -355,7 +358,13 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           entry.suspendable && coroutineFrame !== undefined
             ? yield* FunctionBody.alloca(body, pointer, 'suspend_invocation_frame_slot')
             : undefined
-        const operationState: NativeOperation.State = { trapBlock: undefined, checkOrdinal: 0 }
+        const operationState: NativeOperation.State = { trapBlocks: [], checkOrdinal: 0 }
+        const terminationContext: NativeTermination.FunctionContext = Object.freeze({
+          module: termination,
+          body,
+          fn: entry.fn,
+          state: operationState,
+        })
         const locals = new Map<number, ReadonlyArray<Value.Input>>()
         const roots = discoverRoots(entry.fn, entry.linear)
         const mutableRoots = roots.mutable
@@ -745,7 +754,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           lane: laneContext,
           types: nativeTypes,
           debug: debugLocation,
-          state: operationState,
+          termination: terminationContext,
         })
         const suspensionContext: NativeSuspension.OperationContext = Object.freeze({
           builder,
@@ -842,6 +851,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           arith: arithContext,
           call: callContext,
           suspension: suspensionContext,
+          termination: terminationContext,
           state: operationState,
         })
         const operationContext: NativeOperation.LoweringContext = Object.freeze({
@@ -891,6 +901,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
               failure: failureContext,
               suspension: suspensionReturnContext,
               debug: debugLocation,
+              termination: terminationContext,
             }),
             block.terminator,
             blockOrdinal,
@@ -898,11 +909,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           )
         }
 
-        if (operationState.trapBlock !== undefined) {
-          yield* LlvmBlock.setInsertionPoint(body, operationState.trapBlock)
-          yield* Intrinsic.call(body, 'trap', [], [])
-          yield* FunctionBody.unreachable(body)
-        }
+        yield* NativeTermination.emitTrapBlocks(terminationContext)
       }),
     )
   }

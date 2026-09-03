@@ -17,6 +17,9 @@ const ascii = (value: string): Uint8Array =>
 const failureSource = `pub struct SomeError { code: i32 }
 pub effect fn main() -> () ! SomeError { fail SomeError { code: 42 } }`
 
+const nativeFailureReport =
+  'unhandled error: effect-entry/native.SomeError\n  at effect-entry/native.main (effect-entry/native:2:41)\n'
+
 const successSource = `pub struct SomeError { code: i32 }
 pub effect fn main() -> () ! SomeError { return () }`
 
@@ -237,7 +240,12 @@ it.effect('keeps effect-entry success and failure in LLVM/direct-Wasm parity', (
         { tag: 1, identity: `effect-entry/${name}.SomeError` },
       ])
       assert.isAbove(llvmArtifact.termination.logicalFrames.length, 0)
-      assert.deepEqual(wasmArtifact.termination, llvmArtifact.termination)
+      // The host report is native-only static data; direct Wasm hands structured termination to its
+      // runner instead, so only the scalar entry contract must agree.
+      const { report: _llvmReport, ...llvmContract } = llvmArtifact.termination
+      const { report: wasmReport, ...wasmContract } = wasmArtifact.termination
+      assert.deepEqual(wasmContract, llvmContract)
+      assert.deepEqual(wasmReport, { frames: [], failureSites: [], trapSites: [] })
       assert.strictEqual(
         llvmArtifact.symbols.find((entry) => entry.symbol === 'silk_main')?.declaration.name,
         '$effect-entry',
@@ -347,7 +355,7 @@ it.effect('reports an unhandled effect entry through the native shim', () =>
     if (compiled._tag !== 'Compiled') return
     const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, 1)
-    assert.strictEqual(run.stderr, 'Error: effect-entry/native.SomeError\n')
+    assert.strictEqual(run.stderr, nativeFailureReport)
     const closedStderr = spawnSync(
       '/bin/sh',
       ['-c', 'exec 2>&-; exec "$1"', 'silk-effect-entry', compiled.path],
@@ -374,7 +382,7 @@ it.effect('reports an unhandled effect entry through the native shim', () =>
     // present, so the entry shape change is invisible to every existing program.
     const withArguments = spawnSync(compiled.path, ['one', 'two', 'three'], { encoding: 'utf8' })
     assert.strictEqual(withArguments.status, 1)
-    assert.strictEqual(withArguments.stderr, 'Error: effect-entry/native.SomeError\n')
+    assert.strictEqual(withArguments.stderr, nativeFailureReport)
     const closedWithArguments = spawnSync(
       '/bin/sh',
       ['-c', 'exec 2>&-; exec "$1" one two', 'silk-effect-entry', compiled.path],

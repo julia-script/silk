@@ -40,14 +40,18 @@ import * as NativeFunction from './NativeFunction.js'
 import type * as NativeLanePointer from './NativeLanePointer.js'
 import * as NativeOperation from './NativeOperation.js'
 import * as NativeSuspension from './NativeSuspension.js'
+import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
 import type * as Scalar from './Scalar.js'
+import type * as Termination from './Termination.js'
 
 export const emit = Effect.fn('NativeProgram.emit')(function* (
   program: Mir.Module,
   request: CodegenRequest,
 ): Effect.fn.Return<
   {
+    /** Static host-report tables for the standalone adapter; empty for direct Wasm. */
+    readonly report: Termination.Report
     readonly symbols: ReadonlyArray<SymbolEntry>
     readonly nativeRuntimeSymbols: ReadonlyArray<string>
     readonly runtimeFeatures: ReadonlyArray<RuntimeFeature>
@@ -485,8 +489,10 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     file,
     types: debugTypes,
   })
+  const termination = NativeTermination.make(builder, program, request, i32)
   yield* NativeFunction.emitBodies(
     Object.freeze({
+      termination,
       runtimeFeatures,
       builder,
       program,
@@ -587,6 +593,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   const context = yield* Effect.context<never>()
 
   return {
+    report: NativeTermination.report(termination),
     symbols: declared.map((entry) =>
       Object.freeze({
         declaration: entry.fn.id,

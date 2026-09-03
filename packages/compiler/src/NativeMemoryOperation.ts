@@ -14,6 +14,7 @@ import * as NativeHostFailure from './NativeHostFailure.js'
 import * as NativeLanePointer from './NativeLanePointer.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
+import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
 import * as SilkType from './Type.js'
 
@@ -63,8 +64,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     unsignedOverflowSignatures,
     usizeType,
   } = context
-  const initialTrapBlock = context.state.trapBlock
-  let trapBlock = initialTrapBlock
+  let trapBlock: LlvmBlock.Block | undefined
   const checkOrdinal = context.state.checkOrdinal
   switch (operation._tag) {
     case 'Allocate': {
@@ -372,7 +372,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         alignmentMismatch,
         `raw_buffer${operation.destination.ordinal}_invalid`,
       )
-      if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'raw_trap')
+      trapBlock = yield* NativeTermination.trapBlock(
+        context.termination,
+        'invalid raw buffer layout',
+        operation.provenance.span,
+      )
       const accepted = yield* LlvmBlock.make(
         body,
         `raw_buffer${operation.destination.ordinal}_accepted`,
@@ -415,7 +419,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         alignmentMismatch,
         `shared${operation.destination.ordinal}_invalid`,
       )
-      if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'shared_trap')
+      trapBlock = yield* NativeTermination.trapBlock(
+        context.termination,
+        'invalid shared allocation layout',
+        operation.provenance.span,
+      )
       const accepted = yield* LlvmBlock.make(
         body,
         `shared${operation.destination.ordinal}_accepted`,
@@ -509,7 +517,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* Constant.integerUnsigned(builder, usizeType, operation.block.strongMaximum),
         `shared${operation.destination.ordinal}_overflow`,
       )
-      if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'shared_clone_trap')
+      trapBlock = yield* NativeTermination.trapBlock(
+        context.termination,
+        'shared count overflow',
+        operation.provenance.span,
+      )
       const accepted = yield* LlvmBlock.make(
         body,
         `shared${operation.destination.ordinal}_clone_accepted`,
@@ -585,7 +597,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         count,
         `raw_slot${operation.destination.ordinal}_bounds`,
       )
-      if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'raw_trap')
+      trapBlock = yield* NativeTermination.trapBlock(
+        context.termination,
+        'index out of bounds',
+        operation.provenance.span,
+      )
       const accepted = yield* LlvmBlock.make(
         body,
         `raw_slot${operation.destination.ordinal}_accepted`,
@@ -660,7 +676,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         count,
         `raw_read${operation.destination.ordinal}_bounds`,
       )
-      if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'raw_trap')
+      trapBlock = yield* NativeTermination.trapBlock(
+        context.termination,
+        'index out of bounds',
+        operation.provenance.span,
+      )
       const accepted = yield* LlvmBlock.make(
         body,
         `raw_read${operation.destination.ordinal}_accepted`,
@@ -786,7 +806,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         lengthOutOfBounds,
         `raw_view${operation.destination.ordinal}_invalid`,
       )
-      if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'raw_trap')
+      trapBlock = yield* NativeTermination.trapBlock(
+        context.termination,
+        'raw buffer range out of bounds',
+        operation.provenance.span,
+      )
       const accepted = yield* LlvmBlock.make(
         body,
         `raw_view${operation.destination.ordinal}_accepted`,
@@ -909,7 +933,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         sourceOutOfBounds,
         `raw_copy${operation.destination.ordinal}_invalid`,
       )
-      if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'raw_trap')
+      trapBlock = yield* NativeTermination.trapBlock(
+        context.termination,
+        'raw buffer range out of bounds',
+        operation.provenance.span,
+      )
       const accepted = yield* LlvmBlock.make(
         body,
         `raw_copy${operation.destination.ordinal}_accepted`,
@@ -1026,7 +1054,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         lengthOutOfBounds,
         `raw_fill${operation.destination.ordinal}_invalid`,
       )
-      if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'raw_trap')
+      trapBlock = yield* NativeTermination.trapBlock(
+        context.termination,
+        'raw buffer range out of bounds',
+        operation.provenance.span,
+      )
       const accepted = yield* LlvmBlock.make(
         body,
         `raw_fill${operation.destination.ordinal}_accepted`,
@@ -1387,6 +1419,5 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
   }
-  if (trapBlock !== initialTrapBlock) context.state.trapBlock = trapBlock
   context.state.checkOrdinal = checkOrdinal
 })

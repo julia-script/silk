@@ -18,7 +18,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as CoroutineRuntime from '../src/CoroutineRuntime.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as Target from '../src/Target.js'
-import type * as Termination from '../src/Termination.js'
+import * as Termination from '../src/Termination.js'
 import * as ToolchainPlan from '../src/ToolchainPlan.js'
 
 const defaultClang = (): string => {
@@ -45,6 +45,7 @@ const termination = (...identities: ReadonlyArray<string>): Termination.Contract
       identities.map((identity, ordinal) => Object.freeze({ tag: ordinal + 1, identity })),
     ),
     logicalFrames: Object.freeze([]),
+    report: Termination.emptyReport,
   })
 
 const ascii = (value: string): Uint8Array =>
@@ -108,12 +109,38 @@ it('plans fixed profile arguments against the canonical target id', () => {
   ])
 })
 
-it('generates effect-reporting shims from byte arrays with closed status handling', () => {
-  const source = ToolchainPlan.shimSource(termination('module.Error"\\name'))
-  const expected = Array.from(new TextEncoder().encode('Error: module.Error"\\name\n')).join(', ')
-  assert.include(source, `{ ${expected} }`)
-  assert.notInclude(source, 'Error: module.Error"\\name')
+it('generates effect-reporting shims from escaped identities with closed status handling', () => {
+  const source = ToolchainPlan.shimSource(termination('module.Error"\\name\u00e9'))
+  assert.include(source, 'identity = "module.Error\\"\\\\name\\303\\251";')
+  assert.notInclude(source, 'module.Error"\\name')
+  assert.include(source, 'silk_write_text("unhandled error: ")')
   assert.include(source, 'default:\n      return 2;')
+  assert.include(source, 'return ok ? 1 : 2;')
+})
+
+it('reports trap sites and failure paths only when the artifact declares them', () => {
+  const bare = ToolchainPlan.shimSource(termination('module.Error'))
+  assert.notInclude(bare, 'silk_trap_report_v1')
+  assert.notInclude(bare, 'silk_write_path')
+  const contract: Termination.Contract = Object.freeze({
+    ...termination('module.Error'),
+    report: Object.freeze({
+      frames: Object.freeze(['module.main (module:1:1)']),
+      failureSites: Object.freeze([
+        Object.freeze({ identity: 'module.Error', origin: 'module.load (module:3:3)' }),
+      ]),
+      trapSites: Object.freeze([
+        Object.freeze({ reason: 'division by zero', origin: 'module.calc (module:8:10)' }),
+      ]),
+    }),
+  })
+  const full = ToolchainPlan.shimSource(contract)
+  assert.include(full, 'void silk_trap_report_v1(int site)')
+  assert.include(full, '"fatal trap: "')
+  assert.include(full, '"module.calc (module:8:10)"')
+  assert.include(full, '"while handling: "')
+  assert.include(full, '"module.load (module:3:3)"')
+  assert.include(full, '"module.main (module:1:1)"')
 })
 
 it('includes coroutine storage only when suspension requests it', () => {
