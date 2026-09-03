@@ -1273,11 +1273,30 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
           hirExpression(argument.expression, argumentBorrowId(argument, ordinal)),
         ),
       ),
-      loanEnds: loanEndsOf(fact.arguments, (ordinal) => returnedBorrowOrdinal !== ordinal),
+      // A staged application retains every argument loan inside the new environment.
+      loanEnds: loanEndsOf(
+        fact.arguments,
+        (ordinal) => fact.staged === undefined && returnedBorrowOrdinal !== ordinal,
+      ),
       heldLoans: Object.freeze([
-        ...loanEndsOf(fact.arguments, (ordinal) => returnedBorrowOrdinal === ordinal),
+        ...loanEndsOf(
+          fact.arguments,
+          (ordinal) => fact.staged !== undefined || returnedBorrowOrdinal === ordinal,
+        ),
         ...(returnedCaptureLoan === undefined ? [] : [returnedCaptureLoan]),
       ]),
+      ...(fact.staged === undefined
+        ? {}
+        : {
+            staged: Object.freeze({
+              site: fact.staged.site,
+              captures: Object.freeze(
+                fact.staged.captures.map((capture) =>
+                  Object.freeze({ ordinal: capture.ordinal, access: capture.access }),
+                ),
+              ),
+            }),
+          }),
       access: fact.mode,
       substitution: fact.substitution,
       evaluation:

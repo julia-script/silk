@@ -880,6 +880,11 @@ export type Operation =
       readonly destination: LocalId
       readonly target: Hir.CallableTarget
       readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
+      /**
+       * A callable value of the same target whose environment fields are spliced ahead of
+       * `captures`; a staged section over a callable value (CALLABLE-002).
+       */
+      readonly base?: LocalId
       readonly captures: ReadonlyArray<{
         readonly ordinal: number
         readonly parameterOrdinal: number

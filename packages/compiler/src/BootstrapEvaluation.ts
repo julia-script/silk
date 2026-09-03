@@ -4510,7 +4510,11 @@ function* executeFunction(
             const ticket = state.nextCallable
             state.nextCallable += 1
             state.callables.set(ticket, { state: 'Available' })
-            const captures = operation.captures.map((capture) => {
+            const base = operation.base === undefined ? undefined : read(operation.base).value
+            if (base !== undefined && base._tag !== 'CallableValue')
+              throw new RangeError('MIR verifier allowed staging over a non-callable value')
+            const captures = [...(base?.captures ?? [])]
+            for (const capture of operation.captures) {
               const aliased = aliasedCaptureAccess(capture)
               const captured: Value =
                 aliased === undefined
@@ -4525,13 +4529,15 @@ function* executeFunction(
                         access: aliased,
                       })
                     })()
-              return Object.freeze({
-                ordinal: capture.ordinal,
-                parameterOrdinal: capture.parameterOrdinal,
-                access: capture.access,
-                value: captured,
-              })
-            })
+              captures.push(
+                Object.freeze({
+                  ordinal: capture.ordinal,
+                  parameterOrdinal: capture.parameterOrdinal,
+                  access: capture.access,
+                  value: captured,
+                }),
+              )
+            }
             write(operation.destination, {
               value: Object.freeze({
                 _tag: 'CallableValue',

@@ -933,8 +933,17 @@ const checkExpression = (
         )
       }
       const checkArguments = (): void => {
-        for (const argument of expression.arguments) {
-          checkExpression(state, live, argument, argumentConsumes(argument), guard, escaping)
+        for (const [ordinal, argument] of expression.arguments.entries()) {
+          // A staged argument is captured into the new environment, not passed to a body.
+          const capture = expression.staged?.captures.at(ordinal)
+          checkExpression(
+            state,
+            live,
+            argument,
+            capture === undefined ? argumentConsumes(argument) : capture.access === 'Take',
+            guard,
+            escaping,
+          )
         }
       }
       if (expression.evaluation === 'LeftThenCallable') {
@@ -2290,7 +2299,13 @@ const analyzeLoans = (
                   ),
                 )
               }
-              const returned = returnedOrdinal === argumentOrdinal
+              // A staged application retains every argument borrow inside the new environment
+              // for as long as the resulting callable lives.
+              const staged = expression.staged !== undefined
+              const returned = staged || returnedOrdinal === argumentOrdinal
+              let origin: LoanFact['origin'] = candidate.formation._tag
+              if (staged) origin = 'CallableCapture'
+              else if (returned) origin = 'ReturnedView'
               const loan: LoanFact = Object.freeze({
                 _tag: 'Loan',
                 id: Object.freeze({
@@ -2301,7 +2316,7 @@ const analyzeLoans = (
                 }),
                 root,
                 access: candidate.access,
-                origin: returned ? 'ReturnedView' : candidate.formation._tag,
+                origin,
                 ...(candidate.formation._tag === 'SliceReborrow' ||
                 candidate.formation._tag === 'ValueReborrow'
                   ? { parent: root, suspendsParent: candidate.formation.suspendsParent }

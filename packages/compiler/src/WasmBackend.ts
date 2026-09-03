@@ -6026,8 +6026,19 @@ const emitMakeEffectOrMakeCallableOperation = (
     operation._tag === 'MakeEffect'
       ? operation.type.environment.fields
       : (operation.type.environment?.fields ?? Object.freeze([]))
-  for (const [ordinal, capture] of operation.captures.entries()) {
-    const field = fields.at(ordinal)
+  if (operation._tag === 'MakeCallable' && operation.base !== undefined) {
+    // A staged section copies the base environment's lanes ahead of its own captures.
+    const base = slots(operation.base)
+    instructions.push(...copy(base, destination.slice(0, base.length)))
+    cursor = base.length
+  }
+  // Callable captures name their field ordinal; a staged section's start past the base fields.
+  const fieldOrdinals =
+    operation._tag === 'MakeCallable'
+      ? operation.captures.map((capture) => capture.ordinal)
+      : operation.captures.map((_, ordinal) => ordinal)
+  for (const [offset, capture] of operation.captures.entries()) {
+    const field = fields.at(fieldOrdinals.at(offset) ?? -1)
     if (field === undefined) throw new RangeError('Wasm Effect capture lost its field')
     if (field.representation !== 'Borrow') {
       const source = slots(capture.source)

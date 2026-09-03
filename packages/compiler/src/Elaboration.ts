@@ -885,6 +885,15 @@ export interface CallableApplyExpressionFact {
   readonly returnedBorrowSource?:
     | { readonly _tag: 'Argument'; readonly ordinal: number }
     | { readonly _tag: 'Capture'; readonly capture: CallableCaptureFact }
+  /**
+   * Present when the supplied arguments are a proper trailing suffix of a callable value's
+   * remaining parameters: the application stages a new section over the value instead of
+   * invoking it, splicing these captures after the value's own environment.
+   */
+  readonly staged?: {
+    readonly site: Hir.CallableSiteId
+    readonly captures: ReadonlyArray<CallableCaptureFact>
+  }
   readonly provenance:
     | { readonly _tag: 'DirectCallableApplication' }
     | {

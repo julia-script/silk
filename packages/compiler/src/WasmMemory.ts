@@ -306,7 +306,12 @@ export const framePlan = (
           changed =
             include(
               operation.destination,
-              operation.captures.map((capture) => capture.source),
+              [
+                ...(operation._tag === 'MakeCallable' && operation.base !== undefined
+                  ? [operation.base]
+                  : []),
+                ...operation.captures.map((capture) => capture.source),
+              ],
               capturedRoots(operation),
             ) || changed
           break

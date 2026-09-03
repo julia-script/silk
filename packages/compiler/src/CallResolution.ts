@@ -2455,6 +2455,35 @@ export const finishCallableApplication = (
     caller !== undefined
       ? directSection
       : undefined
+  // A proper trailing suffix supplied to a callable value stages a further section over that
+  // value (CALLABLE-002); the value's own environment is spliced ahead of these captures.
+  const stagedValue =
+    directSection === undefined &&
+    callable !== undefined &&
+    argumentsResult.facts.length > 0 &&
+    argumentsResult.facts.length < callable.parameters.length &&
+    resolution !== undefined &&
+    caller !== undefined
+      ? Object.freeze({
+          site: executableSite('CallableSiteId', resolution, node),
+          captures: Object.freeze(
+            argumentsResult.facts.map((argument, ordinal) =>
+              Object.freeze({
+                _tag: 'CallableCapture' as const,
+                ordinal,
+                parameterOrdinal:
+                  callable.parameters.length - argumentsResult.facts.length + ordinal,
+                expression: argument.expression,
+                access: captureAccess(
+                  argument.expression,
+                  resolution.index,
+                  copyAssumptionsOf(caller),
+                ),
+              }),
+            ),
+          ),
+        })
+      : undefined
   const returnedBorrowParameter = (reference: CallReferenceFact): number | undefined => {
     if (reference._tag === 'ResolvedBuiltin') return reference.returnedBorrowParameter
     if (reference._tag !== 'Resolved') return undefined
@@ -2529,7 +2558,8 @@ export const finishCallableApplication = (
   if (
     callable !== undefined &&
     callable.parameters.length !== argumentsResult.facts.length &&
-    stagedSection === undefined
+    stagedSection === undefined &&
+    stagedValue === undefined
   ) {
     diagnostics.push(
       Diagnostic.wrongCallArity(
@@ -2555,7 +2585,9 @@ export const finishCallableApplication = (
   }
   if (callable !== undefined) {
     const parameterOffset =
-      stagedSection === undefined ? 0 : callable.parameters.length - argumentsResult.facts.length
+      stagedSection === undefined && stagedValue === undefined
+        ? 0
+        : callable.parameters.length - argumentsResult.facts.length
     for (const [ordinal, argument] of argumentsResult.facts.entries()) {
       const expected = callable.parameters.at(parameterOffset + ordinal)
       if (expected === undefined || argument.type._tag !== 'Available') {
@@ -2684,6 +2716,19 @@ export const finishCallableApplication = (
         : availableExpressionType(sectionType)
     }
     const result = Type.substitute(callable.result, inferred)
+    if (stagedValue !== undefined) {
+      return availableExpressionType(
+        Type.callable(
+          callable.parameters
+            .slice(0, callable.parameters.length - argumentsResult.facts.length)
+            .map((parameter) => Type.substitute(parameter, inferred)),
+          result,
+          strongestEffectAccess(callable.mode, callableMode(stagedValue.captures)),
+          callable.schema,
+          callable.unsafe,
+        ),
+      )
+    }
     return availableExpressionType(
       Type.isEffect(result)
         ? Type.effectWithRows(
@@ -2739,7 +2784,7 @@ export const finishCallableApplication = (
       type: type._tag === 'Available' ? type.type : undefined,
     })
   }
-  if (section?.reference._tag === 'ResolvedIntrinsicContract') {
+  if (section?.reference._tag === 'ResolvedIntrinsicContract' && stagedValue === undefined) {
     const protected_ = argumentsResult.facts.at(0)
     if (
       section.reference.intrinsic.rule._tag === 'ContractRule' &&
@@ -2823,16 +2868,21 @@ export const finishCallableApplication = (
       type: type._tag === 'Available' ? type.type : undefined,
     })
   }
+  // Staging copies a shared environment and consumes any other, exactly as capturing the
+  // callable value itself would.
+  let mode: Type.CallableMode = callable?.mode ?? 'Shared'
+  if (stagedValue !== undefined && mode !== 'Shared') mode = 'Take'
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'CallableApply',
       callee: callee.fact,
       arguments: argumentsResult.facts,
-      mode: callable?.mode ?? 'Shared',
+      mode,
       ...(callable === undefined ? {} : { contract: callable }),
       substitution: inferred,
       inferredProviderSelectors,
       ...(returnedBorrowSource === undefined ? {} : { returnedBorrowSource }),
+      ...(stagedValue === undefined ? {} : { staged: stagedValue }),
       provenance: provenance ?? Object.freeze({ _tag: 'DirectCallableApplication' as const }),
       type,
       syntax: node,

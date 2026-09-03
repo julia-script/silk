@@ -599,6 +599,34 @@ export const callableValueType = (
   })
 }
 
+/** The environment-bearing value type a staged application builds at its own site. */
+export const stagedCallableValueType = (
+  fn: FunctionLowering,
+  expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
+  site: Hir.CallableSiteId,
+): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
+  const expected = Type.substitute(expression.type, fn.substitution)
+  const candidates = fn.layout.callableEnvironments.filter(
+    (
+      candidate,
+    ): candidate is Extract<Layout.CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> =>
+      candidate._tag === 'CallableEnvironment' &&
+      Instances.keyText(candidate.callable.owner) === Instances.keyText(fn.owner.key) &&
+      sameSite(candidate.callable.site, site) &&
+      (!Type.isRuntimeConcrete(expected) || Type.equals(candidate.callable.type, expected)),
+  )
+  const environment = candidates.length === 1 ? candidates.at(0) : undefined
+  return environment === undefined
+    ? undefined
+    : Object.freeze({
+        _tag: 'CallableValue',
+        type: environment.callable.type,
+        target: environment.callable.target,
+        site,
+        environment,
+      })
+}
+
 export const directCallableSectionValueType = (
   fn: FunctionLowering,
   section: Extract<Hir.Expression, { readonly _tag: 'CallableSection' }>,
