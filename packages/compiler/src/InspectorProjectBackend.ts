@@ -50,6 +50,8 @@ const typeText = (type: Type.Type): string => {
     }
     case 'CallableType':
       return `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
+    case 'ForeignFunctionType':
+      return Type.encode(type)
     case 'ReferenceType':
       return `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
     case 'PointerType':
@@ -147,6 +149,8 @@ const memberSignature = (member: DeclarationFacts.MemberFact): string => {
   }
   if (member._tag === 'ConstantDeclaration')
     return `${member.visibility === 'Public' ? 'pub ' : ''}const · ${declaredTypeText(member.declaredType)}`
+  if (member._tag === 'ForeignStaticDeclaration')
+    return `${member.direction === 'Import' ? 'extern' : 'export'} static · ${declaredTypeText(member.declaredType)} · ${member.foreign.symbol}`
   if (member._tag === 'AliasDeclaration')
     return `${member.visibility === 'Public' ? 'pub ' : ''}type · ${declaredTypeText(member.target)}`
   if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration')
@@ -562,16 +566,19 @@ export const ownershipRows = (facts: Ownership.ModuleOwnership): ReadonlyArray<R
 }
 
 export const instanceRows = (discovery: Instances.Discovery): ReadonlyArray<RowModel> => {
+  let entryDetail: string
+  if (discovery.entry._tag === 'Resolved')
+    entryDetail = `${discovery.entry.key.declaration.module}.${discovery.entry.key.declaration.name}`
+  else if (discovery.entry._tag === 'Library')
+    entryDetail = `library · ${discovery.foreignExports.length} exports`
+  else entryDetail = `unavailable · ${discovery.entry.reason}`
   const rows: Array<RowModel> = [
     {
       key: 'entry',
       label: 'entry',
-      detail:
-        discovery.entry._tag === 'Resolved'
-          ? `${discovery.entry.key.declaration.module}.${discovery.entry.key.declaration.name}`
-          : `unavailable · ${discovery.entry.reason}`,
+      detail: entryDetail,
       head: true,
-      ...(discovery.entry._tag === 'Resolved' ? {} : { tone: 'warning' as const }),
+      ...(discovery.entry._tag === 'Unavailable' ? { tone: 'warning' as const } : {}),
     },
     {
       key: 'reachable',
@@ -785,6 +792,10 @@ const placeText = (root: Mir.LocalId, selectors: ReadonlyArray<Mir.PlaceSelector
 
 const operationLabel = (operation: Mir.Operation): string => {
   switch (operation._tag) {
+    case 'ForeignStaticLoad':
+      return `${localText(operation.destination)} = foreign static ${operation.symbol}`
+    case 'ForeignFunctionAddress':
+      return `${localText(operation.destination)} = foreign address ${operation.symbol}`
     case 'Literal':
       return `${localText(operation.destination)} = const ${operation.value}`
     case 'EnumConstant':
@@ -1483,16 +1494,18 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
       return 'missing HostInput host provider'
     case 'MissingOsFileSystemHost':
       return 'missing OS filesystem host provider'
-    case 'MissingSystemClock':
-      return 'missing SystemClock host provider'
     case 'MissingMonotonicClock':
       return 'missing MonotonicClock host provider'
     case 'MissingRandomHost':
       return 'missing RandomHost provider'
     case 'IntrinsicTargetUnavailable':
       return reason.diagnostics.map((diagnostic) => diagnostic.message).join(' · ')
-    case 'ForeignTargetUnavailable':
+    case 'ForeignPlanningUnavailable':
       return reason.diagnostics.map((diagnostic) => diagnostic.message).join(' · ')
+    case 'ForeignHostUnavailable':
+      return `missing foreign host binding · ${reason.symbol} · expected ${reason.expected}${reason.provided === undefined ? '' : ` · provided ${reason.provided}`}`
+    case 'ForeignHostCallFailed':
+      return `foreign host call failed · ${reason.symbol} · ${reason.message}`
   }
 }
 

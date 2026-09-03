@@ -1200,7 +1200,16 @@ export const analyzeStatements = (
       }
       context.diagnostics.push(...value.diagnostics)
       const root = assignmentRoot(destination.fact)
-      if (root === undefined) {
+      if (destination.fact._tag === 'ForeignStatic') {
+        context.diagnostics.push(
+          Diagnostic.immutableAssignment(
+            destination.fact.declaration.name._tag === 'Present'
+              ? destination.fact.declaration.name.spelling
+              : '?',
+            destinationNode.span,
+          ),
+        )
+      } else if (root === undefined) {
         if (SyntaxTree.isAvailableSyntax(destinationNode) && destination.diagnostics.length === 0) {
           context.diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
         }

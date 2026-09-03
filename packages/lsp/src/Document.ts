@@ -1785,6 +1785,16 @@ export const symbols = (
         },
       ]
     }
+    if (member._tag === 'ForeignStaticDeclaration') {
+      return [
+        {
+          name: member.name.spelling,
+          kind: SymbolKind.Variable,
+          range,
+          selectionRange,
+        },
+      ]
+    }
     if (member._tag === 'AliasDeclaration') {
       return [
         {

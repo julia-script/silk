@@ -487,6 +487,14 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'ForeignStaticLoad'
+      readonly declaration: DeclarationFacts.CanonicalId
+      readonly direction: 'Import' | 'Export'
+      readonly symbol: string
+      readonly type: DeclarationFacts.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'BindingReference'
       readonly binding: BindingId
       readonly type: DeclarationFacts.SemanticType
@@ -704,6 +712,14 @@ export type Expression =
       readonly target: CallableTarget
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly type: Type.Callable
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      /** Address of an exact, synchronous, noncapturing `export "C"` function. */
+      readonly _tag: 'ForeignFunctionAddress'
+      readonly target: CallableTarget
+      readonly symbol: string
+      readonly type: Type.ForeignFunction
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -1617,6 +1633,10 @@ const encodeExpression = (expression: Expression, depth: number): string => {
   switch (expression._tag) {
     case 'IntegerLiteral':
       return `${indent}literal ${expression.value} : ${Type.encode(expression.type)}${expression.constant === undefined ? '' : ` constant=${expression.constant.module}::${expression.constant.name}`} ${spanText(expression.span)}`
+    case 'ForeignStaticLoad':
+      return `${indent}foreign-static ${expression.symbol} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+    case 'ForeignFunctionAddress':
+      return `${indent}foreign-address ${expression.symbol} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'FloatingLiteral':
       return `${indent}literal ${expression.spelling} bits=0x${expression.bits.toString(16)} : ${expression.type} ${spanText(expression.span)}`
     case 'StaticStringLiteral':

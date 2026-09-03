@@ -239,8 +239,9 @@ it.effect(
         compilation: {
           root: SourceFile.make('numeric-constants/acceptance', ascii(acceptance)),
         },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
         profile: 'release',
+        artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'acceptance'),
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled')

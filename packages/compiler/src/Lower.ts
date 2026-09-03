@@ -55,6 +55,8 @@ export const mirType = (
   if (Type.isSlice(specialized)) return Object.freeze({ _tag: 'Slice', type: specialized })
   if (Type.isReference(specialized)) return Object.freeze({ _tag: 'Reference', type: specialized })
   if (Type.isPointer(specialized)) return Object.freeze({ _tag: 'Pointer', type: specialized })
+  if (Type.isForeignFunction(specialized))
+    return Object.freeze({ _tag: 'ForeignFunction', type: specialized })
   if (Type.isUnion(specialized)) return Object.freeze({ _tag: 'Union', type: specialized })
   if (Type.isEffect(specialized)) return Object.freeze({ _tag: 'EffectOutcome', type: specialized })
   return undefined
@@ -238,6 +240,26 @@ export const lowerProgram = (
   index: DeclarationIndex.Index,
   opaqueRealizations: OpaqueRealization.Catalog,
 ): Mir.Module => {
+  const declaredForeignStatics = Object.freeze(
+    index.modules.flatMap((module) =>
+      module.members.flatMap((member) =>
+        member._tag === 'ForeignStaticDeclaration' &&
+        member.canonical._tag === 'Canonical' &&
+        member.declaredType._tag === 'Resolved'
+          ? [
+              Object.freeze({
+                declaration: member.canonical.id,
+                declarationSpan: member.syntax.span,
+                direction: member.direction,
+                symbol: member.foreign.symbol,
+                type: member.declaredType.type,
+                ...(member.literal === undefined ? {} : { literal: member.literal }),
+              }),
+            ]
+          : [],
+      ),
+    ),
+  )
   const ownershipOf = (instance: Instances.Instance): Ownership.ModuleOwnership =>
     Object.freeze({
       _tag: 'OwnershipFacts',
@@ -487,13 +509,60 @@ export const lowerProgram = (
       return retainedRunners.has(runnerKey(spec.id, spec.owner.key.typeArguments)) ? [runner] : []
     }),
   )
+  const foreignStaticUses = new Set(
+    functions.flatMap((fn) =>
+      Mir.topologicalRegions(fn).flatMap((region) =>
+        Mir.operationsOf(region).flatMap((operation) =>
+          Mir.operationTree(operation).flatMap((nested) =>
+            nested._tag === 'ForeignStaticLoad'
+              ? [`${nested.declaration.module}\u0000${nested.declaration.name}`]
+              : [],
+          ),
+        ),
+      ),
+    ),
+  )
+  const foreignStatics = Object.freeze(
+    declaredForeignStatics
+      .filter(
+        (record) =>
+          record.direction === 'Export' ||
+          foreignStaticUses.has(`${record.declaration.module}\u0000${record.declaration.name}`),
+      )
+      .sort(
+        (left, right) =>
+          left.declarationSpan.sourceId.localeCompare(right.declarationSpan.sourceId) ||
+          left.declarationSpan.start - right.declarationSpan.start ||
+          left.declarationSpan.end - right.declarationSpan.end,
+      ),
+  )
   if (discovery.entry._tag !== 'Resolved') {
+    if (discovery.entry._tag === 'Library') {
+      return Object.freeze({
+        _tag: 'MirModule',
+        module: discovery.rootModule,
+        intrinsics: discovery.intrinsics,
+        foreignCalls: discovery.foreignCalls,
+        foreignExports: discovery.foreignExports,
+        foreignStatics,
+        entry: Object.freeze({ _tag: 'LibraryEntry' }),
+        layout,
+        staticData,
+        executionTransitions: Object.freeze(
+          layout.executionPackages.plans.map((plan, ordinal) =>
+            ExecutionTransition.authority(ordinal, ordinal + 1, plan.readinessStorage),
+          ),
+        ),
+        functions: withLocalSharedDropPlans(layout, functions),
+      })
+    }
     return Object.freeze({
       _tag: 'MirModule',
       module: discovery.rootModule,
       intrinsics: discovery.intrinsics,
       foreignCalls: discovery.foreignCalls,
       foreignExports: discovery.foreignExports,
+      foreignStatics,
       entry: Object.freeze({ _tag: 'UnavailableEntry', reason: discovery.entry.reason }),
       layout,
       staticData,
@@ -701,6 +770,7 @@ export const lowerProgram = (
     intrinsics: discovery.intrinsics,
     foreignCalls: discovery.foreignCalls,
     foreignExports: discovery.foreignExports,
+    foreignStatics,
     entry,
     layout,
     staticData,

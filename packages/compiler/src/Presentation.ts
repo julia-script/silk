@@ -321,10 +321,14 @@ export const structDeclaration = (self: DeclarationFacts.StructFact): Presentati
     self.typeParameters.length === 0
       ? ''
       : `<${self.typeParameters.map(typeParameterName).join(', ')}>`
+  const layout =
+    self.layout._tag === 'Silk'
+      ? ''
+      : `extern ${self.layout.abi === undefined ? '_' : JSON.stringify(self.layout.abi)} `
   return Object.freeze({
     _tag: 'StructPresentation',
     name,
-    text: `${visibility}${self.aggregateKind === 'Positional' ? 'tuple' : 'struct'} ${name}${typeParameters}`,
+    text: `${visibility}${layout}${self.aggregateKind === 'Positional' ? 'tuple' : 'struct'} ${name}${typeParameters}`,
   })
 }
 
@@ -430,6 +434,18 @@ export const constantDeclaration = (self: DeclarationFacts.ConstantFact): Presen
     _tag: 'ConstantPresentation',
     name,
     text: `${visibility}const ${name}: ${declaredType(self.declaredType)}`,
+  })
+}
+
+/** Renders one imported or exported native data binding. */
+export const foreignStaticDeclaration = (
+  self: DeclarationFacts.ForeignStaticFact,
+): Presentation => {
+  const name = self.name._tag === 'Present' ? self.name.spelling : '_'
+  return Object.freeze({
+    _tag: 'ConstantPresentation',
+    name,
+    text: `${self.direction === 'Import' ? 'unsafe extern' : 'export'} "C" static ${name}: ${declaredType(self.declaredType)}`,
   })
 }
 
@@ -560,6 +576,7 @@ export const type = (
     return `Effect<${type(self.success, module, scope)}${failures}${requirements}>`
   }
   if (Type.isRepresented(self)) return type(self.contract, module, scope)
+  if (Type.isForeignFunction(self)) return Type.encode(self)
   return self.members.map((member) => type(member, module, scope)).join(' | ')
 }
 

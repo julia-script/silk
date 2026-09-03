@@ -14,15 +14,17 @@ import type {
 import * as BootstrapOsIntrinsics from './BootstrapOsIntrinsics.js'
 import * as BootstrapPlace from './BootstrapPlace.js'
 import * as BootstrapStorage from './BootstrapStorage.js'
+import * as CAbi from './CAbi.js'
 import type * as ChildProcess from './ChildProcess.js'
 import type * as CleanupPlan from './CleanupPlan.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as FloatingPoint from './FloatingPoint.js'
+import * as ForeignAvailability from './ForeignAvailability.js'
+import * as ForeignHost from './ForeignHost.js'
 import type * as Hir from './Hir.js'
 import type * as HostInput from './HostInput.js'
 import * as Instances from './Instances.js'
-import * as ForeignAvailability from './ForeignAvailability.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as LocalSharedLifecycle from './LocalSharedLifecycle.js'
 import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
@@ -36,7 +38,6 @@ import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StandardInput from './StandardInput.js'
 import type * as StandardStreams from './StandardStreams.js'
-import type * as SystemClock from './SystemClock.js'
 import * as Transcendental from './Transcendental.js'
 import * as Type from './Type.js'
 import * as WakeCell from './WakeCell.js'
@@ -261,9 +262,9 @@ interface EvaluationState {
   readonly processCaptures: Array<ReadonlyArray<number>>
   readonly hostInput?: HostInput.Provider
   readonly osFileSystem?: OsFileSystemHost.Provider
-  readonly systemClock?: SystemClock.Provider
   readonly monotonicClock?: MonotonicClock.Provider
   readonly randomHost?: RandomHost.Provider
+  readonly foreignHost: ForeignHost.Table
   readonly executionMachines: Map<number, IndependentMachine>
 }
 
@@ -2574,10 +2575,75 @@ function* executeFunction(
             )
             break
           }
-          case 'ForeignCall':
-            throw new RangeError(
-              `Target validation allowed a foreign call into the evaluator: ${operation.symbol}`,
+          case 'ForeignCall': {
+            const binding = ForeignHost.resolve(state.foreignHost, operation.symbol)
+            if (binding === undefined)
+              throw new RangeError(
+                `Foreign host admission omitted evaluator binding ${operation.symbol}`,
+              )
+            const invocation = binding.invoke(
+              Object.freeze(operation.arguments.map((argument) => read(argument).value)),
             )
+            if (invocation._tag === 'Failed')
+              return blockedStep({
+                _tag: 'ForeignHostCallFailed',
+                symbol: operation.symbol,
+                message: invocation.message,
+                span: operation.provenance.span,
+              })
+            const value = invocation.value
+            const expected = Mir.semanticType(operation.type)
+            let valid = false
+            let normalized = value
+            switch (operation.signature.result._tag) {
+              case 'Void':
+                valid = value === undefined && Type.equals(expected, Type.unit)
+                break
+              case 'Integer':
+                valid =
+                  value?._tag === 'IntegerValue' &&
+                  Scalar.isIntegerSpelling(expected) &&
+                  CAbi.typeText(CAbi.classify(value.type, program.layout.target, 'Result')) ===
+                    CAbi.typeText(operation.signature.result) &&
+                  (operation.signature.result.signed
+                    ? BigInt.asIntN(operation.signature.result.bits, value.value)
+                    : BigInt.asUintN(operation.signature.result.bits, value.value)) === value.value
+                if (valid && value?._tag === 'IntegerValue' && Scalar.isIntegerSpelling(expected))
+                  normalized = integerValue(expected, value.value)
+                break
+              case 'Float':
+                valid =
+                  value?._tag === 'FloatValue' &&
+                  Type.isBuiltin(expected) &&
+                  value.type === expected &&
+                  BigInt.asUintN(operation.signature.result.bits, value.bits) === value.bits
+                break
+              case 'Pointer':
+                valid = value?._tag === 'PointerValue' && Type.isPointer(expected)
+                break
+              case 'FunctionPointer':
+                valid = false
+                break
+            }
+            if (!valid)
+              return blockedStep({
+                _tag: 'ForeignHostCallFailed',
+                symbol: operation.symbol,
+                message: `host returned a value outside ${CAbi.signatureKey(operation.signature)}`,
+                span: operation.provenance.span,
+              })
+            write(operation.destination, {
+              value:
+                normalized ??
+                Object.freeze({
+                  _tag: 'AggregateValue',
+                  type: Type.unit,
+                  fields: Object.freeze([]),
+                }),
+              fromCall: false,
+            })
+            break
+          }
           case 'HostWrite':
           case 'OsOpen':
           case 'OsCall': {
@@ -5259,9 +5325,10 @@ export interface Options {
   readonly childProcess?: ChildProcess.Provider
   readonly hostInput?: HostInput.Provider
   readonly osFileSystem?: OsFileSystemHost.Provider
-  readonly systemClock?: SystemClock.Provider
   readonly monotonicClock?: MonotonicClock.Provider
   readonly randomHost?: RandomHost.Provider
+  /** Exact symbol implementations available only to this evaluation. */
+  readonly foreignHost?: ForeignHost.Table
   readonly maxSteps?: number
   readonly maxCallDepth?: number
   /** Host-only deterministic bound for compiler-private coroutine-frame storage. */
@@ -5285,6 +5352,26 @@ export const evaluate = (
     options.maxExecutionStackBytes,
     defaultMaxExecutionStackBytes,
   )
+  if (discovery.entry._tag !== 'Resolved') {
+    return Object.freeze({
+      _tag: 'Blocked',
+      entry: undefined,
+      reason: Object.freeze({
+        _tag: 'UnavailableEntry',
+        reason: discovery.entry._tag === 'Library' ? 'MissingEntry' : discovery.entry.reason,
+      }),
+      trace: Object.freeze([]),
+    })
+  }
+  const violations = MirVerification.verify(program)
+  if (violations.length > 0) {
+    return Object.freeze({
+      _tag: 'Blocked',
+      entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
+      reason: Object.freeze({ _tag: 'InvalidMir', violations }),
+      trace: Object.freeze([]),
+    })
+  }
   const availability = IntrinsicAvailability.select(program.intrinsics, 'Evaluator')
   if (availability._tag === 'Unavailable') {
     return Object.freeze({
@@ -5301,31 +5388,53 @@ export const evaluate = (
     program.foreignCalls,
     'Evaluator',
     program.layout.target,
+    program.foreignStatics,
+    ForeignAvailability.callbackAddresses(program),
+    ForeignAvailability.staticLoads(program),
   )
   if (foreign.length > 0) {
     return Object.freeze({
       _tag: 'Blocked',
       entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
-      reason: Object.freeze({ _tag: 'ForeignTargetUnavailable', diagnostics: foreign }),
+      reason: Object.freeze({ _tag: 'ForeignPlanningUnavailable', diagnostics: foreign }),
       trace: Object.freeze([]),
     })
   }
-  if (discovery.entry._tag !== 'Resolved') {
-    return Object.freeze({
-      _tag: 'Blocked',
-      entry: undefined,
-      reason: Object.freeze({ _tag: 'UnavailableEntry', reason: discovery.entry.reason }),
-      trace: Object.freeze([]),
-    })
-  }
-  const violations = MirVerification.verify(program)
-  if (violations.length > 0) {
-    return Object.freeze({
-      _tag: 'Blocked',
-      entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
-      reason: Object.freeze({ _tag: 'InvalidMir', violations }),
-      trace: Object.freeze([]),
-    })
+  const foreignHost = options.foreignHost ?? ForeignHost.empty
+  for (const call of program.foreignCalls) {
+    const parameters = call.signature.parameters.map(CAbi.typeText)
+    const result = CAbi.typeText(call.signature.result)
+    const isHostClass = (value: CAbi.TypeText): value is ForeignHost.Class =>
+      !value.startsWith('extern "C" fn(')
+    if (!parameters.every(isHostClass) || !isHostClass(result)) {
+      return Object.freeze({
+        _tag: 'Blocked',
+        entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
+        reason: Object.freeze({
+          _tag: 'ForeignHostUnavailable',
+          symbol: call.symbol,
+          expected: CAbi.signatureKey(call.signature),
+          span: call.callSpan,
+        }),
+        trace: Object.freeze([]),
+      })
+    }
+    const expected = ForeignHost.signature(parameters, result)
+    const binding = ForeignHost.resolve(foreignHost, call.symbol)
+    if (binding === undefined || !ForeignHost.matches(binding.signature, expected)) {
+      return Object.freeze({
+        _tag: 'Blocked',
+        entry: discovery.entry._tag === 'Resolved' ? discovery.entry.key.declaration : undefined,
+        reason: Object.freeze({
+          _tag: 'ForeignHostUnavailable',
+          symbol: call.symbol,
+          expected: ForeignHost.key(expected),
+          ...(binding === undefined ? {} : { provided: ForeignHost.key(binding.signature) }),
+          span: call.callSpan,
+        }),
+        trace: Object.freeze([]),
+      })
+    }
   }
   const machine = Mir.machineEntry(program)
   const entry = machine.declaration
@@ -5368,9 +5477,9 @@ export const evaluate = (
     processCaptures: [Object.freeze([]), Object.freeze([])],
     ...(options.hostInput === undefined ? {} : { hostInput: options.hostInput }),
     ...(options.osFileSystem === undefined ? {} : { osFileSystem: options.osFileSystem }),
-    ...(options.systemClock === undefined ? {} : { systemClock: options.systemClock }),
     ...(options.monotonicClock === undefined ? {} : { monotonicClock: options.monotonicClock }),
     ...(options.randomHost === undefined ? {} : { randomHost: options.randomHost }),
+    foreignHost,
   })
   if (result._tag === 'Blocked') {
     if (result.reason._tag === 'Trap') {

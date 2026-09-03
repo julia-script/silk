@@ -811,6 +811,12 @@ function encodeTypeNode(value: Type.Type): unknown {
             },
           }),
     }
+  if (Type.isForeignFunction(value))
+    return {
+      tag: 'ForeignFunction',
+      parameters: value.parameters.map(encodeTypeNode),
+      result: encodeTypeNode(value.result),
+    }
   if (Type.isEffect(value))
     return {
       tag: 'Effect',
@@ -1046,6 +1052,11 @@ function decodeTypeNode(value: unknown): Type.Type {
         serializedBoolean(encoded.unsafe, 'callable unsafe qualifier'),
       )
     }
+    case 'ForeignFunction':
+      return Type.foreignFunction(
+        serializedArray(encoded.parameters, 'foreign function parameters').map(decodeTypeNode),
+        decodeTypeNode(encoded.result),
+      )
     case 'Effect': {
       const access = serializedString(encoded.access, 'effect access')
       if (access !== 'Shared' && access !== 'Exclusive' && access !== 'Take')
@@ -1542,6 +1553,12 @@ const declaredType = (value: DeclarationFacts.DeclaredTypeFact): string => {
         declaredType(value.result),
         boolean(value.cause !== undefined),
       ])
+    case 'ForeignFunction':
+      return record('ForeignFunctionType', [
+        array(value.parameters.map(declaredType)),
+        declaredType(value.result),
+        boolean(value.cause !== undefined),
+      ])
     case 'Applied':
       return record('AppliedType', [
         declaredType(value.target),
@@ -1832,6 +1849,17 @@ const structDependency = (value: DeclarationFacts.StructDependency): string =>
     array(value.types.map(type)),
   ])
 
+const structLayout = (value: DeclarationFacts.StructFact['layout']): string => {
+  switch (value._tag) {
+    case 'Silk':
+      return record('SilkStructLayout')
+    case 'Foreign':
+      return record('ForeignStructLayout', [value.abi])
+    case 'InvalidForeign':
+      return record('InvalidForeignStructLayout', [optional(value.abi)])
+  }
+}
+
 const enumMemberCanonicalState = (value: DeclarationFacts.EnumMemberCanonicalState): string => {
   switch (value._tag) {
     case 'Canonical':
@@ -1899,6 +1927,7 @@ const struct = (value: DeclarationFacts.StructFact): string =>
     declarationIdOrdinal(value.id),
     canonicalState(value.canonical),
     value.visibility,
+    structLayout(value.layout),
     array(value.typeParameters.map(typeParameter)),
     name(value.name),
     value.aggregateKind,
@@ -2020,6 +2049,18 @@ const constant = (value: DeclarationFacts.ConstantFact): string =>
     constantLiteral(value.literal),
   ])
 
+const foreignStatic = (value: DeclarationFacts.ForeignStaticFact): string =>
+  record('ForeignStaticDeclaration', [
+    declarationIdOrdinal(value.id),
+    canonicalState(value.canonical),
+    value.direction,
+    name(value.name),
+    value.foreign.symbol,
+    declaredType(value.declaredType),
+    optional(value.initializerTemplate?.canonical),
+    optional(value.literal === undefined ? undefined : constantLiteral(value.literal)),
+  ])
+
 const member = (value: DeclarationFacts.MemberFact): string => {
   switch (value._tag) {
     case 'FunctionDeclaration':
@@ -2036,6 +2077,8 @@ const member = (value: DeclarationFacts.MemberFact): string => {
       return service(value)
     case 'ConstantDeclaration':
       return constant(value)
+    case 'ForeignStaticDeclaration':
+      return foreignStatic(value)
     case 'RoleDeclaration':
       return record('RoleDeclaration', [
         declarationIdOrdinal(value.id),

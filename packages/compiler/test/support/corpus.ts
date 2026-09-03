@@ -71,9 +71,9 @@ export interface CorpusProgram {
   readonly nativeSource?: string
   readonly nativeImports?: Readonly<Record<string, string>>
   readonly nativeEnvironment?: Readonly<Record<string, string>>
-  /** C translation units compiled with `compileCObject` and linked through `nativeObjects`. */
+  /** C translation units compiled with `compileCObject` and linked as structured object inputs. */
   readonly nativeCSources?: Readonly<Record<string, string>>
-  readonly nativeLibraries?: ReadonlyArray<string>
+  readonly nativeDynamicLibraries?: ReadonlyArray<string>
   readonly nativeStdout?: string
   readonly expected:
     | { readonly _tag: 'Completes'; readonly result: number }
@@ -3271,6 +3271,22 @@ pub fn main() -> i32 {
   return u8.toI32(bytes[0]) + u8.toI32(bytes[2]) - 42
 }`
 
+/** A libc call writes through a pointer to a C-layout record and Silk reads the populated fields. */
+export const foreignClockRecordNative = `import silk.pointer { Pointer }
+extern "C" struct Timespec {
+  seconds: i64
+  nanoseconds: i64
+}
+unsafe extern "C" fn clock_gettime(clock: i32, value: *mut Timespec) -> i32
+pub fn main() -> i32 {
+  let mut value = Timespec { seconds: -1, nanoseconds: -1 }
+  if unsafe clock_gettime(0, Pointer.fromMutRef(&mut value)) != 0 { return 1 }
+  if value.seconds < 0 { return 2 }
+  if value.nanoseconds < 0 { return 3 }
+  if value.nanoseconds >= 1000000000 { return 4 }
+  return 0
+}`
+
 /**
  * The libc round trip: allocate, copy a Silk byte view in, NUL-terminate, compare, write to
  * standard output, free. The backend declares `malloc` as `ptr(i64)`, `free` as `void(ptr)`, and
@@ -3437,6 +3453,50 @@ pub fn main() -> i32 { return unsafe abs(-42) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'foreign-libc-qsort-callback',
+    source: 'pub fn main() -> i32 { return 42 }',
+    nativeSource: `import silk.pointer { Pointer }
+unsafe extern "C" fn qsort(base: *mut i32, count: usize, size: usize, compare: extern "C" fn(*const i32, *const i32) -> i32) -> ()
+export "C" fn compare(left: *const i32, right: *const i32) -> i32 {
+  let leftValue = unsafe Pointer.read(left)
+  let rightValue = unsafe Pointer.read(right)
+  if leftValue < rightValue { return -1 }
+  if leftValue > rightValue { return 1 }
+  return 0
+}
+pub fn main() -> i32 {
+  let mut values = [4, 2]
+  unsafe qsort(Pointer.fromMutSlice(&mut values), 2, 4, compare)
+  return values[1] * 10 + values[0]
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'foreign-libc-environ-static',
+    source: 'pub fn main() -> i32 { return 42 }',
+    nativeSource: `import silk.pointer { Pointer }
+unsafe extern "C" static environment: *mut *mut u8 as "environ"
+pub fn main() -> i32 {
+  unsafe { if Pointer.isNull(environment) { return 1 } }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'foreign-object-libm-order',
+    source: 'pub fn main() -> i32 { return 42 }',
+    nativeSource: `import silk.i32 as i32
+unsafe extern "C" fn silk_test_libm_order(value: f64) -> i32
+pub fn main() -> i32 { return unsafe silk_test_libm_order(i32.toF64(85)) }`,
+    nativeCSources: {
+      silk_test_libm_order: `#include <stdint.h>
+#include <math.h>
+int32_t silk_test_libm_order(double value) { return (int32_t)fmod(value, 43.0); }
+`,
+    },
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'pointer-foreign-store',
     source: pointerParameterWrite,
     nativeSource: foreignPointerStoreNative,
@@ -3449,6 +3509,12 @@ pub fn main() -> i32 { return unsafe abs(-42) }`,
     nativeSource: foreignPointerFillNative,
     nativeCSources: { silk_test_foreign_pointers: foreignPointerFixture },
     expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'foreign-c-layout-clock',
+    source: 'pub fn main() -> i32 { return 0 }',
+    nativeSource: foreignClockRecordNative,
+    expected: { _tag: 'Completes', result: 0 },
   },
   {
     name: 'pointer-libc-roundtrip',

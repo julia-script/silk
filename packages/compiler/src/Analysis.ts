@@ -592,9 +592,14 @@ const presentationOfIdentity = (
         Presentation.aliasDeclaration(declaration),
         declaredType(declaration.target),
       )
-    return declaration?._tag === 'ConstantDeclaration'
+    if (declaration?._tag === 'ConstantDeclaration')
+      return hoverPresentation(
+        Presentation.constantDeclaration(declaration),
+        declaredType(declaration.declaredType),
+      )
+    return declaration?._tag === 'ForeignStaticDeclaration'
       ? hoverPresentation(
-          Presentation.constantDeclaration(declaration),
+          Presentation.foreignStaticDeclaration(declaration),
           declaredType(declaration.declaredType),
         )
       : undefined
@@ -981,7 +986,10 @@ export const fixedArrayTypesOf = (
           if (parameter.declaredType._tag === 'Resolved') add(parameter.declaredType.type)
         if (operation.returnType._tag === 'Resolved') add(operation.returnType.type)
       }
-    } else if (member._tag === 'ConstantDeclaration' && member.declaredType._tag === 'Resolved') {
+    } else if (
+      (member._tag === 'ConstantDeclaration' || member._tag === 'ForeignStaticDeclaration') &&
+      member.declaredType._tag === 'Resolved'
+    ) {
       add(member.declaredType.type)
     }
   }
@@ -1173,6 +1181,16 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
   // The cast closes the generic default/override variance gap: omitted selection is LLVM, while
   // an explicit backend determines A at the call site.
   const selected = backend ?? (LlvmBackend.LlvmBackend as Backend.Backend<A>)
+  if (self.mir._tag === 'Unavailable') return yield* self.mir.error
+  const violations = MirVerification.verify(self.mir.value)
+  if (violations.length > 0) {
+    return yield* new Backend.BackendError({
+      operation: 'Backend.emit',
+      backend: selected.name,
+      message: `${selected.name} cannot emit invalid MIR`,
+      reason: { _tag: 'InvalidMir', violations },
+    })
+  }
   const availability = IntrinsicAvailability.select(
     self.instances.intrinsics,
     IntrinsicAvailability.backendTarget(selected.id),
@@ -1191,6 +1209,9 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
           self.instances.foreignCalls,
           IntrinsicAvailability.backendTarget(selected.id),
           self.target.target,
+          self.mir.value.foreignStatics,
+          ForeignAvailability.callbackAddresses(self.mir.value),
+          ForeignAvailability.staticLoads(self.mir.value),
         )
       : Object.freeze([])
   if (foreign.length > 0) {
@@ -1201,7 +1222,6 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
       resolutionFailures: self.closure.resolutionFailures,
     })
   }
-  if (self.mir._tag === 'Unavailable') return yield* self.mir.error
   const planning = ForeignPlanning.check(
     self.mir.value,
     IntrinsicAvailability.backendTarget(selected.id),

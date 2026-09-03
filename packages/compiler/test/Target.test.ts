@@ -3,7 +3,9 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as ArtifactKind from '../src/ArtifactKind.js'
 import * as HeapObservation from '../src/HeapObservation.js'
+import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as Target from '../src/Target.js'
 
 it('keeps the compiler root import graph free of Node built-ins', () => {
@@ -84,4 +86,50 @@ it('encodes target facts deterministically', () => {
     Target.encode(Target.wasm32UnknownUnknown),
     'wasm32-unknown-unknown kind=WebAssembly pointer=4/4 endian=little',
   )
+})
+
+it('owns artifact compatibility and target-conventional filenames', () => {
+  assert.strictEqual(ArtifactKind.fromManifest('executable'), 'NativeExecutable')
+  assert.strictEqual(ArtifactKind.fromManifest('shared-library'), 'NativeSharedLibrary')
+  assert.strictEqual(ArtifactKind.fromManifest('static-library'), 'NativeStaticLibrary')
+  assert.strictEqual(ArtifactKind.fromManifest('shared'), undefined)
+  assert.strictEqual(
+    ArtifactKind.fileName('NativeSharedLibrary', 'math', Target.aarch64AppleDarwin),
+    'libmath.dylib',
+  )
+  assert.strictEqual(
+    ArtifactKind.fileName('NativeSharedLibrary', 'math', Target.x8664UnknownLinuxGnu),
+    'libmath.so',
+  )
+  assert.strictEqual(
+    ArtifactKind.fileName('NativeStaticLibrary', 'math', Target.aarch64UnknownLinuxGnu),
+    'libmath.a',
+  )
+  assert.strictEqual(
+    ArtifactKind.supports('NativeStaticLibrary', Target.wasm32UnknownUnknown),
+    false,
+  )
+})
+
+it('keeps native link inputs structured, immutable, ordered, and injectively encoded', () => {
+  const inputs = Object.freeze([
+    NativeLinkInput.searchPath('/sdk/lib'),
+    NativeLinkInput.library('m', 'Dynamic'),
+    NativeLinkInput.object('/tmp/a.o'),
+    NativeLinkInput.staticArchive('/tmp/libb.a'),
+    NativeLinkInput.framework('CoreFoundation'),
+  ])
+  assert.deepStrictEqual(
+    inputs.map((input) => input._tag),
+    ['SearchPath', 'Library', 'Object', 'StaticArchive', 'Framework'],
+  )
+  assert.deepStrictEqual(inputs.map(NativeLinkInput.path), [
+    undefined,
+    undefined,
+    '/tmp/a.o',
+    '/tmp/libb.a',
+    undefined,
+  ])
+  assert.strictEqual(new Set(inputs.map(NativeLinkInput.encode)).size, inputs.length)
+  assert.strictEqual(Object.isFrozen(inputs[0]), true)
 })

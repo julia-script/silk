@@ -50,6 +50,10 @@ const selectorText = (selectors: ReadonlyArray<PlaceSelector>): string =>
 
 const operationText = (operation: Operation): string => {
   switch (operation._tag) {
+    case 'ForeignStaticLoad':
+      return `${localText(operation.destination)} = foreign-static ${operation.direction.toLowerCase()} ${operation.symbol} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'ForeignFunctionAddress':
+      return `${localText(operation.destination)} = foreign-address ${operation.symbol} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Literal':
       return `${localText(operation.destination)} = literal ${operation.value} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'EnumConstant':
@@ -396,11 +400,22 @@ const coroutineFrameTargetLines = (self: Module): ReadonlyArray<string> =>
     ]),
   ])
 
+const foreignStaticInitializerText = (
+  literal: DeclarationFacts.ConstantLiteralFact | undefined,
+): string => {
+  if (literal?._tag === 'IntegerLiteral') return literal.value.toString()
+  if (literal?._tag === 'FloatingLiteral') return literal.spelling
+  return 'none'
+}
+
 export const encode = (self: Module): string => {
   let entry: string
   switch (self.entry._tag) {
     case 'UnavailableEntry':
       entry = `entry unavailable reason=${self.entry.reason}`
+      break
+    case 'LibraryEntry':
+      entry = `entry library exports=${self.foreignExports.map((export_) => export_.symbol).join(',')}`
       break
     case 'OrdinaryEntry':
       entry = `entry ordinary target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)}`
@@ -412,9 +427,17 @@ export const encode = (self: Module): string => {
   return [
     `mir-module ${self.module}`,
     entry,
+    ...self.foreignExports.map(
+      (record) =>
+        `foreign-export ${record.symbol} type=${SilkType.encode(record.type)} signature=${CAbi.signatureKey(record.signature)} implementation=${instanceText(record.key)} declaration=${targetText(record.declaration)} ${spanText(record.declarationSpan)}`,
+    ),
     ...self.foreignCalls.map(
       (call) =>
         `foreign ${call.symbol} abi=C signature=${CAbi.signatureKey(call.signature)} declaration=${targetText(call.declaration)} ${spanText(call.callSpan)}`,
+    ),
+    ...self.foreignStatics.map(
+      (record) =>
+        `foreign-static ${record.direction.toLowerCase()} ${record.symbol} type=${SilkType.encode(record.type)} initializer=${foreignStaticInitializerText(record.literal)} declaration=${targetText(record.declaration)} ${spanText(record.declarationSpan)}`,
     ),
     ...(self.staticData ?? []).map(
       (data) =>

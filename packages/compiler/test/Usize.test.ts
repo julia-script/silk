@@ -166,8 +166,9 @@ it.effect('executes an exact native i64 call and rejects the same source on Wasm
   Effect.gen(function* () {
     const native = yield* Driver.compile({
       compilation: { root: SourceFile.make('usize/program', ascii(nativeExact)) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
       profile: 'release',
+      artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'native-exact'),
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(native._tag, 'Compiled')

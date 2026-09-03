@@ -175,8 +175,6 @@ const admission = (family: string): AdmissionCategory => {
 
 /** The canonical standard-library consumer of one OS boundary operation. */
 const osConsumer = (spelling: string): string => {
-  if (spelling === 'systemClockNow') return 'silk/os_system_clock.now'
-  if (spelling === 'systemClockResolution') return 'silk/os_system_clock.getResolution'
   if (spelling === 'monotonicClockNow') return 'silk/os_monotonic_clock.now'
   if (spelling === 'monotonicClockResolution') return 'silk/os_monotonic_clock.getResolution'
   if (spelling === 'monotonicClockWaitUntil') return 'silk/os_monotonic_clock.waitUntil'
@@ -1137,29 +1135,6 @@ const intrinsicOperations = Object.freeze([
   ...Scalar.all().flatMap(scalarOperations),
   ...stringOperations,
   ...Object.freeze([
-    osBuiltin({
-      name: 'systemClockNow',
-      operation: 'OsSystemClockNow',
-      parameters: Object.freeze([
-        valueParameter('seconds', '&mut i64'),
-        valueParameter('nanoseconds', '&mut i64'),
-      ]),
-      semanticParameters: Object.freeze([mutableI64, mutableI64]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'outputs are initialized only on success and form a canonical Unix-epoch split instant',
-    }),
-    osBuiltin({
-      name: 'systemClockResolution',
-      operation: 'OsSystemClockResolution',
-      parameters: Object.freeze([valueParameter('nanoseconds', '&mut u64')]),
-      semanticParameters: Object.freeze([mutableU64]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'output is initialized only on success and is a positive whole-nanosecond resolution',
-    }),
     osBuiltin({
       name: 'monotonicClockNow',
       operation: 'OsMonotonicClockNow',

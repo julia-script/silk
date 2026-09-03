@@ -44,6 +44,7 @@ export const samples = (): ReadonlyArray<Module> => {
     intrinsics: Object.freeze([]),
     foreignCalls: Object.freeze([]),
     foreignExports: Object.freeze([]),
+    foreignStatics: Object.freeze([]),
     entry: Object.freeze({
       _tag: 'OrdinaryEntry',
       target: instance(canonical(source.id, 'answer')),
@@ -89,6 +90,7 @@ export const samples = (): ReadonlyArray<Module> => {
     intrinsics: Object.freeze([]),
     foreignCalls: Object.freeze([]),
     foreignExports: Object.freeze([]),
+    foreignStatics: Object.freeze([]),
     entry: Object.freeze({
       _tag: 'OrdinaryEntry',
       target: instance(canonical(source.id, 'choose')),
@@ -177,6 +179,7 @@ export const foreignCallSample = (
     intrinsics: Object.freeze([]),
     foreignCalls: Object.freeze([]),
     foreignExports: Object.freeze([]),
+    foreignStatics: Object.freeze([]),
     entry: Object.freeze({
       _tag: 'OrdinaryEntry',
       target: instance(canonical(source.id, 'answer')),

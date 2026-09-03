@@ -446,8 +446,13 @@ for (const representative of [corpus[1], corpus[3]]) {
 
         const compiled = yield* Driver.compile({
           compilation: { root: SourceFile.make(id, ascii(generated.source)) },
-          toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+          toolchain: Object.freeze({
+            _tag: 'Toolchain',
+            clang: '/usr/bin/clang',
+            llvmAr: 'llvm-ar',
+          }),
           profile: 'release',
+          artifactKind: 'NativeExecutable',
           destination: join(destinationRoot, representative.id),
         }).pipe(Effect.provide(SourceResolver.empty))
         assert.strictEqual(compiled._tag, 'Compiled')
@@ -518,8 +523,9 @@ it.effect(
       // quota rolled back cleanly enough for the next attempt to run.
       const compiled = yield* Driver.compile({
         compilation: { root: SourceFile.make(id, ascii(source)) },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
         profile: 'release',
+        artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'quota-sweep'),
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled', id)

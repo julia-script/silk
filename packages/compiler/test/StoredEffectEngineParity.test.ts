@@ -53,7 +53,7 @@ const clangPath = Effect.fnUntraced(function* () {
 })
 
 /**
- * Takes one already-lowered LLVM artifact through object emission, shim compilation, linking, and
+ * Takes one already-lowered LLVM artifact through object emission, runtime compilation, linking, and
  * execution. Keeping this boundary explicit lets the parity suite inspect and run the same LLVM
  * artifact without involving CLI filesystem policy.
  */
@@ -74,18 +74,19 @@ const runNative = Effect.fnUntraced(function* (
         target,
         'release',
       )
-      const shim = yield* NativeToolchain.compileShim(
+      const runtime = yield* NativeToolchain.compileExecutableRuntime(
         toolchain,
         scope,
         target,
         artifact.termination,
         artifact.nativeRuntimeSymbols,
       )
-      return yield* NativeToolchain.ClangLinker.link(
+      return yield* NativeToolchain.NativeFinalizer.finalize(
         toolchain,
         scope,
+        'NativeExecutable',
         target,
-        [object.artifact, shim.artifact],
+        [object.artifact, runtime.artifact],
         [],
         destination,
       )
@@ -98,7 +99,8 @@ const makeToolchain = Effect.fnUntraced(function* () {
   return Object.freeze({
     _tag: 'Toolchain' as const,
     clang: yield* clangPath(),
-    shimCache: NativeToolchain.makeShimCache(),
+    llvmAr: 'llvm-ar',
+    runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
   })
 })
 
@@ -479,7 +481,7 @@ layer(NodeServices.layer)('stored Effect engine parity', (it) => {
           // The native lowering carries the same exact rows the Wasm lowering and evaluator proved.
           assertExactRows(nativeLowering.module, testCase.name)
           const llvm = yield* emitLlvm(nativeLowering.module, testCase.name)
-          assert.include(llvm.ir, 'define i32 @silk_main', testCase.name)
+          assert.include(llvm.ir, 'define hidden i32 @silk_main', testCase.name)
           assertDirectLlvmRunner(
             llvm.ir,
             nativeLowering.module,
@@ -899,7 +901,7 @@ pub fn main() -> i32 {
 
         const native = yield* lowerStored(moduleName, suspendingProgram(), host)
         const llvm = yield* emitLlvm(native.module, 'suspending')
-        assert.include(llvm.ir, 'define i32 @silk_main')
+        assert.include(llvm.ir, 'define hidden i32 @silk_main')
         assertLlvmDropCall(llvm.ir, native.module, 'suspending')
         assertDirectLlvmRunner(
           llvm.ir,

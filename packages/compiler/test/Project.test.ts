@@ -35,7 +35,8 @@ it.effect('loads the minimal manifest and defaults the source root to the entry 
       backend: 'llvm',
       targets: ['host'],
       outputDirectory: `${root}/build`,
-      nativeLibraries: [],
+      artifact: 'NativeExecutable',
+      nativeLinkInputs: [],
     })
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
@@ -137,14 +138,21 @@ it.effect('materializes explicit build configuration and wasm defaults', () =>
     yield* writeFile(`${root}/src/Main.silk`, source)
     yield* writeFile(
       `${root}/silk.toml`,
-      '[package]\nname = "configured"\nversion = "1.2.3-beta.1+build.7"\nroot = "src/Main.silk"\n\n[build]\nbackend = "llvm"\ntargets = ["host", "wasm32-unknown-unknown"]\noutput-dir = "artifacts"\nnative-libraries = ["c", "m"]\n',
+      '[package]\nname = "configured"\nversion = "1.2.3-beta.1+build.7"\nroot = "src/Main.silk"\n\n[build]\nbackend = "llvm"\ntargets = ["host", "wasm32-unknown-unknown"]\noutput-dir = "artifacts"\nartifact = "shared-library"\nnative-link-inputs = [{ search-path = "native/lib" }, { library = "c", mode = "dynamic" }, { object = "native/add.o" }, { static-archive = "native/libmath.a" }, { framework = "CoreFoundation" }]\n',
     )
     const configured = yield* Project.load({ workingDirectory: root })
     assert.deepStrictEqual(configured.build, {
       backend: 'llvm',
       targets: ['host', 'wasm32-unknown-unknown'],
       outputDirectory: `${root}/artifacts`,
-      nativeLibraries: ['c', 'm'],
+      artifact: 'NativeSharedLibrary',
+      nativeLinkInputs: [
+        { _tag: 'SearchPath', path: `${root}/native/lib` },
+        { _tag: 'Library', name: 'c', mode: 'Dynamic' },
+        { _tag: 'Object', path: `${root}/native/add.o` },
+        { _tag: 'StaticArchive', path: `${root}/native/libmath.a` },
+        { _tag: 'Framework', name: 'CoreFoundation' },
+      ],
     })
 
     yield* writeFile(
@@ -165,16 +173,18 @@ it.effect('rejects malformed build metadata before loading the entry', () =>
       '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\ntargets = []\n',
       '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nbackend = "native"\n',
       '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\noutput-dir = "../outside"\n',
-      '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nnative-libraries = ["-Wl,--export-dynamic"]\n',
-      '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nnative-libraries = ["lib/m"]\n',
-      '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nnative-libraries = "m"\n',
+      '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nartifact = "dynamic-library"\n',
+      '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nnative-link-inputs = [{ library = "-Wl,--export-dynamic", mode = "dynamic" }]\n',
+      '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nnative-link-inputs = [{ library = "m", mode = "dynamic", object = "m.o" }]\n',
+      '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nnative-link-inputs = [{ object = "../outside.o" }]\n',
+      '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nnative-link-inputs = "m"\n',
     ]
     for (const manifest of invalid) {
       yield* writeFile(`${root}/silk.toml`, manifest)
       const error = yield* Effect.flip(Project.load({ workingDirectory: root }))
       assert.strictEqual(error.reason._tag, 'InvalidManifest')
-      if (error.reason._tag === 'InvalidManifest' && manifest.includes('native-libraries'))
-        assert.include(error.reason.detail, 'build.native-libraries')
+      if (error.reason._tag === 'InvalidManifest' && manifest.includes('native-link-inputs'))
+        assert.include(error.reason.detail, 'build.native-link-inputs')
     }
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )

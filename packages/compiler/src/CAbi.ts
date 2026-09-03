@@ -16,12 +16,34 @@ export type CAbiType =
    * is carried so a call site can be checked against the declared pointee.
    */
   | { readonly _tag: 'Pointer'; readonly mutable: boolean; readonly pointee: Type.Type }
+  | {
+      readonly _tag: 'FunctionPointer'
+      readonly parameters: ReadonlyArray<CAbiType>
+      readonly result: CAbiType
+    }
 
 /** The classified C signature that identifies one foreign symbol within an executable. */
 export interface CAbiSignature {
   readonly parameters: ReadonlyArray<CAbiType>
   readonly result: CAbiType
 }
+
+/** Canonical public spelling of one classified C ABI type. */
+export type TypeText =
+  | 'void'
+  | 'i8'
+  | 'u8'
+  | 'i16'
+  | 'u16'
+  | 'i32'
+  | 'u32'
+  | 'i64'
+  | 'u64'
+  | 'f32'
+  | 'f64'
+  | '*const'
+  | '*mut'
+  | `extern "C" fn(${string})->${string}`
 
 export type Position = 'Parameter' | 'Result'
 
@@ -77,6 +99,21 @@ const classifyOrUndefined = (
   if (Type.isBuiltin(type)) return scalar(type, pointerBits)
   if (Type.isPointer(type))
     return Object.freeze({ _tag: 'Pointer', mutable: type.mutable, pointee: type.pointee })
+  if (Type.isForeignFunction(type)) {
+    const parameters = type.parameters.map((parameter) =>
+      classifyOrUndefined(parameter, 'Parameter', pointerBits),
+    )
+    const result = classifyOrUndefined(type.result, 'Result', pointerBits)
+    if (parameters.some((parameter) => parameter === undefined) || result === undefined)
+      return undefined
+    return Object.freeze({
+      _tag: 'FunctionPointer',
+      parameters: Object.freeze(
+        parameters.flatMap((parameter) => (parameter === undefined ? [] : [parameter])),
+      ),
+      result,
+    })
+  }
   if (position === 'Result' && Type.equals(type, Type.unit)) return void_
   return undefined
 }
@@ -108,7 +145,7 @@ export const signature = (
   })
 
 /** The C spelling recorded on artifacts: `i32`, `u64`, `f32`, `f64`, or `void`. */
-export const typeText = (self: CAbiType): string => {
+export const typeText = (self: CAbiType): TypeText => {
   switch (self._tag) {
     case 'Void':
       return 'void'
@@ -118,6 +155,8 @@ export const typeText = (self: CAbiType): string => {
       return `f${self.bits}`
     case 'Pointer':
       return self.mutable ? '*mut' : '*const'
+    case 'FunctionPointer':
+      return `extern "C" fn(${self.parameters.map(typeText).join(',')})->${typeText(self.result)}`
   }
 }
 

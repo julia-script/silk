@@ -106,7 +106,7 @@ pub fn main() -> i32 {
         return yield* NativeToolchain.withBuildScope(name, (scope) => {
           return Effect.map(
             NativeToolchain.emitObject(
-              Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+              Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
               scope,
               artifact,
               host,

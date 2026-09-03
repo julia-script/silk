@@ -1,5 +1,9 @@
 import { assert, it } from '@effect/vitest'
+import * as AbiManifest from '../src/AbiManifest.js'
+import type * as Backend from '../src/Backend.js'
 import * as CAbi from '../src/CAbi.js'
+import * as CHeader from '../src/CHeader.js'
+import * as CLayout from '../src/CLayout.js'
 import * as ForeignSymbol from '../src/ForeignSymbol.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
@@ -28,6 +32,36 @@ const rejected: ReadonlyArray<readonly [string, Type.Type]> = [
   ['struct', Type.nominal('app/main', 'Point')],
   ['type parameter', Type.parameter({ module: 'app/main', name: 'f' }, 0, 'T')],
 ]
+
+it('admits exactly the non-nominal C-layout field vocabulary', () => {
+  const resolveNothing: CLayout.ResolveStruct = () => undefined
+  const acceptedFields: ReadonlyArray<Type.Type> = [
+    ...admitted.map(([type]) => type),
+    Type.pointer(false, Type.string),
+    Type.pointer(true, Type.nominal('app/main', 'Opaque')),
+    Type.fixedArray('u16', 3),
+    Type.fixedArray(Type.fixedArray('f64', 2), 4),
+  ]
+  const rejectedFields: ReadonlyArray<readonly [Type.Type, CLayout.RejectionReason]> = [
+    ['bool', 'UnsupportedType'],
+    ['char', 'UnsupportedType'],
+    [Type.string, 'UnsupportedType'],
+    [Type.unit, 'UnknownRecord'],
+    [Type.reference('Shared', 'i32'), 'UnsupportedType'],
+    [Type.slice('Shared', 'u8'), 'UnsupportedType'],
+    [Type.fixedArray('u8', 0), 'ZeroLengthArray'],
+    [Type.fixedArray('bool', 2), 'UnsupportedType'],
+  ]
+
+  for (const type of acceptedFields) {
+    assert.strictEqual(CLayout.admit(type, resolveNothing)._tag, 'Admitted', Type.encode(type))
+  }
+  for (const [type, reason] of rejectedFields) {
+    const admission = CLayout.admit(type, resolveNothing)
+    assert.strictEqual(admission._tag, 'NotAdmitted', Type.encode(type))
+    if (admission._tag === 'NotAdmitted') assert.strictEqual(admission.reason, reason)
+  }
+})
 
 it('admits every V1 scalar as parameter and result and classifies it on a 64-bit target', () => {
   for (const [spelling, text] of admitted) {
@@ -144,6 +178,131 @@ it('keys pointer mutability so `*const u8` and `*mut u8` name different signatur
     ),
     '(*mut)->void',
   )
+})
+
+it('admits recursively C-compatible function pointers and keys their full signature', () => {
+  const compare = Type.foreignFunction(
+    [Type.pointer(false, 'i32'), Type.pointer(false, 'i32')],
+    'i32',
+  )
+  assert.strictEqual(CAbi.admit(compare, 'Parameter')._tag, 'Admitted')
+  assert.strictEqual(
+    CAbi.typeText(CAbi.classify(compare, Target.aarch64AppleDarwin, 'Parameter')),
+    'extern "C" fn(*const,*const)->i32',
+  )
+  assert.strictEqual(
+    CAbi.signatureKey(CAbi.signature([compare, 'usize'], Type.unit, Target.aarch64AppleDarwin)),
+    '(extern "C" fn(*const,*const)->i32,u64)->void',
+  )
+
+  const invalidParameter = Type.foreignFunction([Type.unit], 'i32')
+  const invalidResult = Type.foreignFunction(['i32'], 'bool')
+  assert.strictEqual(CAbi.admit(invalidParameter, 'Parameter')._tag, 'NotAdmitted')
+  assert.strictEqual(CAbi.admit(invalidResult, 'Parameter')._tag, 'NotAdmitted')
+})
+
+it('renders one exact canonical header for scalars, pointers, nested callbacks, and empty arity', () => {
+  const functions: ReadonlyArray<Backend.ForeignExport> = [
+    {
+      symbol: 'visit',
+      parameters: ['*const', '*mut', 'extern "C" fn(i32,*const)->u8'],
+      result: 'extern "C" fn(u64)->i32',
+    },
+    { symbol: 'answer', parameters: [], result: 'i32' },
+  ]
+  const data: ReadonlyArray<Backend.ForeignStatic> = [
+    { symbol: 'callback_slot', type: 'extern "C" fn(i16)->u16', direction: 'Export' },
+    { symbol: 'mutable_state', type: '*mut', direction: 'Export' },
+    { symbol: 'silk_abi_version', type: 'u32', direction: 'Export' },
+    { symbol: 'host_state', type: '*mut', direction: 'Import' },
+  ]
+  const header = CHeader.make('answer-kit', functions, data)
+  const expected = [
+    '#ifndef SILK_ANSWER_KIT_H',
+    '#define SILK_ANSWER_KIT_H',
+    '',
+    '#include <stdint.h>',
+    '',
+    '#ifdef __cplusplus',
+    'extern "C" {',
+    '#endif',
+    '',
+    'int32_t answer(void);',
+    'extern uint16_t (*const callback_slot)(int16_t arg0);',
+    'extern void *const mutable_state;',
+    'extern const uint32_t silk_abi_version;',
+    'int32_t (*visit(const void *arg0, void *arg1, uint8_t (*arg2)(int32_t arg0, const void *arg1)))(uint64_t arg0);',
+    '',
+    '#ifdef __cplusplus',
+    '}',
+    '#endif',
+    '',
+    '#endif /* SILK_ANSWER_KIT_H */',
+    '',
+  ].join('\n')
+  assert.strictEqual(CHeader.render(header), expected)
+  assert.deepStrictEqual(CHeader.encode(header), new TextEncoder().encode(expected))
+})
+
+it('encodes exact target-qualified ABI manifests for Darwin and Linux', () => {
+  const exports: ReadonlyArray<Backend.ForeignExport> = [
+    { symbol: 'answer', parameters: [], result: 'i32' },
+  ]
+  const data: ReadonlyArray<Backend.ForeignStatic> = [
+    { symbol: 'silk_abi_version', type: 'u32', direction: 'Export' },
+    { symbol: 'host_state', type: '*mut', direction: 'Import' },
+  ]
+  for (const target of [Target.aarch64AppleDarwin, Target.x8664UnknownLinuxGnu]) {
+    const pointerWidth = CAbi.typeText(CAbi.classify('usize', target, 'Parameter'))
+    const imports: ReadonlyArray<Backend.ForeignImport> = [
+      { symbol: 'host_log', parameters: ['*const', pointerWidth], result: 'void' },
+    ]
+    const manifest = AbiManifest.make(target, imports, exports, data)
+    const expected = `${JSON.stringify(
+      {
+        silkForeignAbi: 1,
+        target: target.id,
+        exports: [
+          {
+            kind: 'function',
+            symbol: 'answer',
+            abi: 'C',
+            direction: 'export',
+            parameters: [],
+            result: 'i32',
+          },
+          {
+            kind: 'data',
+            symbol: 'silk_abi_version',
+            abi: 'C',
+            direction: 'export',
+            type: 'u32',
+          },
+        ],
+        imports: [
+          {
+            kind: 'function',
+            symbol: 'host_log',
+            abi: 'C',
+            direction: 'import',
+            parameters: ['*const', pointerWidth],
+            result: 'void',
+          },
+          {
+            kind: 'data',
+            symbol: 'host_state',
+            abi: 'C',
+            direction: 'import',
+            type: '*mut',
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`
+    assert.strictEqual(AbiManifest.render(manifest), expected)
+    assert.deepStrictEqual(AbiManifest.encode(manifest), new TextEncoder().encode(expected))
+  }
 })
 
 it('validates native symbol spelling', () => {

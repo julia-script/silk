@@ -3,13 +3,12 @@ import type { AggregateValue, IntegerValue, SliceValue, Value } from './Bootstra
 import type * as ChildProcess from './ChildProcess.js'
 import type * as HostInput from './HostInput.js'
 import type * as Mir from './Mir.js'
-import type * as MonotonicClock from './MonotonicClock.js'
+import * as MonotonicClock from './MonotonicClock.js'
 import * as OsFileSystemHost from './OsFileSystemHost.js'
 import * as RandomHost from './RandomHost.js'
 import type * as Scalar from './Scalar.js'
 import type * as StandardInput from './StandardInput.js'
 import type * as StandardStreams from './StandardStreams.js'
-import * as SystemClock from './SystemClock.js'
 import * as Type from './Type.js'
 
 /** Preserves an arbitrary stream-provider throw as observable evaluator data. */
@@ -62,7 +61,6 @@ export interface State {
   readonly processCaptures: Array<ReadonlyArray<number>>
   readonly hostInput?: HostInput.Provider
   readonly osFileSystem?: OsFileSystemHost.Provider
-  readonly systemClock?: SystemClock.Provider
   readonly monotonicClock?: MonotonicClock.Provider
   readonly randomHost?: RandomHost.Provider
 }
@@ -204,12 +202,9 @@ export const execute = (
           return Object.freeze({ cause })
         }
       }
-      if (name === 'osSystemClockNow' || name === 'osMonotonicClockNow') {
-        const host = name === 'osSystemClockNow' ? state.systemClock : state.monotonicClock
-        if (host === undefined)
-          return blockedStep({
-            _tag: name === 'osSystemClockNow' ? 'MissingSystemClock' : 'MissingMonotonicClock',
-          })
+      if (name === 'osMonotonicClockNow') {
+        const host = state.monotonicClock
+        if (host === undefined) return blockedStep({ _tag: 'MissingMonotonicClock' })
         const seconds = arguments_.at(0)
         const nanoseconds = arguments_.at(1)
         if (seconds === undefined || nanoseconds === undefined)
@@ -217,7 +212,7 @@ export const execute = (
         const invoked = invokeClock(host.now)
         const result = invoked.result
         const completed =
-          result !== undefined && result._tag === 'Read' && SystemClock.isInstant(result.instant)
+          result !== undefined && result._tag === 'Read' && MonotonicClock.isInstant(result.instant)
         if (completed && result?._tag === 'Read') {
           replaceReferenced(seconds, integerValue('i64', result.instant.seconds))
           replaceReferenced(nanoseconds, integerValue('i64', result.instant.nanoseconds))
@@ -226,13 +221,9 @@ export const execute = (
         commit(boundary.value)
         break
       }
-      if (name === 'osSystemClockResolution' || name === 'osMonotonicClockResolution') {
-        const host = name === 'osSystemClockResolution' ? state.systemClock : state.monotonicClock
-        if (host === undefined)
-          return blockedStep({
-            _tag:
-              name === 'osSystemClockResolution' ? 'MissingSystemClock' : 'MissingMonotonicClock',
-          })
+      if (name === 'osMonotonicClockResolution') {
+        const host = state.monotonicClock
+        if (host === undefined) return blockedStep({ _tag: 'MissingMonotonicClock' })
         const output = arguments_.at(0)
         if (output === undefined) throw new RangeError('OS clock resolution omitted its output')
         const invoked = invokeClock(host.resolution)
@@ -240,7 +231,7 @@ export const execute = (
         const completed =
           result !== undefined &&
           result._tag === 'Resolution' &&
-          SystemClock.isResolution(result.nanoseconds)
+          MonotonicClock.isResolution(result.nanoseconds)
         if (completed && result?._tag === 'Resolution') {
           replaceReferenced(output, integerValue('u64', result.nanoseconds))
         }
@@ -259,7 +250,7 @@ export const execute = (
           seconds: readInteger(seconds, 'i64').value,
           nanoseconds: readInteger(nanoseconds, 'i64').value,
         })
-        if (!SystemClock.isInstant(deadline)) {
+        if (!MonotonicClock.isInstant(deadline)) {
           const boundary = clockResult(false)
           commit(boundary.value)
           break

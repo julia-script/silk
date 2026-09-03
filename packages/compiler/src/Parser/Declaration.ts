@@ -52,6 +52,32 @@ const staticBeginsFunction = (state: State, offset: number): boolean => {
   )
 }
 
+/** Recognizes the ABI-bearing prefix that reserves an existing struct declaration node. */
+const externBeginsStruct = (state: State, offset: number): boolean => {
+  if (peek(state, offset) !== 'ExternKeyword') return false
+  const following = peek(state, offset + 1)
+  return (
+    following === 'StructKeyword' ||
+    (following === 'TextLiteral' && peek(state, offset + 2) === 'StructKeyword')
+  )
+}
+
+/** Recognizes either foreign-static spelling without treating ordinary static functions as data. */
+const beginsForeignStatic = (state: State): boolean => {
+  const kind = nextSignificantKind(state)
+  if (kind === 'UnsafeKeyword')
+    return (
+      peek(state, 1) === 'ExternKeyword' &&
+      peek(state, 2) === 'TextLiteral' &&
+      peek(state, 3) === 'StaticKeyword'
+    )
+  return (
+    kind === 'ExportKeyword' &&
+    peek(state, 1) === 'TextLiteral' &&
+    peek(state, 2) === 'StaticKeyword'
+  )
+}
+
 export const beginsTopLevelDeclaration = (state: State): boolean => {
   const kind = nextSignificantKind(state)
   if (kind === 'StaticKeyword') return staticBeginsFunction(state, 1)
@@ -157,6 +183,53 @@ export const parseConstantDeclaration = (initial: State): NodeResult => {
       ...name.elements,
       ...colon.elements,
       type.node,
+      ...equals.elements,
+      initializer.node,
+    ]),
+  })
+}
+
+/** Parses an imported or exported C data symbol. Both forms are immutable Silk bindings. */
+export const parseForeignStaticDeclaration = (initial: State): NodeResult => {
+  const imported = nextSignificantKind(initial) === 'UnsafeKeyword'
+  const unsafeKeyword = imported
+    ? expect(initial, 'UnsafeKeyword', ['ExternKeyword', 'TextLiteral', 'StaticKeyword'])
+    : Object.freeze({ state: initial, elements: Object.freeze([]) })
+  const markerKind = imported ? 'ExternKeyword' : 'ExportKeyword'
+  const marker = expect(unsafeKeyword.state, markerKind, ['TextLiteral', 'StaticKeyword'])
+  const abi = expect(marker.state, 'TextLiteral', ['StaticKeyword', 'Identifier'])
+  const staticKeyword = expect(abi.state, 'StaticKeyword', ['Identifier', 'Colon'])
+  const name = expect(staticKeyword.state, 'Identifier', ['Colon', ...typeStarts])
+  const colon = expect(name.state, 'Colon', [...typeStarts, 'AsKeyword', 'Equals'])
+  const type = parseType(colon.state, ['AsKeyword', 'Equals', ...topLevelFollowing])
+  const symbol = parseSymbolTail(type.state, ['Equals', ...topLevelFollowing])
+  if (imported) {
+    return Object.freeze({
+      state: symbol.state,
+      node: syntaxNode(symbol.state, 'ForeignStaticDeclaration', [
+        ...unsafeKeyword.elements,
+        ...marker.elements,
+        ...abi.elements,
+        ...staticKeyword.elements,
+        ...name.elements,
+        ...colon.elements,
+        type.node,
+        ...symbol.elements,
+      ]),
+    })
+  }
+  const equals = expect(symbol.state, 'Equals', [...expressionStarts, ...topLevelFollowing])
+  const initializer = parseExpression(equals.state, 0, 'Integer', false, ExpressionNesting.root)
+  return Object.freeze({
+    state: initializer.state,
+    node: syntaxNode(initializer.state, 'ExportStaticDeclaration', [
+      ...marker.elements,
+      ...abi.elements,
+      ...staticKeyword.elements,
+      ...name.elements,
+      ...colon.elements,
+      type.node,
+      ...symbol.elements,
       ...equals.elements,
       initializer.node,
     ]),
@@ -331,9 +404,16 @@ export const parseEnumDeclaration = (initial: State): NodeResult => {
 export const parseStructDeclaration = (initial: State): NodeResult => {
   const hasPublicModifier = nextSignificantKind(initial) === 'PubKeyword'
   const pubKeyword = hasPublicModifier
-    ? expect(initial, 'PubKeyword', ['StructKeyword', 'Identifier', 'LeftBrace'])
+    ? expect(initial, 'PubKeyword', ['ExternKeyword', 'StructKeyword', 'Identifier', 'LeftBrace'])
     : Object.freeze({ state: initial, elements: Object.freeze([]) })
-  const keyword = expect(pubKeyword.state, 'StructKeyword', ['Identifier', 'LeftBrace'])
+  const hasForeignLayout = nextSignificantKind(pubKeyword.state) === 'ExternKeyword'
+  const externKeyword = hasForeignLayout
+    ? expect(pubKeyword.state, 'ExternKeyword', ['TextLiteral', 'StructKeyword'])
+    : Object.freeze({ state: pubKeyword.state, elements: Object.freeze([]) })
+  const abi = hasForeignLayout
+    ? expect(externKeyword.state, 'TextLiteral', ['StructKeyword'])
+    : Object.freeze({ state: externKeyword.state, elements: Object.freeze([]) })
+  const keyword = expect(abi.state, 'StructKeyword', ['Identifier', 'LeftBrace'])
   const name = expect(keyword.state, 'Identifier', ['Less', 'LeftBrace', ...topLevelFollowing])
   const typeParameters =
     nextSignificantKind(name.state) === 'Less'
@@ -349,6 +429,8 @@ export const parseStructDeclaration = (initial: State): NodeResult => {
   let state = left.state
   let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
     ...pubKeyword.elements,
+    ...externKeyword.elements,
+    ...abi.elements,
     ...keyword.elements,
     ...name.elements,
     ...(typeParameters === undefined ? [] : [typeParameters.node]),
@@ -869,6 +951,7 @@ export const parseImplDeclaration = (initial: State): NodeResult => {
 export const parseTopLevelDeclaration = (state: State): NodeResult => {
   const kind = nextSignificantKind(state)
   const following = kind === 'PubKeyword' ? peek(state, 1) : undefined
+  if (beginsForeignStatic(state)) return parseForeignStaticDeclaration(state)
   if (
     (kind === 'StaticKeyword' && !staticBeginsFunction(state, 1)) ||
     (kind === 'PubKeyword' && following === 'StaticKeyword' && !staticBeginsFunction(state, 2))
@@ -883,7 +966,11 @@ export const parseTopLevelDeclaration = (state: State): NodeResult => {
     return parseInterfaceDeclaration(state)
   if (kind === 'ServiceKeyword' || following === 'ServiceKeyword')
     return parseServiceDeclaration(state)
-  if (kind === 'StructKeyword' || following === 'StructKeyword')
+  if (
+    kind === 'StructKeyword' ||
+    following === 'StructKeyword' ||
+    externBeginsStruct(state, kind === 'PubKeyword' ? 1 : 0)
+  )
     return parseStructDeclaration(state)
   if (kind === 'TupleKeyword' || following === 'TupleKeyword') return parseTupleDeclaration(state)
   if (kind === 'EnumKeyword' || following === 'EnumKeyword') return parseEnumDeclaration(state)
@@ -1060,11 +1147,14 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
 }
 
 /** The optional `as <symbol>` tail shared by foreign and exported function headers. */
-const parseSymbolTail = (initial: State): ElementsResult => {
+const parseSymbolTail = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind> = ['LeftBrace', ...topLevelFollowing],
+): ElementsResult => {
   if (nextSignificantKind(initial) !== 'AsKeyword')
     return Object.freeze({ state: initial, elements: Object.freeze([]) })
-  const asKeyword = expect(initial, 'AsKeyword', ['TextLiteral', 'LeftBrace', ...topLevelFollowing])
-  const symbol = expect(asKeyword.state, 'TextLiteral', ['LeftBrace', ...topLevelFollowing])
+  const asKeyword = expect(initial, 'AsKeyword', ['TextLiteral', ...following])
+  const symbol = expect(asKeyword.state, 'TextLiteral', following)
   return Object.freeze({
     state: symbol.state,
     elements: Object.freeze([...asKeyword.elements, ...symbol.elements]),

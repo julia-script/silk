@@ -283,8 +283,9 @@ it.effect('lowers target-neutral writes through native and hosted Wasm boundarie
       compilation: {
         root: SourceFile.make('standard-streams/native', encoder.encode(source)),
       },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
       profile: 'release',
+      artifactKind: 'NativeExecutable',
       destination: join(outputRoot, 'standard-streams'),
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(compiled._tag, 'Compiled')

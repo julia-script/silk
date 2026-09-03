@@ -220,8 +220,9 @@ it.effect(
         compilation: {
           root: SourceFile.make('multi-affine-return/stack-vm', ascii(stackVmWithSeparateVectors)),
         },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
         profile: 'release',
+        artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'stack-vm'),
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled')

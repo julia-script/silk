@@ -71,10 +71,10 @@ it.effect('lowers scalar enums to exact native integer lanes and declared discri
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
 
-    assert.match(artifact.ir, /define i8 @silk_.*identity8.*\(i8/)
-    assert.match(artifact.ir, /define i16 @silk_.*identity16.*\(i16/)
-    assert.match(artifact.ir, /define i32 @silk_.*identity32.*\(i32/)
-    assert.match(artifact.ir, /define i64 @silk_.*identity64.*\(i64/)
+    assert.match(artifact.ir, /define hidden i8 @silk_.*identity8.*\(i8/)
+    assert.match(artifact.ir, /define hidden i16 @silk_.*identity16.*\(i16/)
+    assert.match(artifact.ir, /define hidden i32 @silk_.*identity32.*\(i32/)
+    assert.match(artifact.ir, /define hidden i64 @silk_.*identity64.*\(i64/)
     assert.match(artifact.ir, /i8 -1/)
     assert.match(artifact.ir, /i16 -300/)
     assert.match(artifact.ir, /i32 70000/)
@@ -236,7 +236,7 @@ pub fn main() -> i32 {
         const evaluated = Analysis.evaluate(native)
         assert.strictEqual(evaluated._tag, 'Completed')
         assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
-        assert.include(llvm.ir, 'define i32 @silk_main')
+        assert.include(llvm.ir, 'define hidden i32 @silk_main')
       }
     }),
 )
@@ -485,29 +485,28 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('gates a reachable foreign call at Backend.emit for every non-native surface', () =>
+it.effect('admits direct-Wasm foreign imports and gates LLVM wasm32', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'backend/foreign',
       ascii(`unsafe extern "C" fn abs(value: i32) -> i32
-pub fn main() -> i32 { return unsafe abs(-42) }`),
+unsafe extern "C" fn absAgain(value: i32) -> i32 as "abs"
+pub fn main() -> i32 { return unsafe abs(-42) + unsafe absAgain(-1) }`),
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
-    const backends: ReadonlyArray<Backend.Backend> = [
-      WasmBackend.WasmBackend,
-      LlvmBackend.LlvmBackend,
-    ]
-    for (const backend of backends) {
-      const failure = yield* Effect.flip(Backend.emit(backend, program, { mode: 'release' }))
-      assert.strictEqual(failure.reason._tag, 'UnsupportedForeignFunction')
-      if (failure.reason._tag === 'UnsupportedForeignFunction')
-        assert.deepEqual(
-          failure.reason.diagnostics.map((diagnostic) => diagnostic.code),
-          ['SEM0193'],
-        )
-    }
+    const direct = yield* Backend.emit(WasmBackend.WasmBackend, program, { mode: 'release' })
+    assert.deepEqual(direct.foreignImports, [{ symbol: 'abs', parameters: ['i32'], result: 'i32' }])
+    const failure = yield* Effect.flip(
+      Backend.emit(LlvmBackend.LlvmBackend, program, { mode: 'release' }),
+    )
+    assert.strictEqual(failure.reason._tag, 'UnsupportedForeignFunction')
+    if (failure.reason._tag === 'UnsupportedForeignFunction')
+      assert.deepEqual(
+        failure.reason.diagnostics.map((diagnostic) => diagnostic.code),
+        ['SEM0193'],
+      )
   }),
 )
 

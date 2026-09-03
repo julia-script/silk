@@ -223,12 +223,15 @@ try {
     const destination = join(temporary, `${shape}-${depth}`)
     const compiled = await Effect.runPromise(
       Driver.compile({
+        packageName: 'effect-suspend-stack',
         compilation: { root: SourceFile.make(sourceId, encoder.encode(source)) },
         toolchain: Object.freeze({
           _tag: 'Toolchain',
           clang,
+          llvmAr: 'llvm-ar',
         }),
         profile: 'release',
+        artifactKind: 'NativeExecutable',
         destination,
       }).pipe(Effect.provide(Layer.mergeAll(SourceResolver.empty, NodeHeapObservation.layer))),
     )

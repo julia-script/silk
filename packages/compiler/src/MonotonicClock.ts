@@ -1,42 +1,62 @@
-import * as SystemClock from './SystemClock.js'
-
 /** Exact evaluator host values and deterministic providers for monotonic time. */
+
+/** One canonical split-second monotonic mark. */
+export interface Instant {
+  readonly seconds: bigint
+  readonly nanoseconds: bigint
+}
+
+/** One explicit host-boundary failure. */
+export interface BoundaryFailure {
+  readonly _tag: 'BoundaryFailure'
+  readonly message: string
+}
+
+/** The result of reading the monotonic clock. */
+export type ReadResult = { readonly _tag: 'Read'; readonly instant: Instant } | BoundaryFailure
+
+/** The result of querying the clock's whole-nanosecond resolution. */
+export type ResolutionResult =
+  | { readonly _tag: 'Resolution'; readonly nanoseconds: bigint }
+  | BoundaryFailure
 
 /** One completed deterministic absolute wait. */
 export interface WaitEvent {
   readonly _tag: 'WaitUntil'
-  readonly deadline: SystemClock.Instant
-  readonly before: SystemClock.Instant
-  readonly after: SystemClock.Instant
+  readonly deadline: Instant
+  readonly before: Instant
+  readonly after: Instant
 }
 
 /** The result of completing an absolute wait. */
-export type WaitResult = { readonly _tag: 'Waited' } | SystemClock.BoundaryFailure
+export type WaitResult = { readonly _tag: 'Waited' } | BoundaryFailure
 
 /** The explicit monotonic-clock boundary injected into evaluation. */
 export interface Provider {
-  readonly now: () => SystemClock.ReadResult
-  readonly resolution: () => SystemClock.ResolutionResult
-  readonly waitUntil: (deadline: SystemClock.Instant) => WaitResult
+  readonly now: () => ReadResult
+  readonly resolution: () => ResolutionResult
+  readonly waitUntil: (deadline: Instant) => WaitResult
 }
 
 /** A validated scripted monotonic provider with immutable observation snapshots. */
 export interface Scripted {
   readonly _tag: 'MonotonicClockScripted'
   readonly provider: Provider
-  readonly current: () => SystemClock.Instant
+  readonly current: () => Instant
   readonly waits: () => ReadonlyArray<WaitEvent>
 }
 
 /** Why a scripted monotonic host could not be constructed. */
 export type ConstructionFailureReason =
-  | SystemClock.ConstructionFailureReason
+  | { readonly _tag: 'SecondsOutOfRange'; readonly value: bigint }
+  | { readonly _tag: 'NanosecondsOutOfRange'; readonly value: bigint }
+  | { readonly _tag: 'ResolutionOutOfRange'; readonly value: bigint }
   | { readonly _tag: 'EmptyScript' }
   | {
       readonly _tag: 'DecreasingScript'
       readonly index: number
-      readonly previous: SystemClock.Instant
-      readonly current: SystemClock.Instant
+      readonly previous: Instant
+      readonly current: Instant
     }
 
 /** A construction result that returns invalid timeline data explicitly. */
@@ -44,7 +64,7 @@ export type Construction =
   | { readonly _tag: 'Constructed'; readonly value: Scripted }
   | { readonly _tag: 'ConstructionFailure'; readonly reason: ConstructionFailureReason }
 
-const compare = (left: SystemClock.Instant, right: SystemClock.Instant): number => {
+const compare = (left: Instant, right: Instant): number => {
   if (left.seconds < right.seconds) return -1
   if (left.seconds > right.seconds) return 1
   if (left.nanoseconds < right.nanoseconds) return -1
@@ -52,12 +72,10 @@ const compare = (left: SystemClock.Instant, right: SystemClock.Instant): number 
   return 0
 }
 
-const instant = (value: SystemClock.Instant): SystemClock.Instant =>
+const instant = (value: Instant): Instant =>
   Object.freeze({ seconds: value.seconds, nanoseconds: value.nanoseconds })
 
-const invalidInstant = (
-  value: SystemClock.Instant,
-): SystemClock.ConstructionFailureReason | undefined => {
+const invalidInstant = (value: Instant): ConstructionFailureReason | undefined => {
   if (value.seconds < -(1n << 63n) || value.seconds > (1n << 63n) - 1n) {
     return Object.freeze({ _tag: 'SecondsOutOfRange', value: value.seconds })
   }
@@ -67,18 +85,21 @@ const invalidInstant = (
   return undefined
 }
 
+/** Tests whether a value fits Silk's canonical monotonic-mark scalar ranges. */
+export const isInstant = (value: Instant): boolean => invalidInstant(value) === undefined
+
+/** Tests whether a value fits Silk's positive whole-nanosecond resolution range. */
+export const isResolution = (value: bigint): boolean => value >= 1n && value <= (1n << 64n) - 1n
+
 /** Builds a deterministic provider from a non-decreasing sequence of exact marks. */
-export const scripted = (
-  values: ReadonlyArray<SystemClock.Instant>,
-  resolution: bigint,
-): Construction => {
+export const scripted = (values: ReadonlyArray<Instant>, resolution: bigint): Construction => {
   if (values.length === 0) {
     return Object.freeze({
       _tag: 'ConstructionFailure',
       reason: Object.freeze({ _tag: 'EmptyScript' }),
     })
   }
-  const marks: Array<SystemClock.Instant> = []
+  const marks: Array<Instant> = []
   for (const [index, value] of values.entries()) {
     const failure = invalidInstant(value)
     if (failure !== undefined) {
@@ -99,7 +120,7 @@ export const scripted = (
     }
     marks.push(copied)
   }
-  if (!SystemClock.isResolution(resolution)) {
+  if (!isResolution(resolution)) {
     return Object.freeze({
       _tag: 'ConstructionFailure',
       reason: Object.freeze({ _tag: 'ResolutionOutOfRange', value: resolution }),
@@ -113,7 +134,7 @@ export const scripted = (
       reason: Object.freeze({ _tag: 'EmptyScript' }),
     })
   }
-  let selected: SystemClock.Instant = first
+  let selected: Instant = first
   let index = 0
   const recorded: Array<WaitEvent> = []
   const provider: Provider = Object.freeze({
@@ -126,7 +147,7 @@ export const scripted = (
       return Object.freeze({ _tag: 'Read', instant: selected })
     },
     resolution: () => Object.freeze({ _tag: 'Resolution', nanoseconds: resolution }),
-    waitUntil: (deadline: SystemClock.Instant) => {
+    waitUntil: (deadline: Instant) => {
       const before = selected
       const canonicalDeadline = instant(deadline)
       if (compare(canonicalDeadline, selected) > 0) selected = canonicalDeadline
@@ -152,7 +173,7 @@ export const scripted = (
 
 /** Builds a provider that reports an explicit boundary failure for every operation. */
 export const failing = (message = 'monotonic clock host failed'): Provider => {
-  const failure: SystemClock.BoundaryFailure = Object.freeze({
+  const failure: BoundaryFailure = Object.freeze({
     _tag: 'BoundaryFailure',
     message,
   })

@@ -2,10 +2,10 @@
 
 ## Purpose
 
-Pinned-Clang process orchestration between deterministic bitcode and a runnable binary: object
-emission under fixed optimization profiles, build-scope-owned path-backed intermediates, the
-`NativeLinker` service with its `ClangLinker` implementation, and the minimal C runtime shim that
-reaches a closed native entry.
+Target-aware process orchestration between deterministic bitcode and native executable, shared
+library, static library, or WebAssembly artifacts: fixed-profile object emission, scope-owned
+intermediates, structured native link inputs, hidden runtime support, deterministic archives, and
+atomic artifact/cache commits.
 
 ## Requirements
 
@@ -49,41 +49,6 @@ destination. Large process outputs MUST NOT be read into memory merely to be wri
 
 - **WHEN** a caller promotes an object artifact to a durable destination before scope exit
 - **THEN** the promoted copy survives scope removal at the requested path
-
-### Requirement: The NativeLinker service drives the pinned Clang driver
-
-The `NativeLinker` service SHALL validate that its inputs exist and match the compiler-selected
-canonical target, combine the program object with runtime objects built for that target, any
-request-supplied native object files, and the approved system libraries plus any request-supplied
-library names, invoke the pinned Clang driver with structured target arguments, and write the
-executable to the requested durable destination. Library names SHALL be passed as structured
-`-l<name>` arguments only; the service SHALL NOT accept arbitrary linker flags. On failure the
-outcome SHALL retain process output, exit status, and command provenance as data.
-
-#### Scenario: Link a runnable executable
-
-- **WHEN** the `ClangLinker` links the program object with a runtime shim compiled for the same canonical target
-- **THEN** an executable exists at the requested destination and running it exits with the program's `i32` result
-
-#### Scenario: Link a request-supplied C object
-
-- **WHEN** the request supplies a C object defining a foreign symbol the program reaches
-- **THEN** the planned command lists that object after the program and shim objects and the executable resolves the symbol
-
-#### Scenario: Pass a request-supplied library
-
-- **WHEN** the request supplies the library name `c`
-- **THEN** the planned command contains `-lc` after the object inputs and before the destination
-
-#### Scenario: Reject a missing input as data
-
-- **WHEN** a linker input path does not exist
-- **THEN** the outcome is a failure value naming the missing input without invoking the driver
-
-#### Scenario: Reject a target mismatch
-
-- **WHEN** a program object and runtime object name different canonical targets
-- **THEN** linking returns a target-compatibility failure before invoking Clang
 
 ### Requirement: The minimal runtime shim reaches a closed native entry
 
@@ -172,32 +137,6 @@ Native finalization SHALL connect an explicit process-stream provider. WebAssemb
 - **WHEN** a Wasm program requires `StandardStreams`
 - **THEN** finalization preserves the import required for instantiation
 
-### Requirement: The default artifact cache persists to a configured directory
-
-When the `SILK_NATIVE_CACHE_DIR` environment variable names a directory, the toolchain's default
-artifact cache SHALL persist finalized native and WebAssembly artifacts in that directory, keyed by
-the content of the compilation request: artifact kind, target triple, profile, Clang identity,
-runtime shim, input bitcode, the bytes of every request-supplied native object, and the ordered
-request-supplied library names. A request whose key matches a stored artifact SHALL reuse it
-without invoking the external toolchain. When the variable is unset, the default cache SHALL retain
-its process-local behavior unchanged. A corrupted or missing cache entry SHALL cause recompilation,
-never a failed or incorrect build.
-
-#### Scenario: A second process reuses a cached artifact
-
-- **WHEN** two processes compile an identical request with `SILK_NATIVE_CACHE_DIR` set to the same directory
-- **THEN** the second process produces a byte-identical artifact without invoking Clang
-
-#### Scenario: A changed input misses the cache
-
-- **WHEN** the bitcode, profile, target, shim, Clang identity, a native object's bytes, or the library list of a request differs from every stored entry
-- **THEN** the toolchain compiles the request through Clang and stores the new artifact under its own key
-
-#### Scenario: The variable is unset
-
-- **WHEN** `SILK_NATIVE_CACHE_DIR` is not set
-- **THEN** the default cache remains process-local and no artifact is written outside the build's own scope
-
 ### Requirement: Native toolchain failures yield typed errors
 
 Every expected native-toolchain failure (spawn, write, rename, temp-dir creation) SHALL surface in
@@ -244,3 +183,107 @@ NOT re-read them with a synchronous filesystem call to seed the cache.
 
 - **WHEN** a finalizer produces an artifact
 - **THEN** its bytes are available to the cache without a second read from disk
+
+### Requirement: The native finalizer uses typed link inputs and target tool plans
+
+Native finalization SHALL accept an ordered immutable union of object paths, static-archive paths,
+named libraries with explicit static or dynamic mode, search paths, and frameworks. It SHALL
+translate those values to structured process arguments without accepting raw linker flags. An
+object, static-archive, or search-path input SHALL carry an absolute path before planning so its
+spelling cannot be interpreted as a tool option. An
+executable or shared-library request SHALL use the target Clang driver; a static-library request
+SHALL use deterministic archive mode. Inputs or combinations unsupported by the selected target or
+artifact kind SHALL fail as typed toolchain data before a process is invoked.
+
+#### Scenario: Link a runnable executable
+
+- **WHEN** the native finalizer receives an executable request, the program object, its runtime object, and valid structured link inputs
+- **THEN** it invokes target Clang with structured arguments and atomically commits an executable whose process status is the program result
+
+#### Scenario: Link a shared library
+
+- **WHEN** the native finalizer receives a shared-library request for a supported native target
+- **THEN** it invokes target Clang in that target's shared-library mode and atomically commits a loadable shared-library artifact
+
+#### Scenario: Create a deterministic static library
+
+- **WHEN** the native finalizer receives the same static-library request and object bytes twice
+- **THEN** it invokes the pinned LLVM archive tool with deterministic `rcsD` semantics and produces byte-identical archives
+
+#### Scenario: Preserve structured input order
+
+- **WHEN** a request supplies a search path, a named dynamic library, an object, a static archive, and a framework in that order
+- **THEN** the planned Clang arguments encode the supported inputs in the same order with no shell parsing or arbitrary flag channel
+
+#### Scenario: Reject an unsupported link input
+
+- **WHEN** a framework is requested for a non-Apple target or a non-object input is requested for a static archive
+- **THEN** finalization returns typed unsupported-input data naming the artifact kind, target, and input without invoking a tool
+
+#### Scenario: Reject a missing path input
+
+- **WHEN** an object or static-archive input path does not exist
+- **THEN** finalization returns a typed failure naming the missing input without invoking the tool
+
+#### Scenario: Link a request-supplied C object
+
+- **WHEN** the request supplies a C object defining a foreign symbol the program reaches
+- **THEN** the planned command lists that object after the program and runtime objects and the artifact resolves the symbol
+
+#### Scenario: Pass a request-supplied library
+
+- **WHEN** the request supplies the dynamic library name `c`
+- **THEN** the planned command contains `-lc` in the input's ordered position
+
+#### Scenario: Reject a missing input as data
+
+- **WHEN** a path-backed native link input does not exist
+- **THEN** the outcome is a failure value naming the missing input without invoking the selected tool
+
+#### Scenario: Reject a target mismatch
+
+- **WHEN** a program object and runtime object name different canonical targets
+- **THEN** finalization returns a target-compatibility failure before invoking a tool
+
+### Requirement: The default artifact cache covers native artifact and link structure
+
+When the `SILK_NATIVE_CACHE_DIR` environment variable names a directory, the default artifact
+cache SHALL store each finalized native and WebAssembly artifact in a versioned, checksummed
+envelope and key it by artifact kind, target triple,
+optimization profile, selected tool identities, runtime source, input bitcode, the bytes of every
+path-backed link input, the canonical ordered encoding of every other structured link input, and
+any destination-derived identity embedded in the artifact. A matching entry SHALL be reused only
+after its container, artifact kind, and target validate without invoking an external tool. A
+corrupted, unauthenticated, or missing entry SHALL cause recompilation, never an incorrect build.
+
+#### Scenario: A second process reuses a cached artifact
+
+- **WHEN** two processes compile an identical request with `SILK_NATIVE_CACHE_DIR` set to the same directory
+- **THEN** the second process produces a byte-identical artifact without invoking the selected external tool
+
+#### Scenario: A changed input misses the cache
+
+- **WHEN** an artifact kind, input path's bytes, library mode, library name, search path, framework, or embedded shared-library identity differs from a cached request
+- **THEN** the finalizer invokes the required tool and stores the artifact under a distinct key
+
+#### Scenario: The variable is unset
+
+- **WHEN** `SILK_NATIVE_CACHE_DIR` is not set
+- **THEN** the default cache remains process-local and no cache artifact is written outside the build scope
+
+### Requirement: Native libraries expose only explicit C exports
+
+Shared libraries SHALL make only explicit `export "C"` thunk symbols default-visible. Compiler
+implementation functions, generated entry adapters, helpers, and runtime-support definitions MUST
+be hidden or local in the produced library. Static libraries SHALL retain the same public thunk
+names and MUST NOT promote a compiler-private symbol into the public ABI.
+
+#### Scenario: Inspect a shared library symbol table
+
+- **WHEN** a shared library containing one explicit C export and reachable internal/runtime support is inspected with the platform symbol dumper
+- **THEN** the export thunk is the only Silk-defined default-visible symbol and no compiler implementation or runtime-support name is exported
+
+#### Scenario: Link a C consumer
+
+- **WHEN** a separately compiled C program links and calls an explicit exported thunk from the shared library
+- **THEN** the call succeeds with the declared C ABI while no compiler-private symbol is required by the consumer

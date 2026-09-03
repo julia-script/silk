@@ -520,8 +520,21 @@ _Avoid_: escape hatch, unchecked mode
 A bodiless `unsafe extern "C" fn` declaration whose implementation is native code linked into the
 artifact. It carries a Silk name, a logical native symbol (`as "..."` or the Silk name), and the
 C ABI; it admits only by-value scalars, is called only inside an unsafe boundary, lowers to one
-direct linked call, and is available on native targets only.
+direct foreign call, and is admitted only when the selected execution surface supplies a matching
+binding.
 _Avoid_: FFI binding, extern block, intrinsic
+
+**C function pointer**:
+A Copy, noncapturing native address typed as `extern "C" fn(P...) -> R`. Only an exact,
+synchronous, nongeneric `export "C" fn` item contextually converts to it; ordinary and capturing
+Silk callables remain distinct values.
+_Avoid_: callable, closure, imported function
+
+**Foreign static**:
+An immutable Silk binding backed by a C data symbol. `unsafe extern "C" static` imports and loads
+native data; `export "C" static` defines an externally visible scalar initialized by a literal.
+Pointer pointee mutability does not make the binding assignable.
+_Avoid_: global variable, static-phase binding, foreign constant
 
 **Native export**:
 An `export "C" fn` declaration with a body that native code may call through a compiler-generated

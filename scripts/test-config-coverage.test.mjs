@@ -91,3 +91,26 @@ void test('only the critical-path package chooses its own worker count', () => {
       'from that states why, and is listed here.',
   )
 })
+
+const ciWorkflow = readFileSync(join(workspaceRoot, '.github/workflows/ci.yml'), 'utf8')
+
+const ciJobBody = (name) => {
+  const startMarker = `  ${name}:\n`
+  const start = ciWorkflow.indexOf(startMarker)
+  assert.notEqual(start, -1, `CI workflow is missing the ${name} job`)
+
+  const remainder = ciWorkflow.slice(start + startMarker.length)
+  const nextJob = /^  [a-z][a-z0-9-]+:\n/m.exec(remainder)
+  const end = nextJob === null ? undefined : start + startMarker.length + nextJob.index
+  return ciWorkflow.slice(start, end)
+}
+
+void test('every Linux test job that exercises native archives installs llvm-ar', () => {
+  for (const job of ['native-acceptance', 'compiler-tests']) {
+    assert.match(
+      ciJobBody(job),
+      /sudo apt-get install --yes llvm/,
+      `${job} executes archive-producing tests and must install llvm-ar in its own runner`,
+    )
+  }
+})

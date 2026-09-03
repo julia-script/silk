@@ -169,6 +169,8 @@ export interface ForeignCall {
 export interface ForeignExport {
   readonly _tag: 'ForeignExport'
   readonly symbol: string
+  /** Exact source-level C function-pointer type, including pointer pointees. */
+  readonly type: Type.ForeignFunction
   readonly signature: CAbi.CAbiSignature
   readonly key: InstanceKey
   readonly declaration: DeclarationFacts.CanonicalId
@@ -204,6 +206,9 @@ export type Entry =
       readonly requirements: ReadonlyArray<Type.Requirement>
     }
   | {
+      readonly _tag: 'Library'
+    }
+  | {
       readonly _tag: 'Unavailable'
       readonly reason:
         | 'MissingEntry'
@@ -216,6 +221,7 @@ export type Entry =
         | 'InvalidOrdinaryEntryResult'
         | 'InvalidEffectEntryResult'
         | 'EffectEntryRequirements'
+        | 'MissingLibraryExport'
         | 'InvalidSource'
       readonly requirements?: ReadonlyArray<Type.Requirement>
     }
@@ -232,7 +238,7 @@ export interface Discovery {
   readonly effects: ReadonlyArray<EffectInstance>
   readonly calls: ReadonlyArray<CallInstance>
   readonly intrinsics: ReadonlyArray<IntrinsicCall>
-  /** Reachable foreign declarations in canonical order; native-only availability reads it. */
+  /** Reachable foreign declarations in canonical order; each execution surface admits them. */
   readonly foreignCalls: ReadonlyArray<ForeignCall>
   /** Every closure export in canonical module then declaration order; roots only on native. */
   readonly foreignExports: ReadonlyArray<ForeignExport>
@@ -1009,10 +1015,15 @@ const exportRoots = (
             fact.returnType._tag !== 'Resolved'
           )
             return []
+          const parameters = fact.parameters.flatMap((parameter) =>
+            parameter.declaredType._tag === 'Resolved' ? [parameter.declaredType.type] : [],
+          )
+          if (parameters.length !== fact.parameters.length) return []
           return [
             Object.freeze({
               _tag: 'ForeignExport',
               symbol: fact.foreignExport.symbol,
+              type: Type.foreignFunction(parameters, fact.returnType.type),
               signature: ExecutableOrigin.foreignSignature(fact, target),
               key: keyOf(fact.canonical.id, Hir.contractOf(fact)),
               declaration: fact.canonical.id,
@@ -1033,13 +1044,19 @@ export const discover = (
   index: DeclarationIndex.Index,
   target: Target.Target,
   resolution: NameResolution.Resolution,
+  rootPolicy: 'Executable' | 'Library' = 'Executable',
 ): Discovery => {
   const root = results.get(rootModule)
   if (root === undefined) {
     throw new RangeError(`Instance discovery lost its root module ${rootModule}`)
   }
-  const entry = resolveEntry(root)
-  if (entry._tag !== 'Resolved') {
+  const foreignExports = exportRoots(index, target)
+  let entry: Entry
+  if (rootPolicy === 'Executable') entry = resolveEntry(root)
+  else if (foreignExports.length === 0)
+    entry = Object.freeze({ _tag: 'Unavailable', reason: 'MissingLibraryExport' })
+  else entry = Object.freeze({ _tag: 'Library' })
+  if (entry._tag === 'Unavailable') {
     return Object.freeze({
       _tag: 'InstanceDiscovery',
       rootModule,
@@ -1051,7 +1068,7 @@ export const discover = (
       calls: Object.freeze([]),
       intrinsics: Object.freeze([]),
       foreignCalls: Object.freeze([]),
-      foreignExports: Object.freeze([]),
+      foreignExports,
       constants: Object.freeze([]),
       suspension: Object.freeze([]),
       residualizationDiagnostics: Object.freeze([]),
@@ -1154,10 +1171,9 @@ export const discover = (
       ancestors: new Map([[declarationText(key), Object.freeze({ key })]]),
       cleanupReachable: false,
     })
-  const pending: Array<WorkItem> = [rootItem(entry.key)]
+  const pending: Array<WorkItem> = entry._tag === 'Resolved' ? [rootItem(entry.key)] : []
   // The export inventory is recorded for every target so planning can reject it off native;
-  // only a native target seeds the worklist with it.
-  const foreignExports = exportRoots(index, target)
+  // only a native target seeds the executable worklist with its implementation body.
   if (target.kind === 'Native')
     for (const record of foreignExports) pending.push(rootItem(record.key))
   const violations: Array<PolymorphicRecursion> = []
@@ -1315,7 +1331,9 @@ export const discover = (
       const cleanupTargets = [
         ...slotDropHookTargets(fn, index, substitution),
         ...cleanupHooks,
-        ...(entry.kind === 'Effect' && keyText(key) === keyText(entry.key)
+        ...(entry._tag === 'Resolved' &&
+        entry.kind === 'Effect' &&
+        keyText(key) === keyText(entry.key)
           ? entry.failures.flatMap((failure) =>
               hookCalls(CleanupPlan.cleanupPlan(index, failure.type), index),
             )

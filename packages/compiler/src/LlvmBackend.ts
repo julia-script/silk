@@ -42,6 +42,7 @@ export const LlvmBackend: Backend.Backend<Backend.LlvmBitcodeArtifact> = Object.
       runtimeFeatures: output.runtimeFeatures,
       foreignImports: output.foreignImports,
       foreignExports: output.foreignExports,
+      foreignStatics: output.foreignStatics,
       control: llvmControl(program),
       bitcode: output.bitcode,
     }

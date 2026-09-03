@@ -42,7 +42,8 @@ const clang = Effect.runSync(
 const toolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
   clang,
-  shimCache: NativeToolchain.makeShimCache(),
+  llvmAr: 'llvm-ar',
+  runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
 })
 
 const ascii = (value: string): Uint8Array =>
@@ -305,6 +306,7 @@ const runNative = (id: string, source: string, destination: string) =>
       compilation: { root: SourceFile.make(id, ascii(source)) },
       toolchain,
       profile: 'release',
+      artifactKind: 'NativeExecutable',
       destination,
     })
     assert.strictEqual(compiled._tag, 'Compiled', id)

@@ -537,7 +537,7 @@ it.effect('lowers the same stored-callable matrix through static native LLVM tar
       const artifact = yield* Backend.emit(LlvmBackend.LlvmBackend, module, { mode: 'release' })
       assert.strictEqual(artifact._tag, 'LlvmBitcodeArtifact')
       if (artifact._tag !== 'LlvmBitcodeArtifact') return
-      assert.include(artifact.ir, 'define i32 @silk_main')
+      assert.include(artifact.ir, 'define hidden i32 @silk_main')
       assert.include(artifact.ir, testCase.target)
     }
   }),

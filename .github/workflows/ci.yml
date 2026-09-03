@@ -71,6 +71,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: Install LLVM archiver
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes llvm
       - uses: actions/cache@v4
         with:
           path: .turbo/cache
@@ -107,6 +111,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: Install LLVM archiver
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes llvm
       - uses: actions/cache@v4
         with:
           path: .turbo/cache

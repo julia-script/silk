@@ -35,21 +35,51 @@ const instanceViolationDiagnostics = (
   )
 }
 
+/** Rejects a pointer-sized exported static that cannot be represented on the selected target. */
+const foreignStaticTargetDiagnostics = (
+  index: DeclarationIndex.Index,
+  target: Target.Target,
+): ReadonlyArray<Diagnostic.Diagnostic> =>
+  index.modules.flatMap((module) =>
+    module.members.flatMap((member): ReadonlyArray<Diagnostic.Diagnostic> => {
+      if (
+        member._tag !== 'ForeignStaticDeclaration' ||
+        member.direction !== 'Export' ||
+        member.declaredType._tag !== 'Resolved' ||
+        member.literal?._tag !== 'IntegerLiteral'
+      )
+        return []
+      const scalar =
+        typeof member.declaredType.type === 'string'
+          ? Scalar.find(member.declaredType.type)
+          : undefined
+      if (scalar?.spelling !== 'usize' && scalar?.spelling !== 'isize') return []
+      const range = Scalar.range(scalar, target.pointerSize === 4 ? 32 : 64)
+      if (member.literal.value >= range.minimum && member.literal.value <= range.maximum) return []
+      return [
+        Diagnostic.invalidConstant(
+          `the exported C static initializer is outside ${scalar.spelling} on ${target.id}`,
+          member.initializer?.span ?? member.syntax.span,
+        ),
+      ]
+    }),
+  )
+
 function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
-  options: Options,
+  options: Options & { readonly artifactKind?: ArtifactKind.ArtifactKind },
 ): Realization
 function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
-  options: Options,
+  options: Options & { readonly artifactKind?: ArtifactKind.ArtifactKind },
   backend: Backend.Backend,
 ): Preparation
 function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
-  options: Options,
+  options: Options & { readonly artifactKind?: ArtifactKind.ArtifactKind },
   backend?: Backend.Backend,
 ): Realization | Preparation {
   const report = [...self.report]
@@ -66,6 +96,10 @@ function discoverAndLower(
   // Static specialization is target-relative. Resolve the closed target before constructing any
   // executable worklist so no candidate body can observe a missing or host-inferred target.
   const targetSelection = Target.select(targetId)
+  const foreignStaticDiagnostics =
+    targetSelection._tag === 'Resolved'
+      ? foreignStaticTargetDiagnostics(self.index, targetSelection.target)
+      : Object.freeze([])
   const instances = PhaseReport.measureInto(
     report,
     'instance-discovery',
@@ -79,6 +113,9 @@ function discoverAndLower(
             self.index,
             targetSelection.target,
             self.resolution,
+            ArtifactKind.isLibrary(options.artifactKind ?? ArtifactKind.nativeExecutable)
+              ? 'Library'
+              : 'Executable',
           ),
     (value) => value.instances.length,
     (value) => value.violations.length,
@@ -100,6 +137,7 @@ function discoverAndLower(
     self.diagnostics,
     residualizationDiagnostics,
     instanceViolationDiagnostics(self, instances),
+    foreignStaticDiagnostics,
   )
   if (backend !== undefined && Diagnostic.hasErrors(baseDiagnostics))
     return Object.freeze({
@@ -123,6 +161,12 @@ function discoverAndLower(
     })
   const analysisUnavailable = (() => {
     if (backend !== undefined) return undefined
+    if (Diagnostic.hasErrors(foreignStaticDiagnostics))
+      return new AnalysisUnavailable({
+        operation: 'Analysis.realize',
+        message:
+          'Target-dependent phases are unavailable because an exported C static initializer exceeds the selected target',
+      })
     if (specializationInvalid || Diagnostic.hasGenericSpecializationErrors(baseDiagnostics))
       return new AnalysisUnavailable({
         operation: 'Analysis.realize',
@@ -347,10 +391,11 @@ export const prepare = (
   self: Frontend,
   backend: Backend.Backend,
   targetId: string | undefined = self.requestedTarget,
-  options: Options = {},
+  options: Options & { readonly artifactKind?: ArtifactKind.ArtifactKind } = {},
 ): Preparation => discoverAndLower(self, targetId, options, backend)
 
 import { AnalysisUnavailable } from './AnalysisUnavailable.js'
+import * as ArtifactKind from './ArtifactKind.js'
 import * as Backend from './Backend.js'
 import * as BackendRegistry from './BackendRegistry.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
@@ -370,6 +415,7 @@ import * as MirNormalization from './MirNormalization.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as PhaseReport from './PhaseReport.js'
 import * as ProvisionalMir from './ProvisionalMir.js'
+import * as Scalar from './Scalar.js'
 import * as SuspensionMir from './SuspensionMir.js'
 import * as SuspensionOwnership from './SuspensionOwnership.js'
 import * as Target from './Target.js'

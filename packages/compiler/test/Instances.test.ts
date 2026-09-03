@@ -5,10 +5,12 @@ import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as Instances from '../src/Instances.js'
+import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as Match from '../src/Match.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
+import * as Realization from '../src/Realization.js'
 import * as Type from '../src/Type.js'
 import { unreachable } from './support/raise.js'
 
@@ -46,6 +48,59 @@ pub fn other() -> i32 { return main() }`),
       mutual.instances.map((instance) => instance.key.declaration.name),
       ['main', 'other'],
     )
+  }),
+)
+
+it.effect('roots native libraries at C exports without selecting main', () =>
+  Effect.gen(function* () {
+    const frontend = yield* Analysis.ofSource(
+      'library/Math',
+      ascii(`fn helper(value: i32) -> i32 { return value + 1 }
+export "C" fn increment(value: i32) -> i32 { return helper(value) }
+pub fn main() -> i32 { return 0 }`),
+    )
+    const prepared = Realization.prepare(
+      frontend,
+      LlvmBackend.LlvmBackend,
+      'aarch64-apple-darwin',
+      { artifactKind: 'NativeSharedLibrary' },
+    )
+    assert.strictEqual(prepared._tag, 'Prepared')
+    if (prepared._tag !== 'Prepared') return
+    assert.strictEqual(prepared.program.entry._tag, 'LibraryEntry')
+    assert.deepStrictEqual(
+      {
+        functions: prepared.program.functions.map((fn) => fn.id.name),
+        exports: prepared.program.foreignExports.map((export_) => export_.symbol),
+      },
+      { functions: ['increment', 'helper'], exports: ['increment'] },
+    )
+    assert.deepStrictEqual(
+      prepared.program.foreignExports.map((export_) => export_.symbol),
+      ['increment'],
+    )
+    assert.deepStrictEqual(MirVerification.verify(prepared.program), [])
+    const artifact = yield* LlvmBackend.LlvmBackend.emit(prepared.program, { mode: 'release' })
+    assert.match(artifact.ir, /define hidden i32 @silk_/)
+    assert.match(artifact.ir, /define i32 @increment\(/)
+    assert.notMatch(artifact.ir, /define hidden i32 @increment\(/)
+  }),
+)
+
+it.effect('rejects a native library with no C export root', () =>
+  Effect.gen(function* () {
+    const frontend = yield* Analysis.ofSource(
+      'library/Empty',
+      ascii('pub fn helper() -> i32 { return 42 }'),
+    )
+    const prepared = Realization.prepare(
+      frontend,
+      LlvmBackend.LlvmBackend,
+      'aarch64-apple-darwin',
+      { artifactKind: 'NativeStaticLibrary' },
+    )
+    assert.strictEqual(prepared._tag, 'NoEntry')
+    if (prepared._tag === 'NoEntry') assert.strictEqual(prepared.reason, 'MissingLibraryExport')
   }),
 )
 
