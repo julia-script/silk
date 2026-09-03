@@ -122,8 +122,6 @@ export interface ThunkContext {
   readonly transferHeaderSize: number
   readonly transferResultOffset: number
   readonly transferStorageSize: number
-  readonly driver?: FunctionActor.Function
-  readonly machine?: NativeLoweringContext.DeclaredFunction
   readonly childThunkType?: LlvmType.Type
   readonly resumeThunkType?: LlvmType.Type
 }
@@ -145,8 +143,6 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
     transferHeaderSize,
     transferResultOffset,
     transferStorageSize,
-    driver,
-    machine,
     childThunkType,
     resumeThunkType,
   } = context
@@ -319,7 +315,9 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
     )
   }
 
-  if (driver !== undefined && machine !== undefined) {
+  for (const machine of declared) {
+    const driver = machine.driver
+    if (driver === undefined) continue
     yield* FunctionActor.buildBody(
       builder,
       driver,

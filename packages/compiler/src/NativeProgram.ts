@@ -447,21 +447,6 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       )
     }
   }
-  const machine = declared.find((entry) =>
-    Mir.matchesInstanceKey(entry.fn, Mir.machineEntry(program)),
-  )
-  const driver =
-    machine?.suspendable === true
-      ? yield* FunctionActor.declare(
-          builder,
-          machine.publicSymbol,
-          yield* LlvmType.functionType(
-            builder,
-            machine.resultType,
-            machine.parameterTypes.slice(0, -3),
-          ),
-        )
-      : undefined
 
   const debug = request.mode === 'debug'
   let compileUnit: LlvmMetadata.Optional
@@ -565,8 +550,6 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       transferHeaderSize,
       transferResultOffset,
       transferStorageSize,
-      ...(driver === undefined ? {} : { driver }),
-      ...(machine === undefined ? {} : { machine }),
       ...(childThunkType === undefined ? {} : { childThunkType }),
       ...(resumeThunkType === undefined ? {} : { resumeThunkType }),
     }),

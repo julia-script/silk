@@ -348,9 +348,16 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       if (target === undefined) {
         throw new RangeError(`Backend cannot resolve call target ${operation.target.name}`)
       }
+      // An ordinary call has no suspension control: a suspendable target is driven to
+      // completion here, the way the machine root drives the entry.
+      const handle = target.suspendable ? target.driver : target.handle
+      if (handle === undefined)
+        throw new RangeError(
+          `Backend cannot drive suspendable call target ${operation.target.name}`,
+        )
       const result = yield* FunctionBody.callDirect(
         body,
-        target.handle,
+        handle,
         operation.arguments.flatMap((argument) => [
           ...NativeStorage.readLocal(nativeStorage, argument),
         ]),

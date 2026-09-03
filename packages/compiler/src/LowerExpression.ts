@@ -41,7 +41,7 @@ import type { FunctionLowering } from './FunctionLowering.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
-import type { DelayedEffectState } from './Lower.js'
+import type { DelayedEffectState, ProvidedRequirement } from './Lower.js'
 import { bool, borrowKey, character, isOsOperation, patternKey, usize } from './Lower.js'
 import { lowerBuiltinExpression } from './LowerBuiltin.js'
 import * as Match from './Match.js'
@@ -100,6 +100,67 @@ const packEffectComposite = (
     }),
   )
   return Object.freeze({ result: packed })
+}
+
+/**
+ * A service operation constructed as a value (`Effect.provideMut(Writer.writeAll(b), &mut w)`,
+ * or its pipe form) dispatches on the provider that the enclosing forwarding wrapper binds, so
+ * that provider must exist before the operation's Effect value is built. The provider operand is
+ * lowered first and its local serves both the requirement the operation resolves against and the
+ * wrapper's own provider argument; the operand form recognized here is a pure borrow, so the
+ * earlier evaluation observes nothing.
+ */
+const forwardedServiceProvision = (
+  fn: FunctionLowering,
+  expression: Extract<Hir.Expression, { readonly _tag: 'EffectConstruct' | 'CallableApply' }>,
+  availableRequirements: ReadonlyArray<ProvidedRequirement>,
+):
+  | {
+      readonly provider: Hir.Expression
+      readonly local: Mir.LocalId
+      readonly protected: Hir.Expression
+      readonly requirements: ReadonlyArray<ProvidedRequirement>
+    }
+  | undefined => {
+  const forwarded = inlineForwardedRequirement(fn, expression)
+  if (
+    forwarded === undefined ||
+    forwarded.selection.access === 'Take' ||
+    forwarded.provider._tag !== 'ValueBorrow' ||
+    forwarded.binding.protected._tag !== 'ServiceEffectConstruct' ||
+    availableRequirements.some(
+      (requirement) =>
+        requirement.role === forwarded.selection.role &&
+        Type.equals(requirement.capability, forwarded.selection.capability),
+    )
+  )
+    return undefined
+  const provider = lowerExpression(fn, forwarded.provider, availableRequirements)
+  if (provider === undefined) return undefined
+  return Object.freeze({
+    provider: forwarded.provider,
+    local: provider.result,
+    protected: forwarded.binding.protected,
+    requirements: Object.freeze([
+      ...availableRequirements,
+      Object.freeze({ ...forwarded.selection, local: provider.result }),
+    ]),
+  })
+}
+
+const lowerOperandWithProvision = (
+  fn: FunctionLowering,
+  provision: ReturnType<typeof forwardedServiceProvision>,
+  operand: Hir.Expression,
+  availableRequirements: ReadonlyArray<ProvidedRequirement>,
+): LoweredExpression | undefined => {
+  if (provision === undefined) return lowerExpression(fn, operand, availableRequirements)
+  if (operand === provision.provider) return Object.freeze({ result: provision.local })
+  return lowerExpression(
+    fn,
+    operand,
+    operand === provision.protected ? provision.requirements : availableRequirements,
+  )
 }
 
 export function lowerExpression(
@@ -665,9 +726,10 @@ function lowerCallableApplyExpression(
   let callableType: Type.Callable | undefined
   let target: Hir.CallableTarget | undefined
   let typeArguments: ReadonlyArray<Type.GenericArgument> = Object.freeze([])
+      const provision = forwardedServiceProvision(fn, expression, availableRequirements)
   const lowerArguments = (): boolean => {
     for (const argument of expression.arguments) {
-      const lowered = lowerExpression(fn, argument, availableRequirements)
+          const lowered = lowerOperandWithProvision(fn, provision, argument, availableRequirements)
       if (lowered === undefined) return false
       arguments_.push(lowered.result)
     }
@@ -686,7 +748,12 @@ function lowerCallableApplyExpression(
         )
       if (directSection !== undefined) {
         for (const capture of directSection.captures) {
-          const lowered = lowerExpression(fn, capture.value, availableRequirements)
+              const lowered = lowerOperandWithProvision(
+                fn,
+                provision,
+                capture.value,
+                availableRequirements,
+              )
           if (lowered === undefined) return false
           captures.push(
             Object.freeze({
@@ -888,9 +955,10 @@ function lowerEffectConstructExpression(
       : effectValueByIdentity(fn.layout, call.resultEffect)) ??
     fn.effectResults.get(instanceText(expression.target, typeArguments, staticArguments))
   if (resultType === undefined) return undefined
+      const provision = forwardedServiceProvision(fn, expression, availableRequirements)
   const arguments_: Array<Mir.LocalId> = []
   for (const argument of expression.arguments) {
-    const lowered = lowerExpression(fn, argument, availableRequirements)
+        const lowered = lowerOperandWithProvision(fn, provision, argument, availableRequirements)
     if (lowered === undefined) return undefined
     arguments_.push(lowered.result)
   }

@@ -18,6 +18,12 @@ export interface DeclaredFunction {
   readonly emittedResultType: LlvmType.Type
   readonly resultLaneCount: number
   readonly suspendable: boolean
+  /**
+   * Synchronous-signature entry that drives a suspendable function to completion. Present for
+   * every suspendable function: the machine entry exposes it under the public symbol, and an
+   * ordinary `Call` from a synchronous boundary reaches the suspendable target through it.
+   */
+  readonly driver?: FunctionActor.Function
   readonly parameterTypes: ReadonlyArray<LlvmType.Type>
   readonly linear: ReadonlyArray<MirLinearization.LinearBlock>
 }
