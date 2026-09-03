@@ -674,12 +674,12 @@ pub fn main() -> i32 { return 0 }`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])
     const replacements =
-      Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(0)?.borrowedReplacements ?? []
+      Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(0)?.replacements ?? []
     assert.strictEqual(replacements.length, 1)
-    assert.strictEqual(replacements.at(0)?.displacedCleanup._tag, 'StructCleanup')
+    assert.strictEqual(replacements.at(0)?.cleanup._tag, 'StructCleanup')
     const empty =
-      Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(1)?.borrowedReplacements ?? []
-    const cleanup = empty.at(0)?.displacedCleanup
+      Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(1)?.replacements ?? []
+    const cleanup = empty.at(0)?.cleanup
     assert.strictEqual(cleanup?._tag, 'StructCleanup')
     if (cleanup?._tag === 'StructCleanup') {
       assert.deepEqual(cleanup.fields, [])

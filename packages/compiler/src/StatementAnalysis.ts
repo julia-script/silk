@@ -750,7 +750,14 @@ export const analyzeStatements = (
         mutability:
           SyntaxTree.directToken(element, 'MutKeyword') === undefined ? 'Immutable' : 'Mutable',
         ...(resolvedDeclared === undefined ? {} : { declaredType: resolvedDeclared.fact }),
-        inferredType: initializer.fact.type,
+        // A declared union is the binding's type: the initializer injects at the binding boundary.
+        inferredType:
+          expected !== undefined &&
+          Type.isUnion(expected) &&
+          initializer.type !== undefined &&
+          typesCompatible(initializer.type, expected)
+            ? Object.freeze({ _tag: 'Available', type: expected })
+            : initializer.fact.type,
         initializer: initializer.fact,
         ...(staticValue === undefined ? {} : { staticValue }),
         ...(exactCallable === undefined ? {} : { exactCallable }),
@@ -1833,10 +1840,16 @@ export const analyzeFunctionBody = (
     return undefined
   }
 
-  if (returnedBorrow !== undefined && context.declaration.phase !== 'Static') {
+  const staticView = DeclarationFacts.returnsStaticView(declaration)
+  if ((returnedBorrow !== undefined || staticView) && context.declaration.phase !== 'Static') {
+    // Program-lifetime sources: static literals, calls carrying no caller view, and bindings of
+    // either. A static-view function may return nothing else.
     const isBorrowFreeReturn = (expression: ExpressionFact): boolean => {
       if (expression._tag === 'Grouped') return isBorrowFreeReturn(expression.expression)
-      if (expression._tag === 'StaticText') return expression.data?.kind === 'Text'
+      if (expression._tag === 'Move') return isBorrowFreeReturn(expression.subject)
+      if (expression._tag === 'StaticText') return expression.data !== undefined
+      if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedBinding')
+        return isBorrowFreeReturn(expression.reference.binding.initializer)
       if (expression._tag !== 'Call' || expression.reference._tag !== 'Resolved') return false
       const argument = returnedBorrowArgument(expression)
       return (
@@ -1854,7 +1867,7 @@ export const analyzeFunctionBody = (
         if (statement._tag === 'ReturnStatement') {
           const origin = originOf(statement.expression)
           if (
-            origin?.id.ordinal !== returnedBorrow.parameter.id.ordinal &&
+            origin?.id.ordinal !== returnedBorrow?.parameter.id.ordinal &&
             !isBorrowFreeReturn(statement.expression)
           ) {
             context.diagnostics.push(

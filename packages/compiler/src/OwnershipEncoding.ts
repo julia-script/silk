@@ -138,9 +138,9 @@ export const encode = (self: ModuleOwnership): string =>
         } else if (loan.origin === 'ReturnedView') origin = 'returned-view'
         return `  loan l${loan.id.ordinal} ${loan.access.toLowerCase()} ${siteText(loan.root)} ${origin} region=${loan.startRegion.ordinal}->${loan.endRegion.ordinal} ${spanText(loan.startSpan)}..${spanText(loan.endSpan)}`
       }),
-      ...fn.borrowedReplacements.map(
+      ...fn.replacements.map(
         (replacement) =>
-          `  borrowed-replace p${replacement.root.ordinal} region=${replacement.region.ordinal} type=${Type.encode(replacement.type)} cleanup=${cleanupText(replacement.displacedCleanup)} ${spanText(replacement.span)}`,
+          `  replace region=${replacement.region.ordinal} type=${Type.encode(replacement.type)} cleanup=${cleanupText(replacement.cleanup)} ${spanText(replacement.span)}`,
       ),
       ...fn.callables.map(
         (callable) =>

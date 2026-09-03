@@ -3405,7 +3405,193 @@ export "C" fn silk_test_export_touch() -> () {
 export "C" fn silk_test_export_touched() -> i32 { return unsafe silk_test_export_noted() }
 pub fn main() -> i32 { return unsafe silk_test_export_checksum() }`
 
+/** Replacement cleanup: a displaced local, field, array element, and slice element clean once. */
+export const replaceCleanupProgram = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+import silk.format { Format }
+import silk.writer { Writer, WriterError }
+
+struct Log {
+  slots: [i32; 16]
+  count: usize
+}
+struct Tracer {
+  id: i32
+  log: Shared<Log>
+}
+fn record(log: &mut Log, id: i32) -> i32 {
+  log.slots[log.count] = id
+  log.count = log.count + 1
+  return 0
+}
+impl Drop for Tracer {
+  fn drop(self: &mut Tracer) -> () {
+    let id = self.id
+    let r = Shared.withMut<Log, i32>(&self.log, record(id))
+    return ()
+  }
+}
+fn encode(log: &Log) -> i32 {
+  let mut r = 0
+  let mut i: usize = 0
+  while i < log.count {
+    r = r * 10 + log.slots[i]
+    i = i + 1
+  }
+  return r
+}
+fn tracer(id: i32, log: &Shared<Log>) -> Tracer {
+  return Tracer { id: id, log: Shared.clone<Log>(log) }
+}
+effect fn printLog(log: &Shared<Log>) -> () ! WriterError {
+  let code = Shared.with<Log, i32>(log, encode)
+  let mut writer = Writer.stdoutWriterProvider()
+  return run (Format.display(&code) |> Effect.provideMut<Writer>(&mut writer))
+}
+effect fn makeLog() -> Shared<Log> ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run (Shared.make<Log>(Log { slots: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], count: 0 }) |> Effect.provideMut<Allocator>(&mut allocator))
+}
+effect fn recoverAny(e: OutOfMemoryError | WriterError) -> i32 { return -1 }
+struct Pair {
+  first: Tracer
+  second: Tracer
+}
+fn localReplace(log: &Shared<Log>) -> i32 {
+  let mut a = tracer(1, log)
+  a = tracer(2, log)
+  return 0
+}
+fn fieldReplace(log: &Shared<Log>) -> i32 {
+  let mut p = Pair { first: tracer(3, log), second: tracer(4, log) }
+  p.first = tracer(5, log)
+  return 0
+}
+fn arrayReplace(log: &Shared<Log>) -> i32 {
+  let mut arr = [tracer(6, log)]
+  arr[0] = tracer(7, log)
+  return 0
+}
+fn sliceReplace(values: &mut [Tracer], log: &Shared<Log>) -> i32 {
+  values[0] = tracer(9, log)
+  return 0
+}
+fn paramReplace(mut t: Tracer, log: &Shared<Log>) -> i32 {
+  t = tracer(9, log)
+  return 0
+}
+effect fn body() -> i32 ! OutOfMemoryError | WriterError {
+  let log = run makeLog()
+  let a = localReplace(&log)
+  let b = fieldReplace(&log)
+  let c = arrayReplace(&log)
+  let mut arr = [tracer(8, &log)]
+  let d = sliceReplace(&mut arr, &log)
+  drop arr
+  run printLog(&log)
+  return 0
+}
+pub fn main() -> i32 {
+  return run Effect.catchAll(body(), recoverAny)
+}`
+
+/** Replacement cleanup runs at the write, before an explicit drop and scope exit. */
+export const replaceDropProgram = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+import silk.format { Format }
+import silk.writer { Writer, WriterError }
+
+struct Log {
+  slots: [i32; 16]
+  count: usize
+}
+struct Tracer {
+  id: i32
+  log: Shared<Log>
+}
+fn record(log: &mut Log, id: i32) -> i32 {
+  log.slots[log.count] = id
+  log.count = log.count + 1
+  return 0
+}
+impl Drop for Tracer {
+  fn drop(self: &mut Tracer) -> () {
+    let id = self.id
+    let r = Shared.withMut<Log, i32>(&self.log, record(id))
+    return ()
+  }
+}
+fn encode(log: &Log) -> i32 {
+  let mut r = 0
+  let mut i: usize = 0
+  while i < log.count {
+    r = r * 10 + log.slots[i]
+    i = i + 1
+  }
+  return r
+}
+fn tracer(id: i32, log: &Shared<Log>) -> Tracer {
+  return Tracer { id: id, log: Shared.clone<Log>(log) }
+}
+effect fn printLog(log: &Shared<Log>) -> () ! WriterError {
+  let code = Shared.with<Log, i32>(log, encode)
+  let mut writer = Writer.stdoutWriterProvider()
+  return run (Format.display(&code) |> Effect.provideMut<Writer>(&mut writer))
+}
+effect fn makeLog() -> Shared<Log> ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run (Shared.make<Log>(Log { slots: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], count: 0 }) |> Effect.provideMut<Allocator>(&mut allocator))
+}
+effect fn recoverAny(e: OutOfMemoryError | WriterError) -> i32 { return -1 }
+fn replaceAndDrop(log: &Shared<Log>) -> i32 {
+  let mut a = tracer(1, log)
+  let b = tracer(2, log)
+  a = tracer(3, log)
+  drop b
+  let c = tracer(4, log)
+  return 0
+}
+effect fn body() -> i32 ! OutOfMemoryError | WriterError {
+  let log = run makeLog()
+  let s = replaceAndDrop(&log)
+  run printLog(&log)
+  return 0
+}
+pub fn main() -> i32 {
+  return run Effect.catchAll(body(), recoverAny)
+}`
+
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
+  {
+    name: 'replace-cleanup',
+    source: 'pub fn main() -> i32 { return 0 }',
+    nativeSource: replaceCleanupProgram,
+    nativeStdout: '123546789',
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'replace-drop',
+    source: 'pub fn main() -> i32 { return 0 }',
+    nativeSource: replaceDropProgram,
+    nativeStdout: '1243',
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'effect-borrow-escape',
+    source: `import silk.effect { Effect }
+effect fn inspect(values: &[i32]) -> i32 { return values[0] + values[1] }
+fn make() -> Effect<i32> {
+  let v = [20, 22]
+  return inspect(&v)
+}
+pub fn main() -> i32 {
+  let e = make()
+  return run e
+}`,
+    expected: { _tag: 'Trap' },
+  },
   ...corpus,
   {
     name: 'foreign-export-roundtrip',

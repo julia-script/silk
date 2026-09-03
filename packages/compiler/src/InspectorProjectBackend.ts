@@ -506,13 +506,13 @@ export const ownershipRows = (facts: Ownership.ModuleOwnership): ReadonlyArray<R
       }
     }
 
-    for (const replacement of fn.borrowedReplacements) {
+    for (const replacement of fn.replacements) {
       const replacementSpan = asSpan(replacement.span)
       rows.push({
-        key: `own-${fn.declaration.id.ordinal}-borrowed-replacement-${replacement.span.start}`,
+        key: `own-${fn.declaration.id.ordinal}-replacement-${replacement.span.start}`,
         depth: 1,
-        label: `replace through parameter #${replacement.root.ordinal}`,
-        detail: `${typeText(replacement.type)} · ${cleanupText(replacement.displacedCleanup)} · r${replacement.region.ordinal}`,
+        label: 'replace live value',
+        detail: `${typeText(replacement.type)} · ${cleanupText(replacement.cleanup)} · r${replacement.region.ordinal}`,
         span: replacementSpan,
       })
     }
@@ -715,20 +715,20 @@ export const layoutRows = (
     }
     if (plan.literalVerdicts.length > 0) {
       rows.push({
-        key: 'plan-usize-literals',
+        key: 'plan-word-literals',
         depth: 1,
-        label: 'usize literal verdicts',
+        label: 'target word literal verdicts',
         detail: `${plan.literalVerdicts.length} target-checked`,
         head: true,
       })
       for (const [ordinal, verdict] of plan.literalVerdicts.entries()) {
-        const available = verdict._tag === 'AvailableUsizeLiteral'
+        const available = verdict._tag === 'AvailableWordLiteral'
         rows.push({
-          key: `plan-usize-literal-${ordinal}`,
+          key: `plan-word-literal-${ordinal}`,
           depth: 2,
           dot: available ? 'symbol' : 'warning',
           ...(available ? {} : { tone: 'warning' as const }),
-          label: verdict.value.toString(),
+          label: `${verdict.type} ${verdict.value.toString()}`,
           detail: `${verdict.bits}-bit · ${available ? 'available' : 'out of range'}`,
           span: asSpan(verdict.span),
         })

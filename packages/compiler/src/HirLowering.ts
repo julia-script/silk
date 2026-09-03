@@ -257,32 +257,46 @@ export const lowerStatements = (
             region: statement.region,
             span: statement.syntax.span,
           })
-        if (statement._tag === 'BindStatement')
+        if (statement._tag === 'BindStatement') {
+          const binding = statement.binding
+          const initializer = (): Hir.Expression => {
+            if (
+              options.borrowBindingInitializers &&
+              binding.initializer._tag === 'Borrow' &&
+              options.functionId !== undefined
+            )
+              return hirExpression(
+                binding.initializer,
+                Object.freeze({
+                  _tag: 'BorrowId',
+                  function: options.functionId,
+                  callSpan: binding.initializer.syntax.span,
+                  ordinal: 0,
+                }),
+              )
+            // A declared union is the binding's type: the initializer injects at the boundary.
+            if (
+              binding.declaredType?._tag === 'Resolved' &&
+              Type.isUnion(binding.declaredType.type)
+            )
+              return hirExpectedExpression(
+                binding.initializer,
+                binding.declaredType.type,
+                'Binding',
+                binding.syntax.span,
+              )
+            return hirExpression(binding.initializer)
+          }
           return Object.freeze({
             _tag: 'Bind',
-            binding: statement.binding.id,
-            name:
-              statement.binding.name._tag === 'Present'
-                ? statement.binding.name.spelling
-                : undefined,
-            mutability: statement.binding.mutability,
-            initializer:
-              options.borrowBindingInitializers &&
-              statement.binding.initializer._tag === 'Borrow' &&
-              options.functionId !== undefined
-                ? hirExpression(
-                    statement.binding.initializer,
-                    Object.freeze({
-                      _tag: 'BorrowId',
-                      function: options.functionId,
-                      callSpan: statement.binding.initializer.syntax.span,
-                      ordinal: 0,
-                    }),
-                  )
-                : hirExpression(statement.binding.initializer),
+            binding: binding.id,
+            name: binding.name._tag === 'Present' ? binding.name.spelling : undefined,
+            mutability: binding.mutability,
+            initializer: initializer(),
             region: statement.region,
-            span: statement.binding.syntax.span,
+            span: binding.syntax.span,
           })
+        }
         if (statement._tag === 'PatternBindStatement')
           return Object.freeze({
             _tag: 'PatternBind',

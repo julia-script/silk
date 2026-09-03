@@ -526,6 +526,7 @@ export type Expression =
         | 'StructField'
         | 'ArrayElement'
         | 'Assignment'
+        | 'Binding'
         | 'MatchArm'
       readonly expectedAt: SourceSpan.SourceSpan
       readonly type: Type.StructuralUnion | Type.Effect

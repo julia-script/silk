@@ -1,4 +1,5 @@
 import type { ExitIndex } from './CleanupEmission.js'
+import * as CleanupPlan from './CleanupPlan.js'
 import {
   authored,
   cleanupForLocal,
@@ -545,6 +546,32 @@ export const lowerSequence = (
       )
       const value = lowerExpression(fn, statement.value)
       if (value === undefined) return false
+      // A live displaced value leaves the place as the replacement commits (the verifier pairs
+      // a consuming read with its write), then cleans exactly once through its own plan.
+      const replacement = fn.ownership?.replacements.find(
+        (candidate) =>
+          candidate.span.start === statement.span.start &&
+          candidate.span.end === statement.span.end,
+      )
+      const displacedCleanup =
+        replacement === undefined ? undefined : cleanupForLocal(fn, replacement.cleanup, type)
+      const displaced =
+        displacedCleanup !== undefined && CleanupPlan.hasEffect(displacedCleanup)
+          ? fn.alloc(type)
+          : undefined
+      if (displaced !== undefined) {
+        fn.emit(
+          Object.freeze({
+            _tag: 'ReadPlace',
+            destination: displaced,
+            root,
+            selectors,
+            type,
+            consume: true,
+            provenance: authored(statement.span),
+          }),
+        )
+      }
       fn.emit(
         Object.freeze({
           _tag: 'WritePlace',
@@ -559,6 +586,16 @@ export const lowerSequence = (
           provenance: authored(statement.span),
         }),
       )
+      if (displaced !== undefined && displacedCleanup !== undefined) {
+        fn.emit(
+          Object.freeze({
+            _tag: 'Drop',
+            local: displaced,
+            cleanup: displacedCleanup,
+            provenance: authored(statement.span),
+          }),
+        )
+      }
       endReturnedViewLoans(fn, statement.span)
       return true
     })

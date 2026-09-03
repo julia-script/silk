@@ -96,12 +96,12 @@ export interface LoanFact {
   readonly endSpan: SourceSpan.SourceSpan
 }
 
-export interface BorrowedReplacementFact {
-  readonly _tag: 'BorrowedReplacement'
-  readonly root: DeclarationFacts.ParameterId
+/** One write that displaces a live value: lowering cleans the displaced value before the commit. */
+export interface ReplacementFact {
+  readonly _tag: 'Replacement'
   readonly region: Hir.RegionId
   readonly type: DeclarationFacts.SemanticType
-  readonly displacedCleanup: CleanupPlan.CleanupPlan
+  readonly cleanup: CleanupPlan.CleanupPlan
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -207,7 +207,7 @@ export interface FunctionOwnership {
   readonly matches: ReadonlyArray<MatchOwnership>
   readonly callables: ReadonlyArray<CallableEnvironmentFact>
   readonly loans: ReadonlyArray<LoanFact>
-  readonly borrowedReplacements: ReadonlyArray<BorrowedReplacementFact>
+  readonly replacements: ReadonlyArray<ReplacementFact>
   readonly verdict: Verdict
 }
 
@@ -310,6 +310,7 @@ interface CheckState {
   readonly diagnostics: Array<Diagnostic.Diagnostic>
   readonly matches: Array<MatchOwnership>
   readonly callables: Array<CallableEnvironmentFact>
+  readonly replacements: Array<ReplacementFact>
 }
 
 const useSite = (expression: Hir.Expression): BindingSite | undefined => {
@@ -1337,20 +1338,6 @@ const borrowSite = (root: Elaboration.BorrowRootFact): BindingSite => {
 const sameSite = (left: BindingSite, right: BindingSite): boolean =>
   siteKey(left) === siteKey(right)
 
-const borrowedPlaceAccess = (
-  expression: Elaboration.ExpressionFact,
-): Type.BorrowAccess | undefined => {
-  if (expression._tag === 'Grouped') return borrowedPlaceAccess(expression.expression)
-  if (
-    expression._tag === 'IndexProjection' ||
-    expression._tag === 'ReferentProjection' ||
-    expression._tag === 'FieldProjection'
-  ) {
-    return expression.borrowAccess
-  }
-  return undefined
-}
-
 const analyzeLoans = (
   fn: Elaboration.FunctionFact,
   index: DeclarationIndex.Index,
@@ -1701,7 +1688,8 @@ const analyzeLoans = (
       if (diagnosedEscapes.has(key)) continue
       diagnosedEscapes.add(key)
       diagnostics.push(
-        Diagnostic.callableBorrowEscape(
+        Diagnostic.executableBorrowEscape(
+          'Callable',
           directSite(capture.expression)?.spelling ?? '?',
           capture.access,
           capture.expression.syntax.span,
@@ -1824,6 +1812,148 @@ const analyzeLoans = (
         viewEnds.set(source, ending)
         propagatedViewEnd = true
       }
+    }
+  }
+
+  // An Effect leaving this function may not retain a borrow rooted in storage this function owns:
+  // a local owner, an owned parameter, a pattern binding, or a temporary's hidden owner. A reborrow
+  // of a borrowed parameter is rooted in the caller and travels freely.
+  // Views, Effects, and callables enter an environment by value (their descriptor or handle is
+  // copied), so capturing one is not a borrow of the binding that holds it.
+  const storedByValue = (type: Type.Type | undefined): boolean =>
+    type !== undefined &&
+    (Type.isReference(type) || Type.isSlice(type) || Type.isEffect(type) || Type.isCallable(type))
+  const ownedParameter = (parameter: DeclarationFacts.ParameterId): boolean => {
+    const declared = fn.declaration.parameters.find(
+      (candidate) => candidate.id.ordinal === parameter.ordinal,
+    )
+    const type = declared?.declaredType._tag === 'Resolved' ? declared.declaredType.type : undefined
+    return type !== undefined && !storedByValue(type)
+  }
+  const escapingRoot = (root: BindingSite | undefined): boolean =>
+    root !== undefined && (root._tag === 'Parameter' ? ownedParameter(root.parameter) : true)
+  interface EscapingCapture {
+    readonly spelling: string
+    readonly access: 'Shared' | 'Exclusive'
+    readonly span: SourceSpan.SourceSpan
+  }
+  const captureRoot = (
+    reference: Elaboration.BindingDeclarationFact | DeclarationFacts.ParameterFact,
+    access: 'Copy' | 'Shared' | 'Exclusive' | 'Take',
+  ): BindingSite | undefined => {
+    if (reference._tag === 'BindingFact') {
+      const view = viewRoots.get(reference.id.ordinal)
+      if (view !== undefined) return view
+      const type =
+        reference.inferredType._tag === 'Available' ? reference.inferredType.type : undefined
+      return (access === 'Shared' || access === 'Exclusive') && !storedByValue(type)
+        ? Object.freeze({ _tag: 'Let', binding: reference.id })
+        : undefined
+    }
+    return access === 'Shared' || access === 'Exclusive'
+      ? Object.freeze({ _tag: 'Parameter', parameter: reference.id })
+      : undefined
+  }
+  const effectEscapes = (
+    expression: Elaboration.ExpressionFact,
+    seen: ReadonlySet<number> = new Set(),
+  ): ReadonlyArray<EscapingCapture> => {
+    switch (expression._tag) {
+      case 'Grouped':
+        return effectEscapes(expression.expression, seen)
+      case 'Move':
+        return effectEscapes(expression.subject, seen)
+      case 'Identifier': {
+        const site = directSite(expression)?.site
+        if (site?._tag !== 'Let' || seen.has(site.binding.ordinal)) return []
+        const initializer = bindingInitializers.get(site.binding.ordinal)
+        return initializer === undefined
+          ? []
+          : effectEscapes(initializer, new Set(seen).add(site.binding.ordinal))
+      }
+      case 'EffectBlock':
+        return expression.captures.flatMap((capture) =>
+          escapingRoot(captureRoot(capture.reference, capture.access))
+            ? [
+                {
+                  spelling:
+                    capture.reference.name._tag === 'Present'
+                      ? capture.reference.name.spelling
+                      : '?',
+                  access: capture.access === 'Exclusive' ? 'Exclusive' : ('Shared' as const),
+                  span: capture.span,
+                } satisfies EscapingCapture,
+              ]
+            : [],
+        )
+      case 'EffectCatch':
+        return [
+          ...effectEscapes(expression.protected, seen),
+          ...effectEscapes(expression.handler, seen),
+        ]
+      case 'EffectBindRequirement': {
+        const provider = expression.provider
+        return [
+          ...effectEscapes(expression.protected, seen),
+          ...(provider !== undefined &&
+          escapingRoot(captureRoot(provider.reference, provider.captureAccess))
+            ? [
+                {
+                  spelling:
+                    provider.reference.name._tag === 'Present'
+                      ? provider.reference.name.spelling
+                      : '?',
+                  access:
+                    provider.captureAccess === 'Exclusive' ? 'Exclusive' : ('Shared' as const),
+                  span: provider.span,
+                } satisfies EscapingCapture,
+              ]
+            : []),
+        ]
+      }
+      case 'Call': {
+        if (expression.type._tag !== 'Available' || !Type.isEffect(expression.type.type)) return []
+        return expression.arguments.flatMap((argument) => {
+          const candidate = argument.expression
+          if (candidate._tag !== 'Borrow' || candidate.formation._tag === 'Unavailable')
+            return effectEscapes(candidate, seen)
+          const direct = borrowSite(candidate.formation.root)
+          const reborrow =
+            candidate.formation._tag === 'SliceReborrow' ||
+            candidate.formation._tag === 'ValueReborrow'
+          const root =
+            direct._tag === 'Let'
+              ? (viewRoots.get(direct.binding.ordinal) ?? (reborrow ? undefined : direct))
+              : direct
+          return escapingRoot(root)
+            ? [
+                {
+                  spelling: directSite(candidate.subject)?.spelling ?? '?',
+                  access: candidate.access,
+                  span: candidate.syntax.span,
+                } satisfies EscapingCapture,
+              ]
+            : []
+        })
+      }
+      default:
+        return []
+    }
+  }
+  for (const returned of returnedExpressions(fn.statements)) {
+    for (const capture of effectEscapes(returned)) {
+      const key = captureKey(capture.span, 0)
+      if (diagnosedEscapes.has(key)) continue
+      diagnosedEscapes.add(key)
+      diagnostics.push(
+        Diagnostic.executableBorrowEscape(
+          'Effect',
+          capture.spelling,
+          capture.access,
+          capture.span,
+          returned.syntax.span,
+        ),
+      )
     }
   }
 
@@ -2497,47 +2627,6 @@ interface ExitDescriptor {
   readonly sites: ReadonlyArray<string>
 }
 
-const borrowedReplacements = (
-  fn: Elaboration.FunctionFact,
-  index: DeclarationIndex.Index,
-): ReadonlyArray<BorrowedReplacementFact> => {
-  const replacements: Array<BorrowedReplacementFact> = []
-  const walk = (statements: ReadonlyArray<Elaboration.StatementFact>): void => {
-    for (const statement of statements) {
-      if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
-        walk(statement.taken)
-        walk(statement.otherwise)
-        continue
-      }
-      if (statement._tag === 'WhileStatement') {
-        walk(statement.body)
-        continue
-      }
-      if (
-        statement._tag !== 'WriteStatement' ||
-        statement.root?._tag !== 'ParameterDeclaration' ||
-        statement.destination.type._tag !== 'Available' ||
-        borrowedPlaceAccess(statement.destination) !== 'Exclusive' ||
-        !statement.compatible
-      ) {
-        continue
-      }
-      replacements.push(
-        Object.freeze({
-          _tag: 'BorrowedReplacement',
-          root: statement.root.id,
-          region: statement.region,
-          type: statement.destination.type.type,
-          displacedCleanup: CleanupPlan.cleanupPlan(index, statement.destination.type.type),
-          span: statement.syntax.span,
-        }),
-      )
-    }
-  }
-  walk(fn.statements)
-  return Object.freeze(replacements)
-}
-
 const checkFunction = (
   fn: Hir.HirFunction,
   index: DeclarationIndex.Index,
@@ -2560,8 +2649,6 @@ const checkFunction = (
     semantic === undefined
       ? Object.freeze({ loans: Object.freeze([]), diagnostics: Object.freeze([]) })
       : analyzeLoans(semantic, index, copyAssumptions)
-  const replacements =
-    semantic === undefined ? Object.freeze([]) : borrowedReplacements(semantic, index)
   const state: CheckState = {
     index,
     copyAssumptions,
@@ -2570,6 +2657,7 @@ const checkFunction = (
     diagnostics: [...loanAnalysis.diagnostics],
     matches: [],
     callables: [],
+    replacements: [],
   }
   if (localSharedBoundaries.length > 0) {
     const activeBoundaryOperations = (
@@ -3111,6 +3199,21 @@ const checkFunction = (
         if (!wasLive && statement.place.selectors.length > 0 && root !== undefined) {
           checkUse(state, live, rootSite, statement.place.span, false)
         }
+        // A borrowed referent is always initialized; an owned place displaces only while live.
+        if (statement.place._tag === 'BorrowedWritePlace' || wasLive) {
+          const cleanup = CleanupPlan.cleanupPlan(state.index, statement.place.type)
+          if (cleanup._tag !== 'NoCleanup') {
+            state.replacements.push(
+              Object.freeze({
+                _tag: 'Replacement',
+                region: statement.region,
+                type: statement.place.type,
+                cleanup,
+                span: statement.span,
+              }),
+            )
+          }
+        }
         checkExpression(state, live, statement.value, true)
         if (wasLive && !live.has(rootKey)) {
           state.diagnostics.push(
@@ -3375,7 +3478,7 @@ const checkFunction = (
       matches: Object.freeze(state.matches),
       callables: Object.freeze(state.callables),
       loans: loanAnalysis.loans,
-      borrowedReplacements: replacements,
+      replacements: Object.freeze(state.replacements),
       verdict,
     }),
     diagnostics: Object.freeze([...state.diagnostics]),

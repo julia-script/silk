@@ -872,6 +872,9 @@ export const analyzeMove = (
   })
 }
 
+const borrowsConstant = (subject: ExpressionFact): boolean =>
+  subject._tag === 'Grouped' ? borrowsConstant(subject.expression) : subject._tag === 'Constant'
+
 export const borrowRoot = (subject: ExpressionFact): BorrowRootFact | undefined => {
   if (subject._tag === 'Grouped') return borrowRoot(subject.expression)
   if (subject._tag === 'ReferentProjection' && subject.state._tag === 'Resolved') {
@@ -1043,6 +1046,17 @@ export const borrowSubject = (
 ): ExpressionResult => {
   const subject = subjectResult?.fact ?? unavailableExpression(node)
   const diagnostics = subjectResult?.diagnostics ?? Object.freeze([])
+  if (borrowsConstant(subject))
+    return unavailableBorrow(
+      node,
+      access,
+      subject,
+      diagnostics,
+      Diagnostic.invalidConstant(
+        'constants are immediate values and cannot be borrowed',
+        node.span,
+      ),
+    )
   const sourceType = subjectResult?.type
   const root =
     borrowRoot(subject) ??
