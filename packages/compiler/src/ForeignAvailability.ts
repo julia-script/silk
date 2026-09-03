@@ -1,9 +1,4 @@
-/**
- * Native-only availability for reachable foreign (`extern "C"`) calls. The sibling of
- * `IntrinsicAvailability.select`: it reads the foreign inventory discovery carried onto
- * `Instances.Discovery` and `Mir.Module` and answers with stable source diagnostics, so no
- * backend or evaluator ever meets a `ForeignCall` it cannot host.
- */
+/** Availability and signature coherence for reachable foreign (`extern "C"`) calls. */
 import * as CAbi from './CAbi.js'
 import * as Diagnostic from './Diagnostic.js'
 import type * as Instances from './Instances.js'
@@ -11,10 +6,9 @@ import type * as Intrinsic from './Intrinsic.js'
 import type * as Target from './Target.js'
 
 /**
- * Rejects every reachable foreign call under the evaluator, the direct WebAssembly backend, or
- * LLVM emission of a non-native target (one diagnostic per symbol at its first call), and every
- * pair of reachable declarations of one symbol whose classified C signatures differ. An empty
- * result means the inventory is available.
+ * Rejects LLVM emission of a non-native target (one diagnostic per symbol at its first call) and
+ * every pair of reachable declarations of one symbol whose classified C signatures differ.
+ * Evaluator binding admission and direct WebAssembly imports are owned by those consumers.
  */
 export const select = (
   calls: ReadonlyArray<Instances.ForeignCall>,
@@ -22,9 +16,7 @@ export const select = (
   target: Target.Target,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   if (calls.length === 0) return Object.freeze([])
-  let surface: string | undefined
-  if (executionTarget !== 'LLVM') surface = executionTarget
-  else if (target.kind !== 'Native') surface = target.id
+  const surface = executionTarget === 'LLVM' && target.kind !== 'Native' ? target.id : undefined
   const unavailable = new Map<string, Diagnostic.Diagnostic>()
   if (surface !== undefined)
     for (const call of calls)

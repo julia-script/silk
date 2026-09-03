@@ -84,7 +84,7 @@ interface ArtifactBase {
   readonly termination: Termination
   readonly nativeRuntimeSymbols: ReadonlyArray<string>
   readonly runtimeFeatures: ReadonlyArray<RuntimeFeature>
-  /** Reachable foreign symbols sorted by symbol; empty for direct WebAssembly. */
+  /** Reachable foreign symbols sorted by symbol. */
   readonly foreignImports: ReadonlyArray<ForeignImport>
   /** Exported C-callable symbols with their classified signatures, sorted by symbol. */
   readonly foreignExports: ReadonlyArray<ForeignExport>

@@ -1,19 +1,31 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Result from 'effect/Result'
 import * as Analysis from '../src/Analysis.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import * as Instances from '../src/Instances.js'
+import * as ForeignHost from '../src/ForeignHost.js'
+import * as InspectorFlowModel from '../src/InspectorFlowModel.js'
+import * as InspectorProjectBackend from '../src/InspectorProjectBackend.js'
 import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
-import * as Target from '../src/Target.js'
 import { scalarEnumSignedAcceptance } from './support/corpus.js'
 import * as Json from './support/Json.js'
-import * as MirSamples from './support/mirSamples.js'
 
 // UTF-8, not charCodeAt: corpus programs may carry non-ASCII literals, and for ASCII sources the
 // bytes are identical.
 const encoder = new TextEncoder()
 const ascii = (value: string): Uint8Array => encoder.encode(value)
+
+const hostTable = (bindings: ReadonlyArray<ForeignHost.Binding>): ForeignHost.Table => {
+  const result = ForeignHost.make(bindings)
+  if (Result.isFailure(result)) throw new Error(`duplicate host symbol ${result.failure.symbol}`)
+  return result.success
+}
+
+const hostInteger = (
+  type: BootstrapEvaluation.IntegerValue['type'],
+  value: bigint,
+): BootstrapEvaluation.IntegerValue => Object.freeze({ _tag: 'IntegerValue', type, value })
 
 const evaluateSource = (
   text: string,
@@ -739,34 +751,181 @@ pub fn main() -> i32 { return inspect(Token { value: 42 }) }`),
   }),
 )
 
-it.effect('blocks a reachable foreign call before execution starts', () =>
+it('snapshots host bindings and rejects duplicate symbols', () => {
+  const parameters: Array<ForeignHost.Class> = ['i32']
+  const invoke = () => ForeignHost.returned(hostInteger('i32', 0n))
+  const table = hostTable([{ symbol: 'abs', signature: { parameters, result: 'i32' }, invoke }])
+  parameters[0] = 'i64'
+  const binding = ForeignHost.resolve(table, 'abs')
+  assert.strictEqual(
+    binding === undefined ? undefined : ForeignHost.key(binding.signature),
+    '(i32)->i32',
+  )
+  const duplicate = ForeignHost.make([
+    { symbol: 'abs', signature: ForeignHost.signature(['i32'], 'i32'), invoke },
+    { symbol: 'abs', signature: ForeignHost.signature(['i32'], 'i32'), invoke },
+  ])
+  assert.strictEqual(duplicate._tag, 'Failure')
+})
+
+it.effect('admits and executes exact per-run foreign host bindings', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`unsafe extern "C" fn abs(value: i32) -> i32
-pub fn main() -> i32 { return unsafe abs(-42) }`)
-    assert.strictEqual(outcome._tag, 'Blocked')
-    if (outcome._tag !== 'Blocked' || outcome.reason._tag !== 'ForeignTargetUnavailable')
-      return assert.fail('expected foreign availability to block the evaluator')
+    const source = `unsafe extern "C" fn abs(value: i32) -> i32
+unsafe extern "C" fn touch() -> ()
+pub fn main() -> i32 {
+  unsafe touch()
+  return unsafe abs(-42)
+}`
+    const self = yield* Analysis.ofSourceRealized('memory/evaluation', ascii(source))
+    assert.deepEqual(Analysis.diagnostics(self), [])
+
+    const missing = Analysis.evaluate(self)
+    assert.strictEqual(missing._tag, 'Blocked')
+    if (missing._tag !== 'Blocked' || missing.reason._tag !== 'ForeignHostUnavailable')
+      return assert.fail('expected a missing foreign host binding')
     assert.deepEqual(
-      outcome.reason.diagnostics.map((diagnostic) => diagnostic.code),
-      ['SEM0193'],
+      { symbol: missing.reason.symbol, expected: missing.reason.expected, trace: missing.trace },
+      { symbol: 'abs', expected: '(i32)->i32', trace: [] },
     )
-    assert.deepEqual(outcome.trace, [])
+    assert.strictEqual(
+      source.slice(missing.reason.span.start, missing.reason.span.end).trim(),
+      'abs(-42)',
+    )
+    assert.deepEqual(
+      InspectorFlowModel.projectDataFlow(Analysis.rootAnalysis(self), missing).nodes.find(
+        (node) => node.kind === 'Terminal' && node.layer === 'Evaluated',
+      )?.span,
+      missing.reason.span,
+    )
+    assert.include(
+      InspectorProjectBackend.evaluationRows(missing).at(-1)?.detail ?? '',
+      'abs · expected (i32)->i32',
+    )
+
+    const mismatch = Analysis.evaluate(self, {
+      foreignHost: hostTable([
+        {
+          symbol: 'abs',
+          signature: ForeignHost.signature(['i64'], 'i64'),
+          invoke: () => ForeignHost.returned(hostInteger('i64', 0n)),
+        },
+      ]),
+    })
+    assert.strictEqual(mismatch._tag, 'Blocked')
+    if (mismatch._tag !== 'Blocked' || mismatch.reason._tag !== 'ForeignHostUnavailable')
+      return assert.fail('expected a mismatched foreign host binding')
+    assert.deepEqual(
+      {
+        symbol: mismatch.reason.symbol,
+        expected: mismatch.reason.expected,
+        provided: mismatch.reason.provided,
+        trace: mismatch.trace,
+      },
+      { symbol: 'abs', expected: '(i32)->i32', provided: '(i64)->i64', trace: [] },
+    )
+
+    let touches = 0
+    const table = (abs: ForeignHost.Binding['invoke']): ForeignHost.Table =>
+      hostTable([
+        { symbol: 'abs', signature: ForeignHost.signature(['i32'], 'i32'), invoke: abs },
+        {
+          symbol: 'touch',
+          signature: ForeignHost.signature([], 'void'),
+          invoke: () => {
+            touches += 1
+            return ForeignHost.returned()
+          },
+        },
+      ])
+    const answering =
+      (answer: bigint): ForeignHost.Binding['invoke'] =>
+      (arguments_) => {
+        assert.deepEqual(arguments_, [hostInteger('i32', -42n)])
+        return ForeignHost.returned(hostInteger('i32', answer))
+      }
+    const first = Analysis.evaluate(self, { foreignHost: table(answering(42n)) })
+    const second = Analysis.evaluate(self, { foreignHost: table(answering(7n)) })
+    assert.strictEqual(first._tag === 'Completed' ? first.result.value : undefined, 42n)
+    assert.strictEqual(second._tag === 'Completed' ? second.result.value : undefined, 7n)
+    assert.strictEqual(touches, 2)
+
+    const failed = Analysis.evaluate(self, {
+      foreignHost: table(() => ForeignHost.failed('scripted refusal')),
+    })
+    assert.strictEqual(failed._tag, 'Blocked')
+    if (failed._tag !== 'Blocked' || failed.reason._tag !== 'ForeignHostCallFailed')
+      return assert.fail('expected a typed foreign host failure')
+    assert.strictEqual(failed.reason.symbol, 'abs')
+    assert.strictEqual(failed.reason.message, 'scripted refusal')
+    assert.isAbove(failed.trace.length, 0)
+    assert.strictEqual(
+      source.slice(failed.reason.span.start, failed.reason.span.end).trim(),
+      'abs(-42)',
+    )
+    assert.deepEqual(
+      InspectorFlowModel.projectDataFlow(Analysis.rootAnalysis(self), failed).nodes.find(
+        (node) => node.kind === 'Terminal' && node.layer === 'Evaluated',
+      )?.span,
+      failed.reason.span,
+    )
+    assert.include(
+      InspectorProjectBackend.evaluationRows(failed).at(-1)?.detail ?? '',
+      'abs · scripted refusal',
+    )
+
+    const invalid = Analysis.evaluate(self, {
+      foreignHost: table(() => ForeignHost.returned(hostInteger('i32', 1n << 40n))),
+    })
+    assert.strictEqual(invalid._tag, 'Blocked')
+    if (invalid._tag !== 'Blocked' || invalid.reason._tag !== 'ForeignHostCallFailed')
+      return assert.fail('expected an invalid foreign host result')
+    assert.include(invalid.reason.message, '(i32)->i32')
   }),
 )
 
-it('throws when target validation lets a ForeignCall reach the evaluator', () => {
-  const program = MirSamples.foreignCallSample(Target.aarch64AppleDarwin)
-  const discovery: Instances.Discovery = Object.freeze({
-    ...Instances.invalid(program.module),
-    entry: Object.freeze({
-      _tag: 'Resolved',
-      kind: 'Ordinary',
-      result: 'Status',
-      key: Mir.machineEntry(program),
-    }),
-  })
-  assert.throws(() => BootstrapEvaluation.evaluate(discovery, program), RangeError)
-})
+it.effect('normalizes C-class-equivalent integer results to each declaration type', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'memory/evaluation',
+      ascii(`import silk.i64 as i64
+import silk.u64 as u64
+import silk.usize as usize
+import silk.isize as isize
+unsafe extern "C" fn size() -> usize as "unsigned_same"
+unsafe extern "C" fn wide() -> u64 as "unsigned_same"
+unsafe extern "C" fn offset() -> isize as "signed_same"
+unsafe extern "C" fn distance() -> i64 as "signed_same"
+pub fn main() -> i32 {
+  let sizeValue = unsafe size()
+  let wideValue = unsafe wide()
+  let offsetValue = unsafe offset()
+  let distanceValue = unsafe distance()
+  if sizeValue == 10 && wideValue == 10 && offsetValue == -1 && distanceValue == -1 {
+    return 42
+  }
+  return 0
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const outcome = Analysis.evaluate(self, {
+      foreignHost: hostTable([
+        {
+          symbol: 'unsigned_same',
+          signature: ForeignHost.signature([], 'u64'),
+          invoke: () => ForeignHost.returned(hostInteger('u64', 10n)),
+        },
+        {
+          symbol: 'signed_same',
+          signature: ForeignHost.signature([], 'i64'),
+          invoke: () => ForeignHost.returned(hostInteger('i64', -1n)),
+        },
+      ]),
+    })
+    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome, 2))
+    if (outcome._tag !== 'Completed') return
+    assert.deepEqual(outcome.result, hostInteger('i32', 42n))
+  }),
+)
 
 it.effect('runs main and ignores an uncalled export root', () =>
   Effect.gen(function* () {

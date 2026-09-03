@@ -31,6 +31,7 @@ export interface WasmEmitContext<FunctionLayout, SuspensionRuntime> {
     typeArguments: ReadonlyArray<SilkType.GenericArgument>,
     staticArguments?: ReadonlyArray<StaticValue.Value>,
   ) => FuncActor.Func
+  readonly resolveForeign: (symbol: string) => FuncActor.Func
   readonly memory: WasmMemory.MemoryContext | undefined
   readonly executionPackageCleanups: ReadonlyMap<string, ExecutionPackageCleanup>
   /** Runtime-recursive owner release for opaque Execution packages. */

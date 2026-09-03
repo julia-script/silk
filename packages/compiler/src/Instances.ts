@@ -236,7 +236,7 @@ export interface Discovery {
   readonly effects: ReadonlyArray<EffectInstance>
   readonly calls: ReadonlyArray<CallInstance>
   readonly intrinsics: ReadonlyArray<IntrinsicCall>
-  /** Reachable foreign declarations in canonical order; native-only availability reads it. */
+  /** Reachable foreign declarations in canonical order; each execution surface admits them. */
   readonly foreignCalls: ReadonlyArray<ForeignCall>
   /** Every closure export in canonical module then declaration order; roots only on native. */
   readonly foreignExports: ReadonlyArray<ForeignExport>

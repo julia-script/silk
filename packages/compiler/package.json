@@ -394,6 +394,10 @@
       "types": "./dist/FloatingPoint.d.ts",
       "import": "./dist/FloatingPoint.js"
     },
+    "./ForeignHost": {
+      "types": "./dist/ForeignHost.d.ts",
+      "import": "./dist/ForeignHost.js"
+    },
     "./Transcendental": {
       "types": "./dist/Transcendental.d.ts",
       "import": "./dist/Transcendental.js"

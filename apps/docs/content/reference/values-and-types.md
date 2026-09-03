@@ -1376,7 +1376,9 @@ execution as an unsafe-contract violation reported as data, naming the primitive
 
 **Boundary:** Dangling detection is permitted evaluator behavior, not a language guarantee. Native
 code cannot detect it, and parity between surfaces is required only for well-defined programs.
-Foreign calls are native-only, so the evaluator never observes a native write through a pointer.
+Evaluator foreign calls operate on logical values supplied by the per-evaluation host table, so
+they cannot mutate evaluator storage through a native pointer. Native calls may write through the
+borrowed pointer, while direct WebAssembly calls exchange the target's scalar pointer value.
 
 **Diagnostics:** None at compile time. The evaluator's stop is an as-data trap, not a host
 exception or a typed failure.
@@ -1387,7 +1389,7 @@ allocation ticket.
 
 **Evidence:** [raw pointer specification](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-raw-pointers/spec.md),
 [pointer parity scenarios](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-backend/spec.md),
-[foreign availability](unsafe-intrinsics-and-targets.md#ffi-007--foreign-functions-are-native-only-and-pay-for-use).
+[foreign availability](unsafe-intrinsics-and-targets.md#ffi-007--foreign-functions-use-explicit-pay-for-use-bindings).
 
 ## Structural unions and inference
 

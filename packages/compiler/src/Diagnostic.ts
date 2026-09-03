@@ -2575,7 +2575,7 @@ export const conflictingForeignSignature = (
     ]),
   })
 
-/** Diagnoses a reachable foreign call before a non-native execution surface is entered. */
+/** Diagnoses a reachable foreign call before an execution surface without bindings is entered. */
 export const foreignFunctionTargetUnavailable = (
   symbol: string,
   surface: string,

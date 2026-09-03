@@ -175,36 +175,55 @@ foreign call. Linking SHALL fail as toolchain data when no link input defines th
 - **WHEN** a native build reaches a declared foreign function that no link input defines
 - **THEN** the driver reports a typed link failure retaining the linker output and produces no executable
 
-### Requirement: Foreign functions are native-only and pay-for-use
+### Requirement: Foreign functions use explicit reachability-based bindings on every supported surface
 
-Foreign functions SHALL be available on native targets only. A foreign call retained in the
-executable closure for the evaluator, for the direct WebAssembly backend, or for LLVM emission of
-a WebAssembly target SHALL be rejected before backend construction with a stable availability
-diagnostic naming the symbol and the requested execution surface or target, under the same reachability rule as intrinsic target availability: parsing,
-importing, indexing, or retaining an uncalled foreign declaration MUST NOT reject a portable
-program, and a call in an unselected `static if` arm MUST NOT enter the closure. A reachable
-foreign function SHALL contribute exactly one external declaration to the native artifact; an
-unreachable one SHALL contribute nothing.
+Foreign calls SHALL remain pay-for-use: an unreachable declaration SHALL contribute no binding,
+diagnostic, or artifact import. A reachable call SHALL use exactly one surface-specific binding:
+native and LLVM-native artifacts SHALL retain a direct external symbol for the linker, evaluator
+execution SHALL require an explicit per-evaluation host function keyed by symbol, and the direct
+WebAssembly backend SHALL emit a function import whose field is the symbol. LLVM emission for a
+WebAssembly target SHALL remain unavailable until that backend has an explicit foreign binding
+model. No evaluator or backend SHALL provide an implicit compiler-owned libc symbol set.
 
-#### Scenario: Ignore an unreachable foreign declaration under Wasm
+Before evaluator execution, every reachable symbol SHALL be bound and its declared host signature
+SHALL exactly equal the reachable C-ABI signature. Missing and mismatched bindings SHALL block
+evaluation before any operation runs and SHALL name the symbol and expected signature. A host call
+failure SHALL produce a symbol-specific blocked outcome rather than escape as an untyped exception.
 
-- **WHEN** a module declares a foreign function that the executable closure never calls
-- **THEN** a direct-WebAssembly build succeeds and its module contains no import for the symbol
+#### Scenario: Ignore an unreachable foreign declaration
 
-#### Scenario: Reject a reachable foreign call under the evaluator
+- **WHEN** a program declares a foreign function that its executable closure never calls
+- **THEN** evaluation and direct WebAssembly emission succeed without a binding or import for the symbol
 
-- **WHEN** the evaluator runs a program whose closure calls a foreign function
-- **THEN** planning reports the foreign-function-target-unavailable diagnostic naming the symbol and `Evaluator`, and no execution starts
+#### Scenario: Evaluate through an exact host binding
+
+- **WHEN** a reachable `abs(i32) -> i32` call has a per-evaluation host binding for `abs` with the exact classified C signature
+- **THEN** evaluation invokes that binding and returns its result
+
+#### Scenario: Block an unbound evaluator symbol
+
+- **WHEN** evaluation reaches a closure requiring `abs` and its host table has no `abs` binding
+- **THEN** evaluation starts no operations and returns a blocked reason naming `abs` and its expected signature
+
+#### Scenario: Block a mismatched evaluator signature
+
+- **WHEN** evaluation requires `abs(i32) -> i32` but the `abs` host binding declares `(i64) -> i64`
+- **THEN** evaluation starts no operations and returns a blocked reason naming `abs`, the expected signature, and the supplied signature
+
+#### Scenario: Emit a direct WebAssembly foreign import
+
+- **WHEN** a direct-WebAssembly build reaches `abs(i32) -> i32`
+- **THEN** its module imports one function from the versioned Silk foreign-host module under field `abs` with one `i32` parameter and one `i32` result
 
 #### Scenario: Reject a reachable foreign call under LLVM wasm32
 
 - **WHEN** the LLVM backend is asked to emit `wasm32-unknown-unknown` for a program whose closure calls a foreign function
-- **THEN** planning reports the foreign-function-target-unavailable diagnostic naming the symbol and the target, and emits no bitcode
+- **THEN** planning reports the foreign-function-target-unavailable diagnostic naming the symbol and target and emits no bitcode
 
-#### Scenario: Record reachable imports on the artifact
+#### Scenario: Record reachable imports on artifacts
 
-- **WHEN** a native build reaches `abs` and `silk_test_add`
-- **THEN** the artifact's foreign-import inventory lists both symbols with their C signatures in deterministic order and nothing else
+- **WHEN** a native or direct-WebAssembly build reaches `abs` and `silk_test_add`
+- **THEN** its foreign-import inventory lists both symbols with their C signatures in deterministic order and nothing else
 
 ### Requirement: An exported function publishes one C-callable symbol behind a thunk
 

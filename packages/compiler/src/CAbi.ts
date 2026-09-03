@@ -23,6 +23,22 @@ export interface CAbiSignature {
   readonly result: CAbiType
 }
 
+/** Canonical public spelling of one classified C ABI type. */
+export type TypeText =
+  | 'void'
+  | 'i8'
+  | 'u8'
+  | 'i16'
+  | 'u16'
+  | 'i32'
+  | 'u32'
+  | 'i64'
+  | 'u64'
+  | 'f32'
+  | 'f64'
+  | '*const'
+  | '*mut'
+
 export type Position = 'Parameter' | 'Result'
 
 export type Admission =
@@ -108,7 +124,7 @@ export const signature = (
   })
 
 /** The C spelling recorded on artifacts: `i32`, `u64`, `f32`, `f64`, or `void`. */
-export const typeText = (self: CAbiType): string => {
+export const typeText = (self: CAbiType): TypeText => {
   switch (self._tag) {
     case 'Void':
       return 'void'

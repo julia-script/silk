@@ -14,12 +14,14 @@ import * as WatText from '@silklang/wasm/WatText'
 import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import { symbolFor } from './Backend.js'
+import * as CAbi from './CAbi.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as FloatingPoint from './FloatingPoint.js'
+import * as ForeignHost from './ForeignHost.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import { alignUp } from './internal/Align.js'
@@ -172,6 +174,27 @@ const i64Divisions: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemo
 
 const unsignedI64Divisions: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemonic>>> =
   Object.freeze({ Divide: 'i64.div_u', Remainder: 'i64.rem_u' })
+
+const foreignValueType = (type: CAbi.CAbiType): ValType.ValType | undefined => {
+  switch (type._tag) {
+    case 'Void':
+      return undefined
+    case 'Integer':
+      return type.bits === 64 ? i64 : i32
+    case 'Float':
+      return type.bits === 64 ? f64 : f32
+    case 'Pointer':
+      return i32
+  }
+}
+
+const foreignCallsBySymbol = (
+  calls: ReadonlyArray<Instances.ForeignCall>,
+): ReadonlyMap<string, Instances.ForeignCall> => {
+  const result = new Map<string, Instances.ForeignCall>()
+  for (const call of calls) if (!result.has(call.symbol)) result.set(call.symbol, call)
+  return result
+}
 
 /**
  * Exact IEEE fmod for the wasm backend, which has no float remainder instruction. A naive
@@ -3215,6 +3238,20 @@ const emitStaticStringOperation = (
     Instr.localSet(address),
     Instr.i32Const(operation.byteLength),
     Instr.localSet(length),
+  ]
+}
+
+const emitForeignCallOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ForeignCall' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const destination = state.slots(operation.destination)
+  if (destination.length > 1)
+    throw new RangeError(`Wasm foreign call ${operation.symbol} has a non-scalar result`)
+  return [
+    ...operation.arguments.map((argument) => Instr.localGet(state.scalar(argument))),
+    Instr.call(state.emitter.resolveForeign(operation.symbol)),
+    ...destination.map((slot) => Instr.localSet(slot)),
   ]
 }
 
@@ -7691,9 +7728,7 @@ const emitOperationWithContext = (
     case 'OsCall':
       return emitOsCallOperation(operation, context)
     case 'ForeignCall':
-      throw new RangeError(
-        `Target validation allowed a foreign call into Wasm: ${operation.symbol}`,
-      )
+      return emitForeignCallOperation(operation, context)
     case 'PointerNull':
       return [Instr.i32Const(0), Instr.localSet(context.scalar(operation.destination))]
     case 'PointerIsNull':
@@ -9041,6 +9076,30 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         debugName('silk_standard_stream_write_v1'),
       )
     : undefined
+  const foreignHandles = new Map<string, FuncActor.Func>()
+  for (const [symbol, call] of [...foreignCallsBySymbol(program.foreignCalls)].sort(
+    ([left], [right]) => left.localeCompare(right, 'en'),
+  )) {
+    const result = foreignValueType(call.signature.result)
+    const type = yield* WasmType.func(
+      builder,
+      call.signature.parameters.flatMap((parameter) => {
+        const valueType = foreignValueType(parameter)
+        return valueType === undefined ? [] : [valueType]
+      }),
+      result === undefined ? [] : [result],
+    )
+    foreignHandles.set(
+      symbol,
+      yield* Import.func(
+        builder,
+        ForeignHost.wasmModule,
+        symbol,
+        type,
+        debugName(`silk_foreign_${Backend.sanitize(symbol)}`),
+      ),
+    )
+  }
   if (heapAllocate !== undefined && privateMemory !== undefined && heapPointer !== undefined) {
     const named = (name: string): FuncActor.Local => (debug ? { type: i32, name } : { type: i32 })
     yield* FuncActor.define(builder, heapAllocate, {
@@ -9257,6 +9316,11 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     if (target === undefined) return resolve(targetId, typeArguments, staticArguments)
     return independentDrivers.get(Instances.keyText(target.fn.instance)) ?? target.handle
   }
+  const resolveForeign = (symbol: string): FuncActor.Func => {
+    const handle = foreignHandles.get(symbol)
+    if (handle === undefined) throw new RangeError(`Wasm backend cannot resolve foreign ${symbol}`)
+    return handle
+  }
 
   if (
     executionCleanupHelper !== undefined &&
@@ -9333,6 +9397,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         plan: program.layout,
         resolve,
         resolveIndependent,
+        resolveForeign,
         memory: helperMemory,
         executionPackageCleanups,
         executionCleanup: executionCleanupHelper,
@@ -9422,6 +9487,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         plan: program.layout,
         resolve,
         resolveIndependent,
+        resolveForeign,
         memory,
         executionPackageCleanups,
         ...(executionCleanupHelper === undefined
@@ -9503,6 +9569,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
           plan: program.layout,
           resolve,
           resolveIndependent,
+          resolveForeign,
           memory,
           executionPackageCleanups,
           ...(executionCleanupHelper === undefined
@@ -10038,6 +10105,38 @@ export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = O
     request: Backend.CodegenRequest,
   ): Effect.fn.Return<Backend.WebAssemblyModuleArtifact, Backend.BackendError> {
     const output = yield* emitProgram(program, request)
+    const foreignImports = Object.freeze(
+      [...foreignCallsBySymbol(program.foreignCalls)]
+        .sort(([left], [right]) => left.localeCompare(right, 'en'))
+        .map(([symbol, call]) =>
+          Object.freeze({
+            symbol,
+            parameters: Object.freeze(call.signature.parameters.map(CAbi.typeText)),
+            result: CAbi.typeText(call.signature.result),
+          }),
+        ),
+    )
+    const hostImports = Object.freeze(
+      [
+        ...foreignImports.map((entry) =>
+          Object.freeze({ module: ForeignHost.wasmModule, name: entry.symbol }),
+        ),
+        ...(program.functions.some((fn) =>
+          MirVerification.operations(fn).some((operation) => operation._tag === 'HostWrite'),
+        )
+          ? [
+              Object.freeze({
+                module: StandardStreams.wasmModule,
+                name: StandardStreams.wasmWriteAll,
+              }),
+            ]
+          : []),
+      ].sort(
+        (left, right) =>
+          left.module.localeCompare(right.module, 'en') ||
+          left.name.localeCompare(right.name, 'en'),
+      ),
+    )
     return Object.freeze({
       _tag: 'WebAssemblyModuleArtifact',
       backend: 'wasm',
@@ -10047,21 +10146,12 @@ export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = O
       termination: Backend.terminationOf(program),
       nativeRuntimeSymbols: Object.freeze([]),
       runtimeFeatures: output.runtimeFeatures,
-      foreignImports: Object.freeze([]),
+      foreignImports,
       foreignExports: Object.freeze([]),
       control: controlProvenance(program),
       bytes: output.bitcode,
       wat: output.ir,
-      hostImports: program.functions.some((fn) =>
-        MirVerification.operations(fn).some((operation) => operation._tag === 'HostWrite'),
-      )
-        ? Object.freeze([
-            Object.freeze({
-              module: StandardStreams.wasmModule,
-              name: StandardStreams.wasmWriteAll,
-            }),
-          ])
-        : Object.freeze([]),
+      hostImports,
     })
   }),
 })

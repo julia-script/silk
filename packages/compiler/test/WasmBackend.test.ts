@@ -1,17 +1,14 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
-import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
-import * as Exit from 'effect/Exit'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
+import * as ForeignHost from '../src/ForeignHost.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
-import * as Target from '../src/Target.js'
 import * as WasmBackend from '../src/WasmBackend.js'
 import { corpus, scalarEnumLaneAcceptance } from './support/corpus.js'
-import * as MirSamples from './support/mirSamples.js'
 import * as WasmMain from './support/WasmMain.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -718,28 +715,64 @@ it.effect(
   15_000,
 )
 
-it.effect('rejects a reachable foreign call before the direct Wasm backend is constructed', () =>
+it.effect('imports and executes each foreign scalar class deterministically', () =>
   Effect.gen(function* () {
-    const failure = yield* Effect.flip(
-      emit(`unsafe extern "C" fn abs(value: i32) -> i32
-pub fn main() -> i32 { return unsafe abs(-42) }`),
-    )
-    assert.strictEqual(failure._tag, 'CodegenUnavailable')
-    if (failure._tag === 'CodegenUnavailable')
-      assert.deepEqual(
-        failure.diagnostics.map((diagnostic) => diagnostic.code),
-        ['SEM0193'],
-      )
-  }),
-)
-
-it.effect('throws when target validation lets a ForeignCall reach Wasm emission', () =>
-  Effect.gen(function* () {
-    const program = MirSamples.foreignCallSample(Target.wasm32UnknownUnknown)
-    assert.deepEqual(MirVerification.verify(program), [])
-    const exit = yield* Effect.exit(WasmBackend.WasmBackend.emit(program, { mode: 'release' }))
-    assert.isTrue(Exit.isFailure(exit))
-    if (Exit.isFailure(exit)) assert.instanceOf(Cause.squash(exit.cause), RangeError)
+    const self = yield* snapshotOf(`import silk.i32 as i32
+import silk.pointer { Pointer }
+unsafe extern "C" fn collect(word: i32, wide: i64, single: f32, double: f64, pointer: *const i32) -> i32
+unsafe extern "C" fn touch() -> ()
+pub fn main() -> i32 {
+  unsafe touch()
+  return unsafe collect(1, i32.toI64(2), i32.toF32(3), i32.toF64(4), Pointer.null<i32>())
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const mir = Analysis.loweredMir(self)
+    const reversedMir: Mir.Module = Object.freeze({
+      ...mir,
+      foreignCalls: Object.freeze([...mir.foreignCalls].reverse()),
+    })
+    const reversed: Analysis.Snapshot = Object.freeze({
+      ...self,
+      mir: Object.freeze({ _tag: 'Available', value: reversedMir }),
+    })
+    const reordered = yield* Analysis.codegenWasm(reversed, { mode: 'release' })
+    assert.deepEqual(artifact.foreignImports, reordered.foreignImports)
+    assert.deepEqual(artifact.hostImports, reordered.hostImports)
+    assert.strictEqual(artifact.wat, reordered.wat)
+    assert.deepEqual(artifact.bytes, reordered.bytes)
+    assert.deepEqual(artifact.foreignImports, [
+      {
+        symbol: 'collect',
+        parameters: ['i32', 'i64', 'f32', 'f64', '*const'],
+        result: 'i32',
+      },
+      { symbol: 'touch', parameters: [], result: 'void' },
+    ])
+    assert.deepEqual(artifact.hostImports, [
+      { module: ForeignHost.wasmModule, name: 'collect' },
+      { module: ForeignHost.wasmModule, name: 'touch' },
+    ])
+    assert.include(artifact.wat, '(type (func (param i32 i64 f32 f64 i32) (result i32)))')
+    assert.include(artifact.wat, '(import "silk:runtime/foreign@v1" "collect" (func (type 0)))')
+    let touched = 0
+    let received: ReadonlyArray<number | bigint> = []
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {
+      [ForeignHost.wasmModule]: {
+        collect: (word: number, wide: bigint, single: number, double: number, pointer: number) => {
+          received = [word, wide, single, double, pointer]
+          return 42
+        },
+        touch: () => {
+          touched += 1
+        },
+      },
+    })
+    const main = instance.exports.silk_main
+    if (typeof main !== 'function') return assert.fail('expected silk_main export')
+    assert.strictEqual(main(), 42)
+    assert.strictEqual(touched, 1)
+    assert.deepEqual(received, [1, 2n, 3, 4, 0])
   }),
 )
 

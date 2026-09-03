@@ -1011,35 +1011,68 @@ and records the reachable symbols with their C signatures on the artifact.
 **Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
 [C ABI signature](../../../../packages/compiler/src/CAbi.ts).
 
-### FFI-007 — Foreign functions are native-only and pay-for-use
+### FFI-007 — Foreign functions use explicit pay-for-use bindings
 
 **Status:** Confirmed
 
-Foreign functions are available on native targets only. A foreign call retained in the executable
-closure for the evaluator, for the direct WebAssembly backend, or for LLVM emission of a
-WebAssembly target is rejected before backend construction, under the same reachability rule as
+Foreign functions use one explicit binding model for each supported execution surface. Native
+artifacts retain direct external symbols for the linker. The evaluator resolves reachable calls
+through a host-function table supplied for that evaluation. The direct WebAssembly backend imports
+each reachable symbol from `silk:runtime/foreign@v1` under the symbol's own field name. LLVM
+emission for a WebAssembly target remains unavailable, under the same reachability rule as
 [TARGET-001](#target-001--intrinsic-availability-is-checked-only-for-the-selected-executable-closure).
 
 Parsing, importing, indexing, or retaining an uncalled foreign declaration does not reject a
 portable program, and a call in an unselected `static if` arm does not enter the closure. A
-reachable foreign function contributes exactly one external declaration to the native artifact; an
-unreachable one contributes nothing, as
+reachable foreign function contributes exactly one external declaration or Wasm import to its
+artifact; an unreachable one contributes nothing, as
 [TARGET-002](#target-002--unreachable-target-specific-primitives-have-no-artifact-cost) requires.
 
-**Boundary:** Availability is a property of the target kind, not of the backend. The LLVM backend
-emitting `wasm32-unknown-unknown` rejects a reachable foreign call exactly as the direct
-WebAssembly backend does. Evaluator host tables and Wasm import binding are later proposals.
+The evaluator table is immutable and local to one run. Every entry names the symbol, declares its
+canonical C-class signature, and returns either a value or a typed failure. Evaluation checks the
+complete reachable inventory before the entry runs, so a missing or mismatched binding has an empty
+trace and names the symbol plus expected signature. There is no implicit libc table.
 
-**Diagnostics:** A reachable foreign call on an unavailable surface reports `SEM0193`, naming the
-symbol and the requested execution surface or target, in the
+```ts
+const table = ForeignHost.make([
+  {
+    symbol: 'abs',
+    signature: ForeignHost.signature(['i32'], 'i32'),
+    invoke: ([value]) =>
+      value?._tag === 'IntegerValue' && value.type === 'i32'
+        ? ForeignHost.returned({ ...value, value: value.value < 0n ? -value.value : value.value })
+        : ForeignHost.failed('abs expected one i32'),
+  },
+])
+```
+
+For direct WebAssembly, the artifact's `hostImports` and `foreignImports` inventories describe the
+exact object an instantiating host must supply:
+
+```ts
+const imports = {
+  [ForeignHost.wasmModule]: {
+    abs: (value: number) => Math.abs(value),
+  },
+}
+```
+
+**Boundary:** The direct Wasm backend owns a concrete import model; this does not grant the LLVM
+backend an ambient Wasm linker or import convention. Foreign exports remain native-only.
+
+**Diagnostics:** LLVM-wasm foreign calls and foreign exports on a non-native target report
+`SEM0193`, naming the symbol and requested target or surface, in the
 [TARGET-003](#target-003--target-unavailability-is-a-compile-time-compatibility-error) shape. It
-does not suggest catching a failure or adding an unsafe block.
+does not suggest catching a failure or adding an unsafe block. Evaluator binding absence,
+signature mismatch, and typed host failure are blocked execution reasons rather than semantic
+diagnostics.
 
 **Current compiler:** Aligned. The executable origin collects reachable foreign calls beside
-intrinsic calls, and every availability site checks them with a native-only rule.
+intrinsic calls. Evaluator admission validates `ForeignHost` bindings before execution, and direct
+Wasm emission declares typed imports and records their deterministic metadata.
 
-**Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
-[foreign diagnostics](../../../../packages/compiler/src/Diagnostic.ts),
+**Evidence:** [foreign function specification](../../../../openspec/specs/bootstrap-foreign-functions/spec.md),
+[foreign host contract](../../../../packages/compiler/src/ForeignHost.ts),
 [C ABI classification](../../../../packages/compiler/src/CAbi.ts).
 
 ### FFI-008 — `export "C"` publishes one C-callable symbol behind a generated thunk
@@ -1149,7 +1182,7 @@ Exports do not replace the entry: a native executable still requires the ordinar
 driver, shim, and termination contract are unchanged.
 
 **Boundary:** Availability is a property of the target kind, as in
-[FFI-007](#ffi-007--foreign-functions-are-native-only-and-pay-for-use). On a WebAssembly target an
+[FFI-007](#ffi-007--foreign-functions-use-explicit-pay-for-use-bindings). On a WebAssembly target an
 `export "C"` declaration anywhere in the loaded closure is rejected under either backend, even
 when nothing calls it, because the declaration itself demands a native symbol. The evaluator runs
 the native discovery and inherits the roots harmlessly: it reports nothing for an export, exposes

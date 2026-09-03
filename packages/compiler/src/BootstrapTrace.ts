@@ -392,8 +392,21 @@ export type BlockedReason =
       readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
     }
   | {
-      readonly _tag: 'ForeignTargetUnavailable'
+      readonly _tag: 'ForeignPlanningUnavailable'
       readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+    }
+  | {
+      readonly _tag: 'ForeignHostUnavailable'
+      readonly symbol: string
+      readonly expected: string
+      readonly provided?: string
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'ForeignHostCallFailed'
+      readonly symbol: string
+      readonly message: string
+      readonly span: SourceSpan.SourceSpan
     }
 
 /** A completed exact bootstrap result. */

@@ -1494,8 +1494,12 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
       return 'missing RandomHost provider'
     case 'IntrinsicTargetUnavailable':
       return reason.diagnostics.map((diagnostic) => diagnostic.message).join(' · ')
-    case 'ForeignTargetUnavailable':
+    case 'ForeignPlanningUnavailable':
       return reason.diagnostics.map((diagnostic) => diagnostic.message).join(' · ')
+    case 'ForeignHostUnavailable':
+      return `missing foreign host binding · ${reason.symbol} · expected ${reason.expected}${reason.provided === undefined ? '' : ` · provided ${reason.provided}`}`
+    case 'ForeignHostCallFailed':
+      return `foreign host call failed · ${reason.symbol} · ${reason.message}`
   }
 }
 

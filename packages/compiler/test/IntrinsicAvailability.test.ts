@@ -378,16 +378,8 @@ it('rejects foreign calls off native LLVM and conflicting signatures per pair', 
         : diagnostic.relatedSpans?.map((related) => related.span.sourceId).join(','),
     ])
   assert.deepEqual(codes('LLVM', Target.aarch64AppleDarwin), [['SEM0192', 'availability/a']])
-  assert.deepEqual(codes('Evaluator', Target.aarch64AppleDarwin), [
-    ['SEM0193', 'abs@Evaluator'],
-    ['SEM0193', 'exit@Evaluator'],
-    ['SEM0192', 'availability/a'],
-  ])
-  assert.deepEqual(codes('Wasm', Target.wasm32UnknownUnknown), [
-    ['SEM0193', 'abs@Wasm'],
-    ['SEM0193', 'exit@Wasm'],
-    ['SEM0192', 'availability/a'],
-  ])
+  assert.deepEqual(codes('Evaluator', Target.aarch64AppleDarwin), [['SEM0192', 'availability/a']])
+  assert.deepEqual(codes('Wasm', Target.wasm32UnknownUnknown), [['SEM0192', 'availability/a']])
   assert.deepEqual(codes('LLVM', Target.wasm32UnknownUnknown), [
     ['SEM0193', 'abs@wasm32-unknown-unknown'],
     ['SEM0193', 'exit@wasm32-unknown-unknown'],
@@ -441,31 +433,26 @@ pub fn main() -> i32 { let n = size()
 )
 
 it.effect(
-  'rejects a reachable foreign call under the evaluator, direct Wasm, and LLVM wasm32',
+  'requires an evaluator binding, emits a direct Wasm import, and rejects LLVM wasm32',
   () =>
     Effect.gen(function* () {
       const native = yield* snapshot(foreignSource)
       assert.deepEqual(Analysis.diagnostics(native), [])
       const evaluated = Analysis.evaluate(native)
       assert.strictEqual(evaluated._tag, 'Blocked')
-      if (evaluated._tag === 'Blocked' && evaluated.reason._tag === 'ForeignTargetUnavailable')
+      if (evaluated._tag === 'Blocked' && evaluated.reason._tag === 'ForeignHostUnavailable')
         assert.deepEqual(
-          evaluated.reason.diagnostics.map((diagnostic) => [
-            diagnostic.code,
-            diagnostic.reason._tag,
-          ]),
-          [['SEM0193', 'ForeignFunctionTargetUnavailable']],
+          [evaluated.reason.symbol, evaluated.reason.expected, evaluated.trace],
+          ['abs', '(i32)->i32', []],
         )
       else assert.fail('expected the evaluator to be blocked by foreign availability')
 
       const wasm = yield* snapshot(foreignSource, 'wasm32-unknown-unknown')
-      const direct = yield* Effect.flip(Analysis.codegenWasm(wasm, { mode: 'release' }))
-      assert.strictEqual(direct._tag, 'CodegenUnavailable')
-      if (direct._tag === 'CodegenUnavailable')
-        assert.deepEqual(
-          direct.diagnostics.map((diagnostic) => diagnostic.code),
-          ['SEM0193'],
-        )
+      const direct = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
+      assert.deepEqual(direct.foreignImports, [
+        { symbol: 'abs', parameters: ['i32'], result: 'i32' },
+      ])
+      assert.deepEqual(direct.hostImports, [{ module: 'silk:runtime/foreign@v1', name: 'abs' }])
       const llvm = yield* Effect.flip(Analysis.codegen(wasm, { mode: 'release' }))
       assert.strictEqual(llvm._tag, 'CodegenUnavailable')
       if (llvm._tag === 'CodegenUnavailable')
