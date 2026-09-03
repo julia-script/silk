@@ -1372,13 +1372,8 @@ export const interfaceConstraintDiagnostics = (
       const provider = substitution.get(Type.key(parameter.type))
       if (provider === undefined || !Type.isTypeArgument(provider)) return []
       return parameter.bounds.flatMap((bound): ReadonlyArray<Diagnostic.Diagnostic> => {
-        if (bound._tag !== 'ResolvedBound')
-          return [
-            Diagnostic.invalidConformance(
-              `unknown interface constraint ${bound.spelling}`,
-              parameter.syntax.span,
-            ),
-          ]
+        // An unresolved bound was reported at its declaration.
+        if (bound._tag !== 'ResolvedBound') return []
         const substitutedCapability = Type.substitute(bound.application.capability, substitution)
         if (!Type.isNominal(substitutedCapability))
           return [
@@ -1388,10 +1383,11 @@ export const interfaceConstraintDiagnostics = (
             ),
           ]
         const capability = substitutedCapability
-        const callerCopyAssumptions = copyAssumptionsOf(caller)
         const assumedByCaller =
-          Type.equals(capability, Type.copyCapability) &&
-          ConformanceProof.copyType(index, provider, callerCopyAssumptions)
+          boundAssumedBy(caller, provider, capability) ||
+          (Type.equals(capability, Type.copyCapability) &&
+            ConformanceProof.copyType(index, provider, copyAssumptionsOf(caller)))
+        if (assumedByCaller) return []
         if (!bound.application.providerMatches)
           return [
             Diagnostic.invalidConformance(
@@ -1410,7 +1406,7 @@ export const interfaceConstraintDiagnostics = (
               span,
             ),
           )
-        if (!assumedByCaller && !ConformanceProof.conforms(index, provider, capability)) {
+        if (!ConformanceProof.conforms(index, provider, capability)) {
           // A conditional header that covers this provider but whose own requirements failed has a
           // more useful answer than "does not implement": the chain says which requirement is
           // missing and which wrapper asked for it.
@@ -1440,6 +1436,25 @@ export const interfaceConstraintDiagnostics = (
     }),
   )
 }
+
+/**
+ * Reports whether one caller's own explicit bounds already promise `capability` for a
+ * parameter-typed provider, so the promise is evidence rather than something to prove again.
+ */
+export const boundAssumedBy = (
+  caller: DeclarationFact,
+  provider: Type.Type,
+  capability: Type.Nominal,
+): boolean =>
+  Type.isParameter(provider) &&
+  caller.typeParameters.some(
+    (parameter) =>
+      Type.equals(parameter.type, provider) &&
+      parameter.bounds.some(
+        (bound) =>
+          bound._tag === 'ResolvedBound' && Type.equals(bound.application.capability, capability),
+      ),
+  )
 
 export const copyAssumptionsOf = (declaration: DeclarationFact): ReadonlySet<string> =>
   new Set(
@@ -1603,7 +1618,7 @@ export const interfaceOperationContract = (
  */
 export const boundOperationReference = (
   declaration: DeclarationFact,
-  interface_: DeclarationFacts.InterfaceFact,
+  interface_: DeclarationFacts.ContractFact,
   qualifier: string,
   member: string,
   memberToken: Token.Token,

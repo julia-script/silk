@@ -303,6 +303,8 @@ interface AppliedRows {
   readonly requirements: ReadonlyArray<AppliedRequirement>
   readonly requirementParameters: ReadonlyArray<Type.Parameter>
   readonly rowParameterComponents: ReadonlyArray<DeclaredTypeFact>
+  /** The row as one expression, present only when the row subtracts (`Without<R, K>`). */
+  readonly requirementExpression: RowExpressionFact | undefined
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
@@ -401,6 +403,14 @@ const analyzeAppliedRows = (
           }),
         ]
   })
+  const rowNodes =
+    requirementRowSyntax?.children.filter((element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element),
+    ) ?? []
+  const requirementExpression =
+    requirementRowSyntax !== undefined && rowNodes.some((node) => node.kind === 'RowWithout')
+      ? rowExpressionOf(source, requirementRowSyntax, rowNodes, typeParameters)
+      : undefined
   return Object.freeze({
     failureRowSyntax,
     failures: Object.freeze(failures),
@@ -408,6 +418,7 @@ const analyzeAppliedRows = (
     requirements: Object.freeze(requirements),
     requirementParameters: Object.freeze(requirementParameters),
     rowParameterComponents: Object.freeze(rowParameterComponents),
+    requirementExpression,
     diagnostics: Object.freeze(diagnostics),
   })
 }
@@ -861,6 +872,7 @@ export const analyzeDeclaredType = (
         requirements,
         requirementParameters,
         rowParameterComponents,
+        requirementExpression,
         diagnostics: rowDiagnostics,
       } = analyzeAppliedRows(source, list, typeParameters)
       const diagnostics = [
@@ -898,10 +910,12 @@ export const analyzeDeclaredType = (
       const failuresAvailable = failures.every(
         (failure) => failure.fact._tag === 'Resolved' && Type.isTypeArgument(failure.fact.type),
       )
+      // A subtracting row is resolved with the module graph, where the row algebra runs.
       if (
         arguments_.length === 1 &&
         success?._tag === 'Resolved' &&
         failuresAvailable &&
+        requirementExpression === undefined &&
         resolvedRequirements.length === requirements.length
       ) {
         const type = Type.effect(
@@ -945,6 +959,7 @@ export const analyzeDeclaredType = (
             ),
           ),
           requirementParameters: Object.freeze(requirementParameters),
+          ...(requirementExpression === undefined ? {} : { requirementExpression }),
           spelling: 'Effect',
           token: firstToken,
           syntax,
@@ -1655,11 +1670,16 @@ const parameterAtTypePath = (
     : undefined
 }
 
+/**
+ * `bareKeys` admits a service-role key written without access (`Clock`, `Clock at Primary`), the
+ * form a `Without` operand names; elsewhere a bare path is a row parameter.
+ */
 const collectRowExpression = (
   source: SourceFile.SourceFile,
   syntax: SyntaxTree.Node,
   typeParameters: ReadonlyMap<string, Type.Parameter>,
   leaf: 'Failure' | 'Requirement',
+  bareKeys = false,
 ): {
   readonly fact: RowExpressionFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -1675,8 +1695,8 @@ const collectRowExpression = (
         fact: Object.freeze({ _tag: 'UnavailableRowExpression', syntax }),
         diagnostics: Object.freeze([]),
       })
-    const sourceRow = collectRowExpression(source, left, typeParameters, leaf)
-    const selected = collectRowExpression(source, right, typeParameters, leaf)
+    const sourceRow = collectRowExpression(source, left, typeParameters, leaf, true)
+    const selected = collectRowExpression(source, right, typeParameters, leaf, true)
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'WithoutRowExpression',
@@ -1690,7 +1710,7 @@ const collectRowExpression = (
   if (syntax.kind === 'UnionType') {
     const collected = syntax.children
       .filter((element): element is SyntaxTree.Node => SyntaxTree.isNode(element))
-      .map((operand) => collectRowExpression(source, operand, typeParameters, leaf))
+      .map((operand) => collectRowExpression(source, operand, typeParameters, leaf, bareKeys))
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'UnionRowExpression',
@@ -1718,6 +1738,19 @@ const collectRowExpression = (
       fact: Object.freeze({ _tag: 'RowParameterExpression', parameter, syntax }),
       diagnostics: Object.freeze([]),
     })
+  if (bareKeys && syntax.kind === 'TypePath') {
+    const analyzed = analyzeDeclaredType(source, syntax, typeParameters)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'RequirementMemberExpression',
+        capability: analyzed.fact,
+        access: 'Shared',
+        role: Object.freeze({ _tag: 'DefaultRole' }),
+        syntax,
+      }),
+      diagnostics: analyzed.diagnostics,
+    })
+  }
   if (syntax.kind !== 'Requirement' && syntax.kind !== 'ReferenceType')
     return Object.freeze({
       fact: Object.freeze({ _tag: 'UnavailableRowExpression', syntax }),
@@ -1743,6 +1776,27 @@ const collectRowExpression = (
 }
 
 const emptyRowExpression: RowExpressionFact = Object.freeze({ _tag: 'EmptyRowExpression' })
+
+/** Joins one requirement row's member nodes into a single row expression. */
+const rowExpressionOf = (
+  source: SourceFile.SourceFile,
+  syntax: SyntaxTree.Node,
+  rowNodes: ReadonlyArray<SyntaxTree.Node>,
+  typeParameters: ReadonlyMap<string, Type.Parameter>,
+): RowExpressionFact =>
+  rowNodes
+    .map((member) => collectRowExpression(source, member, typeParameters, 'Requirement'))
+    .reduce<RowExpressionFact>(
+      (left, right) =>
+        left._tag === 'EmptyRowExpression'
+          ? right.fact
+          : Object.freeze({
+              _tag: 'UnionRowExpression',
+              operands: Object.freeze([left, right.fact]),
+              syntax,
+            }),
+      emptyRowExpression,
+    )
 const emptyFailureRow = RowAlgebra.concrete(Type.failureRowPolicy(), [])
 const emptyRequirementRow = RowAlgebra.concrete(Type.requirementRowPolicy(), [])
 
@@ -1858,22 +1912,9 @@ const collectRequirementRow = (
   const rowNodes = syntax.children.filter((element): element is SyntaxTree.Node =>
     SyntaxTree.isNode(element),
   )
-  const expressions = rowNodes.map((member) =>
-    collectRowExpression(source, member, typeParameters, 'Requirement'),
-  )
   // Entry collection below owns source diagnostics. The expression facts are
   // structural and must not duplicate the same diagnostic occurrence.
-  const expression = expressions.reduce<RowExpressionFact>(
-    (left, right) =>
-      left._tag === 'EmptyRowExpression'
-        ? right.fact
-        : Object.freeze({
-            _tag: 'UnionRowExpression',
-            operands: Object.freeze([left, right.fact]),
-            syntax,
-          }),
-    emptyRowExpression,
-  )
+  const expression = rowExpressionOf(source, syntax, rowNodes, typeParameters)
   const entries = SyntaxTree.directNodes(syntax, 'Requirement').map((requirement) => {
     const capabilitySyntax = requirement.children.find(isDeclaredTypeNode)
     const analyzed =
@@ -3227,6 +3268,47 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       syntax: node,
     })
   })
+  // Owner binders precede the member's own, so `Option.map<i32, i64>` reads T then U; a binder
+  // the member refined carries the member's bounds under the head's identity.
+  // An owner binder joins the member's generic sequence only when the member mentions it (or
+  // names `Self`, which stands for the whole applied owner); a member that never mentions one
+  // (`Fiber.cancel(canceller: CompletionCanceller)`) would otherwise carry a binder no call
+  // could ever infer.
+  const joinedTypeParameters = (
+    member: SyntaxTree.Node,
+    headBinders: ReadonlyArray<TypeParameterFact>,
+    built: Pick<DeclarationFact, 'typeParameters'>,
+    refinedBinders: ReadonlyMap<string, TypeParameterFact>,
+  ): ReadonlyArray<TypeParameterFact> => {
+    const mentioned = new Set(
+      SyntaxTree.tokens(member)
+        .filter((token) => token.kind === 'Identifier')
+        .map((token) => spelling(source, token)),
+    )
+    const namesSelf = mentioned.has('Self')
+    return Object.freeze([
+      ...headBinders
+        .filter(
+          (parameter) =>
+            parameter.duplicateOf === undefined &&
+            (namesSelf ||
+              (parameter.name._tag === 'Present' && mentioned.has(parameter.name.spelling))),
+        )
+        .map((parameter) => {
+          const refined =
+            parameter.name._tag === 'Present'
+              ? refinedBinders.get(parameter.name.spelling)
+              : undefined
+          return refined === undefined
+            ? parameter
+            : Object.freeze({
+                ...parameter,
+                bounds: Object.freeze([...parameter.bounds, ...refined.bounds]),
+              })
+        }),
+      ...built.typeParameters,
+    ])
+  }
   // A function declared inside an impl block, conformance or inherent, elaborates and lowers as an
   // ordinary declaration carrying the impl's binders ahead of its own and `Self` bound to the
   // head's binder. The caller supplies identity, visibility, and the membership back-reference.
@@ -3385,12 +3467,20 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         })
         const {
           bodyTemplate: _retained,
-          refinedBinders: _refined,
-          ...shared
+          refinedBinders,
+          ...built
         } = implMember(node, id, targetName, conformance.typeParameters, conformance.self)
         return [
           Object.freeze({
-            ...shared,
+            ...built,
+            // A generic conformance's inline body is generic in the header's binders exactly as a
+            // mapped witness is; the proof that selects the witness supplies their arguments.
+            typeParameters: joinedTypeParameters(
+              node,
+              conformance.typeParameters,
+              built,
+              refinedBinders,
+            ),
             id,
             canonical: Object.freeze({
               _tag: 'Canonical' as const,
@@ -3541,42 +3631,9 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         collected.facts,
         selfType,
       )
-      // Owner binders precede the member's own, so `Option.map<i32, i64>` reads T then U; a binder
-      // the member refined carries the member's bounds under the head's identity.
-      // An owner binder joins the member's generic sequence only when the member mentions it (or
-      // names `Self`, which stands for the whole applied owner); a member that never mentions one
-      // (`Fiber.cancel(canceller: CompletionCanceller)`) would otherwise carry a binder no call
-      // could ever infer.
-      const mentioned = new Set(
-        SyntaxTree.tokens(member)
-          .filter((token) => token.kind === 'Identifier')
-          .map((token) => spelling(source, token)),
-      )
-      const namesSelf = mentioned.has('Self')
       const shared = Object.freeze({
         ...built,
-        typeParameters: Object.freeze([
-          ...collected.facts
-            .filter(
-              (parameter) =>
-                parameter.duplicateOf === undefined &&
-                (namesSelf ||
-                  (parameter.name._tag === 'Present' && mentioned.has(parameter.name.spelling))),
-            )
-            .map((parameter) => {
-              const refined =
-                parameter.name._tag === 'Present'
-                  ? refinedBinders.get(parameter.name.spelling)
-                  : undefined
-              return refined === undefined
-                ? parameter
-                : Object.freeze({
-                    ...parameter,
-                    bounds: Object.freeze([...parameter.bounds, ...refined.bounds]),
-                  })
-            }),
-          ...built.typeParameters,
-        ]),
+        typeParameters: joinedTypeParameters(member, collected.facts, built, refinedBinders),
       })
       const receiverParameter = shared.parameters.at(0)
       const receiver =

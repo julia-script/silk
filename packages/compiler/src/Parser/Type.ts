@@ -238,6 +238,38 @@ export const parseNamedTypeReference = (
   })
 }
 
+/**
+ * One `Without` operand: requirement entries (`&mut Clock at Primary`), row parameters (`R`),
+ * service-role keys (`Clock`, `Clock at Primary`), or nested subtractions, joined by `|`.
+ */
+const parseRowOperand = (initial: State, following: ReadonlyArray<Token.TokenKind>): NodeResult => {
+  const parseMember = (state: State): NodeResult => {
+    if (nextSignificantKind(state) === 'Ampersand')
+      return parseRequirement(state, ['Pipe', ...following])
+    if (isRowWithoutStart(state)) return parseTypePrimary(state, ['Pipe', ...following])
+    const path = parseNamedTypeReference(state, ['Pipe', ...following])
+    if (!hasContextualSpelling(path.state, 'at')) return path
+    const at = expect(path.state, 'Identifier', ['Identifier', 'Pipe', ...following])
+    const role = parseTypePath(at.state, ['Pipe', ...following])
+    return Object.freeze({
+      state: role.state,
+      node: syntaxNode(role.state, 'Requirement', [path.node, ...at.elements, role.node]),
+    })
+  }
+  const first = parseMember(initial)
+  let state = first.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([first.node])
+  while (nextSignificantKind(state) === 'Pipe') {
+    const pipe = expect(state, 'Pipe', ['Ampersand', 'Identifier', ...following])
+    const member = parseMember(pipe.state)
+    children = Object.freeze([...children, ...pipe.elements, member.node])
+    state = member.state
+  }
+  return children.length === 1
+    ? first
+    : Object.freeze({ state, node: syntaxNode(state, 'UnionType', children) })
+}
+
 export const parseTypePrimary = (
   initial: State,
   following: ReadonlyArray<Token.TokenKind>,
@@ -246,9 +278,9 @@ export const parseTypePrimary = (
   if (isRowWithoutStart(initial)) {
     const keyword = expect(initial, 'Identifier', ['Less', ...following])
     const left = expect(keyword.state, 'Less', [...typeStarts, ...following])
-    const source = parseType(left.state, ['Comma', 'Greater', ...following])
+    const source = parseRowOperand(left.state, ['Comma', 'Greater', ...following])
     const comma = expect(source.state, 'Comma', [...typeStarts, 'Greater', ...following])
-    const selected = parseType(comma.state, ['Greater', ...following])
+    const selected = parseRowOperand(comma.state, ['Greater', ...following])
     const right = expect(selected.state, 'Greater', following)
     return Object.freeze({
       state: right.state,

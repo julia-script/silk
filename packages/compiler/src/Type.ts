@@ -1305,12 +1305,13 @@ export const representationAdmissibility = (
   let requiredAccess: CallableMode | Effect['access']
   let actualAccess: CallableMode | Effect['access']
   if (contract._tag === 'CallableType' && requiredBound._tag === 'CallableType') {
+    // A safe callable satisfies an unsafe bound (it asks less of the caller); the reverse does not.
     structuralContract = callable(
       contract.parameters,
       contract.result,
       requiredBound.mode,
       contract.schema,
-      contract.unsafe,
+      contract.unsafe || requiredBound.unsafe,
     )
     requiredAccess = requiredBound.mode
     actualAccess = contract.mode

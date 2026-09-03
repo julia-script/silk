@@ -1266,9 +1266,11 @@ export const discover = (
         parameters,
         key.typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
       )
-      if (substitution === undefined) continue
-      const specialization = specialize(fn, substitution, index)
-      if (specialization === undefined) {
+      // A key whose arguments no longer fit the declaration's binders is as unreachable as one
+      // that cannot be made concrete; both are reported rather than silently dropped.
+      const specialization =
+        substitution === undefined ? undefined : specialize(fn, substitution, index)
+      if (substitution === undefined || specialization === undefined) {
         specializationFailures.set(
           keyText(key),
           Object.freeze({
