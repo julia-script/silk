@@ -6453,6 +6453,115 @@ const conformanceOperationCandidates = (
   )
 
 /**
+ * Resolves a bare qualified call `Contract.operation(...)` whose caller has no bound for the
+ * contract: the receiver operand's own type selects the conformance. A parameter-typed receiver
+ * has no bound to select through and is reported as such; a nominal receiver selects its unique
+ * proved conformance of the contract, and two applications are reported as ambiguous. A call with
+ * no receiver operand, or none the contract can read, resolves nothing here.
+ */
+const concreteContractOperationReference = (
+  contract: DeclarationFacts.ContractFact,
+  member: string,
+  memberToken: Token.Token,
+  argumentsResult: ArgumentsResult,
+  resolution: ResolutionContext,
+):
+  | {
+      readonly _tag: 'Resolved'
+      readonly reference: Extract<
+        CallReferenceFact,
+        { readonly _tag: 'ResolvedInterfaceOperation' }
+      >
+    }
+  | { readonly _tag: 'Rejected'; readonly diagnostic: Diagnostic.Diagnostic }
+  | undefined => {
+  if (contract.canonical._tag !== 'Canonical') return undefined
+  const source = contract.operationContracts.find(
+    (candidate) =>
+      candidate.declaration.name._tag === 'Present' &&
+      candidate.declaration.name.spelling === member,
+  )
+  // An ambient service operation takes its provider from the Effect environment, never from an
+  // argument, so the synthesized receiver operand selects nothing here.
+  if (source === undefined || source.operands.some((operand) => operand.parameter.id.ordinal < 0))
+    return undefined
+  const receiverOrdinal = source.operands.findIndex((operand) => {
+    if (operand.type._tag !== 'Resolved') return false
+    const type = operand.type.type
+    return Type.equals(Type.isReference(type) ? type.target : type, contract.self)
+  })
+  const receiver = receiverOrdinal < 0 ? undefined : argumentsResult.facts.at(receiverOrdinal)
+  if (receiver === undefined || receiver.type._tag !== 'Available') return undefined
+  const receiverType = Type.isReference(receiver.type.type)
+    ? receiver.type.type.target
+    : receiver.type.type
+  const contractName = contract.canonical.id.name
+  if (Type.isParameter(receiverType))
+    return Object.freeze({
+      _tag: 'Rejected',
+      diagnostic: Diagnostic.invalidConformance(
+        `${Type.encode(receiverType)} does not implement ${contractName}`,
+        memberToken.span,
+      ),
+    })
+  if (!Type.isNominal(receiverType)) return undefined
+  const canonical = contract.canonical.id
+  const supplied = ConformanceProof.implementedContracts(
+    resolution.index,
+    resolution.scope.module,
+    receiverType,
+  ).flatMap((capability) => {
+    if (capability.module !== canonical.module || capability.name !== canonical.name) return []
+    const application = DeclarationFacts.interfaceApplication(contract, capability, receiverType)
+    const operation = application?.operations.find(
+      (candidate) =>
+        candidate.declaration.name._tag === 'Present' &&
+        candidate.declaration.name.spelling === member,
+    )
+    return application?.available === true && operation !== undefined
+      ? [Object.freeze({ capability, operation })]
+      : []
+  })
+  if (supplied.length === 0)
+    return Object.freeze({
+      _tag: 'Rejected',
+      diagnostic: Diagnostic.invalidConformance(
+        `${Type.encode(receiverType)} does not implement ${contractName}`,
+        memberToken.span,
+      ),
+    })
+  if (supplied.length > 1)
+    return Object.freeze({
+      _tag: 'Rejected',
+      diagnostic: Diagnostic.ambiguousSuppliedOperation(
+        Type.encode(receiverType),
+        member,
+        supplied.map(({ capability }) => Type.encode(capability)),
+        memberToken.span,
+      ),
+    })
+  const selected = supplied.at(0)
+  const selectedContract =
+    selected === undefined ? undefined : interfaceOperationContract(selected.operation)
+  if (selected === undefined || selectedContract === undefined) return undefined
+  return Object.freeze({
+    _tag: 'Resolved',
+    reference: Object.freeze({
+      _tag: 'ResolvedInterfaceOperation' as const,
+      spelling: `${Type.encode(selected.capability)}.${member}`,
+      token: memberToken,
+      capability: selected.capability,
+      provider: receiverType,
+      operation: member,
+      declaration: selectedContract.declaration,
+      interfaceContract: selectedContract.contract,
+      parameters: selectedContract.parameters,
+      result: selectedContract.result,
+    }),
+  })
+}
+
+/**
  * Resolves the member a value-side spelling `receiver.member(...)` names, mirroring the type-side
  * `lookupAssociated`: an inherent member of a nominal receiver, the unique receiver operation among
  * a type parameter's declared bounds, or — only where the receiver's own type has no such member at
@@ -8257,12 +8366,10 @@ export function analyzeExpression(
     if (analyzed === undefined) return undefined
     const invokesUnsafe = (() => {
       const fact = analyzed.fact
-      if (fact._tag === 'CallableApply')
-        return (
-          fact.callee.type._tag === 'Available' &&
-          Type.isCallable(fact.callee.type.type) &&
-          fact.callee.type.type.unsafe
-        )
+      // The resolved contract is the one the call was checked against: a bound-typed callee
+      // (`F: unsafe fn(i32) -> i32`) keeps its bound's qualifier even when a specialization later
+      // selects a safe implementation.
+      if (fact._tag === 'CallableApply') return fact.contract?.unsafe === true
       if (fact._tag !== 'Call') return false
       switch (fact.reference._tag) {
         case 'Resolved':
@@ -9030,45 +9137,12 @@ export function analyzeExpression(
         )
       }
     }
+    // A bound on the caller wins for interfaces and services alike (SERV-003): only an operation
+    // no bound supplies reaches the ambient service path.
     if (
       qualifierLookup._tag === 'Resolved' &&
-      qualifierLookup.declaration._tag === 'ServiceDeclaration'
-    ) {
-      const operation = serviceOperation(qualifierLookup.declaration, member)
-      const diagnostic =
-        operation === undefined
-          ? Diagnostic.unknownActorOperation(qualifier, member, memberToken.span)
-          : undefined
-      let reference: CallReferenceFact
-      if (operation === undefined) {
-        reference = Object.freeze({
-          _tag: 'Missing',
-          spelling: `${qualifier}.${member}`,
-          token: memberToken,
-          ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
-        })
-      } else {
-        reference = Object.freeze({
-          _tag: 'ResolvedServiceOperation',
-          spelling: `${qualifier}.${member}`,
-          token: memberToken,
-          service: qualifierLookup.declaration,
-          operation,
-        })
-      }
-      return finishDeclarationCall(
-        node,
-        reference,
-        argumentsResult,
-        callTypeArguments,
-        diagnostic,
-        declaration,
-        resolution,
-      )
-    }
-    if (
-      qualifierLookup._tag === 'Resolved' &&
-      qualifierLookup.declaration._tag === 'InterfaceDeclaration'
+      (qualifierLookup.declaration._tag === 'InterfaceDeclaration' ||
+        qualifierLookup.declaration._tag === 'ServiceDeclaration')
     ) {
       const bound = boundOperationReference(
         declaration,
@@ -9106,6 +9180,72 @@ export function analyzeExpression(
           callTypeArguments,
           resolution,
         )
+      const concrete = concreteContractOperationReference(
+        qualifierLookup.declaration,
+        member,
+        memberToken,
+        argumentsResult,
+        resolution,
+      )
+      if (concrete?._tag === 'Resolved')
+        return finishInterfaceOperationCall(
+          node,
+          concrete.reference,
+          argumentsResult,
+          callTypeArguments,
+          resolution,
+        )
+      if (concrete?._tag === 'Rejected')
+        return finishDeclarationCall(
+          node,
+          Object.freeze({
+            _tag: 'Missing',
+            spelling: `${qualifier}.${member}`,
+            token: memberToken,
+            cause: Diagnostic.identity(concrete.diagnostic),
+          }),
+          argumentsResult,
+          callTypeArguments,
+          concrete.diagnostic,
+          declaration,
+          resolution,
+        )
+    }
+    if (
+      qualifierLookup._tag === 'Resolved' &&
+      qualifierLookup.declaration._tag === 'ServiceDeclaration'
+    ) {
+      const operation = serviceOperation(qualifierLookup.declaration, member)
+      const diagnostic =
+        operation === undefined
+          ? Diagnostic.unknownActorOperation(qualifier, member, memberToken.span)
+          : undefined
+      let reference: CallReferenceFact
+      if (operation === undefined) {
+        reference = Object.freeze({
+          _tag: 'Missing',
+          spelling: `${qualifier}.${member}`,
+          token: memberToken,
+          ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
+        })
+      } else {
+        reference = Object.freeze({
+          _tag: 'ResolvedServiceOperation',
+          spelling: `${qualifier}.${member}`,
+          token: memberToken,
+          service: qualifierLookup.declaration,
+          operation,
+        })
+      }
+      return finishDeclarationCall(
+        node,
+        reference,
+        argumentsResult,
+        callTypeArguments,
+        diagnostic,
+        declaration,
+        resolution,
+      )
     }
     if (
       qualifierLookup._tag === 'Resolved' &&

@@ -382,6 +382,8 @@ export type DeclaredTypeFact =
         readonly syntax: SyntaxTree.Node
       }>
       readonly requirementParameters: ReadonlyArray<Type.Parameter>
+      /** The complete row expression, retained when the row subtracts (`Without<R, K>`). */
+      readonly requirementExpression?: RowExpressionFact
       readonly spelling: string
       readonly token: Token.Token
       readonly syntax: SyntaxTree.Node
@@ -1046,14 +1048,21 @@ const interfaceOperationContract = (
       access: interfaceOperandAccess(parameter.declaredType),
     }),
   )
-  const serviceAccess =
+  // Only ambient dependency syntax (`? &Service` on the operation itself) obtains the provider
+  // operand from the Effect environment; an operation written without it keeps exactly the
+  // contract the equivalent interface operation has.
+  const ambient =
     capability === undefined
-      ? 'Shared'
-      : (operation.requirementRow.requirements.find((requirement) =>
+      ? undefined
+      : operation.requirementRow.requirements.find((requirement) =>
           Type.equals(requirement.capability, capability),
-        )?.access ?? 'Shared')
+        )
+  const serviceAccess = ambient?.access ?? 'Shared'
   const receiver =
-    !dependencyEligible || provider === undefined || operation.name._tag !== 'Present'
+    !dependencyEligible ||
+    ambient === undefined ||
+    provider === undefined ||
+    operation.name._tag !== 'Present'
       ? []
       : (() => {
           const type = Type.reference(serviceAccess, provider)

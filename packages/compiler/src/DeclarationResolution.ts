@@ -319,7 +319,8 @@ export const resolveDeclaredType = (
       if (
         requirement.capability.fact._tag === 'Resolved' &&
         requirementRoleIdentity(requirement.role.fact) !== undefined &&
-        (Type.isNominal(requirement.capability.fact.type) ||
+        ((Type.isNominal(requirement.capability.fact.type) &&
+          dependencyEligible(modules, requirement.capability.fact.type)) ||
           (Type.isParameter(requirement.capability.fact.type) &&
             requirement.capability.fact.type.kind === 'Value'))
       ) {
@@ -341,6 +342,11 @@ export const resolveDeclaredType = (
           )
       }
     }
+    const requirementExpression =
+      fact.requirementExpression === undefined
+        ? undefined
+        : resolveRowExpressionFact(module, fact.requirementExpression, resolvers, modules)
+    if (requirementExpression !== undefined) diagnostics.push(...requirementExpression.diagnostics)
     if (success.fact._tag === 'Resolved' && failuresAvailable && requirementsAvailable) {
       const base = Type.effect(
         success.fact.type,
@@ -366,7 +372,9 @@ export const resolveDeclaredType = (
         success.fact.type,
         failureRow,
         fact.access,
-        base.requirementRow,
+        requirementExpression === undefined
+          ? base.requirementRow
+          : semanticRequirementRow(requirementExpression.fact),
       )
       return Object.freeze({
         fact: Object.freeze({
@@ -917,9 +925,8 @@ const genericArgumentForParameter = (
  * Resolves every type parameter's bound to the interface its spelling names in the bounded
  * declaration's own module scope, recording that interface's ordered operation contract.
  *
- * The resolver's own diagnostics are deliberately dropped: a bound that names nothing, or names a
- * declaration that is not an interface, stays `UnresolvedBound` and is reported once at the
- * specialization that would have had to satisfy it, where the type argument is known.
+ * A bound that names nothing, or names a declaration that is not an interface, stays
+ * `UnresolvedBound` and is reported once here, at the declaration that wrote it.
  */
 export const resolveBounds = (
   module: string,
@@ -1046,7 +1053,15 @@ export const resolveBounds = (
       )
       const seen = new Set<string>()
       for (const bound of bounds) {
-        if (bound._tag !== 'ResolvedBound') continue
+        if (bound._tag !== 'ResolvedBound') {
+          diagnostics.push(
+            Diagnostic.invalidConformance(
+              `unknown interface constraint ${bound.spelling}`,
+              parameter.syntax.span,
+            ),
+          )
+          continue
+        }
         const key = Type.key(bound.application.capability)
         if (seen.has(key))
           diagnostics.push(
