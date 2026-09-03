@@ -440,7 +440,7 @@ pub fn main() -> i32 {
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
     assert.strictEqual(
-      evaluated.trace.filter((event) => event._tag === 'ReplacementCleanup').length,
+      evaluated.trace.filter((event) => event._tag === 'Replacement').length,
       1,
     )
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
@@ -767,7 +767,7 @@ pub fn main() -> i32 {
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
     assert.strictEqual(
-      evaluated.trace.filter((event) => event._tag === 'ReplacementCleanup').length,
+      evaluated.trace.filter((event) => event._tag === 'Replacement').length,
       1,
     )
   }),

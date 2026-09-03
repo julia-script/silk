@@ -341,7 +341,7 @@ it.effect(
       const module = 'opaque/specialized-layouts'
       const source = `pub struct Token { left: i32 right: i32 }
 fn keep<T>(ignored: i32, value: T) -> T { return move value }
-pub fn make<T>(value: T) -> some<F: fn(i32) -> T> F { return keep<T>(value) }
+pub fn make<T>(value: T) -> some<F: once fn(i32) -> T> F { return keep<T>(move value) }
 pub fn main() -> i32 {
   let first = make<i32>(40)
   let second = make<i32>(1)

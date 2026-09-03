@@ -16,48 +16,52 @@ const codes = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
  */
 const shared = `import silk.vector { Vector }
 
-pub fn main() -> usize {
+pub fn main() -> i32 {
   let values = Vector.make<i32>()
   let count = Vector.length<i32>(&values)
   drop values
-  return count
+  if count == 0 { return 0 }
+  return 1
 }`
 
 const importedShared = `import silk.vector { Vector }
 
-pub fn main() -> usize {
+pub fn main() -> i32 {
   let values = Vector.make<i32>()
   let count = Vector.length<i32>(&values)
   drop values
-  return count
+  if count == 0 { return 0 }
+  return 1
 }`
 
 const exclusive = `import silk.vector { Vector }
 
-pub fn main() -> usize {
+pub fn main() -> i32 {
   let mut values = Vector.make<i32>()
   let slice = Vector.asMutSlice<i32>(&mut values)
   drop slice
   let count = Vector.length<i32>(&values)
   drop values
-  return count
+  if count == 0 { return 0 }
+  return 1
 }`
 
 const importedExclusive = `import silk.vector { Vector }
 
-pub fn main() -> usize {
+pub fn main() -> i32 {
   let mut values = Vector.make<i32>()
   let slice = Vector.asMutSlice<i32>(&mut values)
   drop slice
   let count = Vector.length<i32>(&values)
   drop values
-  return count
+  if count == 0 { return 0 }
+  return 1
 }`
 
 /** A borrow in a position that wants an owned value is still an invalid borrow position. */
 const ownedPosition = `import silk.vector { Vector }
 
-pub fn main() -> usize {
+pub fn main() -> i32 {
   let values = Vector.make<i32>()
   let taken = Vector.get<i32>(&values, &values)
   drop taken
@@ -106,11 +110,12 @@ it.effect('still rejects a borrow where the parameter wants an owned value', () 
  * could not reach.
  */
 const seeded = `import silk.vector { Vector }
-pub fn main() -> usize {
+pub fn main() -> i32 {
   let values = Vector.make<i32>()
   let count = Vector.length<i32>(&values)
   drop values
-  return count
+  if count == 0 { return 0 }
+  return 1
 }`
 
 it.effect('accepts a borrow through a seeded namespace with no import', () =>

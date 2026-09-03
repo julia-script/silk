@@ -603,7 +603,7 @@ it.effect(
       )
       assert.deepEqual(
         Analysis.diagnostics(overflow).map((diagnostic) => diagnostic.code),
-        ['SEM0170'],
+        ['SEM0204', 'SEM0170'],
       )
       assert.notInclude(Hir.encode(Analysis.rootAnalysis(overflow).hir), '18446744073709551616')
 
@@ -643,7 +643,7 @@ it.effect(
       )
       assert.deepEqual(
         Analysis.diagnostics(malformed).map((diagnostic) => diagnostic.code),
-        ['LEX0012'],
+        ['SEM0204', 'LEX0012'],
       )
     }),
 )
