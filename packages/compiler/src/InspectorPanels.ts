@@ -108,6 +108,17 @@ export const toolchainCommands = (
       message: `the ${target.id} target has no link driver to orchestrate`,
     }
   }
+  const link = ToolchainPlan.nativeCommand(
+    { clang, llvmAr: 'llvm-ar' },
+    'NativeExecutable',
+    target,
+    ['<scope>/program.o', '<scope>/silk_runtime.o'],
+    [],
+    '<destination>/program',
+  )
+  if (link._tag === 'UnsupportedNativePlan') {
+    return { _tag: 'Unavailable', message: `unsupported native plan: ${link.reason}` }
+  }
 
   return {
     _tag: 'Planned',
@@ -126,23 +137,17 @@ export const toolchainCommands = (
         ),
       ],
       [
-        'shim',
+        'runtime',
         commandText(
-          ToolchainPlan.shimCommand(clang, target, '<scope>/silk_shim.c', '<scope>/silk_shim.o'),
-        ),
-      ],
-      [
-        'link',
-        commandText(
-          ToolchainPlan.linkCommand(
+          ToolchainPlan.cObjectCommand(
             clang,
             target,
-            ['<scope>/program.o', '<scope>/silk_shim.o'],
-            [],
-            '<destination>/program',
+            '<scope>/silk_runtime.c',
+            '<scope>/silk_runtime.o',
           ),
         ),
       ],
+      ['link', commandText(link)],
     ],
   }
 }

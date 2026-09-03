@@ -1,4 +1,6 @@
+import * as CLayout from './CLayout.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as FieldRealization from './FieldRealization.js'
 import { alignUp } from './internal/Align.js'
@@ -18,6 +20,7 @@ import {
   callingShapes,
   catalogEntry,
   entry,
+  foreignFunctionEntry,
   neverEntry,
   pointerEntry,
   referenceEntry,
@@ -461,6 +464,21 @@ const verifyEntry = (
             'InvalidScalar',
             candidate.type,
             `${Type.encode(candidate.type)} does not match the canonical pointer layout`,
+          ),
+        ])
+  }
+  if (Type.isForeignFunction(candidate.type)) {
+    const expected = foreignFunctionEntry(target, candidate.type)
+    return candidate.size === expected.size &&
+      candidate.alignment === expected.alignment &&
+      candidate.copy === expected.copy &&
+      representationEquals(candidate.representation, expected.representation)
+      ? Object.freeze([])
+      : Object.freeze([
+          invalid(
+            'InvalidScalar',
+            candidate.type,
+            `${Type.encode(candidate.type)} does not match the canonical C function-pointer layout`,
           ),
         ])
   }
@@ -1026,6 +1044,63 @@ const commonViolations = (
   return Object.freeze(violations)
 }
 
+/**
+ * Verifies the semantic-to-physical boundary unique to C-layout records.
+ *
+ * Ordinary aggregate verification proves canonical packing. This companion check proves that a
+ * declaration carrying the foreign promise reached that packing only through the closed C object
+ * subset, and that the entry still contains exactly the declaration-owned field identities.
+ */
+const cLayoutViolations = (
+  catalog: Catalog,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<Violation> => {
+  const violations: Array<Violation> = []
+  const resolve = CLayout.resolveFrom(index.modules)
+  for (const declaration of index.modules.flatMap((module) => module.structs)) {
+    if (declaration.layout._tag !== 'Foreign' || declaration.canonical._tag !== 'Canonical')
+      continue
+    const type = Type.nominal(declaration.canonical.id.module, declaration.canonical.id.name)
+    const candidate = catalogEntry(catalog, type)
+    if (candidate?._tag !== 'LayoutEntry' || candidate.representation._tag !== 'Aggregate') {
+      violations.push(
+        invalid(
+          'InvalidCLayout',
+          type,
+          `${Type.encode(type)} has a C-layout promise without an aggregate catalog entry`,
+        ),
+      )
+      continue
+    }
+    const representation = candidate.representation
+    const admissions = CLayout.admitFields(declaration, resolve)
+    const supported =
+      declaration.typeParameters.length === 0 &&
+      declaration.fields.length === representation.fields.length &&
+      declaration.fields.every((field, ordinal) => {
+        const placed = representation.fields.at(ordinal)
+        const admission = admissions.at(ordinal)
+        return (
+          field.declaredType._tag === 'Resolved' &&
+          admission?._tag === 'Admitted' &&
+          placed !== undefined &&
+          DeclarationFacts.sameFieldId(field.id, placed.id) &&
+          Type.equals(field.declaredType.type, placed.type)
+        )
+      })
+    if (!supported) {
+      violations.push(
+        invalid(
+          'InvalidCLayout',
+          type,
+          `${Type.encode(type)} reaches layout outside the admitted C object subset`,
+        ),
+      )
+    }
+  }
+  return Object.freeze(violations)
+}
+
 const fieldIdEquals = (left: DeclarationFacts.FieldId, right: DeclarationFacts.FieldId): boolean =>
   DeclarationFacts.sameFieldId(left, right)
 
@@ -1345,8 +1420,11 @@ export const verify = (self: Plan): ReadonlyArray<Violation> =>
   ])
 
 /** Verifies all available entries and deterministic ordering within a nominal catalog. */
-export const verifyCatalog = (self: Catalog): ReadonlyArray<Violation> =>
-  commonViolations(self.target, self.entries)
+export const verifyCatalog = (
+  self: Catalog,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<Violation> =>
+  Object.freeze([...commonViolations(self.target, self.entries), ...cLayoutViolations(self, index)])
 
 /** Verifies that every planned nominal layout is exactly the catalog decision. */
 export const verifyAgainstCatalog = (self: Plan, catalog: Catalog): ReadonlyArray<Violation> =>

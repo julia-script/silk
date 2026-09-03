@@ -13,6 +13,7 @@ import * as StaticValue from './StaticValue.js'
 import type * as Target from './Target.js'
 import * as TerminationModel from './Termination.js'
 import * as Type from './Type.js'
+import type * as CAbi from './CAbi.js'
 
 export interface CodegenRequest {
   readonly mode: 'debug' | 'release'
@@ -65,15 +66,22 @@ export type RuntimeFeature =
  */
 export interface ForeignImport {
   readonly symbol: string
-  readonly parameters: ReadonlyArray<string>
-  readonly result: string
+  readonly parameters: ReadonlyArray<CAbi.TypeText>
+  readonly result: CAbi.TypeText
 }
 
 /** One exported C-callable symbol and the C class spellings of its thunk signature. */
 export interface ForeignExport {
   readonly symbol: string
-  readonly parameters: ReadonlyArray<string>
-  readonly result: string
+  readonly parameters: ReadonlyArray<CAbi.TypeText>
+  readonly result: CAbi.TypeText
+}
+
+/** One native C data symbol retained by an artifact, with its scalar C class. */
+export interface ForeignStatic {
+  readonly symbol: string
+  readonly type: CAbi.TypeText
+  readonly direction: 'Import' | 'Export'
 }
 
 interface ArtifactBase {
@@ -84,10 +92,12 @@ interface ArtifactBase {
   readonly termination: Termination
   readonly nativeRuntimeSymbols: ReadonlyArray<string>
   readonly runtimeFeatures: ReadonlyArray<RuntimeFeature>
-  /** Reachable foreign symbols sorted by symbol; empty for direct WebAssembly. */
+  /** Reachable foreign symbols sorted by symbol. */
   readonly foreignImports: ReadonlyArray<ForeignImport>
   /** Exported C-callable symbols with their classified signatures, sorted by symbol. */
   readonly foreignExports: ReadonlyArray<ForeignExport>
+  /** Imported and exported C data symbols, sorted by symbol and direction. */
+  readonly foreignStatics: ReadonlyArray<ForeignStatic>
   readonly control: ReadonlyArray<ControlProvenance>
 }
 
@@ -162,6 +172,15 @@ export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
   program: Mir.Module,
   request: CodegenRequest,
 ): Effect.fn.Return<A, BackendError> {
+  const violations = MirVerification.verify(program)
+  if (violations.length > 0) {
+    return yield* new BackendError({
+      operation: 'Backend.emit',
+      backend: self.name,
+      message: `${self.name} cannot emit invalid MIR`,
+      reason: { _tag: 'InvalidMir', violations },
+    })
+  }
   const availability = IntrinsicAvailability.select(
     program.intrinsics,
     IntrinsicAvailability.backendTarget(self.id),
@@ -178,6 +197,9 @@ export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
     program.foreignCalls,
     IntrinsicAvailability.backendTarget(self.id),
     program.layout.target,
+    program.foreignStatics,
+    ForeignAvailability.callbackAddresses(program),
+    ForeignAvailability.staticLoads(program),
   )
   const planning = ForeignPlanning.check(
     program,
@@ -190,15 +212,6 @@ export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
       backend: self.name,
       message: `${self.name} cannot emit a program with unavailable foreign functions`,
       reason: { _tag: 'UnsupportedForeignFunction', diagnostics: [...foreign, ...planning] },
-    })
-  }
-  const violations = MirVerification.verify(program)
-  if (violations.length > 0) {
-    return yield* new BackendError({
-      operation: 'Backend.emit',
-      backend: self.name,
-      message: `${self.name} cannot emit invalid MIR`,
-      reason: { _tag: 'InvalidMir', violations },
     })
   }
   if (!self.targets.includes(program.layout.target.id)) {
@@ -245,6 +258,7 @@ export const terminationOf = (
   return Object.freeze({
     _tag: 'EntryTermination',
     success:
+      program.entry._tag !== 'LibraryEntry' &&
       program.entry._tag === 'OrdinaryEntry' &&
       program.entry.machine.declaration.name !== '$unit-entry'
         ? 'ReturnedStatus'
@@ -269,8 +283,8 @@ const injectivePart = (value: string): string => {
   )}`
 }
 
-export const symbolFor = (fn: Mir.MirFunction, entry: Instances.InstanceKey): string =>
-  Mir.matchesInstanceKey(fn, entry)
+export const symbolFor = (fn: Mir.MirFunction, entry: Instances.InstanceKey | undefined): string =>
+  entry !== undefined && Mir.matchesInstanceKey(fn, entry)
     ? 'silk_main'
     : `silk_${sanitize(fn.id.module)}_${sanitize(fn.id.name)}__${[
         fn.instance.declaration.module,

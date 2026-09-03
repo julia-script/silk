@@ -196,6 +196,8 @@ export interface EmissionContext {
     }
   >
   readonly foreignFunctions: ReadonlyMap<string, NativeForeignOperation.Declaration>
+  readonly foreignStatics: ReadonlyMap<string, NativeForeignOperation.StaticDeclaration>
+  readonly foreignCallbacks: ReadonlyMap<string, Constant.Constant>
   readonly declared: ReadonlyArray<NativeLoweringContext.DeclaredFunction>
   readonly originThunks: ReadonlyMap<
     string,
@@ -258,6 +260,8 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
     standardWrite,
     osRuntimes,
     foreignFunctions,
+    foreignStatics,
+    foreignCallbacks,
     declared,
     originThunks,
     resumeThunks,
@@ -840,6 +844,8 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           ...(standardWrite === undefined ? {} : { standardWrite }),
           osRuntimes,
           foreignFunctions,
+          foreignStatics,
+          foreignCallbacks,
           lanePointers,
           suspensionRegions,
           types: nativeTypes,

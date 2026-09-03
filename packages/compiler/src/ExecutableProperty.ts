@@ -523,6 +523,8 @@ const nominalApplications = (type: Type.Type): ReadonlyArray<Type.Nominal> => {
   if (Type.isSlice(type)) return nominalApplications(type.element)
   if (Type.isReference(type)) return nominalApplications(type.target)
   if (Type.isPointer(type)) return nominalApplications(type.pointee)
+  if (Type.isForeignFunction(type))
+    return [...type.parameters, type.result].flatMap(nominalApplications)
   if (Type.isUnion(type)) return type.members.flatMap(nominalApplications)
   if (Type.isCallable(type)) return [...type.parameters, type.result].flatMap(nominalApplications)
   if (Type.isEffect(type))

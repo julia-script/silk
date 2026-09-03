@@ -5,7 +5,6 @@ import * as HeapObservation from '../../src/HeapObservation.js'
 export type {
   BackendFailed,
   Compiled,
-  CompileRequest,
   DriverPhaseReport,
   NoEntry,
   Outcome,
@@ -15,7 +14,14 @@ export type {
   ToolchainFailed,
 } from '../../src/Driver.js'
 
+export type CompileRequest = Omit<Driver.CompileRequest, 'packageName'> & {
+  readonly packageName?: string
+}
+
 /** Test application edge with deterministic heap telemetry. */
-export const compile = Effect.fnUntraced(function* (request: Driver.CompileRequest) {
-  return yield* Driver.compile(request).pipe(Effect.provide(HeapObservation.layerTest))
+export const compile = Effect.fnUntraced(function* (request: CompileRequest) {
+  return yield* Driver.compile({
+    ...request,
+    packageName: request.packageName ?? 'compiler-test',
+  }).pipe(Effect.provide(HeapObservation.layerTest))
 })

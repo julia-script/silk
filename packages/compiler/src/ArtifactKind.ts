@@ -1,0 +1,77 @@
+import type * as Target from './Target.js'
+
+/** The closed set of durable artifacts the compiler can produce. */
+export type ArtifactKind =
+  | 'NativeExecutable'
+  | 'NativeSharedLibrary'
+  | 'NativeStaticLibrary'
+  | 'WebAssemblyModule'
+
+/** Manifest spellings for artifacts selected by a project build. */
+export type ManifestSpelling = 'executable' | 'shared-library' | 'static-library'
+
+export const nativeExecutable: ArtifactKind = 'NativeExecutable'
+export const nativeSharedLibrary: ArtifactKind = 'NativeSharedLibrary'
+export const nativeStaticLibrary: ArtifactKind = 'NativeStaticLibrary'
+export const webAssemblyModule: ArtifactKind = 'WebAssemblyModule'
+
+/** Decodes one exact project-manifest artifact spelling. */
+export const fromManifest = (value: string): ArtifactKind | undefined => {
+  switch (value) {
+    case 'executable':
+      return nativeExecutable
+    case 'shared-library':
+      return nativeSharedLibrary
+    case 'static-library':
+      return nativeStaticLibrary
+    default:
+      return undefined
+  }
+}
+
+/** Encodes a project-selectable artifact kind for a manifest or diagnostic. */
+export const manifestSpelling = (self: ArtifactKind): ManifestSpelling | undefined => {
+  switch (self) {
+    case 'NativeExecutable':
+      return 'executable'
+    case 'NativeSharedLibrary':
+      return 'shared-library'
+    case 'NativeStaticLibrary':
+      return 'static-library'
+    case 'WebAssemblyModule':
+      return undefined
+  }
+}
+
+/** Whether an artifact is a loadable or linkable native library rather than a process. */
+export const isLibrary = (
+  self: ArtifactKind,
+): self is 'NativeSharedLibrary' | 'NativeStaticLibrary' =>
+  self === 'NativeSharedLibrary' || self === 'NativeStaticLibrary'
+
+/** Whether the selected target can carry this artifact kind. */
+export const supports = (self: ArtifactKind, target: Target.Target): boolean =>
+  self === 'WebAssemblyModule' ? target.kind === 'WebAssembly' : target.kind === 'Native'
+
+/** The target-conventional durable filename for one package artifact. */
+export const fileName = (
+  self: ArtifactKind,
+  packageName: string,
+  target: Target.Target,
+): string => {
+  switch (self) {
+    case 'NativeExecutable':
+      return packageName
+    case 'NativeSharedLibrary':
+      return target.id === 'aarch64-apple-darwin'
+        ? `lib${packageName}.dylib`
+        : `lib${packageName}.so`
+    case 'NativeStaticLibrary':
+      return `lib${packageName}.a`
+    case 'WebAssemblyModule':
+      return `${packageName}.wasm`
+  }
+}
+
+/** Deterministic cache/debug encoding. */
+export const encode = (self: ArtifactKind): string => self

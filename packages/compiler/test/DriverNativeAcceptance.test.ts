@@ -1,12 +1,14 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { platform, tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
+import type * as ArtifactKind from '../src/ArtifactKind.js'
+import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -22,10 +24,12 @@ const defaultClang = (): string => {
 const configured = (name: string, fallback = ''): string =>
   Effect.runSync(Config.string(name).pipe(Config.withDefault(fallback)))
 const clang = configured('SILK_TEST_CLANG', defaultClang())
+const defaultLlvmAr = join(dirname(clang), 'llvm-ar')
 const toolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
   clang,
-  shimCache: NativeToolchain.makeShimCache(),
+  llvmAr: configured('SILK_TEST_LLVM_AR', existsSync(defaultLlvmAr) ? defaultLlvmAr : 'llvm-ar'),
+  runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
 })
 
 // UTF-8, not charCodeAt: corpus programs may carry non-ASCII literals, and for ASCII sources the
@@ -54,7 +58,12 @@ const compileSource = (
   name: string,
   text: string,
   imports?: Readonly<Record<string, string>>,
-  link: Pick<Driver.CompileRequest, 'nativeObjects' | 'nativeLibraries'> = {},
+  options: {
+    readonly artifactKind?: ArtifactKind.ArtifactKind
+    readonly packageName?: string
+    readonly nativeLinkInputs?: ReadonlyArray<NativeLinkInput.NativeLinkInput>
+    readonly cache?: boolean
+  } = {},
 ): Effect.Effect<Driver.Outcome, Driver.SourceResolutionFailed | NativeToolchain.ToolchainError> =>
   Driver.compile({
     compilation: {
@@ -62,8 +71,13 @@ const compileSource = (
     },
     toolchain,
     profile: 'release',
+    artifactKind: options.artifactKind ?? 'NativeExecutable',
+    packageName: options.packageName ?? 'compiler-test',
     destination: join(destinationRoot, name),
-    ...link,
+    ...(options.cache === undefined ? {} : { cache: options.cache }),
+    ...(options.nativeLinkInputs === undefined
+      ? {}
+      : { nativeLinkInputs: options.nativeLinkInputs }),
   }).pipe(
     Effect.provide(
       imports === undefined
@@ -105,6 +119,138 @@ const shardedCorpus =
     ? nativeCorpus
     : nativeCorpus.filter((_, index) => index % Number(shard[2]) === Number(shard[1]) - 1)
 
+const librarySource = `unsafe extern "C" fn abs(value: i32) -> i32
+fn helper(value: i32) -> i32 { return value + 1 }
+export "C" fn increment(value: i32) -> i32 { return unsafe abs(helper(value)) }
+export "C" static silk_abi_version: u32 = 1`
+
+const consumerSource = `#include "answer.h"
+int main(void) { return increment(40) + (int32_t)silk_abi_version; }
+`
+
+it.effect(
+  'builds loadable shared/static libraries with only C exports visible',
+  () =>
+    Effect.gen(function* () {
+      const sharedName = platform() === 'darwin' ? 'libsilk_answer.dylib' : 'libsilk_answer.so'
+      const shared = yield* compileSource(sharedName, librarySource, undefined, {
+        artifactKind: 'NativeSharedLibrary',
+        packageName: 'answer',
+        cache: true,
+      })
+      assert.strictEqual(shared._tag, 'Compiled')
+      if (shared._tag !== 'Compiled') return
+      assert.deepStrictEqual(
+        shared.foreignExports.map((export_) => export_.symbol),
+        ['increment'],
+      )
+      assert.deepStrictEqual(shared.foreignStatics, [
+        { symbol: 'silk_abi_version', type: 'u32', direction: 'Export' },
+      ])
+      assert.deepStrictEqual(
+        shared.foreignImports.map((import_) => import_.symbol),
+        ['abs'],
+      )
+      assert.deepStrictEqual(shared.libraryInterface, {
+        _tag: 'LibraryInterfaceArtifacts',
+        cHeader: join(destinationRoot, 'answer.h'),
+        abiManifest: join(destinationRoot, 'answer.abi.json'),
+      })
+      assert.strictEqual('termination' in shared, false)
+      const interfacePhase = shared.report.find((entry) => entry.phase === 'library-interface')
+      assert.deepStrictEqual(
+        interfacePhase === undefined
+          ? undefined
+          : { inputs: interfacePhase.inputs, outputs: interfacePhase.outputs },
+        { inputs: 3, outputs: 2 },
+      )
+      const firstHeader = readFileSync(join(destinationRoot, 'answer.h'))
+      const firstManifest = readFileSync(join(destinationRoot, 'answer.abi.json'))
+
+      const symbolDump =
+        platform() === 'darwin'
+          ? spawnSync('nm', ['-gU', shared.path], { encoding: 'utf8' })
+          : spawnSync('nm', ['-D', '--defined-only', shared.path], { encoding: 'utf8' })
+      assert.strictEqual(symbolDump.status, 0, symbolDump.stderr)
+      const visible = symbolDump.stdout
+        .split('\n')
+        .map((line) => line.trim().split(/\s+/).at(-1) ?? '')
+        .filter((symbol) => symbol.length > 0)
+        .map((symbol) => (platform() === 'darwin' ? symbol.replace(/^_/, '') : symbol))
+      assert.include(visible, 'increment')
+      assert.include(visible, 'silk_abi_version')
+      assert.deepStrictEqual(
+        visible.filter((symbol) => symbol.startsWith('silk_') && symbol !== 'silk_abi_version'),
+        [],
+      )
+
+      const consumerPath = join(destinationRoot, 'library-consumer.c')
+      const sharedExecutable = join(destinationRoot, 'shared-consumer')
+      writeFileSync(consumerPath, consumerSource)
+      const sharedCompile = spawnSync(
+        clang,
+        [
+          '-I',
+          destinationRoot,
+          consumerPath,
+          shared.path,
+          `-Wl,-rpath,${destinationRoot}`,
+          '-o',
+          sharedExecutable,
+        ],
+        { encoding: 'utf8' },
+      )
+      assert.strictEqual(sharedCompile.status, 0, sharedCompile.stderr)
+      assert.strictEqual(spawnSync(sharedExecutable).status, 42)
+
+      rmSync(join(destinationRoot, 'answer.h'))
+      rmSync(join(destinationRoot, 'answer.abi.json'))
+      const cachedShared = yield* compileSource(sharedName, librarySource, undefined, {
+        artifactKind: 'NativeSharedLibrary',
+        packageName: 'answer',
+        cache: true,
+      })
+      assert.strictEqual(cachedShared._tag, 'Compiled')
+      if (cachedShared._tag !== 'Compiled') return
+      assert.include(
+        cachedShared.report.map((entry) => entry.phase),
+        'backend-cache',
+      )
+      assert.include(
+        cachedShared.report.map((entry) => entry.phase),
+        'artifact-cache',
+      )
+      assert.deepStrictEqual(readFileSync(join(destinationRoot, 'answer.h')), firstHeader)
+      assert.deepStrictEqual(readFileSync(join(destinationRoot, 'answer.abi.json')), firstManifest)
+
+      const firstArchive = yield* compileSource(
+        'libsilk_answer-first.a',
+        librarySource,
+        undefined,
+        {
+          artifactKind: 'NativeStaticLibrary',
+          packageName: 'answer',
+          cache: false,
+        },
+      )
+      assert.strictEqual(firstArchive._tag, 'Compiled')
+      if (firstArchive._tag !== 'Compiled') return
+      assert.deepStrictEqual(firstArchive.libraryInterface, shared.libraryInterface)
+      assert.deepStrictEqual(readFileSync(join(destinationRoot, 'answer.h')), firstHeader)
+      assert.deepStrictEqual(readFileSync(join(destinationRoot, 'answer.abi.json')), firstManifest)
+
+      const staticExecutable = join(destinationRoot, 'static-consumer')
+      const staticCompile = spawnSync(
+        clang,
+        ['-I', destinationRoot, consumerPath, firstArchive.path, '-lm', '-o', staticExecutable],
+        { encoding: 'utf8' },
+      )
+      assert.strictEqual(staticCompile.status, 0, staticCompile.stderr)
+      assert.strictEqual(spawnSync(staticExecutable).status, 42)
+    }),
+  20_000,
+)
+
 it.each(shardedCorpus)(
   'runs the native corpus case $name',
   async (program) => {
@@ -120,7 +266,7 @@ it.each(shardedCorpus)(
       )
       if (snapshot.mir._tag !== 'Available') return
       const interpreted = Analysis.evaluate(snapshot)
-      const nativeObjects =
+      const compiledObjects =
         program.nativeCSources === undefined
           ? []
           : yield* compileCSources(`corpus-${program.name}`, program.nativeCSources)
@@ -128,7 +274,14 @@ it.each(shardedCorpus)(
         `corpus-${program.name}`,
         program.nativeSource ?? program.source,
         program.nativeImports,
-        { nativeObjects, nativeLibraries: program.nativeLibraries ?? [] },
+        {
+          nativeLinkInputs: [
+            ...compiledObjects.map(NativeLinkInput.object),
+            ...(program.nativeDynamicLibraries ?? []).map((name) =>
+              NativeLinkInput.library(name, 'Dynamic'),
+            ),
+          ],
+        },
       )
 
       if (program.expected._tag === 'UnavailableEntry') {
@@ -148,7 +301,11 @@ it.each(shardedCorpus)(
       }
 
       if (outcome._tag === 'Rejected') {
-        assert.strictEqual(program.expected._tag, 'Trap', program.name)
+        assert.strictEqual(
+          program.expected._tag,
+          'Trap',
+          `${program.name}: ${outcome.diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`).join('; ')}`,
+        )
         assert.strictEqual(outcome.diagnostics.length > 0, true, program.name)
         return
       }

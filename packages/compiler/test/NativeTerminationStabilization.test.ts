@@ -29,7 +29,11 @@ const defaultClang = (): string => {
 const clang = Effect.runSync(
   Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
 )
-const toolchain: NativeToolchain.Toolchain = Object.freeze({ _tag: 'Toolchain', clang })
+const toolchain: NativeToolchain.Toolchain = Object.freeze({
+  _tag: 'Toolchain',
+  clang,
+  llvmAr: 'llvm-ar',
+})
 const encode = (value: string): Uint8Array => new TextEncoder().encode(value)
 const module = 'memory/driver'
 
@@ -62,6 +66,7 @@ const compileAndRun = Effect.fnUntraced(function* (
     compilation: { root: SourceFile.make(module, encode(source)) },
     toolchain,
     profile: 'release',
+    artifactKind: 'NativeExecutable',
     destination: join(destinationRoot, name),
   }).pipe(Effect.provide(resolver))
   let detail: string = compiled._tag

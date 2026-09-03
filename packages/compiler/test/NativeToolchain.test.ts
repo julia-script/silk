@@ -16,6 +16,7 @@ import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as Analysis from '../src/Analysis.js'
 import * as CoroutineRuntime from '../src/CoroutineRuntime.js'
+import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as Target from '../src/Target.js'
 import * as Termination from '../src/Termination.js'
@@ -30,7 +31,11 @@ const defaultClang = (): string => {
 const clang = Effect.runSync(
   Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
 )
-const toolchain: NativeToolchain.Toolchain = Object.freeze({ _tag: 'Toolchain', clang })
+const toolchain: NativeToolchain.Toolchain = Object.freeze({
+  _tag: 'Toolchain',
+  clang,
+  llvmAr: 'llvm-ar',
+})
 
 const testRoot = mkdtempSync(join(tmpdir(), 'silk-native-boundary-test-'))
 afterAll(() => {
@@ -50,6 +55,83 @@ const termination = (...identities: ReadonlyArray<string>): Termination.Contract
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const setUint16LittleEndian = (bytes: Uint8Array, offset: number, value: number): void => {
+  bytes[offset] = value & 0xff
+  bytes[offset + 1] = (value >>> 8) & 0xff
+}
+
+const setUint32LittleEndian = (bytes: Uint8Array, offset: number, value: number): void => {
+  setUint16LittleEndian(bytes, offset, value & 0xffff)
+  setUint16LittleEndian(bytes, offset + 2, value >>> 16)
+}
+
+const machOImage = (fileType: 2 | 6): Uint8Array => {
+  const bytes = new Uint8Array(32)
+  bytes.set([0xcf, 0xfa, 0xed, 0xfe])
+  setUint32LittleEndian(bytes, 4, 0x0100_000c)
+  setUint32LittleEndian(bytes, 12, fileType)
+  return bytes
+}
+
+const elfImage = (machine: 62 | 183, fileType: 2 | 3, hasInterpreter = false): Uint8Array => {
+  const bytes = new Uint8Array(fileType === 3 ? 68 : 64)
+  bytes.set([0x7f, 0x45, 0x4c, 0x46, 2, 1])
+  setUint16LittleEndian(bytes, 16, fileType)
+  setUint16LittleEndian(bytes, 18, machine)
+  if (fileType === 3) {
+    setUint32LittleEndian(bytes, 32, 64)
+    setUint16LittleEndian(bytes, 54, 4)
+    setUint16LittleEndian(bytes, 56, 1)
+    setUint32LittleEndian(bytes, 64, hasInterpreter ? 3 : 1)
+  }
+  return bytes
+}
+
+const nativeObjectFor = (target: Target.Target): Uint8Array => {
+  switch (target.id) {
+    case 'aarch64-apple-darwin':
+      return machOImage(2)
+    case 'aarch64-unknown-linux-gnu':
+      return elfImage(183, 2)
+    case 'x86_64-unknown-linux-gnu':
+      return elfImage(62, 2)
+    case 'wasm32-unknown-unknown':
+      return assert.fail('WebAssembly has no native object container')
+  }
+}
+
+const staticArchive = (...objects: ReadonlyArray<Uint8Array>): Uint8Array => {
+  const memberLength = (object: Uint8Array): number => 60 + object.length + (object.length % 2)
+  const bytes = new Uint8Array(
+    8 + objects.reduce((length, object) => length + memberLength(object), 0),
+  )
+  bytes.set(ascii('!<arch>\n'))
+  let offset = 8
+  for (const object of objects) {
+    const header = new Uint8Array(60)
+    header.fill(0x20)
+    header.set(ascii('member.o/       '), 0)
+    header.set(ascii(String(object.length).padEnd(10, ' ')), 48)
+    header.set([0x60, 0x0a], 58)
+    bytes.set(header, offset)
+    bytes.set(object, offset + header.length)
+    offset += memberLength(object)
+  }
+  return bytes
+}
+
+const malformedExtendedNameArchive = (nameLength: number): Uint8Array => {
+  const bytes = new Uint8Array(8 + 60 + nameLength)
+  bytes.set(ascii('!<arch>\n'))
+  const header = new Uint8Array(60)
+  header.fill(0x20)
+  header.set(ascii(`#1/${String(nameLength)}`), 0)
+  header.set(ascii(String(nameLength).padEnd(10, ' ')), 48)
+  header.set([0x60, 0x0a], 58)
+  bytes.set(header, 8)
+  return bytes
+}
 
 const artifactFor = Effect.fnUntraced(function* (
   target: Target.Target,
@@ -75,6 +157,7 @@ it('plans fixed profile arguments against the canonical target id', () => {
     '-x',
     'ir',
     'in.bc',
+    '-fPIC',
     '-O0',
     '-g',
     '-o',
@@ -86,21 +169,37 @@ it('plans fixed profile arguments against the canonical target id', () => {
     '-x',
     'ir',
     'in.bc',
+    '-fPIC',
     '-O2',
     '-o',
     'out.o',
   ])
-  const link = ToolchainPlan.linkCommand(
-    clang,
+  const runtime = ToolchainPlan.cObjectCommand(clang, target, 'silk_runtime.c', 'silk_runtime.o')
+  assert.deepEqual(runtime.arguments, [
+    '--target=aarch64-apple-darwin',
+    '-c',
+    '-x',
+    'c',
+    'silk_runtime.c',
+    '-O2',
+    '-fPIC',
+    '-fvisibility=hidden',
+    '-o',
+    'silk_runtime.o',
+  ])
+  const link = ToolchainPlan.nativeCommand(
+    { clang, llvmAr: 'llvm-ar' },
+    'NativeExecutable',
     target,
-    ['program.o', 'silk_shim.o', 'extra.o'],
-    ['m', 'c'],
+    ['program.o', 'silk_runtime.o', 'extra.o'],
+    [NativeLinkInput.library('m', 'Dynamic'), NativeLinkInput.library('c', 'Dynamic')],
     'out',
   )
+  if (link._tag !== 'PlannedCommand') return assert.fail('expected executable link plan')
   assert.deepEqual(link.arguments, [
     '--target=aarch64-apple-darwin',
     'program.o',
-    'silk_shim.o',
+    'silk_runtime.o',
     'extra.o',
     '-lm',
     '-lc',
@@ -109,17 +208,150 @@ it('plans fixed profile arguments against the canonical target id', () => {
   ])
 })
 
-it('generates effect-reporting shims from escaped identities with closed status handling', () => {
-  const source = ToolchainPlan.shimSource(termination('module.Error"\\name\u00e9'))
+it('plans shared links and deterministic static archives from structured inputs', () => {
+  const shared = ToolchainPlan.nativeCommand(
+    { clang, llvmAr: 'llvm-ar' },
+    'NativeSharedLibrary',
+    Target.aarch64AppleDarwin,
+    ['program.o', 'runtime.o'],
+    [
+      NativeLinkInput.searchPath('/sdk/lib'),
+      NativeLinkInput.library('z', 'Dynamic'),
+      NativeLinkInput.object('/objects/extra.o'),
+      NativeLinkInput.staticArchive('/archives/liblocal.a'),
+      NativeLinkInput.framework('CoreFoundation'),
+    ],
+    'libprogram.dylib',
+  )
+  if (shared._tag !== 'PlannedCommand') return assert.fail('expected shared link plan')
+  assert.deepStrictEqual(shared.arguments, [
+    '--target=aarch64-apple-darwin',
+    '-dynamiclib',
+    '-Wl,-install_name,@rpath/libprogram.dylib',
+    'program.o',
+    'runtime.o',
+    '-L/sdk/lib',
+    '-lz',
+    '/objects/extra.o',
+    '/archives/liblocal.a',
+    '-framework',
+    'CoreFoundation',
+    '-o',
+    'libprogram.dylib',
+  ])
+
+  const archive = ToolchainPlan.nativeCommand(
+    { clang, llvmAr: '/tool/llvm-ar' },
+    'NativeStaticLibrary',
+    Target.aarch64AppleDarwin,
+    ['program.o', 'runtime.o'],
+    [NativeLinkInput.object('/objects/extra.o')],
+    'libprogram.a',
+  )
+  if (archive._tag !== 'PlannedCommand') return assert.fail('expected archive plan')
+  assert.strictEqual(archive.command, '/tool/llvm-ar')
+  assert.deepStrictEqual(archive.arguments, [
+    'rcsD',
+    'libprogram.a',
+    'program.o',
+    'runtime.o',
+    '/objects/extra.o',
+  ])
+
+  const linuxStatic = ToolchainPlan.nativeCommand(
+    { clang, llvmAr: 'llvm-ar' },
+    'NativeSharedLibrary',
+    Target.x8664UnknownLinuxGnu,
+    [],
+    [NativeLinkInput.library('answer', 'Static')],
+    'libprogram.so',
+  )
+  if (linuxStatic._tag !== 'PlannedCommand') return assert.fail('expected Linux link plan')
+  assert.deepStrictEqual(linuxStatic.arguments, [
+    '--target=x86_64-unknown-linux-gnu',
+    '-shared',
+    '-Wl,-Bstatic',
+    '-lanswer',
+    '-Wl,-Bdynamic',
+    '-o',
+    'libprogram.so',
+  ])
+})
+
+it('rejects target- and artifact-incompatible structured link inputs', () => {
+  const staticLibrary = NativeLinkInput.library('answer', 'Static')
+  const framework = NativeLinkInput.framework('CoreFoundation')
+  const searchPath = NativeLinkInput.searchPath('/sdk/lib')
+  const darwinStatic = ToolchainPlan.nativeCommand(
+    { clang, llvmAr: 'llvm-ar' },
+    'NativeSharedLibrary',
+    Target.aarch64AppleDarwin,
+    [],
+    [staticLibrary],
+    'libanswer.dylib',
+  )
+  const linuxFramework = ToolchainPlan.nativeCommand(
+    { clang, llvmAr: 'llvm-ar' },
+    'NativeExecutable',
+    Target.x8664UnknownLinuxGnu,
+    [],
+    [framework],
+    'answer',
+  )
+  const archiveSearch = ToolchainPlan.nativeCommand(
+    { clang, llvmAr: 'llvm-ar' },
+    'NativeStaticLibrary',
+    Target.aarch64AppleDarwin,
+    [],
+    [searchPath],
+    'libanswer.a',
+  )
+  if (darwinStatic._tag !== 'UnsupportedNativePlan') return assert.fail('expected rejection')
+  assert.strictEqual(darwinStatic.artifactKind, 'NativeSharedLibrary')
+  assert.deepStrictEqual(darwinStatic.target, Target.aarch64AppleDarwin)
+  assert.deepStrictEqual(darwinStatic.input, staticLibrary)
+  assert.strictEqual(darwinStatic.reason, 'StaticLibraryTarget')
+
+  if (linuxFramework._tag !== 'UnsupportedNativePlan') return assert.fail('expected rejection')
+  assert.strictEqual(linuxFramework.artifactKind, 'NativeExecutable')
+  assert.deepStrictEqual(linuxFramework.target, Target.x8664UnknownLinuxGnu)
+  assert.deepStrictEqual(linuxFramework.input, framework)
+  assert.strictEqual(linuxFramework.reason, 'FrameworkTarget')
+
+  if (archiveSearch._tag !== 'UnsupportedNativePlan') return assert.fail('expected rejection')
+  assert.strictEqual(archiveSearch.artifactKind, 'NativeStaticLibrary')
+  assert.deepStrictEqual(archiveSearch.target, Target.aarch64AppleDarwin)
+  assert.deepStrictEqual(archiveSearch.input, searchPath)
+  assert.strictEqual(archiveSearch.reason, 'StaticArchiveInput')
+
+  const relativeObject = NativeLinkInput.object('-Wl,--export-dynamic')
+  const unsafePath = ToolchainPlan.nativeCommand(
+    { clang, llvmAr: 'llvm-ar' },
+    'NativeExecutable',
+    Target.x8664UnknownLinuxGnu,
+    [],
+    [relativeObject],
+    '/tmp/out',
+  )
+  assert.strictEqual(unsafePath._tag, 'UnsupportedNativePlan')
+  if (unsafePath._tag !== 'UnsupportedNativePlan') return
+  assert.strictEqual(unsafePath.artifactKind, 'NativeExecutable')
+  assert.strictEqual(unsafePath.target, Target.x8664UnknownLinuxGnu)
+  assert.strictEqual(unsafePath.input, relativeObject)
+  assert.strictEqual(unsafePath.reason, 'PathNotAbsolute')
+})
+
+it('generates effect-reporting runtime source from escaped identities with closed status handling', () => {
+  const source = ToolchainPlan.executableSource(termination('module.Error"\\nameé'))
   assert.include(source, 'identity = "module.Error\\"\\\\name\\303\\251";')
-  assert.notInclude(source, 'module.Error"\\name')
+  assert.notInclude(source, 'Error: module.Error"\\name')
   assert.include(source, 'silk_write_text("unhandled error: ")')
   assert.include(source, 'default:\n      return 2;')
   assert.include(source, 'return ok ? 1 : 2;')
 })
 
 it('reports trap sites and failure paths only when the artifact declares them', () => {
-  const bare = ToolchainPlan.shimSource(termination('module.Error'))
+  const bare = ToolchainPlan.executableSource(termination('module.Error'))
   assert.notInclude(bare, 'silk_trap_report_v1')
   assert.notInclude(bare, 'silk_write_path')
   const contract: Termination.Contract = Object.freeze({
@@ -134,7 +366,7 @@ it('reports trap sites and failure paths only when the artifact declares them', 
       ]),
     }),
   })
-  const full = ToolchainPlan.shimSource(contract)
+  const full = ToolchainPlan.executableSource(contract)
   assert.include(full, 'void silk_trap_report_v1(int site)')
   assert.include(full, '"fatal trap: "')
   assert.include(full, '"module.calc (module:8:10)"')
@@ -144,11 +376,22 @@ it('reports trap sites and failure paths only when the artifact declares them', 
 })
 
 it('includes coroutine storage only when suspension requests it', () => {
-  const direct = ToolchainPlan.shimSource(termination())
-  const suspended = ToolchainPlan.shimSource(termination(), CoroutineRuntime.symbols)
+  const direct = ToolchainPlan.executableSource(termination())
+  const suspended = ToolchainPlan.executableSource(termination(), CoroutineRuntime.symbols)
   assert.notInclude(direct, CoroutineRuntime.pushSymbol)
   assert.include(suspended, CoroutineRuntime.pushSymbol)
   assert.include(suspended, CoroutineRuntime.popSymbol)
+})
+
+it('separates a process entry from library-only hidden runtime source', () => {
+  const executable = ToolchainPlan.executableSource(termination(), CoroutineRuntime.symbols)
+  const library = ToolchainPlan.runtimeSource(CoroutineRuntime.symbols)
+  assert.include(executable, 'int main(void)')
+  assert.include(executable, 'extern int silk_main(void)')
+  assert.notInclude(library, 'int main(')
+  assert.notInclude(library, 'silk_main')
+  assert.include(library, CoroutineRuntime.pushSymbol)
+  assert.include(library, CoroutineRuntime.popSymbol)
 })
 
 it.effect('includes the selected native clock runtime in the artifact cache identity', () =>
@@ -156,7 +399,7 @@ it.effect('includes the selected native clock runtime in the artifact cache iden
     const target = yield* NativeToolchain.hostTarget()
     const selected = [
       [],
-      ['silk_os_system_clock_now_v1'],
+      ['silk_os_monotonic_clock_now_v1'],
       ['silk_os_monotonic_clock_now_v1', 'silk_os_monotonic_clock_wait_until_v1'],
     ] as const
     const keys = []
@@ -168,11 +411,91 @@ it.effect('includes the selected native clock runtime in the artifact cache iden
           target,
           'release',
           Uint8Array.from([0, 1, 2, 3]),
-          ToolchainPlan.shimSource(termination(), symbols),
+          ToolchainPlan.executableSource(termination(), symbols),
+          join(testRoot, 'clock-runtime-cache'),
         ),
       )
     }
     assert.strictEqual(new Set(keys).size, selected.length)
+  }),
+)
+
+it.effect('separates every final artifact kind in cache identity and extension', () =>
+  Effect.gen(function* () {
+    const target = yield* NativeToolchain.hostTarget()
+    const bitcode = Uint8Array.from([0, 1, 2, 3])
+    const kinds = ['NativeExecutable', 'NativeSharedLibrary', 'NativeStaticLibrary'] as const
+    const keys = []
+    for (const kind of kinds) {
+      keys.push(
+        yield* NativeToolchain.artifactCacheKey(
+          toolchain,
+          kind,
+          target,
+          'release',
+          bitcode,
+          kind === 'NativeExecutable'
+            ? ToolchainPlan.executableSource(termination())
+            : ToolchainPlan.runtimeSource(),
+          join(testRoot, 'artifact'),
+        ),
+      )
+    }
+    assert.strictEqual(new Set(keys).size, kinds.length)
+    assert.match(keys[0] ?? '', /\.bin$/)
+    assert.match(keys[1] ?? '', /\.(dylib|so)$/)
+    assert.match(keys[2] ?? '', /\.a$/)
+  }),
+)
+
+it.effect('separates Darwin shared-library install names in one artifact cache', () =>
+  Effect.gen(function* () {
+    const cache = NativeToolchain.makeDiskArtifactCache(join(testRoot, 'darwin-install-cache'))
+    const keyFor = (name: string) =>
+      NativeToolchain.artifactCacheKey(
+        toolchain,
+        'NativeSharedLibrary',
+        Target.aarch64AppleDarwin,
+        'release',
+        Uint8Array.from([0, 1, 2, 3]),
+        ToolchainPlan.runtimeSource(),
+        join(testRoot, name),
+      )
+    const foo = yield* keyFor('libfoo.dylib')
+    const bar = yield* keyFor('libbar.dylib')
+    assert.notStrictEqual(foo, bar)
+    yield* NativeToolchain.writeArtifactCache(cache, foo, Uint8Array.from([42]))
+    assert.strictEqual(yield* NativeToolchain.readArtifactCache(cache, bar), undefined)
+  }),
+)
+
+it.effect('authenticates artifact-cache payloads and rejects body or trailing corruption', () =>
+  Effect.gen(function* () {
+    let stored: Uint8Array | undefined
+    const cache: NativeToolchain.ArtifactCache = Object.freeze({
+      _tag: 'ArtifactCache',
+      get: () => Effect.succeed(stored),
+      set: (_key: string, bytes: Uint8Array) =>
+        Effect.sync(() => {
+          stored = Uint8Array.from(bytes)
+        }),
+    })
+    const payload = Uint8Array.from([1, 2, 3, 4])
+    yield* NativeToolchain.writeArtifactCache(cache, 'entry', payload)
+    assert.deepStrictEqual(yield* NativeToolchain.readArtifactCache(cache, 'entry'), payload)
+    assert.strictEqual(yield* NativeToolchain.readArtifactCache(cache, 'other-entry'), undefined)
+    if (stored === undefined) return assert.fail('expected encoded cache entry')
+    const encoded = stored
+
+    const corrupted = Uint8Array.from(encoded)
+    corrupted[corrupted.length - 1] = (corrupted[corrupted.length - 1] ?? 0) ^ 0xff
+    stored = corrupted
+    assert.strictEqual(yield* NativeToolchain.readArtifactCache(cache, 'entry'), undefined)
+
+    const appended = new Uint8Array(encoded.length + 1)
+    appended.set(encoded)
+    stored = appended
+    assert.strictEqual(yield* NativeToolchain.readArtifactCache(cache, 'entry'), undefined)
   }),
 )
 
@@ -183,26 +506,38 @@ it.effect('covers request-supplied object bytes and the ordered library list in 
     const objectB = join(testRoot, 'key-b.o')
     writeFileSync(objectA, Uint8Array.from([1, 2, 3]))
     writeFileSync(objectB, Uint8Array.from([1, 2, 4]))
-    const keyFor = (nativeObjects: ReadonlyArray<string>, nativeLibraries: ReadonlyArray<string>) =>
+    const keyFor = (inputs: ReadonlyArray<NativeLinkInput.NativeLinkInput>) =>
       NativeToolchain.artifactCacheKey(
         toolchain,
         'NativeExecutable',
         target,
         'release',
         Uint8Array.from([0, 1, 2, 3]),
-        ToolchainPlan.shimSource(termination()),
-        { nativeObjects, nativeLibraries },
+        ToolchainPlan.executableSource(termination()),
+        join(testRoot, 'native-input-cache'),
+        inputs,
       )
     const keys = [
-      yield* keyFor([], []),
-      yield* keyFor([objectA], []),
-      yield* keyFor([objectB], []),
-      yield* keyFor([objectA], ['c']),
-      yield* keyFor([objectA], ['c', 'm']),
-      yield* keyFor([objectA], ['m', 'c']),
+      yield* keyFor([]),
+      yield* keyFor([NativeLinkInput.object(objectA)]),
+      yield* keyFor([NativeLinkInput.object(objectB)]),
+      yield* keyFor([NativeLinkInput.object(objectA), NativeLinkInput.library('c', 'Dynamic')]),
+      yield* keyFor([
+        NativeLinkInput.object(objectA),
+        NativeLinkInput.library('c', 'Dynamic'),
+        NativeLinkInput.library('m', 'Dynamic'),
+      ]),
+      yield* keyFor([
+        NativeLinkInput.object(objectA),
+        NativeLinkInput.library('m', 'Dynamic'),
+        NativeLinkInput.library('c', 'Dynamic'),
+      ]),
     ]
     assert.strictEqual(new Set(keys).size, keys.length)
-    assert.strictEqual(yield* keyFor([objectA], ['c']), keys[3])
+    assert.strictEqual(
+      yield* keyFor([NativeLinkInput.object(objectA), NativeLinkInput.library('c', 'Dynamic')]),
+      keys[3],
+    )
   }),
 )
 
@@ -215,7 +550,7 @@ it.effect('yields a typed spawn failure with command, stage, and arbitrary cause
       NativeToolchain.withBuildScope('spawn-failure', (scope) => {
         scopeRoot = scope.root
         return NativeToolchain.emitObject(
-          { _tag: 'Toolchain', clang: '/nonexistent/clang' },
+          { _tag: 'Toolchain', clang: '/nonexistent/clang', llvmAr: 'llvm-ar' },
           scope,
           artifact,
           target,
@@ -235,18 +570,18 @@ it.effect('yields a typed spawn failure with command, stage, and arbitrary cause
   }),
 )
 
-it.effect('reuses explicitly shared shim bytes across cleaned build scopes', () =>
+it.effect('reuses explicitly shared runtime bytes across cleaned build scopes', () =>
   Effect.gen(function* () {
     const target = yield* NativeToolchain.hostTarget()
-    const cache = NativeToolchain.makeShimCache()
-    const cachedToolchain = Object.freeze({ ...toolchain, shimCache: cache })
-    yield* NativeToolchain.withBuildScope('shim-miss', (scope) =>
-      NativeToolchain.compileShim(cachedToolchain, scope, target, termination()),
+    const cache = NativeToolchain.makeRuntimeObjectCache()
+    const cachedToolchain = Object.freeze({ ...toolchain, runtimeObjectCache: cache })
+    yield* NativeToolchain.withBuildScope('runtime-miss', (scope) =>
+      NativeToolchain.compileExecutableRuntime(cachedToolchain, scope, target, termination()),
     )
-    yield* NativeToolchain.withBuildScope('shim-hit', (scope) =>
-      NativeToolchain.compileShim(cachedToolchain, scope, target, termination()),
+    yield* NativeToolchain.withBuildScope('runtime-hit', (scope) =>
+      NativeToolchain.compileExecutableRuntime(cachedToolchain, scope, target, termination()),
     )
-    assert.deepEqual(NativeToolchain.shimCacheStats(cache), {
+    assert.deepEqual(NativeToolchain.runtimeObjectCacheStats(cache), {
       entries: 1,
       hits: 1,
       misses: 1,
@@ -381,6 +716,55 @@ it.effect('failed rename removes its temporary sibling and preserves the destina
   }),
 )
 
+it.effect('commits exact native-library interface siblings beside the primary artifact', () =>
+  Effect.gen(function* () {
+    const destination = join(testRoot, 'interface-success', 'libanswer.a')
+    const primary = yield* NativeToolchain.atomicCommit(destination, ascii('archive'))
+    const companions = yield* NativeToolchain.commitLibraryInterface(
+      primary,
+      destination,
+      'answer',
+      ascii('header\n'),
+      ascii('{"silkForeignAbi":1}\n'),
+    )
+    assert.deepStrictEqual(companions, {
+      _tag: 'LibraryInterfaceArtifacts',
+      cHeader: join(testRoot, 'interface-success', 'answer.h'),
+      abiManifest: join(testRoot, 'interface-success', 'answer.abi.json'),
+    })
+    assert.deepStrictEqual(readFileSync(companions.cHeader), ascii('header\n'))
+    assert.deepStrictEqual(readFileSync(companions.abiManifest), ascii('{"silkForeignAbi":1}\n'))
+  }),
+)
+
+it.effect('removes the primary and stale companions when manifest staging fails', () =>
+  Effect.gen(function* () {
+    const directory = join(testRoot, 'interface-failure')
+    const destination = join(directory, 'libanswer.a')
+    const primary = yield* NativeToolchain.atomicCommit(destination, ascii('archive'))
+    const header = join(directory, 'answer.h')
+    const manifest = join(directory, 'answer.abi.json')
+    writeFileSync(header, ascii('stale header\n'))
+    writeFileSync(manifest, ascii('{"stale":true}\n'))
+    const unstagedManifest = new Proxy(ascii('{}\n'), {})
+
+    const result = yield* Effect.result(
+      NativeToolchain.commitLibraryInterface(
+        primary,
+        destination,
+        'answer',
+        ascii('header\n'),
+        unstagedManifest,
+      ),
+    )
+
+    assert.strictEqual(result._tag, 'Failure')
+    assert.strictEqual(existsSync(primary), false)
+    assert.strictEqual(existsSync(header), false)
+    assert.strictEqual(existsSync(manifest), false)
+  }),
+)
+
 it.effect('retries throwing atomic cleanup and leaves no staged sibling', () =>
   Effect.gen(function* () {
     const destination = join(testRoot, 'occupied-cleanup-retry')
@@ -432,12 +816,12 @@ it.effect('falls back to Node cleanup when injected atomic cleanup keeps failing
   }),
 )
 
-it.effect('translates synchronously throwing shim-cache reads with cache-stage provenance', () =>
+it.effect('translates synchronously throwing runtime-cache reads with cache-stage provenance', () =>
   Effect.gen(function* () {
     const target = yield* NativeToolchain.hostTarget()
     const cause = Object.freeze({ injected: 'cache-read' })
-    const cache: NativeToolchain.ShimCache = Object.freeze({
-      _tag: 'ShimCache',
+    const cache: NativeToolchain.RuntimeObjectCache = Object.freeze({
+      _tag: 'RuntimeObjectCache',
       get: () => {
         throw cause
       },
@@ -446,8 +830,8 @@ it.effect('translates synchronously throwing shim-cache reads with cache-stage p
     })
     const result = yield* Effect.result(
       NativeToolchain.withBuildScope('cache-read-failure', (scope) =>
-        NativeToolchain.compileShim(
-          Object.freeze({ ...toolchain, shimCache: cache }),
+        NativeToolchain.compileExecutableRuntime(
+          Object.freeze({ ...toolchain, runtimeObjectCache: cache }),
           scope,
           target,
           termination(),
@@ -457,53 +841,168 @@ it.effect('translates synchronously throwing shim-cache reads with cache-stage p
     assert.strictEqual(result._tag, 'Failure')
     if (result._tag !== 'Failure') return
     assert.strictEqual(result.failure.stage, 'cache-read')
-    assert.strictEqual(result.failure.operation, 'NativeToolchain.ShimCache.get')
+    assert.strictEqual(result.failure.operation, 'NativeToolchain.RuntimeObjectCache.get')
     assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
     if (result.failure.reason._tag !== 'StorageFailed') return
     assert.strictEqual(result.failure.reason.cause, cause)
   }),
 )
 
-it.effect('translates synchronously throwing shim-cache writes with cache-stage provenance', () =>
-  Effect.gen(function* () {
-    const target = yield* NativeToolchain.hostTarget()
-    const cause = Object.freeze({ injected: 'cache-write' })
-    const cache: NativeToolchain.ShimCache = Object.freeze({
-      _tag: 'ShimCache',
-      get: () => Effect.as(Effect.void, undefined),
-      set: () => {
-        throw cause
-      },
-      stats: () => Object.freeze({ entries: 0, hits: 0, misses: 0 }),
-    })
-    const result = yield* Effect.result(
-      NativeToolchain.withBuildScope('cache-write-failure', (scope) =>
-        NativeToolchain.compileShim(
-          Object.freeze({ ...toolchain, shimCache: cache }),
-          scope,
-          target,
-          termination(),
+it.effect(
+  'translates synchronously throwing runtime-cache writes with cache-stage provenance',
+  () =>
+    Effect.gen(function* () {
+      const target = yield* NativeToolchain.hostTarget()
+      const cause = Object.freeze({ injected: 'cache-write' })
+      const cache: NativeToolchain.RuntimeObjectCache = Object.freeze({
+        _tag: 'RuntimeObjectCache',
+        get: () => Effect.as(Effect.void, undefined),
+        set: () => {
+          throw cause
+        },
+        stats: () => Object.freeze({ entries: 0, hits: 0, misses: 0 }),
+      })
+      const result = yield* Effect.result(
+        NativeToolchain.withBuildScope('cache-write-failure', (scope) =>
+          NativeToolchain.compileExecutableRuntime(
+            Object.freeze({ ...toolchain, runtimeObjectCache: cache }),
+            scope,
+            target,
+            termination(),
+          ),
         ),
-      ),
-    )
-    assert.strictEqual(result._tag, 'Failure')
-    if (result._tag !== 'Failure') return
-    assert.strictEqual(result.failure.stage, 'cache-write')
-    assert.strictEqual(result.failure.operation, 'NativeToolchain.ShimCache.set')
-    assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
-    if (result.failure.reason._tag !== 'StorageFailed') return
-    assert.strictEqual(result.failure.reason.cause, cause)
-  }),
+      )
+      assert.strictEqual(result._tag, 'Failure')
+      if (result._tag !== 'Failure') return
+      assert.strictEqual(result.failure.stage, 'cache-write')
+      assert.strictEqual(result.failure.operation, 'NativeToolchain.RuntimeObjectCache.set')
+      assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
+      if (result.failure.reason._tag !== 'StorageFailed') return
+      assert.strictEqual(result.failure.reason.cause, cause)
+    }),
 )
 
-it.effect('returns committed bytes in memory and makes cached native artifacts executable', () =>
+it('classifies cached artifacts by container, kind, and every canonical target', () => {
+  const fixtures: ReadonlyArray<{
+    readonly kind: NativeToolchain.FinalArtifact['kind']
+    readonly target: Target.Target
+    readonly bytes: Uint8Array
+  }> = [
+    {
+      kind: 'NativeExecutable',
+      target: Target.aarch64AppleDarwin,
+      bytes: machOImage(2),
+    },
+    {
+      kind: 'NativeSharedLibrary',
+      target: Target.aarch64AppleDarwin,
+      bytes: machOImage(6),
+    },
+    {
+      kind: 'NativeExecutable',
+      target: Target.aarch64UnknownLinuxGnu,
+      bytes: elfImage(183, 2),
+    },
+    {
+      kind: 'NativeExecutable',
+      target: Target.aarch64UnknownLinuxGnu,
+      bytes: elfImage(183, 3, true),
+    },
+    {
+      kind: 'NativeSharedLibrary',
+      target: Target.aarch64UnknownLinuxGnu,
+      bytes: elfImage(183, 3),
+    },
+    {
+      kind: 'NativeExecutable',
+      target: Target.x8664UnknownLinuxGnu,
+      bytes: elfImage(62, 2),
+    },
+    {
+      kind: 'NativeExecutable',
+      target: Target.x8664UnknownLinuxGnu,
+      bytes: elfImage(62, 3, true),
+    },
+    {
+      kind: 'NativeSharedLibrary',
+      target: Target.x8664UnknownLinuxGnu,
+      bytes: elfImage(62, 3),
+    },
+    ...Target.native.map((target) => ({
+      kind: 'NativeStaticLibrary' as const,
+      target,
+      bytes: staticArchive(nativeObjectFor(target)),
+    })),
+    {
+      kind: 'WebAssemblyModule',
+      target: Target.wasm32UnknownUnknown,
+      bytes: Uint8Array.from([0, 97, 115, 109, 1, 0, 0, 0]),
+    },
+  ]
+  const kinds: ReadonlyArray<NativeToolchain.FinalArtifact['kind']> = [
+    'NativeExecutable',
+    'NativeSharedLibrary',
+    'NativeStaticLibrary',
+    'WebAssemblyModule',
+  ]
+
+  for (const fixture of fixtures) {
+    for (const kind of kinds) {
+      for (const target of Target.all) {
+        assert.strictEqual(
+          NativeToolchain.isCachedArtifact(fixture.bytes, kind, target),
+          kind === fixture.kind && target.id === fixture.target.id,
+          `${fixture.kind}/${fixture.target.id} classified as ${kind}/${target.id}`,
+        )
+      }
+    }
+  }
+
+  for (const kind of kinds) {
+    for (const target of Target.all) {
+      assert.strictEqual(NativeToolchain.isCachedArtifact(new Uint8Array(), kind, target), false)
+      assert.strictEqual(
+        NativeToolchain.isCachedArtifact(Uint8Array.from([0x7f, 0x45, 0x4c, 0x46]), kind, target),
+        false,
+      )
+    }
+  }
+
+  const mixedArchive = staticArchive(machOImage(2), elfImage(62, 2))
+  assert.strictEqual(
+    NativeToolchain.isCachedArtifact(
+      mixedArchive,
+      'NativeStaticLibrary',
+      Target.aarch64AppleDarwin,
+    ),
+    false,
+  )
+  assert.strictEqual(
+    NativeToolchain.isCachedArtifact(
+      mixedArchive,
+      'NativeStaticLibrary',
+      Target.x8664UnknownLinuxGnu,
+    ),
+    false,
+  )
+  assert.strictEqual(
+    NativeToolchain.isCachedArtifact(
+      malformedExtendedNameArchive(200_000),
+      'NativeStaticLibrary',
+      Target.x8664UnknownLinuxGnu,
+    ),
+    false,
+  )
+})
+
+it.effect('returns validated cached WebAssembly bytes in memory', () =>
   Effect.gen(function* () {
-    const target = yield* NativeToolchain.hostTarget()
-    const destination = join(testRoot, 'cached-program')
-    const bytes = Uint8Array.from([0x7f, 0x45, 0x4c, 0x46])
+    const target = Target.wasm32UnknownUnknown
+    const destination = join(testRoot, 'cached-module.wasm')
+    const bytes = Uint8Array.from([0, 97, 115, 109, 1, 0, 0, 0])
     const committed = yield* NativeToolchain.commitCachedArtifact(
       bytes,
-      'NativeExecutable',
+      'WebAssemblyModule',
       target,
       destination,
     )
@@ -517,9 +1016,10 @@ it.effect('rejects a missing linker input in the typed link channel', () =>
     const target = yield* NativeToolchain.hostTarget()
     const result = yield* Effect.result(
       NativeToolchain.withBuildScope('missing-link-input', (scope) =>
-        NativeToolchain.ClangLinker.link(
+        NativeToolchain.NativeFinalizer.finalize(
           toolchain,
           scope,
+          'NativeExecutable',
           target,
           [
             Object.freeze({
@@ -542,8 +1042,107 @@ it.effect('rejects a missing linker input in the typed link channel', () =>
   }),
 )
 
+it.effect('rejects missing archive paths and unsupported inputs before spawning', () =>
+  Effect.gen(function* () {
+    const target = yield* NativeToolchain.hostTarget()
+    const missing = join(testRoot, 'missing-library.a')
+    const missingResult = yield* Effect.result(
+      NativeToolchain.withBuildScope('missing-archive-input', (scope) =>
+        NativeToolchain.NativeFinalizer.finalize(
+          toolchain,
+          scope,
+          'NativeSharedLibrary',
+          target,
+          [],
+          [NativeLinkInput.staticArchive(missing)],
+          join(testRoot, 'never-written-shared'),
+        ),
+      ),
+    )
+    assert.strictEqual(missingResult._tag, 'Failure')
+    if (missingResult._tag === 'Failure') {
+      assert.strictEqual(missingResult.failure.reason._tag, 'LinkFailed')
+      if (missingResult.failure.reason._tag === 'LinkFailed')
+        assert.include(missingResult.failure.reason.output, missing)
+    }
+
+    const unsupportedInput = NativeLinkInput.library('answer', 'Dynamic')
+    const neverToolchain: NativeToolchain.Toolchain = Object.freeze({
+      _tag: 'Toolchain',
+      clang: join(testRoot, 'missing-clang'),
+      llvmAr: join(testRoot, 'missing-llvm-ar'),
+    })
+    const unsupportedResult = yield* Effect.result(
+      NativeToolchain.withBuildScope('unsupported-archive-input', (scope) =>
+        NativeToolchain.NativeFinalizer.finalize(
+          neverToolchain,
+          scope,
+          'NativeStaticLibrary',
+          target,
+          [],
+          [unsupportedInput],
+          join(testRoot, 'never-written-archive'),
+        ),
+      ),
+    )
+    assert.strictEqual(unsupportedResult._tag, 'Failure')
+    if (unsupportedResult._tag !== 'Failure') return
+    assert.strictEqual(unsupportedResult.failure.reason._tag, 'UnsupportedPlan')
+    if (unsupportedResult.failure.reason._tag !== 'UnsupportedPlan') return
+    assert.strictEqual(unsupportedResult.failure.reason.plan.artifactKind, 'NativeStaticLibrary')
+    assert.deepStrictEqual(unsupportedResult.failure.reason.plan.target, target)
+    assert.deepStrictEqual(unsupportedResult.failure.reason.plan.input, unsupportedInput)
+    assert.strictEqual(unsupportedResult.failure.reason.plan.reason, 'StaticArchiveInput')
+  }),
+)
+
+it.effect('creates byte-identical deterministic archives from the same object input', () =>
+  Effect.gen(function* () {
+    const target = yield* NativeToolchain.hostTarget()
+    const firstDestination = join(testRoot, 'deterministic-first.a')
+    const secondDestination = join(testRoot, 'deterministic-second.a')
+    const artifacts = yield* NativeToolchain.withBuildScope('deterministic-archive', (scope) =>
+      Effect.gen(function* () {
+        const object = yield* NativeToolchain.writeArtifact(
+          scope,
+          target,
+          'fixture.o',
+          nativeObjectFor(target),
+        )
+        const first = yield* NativeToolchain.NativeFinalizer.finalize(
+          toolchain,
+          scope,
+          'NativeStaticLibrary',
+          target,
+          [object],
+          [],
+          firstDestination,
+        )
+        const second = yield* NativeToolchain.NativeFinalizer.finalize(
+          toolchain,
+          scope,
+          'NativeStaticLibrary',
+          target,
+          [object],
+          [],
+          secondDestination,
+        )
+        return Object.freeze({ first, second })
+      }),
+    )
+    const { first, second } = artifacts
+    assert.deepStrictEqual(first.bytes, second.bytes)
+    assert.strictEqual(
+      NativeToolchain.isCachedArtifact(first.bytes, 'NativeStaticLibrary', target),
+      true,
+    )
+    assert.deepStrictEqual(first.bytes, readFileSync(firstDestination))
+    assert.deepStrictEqual(second.bytes, readFileSync(secondDestination))
+  }),
+)
+
 it.effect(
-  'links the shim and program while returning the executable bytes in memory',
+  'links the runtime and program while returning executable bytes in memory',
   () =>
     Effect.gen(function* () {
       const target = yield* NativeToolchain.hostTarget()
@@ -558,27 +1157,30 @@ it.effect(
             target,
             'release',
           )
-          const shim = yield* NativeToolchain.compileShim(
+          const runtime = yield* NativeToolchain.compileExecutableRuntime(
             toolchain,
             scope,
             target,
             artifact.termination,
           )
-          assert.deepEqual(shim.planned.arguments, [
+          assert.deepEqual(runtime.planned.arguments, [
             `--target=${target.id}`,
             '-c',
             '-x',
             'c',
-            join(scope.root, 'silk_shim.c'),
+            join(scope.root, 'silk_runtime.c'),
             '-O2',
+            '-fPIC',
+            '-fvisibility=hidden',
             '-o',
-            join(scope.root, 'silk_shim.o'),
+            join(scope.root, 'silk_runtime.o'),
           ])
-          return yield* NativeToolchain.ClangLinker.link(
+          return yield* NativeToolchain.NativeFinalizer.finalize(
             toolchain,
             scope,
+            'NativeExecutable',
             target,
-            [object.artifact, shim.artifact],
+            [object.artifact, runtime.artifact],
             [],
             destination,
           )

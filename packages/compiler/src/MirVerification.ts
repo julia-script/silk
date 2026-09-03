@@ -37,6 +37,7 @@ import {
   conformanceWitnessMatches,
   isCopy,
   matchesInstance,
+  matchesInstanceKey,
   operationChildren,
   operationsOf,
   operationTree,
@@ -656,6 +657,8 @@ const outcomeOf = (region: Region): Outcome | undefined =>
 /** Every local named by one operation, including definitions and structured child results. */
 export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
   switch (operation._tag) {
+    case 'ForeignStaticLoad':
+    case 'ForeignFunctionAddress':
     case 'Literal':
     case 'EnumConstant':
     case 'StaticView':
@@ -1581,6 +1584,8 @@ const storedEffectCleanupValid = (
 
 const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.SemanticType> => {
   switch (operation._tag) {
+    case 'ForeignStaticLoad':
+    case 'ForeignFunctionAddress':
     case 'Literal':
     case 'EnumConstant':
     case 'StaticView':
@@ -1838,6 +1843,9 @@ interface ActiveLoan {
 
 const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
   switch (operation._tag) {
+    case 'ForeignStaticLoad':
+    case 'ForeignFunctionAddress':
+      return []
     case 'StringFromUtf8Unchecked':
       return [operation.bytes]
     case 'StringUtf8Bytes':
@@ -2596,6 +2604,137 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
     }),
   )
   violations.push(...coroutineFrameLayoutViolations(self))
+  const sameDeclaration = (
+    left: DeclarationFacts.CanonicalId,
+    right: DeclarationFacts.CanonicalId,
+  ): boolean => left.module === right.module && left.name === right.name
+  const declarationKey = (declaration: DeclarationFacts.CanonicalId): string =>
+    `${declaration.module}\u0000${declaration.name}`
+  const exportInventoryCanonical = self.foreignExports.every((record, ordinal) => {
+    const previous = ordinal === 0 ? undefined : self.foreignExports.at(ordinal - 1)
+    if (previous === undefined) return true
+    return (
+      previous.declaration.module.localeCompare(record.declaration.module) < 0 ||
+      (previous.declaration.module === record.declaration.module &&
+        (previous.declarationSpan.start < record.declarationSpan.start ||
+          (previous.declarationSpan.start === record.declarationSpan.start &&
+            previous.declarationSpan.end < record.declarationSpan.end)))
+    )
+  })
+  const exportDeclarations = new Set<string>()
+  if (!exportInventoryCanonical) {
+    violations.push(
+      Object.freeze({
+        _tag: 'Violation',
+        rule: 'InvalidForeignOperation',
+        detail: 'Foreign export inventory is duplicated or outside canonical declaration order',
+      }),
+    )
+  }
+  for (const record of self.foreignExports) {
+    const key = declarationKey(record.declaration)
+    const declarationUnique = !exportDeclarations.has(key)
+    exportDeclarations.add(key)
+    const implementation = self.functions.find((candidate) =>
+      matchesInstanceKey(candidate, record.key),
+    )
+    const implementationType =
+      implementation === undefined
+        ? undefined
+        : SilkType.foreignFunction(
+            implementation.localTypes.slice(0, implementation.parameterCount).map(semanticType),
+            semanticType(implementation.result),
+          )
+    const signatureAdmitted =
+      record.type.parameters.every(
+        (parameter) => CAbi.admit(parameter, 'Parameter')._tag === 'Admitted',
+      ) && CAbi.admit(record.type.result, 'Result')._tag === 'Admitted'
+    const signature = signatureAdmitted
+      ? CAbi.signature(record.type.parameters, record.type.result, self.layout.target)
+      : undefined
+    if (
+      !declarationUnique ||
+      !sameDeclaration(record.key.declaration, record.declaration) ||
+      (self.layout.target.kind === 'Native' &&
+        (implementationType === undefined || !SilkType.equals(implementationType, record.type))) ||
+      signature === undefined ||
+      CAbi.signatureKey(record.signature) !== CAbi.signatureKey(signature)
+    ) {
+      violations.push(
+        Object.freeze({
+          _tag: 'Violation',
+          rule: 'InvalidForeignOperation',
+          detail: `Foreign export ${record.symbol} does not match one unique canonical implementation`,
+        }),
+      )
+    }
+  }
+  const foreignStaticInitializerValid = (record: Module['foreignStatics'][number]): boolean => {
+    if (record.direction === 'Import') return record.literal === undefined
+    const scalar = typeof record.type === 'string' ? Scalar.find(record.type) : undefined
+    if (record.literal?._tag === 'IntegerLiteral' && scalar?.category === 'Integer') {
+      const range = Scalar.range(scalar, self.layout.target.pointerSize === 4 ? 32 : 64)
+      return record.literal.value >= range.minimum && record.literal.value <= range.maximum
+    }
+    if (record.literal?._tag === 'FloatingLiteral' && scalar?.category === 'Floating') {
+      const value = Number(record.literal.spelling)
+      return (
+        Number.isFinite(value) && (scalar.spelling !== 'f32' || Number.isFinite(Math.fround(value)))
+      )
+    }
+    return false
+  }
+  const foreignStaticLoads = self.functions.flatMap((fn) =>
+    operations(fn).filter(
+      (operation): operation is Extract<Operation, { readonly _tag: 'ForeignStaticLoad' }> =>
+        operation._tag === 'ForeignStaticLoad',
+    ),
+  )
+  const staticDeclarations = new Set<string>()
+  const staticInventoryCanonical = self.foreignStatics.every((record, ordinal) => {
+    const previous = ordinal === 0 ? undefined : self.foreignStatics.at(ordinal - 1)
+    if (previous === undefined) return true
+    return (
+      previous.declarationSpan.sourceId.localeCompare(record.declarationSpan.sourceId) < 0 ||
+      (previous.declarationSpan.sourceId === record.declarationSpan.sourceId &&
+        (previous.declarationSpan.start < record.declarationSpan.start ||
+          (previous.declarationSpan.start === record.declarationSpan.start &&
+            previous.declarationSpan.end < record.declarationSpan.end)))
+    )
+  })
+  if (!staticInventoryCanonical) {
+    violations.push(
+      Object.freeze({
+        _tag: 'Violation',
+        rule: 'InvalidForeignOperation',
+        detail: 'Foreign static inventory is duplicated or outside canonical source order',
+      }),
+    )
+  }
+  for (const record of self.foreignStatics) {
+    const key = declarationKey(record.declaration)
+    const declarationUnique = !staticDeclarations.has(key)
+    staticDeclarations.add(key)
+    const retainedImportValid =
+      record.direction === 'Export' ||
+      foreignStaticLoads.some((operation) =>
+        sameDeclaration(operation.declaration, record.declaration),
+      )
+    if (
+      CAbi.admit(record.type, 'Parameter')._tag === 'NotAdmitted' ||
+      !declarationUnique ||
+      !foreignStaticInitializerValid(record) ||
+      !retainedImportValid
+    ) {
+      violations.push(
+        Object.freeze({
+          _tag: 'Violation',
+          rule: 'InvalidForeignOperation',
+          detail: `Foreign static ${record.symbol} has an invalid ${record.direction.toLowerCase()} type, initializer, or reachability record`,
+        }),
+      )
+    }
+  }
   const expectedAuthorities = self.layout.executionPackages.plans.length
   if (
     self.executionTransitions.length !== expectedAuthorities ||
@@ -2676,7 +2815,10 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         })`,
       }),
     )
-  const availableEntry = self.entry._tag === 'UnavailableEntry' ? undefined : self.entry
+  const availableEntry =
+    self.entry._tag === 'UnavailableEntry' || self.entry._tag === 'LibraryEntry'
+      ? undefined
+      : self.entry
   const target = self.functions.find(
     (fn) =>
       availableEntry !== undefined &&
@@ -2698,54 +2840,59 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
       .flatMap(operationTree)
       .filter((operation) => operation._tag === 'Call') ?? []
   const entryValid =
-    availableEntry !== undefined &&
-    target !== undefined &&
-    machine !== undefined &&
-    machine.parameterCount === 0 &&
-    machine.result._tag === 'i32' &&
-    (availableEntry._tag === 'OrdinaryEntry'
-      ? (instanceText(availableEntry.target) === instanceText(availableEntry.machine) &&
-          target.result._tag === 'i32' &&
-          machineClosures.length === 0) ||
-        (availableEntry.machine.declaration.name === '$unit-entry' &&
-          SilkType.equals(semanticType(target.result), SilkType.unit) &&
-          machineClosures.length === 0 &&
-          machineCalls.length === 1 &&
-          machineCalls.some(
-            (call) =>
-              call.target.module === availableEntry.target.declaration.module &&
-              call.target.name === availableEntry.target.declaration.name,
-          ))
-      : target.result._tag === 'EffectValue' &&
-        target.parameterCount === 0 &&
-        machineClosures.length === 1 &&
-        availableEntry.requirements.length ===
-          SilkType.requirementMembers(target.result.type).length &&
-        availableEntry.requirements.every((requirement, ordinal) => {
-          const expected =
-            target.result._tag === 'EffectValue'
-              ? SilkType.requirementMembers(target.result.type).at(ordinal)
-              : undefined
-          return (
-            expected !== undefined &&
-            requirement.access === expected.access &&
-            requirement.role === expected.role &&
-            SilkType.equals(requirement.capability, expected.capability)
-          )
-        }) &&
-        availableEntry.failures.length === SilkType.failureMembers(target.result.type).length &&
-        availableEntry.failures.every((failure, ordinal) => {
-          const expected =
-            target.result._tag === 'EffectValue'
-              ? SilkType.failureCarrierMember(target.result.type, failure.tag, 'OneBased')
-              : undefined
-          return (
-            expected !== undefined &&
-            failure.tag === ordinal + 1 &&
-            SilkType.equals(failure.type, expected) &&
-            failure.identity === SilkType.encode(expected)
-          )
-        }))
+    self.entry._tag === 'LibraryEntry'
+      ? self.foreignExports.length > 0 &&
+        self.foreignExports.every((export_) =>
+          self.functions.some((fn) => matchesInstanceKey(fn, export_.key)),
+        )
+      : availableEntry !== undefined &&
+        target !== undefined &&
+        machine !== undefined &&
+        machine.parameterCount === 0 &&
+        machine.result._tag === 'i32' &&
+        (availableEntry._tag === 'OrdinaryEntry'
+          ? (instanceText(availableEntry.target) === instanceText(availableEntry.machine) &&
+              target.result._tag === 'i32' &&
+              machineClosures.length === 0) ||
+            (availableEntry.machine.declaration.name === '$unit-entry' &&
+              SilkType.equals(semanticType(target.result), SilkType.unit) &&
+              machineClosures.length === 0 &&
+              machineCalls.length === 1 &&
+              machineCalls.some(
+                (call) =>
+                  call.target.module === availableEntry.target.declaration.module &&
+                  call.target.name === availableEntry.target.declaration.name,
+              ))
+          : target.result._tag === 'EffectValue' &&
+            target.parameterCount === 0 &&
+            machineClosures.length === 1 &&
+            availableEntry.requirements.length ===
+              SilkType.requirementMembers(target.result.type).length &&
+            availableEntry.requirements.every((requirement, ordinal) => {
+              const expected =
+                target.result._tag === 'EffectValue'
+                  ? SilkType.requirementMembers(target.result.type).at(ordinal)
+                  : undefined
+              return (
+                expected !== undefined &&
+                requirement.access === expected.access &&
+                requirement.role === expected.role &&
+                SilkType.equals(requirement.capability, expected.capability)
+              )
+            }) &&
+            availableEntry.failures.length === SilkType.failureMembers(target.result.type).length &&
+            availableEntry.failures.every((failure, ordinal) => {
+              const expected =
+                target.result._tag === 'EffectValue'
+                  ? SilkType.failureCarrierMember(target.result.type, failure.tag, 'OneBased')
+                  : undefined
+              return (
+                expected !== undefined &&
+                failure.tag === ordinal + 1 &&
+                SilkType.equals(failure.type, expected) &&
+                failure.identity === SilkType.encode(expected)
+              )
+            }))
   if (!entryValid) {
     violations.push(
       Object.freeze({
@@ -3732,6 +3879,91 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 function: fn.id,
                 region: region.id,
                 detail: 'OS open does not match its affine carrier signature',
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'ForeignStaticLoad') {
+          const record = self.foreignStatics.find((candidate) =>
+            sameDeclaration(candidate.declaration, operation.declaration),
+          )
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          if (
+            record === undefined ||
+            record.symbol !== operation.symbol ||
+            record.direction !== operation.direction ||
+            !SilkType.equals(record.type, semanticType(operation.type)) ||
+            destination === undefined ||
+            !SilkType.equals(semanticType(destination), record.type) ||
+            !foreignStaticInitializerValid(record)
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidForeignOperation',
+                function: fn.id,
+                region: region.id,
+                detail: `Foreign static load ${operation.symbol} does not match its declaration inventory`,
+              }),
+            )
+          }
+        }
+        if (operation._tag === 'ForeignFunctionAddress') {
+          const declaration =
+            operation.target._tag === 'DeclarationCallableTarget'
+              ? operation.target.declaration
+              : undefined
+          const record = self.foreignExports.find(
+            (candidate) =>
+              declaration !== undefined &&
+              sameDeclaration(candidate.declaration, declaration) &&
+              candidate.symbol === operation.symbol,
+          )
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const implementation =
+            record === undefined
+              ? undefined
+              : self.functions.find((candidate) => matchesInstanceKey(candidate, record.key))
+          const implementationParameters =
+            implementation?.localTypes.slice(0, implementation.parameterCount).map(semanticType) ??
+            []
+          const implementationType =
+            implementation === undefined
+              ? undefined
+              : SilkType.foreignFunction(
+                  implementationParameters,
+                  semanticType(implementation.result),
+                )
+          const signatureAdmitted =
+            operation.type.type.parameters.every(
+              (parameter) => CAbi.admit(parameter, 'Parameter')._tag === 'Admitted',
+            ) && CAbi.admit(operation.type.type.result, 'Result')._tag === 'Admitted'
+          const signature = signatureAdmitted
+            ? CAbi.signature(
+                operation.type.type.parameters,
+                operation.type.type.result,
+                self.layout.target,
+              )
+            : undefined
+          if (
+            record === undefined ||
+            !sameDeclaration(record.key.declaration, record.declaration) ||
+            (self.layout.target.kind === 'Native' &&
+              (implementationType === undefined ||
+                !SilkType.equals(implementationType, record.type))) ||
+            !SilkType.equals(operation.type.type, record.type) ||
+            signature === undefined ||
+            CAbi.signatureKey(record.signature) !== CAbi.signatureKey(signature) ||
+            destination?._tag !== 'ForeignFunction' ||
+            !SilkType.equals(destination.type, operation.type.type)
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidForeignOperation',
+                function: fn.id,
+                region: region.id,
+                detail: `Foreign function address ${operation.symbol} does not match its export inventory`,
               }),
             )
           }

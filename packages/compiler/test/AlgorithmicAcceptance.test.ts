@@ -154,11 +154,13 @@ it.effect('keeps logical native and WebAssembly execution in parity', () =>
     const toolchain: NativeToolchain.Toolchain = Object.freeze({
       _tag: 'Toolchain',
       clang: '/usr/bin/clang',
+      llvmAr: 'llvm-ar',
     })
     const native = yield* Driver.compile({
       compilation: { root: SourceFile.make(rootModule, rootBytes) },
       toolchain,
       profile: 'release',
+      artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'coverage-fold'),
     }).pipe(Effect.provide(resolver))
     let nativeFailure: string | undefined

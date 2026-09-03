@@ -134,6 +134,8 @@ export const emit = Effect.fnUntraced(function* (
     case 'Call':
       return yield* NativeCallOperation.emit(context.call, operation)
     case 'ForeignCall':
+    case 'ForeignStaticLoad':
+    case 'ForeignFunctionAddress':
       return yield* NativeForeignOperation.emit(context.call, operation)
     case 'PointerNull':
     case 'PointerIsNull':

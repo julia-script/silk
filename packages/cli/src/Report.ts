@@ -116,6 +116,9 @@ export const toolchainError = (failure: NativeToolchain.ToolchainError): string 
   if (failure.reason._tag === 'StorageFailed') {
     return `${failure.stage} stage failed: ${failure.message}`
   }
+  if (failure.reason._tag === 'UnsupportedPlan' || failure.reason._tag === 'InvalidPackageName') {
+    return `${failure.stage} stage failed: ${failure.message}`
+  }
   const command = [failure.reason.planned.command, ...failure.reason.planned.arguments].join(' ')
   const reason =
     failure.reason.status === null
@@ -174,6 +177,8 @@ export const backendError = (self: Backend.BackendError, sources: SourceCatalog)
 /** Explains why the root module offered no usable `main`, in terms a caller can act on. */
 const entryReason = (entry: Driver.NoEntry): string => {
   switch (entry.reason) {
+    case 'MissingLibraryExport':
+      return 'the root module declares no exported C function'
     case 'MissingEntry':
       return 'the root module declares no `main`'
     case 'AmbiguousEntry':
@@ -213,6 +218,12 @@ export const outcome = (
       return [
         ...(rendered.length > 0 ? [rendered] : []),
         `Compiled ${entryPath} -> ${self.path} (${self.backend}, ${self.target.id}, ${self.symbols.length} symbols)`,
+        ...(self.libraryInterface === undefined
+          ? []
+          : [
+              `C header: ${self.libraryInterface.cHeader}`,
+              `ABI manifest: ${self.libraryInterface.abiManifest}`,
+            ]),
       ].join('\n')
     }
     case 'NoEntry': {

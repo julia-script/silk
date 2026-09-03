@@ -313,6 +313,57 @@ export const parseTypePrimary = (
       ]),
     })
   }
+  if (nextSignificantKind(initial) === 'ExternKeyword') {
+    const externKeyword = expect(initial, 'ExternKeyword', [
+      'TextLiteral',
+      'FnKeyword',
+      ...following,
+    ])
+    const abi = expect(externKeyword.state, 'TextLiteral', ['FnKeyword', ...following])
+    const fn = expect(abi.state, 'FnKeyword', ['LeftParenthesis', ...following])
+    const left = expect(fn.state, 'LeftParenthesis', [
+      ...typeStarts,
+      'RightParenthesis',
+      'Arrow',
+      ...following,
+    ])
+    let state = left.state
+    let parameters: ReadonlyArray<SyntaxTree.Element> = Object.freeze([])
+    while (
+      nextSignificantKind(state) !== 'RightParenthesis' &&
+      nextSignificantKind(state) !== 'Arrow' &&
+      nextSignificantKind(state) !== 'EndOfFile'
+    ) {
+      const parameter = parseType(state, ['Comma', 'RightParenthesis', 'Arrow', ...following])
+      parameters = Object.freeze([...parameters, parameter.node])
+      state = parameter.state
+      if (nextSignificantKind(state) !== 'Comma') break
+      const comma = expect(state, 'Comma', [
+        ...typeStarts,
+        'RightParenthesis',
+        'Arrow',
+        ...following,
+      ])
+      parameters = Object.freeze([...parameters, ...comma.elements])
+      state = comma.state
+    }
+    const right = expect(state, 'RightParenthesis', ['Arrow', ...following])
+    const arrow = expect(right.state, 'Arrow', [...typeStarts, ...following])
+    const result = parseType(arrow.state, following)
+    return Object.freeze({
+      state: result.state,
+      node: syntaxNode(result.state, 'ForeignFunctionType', [
+        ...externKeyword.elements,
+        ...abi.elements,
+        ...fn.elements,
+        ...left.elements,
+        ...parameters,
+        ...right.elements,
+        ...arrow.elements,
+        result.node,
+      ]),
+    })
+  }
   const unsafeCallable = nextSignificantKind(initial) === 'UnsafeKeyword'
   const unsafe = unsafeCallable
     ? expect(initial, 'UnsafeKeyword', ['MutKeyword', 'OnceKeyword', 'FnKeyword', ...following])

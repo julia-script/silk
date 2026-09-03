@@ -52,6 +52,7 @@ export type Type =
   | { readonly _tag: 'Slice'; readonly type: SilkType.Slice }
   | { readonly _tag: 'Reference'; readonly type: SilkType.Reference }
   | { readonly _tag: 'Pointer'; readonly type: SilkType.Pointer }
+  | { readonly _tag: 'ForeignFunction'; readonly type: SilkType.ForeignFunction }
   | { readonly _tag: 'Union'; readonly type: SilkType.StructuralUnion }
   | {
       readonly _tag: 'EnvironmentBorrow'
@@ -114,6 +115,7 @@ export const semanticType = (self: Type): DeclarationFacts.SemanticType => {
     self._tag === 'Slice' ||
     self._tag === 'Reference' ||
     self._tag === 'Pointer' ||
+    self._tag === 'ForeignFunction' ||
     self._tag === 'Union' ||
     self._tag === 'EnvironmentBorrow' ||
     self._tag === 'EffectOutcome'
@@ -284,6 +286,23 @@ export type PlaceSelector =
     }
 
 export type Operation =
+  | {
+      readonly _tag: 'ForeignStaticLoad'
+      readonly destination: LocalId
+      readonly declaration: DeclarationFacts.CanonicalId
+      readonly direction: 'Import' | 'Export'
+      readonly symbol: string
+      readonly type: Type
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'ForeignFunctionAddress'
+      readonly destination: LocalId
+      readonly target: Hir.CallableTarget
+      readonly symbol: string
+      readonly type: Extract<Type, { readonly _tag: 'ForeignFunction' }>
+      readonly provenance: Provenance
+    }
   | {
       readonly _tag: 'Literal'
       readonly destination: LocalId
@@ -1505,6 +1524,9 @@ export type Entry =
       readonly reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason']
     }
   | {
+      readonly _tag: 'LibraryEntry'
+    }
+  | {
       readonly _tag: 'OrdinaryEntry'
       readonly target: Instances.InstanceKey
       readonly machine: Instances.InstanceKey
@@ -1530,6 +1552,15 @@ export interface Module {
   readonly foreignCalls: ReadonlyArray<Instances.ForeignCall>
   /** Native export roots with the C signature each thunk publishes. */
   readonly foreignExports: ReadonlyArray<Instances.ForeignExport>
+  /** Resolved C data declarations retained for native import/export emission. */
+  readonly foreignStatics: ReadonlyArray<{
+    readonly declaration: DeclarationFacts.CanonicalId
+    readonly declarationSpan: SourceSpan.SourceSpan
+    readonly direction: 'Import' | 'Export'
+    readonly symbol: string
+    readonly type: SilkType.Type
+    readonly literal?: DeclarationFacts.ConstantLiteralFact
+  }>
   readonly layout: Layout.Plan
   readonly staticData?: ReadonlyArray<StaticText.Data>
   readonly functions: ReadonlyArray<MirFunction>
@@ -1541,8 +1572,12 @@ export interface Module {
 
 /** The concrete zero-parameter `i32` function exported as the machine entry. */
 export const machineEntry = (self: Module): Instances.InstanceKey => {
-  if (self.entry._tag === 'UnavailableEntry') {
-    throw new RangeError(`MIR has no machine entry: ${self.entry.reason}`)
+  if (self.entry._tag === 'UnavailableEntry' || self.entry._tag === 'LibraryEntry') {
+    throw new RangeError(
+      self.entry._tag === 'UnavailableEntry'
+        ? `MIR has no machine entry: ${self.entry.reason}`
+        : 'MIR library has no machine entry',
+    )
   }
   return self.entry.machine
 }
@@ -1753,6 +1788,7 @@ export interface Violation {
     | 'InvalidStandardStreamOperation'
     | 'InvalidOsOperation'
     | 'InvalidForeignCall'
+    | 'InvalidForeignOperation'
     | 'InvalidRawStorageOperation'
     | 'InvalidPointerOperation'
     | 'InvalidLocalSharedOperation'

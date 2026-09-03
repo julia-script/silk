@@ -118,8 +118,9 @@ it.effect('maps an ordinary unit entry to status zero on every engine', () =>
       compilation: {
         root: SourceFile.make('entry/ordinary-unit', ascii(source)),
       },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
       profile: 'release',
+      artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'ordinary-unit'),
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(compiled._tag, 'Compiled')
@@ -329,8 +330,9 @@ it.effect('executes Evaluate effects in order and halts on failure across every 
 
       const compiled = yield* Driver.compile({
         compilation: { root: SourceFile.make(module, ascii(source)) },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
         profile: 'release',
+        artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, name),
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(compiled._tag, 'Compiled')
@@ -341,14 +343,15 @@ it.effect('executes Evaluate effects in order and halts on failure across every 
   }),
 )
 
-it.effect('reports an unhandled effect entry through the native shim', () =>
+it.effect('reports an unhandled effect entry through the native runtime', () =>
   Effect.gen(function* () {
     const compiled = yield* Driver.compile({
       compilation: {
         root: SourceFile.make('effect-entry/native', ascii(failureSource)),
       },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
       profile: 'release',
+      artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'native-failure'),
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(compiled._tag, 'Compiled')
@@ -367,8 +370,9 @@ it.effect('reports an unhandled effect entry through the native shim', () =>
       compilation: {
         root: SourceFile.make('effect-entry/native-success', ascii(successSource)),
       },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
       profile: 'release',
+      artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'native-success'),
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(succeeded._tag, 'Compiled')

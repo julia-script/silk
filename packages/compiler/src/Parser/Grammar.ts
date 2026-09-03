@@ -67,6 +67,7 @@ export const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
 
 export const typeStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'Identifier',
+  'ExternKeyword',
   'UnsafeKeyword',
   'FnKeyword',
   'MutKeyword',

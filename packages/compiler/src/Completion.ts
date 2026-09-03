@@ -103,6 +103,7 @@ const declarationKind = (
     case 'FunctionDeclaration':
       return 'Function'
     case 'ConstantDeclaration':
+    case 'ForeignStaticDeclaration':
       return 'Constant'
     case 'ServiceDeclaration':
     case 'InterfaceDeclaration':
@@ -122,6 +123,8 @@ const declarationDetail = (declaration: DeclarationFacts.MemberFact): Presentati
       return PresentationRenderer.functionDeclaration(declaration)
     case 'ConstantDeclaration':
       return PresentationRenderer.constantDeclaration(declaration)
+    case 'ForeignStaticDeclaration':
+      return PresentationRenderer.foreignStaticDeclaration(declaration)
     case 'ServiceDeclaration':
     case 'InterfaceDeclaration':
       return PresentationRenderer.serviceDeclaration(declaration)

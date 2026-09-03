@@ -186,6 +186,39 @@ export function lowerExpressionInner(
   availableRequirements = fn.providedRequirements,
 ): LoweredExpression | undefined {
   switch (expression._tag) {
+    case 'ForeignFunctionAddress': {
+      const type = fn.type(expression.type)
+      if (type === undefined || type._tag !== 'ForeignFunction') return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'ForeignFunctionAddress',
+          destination,
+          target: expression.target,
+          symbol: expression.symbol,
+          type,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
+    case 'ForeignStaticLoad': {
+      const type = fn.type(expression.type)
+      if (type === undefined) return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'ForeignStaticLoad',
+          destination,
+          declaration: expression.declaration,
+          direction: expression.direction,
+          symbol: expression.symbol,
+          type,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
     case 'IntegerLiteral':
       return lowerIntegerLiteralExpression(fn, expression)
     case 'FloatingLiteral':

@@ -143,6 +143,14 @@ export interface Callable {
   readonly schema?: CallableSchema
 }
 
+/** A non-capturing synchronous function pointer with one native calling convention. */
+export interface ForeignFunction {
+  readonly _tag: 'ForeignFunctionType'
+  readonly abi: 'C'
+  readonly parameters: ReadonlyArray<Type>
+  readonly result: Type
+}
+
 /** One compile-time capability requirement. Roles select slots and have no runtime value. */
 export interface Requirement extends RequirementRow.Member<Nominal | Parameter> {}
 
@@ -258,8 +266,6 @@ const nonScalarBuiltinOperations = Object.freeze([
   'StringUtf8Bytes',
   'StringByteLength',
   'StringEqualsExact',
-  'OsSystemClockNow',
-  'OsSystemClockResolution',
   'OsMonotonicClockNow',
   'OsMonotonicClockResolution',
   'OsMonotonicClockWaitUntil',
@@ -440,6 +446,7 @@ export type Type =
   | Reference
   | Pointer
   | Callable
+  | ForeignFunction
   | Effect
   | Represented
   | StructuralUnion
@@ -710,6 +717,8 @@ export const containsStaticPhaseOnly = (self: Type): boolean => {
   if (isPointer(self)) return containsStaticPhaseOnly(self.pointee)
   if (isCallable(self))
     return self.parameters.some(containsStaticPhaseOnly) || containsStaticPhaseOnly(self.result)
+  if (isForeignFunction(self))
+    return self.parameters.some(containsStaticPhaseOnly) || containsStaticPhaseOnly(self.result)
   if (isEffect(self))
     return (
       containsStaticPhaseOnly(self.success) ||
@@ -835,6 +844,15 @@ export const callable = (
             origins: Object.freeze(Array.from(schema.origins)),
           }),
         }),
+  })
+
+/** Constructs one immutable C ABI function-pointer type. */
+export const foreignFunction = (parameters_: ReadonlyArray<Type>, result: Type): ForeignFunction =>
+  Object.freeze({
+    _tag: 'ForeignFunctionType',
+    abi: 'C',
+    parameters: Object.freeze(Array.from(parameters_)),
+    result,
   })
 
 const implicitRowOrigin: SourceSpan.SourceSpan = (() => {
@@ -1609,6 +1627,7 @@ export const hashGenericArgument = (self: GenericArgument): number => {
 export const isDetachedUnionMember = (self: Type): boolean => {
   if (isSlice(self) || isReference(self) || isSlot(self)) return false
   if (isCallable(self) || isEffect(self)) return false
+  if (isForeignFunction(self)) return true
   if (isRepresented(self)) return self.representation.admissibility._tag !== 'Unavailable'
   if (isFixedArray(self)) return isDetachedUnionMember(self.element)
   // A nominal member has its own finite identity. Whether one concrete application can be stored
@@ -1693,6 +1712,10 @@ export const isPointer = (self: Type): self is Pointer =>
 export const isCallable = (self: Type): self is Callable =>
   typeof self !== 'string' && self._tag === 'CallableType'
 
+/** Tests whether a semantic type is a C ABI function pointer. */
+export const isForeignFunction = (self: Type): self is ForeignFunction =>
+  typeof self !== 'string' && self._tag === 'ForeignFunctionType'
+
 /** Tests whether a semantic type is a compiler-private lazy effect contract. */
 export const isEffect = (self: Type): self is Effect =>
   typeof self !== 'string' && self._tag === 'EffectType'
@@ -1713,6 +1736,7 @@ const semanticTypeTags: ReadonlySet<string> = new Set([
   'ReferenceType',
   'PointerType',
   'CallableType',
+  'ForeignFunctionType',
   'EffectType',
   'RepresentedType',
   'StructuralUnionType',
@@ -1800,6 +1824,8 @@ const computeKey = (self: Type): string => {
           ])
     return `callable:${self.unsafe ? 'unsafe:' : 'safe:'}${self.mode}<(${self.parameters.map(key).join(',')})->${key(self.result)}>${schemaKey}`
   }
+  if (isForeignFunction(self))
+    return `foreign:C<(${self.parameters.map(key).join(',')})->${key(self.result)}>`
   if (isEffect(self))
     return `effect:${self.access}<${key(self.success)}!${RowAlgebra.key(
       failureRowPolicy(),
@@ -1888,6 +1914,20 @@ export const firstRepresentationDivergence = (
     return firstRepresentationDivergence(left.target, right.target)
   if (isPointer(left) && isPointer(right))
     return firstRepresentationDivergence(left.pointee, right.pointee)
+  if (isForeignFunction(left) && isForeignFunction(right)) {
+    for (
+      let ordinal = 0;
+      ordinal < Math.min(left.parameters.length, right.parameters.length);
+      ordinal += 1
+    ) {
+      const leftParameter = left.parameters.at(ordinal)
+      const rightParameter = right.parameters.at(ordinal)
+      if (leftParameter === undefined || rightParameter === undefined) continue
+      const divergence = firstRepresentationDivergence(leftParameter, rightParameter)
+      if (divergence !== undefined) return divergence
+    }
+    return firstRepresentationDivergence(left.result, right.result)
+  }
   if (isCallable(left) && isCallable(right)) {
     for (
       let ordinal = 0;
@@ -2041,6 +2081,17 @@ export const haveSameRepresentationShape = (left: Type, right: Type): boolean =>
       left.mutable === right.mutable &&
       haveSameRepresentationShape(left.pointee, right.pointee)
     )
+  if (isForeignFunction(left) || isForeignFunction(right))
+    return (
+      isForeignFunction(left) &&
+      isForeignFunction(right) &&
+      left.parameters.length === right.parameters.length &&
+      left.parameters.every((parameter, ordinal) => {
+        const compared = right.parameters.at(ordinal)
+        return compared !== undefined && haveSameRepresentationShape(parameter, compared)
+      }) &&
+      haveSameRepresentationShape(left.result, right.result)
+    )
   if (isCallable(left) || isCallable(right)) {
     if (!isCallable(left) || !isCallable(right)) return false
     return (
@@ -2148,6 +2199,16 @@ export const opaqueRepresentationEvidence = (
     return opaqueRepresentationEvidence(actual.target, expected.target, family)
   if (isPointer(actual) && isPointer(expected))
     return opaqueRepresentationEvidence(actual.pointee, expected.pointee, family)
+  if (isForeignFunction(actual) && isForeignFunction(expected))
+    return Object.freeze([
+      ...expected.parameters.flatMap((parameter, ordinal) => {
+        const supplied = actual.parameters.at(ordinal)
+        return supplied === undefined
+          ? []
+          : opaqueRepresentationEvidence(supplied, parameter, family)
+      }),
+      ...opaqueRepresentationEvidence(actual.result, expected.result, family),
+    ])
   if (isCallable(actual) && isCallable(expected))
     return Object.freeze([
       ...expected.parameters.flatMap((parameter_, ordinal) => {
@@ -2316,7 +2377,10 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
     } else if (isFixedArray(type) || isSlice(type)) visitType(type.element)
     else if (isReference(type)) visitType(type.target)
     else if (isPointer(type)) visitType(type.pointee)
-    else if (isCallable(type)) {
+    else if (isForeignFunction(type)) {
+      for (const parameter_ of type.parameters) visitType(parameter_)
+      visitType(type.result)
+    } else if (isCallable(type)) {
       if (type.schema !== undefined) pushBinders(type.schema.binders)
       for (const parameter_ of type.parameters) visitType(parameter_)
       visitType(type.result)
@@ -2405,6 +2469,8 @@ export const encode = (self: Type): string => {
     const mode = executableAccessPrefix(self.mode)
     return `${self.unsafe ? 'unsafe ' : ''}${mode}fn(${self.parameters.map(encode).join(', ')}) -> ${encode(self.result)}`
   }
+  if (isForeignFunction(self))
+    return `extern "C" fn(${self.parameters.map(encode).join(', ')}) -> ${encode(self.result)}`
   if (isEffect(self)) {
     const access = executableAccessPrefix(self.access)
     const failureMembers = RowAlgebra.encode(
@@ -2656,6 +2722,8 @@ export function runtimeAvailable(self: Type): boolean {
   if (isFixedArray(self) || isSlice(self)) return runtimeAvailable(self.element)
   if (isReference(self)) return runtimeAvailable(self.target)
   if (isPointer(self)) return runtimeAvailable(self.pointee)
+  if (isForeignFunction(self))
+    return self.parameters.every(runtimeAvailable) && runtimeAvailable(self.result)
   if (isCallable(self))
     return (
       self.parameters.every(runtimeAvailable) &&
@@ -2726,6 +2794,10 @@ export const isRuntimeConcreteGenericArgument = (self: GenericArgument): boolean
 export const someSubterm = (self: Type, predicate: (type: Type) => boolean): boolean => {
   return fold(self, { type: (type) => (predicate(type) ? true : undefined) }).length > 0
 }
+
+/** Every nested C function-pointer type in deterministic preorder, including `self`. */
+export const foreignFunctions = (self: Type): ReadonlyArray<ForeignFunction> =>
+  fold(self, { type: (type) => (isForeignFunction(type) ? type : undefined) })
 
 /** Tests whether a type contains a lexical borrow at any depth. */
 export const containsBorrow = (self: Type): boolean =>
@@ -2910,6 +2982,11 @@ export const substitute = (self: Type, substitution: Substitution): Type => {
   if (isSlice(self)) return slice(self.access, substitute(self.element, substitution))
   if (isReference(self)) return reference(self.access, substitute(self.target, substitution))
   if (isPointer(self)) return pointer(self.mutable, substitute(self.pointee, substitution))
+  if (isForeignFunction(self))
+    return foreignFunction(
+      self.parameters.map((parameter_) => substitute(parameter_, substitution)),
+      substitute(self.result, substitution),
+    )
   if (isCallable(self))
     return callable(
       self.parameters.map((parameter_) => substitute(parameter_, substitution)),
@@ -3144,6 +3221,8 @@ export const specializeExecutableOwner = (
     if (isSlice(type)) return slice(type.access, specializeType(type.element))
     if (isReference(type)) return reference(type.access, specializeType(type.target))
     if (isPointer(type)) return pointer(type.mutable, specializeType(type.pointee))
+    if (isForeignFunction(type))
+      return foreignFunction(type.parameters.map(specializeType), specializeType(type.result))
     if (isCallable(type))
       return callable(
         type.parameters.map(specializeType),

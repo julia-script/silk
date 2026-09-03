@@ -16,11 +16,11 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | `LEX`  | Lexical   | 12    |
 | `PAR`  | Parser    | 5     |
 | `MOD`  | Module    | 3     |
-| `SEM`  | Semantic  | 196   |
+| `SEM`  | Semantic  | 200   |
 | `OWN`  | Ownership | 17    |
 | `LAY`  | Layout    | 1     |
 
-There are 234 codes in total.
+There are 238 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -257,6 +257,10 @@ There are 234 codes in total.
 | `SEM0202` | Stable code for a receiver operation supplied by more than one of the receiver's conformances.               | `<member> is supplied to <receiver> by more than one interface (<join>); call it through one, as <at0Interface>.<member>(...)`                                                                                                                                                                                                                                                                                                                                             |
 | `SEM0203` | Stable code for naming a conformance-supplied receiver operation as a value instead of calling it.           | `<member> is supplied to <receiver> by an interface and must be called; it has no value form`                                                                                                                                                                                                                                                                                                                                                                              |
 | `SEM0204` | Stable code for a root `main` whose declaration shape is not a valid program entry.                          | ``Entry \`main\` <detail>``                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `SEM0205` | Stable code for a C-layout record that declares type parameters.                                             | `C-layout record <record> cannot declare type parameters`                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `SEM0206` | Stable code for a C-layout record field outside the closed C object subset.                                  | `Field <field> of C-layout record <record> has unsupported type <type>`                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `SEM0207` | Stable code for a value that cannot become an exact noncapturing C callback address.                         | `<name> cannot be used as a C callback: <detail>`                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `SEM0208` | Stable code for reachable C data on an execution surface without native symbol linkage.                      | `Foreign static <symbol> is unavailable on <surface>; C data symbols require native LLVM linkage`                                                                                                                                                                                                                                                                                                                                                                          |
 
 ## Ownership (`OWN`)
 

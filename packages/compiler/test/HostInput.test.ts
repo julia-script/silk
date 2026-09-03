@@ -525,7 +525,7 @@ it.effect(
   'reads the real command line and environment of a compiled native program',
   () =>
     Effect.gen(function* () {
-      // The exit status is derived from the arguments the process actually received, so a shim that
+      // The exit status is derived from the arguments the process actually received, so a runtime that
       // dropped `argc` and `argv` could not produce it.
       const source = nativeSource(`import silk.bytes { Bytes }
 import silk.allocator { OutOfMemoryError }
@@ -581,8 +581,9 @@ effect fn recover(error: HostInputError | OutOfMemoryError) -> i32 { return 9 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`)
       const compiled = yield* Driver.compile({
         compilation: { root: SourceFile.make('host-input/native', encoder.encode(source)) },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang }),
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang, llvmAr: 'llvm-ar' }),
         profile: 'release',
+        artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'native-host-input'),
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(

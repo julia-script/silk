@@ -9,7 +9,11 @@ import * as WasmBackend from '@silklang/compiler/WasmBackend'
 import * as Result from 'effect/Result'
 import * as BuildPlan from '../src/BuildPlan.js'
 
-const project = (name = 'hello', outputDirectory = '/workspace/build'): Project.Project =>
+const project = (
+  name = 'hello',
+  outputDirectory = '/workspace/build',
+  artifact: Project.Project['build']['artifact'] = 'NativeExecutable',
+): Project.Project =>
   Object.freeze({
     _tag: 'Project',
     name,
@@ -27,7 +31,8 @@ const project = (name = 'hello', outputDirectory = '/workspace/build'): Project.
       backend: 'llvm',
       targets: ['host'] as const,
       outputDirectory,
-      nativeLibraries: [],
+      artifact,
+      nativeLinkInputs: [],
     }),
   })
 
@@ -77,6 +82,44 @@ it('selects the wasm extension and prevents backend collisions', () => {
       '/workspace/artifacts/wasm/wasm32-unknown-unknown/release/hello.wasm',
     )
   }
+})
+
+it('uses platform library filenames and rejects library plans for wasm or run', () => {
+  const shared = BuildPlan.make(project('answer', '/workspace/build', 'NativeSharedLibrary'), {
+    backend: LlvmBackend.LlvmBackend,
+    target: Target.aarch64AppleDarwin,
+    profile: 'release',
+  })
+  const archive = BuildPlan.make(project('answer', '/workspace/build', 'NativeStaticLibrary'), {
+    backend: LlvmBackend.LlvmBackend,
+    target: Target.x8664UnknownLinuxGnu,
+    profile: 'release',
+  })
+  assert.strictEqual(Result.isSuccess(shared), true)
+  assert.strictEqual(Result.isSuccess(archive), true)
+  if (Result.isSuccess(shared)) assert.match(shared.success.destination, /libanswer\.dylib$/)
+  if (Result.isSuccess(archive)) assert.match(archive.success.destination, /libanswer\.a$/)
+
+  const wasm = BuildPlan.make(project('answer', '/workspace/build', 'NativeSharedLibrary'), {
+    backend: LlvmBackend.LlvmBackend,
+    target: Target.wasm32UnknownUnknown,
+    profile: 'release',
+  })
+  assert.strictEqual(Result.isFailure(wasm), true)
+  if (Result.isFailure(wasm))
+    assert.strictEqual(wasm.failure.reason._tag, 'IncompatibleArtifactTarget')
+
+  const host = TargetSelector.resolve('host', NativeToolchain.hostSelection())
+  assert.strictEqual(Result.isSuccess(host), true)
+  if (Result.isFailure(host)) return
+  const run = BuildPlan.make(project('answer', '/workspace/build', 'NativeStaticLibrary'), {
+    backend: LlvmBackend.LlvmBackend,
+    target: host.success,
+    profile: 'release',
+    purpose: 'run',
+  })
+  assert.strictEqual(Result.isFailure(run), true)
+  if (Result.isFailure(run)) assert.strictEqual(run.failure.reason._tag, 'NonExecutableRunArtifact')
 })
 
 it('rejects incompatible backend-target pairs during planning', () => {

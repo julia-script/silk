@@ -1242,3 +1242,68 @@ operations.
 
 - **WHEN** a copy's destination offset plus its length exceeds the destination buffer's count
 - **THEN** the evaluator, the native binary, and the WebAssembly module each trap
+
+### Requirement: Native foreign calls preserve C-layout record storage
+
+Native lowering SHALL represent a pointer to a C-layout record as the existing target pointer lane and SHALL materialize the pointee with the compiler-selected C aggregate layout. A foreign call through a mutable pointer SHALL invalidate or reload affected Silk places so native field writes are observable without an adapter, shadow record, or generated C runtime shim.
+
+#### Scenario: Read a record filled by C
+
+- **WHEN** a native Silk program passes a mutable pointer to a C-layout record to a linked C function that writes distinct field values
+- **THEN** the following Silk field reads observe those values from the same storage
+
+#### Scenario: Call the system clock
+
+- **WHEN** a supported native program calls `clock_gettime` with a pointer to a C-layout `Timespec`
+- **THEN** the executable links through the system C runtime and reads a valid result and populated fields
+
+### Requirement: Direct WebAssembly lowers reachable foreign calls to deterministic imports
+
+The direct WebAssembly backend SHALL declare one imported function per reachable foreign symbol in
+canonical symbol order. The import SHALL use a versioned compiler-owned module name, the foreign
+symbol as its field name, and WebAssembly scalar parameters and result derived from the classified
+C signature for `wasm32-unknown-unknown`. Calls SHALL target that imported handle directly. The
+artifact SHALL record the same canonical foreign inventory and include each concrete module/field
+pair in its host-import inventory.
+
+#### Scenario: Lower integer, float, pointer, and void classes
+
+- **WHEN** reachable foreign signatures use admitted integer, float, pointer, and void C classes
+- **THEN** the backend maps them respectively to `i32` or `i64`, `f32` or `f64`, `i32`, and no WebAssembly result
+
+#### Scenario: Deduplicate agreeing declarations
+
+- **WHEN** multiple reachable declarations name one symbol with the same classified signature
+- **THEN** the module contains one import and every corresponding call targets that import
+
+#### Scenario: Preserve deterministic import metadata
+
+- **WHEN** equivalent programs discover agreeing foreign declarations in different source orders
+- **THEN** their function imports, artifact foreign inventory, host-import inventory, WAT, and binary bytes are identical
+
+### Requirement: Native artifacts lower C callbacks as function addresses
+
+The native backend SHALL represent a C function pointer as one LLVM pointer lane, SHALL use the
+generated `export "C"` thunk address for an admitted callback conversion, and SHALL pass that address
+unchanged to a foreign call.
+
+#### Scenario: Lower qsort callback invocation
+
+- **WHEN** a native program passes an exported comparator to `qsort`
+- **THEN** emitted LLVM calls `qsort` with the comparator thunk address and the linked executable sorts through callbacks into Silk
+
+### Requirement: Native artifacts declare imported and exported data symbols
+
+The native backend SHALL declare an imported static as an external LLVM global and SHALL define an
+exported static as a C-visible LLVM global with its initializer. Both forms SHALL use the selected
+target's exact ABI layout and SHALL appear in deterministic artifact symbol metadata.
+
+#### Scenario: Import environ
+
+- **WHEN** a native executable reaches an imported `environ` static
+- **THEN** emitted LLVM contains one external global declaration and loads its value at the read
+
+#### Scenario: Export initialized data
+
+- **WHEN** a native library reaches an exported `u32` static initialized to `1`
+- **THEN** emitted LLVM contains one externally visible global definition initialized to `1`

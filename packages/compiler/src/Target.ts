@@ -24,6 +24,7 @@ export class TargetError extends Data.TaggedError('TargetError')<{
     | 'Target.resolve'
     | 'Target.host'
     | 'Target.requireNative'
+    | 'Target.validateArtifact'
     | 'Target.validateInventory'
   readonly requested: string
   readonly message: string
@@ -147,6 +148,14 @@ export const unavailableInventory = (
     requested: self.id,
     message: `Target ${self.id} does not support ${operations.join(', ')}`,
     unavailableOperations: Object.freeze([...operations]),
+  })
+
+/** Reports an artifact kind that cannot be produced for the selected target family. */
+export const unavailableArtifact = (self: Target, artifactKind: string): TargetError =>
+  new TargetError({
+    operation: 'Target.validateArtifact',
+    requested: self.id,
+    message: `Target ${self.id} cannot produce ${artifactKind}`,
   })
 
 /** Whether a target value exactly matches its compiler-owned canonical profile. */

@@ -1,4 +1,8 @@
+import { spawnSync } from 'node:child_process'
+import { join } from 'node:path'
 import { assert, it } from '@effect/vitest'
+import * as Config from 'effect/Config'
+import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as ExecutionPackage from '../src/ExecutionPackage.js'
@@ -8,11 +12,24 @@ import * as LayoutVerify from '../src/LayoutVerify.js'
 import * as LocalSharedAllocationProvenance from '../src/LocalSharedAllocationProvenance.js'
 import * as LocalSharedControlBlock from '../src/LocalSharedControlBlock.js'
 import * as LocalSharedLifecycle from '../src/LocalSharedLifecycle.js'
+import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+class CLayoutOracleError extends Data.TaggedError('CLayoutOracleError')<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
+
+const cLayoutOracleToolchain: NativeToolchain.Toolchain = Object.freeze({
+  _tag: 'Toolchain',
+  clang: Effect.runSync(Config.string('SILK_TEST_CLANG').pipe(Config.withDefault('clang'))),
+  llvmAr: 'llvm-ar',
+  runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
+})
 
 it('plans opaque local-shared blocks without exposing field offsets to source layout data', () => {
   const scalar: Layout.Entry = Object.freeze({
@@ -335,7 +352,7 @@ pub fn main() -> i32 { return 0 }`
         })
         assert.strictEqual(shape?.laneCount, 1)
         assert.deepEqual(shape?.lanes, [{ _tag: 'CallingLane', path: [], type: lane }])
-        assert.deepEqual(LayoutVerify.verifyCatalog(catalog.value), [])
+        assert.deepEqual(LayoutVerify.verifyCatalog(catalog.value, snapshot.index), [])
       }
     }
   }),
@@ -671,7 +688,7 @@ pub fn main() -> i32 { let outer = make() return outer.pair.left }`),
           ['pair', 0, 8],
         ],
       )
-      assert.deepEqual(LayoutVerify.verifyCatalog(catalog.value), [])
+      assert.deepEqual(LayoutVerify.verifyCatalog(catalog.value, snapshot.index), [])
       assert.deepEqual(LayoutVerify.verifyAgainstCatalog(plan.value, catalog.value), [])
       assert.strictEqual(Layout.entry(plan.value, Type.nominal('layout/catalog', 'Outer')), outer)
       assert.strictEqual(
@@ -762,7 +779,7 @@ pub fn main() -> i32 { return 0 }`),
       LayoutEncode.encodeCatalog(catalog.value),
       'repr=nominal-union layout/nominal-union.State',
     )
-    assert.deepEqual(LayoutVerify.verifyCatalog(catalog.value), [])
+    assert.deepEqual(LayoutVerify.verifyCatalog(catalog.value, snapshot.index), [])
     assert.deepEqual(LayoutVerify.verify(plan.value), [])
   }),
 )
@@ -809,7 +826,7 @@ pub fn main() -> i32 { return 42 }`),
       assert.strictEqual(outer.cause?.code, 'SEM0001')
       assert.strictEqual(left.cause?.code, 'SEM0020')
       assert.strictEqual(right.cause?.code, 'SEM0020')
-      assert.deepEqual(LayoutVerify.verifyCatalog(selected.value), [])
+      assert.deepEqual(LayoutVerify.verifyCatalog(selected.value, snapshot.index), [])
     }),
 )
 
@@ -862,9 +879,7 @@ it.effect('reports malformed aggregate facts and divergence from the catalog', (
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'layout/verify-aggregate',
-      ascii(
-        'struct Pair { left: i32 right: bool }\npub fn main() -> Pair { return Pair { left: 42, right: true } }',
-      ),
+      ascii('extern "C" struct Pair { left: i32 right: i64 }\npub fn main() -> i32 { return 0 }'),
       'aarch64-apple-darwin',
     )
     const selected = Analysis.layoutCatalogOf(snapshot)
@@ -882,7 +897,10 @@ it.effect('reports malformed aggregate facts and divergence from the catalog', (
       ...pair,
       representation: {
         ...pair.representation,
-        fields: [{ ...first, offset: 1 }, ...pair.representation.fields.slice(1)],
+        fields: [
+          { ...first, id: { ...first.id, ordinal: 1 }, offset: 1 },
+          ...pair.representation.fields.slice(1),
+        ],
       },
     }
     const catalog: Layout.Catalog = { ...selected.value, entries: [malformed] }
@@ -899,10 +917,11 @@ it.effect('reports malformed aggregate facts and divergence from the catalog', (
       diagnostics: [],
     }
 
-    assert.include(
-      LayoutVerify.verifyCatalog(catalog).map((violation) => violation.rule),
-      'InvalidAggregate',
+    const rules = LayoutVerify.verifyCatalog(catalog, snapshot.index).map(
+      (violation) => violation.rule,
     )
+    assert.include(rules, 'InvalidAggregate')
+    assert.include(rules, 'InvalidCLayout')
     assert.deepEqual(
       LayoutVerify.verifyAgainstCatalog(plan, selected.value).map((violation) => violation.rule),
       ['CatalogMismatch'],
@@ -941,7 +960,164 @@ pub fn main() -> i32 { return 42 }`),
       assert.strictEqual(handle?._tag, 'LayoutEntry')
       if (handle?._tag !== 'LayoutEntry') return
       assert.deepEqual([handle.size, handle.alignment], [size, size])
-      assert.deepEqual(LayoutVerify.verifyCatalog(catalog), [])
+      assert.deepEqual(LayoutVerify.verifyCatalog(catalog, snapshot.index), [])
     }
+  }),
+)
+
+it.effect('matches mixed nested and array record layout with the host C compiler', () =>
+  Effect.gen(function* () {
+    const host = yield* NativeToolchain.hostTarget()
+
+    const sourceId = 'layout/c-record-oracle'
+    const snapshot = yield* Analysis.ofSourceRealized(
+      sourceId,
+      ascii(`extern "C" struct Inner {
+  count: i32
+  ratio: f64
+}
+extern "C" struct Mixed {
+  marker: i8
+  wide: i64
+  opaque: *mut u8
+  values: [u16; 3]
+  inner: Inner
+}
+pub fn main() -> i32 { return 0 }`),
+      host.id,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const selectedCatalog = Analysis.layoutCatalogOf(snapshot)
+    assert.strictEqual(selectedCatalog._tag, 'Available')
+    if (selectedCatalog._tag !== 'Available') return
+    const index = Analysis.declarationIndex(snapshot)
+    const mixed = Layout.catalogEntry(selectedCatalog.value, Type.nominal(sourceId, 'Mixed'))
+    const inner = Layout.catalogEntry(selectedCatalog.value, Type.nominal(sourceId, 'Inner'))
+    const array = Layout.catalogEntry(selectedCatalog.value, Type.fixedArray('u16', 3))
+    assert.strictEqual(mixed?._tag, 'LayoutEntry')
+    assert.strictEqual(inner?._tag, 'LayoutEntry')
+    assert.strictEqual(array?._tag, 'LayoutEntry')
+    if (
+      mixed?._tag !== 'LayoutEntry' ||
+      inner?._tag !== 'LayoutEntry' ||
+      array?._tag !== 'LayoutEntry' ||
+      mixed.representation._tag !== 'Aggregate' ||
+      inner.representation._tag !== 'Aggregate' ||
+      array.representation._tag !== 'Repeated'
+    )
+      return
+
+    const oracle = yield* NativeToolchain.withBuildScope('c-layout-oracle', (scope) =>
+      Effect.gen(function* () {
+        const object = yield* NativeToolchain.compileCObject(
+          cLayoutOracleToolchain,
+          scope,
+          host,
+          'record-layout',
+          `#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+
+struct Inner {
+  int32_t count;
+  double ratio;
+};
+
+struct Mixed {
+  int8_t marker;
+  int64_t wide;
+  void *opaque;
+  uint16_t values[3];
+  struct Inner inner;
+};
+
+int main(void) {
+  struct Mixed value;
+  printf("%zu %zu "
+         "%zu %zu %zu %zu %zu %zu %zu %zu %zu %zu "
+         "%zu %zu %zu %zu %zu %zu "
+         "%zu %zu\\n",
+         sizeof(struct Mixed), _Alignof(struct Mixed),
+         offsetof(struct Mixed, marker), sizeof(value.marker),
+         offsetof(struct Mixed, wide), sizeof(value.wide),
+         offsetof(struct Mixed, opaque), sizeof(value.opaque),
+         offsetof(struct Mixed, values), sizeof(value.values),
+         offsetof(struct Mixed, inner), sizeof(value.inner),
+         sizeof(struct Inner), _Alignof(struct Inner),
+         offsetof(struct Inner, count), sizeof(value.inner.count),
+         offsetof(struct Inner, ratio), sizeof(value.inner.ratio),
+         _Alignof(uint16_t[3]), sizeof(value.values[0]));
+  return 0;
+}
+`,
+        )
+        const executable = yield* NativeToolchain.NativeFinalizer.finalize(
+          cLayoutOracleToolchain,
+          scope,
+          'NativeExecutable',
+          host,
+          [object.artifact],
+          [],
+          join(scope.root, 'record-layout-oracle'),
+        )
+        const ran = yield* Effect.try({
+          try: () => spawnSync(executable.path, [], { encoding: 'utf8' }),
+          catch: (cause) =>
+            new CLayoutOracleError({ message: 'C layout oracle could not execute', cause }),
+        })
+        if (ran.error !== undefined || ran.status !== 0) {
+          return yield* new CLayoutOracleError({
+            message: `C layout oracle failed: ${ran.stderr}${ran.error?.message ?? ''}`,
+            ...(ran.error === undefined ? {} : { cause: ran.error }),
+          })
+        }
+        const values = ran.stdout.trim().split(/\s+/u).map(Number)
+        assert.strictEqual(values.length, 20)
+        return values
+      }),
+    )
+
+    assert.deepEqual(
+      [
+        mixed.size,
+        mixed.alignment,
+        ...mixed.representation.fields.flatMap((field) => [field.offset, field.size]),
+        inner.size,
+        inner.alignment,
+        ...inner.representation.fields.flatMap((field) => [field.offset, field.size]),
+        array.alignment,
+        array.representation.stride,
+      ],
+      oracle,
+    )
+
+    const expectedPadding = (
+      recordSize: number,
+      offsetSizePairs: ReadonlyArray<number>,
+    ): { readonly fields: ReadonlyArray<number>; readonly tail: number } => {
+      let cursor = 0
+      const fields: Array<number> = []
+      for (let pair = 0; pair < offsetSizePairs.length; pair += 2) {
+        const offset = offsetSizePairs.at(pair)
+        const size = offsetSizePairs.at(pair + 1)
+        if (offset === undefined || size === undefined) continue
+        fields.push(offset - cursor)
+        cursor = offset + size
+      }
+      return { fields, tail: recordSize - cursor }
+    }
+    const cMixedPadding = expectedPadding(oracle.at(0) ?? 0, oracle.slice(2, 12))
+    const cInnerPadding = expectedPadding(oracle.at(12) ?? 0, oracle.slice(14, 18))
+    assert.deepEqual(
+      mixed.representation.fields.map((field) => field.padding),
+      cMixedPadding.fields,
+    )
+    assert.strictEqual(mixed.representation.tailPadding, cMixedPadding.tail)
+    assert.deepEqual(
+      inner.representation.fields.map((field) => field.padding),
+      cInnerPadding.fields,
+    )
+    assert.strictEqual(inner.representation.tailPadding, cInnerPadding.tail)
+    assert.deepEqual(LayoutVerify.verifyCatalog(selectedCatalog.value, index), [])
   }),
 )

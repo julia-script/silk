@@ -1124,6 +1124,7 @@ export const declareReleaseHelper = Effect.fnUntraced(function* (
       builder,
       releaseHelperSymbol,
       yield* LlvmType.functionType(builder, voidType, [pointer]),
+      { visibility: 'hidden' },
     ),
     resultType: voidType,
     emittedResultType: voidType,

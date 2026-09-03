@@ -407,6 +407,15 @@ const unify = (
     return left.access === right.access && unify(left.target, right.target, bindings)
   if (Type.isPointer(left) && Type.isPointer(right))
     return left.mutable === right.mutable && unify(left.pointee, right.pointee, bindings)
+  if (Type.isForeignFunction(left) && Type.isForeignFunction(right))
+    return (
+      left.parameters.length === right.parameters.length &&
+      left.parameters.every((parameter, ordinal) => {
+        const other = right.parameters.at(ordinal)
+        return other !== undefined && unify(parameter, other, bindings)
+      }) &&
+      unify(left.result, right.result, bindings)
+    )
   if (Type.isCallable(left) && Type.isCallable(right))
     return (
       left.parameters.length === right.parameters.length &&

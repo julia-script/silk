@@ -70,8 +70,8 @@ The following are not current language capabilities:
 
 - parallel execution, multithreading, preemptive scheduling, or detached tasks;
 - a package registry or stable third-party dependency format;
-- broad native FFI: scalar and raw-pointer `extern "C"` imports and `export "C"` exports exist,
-  but C-layout records, library artifacts, and a stable ABI do not;
+- broad native FFI: scalar, raw-pointer, and C-layout-record `extern "C"` imports and `export
+"C"` exports exist, but library artifacts and a stable ABI do not;
 - self-hosting, macros, async/await syntax, or generic type aliases; and
 - a compatibility guarantee for syntax, diagnostics, manifests, generated artifacts, or standard
   library APIs.

@@ -21,7 +21,8 @@ const clang = existsSync('/opt/homebrew/opt/llvm/bin/clang')
 const toolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
   clang,
-  shimCache: NativeToolchain.makeShimCache(),
+  llvmAr: 'llvm-ar',
+  runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
 })
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-effect-suspension-native-'))
 
@@ -74,6 +75,7 @@ it.effect('runs one million suspended native recursive frames with bounded machi
       },
       toolchain,
       profile: 'release',
+      artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'deep'),
     }).pipe(Effect.provide(SourceResolver.empty))
 
@@ -133,6 +135,7 @@ it.effect('propagates a failure after a resumed retry into its native handler', 
       },
       toolchain,
       profile: 'release',
+      artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'retry-failure'),
     }).pipe(Effect.provide(SourceResolver.empty))
 
@@ -179,7 +182,7 @@ it.effect('releases frame-retained executions through one out-of-line native hel
     // Emission is finite because every ExecutionCleanup calls the single helper; the helper's own
     // frame cleanup reaches the nested Execution through a call to itself, not another expansion.
     const artifact = yield* Analysis.codegen(analysis, { mode: 'release' })
-    const definitions = artifact.ir.split('define void @silk_execution_release(ptr')
+    const definitions = artifact.ir.split('define hidden void @silk_execution_release(ptr')
     assert.lengthOf(definitions, 2)
     const helperBody = (definitions.at(1) ?? '').split('\n}\n').at(0) ?? ''
     assert.include(helperBody, 'call void @silk_execution_release(ptr')

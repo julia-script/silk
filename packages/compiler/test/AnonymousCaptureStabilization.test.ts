@@ -47,7 +47,8 @@ const defaultClang = (): string => {
 const toolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
   clang: Effect.runSync(Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang()))),
-  shimCache: NativeToolchain.makeShimCache(),
+  llvmAr: 'llvm-ar',
+  runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
 })
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-anonymous-capture-'))
 afterAll(() => {
@@ -60,6 +61,7 @@ const runNative = Effect.fnUntraced(function* (name: string, source: string, exp
     compilation: { root: SourceFile.make('memory/driver', ascii(source)) },
     toolchain,
     profile: 'release',
+    artifactKind: 'NativeExecutable',
     destination: join(destinationRoot, name),
   }).pipe(Effect.provide(SourceResolver.empty))
   assert.strictEqual(outcome._tag, 'Compiled', `${name}: ${json(outcome)}`)

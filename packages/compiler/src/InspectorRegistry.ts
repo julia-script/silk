@@ -680,10 +680,13 @@ export const views: ReadonlyArray<ViewDefinition> = [
         },
         {
           phase: 'instance discovery',
-          outputs:
-            discovery.entry._tag === 'Resolved'
-              ? `${discovery.instances.length} instances`
-              : `entry unavailable · ${discovery.entry.reason}`,
+          outputs: (() => {
+            if (discovery.entry._tag === 'Resolved')
+              return `${discovery.instances.length} instances`
+            if (discovery.entry._tag === 'Library')
+              return `${discovery.instances.length} library instances`
+            return `entry unavailable · ${discovery.entry.reason}`
+          })(),
           diagnostics: 0,
         },
         {
@@ -707,7 +710,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
           outputs: backendOutputs,
           diagnostics: countFor('backend'),
         },
-        { phase: 'native toolchain', outputs: 'object · shim · link', diagnostics: 0 },
+        { phase: 'native toolchain', outputs: 'object · runtime · link', diagnostics: 0 },
       ]
 
       const blocked = phases.filter((entry) => entry.diagnostics > 0).length

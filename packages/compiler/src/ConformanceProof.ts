@@ -195,7 +195,8 @@ export const copyProof = (
     Type.isString(type) ||
     Type.isNever(type) ||
     Type.equals(type, Type.unit) ||
-    Type.isPointer(type)
+    Type.isPointer(type) ||
+    Type.isForeignFunction(type)
   )
     return provedCopy
   if (Type.isReference(type) || Type.isSlice(type))

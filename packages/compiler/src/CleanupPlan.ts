@@ -265,7 +265,8 @@ export const cleanupPlan = (
       ),
     })
   }
-  if (Type.isCallable(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.isCallable(type) || Type.isForeignFunction(type))
+    return Object.freeze({ _tag: 'NoCleanup', type })
   // A stored executable representation owes its enclosing aggregate an exactly-once release of
   // every owned environment lane. Concrete specialization resolves the shared realization.
   if (Type.isRepresented(type)) {

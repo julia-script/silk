@@ -205,6 +205,8 @@ const hirTypeText = (type: Type.Type): string => {
     }
     case 'CallableType':
       return `(${type.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(type.result)} ${type.mode.toLowerCase()}`
+    case 'ForeignFunctionType':
+      return Type.encode(type)
     case 'ReferenceType':
       return `${type.access === 'Exclusive' ? '&mut ' : '&'}${hirTypeText(type.target)}`
     case 'PointerType':

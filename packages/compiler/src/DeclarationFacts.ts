@@ -10,6 +10,7 @@ import type * as Operator from './Operator.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as Scalar from './Scalar.js'
+import type * as SourceSpan from './SourceSpan.js'
 import type * as StaticText from './StaticText.js'
 import type * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
@@ -352,6 +353,15 @@ export type DeclaredTypeFact =
       readonly cause?: Diagnostic.Identity
     }
   | {
+      readonly _tag: 'ForeignFunction'
+      readonly parameters: ReadonlyArray<DeclaredTypeFact>
+      readonly result: DeclaredTypeFact
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly syntax: SyntaxTree.Node
+      readonly cause?: Diagnostic.Identity
+    }
+  | {
       readonly _tag: 'Applied'
       readonly target: DeclaredTypeFact
       readonly arguments: ReadonlyArray<DeclaredTypeFact>
@@ -630,6 +640,23 @@ export interface ConstantFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** One immutable Silk binding backed by an imported or exported C data symbol. */
+export interface ForeignStaticFact {
+  readonly _tag: 'ForeignStaticDeclaration'
+  readonly id: DeclarationId
+  readonly canonical: CanonicalState
+  readonly visibility: 'Private'
+  readonly typeParameters: ReadonlyArray<TypeParameterFact>
+  readonly name: DeclaredName
+  readonly direction: 'Import' | 'Export'
+  readonly foreign: { readonly abi: 'C'; readonly symbol: string }
+  readonly declaredType: DeclaredTypeFact
+  readonly initializerTemplate?: StaticExpressionTemplate
+  readonly literal?: ConstantLiteralFact
+  readonly initializer?: SyntaxTree.Node
+  readonly syntax: SyntaxTree.Node
+}
+
 /** One transparent type alias header. Its target erases to a canonical type at resolution. */
 export interface AliasFact {
   readonly _tag: 'AliasDeclaration'
@@ -696,6 +723,15 @@ export interface StructFact {
   readonly id: DeclarationId
   readonly canonical: CanonicalState
   readonly visibility: 'Public' | 'Private'
+  /** The physical-layout promise retained independently of source visibility and field shape. */
+  readonly layout:
+    | { readonly _tag: 'Silk' }
+    | { readonly _tag: 'Foreign'; readonly abi: 'C'; readonly abiSpan: SourceSpan.SourceSpan }
+    | {
+        readonly _tag: 'InvalidForeign'
+        readonly abi: string | undefined
+        readonly abiSpan: SourceSpan.SourceSpan
+      }
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly name: DeclaredName
   /** Canonical source or literal-occurrence identity for this nominal aggregate. */
@@ -1618,6 +1654,7 @@ export type MemberFact =
   | ServiceFact
   | InterfaceFact
   | ConstantFact
+  | ForeignStaticFact
   | RoleFact
   | AliasFact
 

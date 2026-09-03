@@ -3,6 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as CAbi from '../src/CAbi.js'
+import * as ForeignAvailability from '../src/ForeignAvailability.js'
 import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -285,6 +286,7 @@ it('reports broken graphs deterministically as data', () => {
     intrinsics: straight?.intrinsics ?? raise('expected the sample intrinsic inventory'),
     foreignCalls: Object.freeze([]),
     foreignExports: Object.freeze([]),
+    foreignStatics: Object.freeze([]),
     entry: straight?.entry ?? raise('expected the sample entry'),
     layout: straight?.layout ?? raise('expected the sample layout'),
     executionTransitions: straight?.executionTransitions ?? Object.freeze([]),
@@ -616,6 +618,433 @@ pub fn main() -> i32 {
       MirVerification.verify(rewritten).map((violation) => violation.rule),
       ['InvalidForeignCall'],
     )
+  }),
+)
+
+it.effect('lowers an exact exported C function item to a native callback address', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'mir/foreign-callback-address',
+      ascii(`unsafe extern "C" fn invoke(value: i32, callback: extern "C" fn(i32) -> i32) -> i32
+export "C" fn increment(value: i32) -> i32 { return value + 1 }
+export "C" fn decrement(value: i32) -> i32 { return value - 1 }
+pub fn main() -> i32 { return unsafe invoke(41, increment) }`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(program), [])
+    const operations = program.functions.flatMap((fn) => MirVerification.operations(fn))
+    const address = operations.find((operation) => operation._tag === 'ForeignFunctionAddress')
+    assert.strictEqual(address?._tag, 'ForeignFunctionAddress')
+    if (address?._tag !== 'ForeignFunctionAddress') return
+    assert.strictEqual(address.symbol, 'increment')
+    assert.strictEqual(Type.encode(Mir.semanticType(address.type)), 'extern "C" fn(i32) -> i32')
+    assert.include(MirEncoding.encode(program), '= foreign-address increment')
+    assert.deepEqual(
+      ForeignAvailability.callbackAddresses(program).map((callback) => callback.symbol),
+      ['increment'],
+    )
+    const rewriteAddress = (
+      rewrite: (
+        operation: Extract<Mir.Operation, { readonly _tag: 'ForeignFunctionAddress' }>,
+      ) => Extract<Mir.Operation, { readonly _tag: 'ForeignFunctionAddress' }>,
+    ): Mir.Module =>
+      Object.freeze({
+        ...program,
+        functions: Object.freeze(
+          program.functions.map((fn) =>
+            Object.freeze({
+              ...fn,
+              regions: Object.freeze(
+                fn.regions.map((region) =>
+                  region._tag !== 'OperationRegion'
+                    ? region
+                    : Object.freeze({
+                        ...region,
+                        operations: Object.freeze(
+                          region.operations.map((operation) =>
+                            operation._tag === 'ForeignFunctionAddress'
+                              ? rewrite(operation)
+                              : operation,
+                          ),
+                        ),
+                      }),
+                ),
+              ),
+            }),
+          ),
+        ),
+      })
+    const decrement = program.foreignExports.find((record) => record.symbol === 'decrement')
+    if (decrement === undefined) return assert.fail('expected the second same-signature export')
+    const increment = program.foreignExports.find((record) => record.symbol === 'increment')
+    if (increment === undefined) return assert.fail('expected the callback export')
+    const malformed = [
+      rewriteAddress((operation) => Object.freeze({ ...operation, symbol: 'missing' })),
+      rewriteAddress((operation) =>
+        Object.freeze({
+          ...operation,
+          target: Object.freeze({
+            _tag: 'DeclarationCallableTarget',
+            declaration: Object.freeze({
+              _tag: 'CanonicalDeclarationId',
+              module:
+                operation.target._tag === 'DeclarationCallableTarget'
+                  ? operation.target.declaration.module
+                  : 'mir/foreign-callback-address',
+              name: 'missing',
+            }),
+          }),
+        }),
+      ),
+      rewriteAddress((operation) =>
+        Object.freeze({
+          ...operation,
+          type: Object.freeze({
+            _tag: 'ForeignFunction',
+            type: Type.foreignFunction(['u32'], 'u32'),
+          }),
+        }),
+      ),
+      Object.freeze({
+        ...program,
+        foreignExports: Object.freeze(
+          program.foreignExports.map((record) =>
+            record.symbol === 'increment'
+              ? Object.freeze({ ...record, key: decrement.key })
+              : record,
+          ),
+        ),
+      }),
+      Object.freeze({
+        ...program,
+        foreignExports: Object.freeze(
+          program.foreignExports.map((record) =>
+            record.symbol === 'decrement'
+              ? Object.freeze({ ...record, key: increment.key })
+              : record,
+          ),
+        ),
+      }),
+    ]
+    assert.deepEqual(
+      malformed.map((candidate) =>
+        MirVerification.verify(candidate).some(
+          (violation) => violation.rule === 'InvalidForeignOperation',
+        ),
+      ),
+      [true, true, true, true, true],
+    )
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Blocked')
+    assert.deepEqual(evaluated.trace, [])
+    assert.deepEqual(
+      evaluated._tag === 'Blocked' && evaluated.reason._tag === 'ForeignPlanningUnavailable'
+        ? evaluated.reason.diagnostics.map((diagnostic) =>
+            diagnostic.reason._tag === 'ForeignFunctionTargetUnavailable'
+              ? `${diagnostic.reason.symbol}@${diagnostic.reason.surface}`
+              : diagnostic.code,
+          )
+        : [],
+      ['invoke@Evaluator', 'increment@Evaluator'],
+    )
+    const wasmFailure = yield* Effect.flip(Analysis.codegenWasm(snapshot, { mode: 'release' }))
+    assert.strictEqual(wasmFailure._tag, 'CodegenUnavailable')
+    assert.deepEqual(
+      wasmFailure._tag === 'CodegenUnavailable'
+        ? wasmFailure.diagnostics.map((diagnostic) =>
+            diagnostic.reason._tag === 'ForeignFunctionTargetUnavailable'
+              ? `${diagnostic.reason.symbol}@${diagnostic.reason.surface}`
+              : diagnostic.code,
+          )
+        : [],
+      ['invoke@Wasm', 'increment@Wasm'],
+    )
+  }),
+)
+
+it.effect('rejects every Silk callable without one exact exported C address', () =>
+  Effect.gen(function* () {
+    const source = `unsafe extern "C" fn install(callback: extern "C" fn(i32) -> i32) -> ()
+fn private(value: i32) -> i32 { return value }
+effect fn effectful(value: i32) -> i32 { return value }
+fn generic<T>(value: T) -> T { return move value }
+export "C" fn wrong(value: u32) -> u32 { return value }
+fn invalidPointer(callback: extern "C" fn(bool) -> i32) { drop callback }
+pub fn main() -> i32 {
+  let captured = 1
+  unsafe {
+    install(private)
+    install(effectful)
+    install(generic)
+    install(wrong)
+    install(fn(value: i32) -> i32 { return value + captured })
+  }
+  return 0
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'mir/invalid-foreign-callbacks',
+      ascii(source),
+      'aarch64-apple-darwin',
+    )
+    const diagnostics = Analysis.diagnostics(snapshot).filter(
+      (diagnostic) => diagnostic.code === 'SEM0207',
+    )
+    const invalidPointer = Analysis.diagnostics(snapshot).filter(
+      (diagnostic) => diagnostic.code === 'SEM0187',
+    )
+    assert.deepEqual(
+      invalidPointer.map((diagnostic) => source.slice(diagnostic.span.start, diagnostic.span.end)),
+      ['extern "C" fn(bool) -> i32'],
+    )
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.reason._tag),
+      [
+        'InvalidForeignCallback',
+        'InvalidForeignCallback',
+        'InvalidForeignCallback',
+        'InvalidForeignCallback',
+        'InvalidForeignCallback',
+      ],
+    )
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => source.slice(diagnostic.span.start, diagnostic.span.end)),
+      [
+        'private',
+        'effectful',
+        'generic',
+        'wrong',
+        'fn(value: i32) -> i32 { return value + captured }',
+      ],
+    )
+  }),
+)
+
+it.effect('requires an unsafe boundary to read an imported C static', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'mir/unsafe-foreign-static',
+      ascii(`unsafe extern "C" static environment: *mut *mut u8 as "environ"
+pub fn main() -> i32 { let value = environment return 0 }`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0082'],
+    )
+  }),
+)
+
+it.effect('keeps a C static binding immutable independently of pointee mutability', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'mir/immutable-foreign-static',
+      ascii(`export "C" static answer: i32 = 42
+pub fn main() -> i32 { answer = 1 return answer }`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0035'],
+    )
+  }),
+)
+
+it.effect('retains demanded C statics and blocks their loads outside native linkage', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'mir/used-foreign-static',
+      ascii(`unsafe extern "C" static environment: *mut *mut u8 as "environ"
+unsafe extern "C" static unreferenced: u64 as "environ"
+export "C" static answer: i32 as "silk_answer" = 42
+pub fn main() -> i32 { unsafe { let value = environment drop value } return answer }`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(
+      program.foreignStatics.map((record) => record.symbol),
+      ['environ', 'silk_answer'],
+    )
+    const encoded = MirEncoding.encode(program)
+    assert.include(encoded, 'foreign-static import environ type=*mut *mut u8 initializer=none')
+    assert.include(encoded, 'foreign-static export silk_answer type=i32 initializer=42')
+    const rewriteStatic = (
+      rewrite: (
+        operation: Extract<Mir.Operation, { readonly _tag: 'ForeignStaticLoad' }>,
+      ) => Extract<Mir.Operation, { readonly _tag: 'ForeignStaticLoad' }>,
+    ): Mir.Module =>
+      Object.freeze({
+        ...program,
+        functions: Object.freeze(
+          program.functions.map((fn) =>
+            Object.freeze({
+              ...fn,
+              regions: Object.freeze(
+                fn.regions.map((region) =>
+                  region._tag !== 'OperationRegion'
+                    ? region
+                    : Object.freeze({
+                        ...region,
+                        operations: Object.freeze(
+                          region.operations.map((operation) =>
+                            operation._tag === 'ForeignStaticLoad' ? rewrite(operation) : operation,
+                          ),
+                        ),
+                      }),
+                ),
+              ),
+            }),
+          ),
+        ),
+      })
+    const malformed = [
+      rewriteStatic((operation) => Object.freeze({ ...operation, symbol: 'missing' })),
+      rewriteStatic((operation) =>
+        Object.freeze({
+          ...operation,
+          declaration: Object.freeze({ ...operation.declaration, name: 'missing' }),
+        }),
+      ),
+      rewriteStatic((operation) =>
+        Object.freeze({
+          ...operation,
+          direction: operation.direction === 'Import' ? 'Export' : 'Import',
+        }),
+      ),
+      rewriteStatic((operation) => Object.freeze({ ...operation, type: { _tag: 'u64' as const } })),
+      Object.freeze({
+        ...program,
+        foreignStatics: Object.freeze(
+          program.foreignStatics.map((record) =>
+            record.direction === 'Export'
+              ? Object.freeze({
+                  declaration: record.declaration,
+                  declarationSpan: record.declarationSpan,
+                  direction: record.direction,
+                  symbol: record.symbol,
+                  type: record.type,
+                })
+              : record,
+          ),
+        ),
+      }),
+      Object.freeze({
+        ...program,
+        foreignStatics: Object.freeze(
+          program.foreignStatics.map((record) =>
+            record.direction === 'Export' && record.literal?._tag === 'IntegerLiteral'
+              ? Object.freeze({
+                  ...record,
+                  literal: Object.freeze({
+                    ...record.literal,
+                    _tag: 'FloatingLiteral' as const,
+                    spelling: '42.0',
+                  }),
+                })
+              : record,
+          ),
+        ),
+      }),
+      Object.freeze({
+        ...program,
+        foreignStatics: Object.freeze(
+          program.foreignStatics.map((record) =>
+            record.direction === 'Export' && record.literal?._tag === 'IntegerLiteral'
+              ? Object.freeze({
+                  ...record,
+                  literal: Object.freeze({ ...record.literal, value: 1n << 40n }),
+                })
+              : record,
+          ),
+        ),
+      }),
+      Object.freeze({
+        ...program,
+        foreignStatics: Object.freeze(
+          program.foreignStatics.flatMap((record) =>
+            record.direction === 'Import'
+              ? [
+                  record,
+                  Object.freeze({
+                    ...record,
+                    symbol: 'phantom_environ',
+                    declarationSpan: Object.freeze({
+                      ...record.declarationSpan,
+                      start: record.declarationSpan.start + 1,
+                      end: record.declarationSpan.end + 1,
+                    }),
+                  }),
+                ]
+              : [record],
+          ),
+        ),
+      }),
+    ]
+    assert.deepEqual(
+      malformed.map((candidate) =>
+        MirVerification.verify(candidate).some(
+          (violation) => violation.rule === 'InvalidForeignOperation',
+        ),
+      ),
+      [true, true, true, true, true, true, true, true],
+    )
+    const identityDuplicate = malformed.at(-1) ?? raise('expected a malformed static inventory')
+    const facadeFailure = yield* Effect.flip(
+      Analysis.codegenWasm(
+        Object.freeze({
+          ...snapshot,
+          mir: Object.freeze({ _tag: 'Available' as const, value: identityDuplicate }),
+        }),
+        { mode: 'release' },
+      ),
+    )
+    assert.strictEqual(facadeFailure._tag, 'BackendError')
+    if (facadeFailure._tag === 'BackendError')
+      assert.strictEqual(facadeFailure.reason?._tag, 'InvalidMir')
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Blocked')
+    assert.deepEqual(evaluated.trace, [])
+    assert.deepEqual(
+      evaluated._tag === 'Blocked' && evaluated.reason._tag === 'ForeignPlanningUnavailable'
+        ? evaluated.reason.diagnostics.map((diagnostic) =>
+            diagnostic.reason._tag === 'ForeignStaticTargetUnavailable'
+              ? `${diagnostic.reason.symbol}@${diagnostic.reason.surface}`
+              : diagnostic.code,
+          )
+        : [],
+      ['environ@Evaluator', 'silk_answer@Evaluator'],
+    )
+    const wasmFailure = yield* Effect.flip(Analysis.codegenWasm(snapshot, { mode: 'release' }))
+    assert.strictEqual(wasmFailure._tag, 'CodegenUnavailable')
+    assert.deepEqual(
+      wasmFailure._tag === 'CodegenUnavailable'
+        ? wasmFailure.diagnostics.map((diagnostic) =>
+            diagnostic.reason._tag === 'ForeignStaticTargetUnavailable'
+              ? `${diagnostic.reason.symbol}@${diagnostic.reason.surface}`
+              : diagnostic.code,
+          )
+        : [],
+      ['environ@Wasm', 'silk_answer@Wasm'],
+    )
+  }),
+)
+
+it.effect('rejects a pointer-sized C static initializer outside the selected target', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'mir/foreign-static-target-range',
+      ascii(`export "C" static wide: usize = 4294967296
+pub fn main() -> i32 { return 0 }`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0086'],
+    )
+    assert.strictEqual(snapshot.mir._tag, 'Unavailable')
   }),
 )
 

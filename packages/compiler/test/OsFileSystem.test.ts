@@ -476,8 +476,9 @@ it.effect(
           target: 'wasm32-unknown-unknown',
         },
         backend: WasmBackend.WasmBackend,
-        toolchain: { _tag: 'Toolchain', clang: '' },
+        toolchain: { _tag: 'Toolchain', clang: '', llvmAr: 'llvm-ar' },
         profile: 'release',
+        artifactKind: 'WebAssemblyModule',
         destination: join(destinationRoot, 'unsupported.wasm'),
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(driven._tag, 'TargetFailed')
@@ -632,13 +633,15 @@ it.effect('keeps the evaluator boundary browser-safe and native runtime pay-for-
         '-',
       ],
       {
-        input: ToolchainPlan.shimSource(returnedStatusTermination, ['silk_os_path_inspect_v1']),
+        input: ToolchainPlan.executableSource(returnedStatusTermination, [
+          'silk_os_path_inspect_v1',
+        ]),
         encoding: 'utf8',
       },
     )
     assert.strictEqual(checked.status, 0, checked.stderr)
 
-    const securitySource = `${ToolchainPlan.shimSource(returnedStatusTermination, [
+    const securitySource = `${ToolchainPlan.executableSource(returnedStatusTermination, [
       'silk_os_path_inspect_v1',
     ])}
 static int rejected(const unsigned char *root, size_t root_length,
@@ -751,8 +754,9 @@ pub fn main() -> i32 {
         compilation: {
           root: SourceFile.make('os-filesystem/native-provider', ascii(source)),
         },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
         profile: 'release',
+        artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'native-provider'),
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(

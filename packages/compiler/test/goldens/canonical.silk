@@ -87,6 +87,12 @@ pub export "C" fn double(value: i32) -> i32 as "silk_test_double_v1" {
   return value * 2
 }
 
+unsafe extern "C" static environment: *mut *mut u8 as "environ"
+
+export "C" static answer: i32 as "silk_answer" = 42
+
+fn useCallback(callback: extern "C" fn(i32) -> i32) {}
+
 fn inspect(event: Token | End) -> i32 {
   return match &mut event {
     Token {span: Span {start: offset, ..}, ..} if true => offset

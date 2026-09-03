@@ -423,6 +423,14 @@ export const ambiguousSuppliedOperationCode = 'SEM0202' as const
 export const suppliedOperationValueCode = 'SEM0203' as const
 /** Stable code for a root `main` whose declaration shape is not a valid program entry. */
 export const invalidEntryShapeCode = 'SEM0204' as const
+/** Stable code for a C-layout record that declares type parameters. */
+export const genericCLayoutRecordCode = 'SEM0205' as const
+/** Stable code for a C-layout record field outside the closed C object subset. */
+export const unsupportedCLayoutFieldCode = 'SEM0206' as const
+/** Stable code for a value that cannot become an exact noncapturing C callback address. */
+export const invalidForeignCallbackCode = 'SEM0207' as const
+/** Stable code for reachable C data on an execution surface without native symbol linkage. */
+export const foreignStaticTargetUnavailableCode = 'SEM0208' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -671,6 +679,10 @@ export type Code =
   | typeof ambiguousSuppliedOperationCode
   | typeof suppliedOperationValueCode
   | typeof invalidEntryShapeCode
+  | typeof genericCLayoutRecordCode
+  | typeof unsupportedCLayoutFieldCode
+  | typeof invalidForeignCallbackCode
+  | typeof foreignStaticTargetUnavailableCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -1128,10 +1140,23 @@ export type Reason =
   | { readonly _tag: 'CyclicTypeAlias'; readonly aliases: ReadonlyArray<string> }
   | { readonly _tag: 'TypeAliasParameters'; readonly alias: string }
   | { readonly _tag: 'UnsupportedForeignAbi'; readonly abi: string }
+  | { readonly _tag: 'GenericCLayoutRecord'; readonly record: string }
+  | {
+      readonly _tag: 'UnsupportedCLayoutField'
+      readonly record: string
+      readonly field: string
+      readonly type: string
+    }
   | { readonly _tag: 'ForeignFunctionRequiresUnsafe'; readonly name: string }
   | { readonly _tag: 'ForeignTypeNotAdmitted'; readonly type: string; readonly abi: string }
   | { readonly _tag: 'ForeignDeclarationRestriction'; readonly restriction: string }
   | { readonly _tag: 'ForeignFunctionNotFirstClass'; readonly name: string }
+  | { readonly _tag: 'InvalidForeignCallback'; readonly name: string; readonly detail: string }
+  | {
+      readonly _tag: 'ForeignStaticTargetUnavailable'
+      readonly symbol: string
+      readonly surface: string
+    }
   | { readonly _tag: 'InvalidForeignSymbol'; readonly symbol: string }
   | { readonly _tag: 'ReservedForeignSymbol'; readonly symbol: string }
   | {
@@ -2440,6 +2465,35 @@ export const unsupportedForeignAbi = (abi: string, span: SourceSpan.SourceSpan):
     span,
   })
 
+/** Rejects a parameterized record before it can publish a C-layout promise. */
+export const genericCLayoutRecord = (record: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: genericCLayoutRecordCode,
+    severity: 'error',
+    message: `C-layout record ${record} cannot declare type parameters`,
+    reason: Object.freeze({ _tag: 'GenericCLayoutRecord', record }),
+    span,
+  })
+
+/** Rejects one field whose resolved type has no supported C object representation. */
+export const unsupportedCLayoutField = (
+  record: string,
+  field: string,
+  type: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unsupportedCLayoutFieldCode,
+    severity: 'error',
+    message: `Field ${field} of C-layout record ${record} has unsupported type ${type}`,
+    reason: Object.freeze({ _tag: 'UnsupportedCLayoutField', record, field, type }),
+    span,
+  })
+
 export const foreignFunctionRequiresUnsafe = (
   name: string,
   span: SourceSpan.SourceSpan,
@@ -2499,6 +2553,36 @@ export const foreignFunctionNotFirstClass = (
     span,
   })
 
+export const invalidForeignCallback = (
+  name: string,
+  detail: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidForeignCallbackCode,
+    severity: 'error',
+    message: `${name} cannot be used as a C callback: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidForeignCallback', name, detail }),
+    span,
+  })
+
+export const foreignStaticTargetUnavailable = (
+  symbol: string,
+  surface: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: foreignStaticTargetUnavailableCode,
+    severity: 'error',
+    message: `Foreign static ${symbol} is unavailable on ${surface}; C data symbols require native LLVM linkage`,
+    reason: Object.freeze({ _tag: 'ForeignStaticTargetUnavailable', symbol, surface }),
+    span,
+  })
+
 export const invalidForeignSymbol = (symbol: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
@@ -2540,7 +2624,7 @@ export const conflictingForeignSignature = (
     ]),
   })
 
-/** Diagnoses a reachable foreign call before a non-native execution surface is entered. */
+/** Diagnoses a reachable foreign call before an execution surface without bindings is entered. */
 export const foreignFunctionTargetUnavailable = (
   symbol: string,
   surface: string,

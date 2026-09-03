@@ -20,7 +20,8 @@ const clang = existsSync('/opt/homebrew/opt/llvm/bin/clang')
 const toolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
   clang,
-  shimCache: NativeToolchain.makeShimCache(),
+  llvmAr: 'llvm-ar',
+  runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
 })
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-nested-effect-row-stabilization-'))
 
@@ -162,6 +163,7 @@ it.effect(
         },
         toolchain,
         profile: 'release',
+        artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'provide-each-layer'),
       }).pipe(Effect.provide(SourceResolver.empty))
 

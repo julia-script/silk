@@ -30,8 +30,9 @@ const runWasm = (bytes: Uint8Array): number => {
 const compileNative = (name: string, source: string, backend?: Backend.Backend) =>
   Driver.compile({
     compilation: { root: SourceFile.make(name, ascii(source)) },
-    toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+    toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
     profile: 'release',
+    artifactKind: 'NativeExecutable',
     destination: join(destinationRoot, name.replace(/[^a-z0-9]/gi, '-')),
     ...(backend === undefined ? {} : { backend }),
     cache: false,

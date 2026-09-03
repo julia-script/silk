@@ -35,8 +35,9 @@ const runWasm = Effect.fnUntraced(function* (snapshot: Analysis.Snapshot) {
 const runNative = Effect.fnUntraced(function* (name: string, source: string) {
   const outcome = yield* Driver.compile({
     compilation: { root: SourceFile.make('memory/driver', ascii(source)) },
-    toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+    toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
     profile: 'release',
+    artifactKind: 'NativeExecutable',
     destination: join(destinationRoot, name.replace(/[^a-z0-9]/gi, '-')),
     cache: false,
   }).pipe(Effect.provide(SourceResolver.empty))

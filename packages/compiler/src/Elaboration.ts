@@ -762,6 +762,15 @@ export interface ConstantExpressionFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** One runtime load from a declaration-owned C data symbol. */
+export interface ForeignStaticExpressionFact {
+  readonly _tag: 'ForeignStatic'
+  readonly declaration: DeclarationFacts.ForeignStaticFact
+  readonly token: Token.Token
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
 /** One parenthesized expression retaining its concrete grouping. */
 export interface GroupedExpressionFact {
   readonly _tag: 'Grouped'
@@ -827,6 +836,8 @@ export interface FunctionItemExpressionFact {
   readonly reference: CallReferenceFact
   readonly path: ReferencePathFact
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+  /** Present when contextual typing converts an exported function item to its C address. */
+  readonly foreignAddress?: { readonly symbol: string }
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
 }
@@ -994,6 +1005,7 @@ export type ExpressionFact =
     }
   | BooleanExpressionFact
   | ConstantExpressionFact
+  | ForeignStaticExpressionFact
   | EnumMemberExpressionFact
   | EnumValueExpressionFact
   | IdentifierExpressionFact

@@ -118,6 +118,7 @@ const ofTypeInner = (
   if (Type.isSlice(type)) return ofTypeInner(index, type.element, active)
   if (Type.isReference(type)) return ofTypeInner(index, type.target, active)
   if (Type.isPointer(type)) return ofTypeInner(index, type.pointee, active)
+  if (Type.isForeignFunction(type)) return unrestricted
   if (Type.isUnion(type))
     return join(type.members.map((member) => ofTypeInner(index, member, active)))
   // Callable and Effect contracts describe invocation, not the hidden values retained by a

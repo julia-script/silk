@@ -259,14 +259,6 @@ import silk.option { Option }
 fn absurd<T>() -> T { let boom = 1 / 0 return absurd<T>() }
 fn opened(handle: OsHandle) -> Option<OsHandle> { return Option.some<OsHandle>(move handle) }
 fn refused() -> Option<OsHandle> { return Option.none<OsHandle>() }
-effect fn systemClockNow(seconds: &mut i64, nanoseconds: &mut i64) -> bool {
-  unsafe { return run Intrinsic.osSystemClockNow(seconds, nanoseconds) }
-  return false
-}
-effect fn systemClockResolution(nanoseconds: &mut u64) -> bool {
-  unsafe { return run Intrinsic.osSystemClockResolution(nanoseconds) }
-  return false
-}
 effect fn monotonicClockNow(seconds: &mut i64, nanoseconds: &mut i64) -> bool {
   unsafe { return run Intrinsic.osMonotonicClockNow(seconds, nanoseconds) }
   return false
@@ -560,6 +552,20 @@ it('indexes every actor and operation without changing catalog identity', () => 
       name: 'missing',
     }),
     undefined,
+  )
+})
+
+it('contains no compiler repository identity for the migrated system clock', () => {
+  const source = readFileSync(new URL('../src/Intrinsic.ts', import.meta.url), 'utf8')
+  assert.notInclude(source, "spelling === 'systemClockNow'")
+  assert.notInclude(source, "spelling === 'systemClockResolution'")
+  assert.deepEqual(
+    Intrinsic.inventory().filter(
+      (entry) =>
+        entry.operation.includes('SystemClock') ||
+        entry.consumer.startsWith('silk/os_system_clock'),
+    ),
+    [],
   )
 })
 

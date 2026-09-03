@@ -856,7 +856,9 @@ distinct from Silk type compatibility. The admitted subset is:
 - `isize` and `usize` as pointer-width integers of the selected target;
 - `f32` and `f64` as the C `float` and `double` classes; and
 - `*const T` and `*mut T` for any pointee `T` as the C pointer class, without requiring the
-  pointee itself to be admitted.
+  pointee itself to be admitted; and
+- `extern "C" fn(P...) -> R` as one C function-pointer class when every parameter and result is
+  admitted recursively.
 
 ```silk,ignore
 struct Opaque {}
@@ -867,7 +869,7 @@ unsafe extern "C" fn use(handle: *mut Opaque) -> i32
 ```
 
 Parameters are passed by value. Every other type is rejected: `bool`, `char`, `string`,
-references, slices, fixed arrays, structs, unions, enums, callable types, and type parameters.
+references, slices, fixed arrays, structs, unions, enums, Silk callable types, and type parameters.
 
 Admission is judged on the type spelling alone, so a foreign header is admitted or rejected once
 per module, independent of the target. The C classification of `isize`, `usize`, and pointers
@@ -875,9 +877,9 @@ takes the selected target's pointer width when the executable is realized for th
 
 **Boundary:** A type being representable in C does not admit it. `bool` has a C-compatible
 layout on every supported target and is still outside the subset, because admission is a closed
-relation, not a layout query. Admitting `*mut Opaque` says nothing about the pointee: native code
-reading the fields of a Silk struct through a pointer is undefined until C-layout records exist,
-which are a separate proposal. Pointer values themselves are defined by
+relation, not a layout query. Admitting `*mut Opaque` says nothing about the pointee: an ordinary
+Silk struct remains an opaque handle, while only a valid `extern "C" struct` grants native code the
+right to interpret its fields. Pointer values themselves are defined by
 [PTR-001](values-and-types.md#ptr-001--a-raw-pointer-is-one-un-owned-machine-address).
 
 **Diagnostics:** A parameter or result outside the subset reports `SEM0187` at the offending
@@ -885,12 +887,14 @@ type, naming the type and the ABI. One declaration with several offending types 
 diagnostic per type. A rejected header publishes no callable.
 
 **Current compiler:** Aligned. `CAbi.admit` judges the spelling and accepts a pointer without
-examining its pointee; `CAbi.classify` and `CAbi.signature` derive the target-specific C signature
-used by MIR, verification, and the backend, with pointer mutability part of the signature key so
-`*const u8` and `*mut u8` redeclarations disagree.
+examining its pointee; C-layout field validation is a separate recursive contract.
+`CAbi.classify` and `CAbi.signature` derive the target-specific C signature used by MIR,
+verification, and the backend, with pointer mutability part of the signature key so `*const u8`
+and `*mut u8` redeclarations disagree.
 
 **Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
 [pointer admission](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-foreign-functions/spec.md),
+[C-layout field contract](values-and-types.md#struct-006--c-layout-records-make-an-explicit-field-layout-promise),
 [C ABI classification](../../../../packages/compiler/src/CAbi.ts),
 [declaration completion](../../../../packages/compiler/src/DeclarationCompletion.ts).
 
@@ -914,7 +918,9 @@ argument, storing it, or partially applying it is rejected.
 **Boundary:** This restriction is narrower than
 [UNSAFE-007](#unsafe-007--partial-application-preserves-unsafety-but-does-not-invoke-it), which
 lets ordinary unsafe source callables be taken as values. A foreign function has no Silk callable
-representation in this change; a later proposal may lift the first-class restriction.
+representation. An exact `export "C"` function may instead become a C address under
+[FFI-012](#ffi-012--c-function-pointers-are-exact-exported-addresses); that does not make imported
+foreign functions first class.
 
 **Diagnostics:** Retained Silk-only syntax reports `SEM0188` at the offending syntax and publishes
 no callable. A first-class use reports `SEM0189` at the use.
@@ -976,14 +982,20 @@ crosses the boundary as one address lane, and every place a pointer was formed f
 after the call, so a native write through the pointer is observed by later Silk reads under
 [PTR-003](values-and-types.md#ptr-003--formation-ends-no-loan-and-validity-is-the-callers-obligation).
 
-Link inputs are the program object, the toolchain shim, and the libraries the project manifest
-names. The optional `[build]` table's `native-libraries` list reaches the link command as `-l`
-arguments; a name with a path separator, whitespace, NUL, or leading `-` is rejected when the
-manifest is read. Arbitrary linker flags stay out of source and manifest.
+Link inputs are compiler-generated objects followed by the ordered structured inputs the project
+manifest names. The optional `[build]` table's `native-link-inputs` array accepts object paths,
+static-archive paths, named libraries with an explicit static or dynamic mode, search paths, and
+Apple frameworks. Paths are resolved relative to the manifest and may not escape the project; a
+name with a path separator, whitespace, NUL, or leading `-` is rejected. Arbitrary linker flags
+stay out of source and manifest.
 
 ```toml
 [build]
-native-libraries = ["m"]
+native-link-inputs = [
+  { search-path = "vendor/lib" },
+  { library = "m", mode = "dynamic" },
+  { static-archive = "vendor/libsupport.a" },
+]
 ```
 
 **Boundary:** The compiler does not verify that a link input defines the symbol or that its real
@@ -1003,35 +1015,68 @@ and records the reachable symbols with their C signatures on the artifact.
 **Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
 [C ABI signature](../../../../packages/compiler/src/CAbi.ts).
 
-### FFI-007 — Foreign functions are native-only and pay-for-use
+### FFI-007 — Foreign functions use explicit pay-for-use bindings
 
 **Status:** Confirmed
 
-Foreign functions are available on native targets only. A foreign call retained in the executable
-closure for the evaluator, for the direct WebAssembly backend, or for LLVM emission of a
-WebAssembly target is rejected before backend construction, under the same reachability rule as
+Foreign functions use one explicit binding model for each supported execution surface. Native
+artifacts retain direct external symbols for the linker. The evaluator resolves reachable calls
+through a host-function table supplied for that evaluation. The direct WebAssembly backend imports
+each reachable symbol from `silk:runtime/foreign@v1` under the symbol's own field name. LLVM
+emission for a WebAssembly target remains unavailable, under the same reachability rule as
 [TARGET-001](#target-001--intrinsic-availability-is-checked-only-for-the-selected-executable-closure).
 
 Parsing, importing, indexing, or retaining an uncalled foreign declaration does not reject a
 portable program, and a call in an unselected `static if` arm does not enter the closure. A
-reachable foreign function contributes exactly one external declaration to the native artifact; an
-unreachable one contributes nothing, as
+reachable foreign function contributes exactly one external declaration or Wasm import to its
+artifact; an unreachable one contributes nothing, as
 [TARGET-002](#target-002--unreachable-target-specific-primitives-have-no-artifact-cost) requires.
 
-**Boundary:** Availability is a property of the target kind, not of the backend. The LLVM backend
-emitting `wasm32-unknown-unknown` rejects a reachable foreign call exactly as the direct
-WebAssembly backend does. Evaluator host tables and Wasm import binding are later proposals.
+The evaluator table is immutable and local to one run. Every entry names the symbol, declares its
+canonical C-class signature, and returns either a value or a typed failure. Evaluation checks the
+complete reachable inventory before the entry runs, so a missing or mismatched binding has an empty
+trace and names the symbol plus expected signature. There is no implicit libc table.
 
-**Diagnostics:** A reachable foreign call on an unavailable surface reports `SEM0193`, naming the
-symbol and the requested execution surface or target, in the
+```ts
+const table = ForeignHost.make([
+  {
+    symbol: 'abs',
+    signature: ForeignHost.signature(['i32'], 'i32'),
+    invoke: ([value]) =>
+      value?._tag === 'IntegerValue' && value.type === 'i32'
+        ? ForeignHost.returned({ ...value, value: value.value < 0n ? -value.value : value.value })
+        : ForeignHost.failed('abs expected one i32'),
+  },
+])
+```
+
+For direct WebAssembly, the artifact's `hostImports` and `foreignImports` inventories describe the
+exact object an instantiating host must supply:
+
+```ts
+const imports = {
+  [ForeignHost.wasmModule]: {
+    abs: (value: number) => Math.abs(value),
+  },
+}
+```
+
+**Boundary:** The direct Wasm backend owns a concrete import model; this does not grant the LLVM
+backend an ambient Wasm linker or import convention. Foreign exports remain native-only.
+
+**Diagnostics:** LLVM-wasm foreign calls and foreign exports on a non-native target report
+`SEM0193`, naming the symbol and requested target or surface, in the
 [TARGET-003](#target-003--target-unavailability-is-a-compile-time-compatibility-error) shape. It
-does not suggest catching a failure or adding an unsafe block.
+does not suggest catching a failure or adding an unsafe block. Evaluator binding absence,
+signature mismatch, and typed host failure are blocked execution reasons rather than semantic
+diagnostics.
 
 **Current compiler:** Aligned. The executable origin collects reachable foreign calls beside
-intrinsic calls, and every availability site checks them with a native-only rule.
+intrinsic calls. Evaluator admission validates `ForeignHost` bindings before execution, and direct
+Wasm emission declares typed imports and records their deterministic metadata.
 
-**Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
-[foreign diagnostics](../../../../packages/compiler/src/Diagnostic.ts),
+**Evidence:** [foreign function specification](../../../../openspec/specs/bootstrap-foreign-functions/spec.md),
+[foreign host contract](../../../../packages/compiler/src/ForeignHost.ts),
 [C ABI classification](../../../../packages/compiler/src/CAbi.ts).
 
 ### FFI-008 — `export "C"` publishes one C-callable symbol behind a generated thunk
@@ -1067,11 +1112,13 @@ and is neither implied by nor implies native export: a private exported function
 symbol, and a `pub` function without `export` is not.
 
 **Boundary:** Renaming with `as` creates no declaration under the symbol's spelling; `add` above
-defines no native symbol named `add`. Exports live in executables in this change; a native
-executable still requires `main` and its exports are additional symbols beside the entry. Library
-artifacts, generated C headers, records, callbacks, and data symbols are separate proposals;
-pointer parameters and results are forwarded through the thunk unchanged. There is no `unsafe export`: unsafety is a caller-side Silk contract that a C caller
-cannot acknowledge.
+defines no native symbol named `add`. A native executable requires `main` and treats exports as
+additional roots. A native shared or static library instead requires at least one export, roots
+reachability at all exports, and synthesizes no process entry. Only export thunks have default
+visibility in a shared library; their compiler implementations and runtime support stay hidden.
+Generated C headers remain a separate proposal. Pointer and function-pointer parameters and
+results are forwarded through the thunk unchanged. There is no `unsafe export`:
+unsafety is a caller-side Silk contract that a C caller cannot acknowledge.
 
 **Diagnostics:** An ABI string other than `"C"` reports `SEM0185` at the string and publishes no
 callable. A missing body is a parser diagnostic, because the exported form has no bodiless shape.
@@ -1139,7 +1186,7 @@ Exports do not replace the entry: a native executable still requires the ordinar
 driver, shim, and termination contract are unchanged.
 
 **Boundary:** Availability is a property of the target kind, as in
-[FFI-007](#ffi-007--foreign-functions-are-native-only-and-pay-for-use). On a WebAssembly target an
+[FFI-007](#ffi-007--foreign-functions-use-explicit-pay-for-use-bindings). On a WebAssembly target an
 `export "C"` declaration anywhere in the loaded closure is rejected under either backend, even
 when nothing calls it, because the declaration itself demands a native symbol. The evaluator runs
 the native discovery and inherits the roots harmlessly: it reports nothing for an export, exposes
@@ -1165,7 +1212,7 @@ emission header.
 
 An export symbol obeys the spelling and reservation rules of
 [FFI-005](#ffi-005--foreign-symbols-are-valid-unreserved-and-unique-per-executable): a non-empty
-ASCII identifier that is not a symbol the compiler owns. Within one executable closure, two
+ASCII identifier that is not a symbol the compiler owns. Within one native artifact closure, two
 exported declarations of one symbol are rejected, and an exported symbol equal to a reachable
 foreign import's symbol is rejected, because the executable would both define and import one name.
 
@@ -1176,8 +1223,8 @@ export "C" fn abs(value: i32) -> i32 { return value }
 ```
 
 The artifact records every export with its symbol and classified C signature, sorted by symbol,
-beside the foreign imports. That inventory is the seed for generated headers and ABI manifests,
-which are later proposals.
+beside the foreign imports. That inventory is the source of the generated headers and ABI
+manifests described by [FFI-014](#ffi-014--native-libraries-publish-c-interface-companions).
 
 **Boundary:** Two foreign imports of one symbol agree when their C signatures match; two exports
 never do, because each would define the symbol. An export in a module that is not loaded into
@@ -1193,7 +1240,162 @@ closure-wide symbol map over imports and exports is built at the planning gate b
 construction, and the native backend populates the artifact's export inventory from the MIR
 module.
 
-**Evidence:** [export specification](../../../../openspec/changes/add-export-c-functions/specs/bootstrap-foreign-functions/spec.md),
+**Evidence:** [export specification](../../../../openspec/specs/bootstrap-foreign-functions/spec.md),
 [symbol spelling and reservation](../../../../packages/compiler/src/ForeignSymbol.ts),
 [foreign planning](../../../../packages/compiler/src/ForeignPlanning.ts),
 [native program emission](../../../../packages/compiler/src/NativeProgram.ts).
+
+### FFI-012 — C function pointers are exact exported addresses
+
+**Status:** Confirmed
+
+`extern "C" fn(P...) -> R` is a distinct Copy type represented by one native address. It is not a
+Silk `fn(P...) -> R` value: it has no environment, dynamic dispatch record, or ownership-bearing
+capture. A named `export "C" fn` item contextually converts to the C function-pointer type only
+when its parameter and result types match exactly and its body is nongeneric and synchronous.
+
+```silk,ignore
+import silk.pointer { Pointer }
+
+unsafe extern "C" fn qsort(
+  base: *mut i32,
+  count: usize,
+  size: usize,
+  compare: extern "C" fn(*const i32, *const i32) -> i32,
+) -> ()
+
+export "C" fn compare(left: *const i32, right: *const i32) -> i32 {
+  let a = unsafe Pointer.read(left)
+  let b = unsafe Pointer.read(right)
+  if a < b { return -1 }
+  if a > b { return 1 }
+  return 0
+}
+```
+
+The native backend supplies the address of the same C-ABI thunk published for external callers.
+The address passes unchanged through the foreign call. Ordinary functions, generic functions,
+effect or suspending functions, and anonymous or capturing callables never acquire a C address.
+
+**Boundary:** Callback conversion is contextual; naming `compare` where a Silk callable is expected
+still produces its ordinary Silk callable value. Imported foreign functions remain callable-only.
+The evaluator and direct WebAssembly reject any reachable call whose signature contains a C
+function pointer before entry and do not invent host addresses.
+
+**Diagnostics:** A C function-pointer type containing any parameter or result outside the admitted
+C subset reports `SEM0187` at that type wherever it is declared. An ineligible value at a C
+callback conversion reports `SEM0207` at the value. An otherwise valid callback operation on a
+non-native execution surface reports `SEM0193` with the foreign symbol and surface.
+
+**Current compiler:** Aligned. Semantic analysis records the contextual address conversion, MIR
+retains a dedicated foreign-address operation, and native lowering resolves it to the generated
+export thunk. The native corpus calls libc `qsort` through a Silk comparator.
+
+**Evidence:** [callback specification](../../../../openspec/specs/bootstrap-foreign-functions/spec.md),
+[call resolution](../../../../packages/compiler/src/CallResolution.ts),
+[native foreign lowering](../../../../packages/compiler/src/NativeForeignOperation.ts).
+
+### FFI-013 — C statics are immutable bindings to native data symbols
+
+**Status:** Confirmed
+
+An imported data symbol is declared with `unsafe extern "C" static`; an exported definition uses
+`export "C" static`. The optional `as` tail changes only the native symbol. The Silk binding cannot
+be assigned, while a pointer stored in it retains the pointee mutability written by its type.
+
+```silk,ignore
+unsafe extern "C" static environment: *mut *mut u8 as "environ"
+export "C" static silk_abi_version: u32 = 1
+```
+
+Reading an imported static requires a lexical unsafe boundary and loads the current value from the
+external global. An exported static requires one matching integer or floating-point literal and
+becomes an externally visible constant global. Native artifacts record imported and exported data
+symbols, their C class, and direction in deterministic symbol order.
+
+**Boundary:** C statics are native-only. The evaluator and direct WebAssembly report a reachable
+read before entry and never synthesize ambient data. Unreferenced imports do not enter MIR or the
+artifact; exports remain roots because an external C consumer can read them without Silk code doing
+so.
+
+**Diagnostics:** Invalid ABI types report `SEM0187`; invalid initializers report `SEM0086`; reads
+outside an unsafe boundary report `SEM0082`; and reachable statics on non-native surfaces report
+`SEM0208` naming the symbol and surface. Symbol spelling, reservation, and closure-wide collision
+rules reuse `SEM0190`–`SEM0192`.
+
+**Current compiler:** Aligned. The declaration surface, HIR/MIR, availability planner, LLVM global
+emission, artifact metadata, and native shared/static-library acceptance all retain the same symbol
+and C type.
+
+**Evidence:** [data-symbol specification](../../../../openspec/specs/bootstrap-foreign-functions/spec.md),
+[foreign-static lowering](../../../../packages/compiler/src/LowerExpression.ts),
+[native program emission](../../../../packages/compiler/src/NativeProgram.ts).
+
+### FFI-014 — Native libraries publish C interface companions
+
+**Status:** Confirmed
+
+A successful native shared- or static-library build writes `<package>.h` and
+`<package>.abi.json` beside the platform library and reports all three durable paths. Executables
+and WebAssembly modules write neither companion. A cache hit regenerates both files from the
+verified backend inventory, so the result is byte-identical to an uncached build and cannot retain
+stale package-specific names.
+
+The header includes `<stdint.h>`, a package-derived include guard, and C++ `extern "C"` guards.
+Integer classes use `intN_t` or `uintN_t`, floats use `float` or `double`, and no-argument functions
+use `(void)`. V1 does not expose Silk pointee definitions: immutable and mutable pointers are
+rendered as `const void *` and `void *`. Callback classes are rendered recursively as nested C
+function-pointer declarators, preserving declarator precedence.
+
+The UTF-8 manifest ends with one newline and has this versioned shape:
+
+```json
+{
+  "silkForeignAbi": 1,
+  "target": "aarch64-apple-darwin",
+  "exports": [],
+  "imports": []
+}
+```
+
+Each entry has `kind`, `symbol`, `abi`, and lowercase `direction`. Function entries additionally
+carry `parameters` and `result`; data entries carry `type`. Each direction array is sorted by
+symbol and then kind, and target-sized integers have already been resolved to a fixed-width ABI
+class before serialization.
+
+**Current compiler:** Aligned. `CHeader` and `AbiManifest` render the verified backend inventories,
+the driver invokes them on every native-library success path, and `NativeToolchain` atomically
+commits the companions while removing the complete artifact set after a partial failure.
+
+**Evidence:** [interface-artifact specification](../../../../openspec/specs/native-library-interface-artifacts/spec.md),
+[header renderer](../../../../packages/compiler/src/CHeader.ts),
+[manifest renderer](../../../../packages/compiler/src/AbiManifest.ts),
+[driver](../../../../packages/compiler/src/Driver.ts).
+
+### FFI-015 — The OS system clock is an ordinary libc boundary
+
+**Status:** Confirmed
+
+`silk/os_system_clock` declares the C-layout `Timespec` record and the libc functions
+`clock_gettime` and `clock_getres` in ordinary Silk. Its service implementation calls those
+functions with `CLOCK_REALTIME`, validates the returned fraction and resolution, and then constructs
+the portable `SystemClock` values. Darwin and Linux use the same admitted C classes; Linux retains
+the existing `glibc >= 2.17` baseline and needs no `librt` link.
+
+The sealed intrinsic catalog has no system-clock operation, and the generated OS runtime owns no
+`silk_os_system_clock_*` symbol. A reachable native system clock therefore contributes ordinary
+foreign imports resolved by libc. Evaluation without exact `clock_gettime` or `clock_getres`
+bindings returns `ForeignHostUnavailable`; direct WebAssembly emits the same names from
+`silk:runtime/foreign@v1`. Neither execution surface reads ambient host time automatically.
+
+**Boundary:** `OsMonotonicClock` remains on its three target-neutral intrinsics until its separate
+migration. Importing or constructing either provider remains inert; only reachable operations add
+their respective foreign or runtime dependencies.
+
+**Current compiler:** Aligned. The system-clock source owns the declarations and validation, the
+foreign inventory identifies the libc functions, and the old intrinsic operations, evaluator host
+option, reserved runtime names, and generated C functions have been deleted.
+
+**Evidence:** [clock-service specification](../../../../openspec/specs/bootstrap-clock-services/spec.md),
+[system-clock source](../../../../packages/compiler/stdlib/silk/os_system_clock.silk),
+[clock integration tests](../../../../packages/compiler/test/Clock.test.ts).

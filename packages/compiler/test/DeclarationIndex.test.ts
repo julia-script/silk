@@ -1048,6 +1048,100 @@ it.effect('indexes mixed struct and function declarations in one canonical names
   }),
 )
 
+it.effect('retains valid nested C-layout contracts across module resolution', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `import dep { Inner }
+struct Opaque {}
+pub extern "C" struct Packet {
+  tag: i8
+  count: usize
+  address: *mut Opaque
+  samples: [f32; 3]
+  inner: Inner
+}`,
+      ],
+      ['dep', 'pub extern "C" struct Inner { low: i32 high: f64 }'],
+    ])
+    const packet = index.modules.find((module) => module.module === 'root')?.structs.at(1)
+    const inner = index.modules.find((module) => module.module === 'dep')?.structs.at(0)
+
+    assert.deepEqual(index.diagnostics, [])
+    assert.strictEqual(packet?.layout._tag, 'Foreign')
+    assert.strictEqual(inner?.layout._tag, 'Foreign')
+    if (packet?.layout._tag === 'Foreign') assert.strictEqual(packet.layout.abi, 'C')
+    assert.deepEqual(
+      packet?.fields.map((field) =>
+        field.declaredType._tag === 'Resolved'
+          ? field.declaredType.spelling
+          : field.declaredType._tag,
+      ),
+      ['i8', 'usize', '*mut root.Opaque', 'Array<f32, 3>', 'Inner'],
+    )
+  }),
+)
+
+it.effect('withholds invalid C-layout promises with stable source-owned diagnostics', () =>
+  Effect.gen(function* () {
+    const source = `struct Ordinary { value: i32 }
+extern "system" struct Wrong { value: i32 }
+extern "C" struct Generic<T> { value: T }
+extern "C" struct Bad {
+  flag: bool
+  zero: [u8; 0]
+  nested: Ordinary
+}`
+    const index = yield* collect('records', [['records', source]])
+    const structs = index.modules.at(0)?.structs ?? []
+    const named = (name: string) =>
+      structs.find((struct) => struct.name._tag === 'Present' && struct.name.spelling === name)
+
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => ({
+        code: diagnostic.code,
+        reason: diagnostic.reason._tag,
+        text: source.slice(diagnostic.span.start, diagnostic.span.end),
+      })),
+      [
+        { code: 'SEM0185', reason: 'UnsupportedForeignAbi', text: '"system"' },
+        { code: 'SEM0205', reason: 'GenericCLayoutRecord', text: '<T>' },
+        { code: 'SEM0206', reason: 'UnsupportedCLayoutField', text: 'bool' },
+        { code: 'SEM0206', reason: 'UnsupportedCLayoutField', text: '[u8; 0]' },
+        { code: 'SEM0206', reason: 'UnsupportedCLayoutField', text: 'Ordinary' },
+      ],
+    )
+    assert.strictEqual(named('Ordinary')?.layout._tag, 'Silk')
+    assert.strictEqual(named('Wrong')?.layout._tag, 'InvalidForeign')
+    assert.strictEqual(named('Generic')?.layout._tag, 'InvalidForeign')
+    assert.strictEqual(named('Bad')?.layout._tag, 'InvalidForeign')
+  }),
+)
+
+it.effect('withholds direct and mutual recursive C-layout promises', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('records', [
+      [
+        'records',
+        `extern "C" struct Direct { next: Direct }
+extern "C" struct Left { right: Right }
+extern "C" struct Right { left: Left }`,
+      ],
+    ])
+    const structs = index.modules.at(0)?.structs ?? []
+
+    assert.deepEqual(
+      structs.map((struct) => struct.layout._tag),
+      ['InvalidForeign', 'InvalidForeign', 'InvalidForeign'],
+    )
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0020', 'SEM0206', 'SEM0020', 'SEM0206', 'SEM0206'],
+    )
+  }),
+)
+
 it.effect('indexes generic nominal unions with parent-scoped variants and fields', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
@@ -1794,6 +1888,69 @@ pub fn plain(value: i32) -> i32 { return value }`,
     assert.strictEqual(plain?.foreignExport, undefined)
     assert.strictEqual(plain?.visibility, 'Public')
     assert.strictEqual(DeclarationFacts.lookup(index, 'root', 'double')._tag, 'Resolved')
+  }),
+)
+
+it.effect('indexes imported and exported C statics as immutable typed data symbols', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `unsafe extern "C" static environment: *mut *mut u8 as "environ"
+export "C" static answer: i32 = 42`,
+      ],
+    ])
+    const [environment, answer] = index.modules.at(0)?.members ?? []
+
+    assert.deepEqual(index.diagnostics, [])
+    assert.strictEqual(environment?._tag, 'ForeignStaticDeclaration')
+    assert.strictEqual(answer?._tag, 'ForeignStaticDeclaration')
+    if (
+      environment?._tag !== 'ForeignStaticDeclaration' ||
+      answer?._tag !== 'ForeignStaticDeclaration'
+    )
+      return
+    assert.strictEqual(environment.direction, 'Import')
+    assert.deepEqual(environment.foreign, { abi: 'C', symbol: 'environ' })
+    assert.strictEqual(environment.declaredType._tag, 'Resolved')
+    assert.strictEqual(answer.direction, 'Export')
+    assert.deepEqual(answer.foreign, { abi: 'C', symbol: 'answer' })
+    assert.deepEqual(answer.literal?._tag, 'IntegerLiteral')
+    assert.strictEqual(answer.declaredType._tag, 'Resolved')
+  }),
+)
+
+it.effect('rejects a non-C function-pointer ABI at its type declaration', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      ['root', 'fn install(callback: extern "system" fn(i32) -> i32) -> () {}'],
+    ])
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0185'],
+    )
+  }),
+)
+
+it.effect('rejects exported C statics without a matching scalar literal', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        'export "C" static pointer: *mut u8 = 0\nexport "C" static count: i32 = 1.5\nexport "C" static byte: u8 = 256',
+      ],
+    ])
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0086', 'SEM0086', 'SEM0086'],
+    )
+    assert.deepEqual(
+      index.modules
+        .at(0)
+        ?.members.filter((declaration) => declaration._tag === 'ForeignStaticDeclaration')
+        .map((declaration) => declaration.declaredType._tag),
+      ['Unavailable', 'Unavailable', 'Unavailable'],
+    )
   }),
 )
 

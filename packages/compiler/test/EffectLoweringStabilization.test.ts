@@ -20,7 +20,8 @@ const clang = existsSync('/opt/homebrew/opt/llvm/bin/clang')
 const toolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
   clang,
-  shimCache: NativeToolchain.makeShimCache(),
+  llvmAr: 'llvm-ar',
+  runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
 })
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-effect-lowering-stabilization-'))
 afterAll(() => {
@@ -72,6 +73,7 @@ const runEverywhere = Effect.fnUntraced(function* (
     compilation: { root: SourceFile.make(name, ascii(source)) },
     toolchain,
     profile: 'release',
+    artifactKind: 'NativeExecutable',
     cache: false,
     destination: join(destinationRoot, name.replaceAll('/', '-')),
   }).pipe(Effect.provide(SourceResolver.empty))

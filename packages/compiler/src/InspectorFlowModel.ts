@@ -27,6 +27,8 @@ const typeText = (type: Type.Type): string => {
     }
     case 'CallableType':
       return `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
+    case 'ForeignFunctionType':
+      return Type.encode(type)
     case 'ReferenceType':
       return `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
     case 'PointerType':
@@ -692,16 +694,18 @@ const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
       return 'MissingHostInput: no host provider was supplied'
     case 'MissingOsFileSystemHost':
       return 'MissingOsFileSystemHost: no OS filesystem host provider was supplied'
-    case 'MissingSystemClock':
-      return 'MissingSystemClock: no system-clock host provider was supplied'
     case 'MissingMonotonicClock':
       return 'MissingMonotonicClock: no monotonic-clock host provider was supplied'
     case 'MissingRandomHost':
       return 'MissingRandomHost: no random host provider was supplied'
     case 'IntrinsicTargetUnavailable':
       return `IntrinsicTargetUnavailable: ${reason.diagnostics.map((diagnostic) => diagnostic.message).join('; ')}`
-    case 'ForeignTargetUnavailable':
-      return `ForeignTargetUnavailable: ${reason.diagnostics.map((diagnostic) => diagnostic.message).join('; ')}`
+    case 'ForeignPlanningUnavailable':
+      return `ForeignPlanningUnavailable: ${reason.diagnostics.map((diagnostic) => diagnostic.message).join('; ')}`
+    case 'ForeignHostUnavailable':
+      return `ForeignHostUnavailable(${reason.symbol}): expected ${reason.expected}${reason.provided === undefined ? '' : `; provided ${reason.provided}`}`
+    case 'ForeignHostCallFailed':
+      return `ForeignHostCallFailed(${reason.symbol}): ${reason.message}`
   }
 }
 
@@ -731,8 +735,6 @@ const blockedSpan = (
       return undefined
     case 'MissingOsFileSystemHost':
       return undefined
-    case 'MissingSystemClock':
-      return undefined
     case 'MissingMonotonicClock':
       return undefined
     case 'MissingRandomHost':
@@ -741,8 +743,11 @@ const blockedSpan = (
       return reason.span
     case 'IntrinsicTargetUnavailable':
       return reason.diagnostics.at(0)?.span
-    case 'ForeignTargetUnavailable':
+    case 'ForeignPlanningUnavailable':
       return reason.diagnostics.at(0)?.span
+    case 'ForeignHostUnavailable':
+    case 'ForeignHostCallFailed':
+      return reason.span
   }
 }
 

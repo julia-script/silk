@@ -27,6 +27,7 @@ import type {
   FieldId,
   FieldOwnerId,
   FieldState,
+  ForeignStaticFact,
   FunctionBodyTemplate,
   InterfaceFact,
   MemberFact,
@@ -184,6 +185,7 @@ export const isDeclaredTypeNode = (element: SyntaxTree.Element): element is Synt
     element.kind === 'ReferenceType' ||
     element.kind === 'PointerType' ||
     element.kind === 'CallableType' ||
+    element.kind === 'ForeignFunctionType' ||
     element.kind === 'UnitType' ||
     element.kind === 'ParenthesizedType' ||
     element.kind === 'ExactRepresentationType' ||
@@ -513,6 +515,66 @@ export const analyzeDeclaredType = (
         ...(cause === undefined ? {} : { cause }),
       }),
       diagnostics,
+    })
+  }
+  if (syntax.kind === 'ForeignFunctionType') {
+    const token = SyntaxTree.directToken(syntax, 'FnKeyword')
+    const abiToken = SyntaxTree.directToken(syntax, 'TextLiteral')
+    const typeNodes = syntax.children.filter(isDeclaredTypeNode)
+    const resultSyntax = typeNodes.at(-1)
+    if (token === undefined || resultSyntax === undefined) {
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
+        diagnostics: Object.freeze([]),
+      })
+    }
+    const analyzed = typeNodes.map((node) => analyzeDeclaredType(source, node, typeParameters))
+    const result = analyzed.at(-1)
+    const parameters = analyzed.slice(0, -1)
+    const diagnostics: Array<Diagnostic.Diagnostic> = analyzed.flatMap((entry) =>
+      Array.from(entry.diagnostics),
+    )
+    if (abiToken !== undefined) {
+      const abi = decodedText(source, abiToken)
+      if (abi !== 'C') diagnostics.push(Diagnostic.unsupportedForeignAbi(abi ?? '', abiToken.span))
+    }
+    if (
+      diagnostics.length === 0 &&
+      result?.fact._tag === 'Resolved' &&
+      parameters.every((entry) => entry.fact._tag === 'Resolved')
+    ) {
+      const type = Type.foreignFunction(
+        parameters.flatMap((entry) => (entry.fact._tag === 'Resolved' ? [entry.fact.type] : [])),
+        result.fact.type,
+      )
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Resolved',
+          type,
+          spelling: Type.encode(type),
+          token,
+          syntax,
+          components: Object.freeze([
+            ...parameters.map((parameter) => parameter.fact),
+            result.fact,
+          ]),
+        }),
+        diagnostics: Object.freeze(diagnostics),
+      })
+    }
+    const resultFact = result?.fact ?? Object.freeze({ _tag: 'Unavailable' as const, syntax })
+    const cause = diagnostics.at(-1)
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'ForeignFunction',
+        parameters: Object.freeze(parameters.map((entry) => entry.fact)),
+        result: resultFact,
+        spelling: 'extern "C" fn(...)',
+        token,
+        syntax,
+        ...(cause === undefined ? {} : { cause: Diagnostic.identity(cause) }),
+      }),
+      diagnostics: Object.freeze(diagnostics),
     })
   }
   if (syntax.kind === 'ParenthesizedType') {
@@ -2494,6 +2556,38 @@ const decodedText = (source: SourceFile.SourceFile, token: Token.Token): string 
     : undefined
 }
 
+/** A malformed or unsupported foreign marker is retained without granting a layout promise. */
+const collectStructLayout = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+): {
+  readonly fact: StructFact['layout']
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  const marker = SyntaxTree.directToken(node, 'ExternKeyword')
+  if (marker === undefined)
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'Silk' }),
+      diagnostics: Object.freeze([]),
+    })
+  const abiToken = SyntaxTree.directToken(node, 'TextLiteral')
+  if (abiToken === undefined)
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'InvalidForeign', abi: undefined, abiSpan: marker.span }),
+      diagnostics: Object.freeze([]),
+    })
+  const abi = decodedText(source, abiToken)
+  if (abi === 'C')
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'Foreign', abi, abiSpan: abiToken.span }),
+      diagnostics: Object.freeze([]),
+    })
+  return Object.freeze({
+    fact: Object.freeze({ _tag: 'InvalidForeign', abi, abiSpan: abiToken.span }),
+    diagnostics: Object.freeze([Diagnostic.unsupportedForeignAbi(abi ?? '', abiToken.span)]),
+  })
+}
+
 const textDecoder = new TextDecoder()
 
 const sharedForeignRestrictions: ReadonlyArray<
@@ -2567,6 +2661,46 @@ const collectForeign = (
   })
 }
 
+/** Collects the ABI and symbol spelling shared by imported and exported data declarations. */
+const collectForeignStatic = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  name: DeclaredName,
+): {
+  readonly fact: ForeignStaticFact['foreign']
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const declarationSpan = name._tag === 'Present' ? name.token.span : node.span
+  const spellingOf = name._tag === 'Present' ? name.spelling : '#foreign-static'
+  const abiToken = SyntaxTree.directToken(node, 'TextLiteral')
+  if (abiToken !== undefined) {
+    const abi = decodedText(source, abiToken)
+    if (abi !== 'C') diagnostics.push(Diagnostic.unsupportedForeignAbi(abi ?? '', abiToken.span))
+  }
+  const asIndex = node.children.findIndex(
+    (child) => SyntaxTree.isToken(child) && child.kind === 'AsKeyword',
+  )
+  const symbolToken = node.children
+    .slice(asIndex + 1)
+    .find(
+      (child): child is Token.Token => SyntaxTree.isToken(child) && child.kind === 'TextLiteral',
+    )
+  const renamed =
+    asIndex >= 0 && symbolToken !== undefined ? decodedText(source, symbolToken) : undefined
+  const symbol = renamed ?? spellingOf
+  const symbolSpan =
+    renamed === undefined ? declarationSpan : (symbolToken?.span ?? declarationSpan)
+  if (!ForeignSymbol.isValidSpelling(symbol))
+    diagnostics.push(Diagnostic.invalidForeignSymbol(symbol, symbolSpan))
+  else if (ForeignSymbol.isReserved(symbol))
+    diagnostics.push(Diagnostic.reservedForeignSymbol(symbol, symbolSpan))
+  return Object.freeze({
+    fact: Object.freeze({ abi: 'C' as const, symbol }),
+    diagnostics: Object.freeze(diagnostics),
+  })
+}
+
 const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
   const source = syntax.source
   const nodes = syntax.root.children.filter(
@@ -2582,6 +2716,8 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         element.kind === 'InterfaceDeclaration' ||
         element.kind === 'RoleDeclaration' ||
         element.kind === 'ConstantDeclaration' ||
+        element.kind === 'ForeignStaticDeclaration' ||
+        element.kind === 'ExportStaticDeclaration' ||
         element.kind === 'TypeAliasDeclaration'),
   )
   const first = new Map<string, { readonly id: CanonicalId; readonly token: Token.Token }>()
@@ -2870,6 +3006,34 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         syntax: node,
       })
     }
+    if (node.kind === 'ForeignStaticDeclaration' || node.kind === 'ExportStaticDeclaration') {
+      const declaredType = analyzeDeclaredType(source, declaredTypeNode(node))
+      const foreign = collectForeignStatic(source, node, name)
+      diagnostics.push(...declaredType.diagnostics, ...foreign.diagnostics)
+      const initializer = node.children.find(
+        (element): element is SyntaxTree.Node =>
+          SyntaxTree.isNode(element) && !isDeclaredTypeNode(element),
+      )
+      return Object.freeze({
+        _tag: 'ForeignStaticDeclaration',
+        id,
+        canonical,
+        visibility: 'Private',
+        typeParameters: Object.freeze([]),
+        name,
+        direction: node.kind === 'ForeignStaticDeclaration' ? 'Import' : 'Export',
+        foreign: foreign.fact,
+        declaredType: declaredType.fact,
+        ...(initializer === undefined
+          ? {}
+          : {
+              initializerTemplate: staticExpressionTemplate(source, initializer),
+              literal: constantLiteral(source, initializer),
+              initializer,
+            }),
+        syntax: node,
+      })
+    }
     if (node.kind === 'RoleDeclaration') {
       return Object.freeze({
         _tag: 'RoleDeclaration',
@@ -2895,6 +3059,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         diagnostics,
       )
     if (node.kind === 'StructDeclaration') {
+      const layout = collectStructLayout(source, node)
       const collected = collectFields(
         source,
         node,
@@ -2902,12 +3067,13 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         'StructField',
         typeParameters.environment,
       )
-      diagnostics.push(...collected.diagnostics)
+      diagnostics.push(...layout.diagnostics, ...collected.diagnostics)
       return Object.freeze({
         _tag: 'StructDeclaration',
         id,
         canonical,
         visibility,
+        layout: layout.fact,
         typeParameters: typeParameters.facts,
         name,
         ...(name._tag === 'Present'
@@ -2932,6 +3098,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         id,
         canonical,
         visibility,
+        layout: Object.freeze({ _tag: 'Silk' }),
         typeParameters: typeParameters.facts,
         name,
         ...(name._tag === 'Present'

@@ -214,7 +214,7 @@ export const resolveDeclaredType = (
       diagnostics: Object.freeze([diagnostic]),
     })
   }
-  if (fact._tag === 'Callable') {
+  if (fact._tag === 'Callable' || fact._tag === 'ForeignFunction') {
     const parameters = fact.parameters.map((parameter) =>
       resolveDeclaredType(module, parameter, resolvers, modules),
     )
@@ -227,15 +227,13 @@ export const resolveDeclaredType = (
       result.fact._tag === 'Resolved' &&
       parameters.every((parameter) => parameter.fact._tag === 'Resolved')
     ) {
-      const type = Type.callable(
-        parameters.flatMap((parameter) =>
-          parameter.fact._tag === 'Resolved' ? [parameter.fact.type] : [],
-        ),
-        result.fact.type,
-        fact.mode,
-        undefined,
-        fact.unsafe,
+      const resolvedParameters = parameters.flatMap((parameter) =>
+        parameter.fact._tag === 'Resolved' ? [parameter.fact.type] : [],
       )
+      const type =
+        fact._tag === 'Callable'
+          ? Type.callable(resolvedParameters, result.fact.type, fact.mode, undefined, fact.unsafe)
+          : Type.foreignFunction(resolvedParameters, result.fact.type)
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Resolved',
@@ -1827,6 +1825,8 @@ const inlineReach = (
     }
     // A raw pointer is one address; its layout never embeds the pointee.
     if (Type.isPointer(type)) return
+    // A C function pointer is likewise one address; its signature does not embed its types.
+    if (Type.isForeignFunction(type)) return
     if (Type.isCallable(type)) {
       for (const parameter of type.parameters) descend(parameter)
       descend(type.result)

@@ -2809,6 +2809,42 @@ it('parses callable contracts with ordered parameters and all invocation modes',
   assertOriginalTokenTraversal(result)
 })
 
+it('parses C function-pointer types as a distinct lossless type form', () => {
+  const source = 'fn sort(compare: extern "C" fn(*const i32, *const i32) -> i32) {}'
+  const result = parseText('memory/foreign-function-type', source)
+  const type = descendants(result.root).find(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'ForeignFunctionType',
+  )
+
+  assert.notStrictEqual(type, undefined)
+  assert.strictEqual(
+    type?.children.filter((element) => SyntaxTree.isNode(element) && element.kind === 'PointerType')
+      .length,
+    2,
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('retains unsupported and missing callback ABIs inside the foreign type form', () => {
+  const source = 'fn use(first: extern "system" fn(i32) -> i32, second: extern fn(i32) -> i32) {}'
+  const result = parseText('memory/foreign-function-type-recovery', source)
+  assert.strictEqual(
+    descendants(result.root).filter(
+      (element) => SyntaxTree.isNode(element) && element.kind === 'ForeignFunctionType',
+    ).length,
+    2,
+  )
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('parses reusable, exclusive, and take-capable Effect access bounds', () => {
   const source =
     'fn use(shared: Effect<i32>, exclusive: mut Effect<i32>, any: once Effect<i32>) -> i32 { return 0 }'
@@ -3811,6 +3847,47 @@ const significantShape = (node: SyntaxTree.Node): ReadonlyArray<string> =>
     return [`Missing(${child.expected})`]
   })
 
+it('parses a public C-layout struct on the existing struct node losslessly', () => {
+  const source = 'pub extern "C" struct Timespec { seconds: i64 }'
+  const result = parseText('memory/c-layout-struct', source)
+  const declaration = SyntaxTree.directNode(result.root, 'StructDeclaration')
+
+  assert.notStrictEqual(declaration, undefined)
+  assert.deepEqual(significantShape(declaration ?? result.root), [
+    'PubKeyword',
+    'ExternKeyword',
+    'TextLiteral',
+    'StructKeyword',
+    'Identifier',
+    'LeftBrace',
+    '{StructField}',
+    'RightBrace',
+  ])
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('recovers a C-layout struct without an ABI literal inside its declaration', () => {
+  const source = 'extern struct Broken { value: i32 }\npub struct Next {}'
+  const result = parseText('memory/c-layout-struct-missing-abi', source)
+  const [damaged, next] = SyntaxTree.directNodes(result.root, 'StructDeclaration')
+
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assert.deepEqual(
+    missingLeaves(damaged ?? result.root).map((missing) => missing.expected),
+    ['TextLiteral'],
+  )
+  assert.strictEqual(SyntaxTree.directNodes(damaged ?? result.root, 'StructField').length, 1)
+  assert.notStrictEqual(next, undefined)
+  assert.strictEqual(SyntaxTree.isAvailableSyntax(next ?? result.root), true)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('parses a renamed public foreign function declaration losslessly', () => {
   const source = 'pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"'
   const result = parseText('memory/foreign-function', source)
@@ -3838,6 +3915,44 @@ it('parses a renamed public foreign function declaration losslessly', () => {
         ).length,
     1,
   )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('parses imported and exported C data symbols losslessly', () => {
+  const source =
+    'unsafe extern "C" static environment: *mut *mut u8 as "environ"\n' +
+    'export "C" static answer: i32 as "silk_answer" = 42'
+  const result = parseText('memory/foreign-statics', source)
+  const imported = SyntaxTree.directNode(result.root, 'ForeignStaticDeclaration')
+  const exported = SyntaxTree.directNode(result.root, 'ExportStaticDeclaration')
+
+  assert.notStrictEqual(imported, undefined)
+  assert.notStrictEqual(exported, undefined)
+  assert.deepEqual(significantShape(imported ?? result.root), [
+    'UnsafeKeyword',
+    'ExternKeyword',
+    'TextLiteral',
+    'StaticKeyword',
+    'Identifier',
+    'Colon',
+    '{PointerType}',
+    'AsKeyword',
+    'TextLiteral',
+  ])
+  assert.deepEqual(significantShape(exported ?? result.root), [
+    'ExportKeyword',
+    'TextLiteral',
+    'StaticKeyword',
+    'Identifier',
+    'Colon',
+    '{TypePath}',
+    'AsKeyword',
+    'TextLiteral',
+    'Equals',
+    '{IntegerLiteralExpression}',
+  ])
   assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(source))

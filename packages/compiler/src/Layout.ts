@@ -507,6 +507,7 @@ export interface Violation {
     | 'NonCanonicalOrder'
     | 'InvalidScalar'
     | 'InvalidAggregate'
+    | 'InvalidCLayout'
     | 'InvalidCallingShape'
     | 'InvalidLiteralVerdict'
     | 'CatalogMismatch'
@@ -649,6 +650,26 @@ export const pointerEntry = (target: Target.Target, type: Type.Pointer): Entry =
     representation: Object.freeze({
       _tag: 'Reference',
       target: type.pointee,
+      address: Object.freeze({
+        bits: target.pointerSize === 4 ? 32 : 64,
+        offset: 0,
+        size: target.pointerSize,
+        alignment: target.pointerAlignment,
+      }),
+    }),
+  })
+
+/** A C function pointer is one Copy address lane with no embedded pointee layout. */
+export const foreignFunctionEntry = (target: Target.Target, type: Type.ForeignFunction): Entry =>
+  Object.freeze({
+    _tag: 'LayoutEntry',
+    type,
+    copy: true,
+    size: target.pointerSize,
+    alignment: target.pointerAlignment,
+    representation: Object.freeze({
+      _tag: 'Reference',
+      target: type,
       address: Object.freeze({
         bits: target.pointerSize === 4 ? 32 : 64,
         offset: 0,
@@ -1853,6 +1874,11 @@ export const catalog = (
       completed.set(Type.key(type), result)
       return result
     }
+    if (Type.isForeignFunction(type)) {
+      const result = foreignFunctionEntry(target, type)
+      completed.set(Type.key(type), result)
+      return result
+    }
     const key = Type.key(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
@@ -1968,7 +1994,10 @@ export const catalog = (
               addReferenced(parameter.declaredType.type)
           if (operation.returnType._tag === 'Resolved') addReferenced(operation.returnType.type)
         }
-      } else if (member._tag === 'ConstantDeclaration' && member.declaredType._tag === 'Resolved') {
+      } else if (
+        (member._tag === 'ConstantDeclaration' || member._tag === 'ForeignStaticDeclaration') &&
+        member.declaredType._tag === 'Resolved'
+      ) {
         addReferenced(member.declaredType.type)
       }
     }
@@ -3582,6 +3611,7 @@ const shapeNode = (
       laneCount: 1,
     })
   }
+  if (Type.isForeignFunction(type)) return borrowedShape(context, type)
   if (Type.isCallable(type)) {
     throw new RangeError(
       `callable ${Type.encode(type)} needs a hidden concrete identity before calling-shape planning`,

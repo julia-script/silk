@@ -29,8 +29,6 @@ const termination = (...identities: ReadonlyArray<string>): Termination.Contract
   })
 
 const clockSymbols = Object.freeze([
-  'silk_os_system_clock_now_v1',
-  'silk_os_system_clock_resolution_v1',
   'silk_os_monotonic_clock_now_v1',
   'silk_os_monotonic_clock_resolution_v1',
   'silk_os_monotonic_clock_wait_until_v1',
@@ -55,13 +53,13 @@ const strictSyntaxCheck = (source: string): void => {
   assert.strictEqual(checked.status, 0, checked.stderr)
 }
 
-it('keeps clock-only runtime source minimal and owns feature macros in the complete shim', () => {
-  const nowOnly = OsRuntime.source(['silk_os_system_clock_now_v1'])
-  assert.include(nowOnly, 'silk_os_system_clock_now_v1')
+it('keeps clock-only runtime source minimal and owns feature macros in the complete unit', () => {
+  const nowOnly = OsRuntime.source(['silk_os_monotonic_clock_now_v1'])
+  assert.include(nowOnly, 'silk_os_monotonic_clock_now_v1')
   assert.include(nowOnly, 'silk_clock_read')
   assert.notInclude(nowOnly, 'silk_clock_resolution')
   assert.notInclude(nowOnly, 'silk_clock_deadline')
-  assert.notInclude(nowOnly, 'silk_os_monotonic_clock_now_v1')
+  assert.notInclude(nowOnly, 'silk_os_system_clock_now_v1')
   assert.notInclude(nowOnly, '<errno.h>')
 
   const clockOnly = OsRuntime.source(clockSymbols)
@@ -74,7 +72,7 @@ it('keeps clock-only runtime source minimal and owns feature macros in the compl
   assert.notInclude(clockOnly, 'silk_reason_from_errno')
   assert.notInclude(clockOnly, 'silk_os_path_inspect_v1')
 
-  const combined = ToolchainPlan.shimSource(termination(), [
+  const combined = ToolchainPlan.executableSource(termination(), [
     ...clockSymbols,
     'silk_standard_stream_write_v1',
   ])
@@ -83,7 +81,7 @@ it('keeps clock-only runtime source minimal and owns feature macros in the compl
   assert.isBelow(combined.indexOf('_POSIX_C_SOURCE'), combined.indexOf('#include'))
   strictSyntaxCheck(combined)
 
-  const typedFailure = ToolchainPlan.shimSource(termination('clock.Failure'), clockSymbols)
+  const typedFailure = ToolchainPlan.executableSource(termination('clock.Failure'), clockSymbols)
   assert.isBelow(typedFailure.indexOf(featureMacro), typedFailure.indexOf('#include'))
   strictSyntaxCheck(typedFailure)
 })
@@ -192,66 +190,6 @@ static int check_reads_and_resolutions(void) {
   int64_t seconds = 41;
   int64_t nanoseconds = 42;
   uint64_t resolution = UINT64_C(43);
-
-  reset_calls();
-  gettime_count = 1;
-  gettime_values[0] = (struct timespec){ (time_t)-1, 999999999L };
-  CHECK(silk_os_system_clock_now_v1(&seconds, &nanoseconds) == 1, 1);
-  CHECK(seconds == -1 && nanoseconds == 999999999 && gettime_clock == CLOCK_REALTIME, 2);
-
-  seconds = 41; nanoseconds = 42;
-  reset_calls();
-  gettime_count = 1;
-  gettime_values[0] = (struct timespec){ (time_t)7, 8L };
-  gettime_statuses[0] = -1;
-  CHECK(silk_os_system_clock_now_v1(&seconds, &nanoseconds) == 0, 3);
-  CHECK(seconds == 41 && nanoseconds == 42, 4);
-
-  reset_calls();
-  gettime_count = 1;
-  gettime_values[0] = (struct timespec){ (time_t)7, 1000000000L };
-  CHECK(silk_os_system_clock_now_v1(&seconds, &nanoseconds) == 0, 5);
-  CHECK(seconds == 41 && nanoseconds == 42, 6);
-
-  reset_calls();
-  gettime_count = 1;
-  gettime_values[0] = (struct timespec){ ((time_t)INT64_MAX) + 1, 0L };
-  CHECK(silk_os_system_clock_now_v1(&seconds, &nanoseconds) == 0, 7);
-  CHECK(seconds == 41 && nanoseconds == 42, 8);
-
-  reset_calls();
-  getres_count = 1;
-  getres_values[0] = (struct timespec){ (time_t)2, 3L };
-  CHECK(silk_os_system_clock_resolution_v1(&resolution) == 1, 9);
-  CHECK(resolution == UINT64_C(2000000003) && getres_clock == CLOCK_REALTIME, 10);
-
-  resolution = UINT64_C(43);
-  reset_calls();
-  getres_count = 1;
-  getres_values[0] = (struct timespec){ (time_t)0, 0L };
-  CHECK(silk_os_system_clock_resolution_v1(&resolution) == 0, 11);
-  CHECK(resolution == UINT64_C(43), 12);
-
-  reset_calls();
-  getres_count = 1;
-  getres_values[0] = (struct timespec){ (time_t)0, -1L };
-  CHECK(silk_os_system_clock_resolution_v1(&resolution) == 0, 13);
-  CHECK(resolution == UINT64_C(43), 14);
-
-  reset_calls();
-  getres_count = 1;
-  getres_values[0] = (struct timespec){ (time_t)1, 0L };
-  getres_statuses[0] = -1;
-  CHECK(silk_os_system_clock_resolution_v1(&resolution) == 0, 15);
-  CHECK(resolution == UINT64_C(43), 16);
-
-  reset_calls();
-  getres_count = 1;
-  getres_values[0] = (struct timespec){
-    ((time_t)(UINT64_MAX / UINT64_C(1000000000))) + 1, 0L
-  };
-  CHECK(silk_os_system_clock_resolution_v1(&resolution) == 0, 17);
-  CHECK(resolution == UINT64_C(43), 18);
 
   reset_calls();
   gettime_count = 3;
