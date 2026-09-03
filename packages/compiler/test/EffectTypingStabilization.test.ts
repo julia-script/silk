@@ -154,7 +154,7 @@ it.effect('runs a generic fail-only effect block on every engine', () =>
     'effect-typing/fail-only-generic',
     `import silk.effect { Effect }
 pub struct ProblemError { code: i32 }
-fn failWith<E>(problem: E) -> Effect<i32 ! E> {
+fn failWith<E>(problem: E) -> once Effect<i32 ! E> {
   return effect {
     fail move problem
   }
