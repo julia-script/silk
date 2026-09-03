@@ -102,8 +102,9 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
     }
   }
   if (Type.isEffect(source) && Type.isEffect(target)) {
+    // A `never` success (a body that only fails) satisfies any declared success type.
     const sameOutputs =
-      Type.equals(source.success, target.success) &&
+      (Type.equals(source.success, target.success) || Type.isNever(source.success)) &&
       Type.equals(Type.failureType(source), Type.failureType(target))
     const compatibleRequirements =
       Type.requirementMembers(source).every((requirement) =>

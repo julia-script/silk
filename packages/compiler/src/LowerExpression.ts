@@ -46,6 +46,7 @@ import { bool, borrowKey, character, isOsOperation, patternKey, usize } from './
 import { lowerBuiltinExpression } from './LowerBuiltin.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
+import type * as SourceSpan from './SourceSpan.js'
 import * as Scalar from './Scalar.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
@@ -67,6 +68,38 @@ import {
   storedEffectValueType,
 } from './ValueType.js'
 import { lowerStaticInterfaceWitnessCall, lowerWitnessEffect } from './WitnessLowering.js'
+
+/** Packs one exact Effect alternative into the finite composite that joins it. */
+const packEffectComposite = (
+  fn: FunctionLowering,
+  lowered: LoweredExpression,
+  composite: Extract<Mir.Type, { readonly _tag: 'EffectComposite' }>,
+  span: SourceSpan.SourceSpan,
+): LoweredExpression | undefined => {
+  const selectedType = fn.localTypes.at(lowered.result.ordinal)
+  if (selectedType?._tag !== 'EffectValue') return undefined
+  const selectedIdentity = Instances.effectIdentity(
+    selectedType.environment.instance,
+    selectedType.site,
+  )
+  const alternative = composite.alternatives.findIndex(
+    (candidate) =>
+      Instances.effectIdentity(candidate.environment.instance, candidate.site) === selectedIdentity,
+  )
+  if (alternative < 0) return undefined
+  const packed = fn.alloc(composite)
+  fn.emit(
+    Object.freeze({
+      _tag: 'PackEffectComposite',
+      destination: packed,
+      source: lowered.result,
+      alternative,
+      type: composite,
+      provenance: authored(span),
+    }),
+  )
+  return Object.freeze({ result: packed })
+}
 
 export function lowerExpression(
   fn: FunctionLowering,
@@ -1386,6 +1419,12 @@ export function lowerExpressionInner(
       // Effect access is a semantic ownership coercion. Hidden construction identity has already
       // selected one concrete EffectValue layout, so the runtime representation is unchanged.
       if (expression.conversion === 'EffectAccess') return source
+      if (expression.conversion === 'EffectJoin') {
+        const composite = fn.type(expression.type)
+        return source === undefined || composite?._tag !== 'EffectComposite'
+          ? undefined
+          : packEffectComposite(fn, source, composite, expression.span)
+      }
       const sourceType = fn.type(expression.sourceType)
       const targetType = fn.type(expression.target)
       const substituted = TypeCompatibility.check(
@@ -1560,30 +1599,7 @@ export function lowerExpressionInner(
         const [selectedResult, selectedOperations] = fn.capture(() => {
           const lowered = lowerExpression(fn, arm.result, availableRequirements)
           if (lowered === undefined || resultType._tag !== 'EffectComposite') return lowered
-          const selectedType = fn.localTypes.at(lowered.result.ordinal)
-          if (selectedType?._tag !== 'EffectValue') return undefined
-          const selectedIdentity = Instances.effectIdentity(
-            selectedType.environment.instance,
-            selectedType.site,
-          )
-          const alternative = resultType.alternatives.findIndex(
-            (candidate) =>
-              Instances.effectIdentity(candidate.environment.instance, candidate.site) ===
-              selectedIdentity,
-          )
-          if (alternative < 0) return undefined
-          const packed = fn.alloc(resultType)
-          fn.emit(
-            Object.freeze({
-              _tag: 'PackEffectComposite',
-              destination: packed,
-              source: lowered.result,
-              alternative,
-              type: resultType,
-              provenance: authored(arm.result.span),
-            }),
-          )
-          return Object.freeze({ result: packed })
+          return packEffectComposite(fn, lowered, resultType, arm.result.span)
         })
         if (selectedResult === undefined) return undefined
         armStates.set(arm.id.ordinal, delayedEffectState(fn))

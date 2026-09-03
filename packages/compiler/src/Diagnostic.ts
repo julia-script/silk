@@ -3451,6 +3451,7 @@ export const storedCallableConstruction = (
   span: SourceSpan.SourceSpan,
   constructedAt?: SourceSpan.SourceSpan,
   represented = false,
+  kind: 'callable' | 'Effect' = 'callable',
 ): Diagnostic => {
   const site = field === undefined ? 'its element' : `field ${field}`
   return Object.freeze({
@@ -3460,7 +3461,7 @@ export const storedCallableConstruction = (
     severity: 'error',
     message: represented
       ? `Cannot construct ${aggregate}: ${site} retains the static identity of ${callable}, but represented callable storage has no supported runtime layout`
-      : `Cannot construct ${aggregate}: ${site} would store the callable ${callable}, whose environment layout depends on a hidden concrete identity that ${aggregate} does not carry`,
+      : `Cannot construct ${aggregate}: ${site} would store the ${kind} ${callable}, whose environment layout depends on a hidden concrete identity that ${aggregate} does not carry`,
     reason: Object.freeze({
       _tag: 'StoredCallableConstruction',
       aggregate,

@@ -1344,6 +1344,8 @@ export interface FunctionFact {
   readonly regionOrder: ReadonlyArray<Hir.RegionId>
   readonly returnedExpression: ExpressionFact
   readonly returnCompatibility: ReturnCompatibility
+  /** The finite composite Effect representation joined across distinct return sites. */
+  readonly resultRepresentation?: SemanticType
   readonly returnedBorrow?: DeclarationFacts.ReturnedBorrowFact
   readonly generatedAggregates: ReadonlyArray<DeclarationFacts.StructFact>
   /** Static-only authored loops and their independently elaborated target-selected scopes. */
@@ -2174,6 +2176,9 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
       ...(fact.declaration.returnType._tag === 'Resolved'
         ? { resultType: fact.declaration.returnType.type }
         : {}),
+      ...(fact.resultRepresentation === undefined
+        ? {}
+        : { resultRepresentation: fact.resultRepresentation }),
       functionId: fact.declaration.id,
       eraseIntrinsicSections: true,
       borrowBindingInitializers: true,

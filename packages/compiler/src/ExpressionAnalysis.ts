@@ -106,6 +106,7 @@ import {
   analyzeFunctionBody,
   analyzeStatements,
   reachableCallableWrites,
+  returnFlowOf,
   unsafeCallDiagnostic,
 } from './StatementAnalysis.js'
 import * as StaticEvaluation from './StaticEvaluation.js'
@@ -8339,7 +8340,10 @@ export function analyzeExpression(
       expression.type._tag === 'Available' ? [expression.type.type] : [],
     )
     let success: Type.Type | undefined
-    if (returned.length > 0 && returnedTypes.length === returned.length) {
+    // A block whose every path ends in `fail` never produces a value: its success type is `never`
+    // (EFF-007), and the recorded failures still form its failure channel.
+    if (returned.length === 0 && !returnFlowOf(statements).fallsThrough) success = 'never'
+    else if (returned.length > 0 && returnedTypes.length === returned.length) {
       const joined = Match.join(returnedTypes)
       if (joined._tag === 'Joined') success = joined.type
       else {

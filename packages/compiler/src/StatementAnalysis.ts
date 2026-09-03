@@ -42,6 +42,7 @@ import {
   bindingName,
   coverageMembersOf,
   enumFactByType,
+  representationOfExpression,
   statementExpressionNode,
   unsafeCallAuthorized,
 } from './ExpressionAnalysis.js'
@@ -1679,6 +1680,58 @@ export const reachableCallableWrites = (
   return writes
 }
 
+/**
+ * Joins the Effects constructed at distinct return sites of one function into one finite
+ * composite representation under the declared contract (EFF-013). A single construction site
+ * needs no composite; sites without an exact static representation cannot join and report
+ * `SEM0132`.
+ */
+const returnSiteEffectJoin = (
+  context: BodyContext,
+  declaration: DeclarationFact,
+  returns: ReadonlyArray<Extract<StatementFact, { readonly _tag: 'ReturnStatement' }>>,
+): Type.Type | undefined => {
+  if (declaration.returnType._tag !== 'Resolved') return undefined
+  const declared = declaration.returnType.type
+  if (!Type.isEffect(declared) || returns.length < 2) return undefined
+  const sites = returns.filter(
+    (statement) =>
+      statement.expression.type._tag === 'Available' &&
+      !Type.isNever(statement.expression.type.type),
+  )
+  const alternatives: Array<Type.ExactRepresentationArgument> = []
+  const missing: Array<SourceSpan.SourceSpan> = []
+  for (const statement of sites) {
+    const representation = representationOfExpression(statement.expression)
+    if (
+      representation !== undefined &&
+      Type.isExactRepresentationArgument(representation) &&
+      Type.isEffectIdentityArgument(representation.identity)
+    )
+      alternatives.push(representation)
+    else if (
+      representation !== undefined &&
+      Type.isCompositeEffectRepresentationArgument(representation)
+    )
+      alternatives.push(...representation.alternatives)
+    else missing.push(statement.expression.syntax.span)
+  }
+  const composite = Type.compositeEffectRepresentationArgument(declared, alternatives)
+  if (composite.alternatives.length < 2 && missing.length === 0) return undefined
+  if (missing.length > 0) {
+    if (composite.alternatives.length === 0) return undefined
+    for (const span of missing)
+      context.diagnostics.push(
+        Diagnostic.nonFiniteEffectJoin(
+          'every reachable return site must retain one exact static Effect representation',
+          span,
+        ),
+      )
+    return undefined
+  }
+  return Type.represented(declared, declared, composite)
+}
+
 export const analyzeFunctionBody = (
   source: SourceFile.SourceFile,
   declaration: DeclarationFact,
@@ -1957,6 +2010,9 @@ export const analyzeFunctionBody = (
     }
   }
   const returnCompatibility = validReturnContract ? compatible : unavailableCompatibility
+  const resultRepresentation = validReturnContract
+    ? returnSiteEffectJoin(context, declaration, returnFlow.returns)
+    : undefined
 
   return Object.freeze({
     fact: Object.freeze({
@@ -1967,6 +2023,7 @@ export const analyzeFunctionBody = (
       regionOrder: Object.freeze([...context.regions]),
       returnedExpression: expression,
       returnCompatibility,
+      ...(resultRepresentation === undefined ? {} : { resultRepresentation }),
       generatedAggregates: Object.freeze([...(bodyResolution.generatedAggregates?.values() ?? [])]),
       staticIterations: Object.freeze([...context.staticIterations]),
       ...(returnedBorrow === undefined ? {} : { returnedBorrow }),

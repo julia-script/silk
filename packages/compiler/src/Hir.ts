@@ -516,8 +516,8 @@ export type Expression =
       readonly _tag: 'UnionConvert'
       readonly source: Expression
       readonly sourceType: Type.Type
-      readonly target: Type.StructuralUnion | Type.Effect
-      readonly conversion: 'Inject' | 'Widen' | 'EffectAccess'
+      readonly target: Type.StructuralUnion | Type.Effect | Type.Represented
+      readonly conversion: 'Inject' | 'Widen' | 'EffectAccess' | 'EffectJoin'
       readonly mappings: ReadonlyArray<TypeCompatibility.MemberMapping>
       readonly access: 'Copy' | 'Owned'
       readonly context:
@@ -528,7 +528,7 @@ export type Expression =
         | 'Assignment'
         | 'MatchArm'
       readonly expectedAt: SourceSpan.SourceSpan
-      readonly type: Type.StructuralUnion | Type.Effect
+      readonly type: Type.StructuralUnion | Type.Effect | Type.Represented
       readonly span: SourceSpan.SourceSpan
     }
   | {
