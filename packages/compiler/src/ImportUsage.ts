@@ -1,8 +1,7 @@
 import * as Option from 'effect/Option'
 import type * as NameResolution from './NameResolution.js'
-import * as SemanticOccurrence from './SemanticOccurrence.js'
+import type * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as SourceAction from './SourceAction.js'
-import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
@@ -15,20 +14,10 @@ export interface UnusedBinding {
   readonly change?: SourceAction.ChangePlan
 }
 
-const text = (source: SourceFile.SourceFile, span: SourceSpan.SourceSpan): string | undefined =>
-  Option.getOrUndefined(SourceFile.spelling(source, span))
-
-const identityKey = (binding: NameResolution.Binding): string | undefined => {
-  if (binding._tag === 'ModuleNamespace')
-    return SemanticOccurrence.identityKey({
-      _tag: 'ImportNamespaceIdentity',
-      module: binding.module,
-      spelling: binding.spelling,
-    })
-  if (binding._tag === 'ImportedMember')
-    return SemanticOccurrence.identityKey({ _tag: 'DeclarationIdentity', id: binding.declaration })
-  return undefined
-}
+type ImportBinding = Extract<
+  NameResolution.Binding,
+  { readonly _tag: 'ModuleNamespace' | 'ImportedMember' }
+>
 
 const hasComment = (syntax: SyntaxFile.SyntaxFile, start: number, end: number): boolean =>
   syntax.tokens.some(
@@ -41,45 +30,93 @@ const hasComment = (syntax: SyntaxFile.SyntaxFile, start: number, end: number): 
   )
 
 const lineSpan = (
-  source: SourceFile.SourceFile,
+  syntax: SyntaxFile.SyntaxFile,
   declaration: SyntaxTree.Node,
-): SourceSpan.SourceSpan => {
-  let start = declaration.span.start
-  while (start > 0 && source.bytes[start - 1] !== 0x0a && source.bytes[start - 1] !== 0x0d)
-    start -= 1
-  let end = declaration.span.end
+): SourceSpan.SourceSpan | undefined => {
+  const source = syntax.source
+  const keyword = SyntaxTree.directToken(declaration, 'ImportKeyword')
+  if (keyword === undefined) return undefined
+  let indentationStart = keyword.span.start
   while (
-    end < source.bytes.length &&
-    (source.bytes[end] === 0x20 || source.bytes[end] === 0x09)
+    indentationStart > 0 &&
+    (source.bytes[indentationStart - 1] === 0x20 || source.bytes[indentationStart - 1] === 0x09)
   )
+    indentationStart -= 1
+  const preceding = indentationStart === 0 ? undefined : source.bytes[indentationStart - 1]
+  const ownsLine = preceding === undefined || preceding === 0x0a || preceding === 0x0d
+  const start = ownsLine ? indentationStart : keyword.span.start
+  let end = declaration.span.end
+  while (end < source.bytes.length && (source.bytes[end] === 0x20 || source.bytes[end] === 0x09))
     end += 1
-  if (source.bytes[end] === 0x0d) end += 1
-  if (source.bytes[end] === 0x0a) end += 1
-  return Option.getOrElse(SourceSpan.make(source, start, end), () => declaration.span)
+  let physicalEnd = end
+  while (
+    physicalEnd < source.bytes.length &&
+    source.bytes[physicalEnd] !== 0x0a &&
+    source.bytes[physicalEnd] !== 0x0d
+  )
+    physicalEnd += 1
+  if (hasComment(syntax, keyword.span.start, physicalEnd)) return undefined
+  if (ownsLine && source.bytes[end] === 0x0d) end += 1
+  if (ownsLine && source.bytes[end] === 0x0a) end += 1
+  return Option.getOrUndefined(SourceSpan.make(source, start, end))
+}
+
+const clauseSpan = (
+  syntax: SyntaxFile.SyntaxFile,
+  start: number,
+  end: number,
+): SourceSpan.SourceSpan | undefined => {
+  let ownedStart = start
+  while (
+    ownedStart > 0 &&
+    (syntax.source.bytes[ownedStart - 1] === 0x20 || syntax.source.bytes[ownedStart - 1] === 0x09)
+  )
+    ownedStart -= 1
+  if (hasComment(syntax, ownedStart, end)) return undefined
+  return Option.getOrUndefined(SourceSpan.make(syntax.source, ownedStart, end))
 }
 
 const removal = (
   syntax: SyntaxFile.SyntaxFile,
   declaration: SyntaxTree.Node,
-  member: SyntaxTree.Node | undefined,
+  binding: ImportBinding,
+  siblings: ReadonlyArray<NameResolution.Binding>,
 ): SourceAction.ChangePlan | undefined => {
-  const members = SyntaxTree.directNodes(
-    SyntaxTree.directNode(declaration, 'ImportMemberList') ?? declaration,
-    'ImportMember',
-  )
-  let span: SourceSpan.SourceSpan
-  if (member === undefined || members.length === 1) span = lineSpan(syntax.source, declaration)
-  else {
-    const ordinal = members.indexOf(member)
+  const list = SyntaxTree.directNode(declaration, 'ImportMemberList')
+  const members = SyntaxTree.directNodes(list ?? declaration, 'ImportMember')
+  let span: SourceSpan.SourceSpan | undefined
+  if (binding._tag === 'ModuleNamespace' && list !== undefined) {
+    const alias = SyntaxTree.directNode(declaration, 'ImportAlias')
+    const keyword = alias === undefined ? undefined : SyntaxTree.directToken(alias, 'AsKeyword')
+    const local = alias === undefined ? undefined : SyntaxTree.directToken(alias, 'Identifier')
+    if (keyword !== undefined && local !== undefined)
+      span = clauseSpan(syntax, keyword.span.start, local.span.end)
+  } else if (binding._tag === 'ModuleNamespace' || members.length === 1) {
+    if (
+      binding._tag === 'ImportedMember' &&
+      siblings.some(({ _tag }) => _tag === 'ModuleNamespace')
+    ) {
+      const left = list === undefined ? undefined : SyntaxTree.directToken(list, 'LeftBrace')
+      const right = list === undefined ? undefined : SyntaxTree.directToken(list, 'RightBrace')
+      if (left !== undefined && right !== undefined)
+        span = clauseSpan(syntax, left.span.start, right.span.end)
+    } else span = lineSpan(syntax, declaration)
+  } else {
+    const ordinal = members.indexOf(binding.syntax)
     if (ordinal < 0) return undefined
     const next = members.at(ordinal + 1)
     const previous = members.at(ordinal - 1)
-    const start = next === undefined ? previous?.span.end : member.span.start
-    const end = next?.span.start ?? member.span.end
+    const start = next === undefined ? previous?.span.end : binding.syntax.span.start
+    const end = next?.span.start ?? binding.syntax.span.end
     if (start === undefined) return undefined
-    span = Option.getOrUndefined(SourceSpan.make(syntax.source, start, end)) ?? member.span
+    const left = SyntaxTree.directToken(list ?? declaration, 'LeftBrace')
+    const right = SyntaxTree.directToken(list ?? declaration, 'RightBrace')
+    const guardStart = previous?.span.end ?? left?.span.end ?? binding.syntax.span.start
+    const guardEnd = next?.span.start ?? right?.span.start ?? binding.syntax.span.end
+    if (hasComment(syntax, guardStart, guardEnd)) return undefined
+    span = Option.getOrUndefined(SourceSpan.make(syntax.source, start, end))
   }
-  if (hasComment(syntax, span.start, span.end)) return undefined
+  if (span === undefined || hasComment(syntax, span.start, span.end)) return undefined
   return Option.getOrUndefined(
     SourceAction.changePlan({
       preconditions: [SourceAction.precondition(syntax.source)],
@@ -96,29 +133,32 @@ export const unused = (
 ): ReadonlyArray<UnusedBinding> => {
   if (scope === undefined || occurrences === undefined) return []
   const conflicted = new Set(scope.conflicts.flatMap((conflict) => conflict.bindings))
+  const effective = new Set<NameResolution.Binding>()
+  const seen = new Set<string>()
+  for (const binding of scope.bindings)
+    if (!seen.has(binding.spelling)) {
+      seen.add(binding.spelling)
+      effective.add(binding)
+    }
   const result: Array<UnusedBinding> = []
   for (const imported of scope.imports) {
-    if (imported._tag !== 'Available') continue
+    if (imported._tag !== 'Available' || !SyntaxTree.isAvailableSyntax(imported.import.syntax))
+      continue
     for (const binding of imported.bindings) {
-      if (conflicted.has(binding)) continue
-      const key = identityKey(binding)
-      if (
-        key === undefined ||
-        (binding._tag !== 'ModuleNamespace' && binding._tag !== 'ImportedMember')
-      )
-        continue
+      if (conflicted.has(binding) || !effective.has(binding)) continue
+      if (binding._tag !== 'ModuleNamespace' && binding._tag !== 'ImportedMember') continue
+      const authored =
+        binding._tag === 'ModuleNamespace' ? binding.token.span : binding.localToken.span
       const used = occurrences.occurrences.some(
         (occurrence) =>
-          occurrence.role !== 'Import' &&
-          occurrence.resolution._tag === 'Available' &&
-          SemanticOccurrence.identityKey(occurrence.resolution.identity) === key &&
-          text(syntax.source, occurrence.span) === binding.spelling,
+          occurrence.importBinding?.sourceId === authored.sourceId &&
+          occurrence.importBinding.start === authored.start &&
+          occurrence.importBinding.end === authored.end,
       )
       if (used) continue
       const declaration =
         binding._tag === 'ModuleNamespace' ? binding.syntax : imported.import.syntax
-      const member = binding._tag === 'ImportedMember' ? binding.syntax : undefined
-      const change = removal(syntax, declaration, member)
+      const change = removal(syntax, declaration, binding, imported.bindings)
       result.push(
         Object.freeze({
           _tag: 'UnusedImportBinding',

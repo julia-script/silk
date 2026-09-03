@@ -6,4 +6,4 @@
 - [x] Add focused alias/member warning and edit coverage.
 - [x] Update maintained reference documentation.
 - [x] Synchronize accepted delta requirements to the main specs.
-- [ ] Run repository checks and release-candidate validation.
+- [x] Run repository checks and release-candidate validation.

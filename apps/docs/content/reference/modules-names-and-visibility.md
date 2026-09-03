@@ -898,10 +898,14 @@ Re-exports remain deferred: `pub import` is unsupported and ordinary imports are
 
 The language server reports `LSP0004` on each valid namespace or selected-member import binding that
 has no semantic use in its module. Aliases are tracked as authored bindings, so using one alias does
-not make another alias used. Import declarations, comments, and matching text are not uses.
+not make another alias used. Qualified access uses the namespace binding rather than an independent
+direct selector with the same declaration and spelling. Import declarations, comments, recovered
+syntax, and matching text are not uses.
 
 The **Remove unused import** quick fix removes only the selector and its owned delimiter, or removes
-the whole declaration when it is the final binding. The fix is omitted when comment or trivia
-ownership is ambiguous. Plans are tied to the analyzed source snapshot and are not applied at stale
-offsets. This is a tooling warning: it does not affect compiler diagnostics, lowering, code
-generation, or command success. Imports themselves have no runtime behavior.
+the whole declaration when it is the final binding. In a hybrid import, it can instead remove only
+the namespace alias or selected-member clause. The fix is omitted when comment or trivia ownership
+is ambiguous. Code actions reacquire the same binding and plan from the exact accepted document
+version before returning an edit, so changed documents cannot receive stale offsets. This is a
+tooling warning: it does not affect compiler diagnostics, lowering, code generation, or command
+success. Imports themselves have no runtime behavior.

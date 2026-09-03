@@ -153,6 +153,7 @@ const compilerDiagnostics = (
 interface ImportRedundancy {
   readonly diagnostic: LspDiagnostic
   readonly title: string
+  readonly ownership: ReadonlyArray<SourceSpan.SourceSpan>
   readonly edits: ReadonlyArray<TextEdit>
 }
 
@@ -203,6 +204,7 @@ const importRedundancies = (
       const span = importLine(source, declaration)
       result.push({
         title: 'Remove the repeated import',
+        ownership: Object.freeze([declaration.span]),
         diagnostic: {
           range: LineIndex.rangeOf(self.index, declaration.span),
           severity: DiagnosticSeverity.Warning,
@@ -238,6 +240,7 @@ const importRedundancies = (
         if (members.length > 0) {
           result.push({
             title: 'Consolidate imports from this module',
+            ownership: Object.freeze([first.span, declaration.span]),
             diagnostic: {
               range: LineIndex.rangeOf(self.index, declaration.span),
               severity: DiagnosticSeverity.Warning,
@@ -281,6 +284,7 @@ const importRedundancies = (
       const span = aliasClause(source, alias)
       result.push({
         title: 'Remove the redundant alias',
+        ownership: Object.freeze([declaration.span]),
         diagnostic: {
           range: LineIndex.rangeOf(self.index, span),
           severity: DiagnosticSeverity.Warning,
@@ -308,6 +312,8 @@ export const diagnostics = (
 
 interface UnusedImportWarning {
   readonly diagnostic: LspDiagnostic
+  readonly spelling: string
+  readonly span: SourceSpan.SourceSpan
   readonly change?: SourceAction.ChangePlan
 }
 
@@ -316,16 +322,20 @@ const unusedImportWarnings = (
   snapshot: Analysis.FrontendSnapshot,
 ): ReadonlyArray<UnusedImportWarning> => {
   const redundancies = importRedundancies(self, snapshot)
-  if (redundancies.some((entry) => entry.diagnostic.code !== 'LSP0002')) return []
   return Analysis.unusedImports(snapshot, self.module).flatMap((binding) => {
-    const declarationRange = LineIndex.rangeOf(self.index, binding.declarationSpan)
-    const ownedElsewhere = redundancies.some(
-      (entry) =>
-        entry.diagnostic.code !== 'LSP0002' && overlaps(entry.diagnostic.range, declarationRange),
+    const ownedElsewhere = redundancies.some((entry) =>
+      entry.ownership.some(
+        (owner) =>
+          owner.sourceId === binding.declarationSpan.sourceId &&
+          owner.start === binding.declarationSpan.start &&
+          owner.end === binding.declarationSpan.end,
+      ),
     )
     if (ownedElsewhere) return []
     return [
       Object.freeze({
+        spelling: binding.spelling,
+        span: binding.span,
         diagnostic: {
           range: LineIndex.rangeOf(self.index, binding.span),
           severity: DiagnosticSeverity.Warning,
@@ -358,6 +368,19 @@ export interface AutoImportData {
   readonly candidate: AutoImport.CandidateKey
 }
 
+/** Serializable identity for reacquiring one unused binding from an accepted revision. */
+export interface UnusedImportData {
+  readonly _tag: 'SilkUnusedImport'
+  readonly uri: string
+  readonly version: number
+  readonly module: string
+  readonly spelling: string
+  readonly target: { readonly start: number; readonly end: number }
+}
+
+/** Every revision-bound descriptor accepted by code-action resolution. */
+export type CodeActionData = AutoImportData | UnusedImportData
+
 const autoImportData = (
   self: Document,
   target: SourceSpan.SourceSpan,
@@ -372,32 +395,91 @@ const autoImportData = (
     candidate,
   })
 
+const unusedImportData = (
+  self: Document,
+  spelling: string,
+  target: SourceSpan.SourceSpan,
+): UnusedImportData =>
+  Object.freeze({
+    _tag: 'SilkUnusedImport',
+    uri: self.uri,
+    version: self.version,
+    module: self.module,
+    spelling,
+    target: Object.freeze({ start: target.start, end: target.end }),
+  })
+
 const record = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null
 
-/** Validates untrusted protocol data before it is used for exact-version reacquisition. */
-export const parseAutoImportData = (value: unknown): AutoImportData | undefined => {
-  if (!record(value) || value._tag !== 'SilkAutoImport') return undefined
+const declarationKinds: ReadonlySet<string> = new Set([
+  'Function',
+  'Constant',
+  'Struct',
+  'Union',
+  'Service',
+  'Interface',
+  'Alias',
+])
+
+const declarationKind = (value: unknown): value is AutoImport.CandidateKey['declarationKind'] =>
+  typeof value === 'string' && declarationKinds.has(value)
+
+const parseTarget = (
+  value: unknown,
+): { readonly start: number; readonly end: number } | undefined =>
+  !record(value) || typeof value.start !== 'number' || typeof value.end !== 'number'
+    ? undefined
+    : Object.freeze({ start: value.start, end: value.end })
+
+/** Validates untrusted protocol data before exact-revision source-action reacquisition. */
+export const parseCodeActionData = (value: unknown): CodeActionData | undefined => {
+  if (!record(value)) return undefined
   const target = value.target
-  const candidate = value.candidate
+  const parsedTarget = parseTarget(target)
   if (
     typeof value.uri !== 'string' ||
     typeof value.version !== 'number' ||
     typeof value.module !== 'string' ||
-    !record(target) ||
-    typeof target.start !== 'number' ||
-    typeof target.end !== 'number' ||
+    parsedTarget === undefined
+  )
+    return undefined
+  if (value._tag === 'SilkUnusedImport') {
+    if (typeof value.spelling !== 'string') return undefined
+    return Object.freeze({
+      _tag: 'SilkUnusedImport',
+      uri: value.uri,
+      version: value.version,
+      module: value.module,
+      spelling: value.spelling,
+      target: parsedTarget,
+    })
+  }
+  if (value._tag !== 'SilkAutoImport') return undefined
+  const candidate = value.candidate
+  if (
     !record(candidate) ||
     candidate._tag !== 'AutoImportCandidateKey' ||
     typeof candidate.module !== 'string' ||
     typeof candidate.spelling !== 'string' ||
     typeof candidate.ordinal !== 'number' ||
-    !['Function', 'Constant', 'Struct', 'Union', 'Service', 'Interface', 'Alias'].includes(
-      typeof candidate.declarationKind === 'string' ? candidate.declarationKind : '',
-    )
+    !declarationKind(candidate.declarationKind)
   )
     return undefined
-  return value as unknown as AutoImportData
+  return Object.freeze({
+    _tag: 'SilkAutoImport',
+    uri: value.uri,
+    version: value.version,
+    module: value.module,
+    target: parsedTarget,
+    candidate: Object.freeze({
+      _tag: 'AutoImportCandidateKey',
+      module: candidate.module,
+      spelling: candidate.spelling,
+      declarationKind: candidate.declarationKind,
+      ordinal: candidate.ordinal,
+    }),
+  })
 }
 
 const workspaceEdit = (
@@ -646,17 +728,14 @@ export const codeActions = (
   const unused = unusedImportWarnings(self, snapshot).flatMap(
     (entry): ReadonlyArray<CodeAction> => {
       if (!overlaps(entry.diagnostic.range, range) || entry.change === undefined) return []
-      const edit = workspaceEdit(self, snapshot, entry.change, uriOf)
-      return edit === undefined
-        ? []
-        : [
-            {
-              title: 'Remove unused import',
-              kind: CodeActionKind.QuickFix,
-              diagnostics: [entry.diagnostic],
-              edit,
-            },
-          ]
+      return [
+        {
+          title: 'Remove unused import',
+          kind: CodeActionKind.QuickFix,
+          diagnostics: [entry.diagnostic],
+          data: unusedImportData(self, entry.spelling, entry.span),
+        },
+      ]
     },
   )
   return [...compiler, ...redundancy, ...unused]
@@ -676,9 +755,31 @@ export const resolveCodeAction = (
   action: CodeAction,
   uriOf: (module: string) => string | undefined,
 ): CodeAction => {
-  const data = parseAutoImportData(action.data)
-  if (data === undefined || data.uri !== self.uri || data.version !== self.version)
+  const data = parseCodeActionData(action.data)
+  if (
+    data === undefined ||
+    data.uri !== self.uri ||
+    data.module !== self.module ||
+    data.version !== self.version
+  )
     return disableCodeAction(action, 'The source revision for this action is no longer available')
+  if (data._tag === 'SilkUnusedImport') {
+    const binding = Analysis.unusedImports(snapshot, data.module).find(
+      (candidate) =>
+        candidate.spelling === data.spelling &&
+        candidate.span.start === data.target.start &&
+        candidate.span.end === data.target.end,
+    )
+    if (binding?.change === undefined)
+      return disableCodeAction(
+        action,
+        'This unused import is no longer removable in the accepted revision',
+      )
+    const edit = workspaceEdit(self, snapshot, binding.change, uriOf)
+    return edit === undefined
+      ? disableCodeAction(action, 'The unused import could not be mapped to a workspace document')
+      : { ...action, edit }
+  }
   const plan = Option.getOrUndefined(
     Analysis.resolveAutoImport(snapshot, inventory, data.module, data.target.start, data.candidate),
   )
