@@ -7848,6 +7848,16 @@ export const effectCaptureFacts = (
     }
     recordReference(reference, requested, fact.syntax.span, copy, fact)
   }
+  const consumingAccess = (fact: ExpressionFact): EffectCaptureFact['access'] => {
+    if (fact.type._tag !== 'Available') return 'Shared'
+    const type = fact.type.type
+    if (Type.containsViewBorrow(type)) return 'Shared'
+    const copy =
+      index === undefined
+        ? typeof type === 'string'
+        : ConformanceProof.copyType(index, type, assumptions)
+    return copy ? 'Shared' : 'Take'
+  }
   const expression = (
     fact: ExpressionFact,
     requested: EffectCaptureFact['access'] = 'Shared',
@@ -7986,18 +7996,11 @@ export const effectCaptureFacts = (
           visit(statement.body)
           break
         case 'ReturnStatement':
-          // A returned owned value leaves with the outcome; a returned borrow is only read.
-          expression(
-            statement.expression,
-            statement.expression.type._tag === 'Available' &&
-              Type.containsViewBorrow(statement.expression.type.type)
-              ? 'Shared'
-              : 'Take',
-          )
-          break
         case 'FailStatement':
         case 'DropStatement':
-          expression(statement.expression, 'Take')
+          // An owned affine operand leaves with the outcome or is cleaned here, so its capture is
+          // consumed; a Copy value or a borrowed view is only read through its capture.
+          expression(statement.expression, consumingAccess(statement.expression))
           break
         case 'BreakStatement':
         case 'ContinueStatement':
