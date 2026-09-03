@@ -37,10 +37,7 @@ export const backendEmission = (
     const selection = Analysis.targetOf(snapshot)
     return {
       _tag: 'Emitted',
-      artifact:
-        selection._tag === 'Resolved' && selection.target.kind === 'WebAssembly'
-          ? Effect.runSync(Analysis.codegenWasm(snapshot, { mode }))
-          : Effect.runSync(Analysis.codegen(snapshot, { mode })),
+      artifact: Effect.runSync(Analysis.codegen(snapshot, { mode })),
     }
   } catch (error) {
     return { _tag: 'Rejected', message: messageOf(error) }

@@ -605,33 +605,6 @@ export const compile = Effect.fn('Driver.compile')(function* (
     scopeName,
     (scope) =>
       Effect.gen(function* () {
-        if (artifact._tag === 'WebAssemblyModuleArtifact') {
-          const committed = yield* PhaseReport.measureEffectInto(
-            report,
-            'artifact-commit',
-            1,
-            NativeToolchain.commitWasm(artifact, request.destination),
-            () => 1,
-            () => 0,
-            { heapBytes },
-          )
-          return Object.freeze({
-            _tag: 'Compiled',
-            backend: artifact.backend,
-            artifactKind: committed.kind,
-            path: committed.path,
-            target: committed.target,
-            symbols: artifact.symbols,
-            foreignImports: artifact.foreignImports,
-            foreignExports: artifact.foreignExports,
-            foreignStatics: artifact.foreignStatics,
-            termination: artifact.termination,
-            diagnostics,
-            report: Object.freeze([...report]),
-            toolchainIdentity: distribution.digest,
-          })
-        }
-
         if (!Target.isNative(target)) {
           const finalized = yield* PhaseReport.measureEffectInto(
             report,

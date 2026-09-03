@@ -53,7 +53,6 @@ commitments.
   multi-target builds, native execution, formatting, and documentation generation through `silk`.
 - [`@silklang/llvm`](packages/llvm) — Effect-native LLVM IR construction and deterministic text
   and bitcode emission.
-- [`@silklang/wasm`](packages/wasm) — deterministic WebAssembly module construction and binary
   emission.
 - [`@silklang/editor-support`](packages/editor-support) — portable CodeMirror integration,
   TextMate grammar, semantic editor projections, and the `<silk-snippet>` custom element.

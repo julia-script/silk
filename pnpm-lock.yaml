@@ -153,9 +153,6 @@ importers:
       '@silklang/formatter':
         specifier: workspace:*
         version: link:../../packages/formatter
-      '@silklang/wasm':
-        specifier: workspace:*
-        version: link:../../packages/wasm
       '@tailwindcss/postcss':
         specifier: ^4.3.3
         version: 4.3.3
@@ -261,9 +258,6 @@ importers:
       '@silklang/llvm':
         specifier: workspace:*
         version: link:../llvm
-      '@silklang/wasm':
-        specifier: workspace:*
-        version: link:../wasm
       effect:
         specifier: 'catalog:'
         version: 4.0.0-rc.112
@@ -451,16 +445,6 @@ importers:
       playwright:
         specifier: 1.62.1
         version: 1.62.1
-
-  packages/wasm:
-    dependencies:
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-rc.112
-    devDependencies:
-      '@effect/vitest':
-        specifier: 'catalog:'
-        version: 4.0.0-rc.112(effect@4.0.0-rc.112)(vitest@4.1.10)
 
 packages:
 

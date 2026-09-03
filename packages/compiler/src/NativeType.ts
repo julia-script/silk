@@ -23,7 +23,7 @@ export const lanesFor = (
 ): ReadonlyArray<Layout.CallingLane> => {
   if (type._tag === 'EffectComposite') {
     // The registered shape overlaps alternatives into unified payload lanes; every consumer must
-    // agree with it (the wasm backend resolves it the same way in WasmLanes.laneKindsOf). The
+    // agree with it for all LLVM targets. The
     // concatenating fallback below only covers composites the plan never registered.
     const registered = Layout.callingShape(context.program.layout, type.type)
     if (registered !== undefined) return registered.lanes

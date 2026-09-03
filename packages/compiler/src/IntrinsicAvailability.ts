@@ -25,8 +25,7 @@ const operations = (): ReadonlyArray<Intrinsic.Operation> =>
 const operationKey = (id: Intrinsic.OperationId): string => Intrinsic.operationText(id)
 
 /** Maps the explicit backend choice to the matching intrinsic execution surface. */
-export const backendTarget = (backend: 'llvm' | 'wasm'): Intrinsic.ExecutionTarget =>
-  backend === 'llvm' ? 'LLVM' : 'Wasm'
+export const backendTarget = (_backend: 'llvm'): Intrinsic.ExecutionTarget => 'LLVM'
 
 /**
  * Validates only calls retained by executable closure. The optional catalog exists for focused

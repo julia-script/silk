@@ -48,7 +48,7 @@ export interface ControlProvenance {
   readonly span: SourceSpan.SourceSpan
 }
 
-export type Id = 'llvm' | 'wasm'
+export type Id = 'llvm'
 export type Termination = TerminationModel.Contract
 
 /** Canonical target-runtime capabilities that the backend actually emitted. */
@@ -108,15 +108,7 @@ export interface LlvmBitcodeArtifact extends ArtifactBase {
   readonly ir: string
 }
 
-export interface WebAssemblyModuleArtifact extends ArtifactBase {
-  readonly _tag: 'WebAssemblyModuleArtifact'
-  readonly backend: 'wasm'
-  readonly bytes: Uint8Array
-  readonly wat: string
-  readonly hostImports: ReadonlyArray<{ readonly module: string; readonly name: string }>
-}
-
-export type Artifact = LlvmBitcodeArtifact | WebAssemblyModuleArtifact
+export type Artifact = LlvmBitcodeArtifact
 
 export interface ModuleViolation {
   readonly function: string

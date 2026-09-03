@@ -3,15 +3,11 @@ import * as Result from 'effect/Result'
 import type * as Backend from './Backend.js'
 import * as LlvmBackend from './LlvmBackend.js'
 import type * as Target from './Target.js'
-import * as WasmBackend from './WasmBackend.js'
 
 /** Stable backend-id resolution and explicit backend-target compatibility validation. */
 
 /** Every backend the bootstrap compiler can dispatch to, in deterministic order. */
-export const backends: ReadonlyArray<Backend.Backend> = Object.freeze([
-  LlvmBackend.LlvmBackend,
-  WasmBackend.WasmBackend,
-])
+export const backends: ReadonlyArray<Backend.Backend> = Object.freeze([LlvmBackend.LlvmBackend])
 
 export type BackendRegistryErrorReason =
   | { readonly _tag: 'UnknownBackend'; readonly id: string }
@@ -35,7 +31,7 @@ export const resolve = (id: string): Result.Result<Backend.Backend, BackendRegis
     ? Result.fail(
         new BackendRegistryError({
           operation: 'BackendRegistry.resolve',
-          message: `Unknown backend ${id}; expected llvm or wasm`,
+          message: `Unknown backend ${id}; expected llvm`,
           reason: { _tag: 'UnknownBackend', id },
         }),
       )

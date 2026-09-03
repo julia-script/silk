@@ -579,9 +579,7 @@ export const flowRows = (flow: FlowModel): ReadonlyArray<RowModel> => {
         key: `flow-${group.id}`,
         depth: Math.min(group.depth, 3),
         label: group.label,
-        detail: `${group.state} · ${group.detail}${
-          group.evaluation === undefined ? '' : ` · evaluated #${group.evaluation.order}`
-        }`,
+        detail: `${group.state} · ${group.detail}`,
         span: groupSpan,
         head: true,
         ...(stateTone(group.state) === undefined
@@ -595,11 +593,8 @@ export const flowRows = (flow: FlowModel): ReadonlyArray<RowModel> => {
       rows.push({
         key: `flow-${node.id}`,
         depth: Math.min(group.depth, 3) + 1,
-        dot: node.evaluation === undefined ? undefined : 'ok',
         label: node.label,
-        detail: `${node.kind} · ${node.detail}${
-          node.evaluation?.value === undefined ? '' : ` · value ${node.evaluation.value}`
-        }`,
+        detail: `${node.kind} · ${node.detail}`,
         span,
         ...(stateTone(node.state) === undefined ? {} : { tone: stateTone(node.state) as RowTone }),
       })

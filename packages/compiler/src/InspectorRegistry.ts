@@ -11,17 +11,14 @@
  */
 
 import * as Analysis from './Analysis.js'
-import type * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import * as Hir from './Hir.js'
 import { projectDataFlow } from './InspectorFlowModel.js'
-import { backendEmission, execute, toolchainCommands } from './InspectorPanels.js'
+import { backendEmission, toolchainCommands } from './InspectorPanels.js'
 import {
   arrayValueRows,
   backendControlRows,
   backendTextRows,
   closureRows,
-  evaluationRows,
-  hexRows,
   indexRows,
   instanceRows,
   layoutRows,
@@ -52,7 +49,6 @@ export const viewIds = [
   'tokens',
   'tree',
   'flow',
-  'evaluation',
   'closure',
   'index',
   'resolution',
@@ -86,12 +82,6 @@ export interface ViewContext {
   readonly root: string
   readonly mode: 'release' | 'debug'
   readonly profile: ToolchainPlan.OptimizationProfile
-  /**
-   * Evaluation is an explicit action, never implied by editing: the green semantic layer states
-   * what the program means, and only an actual run may claim what it does. The consumer runs it
-   * (when its surface's run action fires) and hands the outcome in here.
-   */
-  readonly evaluation: BootstrapEvaluation.Outcome | undefined
   /** Pane-local view state, keyed by pane id — the CST filter and trivia toggle live here. */
   readonly filter: string
   readonly showTrivia: boolean
@@ -247,8 +237,8 @@ export const views: ReadonlyArray<ViewDefinition> = [
      * binds to which parameter, and what a run actually computed for each. The evaluated overlay
      * is layered on when a run has happened, so the same rows read as semantics-only until then.
      */
-    project: ({ snapshot, evaluation }) => {
-      const flow = projectDataFlow(Analysis.rootAnalysis(snapshot), evaluation)
+    project: ({ snapshot }) => {
+      const flow = projectDataFlow(Analysis.rootAnalysis(snapshot))
       if (flow.status === 'Empty') {
         return { rows: noRows, unavailable: `No value path — ${flow.summary}` }
       }
@@ -269,7 +259,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
      * the projection chain, the compiler-owned scalar calling shapes, and — after a run — the
      * Construct/Project/Cleanup events that realized them.
      */
-    project: ({ snapshot, root, evaluation }) => {
+    project: ({ snapshot, root }) => {
       const literals = Analysis.expressionsOf(snapshot, root).filter(
         (expression) => expression._tag === 'StructLiteral',
       )
@@ -277,7 +267,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
       const layout = Analysis.layoutOf(snapshot)
       const shapes = layout._tag === 'Available' ? layout.value.callingShapes : []
       return {
-        rows: structValueRows(literals, projections, shapes, evaluation),
+        rows: structValueRows(literals, projections, shapes),
         meta: `${literals.length} lit · ${projections.length} proj`,
       }
     },
@@ -285,10 +275,10 @@ export const views: ReadonlyArray<ViewDefinition> = [
   {
     id: 'array-values',
     title: 'Array values',
-    phase: 'elaboration + layout + evaluation',
+    phase: 'elaboration + layout',
     tag: 'ARR',
     group: 'semantics',
-    project: ({ snapshot, root, evaluation }) => {
+    project: ({ snapshot, root }) => {
       const types = Analysis.fixedArrayTypesOf(snapshot, root)
       const literals = Analysis.arrayLiteralsOf(snapshot, root)
       const projections = Analysis.indexProjectionsOf(snapshot, root)
@@ -299,7 +289,6 @@ export const views: ReadonlyArray<ViewDefinition> = [
           projections,
           Analysis.repeatedLayoutsOf(snapshot),
           Analysis.arrayCallingShapesOf(snapshot),
-          evaluation,
         ),
         meta: `${literals.length} lit · ${projections.length} index`,
       }
@@ -433,48 +422,6 @@ export const views: ReadonlyArray<ViewDefinition> = [
     },
   },
   {
-    id: 'evaluation',
-    title: 'Bootstrap evaluation',
-    phase: 'interpretation',
-    tag: 'EVA',
-    group: 'semantics',
-    // After MIR in pipeline order: the bootstrap interpreter runs the lowered program.
-    action: { label: 'run' },
-    project: ({ evaluation }) => {
-      const rows = evaluationRows(evaluation)
-      if (evaluation === undefined) return { rows, meta: 'not run' }
-      let facts: ReadonlyArray<Fact> = []
-      switch (evaluation._tag) {
-        case 'Completed':
-          facts = [
-            { text: 'Completed', tone: 'ok' },
-            { text: `${evaluation.entry.name}() → ${evaluation.result.value}` },
-            { text: `${evaluation.trace.length} steps`, tone: 'muted' },
-          ]
-          break
-        case 'UnhandledFailure':
-          facts = [
-            { text: 'Unhandled failure', tone: 'warning' },
-            { text: `${evaluation.identity} · tag ${evaluation.tag}`, tone: 'muted' },
-          ]
-          break
-        case 'Trap':
-          facts = [
-            { text: 'Fatal trap', tone: 'warning' },
-            { text: evaluation.reason, tone: 'muted' },
-          ]
-          break
-        case 'Blocked':
-          facts = [
-            { text: 'Blocked', tone: 'warning' },
-            { text: evaluation.reason._tag, tone: 'muted' },
-          ]
-          break
-      }
-      return { rows, facts, meta: `${evaluation.trace.length} steps` }
-    },
-  },
-  {
     id: 'backend',
     title: 'Backend output',
     phase: 'backend',
@@ -490,90 +437,14 @@ export const views: ReadonlyArray<ViewDefinition> = [
         }
       }
       const artifact = emission.artifact
-      const bytes = artifact._tag === 'LlvmBitcodeArtifact' ? artifact.bitcode : artifact.bytes
-      const text = artifact._tag === 'LlvmBitcodeArtifact' ? artifact.ir : artifact.wat
-
-      // Only a WebAssembly module can be run right here, so the execute-and-compare check is a
-      // WebAssembly-target extra rather than something every backend can answer. The interpreter
-      // ran the same MIR the backend emitted from, so a disagreement is a backend bug.
-      const runnable = artifact._tag === 'WebAssemblyModuleArtifact'
-      const execution = runnable ? execute(artifact.bytes) : undefined
-      const interpreted =
-        runnable && Analysis.mirOf(snapshot)._tag === 'Available'
-          ? Analysis.evaluate(snapshot)
-          : undefined
-      let expected: number | 'trap' | undefined
-      if (interpreted === undefined) expected = undefined
-      else if (interpreted._tag === 'Completed') expected = Number(interpreted.result.value)
-      else expected = 'trap'
-
-      let observed: number | 'trap' | 'failed' | undefined
-      if (execution === undefined) observed = undefined
-      else if (execution._tag === 'Completed') observed = execution.value
-      else if (execution._tag === 'Trapped') observed = 'trap'
-      else observed = 'failed'
-      const agrees = observed !== undefined && observed === expected
-
-      const executionRows: Array<RowModel> = []
-      if (execution !== undefined) {
-        let executionDetail: string
-        switch (execution._tag) {
-          case 'Completed':
-            executionDetail = `returned ${execution.value}`
-            break
-          case 'Trapped':
-            executionDetail = `trapped — ${execution.message}`
-            break
-          case 'Failed':
-            executionDetail = `instantiation failed — ${execution.message}`
-            break
-        }
-        let interpreterDetail = 'not run — MIR unavailable'
-        if (interpreted !== undefined) {
-          interpreterDetail =
-            interpreted._tag === 'Completed' ? `returned ${interpreted.result.value}` : 'trapped'
-        }
-        executionRows.push(
-          {
-            key: 'exec-head',
-            label: 'execution',
-            detail: agrees
-              ? 'the backend and the interpreter agree'
-              : 'the backend and the interpreter disagree',
-            head: true,
-            tone: agrees ? 'ok' : 'error',
-            dot: agrees ? 'ok' : 'error',
-          },
-          {
-            key: 'exec-wasm',
-            depth: 1,
-            label: 'silk_main()',
-            detail: executionDetail,
-          },
-          {
-            key: 'exec-interp',
-            depth: 1,
-            label: 'bootstrap interpreter',
-            detail: interpreterDetail,
-          },
-        )
-      }
-
-      const executionFacts: Array<Fact> = []
-      if (execution !== undefined) {
-        executionFacts.push({
-          text: agrees ? 'runs · agrees' : 'runs · disagrees',
-          tone: agrees ? 'ok' : 'warning',
-        })
-      }
+      const bytes = artifact.bitcode
+      const text = artifact.ir
 
       return {
         rows: [
           ...symbolRows(artifact.symbols),
-          ...executionRows,
           ...backendControlRows(artifact.control),
           ...backendTextRows(text),
-          ...(runnable ? hexRows(bytes) : []),
         ],
         facts: [
           ...artifact.symbols.slice(0, 2).map((entry): Fact => ({
@@ -584,7 +455,6 @@ export const views: ReadonlyArray<ViewDefinition> = [
             text: `${artifact.backend} · ${bytes.length} B · ${mode}`,
             tone: 'muted',
           },
-          ...executionFacts,
         ],
         meta: `${bytes.length} B`,
       }
@@ -633,10 +503,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
 
       let backendOutputs = 'emission rejected'
       if (emission._tag === 'Emitted') {
-        backendOutputs =
-          emission.artifact._tag === 'LlvmBitcodeArtifact'
-            ? `${emission.artifact.bitcode.length} bitcode bytes`
-            : `${emission.artifact.bytes.length} WebAssembly bytes`
+        backendOutputs = `${emission.artifact.bitcode.length} bitcode bytes`
       }
 
       const phases = [

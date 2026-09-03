@@ -1143,29 +1143,6 @@ export const finalizeWasm = Effect.fn('NativeToolchain.finalizeWasm')(function* 
   })
 })
 
-export const commitWasm = Effect.fn('NativeToolchain.commitWasm')(function* (
-  artifact: Backend.WebAssemblyModuleArtifact,
-  destination: string,
-): Effect.fn.Return<FinalArtifact, ToolchainError> {
-  if (!hasWasmHeader(artifact.bytes)) {
-    return yield* storageError(
-      'NativeToolchain.commitWasm',
-      'artifact-commit',
-      destination,
-      new TypeError('backend bytes are not a WebAssembly module'),
-    )
-  }
-  const bytes = Uint8Array.from(artifact.bytes)
-  const path = yield* atomicCommit(destination, bytes)
-  return Object.freeze({
-    _tag: 'FinalArtifact',
-    kind: 'WebAssemblyModule',
-    path,
-    bytes,
-    target: artifact.target,
-  })
-})
-
 export const commitCachedArtifact = Effect.fn('NativeToolchain.commitCachedArtifact')(function* (
   bytes: Uint8Array,
   kind: FinalArtifact['kind'],

@@ -58,10 +58,6 @@
       "types": "./dist/LlvmBackend.d.ts",
       "import": "./dist/LlvmBackend.js"
     },
-    "./BootstrapEvaluation": {
-      "types": "./dist/BootstrapEvaluation.d.ts",
-      "import": "./dist/BootstrapEvaluation.js"
-    },
     "./FieldRealization": {
       "types": "./dist/FieldRealization.d.ts",
       "import": "./dist/FieldRealization.js"
@@ -438,10 +434,6 @@
       "types": "./dist/StaticValue.d.ts",
       "import": "./dist/StaticValue.js"
     },
-    "./WasmBackend": {
-      "types": "./dist/WasmBackend.d.ts",
-      "import": "./dist/WasmBackend.js"
-    },
     "./FileSourceResolver": {
       "types": "./dist/FileSourceResolver.d.ts",
       "import": "./dist/FileSourceResolver.js"
@@ -517,7 +509,6 @@
   },
   "dependencies": {
     "@silklang/llvm": "workspace:*",
-    "@silklang/wasm": "workspace:*",
     "effect": "catalog:",
     "smol-toml": "^1.7.1"
   },

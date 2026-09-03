@@ -265,7 +265,6 @@ it.each(shardedCorpus)(
           .join(',')}`,
       )
       if (snapshot.mir._tag !== 'Available') return
-      const interpreted = Analysis.evaluate(snapshot)
       const compiledObjects =
         program.nativeCSources === undefined
           ? []
@@ -320,20 +319,16 @@ it.each(shardedCorpus)(
       if (outcome._tag !== 'Compiled') return
 
       if (program.expected._tag === 'Completes') {
-        assert.strictEqual(interpreted._tag, 'Completed', program.name)
         const run = yield* runCompiled(outcome.path, program.nativeEnvironment)
         if (program.nativeStdout !== undefined)
           assert.strictEqual(run.stdout, program.nativeStdout, program.name)
         const nativeStatus = run.status === null ? null : BigInt(run.status)
         // POSIX exposes only the low unsigned byte of a process exit value.
-        const interpretedStatus =
-          interpreted._tag === 'Completed' ? interpreted.result.value & 0xffn : -1n
+        const expectedStatus = BigInt(program.expected.result) & 0xffn
         assert.strictEqual(
           nativeStatus,
-          interpretedStatus,
-          `differential divergence on ${program.name}: interpreter ${
-            interpreted._tag === 'Completed' ? interpreted.result.value : interpreted._tag
-          }, native ${run.status}`,
+          expectedStatus,
+          `unexpected native result for ${program.name}: expected ${program.expected.result}, native ${run.status}`,
         )
         return
       }
@@ -343,7 +338,7 @@ it.each(shardedCorpus)(
         assert.strictEqual(
           run.signal !== null || (run.status !== null && run.status !== 0),
           true,
-          `differential divergence on ${program.name}: interpreter trapped, native exited ${run.status}`,
+          `expected ${program.name} to trap, native exited ${run.status}`,
         )
       }
     }).pipe(Effect.runPromise)

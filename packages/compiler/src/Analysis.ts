@@ -8,7 +8,6 @@ export { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import type { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import * as AutoImport from './AutoImport.js'
 import * as Backend from './Backend.js'
-import * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import * as Completion from './Completion.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as Diagnostic from './Diagnostic.js'
@@ -47,7 +46,6 @@ import * as Target from './Target.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
 import * as TypeHint from './TypeHint.js'
-import * as WasmBackend from './WasmBackend.js'
 import type * as WorkspaceInventory from './WorkspaceInventory.js'
 
 /**
@@ -1247,32 +1245,3 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
       ),
   })
 })
-
-/**
- * Emits the snapshot through the direct WebAssembly backend. The final-module artifact's `wat`
- * carries inspection text and `bytes` carries the instantiable module. A native-target snapshot
- * is rejected by compatibility validation.
- */
-export const codegenWasm = Effect.fn('Analysis.codegenWasm')(function* (
-  self: Snapshot,
-  request: Backend.CodegenRequest,
-): Effect.fn.Return<
-  Backend.WebAssemblyModuleArtifact,
-  Backend.BackendError | Target.TargetError | AnalysisUnavailable | CodegenUnavailable
-> {
-  const artifact = yield* codegen(self, request, WasmBackend.WasmBackend)
-  if (artifact._tag === 'WebAssemblyModuleArtifact') return artifact
-  return yield* new Backend.BackendError({
-    operation: 'Backend.emit',
-    backend: WasmBackend.WasmBackend.name,
-    message: 'WebAssembly backend returned a non-WebAssembly artifact',
-    reason: { _tag: 'UnsupportedMir', detail: 'backend artifact kind mismatch' },
-  })
-})
-
-/** Executes the snapshot's lowered MIR program through the closed bootstrap interpreter. */
-export const evaluate = (
-  self: Snapshot,
-  options: BootstrapEvaluation.Options = {},
-): BootstrapEvaluation.Outcome =>
-  BootstrapEvaluation.evaluate(self.instances, loweredMir(self), options)

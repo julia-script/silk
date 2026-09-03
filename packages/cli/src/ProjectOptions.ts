@@ -6,7 +6,7 @@ import { Flag } from 'effect/unstable/cli'
 
 export const profiles = ['debug', 'release', 'release-with-debug'] as const
 const targetIds = ['host', ...Target.all.map((candidate) => candidate.id)]
-const backendIds = ['llvm', 'wasm'] as const
+const backendIds = ['llvm'] as const
 
 export const manifestPath = Flag.string('manifest-path').pipe(
   Flag.withDescription('Path to a Silk project manifest. Disables upward discovery.'),

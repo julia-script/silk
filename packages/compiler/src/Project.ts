@@ -181,12 +181,11 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
     return yield* invalidManifest(manifestPath, '[build] must be a table')
   }
   const backendValue = buildTable?.backend ?? 'llvm'
-  if (backendValue !== 'llvm' && backendValue !== 'wasm') {
-    return yield* invalidManifest(manifestPath, 'build.backend must be llvm or wasm')
+  if (backendValue !== 'llvm') {
+    return yield* invalidManifest(manifestPath, 'build.backend must be llvm')
   }
-  const backend: Backend.Id = backendValue === 'wasm' ? 'wasm' : 'llvm'
-  const defaultTargets: ReadonlyArray<TargetSelector.TargetSelector> =
-    backend === 'wasm' ? ['wasm32-unknown-unknown'] : ['host']
+  const backend: Backend.Id = 'llvm'
+  const defaultTargets: ReadonlyArray<TargetSelector.TargetSelector> = ['host']
   const targetsValue = buildTable?.targets ?? defaultTargets
   if (
     !Array.isArray(targetsValue) ||
