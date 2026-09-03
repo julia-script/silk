@@ -1303,6 +1303,7 @@ export const intrinsicStruct = (
       Type.equals(type, Type.layout) || Type.equals(type, Type.invalidAlignment)
         ? 'Public'
         : 'Private',
+    layout: Object.freeze({ _tag: 'Silk' }),
     typeParameters: Object.freeze([]),
     name: Object.freeze({ _tag: 'Present', spelling: type.name, token }),
     aggregateKind: 'Named',
@@ -5085,6 +5086,7 @@ const generatedAggregate = (
       }),
     }),
     visibility: 'Private',
+    layout: Object.freeze({ _tag: 'Silk' }),
     typeParameters: Object.freeze([]),
     name: Object.freeze({ _tag: 'Unavailable', syntax }),
     identity,

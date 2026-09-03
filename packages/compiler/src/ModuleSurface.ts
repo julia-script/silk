@@ -1832,6 +1832,17 @@ const structDependency = (value: DeclarationFacts.StructDependency): string =>
     array(value.types.map(type)),
   ])
 
+const structLayout = (value: DeclarationFacts.StructFact['layout']): string => {
+  switch (value._tag) {
+    case 'Silk':
+      return record('SilkStructLayout')
+    case 'Foreign':
+      return record('ForeignStructLayout', [value.abi])
+    case 'InvalidForeign':
+      return record('InvalidForeignStructLayout', [optional(value.abi)])
+  }
+}
+
 const enumMemberCanonicalState = (value: DeclarationFacts.EnumMemberCanonicalState): string => {
   switch (value._tag) {
     case 'Canonical':
@@ -1899,6 +1910,7 @@ const struct = (value: DeclarationFacts.StructFact): string =>
     declarationIdOrdinal(value.id),
     canonicalState(value.canonical),
     value.visibility,
+    structLayout(value.layout),
     array(value.typeParameters.map(typeParameter)),
     name(value.name),
     value.aggregateKind,

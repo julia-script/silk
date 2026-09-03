@@ -10,6 +10,7 @@ import type * as Operator from './Operator.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as Scalar from './Scalar.js'
+import type * as SourceSpan from './SourceSpan.js'
 import type * as StaticText from './StaticText.js'
 import type * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
@@ -674,6 +675,15 @@ export interface StructFact {
   readonly id: DeclarationId
   readonly canonical: CanonicalState
   readonly visibility: 'Public' | 'Private'
+  /** The physical-layout promise retained independently of source visibility and field shape. */
+  readonly layout:
+    | { readonly _tag: 'Silk' }
+    | { readonly _tag: 'Foreign'; readonly abi: 'C'; readonly abiSpan: SourceSpan.SourceSpan }
+    | {
+        readonly _tag: 'InvalidForeign'
+        readonly abi: string | undefined
+        readonly abiSpan: SourceSpan.SourceSpan
+      }
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly name: DeclaredName
   /** Canonical source or literal-occurrence identity for this nominal aggregate. */

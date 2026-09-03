@@ -52,6 +52,16 @@ const staticBeginsFunction = (state: State, offset: number): boolean => {
   )
 }
 
+/** Recognizes the ABI-bearing prefix that reserves an existing struct declaration node. */
+const externBeginsStruct = (state: State, offset: number): boolean => {
+  if (peek(state, offset) !== 'ExternKeyword') return false
+  const following = peek(state, offset + 1)
+  return (
+    following === 'StructKeyword' ||
+    (following === 'TextLiteral' && peek(state, offset + 2) === 'StructKeyword')
+  )
+}
+
 export const beginsTopLevelDeclaration = (state: State): boolean => {
   const kind = nextSignificantKind(state)
   if (kind === 'StaticKeyword') return staticBeginsFunction(state, 1)
@@ -331,9 +341,16 @@ export const parseEnumDeclaration = (initial: State): NodeResult => {
 export const parseStructDeclaration = (initial: State): NodeResult => {
   const hasPublicModifier = nextSignificantKind(initial) === 'PubKeyword'
   const pubKeyword = hasPublicModifier
-    ? expect(initial, 'PubKeyword', ['StructKeyword', 'Identifier', 'LeftBrace'])
+    ? expect(initial, 'PubKeyword', ['ExternKeyword', 'StructKeyword', 'Identifier', 'LeftBrace'])
     : Object.freeze({ state: initial, elements: Object.freeze([]) })
-  const keyword = expect(pubKeyword.state, 'StructKeyword', ['Identifier', 'LeftBrace'])
+  const hasForeignLayout = nextSignificantKind(pubKeyword.state) === 'ExternKeyword'
+  const externKeyword = hasForeignLayout
+    ? expect(pubKeyword.state, 'ExternKeyword', ['TextLiteral', 'StructKeyword'])
+    : Object.freeze({ state: pubKeyword.state, elements: Object.freeze([]) })
+  const abi = hasForeignLayout
+    ? expect(externKeyword.state, 'TextLiteral', ['StructKeyword'])
+    : Object.freeze({ state: externKeyword.state, elements: Object.freeze([]) })
+  const keyword = expect(abi.state, 'StructKeyword', ['Identifier', 'LeftBrace'])
   const name = expect(keyword.state, 'Identifier', ['Less', 'LeftBrace', ...topLevelFollowing])
   const typeParameters =
     nextSignificantKind(name.state) === 'Less'
@@ -349,6 +366,8 @@ export const parseStructDeclaration = (initial: State): NodeResult => {
   let state = left.state
   let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
     ...pubKeyword.elements,
+    ...externKeyword.elements,
+    ...abi.elements,
     ...keyword.elements,
     ...name.elements,
     ...(typeParameters === undefined ? [] : [typeParameters.node]),
@@ -883,7 +902,11 @@ export const parseTopLevelDeclaration = (state: State): NodeResult => {
     return parseInterfaceDeclaration(state)
   if (kind === 'ServiceKeyword' || following === 'ServiceKeyword')
     return parseServiceDeclaration(state)
-  if (kind === 'StructKeyword' || following === 'StructKeyword')
+  if (
+    kind === 'StructKeyword' ||
+    following === 'StructKeyword' ||
+    externBeginsStruct(state, kind === 'PubKeyword' ? 1 : 0)
+  )
     return parseStructDeclaration(state)
   if (kind === 'TupleKeyword' || following === 'TupleKeyword') return parseTupleDeclaration(state)
   if (kind === 'EnumKeyword' || following === 'EnumKeyword') return parseEnumDeclaration(state)

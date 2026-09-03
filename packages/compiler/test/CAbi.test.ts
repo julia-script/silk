@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as CAbi from '../src/CAbi.js'
+import * as CLayout from '../src/CLayout.js'
 import * as ForeignSymbol from '../src/ForeignSymbol.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
@@ -28,6 +29,36 @@ const rejected: ReadonlyArray<readonly [string, Type.Type]> = [
   ['struct', Type.nominal('app/main', 'Point')],
   ['type parameter', Type.parameter({ module: 'app/main', name: 'f' }, 0, 'T')],
 ]
+
+it('admits exactly the non-nominal C-layout field vocabulary', () => {
+  const resolveNothing: CLayout.ResolveStruct = () => undefined
+  const acceptedFields: ReadonlyArray<Type.Type> = [
+    ...admitted.map(([type]) => type),
+    Type.pointer(false, Type.string),
+    Type.pointer(true, Type.nominal('app/main', 'Opaque')),
+    Type.fixedArray('u16', 3),
+    Type.fixedArray(Type.fixedArray('f64', 2), 4),
+  ]
+  const rejectedFields: ReadonlyArray<readonly [Type.Type, CLayout.RejectionReason]> = [
+    ['bool', 'UnsupportedType'],
+    ['char', 'UnsupportedType'],
+    [Type.string, 'UnsupportedType'],
+    [Type.unit, 'UnknownRecord'],
+    [Type.reference('Shared', 'i32'), 'UnsupportedType'],
+    [Type.slice('Shared', 'u8'), 'UnsupportedType'],
+    [Type.fixedArray('u8', 0), 'ZeroLengthArray'],
+    [Type.fixedArray('bool', 2), 'UnsupportedType'],
+  ]
+
+  for (const type of acceptedFields) {
+    assert.strictEqual(CLayout.admit(type, resolveNothing)._tag, 'Admitted', Type.encode(type))
+  }
+  for (const [type, reason] of rejectedFields) {
+    const admission = CLayout.admit(type, resolveNothing)
+    assert.strictEqual(admission._tag, 'NotAdmitted', Type.encode(type))
+    if (admission._tag === 'NotAdmitted') assert.strictEqual(admission.reason, reason)
+  }
+})
 
 it('admits every V1 scalar as parameter and result and classifies it on a 64-bit target', () => {
   for (const [spelling, text] of admitted) {

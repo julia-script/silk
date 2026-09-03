@@ -6,6 +6,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as CallableContract from '../src/CallableContract.js'
 import * as Constraint from '../src/Constraint.js'
 import * as ModuleSurface from '../src/ModuleSurface.js'
+import * as Presentation from '../src/Presentation.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as SourceSpan from '../src/SourceSpan.js'
 import * as Type from '../src/Type.js'
@@ -122,6 +123,55 @@ it.effect('projects complete nominal union headers into deterministic module sur
     assert.include(base.canonical, 'UnionDeclaration')
     assert.include(base.canonical, 'CanonicalUnionVariant')
     assert.include(base.canonical, 'AvailableStructDependency')
+  }),
+)
+
+it.effect('preserves C-layout struct facts in presentation and module surfaces', () =>
+  Effect.gen(function* () {
+    const source = 'pub extern "C" struct Timespec { pub seconds: i64 }'
+    const cLayout = yield* Analysis.ofSource('surface/Main', encoder.encode(source))
+    const repeated = yield* surface(source)
+    const ordinaryAnalysis = yield* Analysis.ofSource(
+      'surface/Main',
+      encoder.encode('pub struct Timespec { pub seconds: i64 }'),
+    )
+    const invalidAnalysis = yield* Analysis.ofSource(
+      'surface/Main',
+      encoder.encode('pub extern "Rust" struct Timespec { pub seconds: i64 }'),
+    )
+    const fact = cLayout.index.modules.at(0)?.structs.at(0)
+    const cLayoutSurface =
+      cLayout.surfaces.get('surface/Main') ?? assert.fail('missing C-layout module surface')
+    const ordinary =
+      ordinaryAnalysis.surfaces.get('surface/Main') ??
+      assert.fail('missing ordinary module surface')
+    const invalid =
+      invalidAnalysis.surfaces.get('surface/Main') ?? assert.fail('missing invalid module surface')
+    const ordinaryFact = ordinaryAnalysis.index.modules.at(0)?.structs.at(0)
+    const invalidFact = invalidAnalysis.index.modules.at(0)?.structs.at(0)
+
+    assert.strictEqual(fact?.layout._tag, 'Foreign')
+    assert.strictEqual(fact?.layout._tag === 'Foreign' ? fact.layout.abi : undefined, 'C')
+    assert.strictEqual(ordinaryFact?.layout._tag, 'Silk')
+    assert.strictEqual(invalidFact?.layout._tag, 'InvalidForeign')
+    assert.strictEqual(
+      fact === undefined ? undefined : Presentation.structDeclaration(fact).text,
+      'pub extern "C" struct Timespec',
+    )
+    assert.strictEqual(
+      invalidFact === undefined ? undefined : Presentation.structDeclaration(invalidFact).text,
+      'pub extern "Rust" struct Timespec',
+    )
+    assert.strictEqual(ModuleSurface.equals(cLayoutSurface, repeated), true)
+    assert.strictEqual(ModuleSurface.equals(cLayoutSurface, ordinary), false)
+    assert.strictEqual(ModuleSurface.equals(cLayoutSurface, invalid), false)
+    assert.include(cLayoutSurface.canonical, 'ForeignStructLayout')
+    assert.include(ordinary.canonical, 'SilkStructLayout')
+    assert.include(invalid.canonical, 'InvalidForeignStructLayout')
+    assert.deepEqual(
+      invalidAnalysis.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0185'],
+    )
   }),
 )
 

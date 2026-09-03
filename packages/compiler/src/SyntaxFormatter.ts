@@ -324,14 +324,29 @@ const printStructDeclaration = (
   const fields = directNodes(node).filter((child) => child.kind === 'StructField')
   const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
   const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
+  const externKeyword = directTokens(node).find((token) => token.kind === 'ExternKeyword')
+  const abi = directTokens(node).find((token) => token.kind === 'TextLiteral')
   const head = FormatDocument.concat(
     ...(publicKeyword === undefined
       ? []
       : [printToken(context, publicKeyword, prefix), FormatDocument.text(' ')]),
+    ...(externKeyword === undefined
+      ? []
+      : [
+          printToken(
+            context,
+            externKeyword,
+            publicKeyword === undefined ? prefix : FormatDocument.empty,
+          ),
+          abi === undefined
+            ? FormatDocument.empty
+            : printToken(context, abi, FormatDocument.text(' ')),
+          FormatDocument.text(' '),
+        ]),
     printToken(
       context,
       tokenOf(node, 'StructKeyword'),
-      publicKeyword === undefined ? prefix : FormatDocument.empty,
+      publicKeyword === undefined && externKeyword === undefined ? prefix : FormatDocument.empty,
     ),
     printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
     ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),

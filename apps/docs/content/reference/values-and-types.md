@@ -616,6 +616,44 @@ memory cannot request Copy merely because its physical representation contains a
 
 **Evidence:** [owned value classification](ownership-and-borrowing.md#own-001--every-value-type-is-either-copy-or-affine).
 
+### STRUCT-006 — C-layout records make an explicit field-layout promise
+
+**Status:** Confirmed
+
+`[pub] extern "C" struct` declares an ordinary nominal Silk value and additionally promises that
+its fields use the selected target's C aggregate layout. Construction, projection, visibility,
+borrowing, ownership, and an explicit `Copy` implementation follow the ordinary struct rules.
+
+```silk
+pub extern "C" struct Timespec {
+  pub seconds: i64
+  pub nanoseconds: i64
+}
+```
+
+A C-layout record is nongeneric. Its fields may be fixed-width integers, `isize`, `usize`, `f32`,
+`f64`, raw pointers, non-zero fixed arrays of permitted fields, and other valid C-layout records.
+The compiler places those fields in declaration order with the C ABI's alignment, internal
+padding, and tail padding for the selected target.
+
+**Boundary:** The marker does not admit a record by value in a foreign function signature; foreign
+aggregates remain pointer-only. A raw pointer to an ordinary Silk struct remains a valid opaque C
+handle, but only a valid C-layout pointee grants native code the right to interpret its fields.
+Unit, `bool`, `char`, strings, references, slices, ordinary structs by value, unions, enums,
+callables, Effect values, type parameters, represented types, and zero-length arrays cannot be
+C-layout fields.
+
+**Diagnostics:** A generic C-layout declaration and an unsupported field type each report a stable
+semantic diagnostic at the source syntax that violates the layout contract. The nominal type
+remains available for tooling, but the compiler withholds the C-layout promise.
+
+**Current compiler:** Aligned. Struct facts and public module surfaces retain the layout contract,
+and the shared target-layout catalog is the single authority used before native lowering.
+
+**Evidence:** [C-layout record specification](../../../../openspec/changes/archive/2026-09-02-add-c-layout-records/specs/bootstrap-struct-types/spec.md),
+[target layout specification](../../../../openspec/changes/archive/2026-09-02-add-c-layout-records/specs/bootstrap-target-layout/spec.md),
+[layout implementation](../../../../packages/compiler/src/Layout.ts).
+
 ## Tuples and contextual aggregate literals
 
 ### TUPLE-001 — Named tuples are nominal positional structs
@@ -1186,8 +1224,9 @@ argument for a `*const T` parameter; the reverse direction is an ordinary type m
 
 **Boundary:** No other conversion exists. A pointer cannot be cast to or from an integer, compared
 with anything except null through `Pointer.isNull`, used in arithmetic, or converted to a reference
-or slice. Pointing at a Silk struct is allowed, but native code reading its fields is undefined
-until C-layout records exist. Function pointers are a separate proposal.
+or slice. Pointing at an ordinary Silk struct is allowed as an opaque handle, but only a valid
+C-layout record grants native code the right to interpret the pointee's fields. Function pointers
+are a separate proposal.
 
 **Diagnostics:** Passing `*const T` where `*mut T` is expected reports the ordinary type mismatch.
 A `*` in type position not followed by `const` or `mut` is a parser diagnostic that recovers at the

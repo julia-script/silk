@@ -1,4 +1,5 @@
 import * as CAbi from './CAbi.js'
+import * as CLayout from './CLayout.js'
 import * as ConformanceHead from './ConformanceHead.js'
 import { copyAssumptions, copyProof } from './ConformanceProof.js'
 import type {
@@ -54,9 +55,26 @@ import * as InterfaceWitnessCompatibility from './InterfaceWitnessCompatibility.
 import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as ResolutionSeams from './ResolutionSeams.js'
-import type * as SourceSpan from './SourceSpan.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import * as Type from './Type.js'
+
+const tightSpan = (syntax: SyntaxTree.Element): SourceSpan.SourceSpan => {
+  if (!SyntaxTree.isNode(syntax)) return syntax.span
+  const tokens = SyntaxTree.tokens(syntax).filter(
+    (token) =>
+      token.kind !== 'Whitespace' &&
+      token.kind !== 'LineComment' &&
+      token.kind !== 'DocComment' &&
+      token.kind !== 'ModuleDocComment' &&
+      token.kind !== 'EndOfFile',
+  )
+  const first = tokens.at(0)
+  const last = tokens.at(-1)
+  return first === undefined || last === undefined
+    ? syntax.span
+    : (SourceSpan.fromOffsets(syntax.span.sourceId, first.span.start, last.span.end) ?? syntax.span)
+}
 
 /** Makes resolved executable-representation bounds visible while closing their declaration. */
 const withResolvedRepresentationParameters = (
@@ -737,6 +755,65 @@ export const complete = (
         ),
       ),
       conformances: Object.freeze(conformances),
+    })
+  })
+
+  // C-layout validation needs the whole resolved declaration graph: a field may embed a record
+  // declared later or imported from another module. Invalid contracts keep the nominal available
+  // to ordinary Silk tooling, but they do not retain the foreign-layout promise.
+  const resolveCLayoutStruct = CLayout.resolveFrom(modules)
+  modules = modules.map((module): ModuleHeaders => {
+    const members = module.members.map((member): MemberFact => {
+      if (member._tag !== 'StructDeclaration' || member.layout._tag !== 'Foreign') return member
+      const record = member.name._tag === 'Present' ? member.name.spelling : '<anonymous>'
+      let invalid = false
+      if (member.typeParameters.length !== 0) {
+        invalid = true
+        diagnostics.push(
+          Diagnostic.genericCLayoutRecord(
+            record,
+            SyntaxTree.directNode(member.syntax, 'TypeParameterList')?.span ?? member.syntax.span,
+          ),
+        )
+      }
+      const admissions =
+        member.typeParameters.length === 0
+          ? CLayout.admitFields(member, resolveCLayoutStruct)
+          : Object.freeze([])
+      for (const [ordinal, field] of member.fields.entries()) {
+        if (field.declaredType._tag !== 'Resolved') {
+          invalid = true
+          continue
+        }
+        const admission = admissions.at(ordinal)
+        if (admission?._tag !== 'NotAdmitted') continue
+        invalid = true
+        diagnostics.push(
+          Diagnostic.unsupportedCLayoutField(
+            record,
+            field.name._tag === 'Present' ? field.name.spelling : `${field.id.ordinal}`,
+            field.declaredType.spelling,
+            tightSpan(field.declaredType.syntax),
+          ),
+        )
+      }
+      return invalid
+        ? Object.freeze({
+            ...member,
+            layout: Object.freeze({
+              _tag: 'InvalidForeign' as const,
+              abi: member.layout.abi,
+              abiSpan: member.layout.abiSpan,
+            }),
+          })
+        : member
+    })
+    return Object.freeze({
+      ...module,
+      members: Object.freeze(members),
+      structs: Object.freeze(
+        members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+      ),
     })
   })
 

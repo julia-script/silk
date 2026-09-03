@@ -370,6 +370,27 @@ unsafe extern "C" fn tick()
   }),
 )
 
+it.effect('formats C-layout struct declarations canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source = 'pub   extern  "C"struct Timespec{seconds:i64 nanoseconds:i64}'
+    const first = yield* SyntaxFormatter.format(parse('memory://c-layout-struct.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `pub extern "C" struct Timespec {
+  seconds: i64
+  nanoseconds: i64
+}
+`,
+    )
+    const second = yield* SyntaxFormatter.format(
+      parse('memory://c-layout-struct-idempotent.silk', text),
+    )
+    assert.strictEqual(formattedText(second), text)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
 it.effect('formats retained foreign declaration forms without repair', () =>
   Effect.gen(function* () {
     const source =

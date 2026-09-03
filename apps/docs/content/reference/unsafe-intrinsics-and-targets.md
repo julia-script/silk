@@ -875,9 +875,9 @@ takes the selected target's pointer width when the executable is realized for th
 
 **Boundary:** A type being representable in C does not admit it. `bool` has a C-compatible
 layout on every supported target and is still outside the subset, because admission is a closed
-relation, not a layout query. Admitting `*mut Opaque` says nothing about the pointee: native code
-reading the fields of a Silk struct through a pointer is undefined until C-layout records exist,
-which are a separate proposal. Pointer values themselves are defined by
+relation, not a layout query. Admitting `*mut Opaque` says nothing about the pointee: an ordinary
+Silk struct remains an opaque handle, while only a valid `extern "C" struct` grants native code the
+right to interpret its fields. Pointer values themselves are defined by
 [PTR-001](values-and-types.md#ptr-001--a-raw-pointer-is-one-un-owned-machine-address).
 
 **Diagnostics:** A parameter or result outside the subset reports `SEM0187` at the offending
@@ -885,12 +885,14 @@ type, naming the type and the ABI. One declaration with several offending types 
 diagnostic per type. A rejected header publishes no callable.
 
 **Current compiler:** Aligned. `CAbi.admit` judges the spelling and accepts a pointer without
-examining its pointee; `CAbi.classify` and `CAbi.signature` derive the target-specific C signature
-used by MIR, verification, and the backend, with pointer mutability part of the signature key so
-`*const u8` and `*mut u8` redeclarations disagree.
+examining its pointee; C-layout field validation is a separate recursive contract.
+`CAbi.classify` and `CAbi.signature` derive the target-specific C signature used by MIR,
+verification, and the backend, with pointer mutability part of the signature key so `*const u8`
+and `*mut u8` redeclarations disagree.
 
 **Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
 [pointer admission](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-foreign-functions/spec.md),
+[C-layout field contract](values-and-types.md#struct-006--c-layout-records-make-an-explicit-field-layout-promise),
 [C ABI classification](../../../../packages/compiler/src/CAbi.ts),
 [declaration completion](../../../../packages/compiler/src/DeclarationCompletion.ts).
 

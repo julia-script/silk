@@ -421,6 +421,10 @@ export const exportSuspendsCode = 'SEM0201' as const
 export const ambiguousSuppliedOperationCode = 'SEM0202' as const
 /** Stable code for naming a conformance-supplied receiver operation as a value instead of calling it. */
 export const suppliedOperationValueCode = 'SEM0203' as const
+/** Stable code for a C-layout record that declares type parameters. */
+export const genericCLayoutRecordCode = 'SEM0204' as const
+/** Stable code for a C-layout record field outside the closed C object subset. */
+export const unsupportedCLayoutFieldCode = 'SEM0205' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -668,6 +672,8 @@ export type Code =
   | typeof exportSuspendsCode
   | typeof ambiguousSuppliedOperationCode
   | typeof suppliedOperationValueCode
+  | typeof genericCLayoutRecordCode
+  | typeof unsupportedCLayoutFieldCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -1123,6 +1129,13 @@ export type Reason =
   | { readonly _tag: 'CyclicTypeAlias'; readonly aliases: ReadonlyArray<string> }
   | { readonly _tag: 'TypeAliasParameters'; readonly alias: string }
   | { readonly _tag: 'UnsupportedForeignAbi'; readonly abi: string }
+  | { readonly _tag: 'GenericCLayoutRecord'; readonly record: string }
+  | {
+      readonly _tag: 'UnsupportedCLayoutField'
+      readonly record: string
+      readonly field: string
+      readonly type: string
+    }
   | { readonly _tag: 'ForeignFunctionRequiresUnsafe'; readonly name: string }
   | { readonly _tag: 'ForeignTypeNotAdmitted'; readonly type: string; readonly abi: string }
   | { readonly _tag: 'ForeignDeclarationRestriction'; readonly restriction: string }
@@ -2430,6 +2443,35 @@ export const unsupportedForeignAbi = (abi: string, span: SourceSpan.SourceSpan):
     severity: 'error',
     message: `Foreign ABI "${abi}" is not supported; only "C" is available`,
     reason: Object.freeze({ _tag: 'UnsupportedForeignAbi', abi }),
+    span,
+  })
+
+/** Rejects a parameterized record before it can publish a C-layout promise. */
+export const genericCLayoutRecord = (record: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: genericCLayoutRecordCode,
+    severity: 'error',
+    message: `C-layout record ${record} cannot declare type parameters`,
+    reason: Object.freeze({ _tag: 'GenericCLayoutRecord', record }),
+    span,
+  })
+
+/** Rejects one field whose resolved type has no supported C object representation. */
+export const unsupportedCLayoutField = (
+  record: string,
+  field: string,
+  type: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unsupportedCLayoutFieldCode,
+    severity: 'error',
+    message: `Field ${field} of C-layout record ${record} has unsupported type ${type}`,
+    reason: Object.freeze({ _tag: 'UnsupportedCLayoutField', record, field, type }),
     span,
   })
 

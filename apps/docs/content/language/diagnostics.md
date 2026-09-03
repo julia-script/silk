@@ -16,11 +16,11 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | `LEX`  | Lexical   | 12    |
 | `PAR`  | Parser    | 5     |
 | `MOD`  | Module    | 3     |
-| `SEM`  | Semantic  | 195   |
+| `SEM`  | Semantic  | 197   |
 | `OWN`  | Ownership | 17    |
 | `LAY`  | Layout    | 1     |
 
-There are 233 codes in total.
+There are 235 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -256,6 +256,8 @@ There are 233 codes in total.
 | `SEM0201` | Stable code for an `export "C"` function whose body may suspend.                                             | `Exported function <symbol> may suspend; a C-callable body must be synchronous`                                                                                                                                                                                                                                                                                                                                                                                            |
 | `SEM0202` | Stable code for a receiver operation supplied by more than one of the receiver's conformances.               | `<member> is supplied to <receiver> by more than one interface (<join>); call it through one, as <at0Interface>.<member>(...)`                                                                                                                                                                                                                                                                                                                                             |
 | `SEM0203` | Stable code for naming a conformance-supplied receiver operation as a value instead of calling it.           | `<member> is supplied to <receiver> by an interface and must be called; it has no value form`                                                                                                                                                                                                                                                                                                                                                                              |
+| `SEM0204` | Stable code for a C-layout record that declares type parameters.                                             | `C-layout record <record> cannot declare type parameters`                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `SEM0205` | Stable code for a C-layout record field outside the closed C object subset.                                  | `Field <field> of C-layout record <record> has unsupported type <type>`                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 ## Ownership (`OWN`)
 

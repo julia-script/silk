@@ -481,6 +481,7 @@ export interface Violation {
     | 'NonCanonicalOrder'
     | 'InvalidScalar'
     | 'InvalidAggregate'
+    | 'InvalidCLayout'
     | 'InvalidCallingShape'
     | 'InvalidLiteralVerdict'
     | 'CatalogMismatch'

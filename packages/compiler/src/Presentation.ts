@@ -321,10 +321,14 @@ export const structDeclaration = (self: DeclarationFacts.StructFact): Presentati
     self.typeParameters.length === 0
       ? ''
       : `<${self.typeParameters.map(typeParameterName).join(', ')}>`
+  const layout =
+    self.layout._tag === 'Silk'
+      ? ''
+      : `extern ${self.layout.abi === undefined ? '_' : JSON.stringify(self.layout.abi)} `
   return Object.freeze({
     _tag: 'StructPresentation',
     name,
-    text: `${visibility}${self.aggregateKind === 'Positional' ? 'tuple' : 'struct'} ${name}${typeParameters}`,
+    text: `${visibility}${layout}${self.aggregateKind === 'Positional' ? 'tuple' : 'struct'} ${name}${typeParameters}`,
   })
 }
 

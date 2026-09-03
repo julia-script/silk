@@ -72,7 +72,7 @@ pub fn main() -> i32 {
       assert.strictEqual(represented.size, 4)
       assert.strictEqual(represented.alignment, 4)
       assert.strictEqual(deferred.representation._tag, 'Aggregate')
-      assert.deepEqual(LayoutVerify.verifyCatalog(catalog), [])
+      assert.deepEqual(LayoutVerify.verifyCatalog(catalog, snapshot.index), [])
       assert.deepEqual(LayoutVerify.verify(plan), [])
     }
   }),

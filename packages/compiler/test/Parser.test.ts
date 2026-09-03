@@ -3811,6 +3811,47 @@ const significantShape = (node: SyntaxTree.Node): ReadonlyArray<string> =>
     return [`Missing(${child.expected})`]
   })
 
+it('parses a public C-layout struct on the existing struct node losslessly', () => {
+  const source = 'pub extern "C" struct Timespec { seconds: i64 }'
+  const result = parseText('memory/c-layout-struct', source)
+  const declaration = SyntaxTree.directNode(result.root, 'StructDeclaration')
+
+  assert.notStrictEqual(declaration, undefined)
+  assert.deepEqual(significantShape(declaration ?? result.root), [
+    'PubKeyword',
+    'ExternKeyword',
+    'TextLiteral',
+    'StructKeyword',
+    'Identifier',
+    'LeftBrace',
+    '{StructField}',
+    'RightBrace',
+  ])
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('recovers a C-layout struct without an ABI literal inside its declaration', () => {
+  const source = 'extern struct Broken { value: i32 }\npub struct Next {}'
+  const result = parseText('memory/c-layout-struct-missing-abi', source)
+  const [damaged, next] = SyntaxTree.directNodes(result.root, 'StructDeclaration')
+
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0001'],
+  )
+  assert.deepEqual(
+    missingLeaves(damaged ?? result.root).map((missing) => missing.expected),
+    ['TextLiteral'],
+  )
+  assert.strictEqual(SyntaxTree.directNodes(damaged ?? result.root, 'StructField').length, 1)
+  assert.notStrictEqual(next, undefined)
+  assert.strictEqual(SyntaxTree.isAvailableSyntax(next ?? result.root), true)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('parses a renamed public foreign function declaration losslessly', () => {
   const source = 'pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"'
   const result = parseText('memory/foreign-function', source)

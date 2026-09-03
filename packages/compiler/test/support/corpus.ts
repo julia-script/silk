@@ -3271,6 +3271,22 @@ pub fn main() -> i32 {
   return u8.toI32(bytes[0]) + u8.toI32(bytes[2]) - 42
 }`
 
+/** A libc call writes through a pointer to a C-layout record and Silk reads the populated fields. */
+export const foreignClockRecordNative = `import silk.pointer { Pointer }
+extern "C" struct Timespec {
+  seconds: i64
+  nanoseconds: i64
+}
+unsafe extern "C" fn clock_gettime(clock: i32, value: *mut Timespec) -> i32
+pub fn main() -> i32 {
+  let mut value = Timespec { seconds: -1, nanoseconds: -1 }
+  if unsafe clock_gettime(0, Pointer.fromMutRef(&mut value)) != 0 { return 1 }
+  if value.seconds < 0 { return 2 }
+  if value.nanoseconds < 0 { return 3 }
+  if value.nanoseconds >= 1000000000 { return 4 }
+  return 0
+}`
+
 /**
  * The libc round trip: allocate, copy a Silk byte view in, NUL-terminate, compare, write to
  * standard output, free. The backend declares `malloc` as `ptr(i64)`, `free` as `void(ptr)`, and
@@ -3449,6 +3465,12 @@ pub fn main() -> i32 { return unsafe abs(-42) }`,
     nativeSource: foreignPointerFillNative,
     nativeCSources: { silk_test_foreign_pointers: foreignPointerFixture },
     expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'foreign-c-layout-clock',
+    source: 'pub fn main() -> i32 { return 0 }',
+    nativeSource: foreignClockRecordNative,
+    expected: { _tag: 'Completes', result: 0 },
   },
   {
     name: 'pointer-libc-roundtrip',

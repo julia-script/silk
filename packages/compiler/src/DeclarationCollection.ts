@@ -2453,6 +2453,38 @@ const decodedText = (source: SourceFile.SourceFile, token: Token.Token): string 
     : undefined
 }
 
+/** A malformed or unsupported foreign marker is retained without granting a layout promise. */
+const collectStructLayout = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+): {
+  readonly fact: StructFact['layout']
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  const marker = SyntaxTree.directToken(node, 'ExternKeyword')
+  if (marker === undefined)
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'Silk' }),
+      diagnostics: Object.freeze([]),
+    })
+  const abiToken = SyntaxTree.directToken(node, 'TextLiteral')
+  if (abiToken === undefined)
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'InvalidForeign', abi: undefined, abiSpan: marker.span }),
+      diagnostics: Object.freeze([]),
+    })
+  const abi = decodedText(source, abiToken)
+  if (abi === 'C')
+    return Object.freeze({
+      fact: Object.freeze({ _tag: 'Foreign', abi, abiSpan: abiToken.span }),
+      diagnostics: Object.freeze([]),
+    })
+  return Object.freeze({
+    fact: Object.freeze({ _tag: 'InvalidForeign', abi, abiSpan: abiToken.span }),
+    diagnostics: Object.freeze([Diagnostic.unsupportedForeignAbi(abi ?? '', abiToken.span)]),
+  })
+}
+
 const textDecoder = new TextDecoder()
 
 const sharedForeignRestrictions: ReadonlyArray<
@@ -2854,6 +2886,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         diagnostics,
       )
     if (node.kind === 'StructDeclaration') {
+      const layout = collectStructLayout(source, node)
       const collected = collectFields(
         source,
         node,
@@ -2861,12 +2894,13 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         'StructField',
         typeParameters.environment,
       )
-      diagnostics.push(...collected.diagnostics)
+      diagnostics.push(...layout.diagnostics, ...collected.diagnostics)
       return Object.freeze({
         _tag: 'StructDeclaration',
         id,
         canonical,
         visibility,
+        layout: layout.fact,
         typeParameters: typeParameters.facts,
         name,
         ...(name._tag === 'Present'
@@ -2891,6 +2925,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         id,
         canonical,
         visibility,
+        layout: Object.freeze({ _tag: 'Silk' }),
         typeParameters: typeParameters.facts,
         name,
         ...(name._tag === 'Present'
