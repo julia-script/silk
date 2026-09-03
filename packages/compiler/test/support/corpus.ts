@@ -1418,6 +1418,30 @@ pub fn main() -> i32 {
 pub fn main() -> i32 { return combine(3)(2)(1) }`,
     expected: { _tag: 'Completes', result: 123 },
   },
+  // CALLABLE-002: every stage may pass through a binding, keeping the captured suffix in place.
+  {
+    name: 'staged-callable-bindings',
+    source: `fn combine(a: i32, b: i32, c: i32) -> i32 {
+  return a * 100 + b * 10 + c
+}
+pub fn main() -> i32 {
+  let withThree = combine(3)
+  let withTwoAndThree = withThree(2)
+  return withTwoAndThree(1)
+}`,
+    expected: { _tag: 'Completes', result: 123 },
+  },
+  // CALLABLE-002: a stage over an erased callable parameter splices the hidden environment.
+  {
+    name: 'staged-callable-parameter',
+    source: `fn combine(a: i32, b: i32, c: i32) -> i32 { return a * 100 + b * 10 + c }
+fn stage(f: fn(i32, i32) -> i32) -> i32 {
+  let g = f(2)
+  return g(1)
+}
+pub fn main() -> i32 { return stage(combine(3)) - 123 + 42 }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // JUL-72: one source-defined anonymous environment covers Copy, shared, exclusive, and moved
   // captures so the evaluator/native differential owns backend parity for the feature.
   {

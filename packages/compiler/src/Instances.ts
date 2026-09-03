@@ -1107,6 +1107,32 @@ export const discover = (
     }
   }
   const recordedCallables = new Map<string, CallableInstance>()
+  /** Finds the already-discovered environment a hidden callable identity names. */
+  const resolveRecordedCallable = (
+    identity: Type.CallableIdentityArgument,
+  ): CallableInstance | undefined => {
+    const environment = identity.environment
+    if (environment === undefined) return undefined
+    for (const candidate of recordedCallables.values()) {
+      if (
+        Type.equalsCallableEnvironmentIdentity(
+          environment,
+          callableEnvironmentIdentity(candidate),
+        ) &&
+        Hir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
+        candidate.typeArguments.length === identity.typeArguments.length &&
+        candidate.typeArguments.every((argument, ordinal) => {
+          const expected = identity.typeArguments.at(ordinal)
+          return (
+            expected !== undefined &&
+            Type.genericArgumentKey(argument) === Type.genericArgumentKey(expected)
+          )
+        })
+      )
+        return candidate
+    }
+    return undefined
+  }
   const recordedCalls = new Map<string, CallInstance>()
   const providerCalls = new Map<string, CallInstance>()
   const scannedContexts = new Set<string>()
@@ -1302,7 +1328,14 @@ export const discover = (
           }),
         )
       }
-      for (const callable of concreteCallables(fn, key, substitution, results, index)) {
+      for (const callable of concreteCallables(
+        fn,
+        key,
+        substitution,
+        results,
+        index,
+        resolveRecordedCallable,
+      )) {
         recordedCallables.set(callableIdentity(callable), callable)
       }
       const cleanupHooks = cleanupPrepassTargets(fn, residual.fact, substitution)

@@ -858,6 +858,24 @@ export const make = (operations: Operations) => {
             context.resolving,
           )
     }
+    if (expression._tag === 'CallableApply' && expression.staged !== undefined) {
+      // A staged application keeps the base's target and names the spliced environment it built.
+      const base = callableOriginOf(expression.callee, context)
+      return base === undefined
+        ? undefined
+        : Type.callableIdentityArgument(
+            base.identity,
+            base.target,
+            base.typeArguments,
+            Hir.callableEnvironmentIdentity(expression.staged.site, {
+              declaration: Object.freeze({
+                module: context.owner.declaration.module,
+                name: context.owner.declaration.name,
+              }),
+              typeArguments: context.owner.typeArguments,
+            }),
+          )
+    }
     if (expression._tag === 'CallableApply') {
       const targetKey = targetKeyOfCallableApply(expression, context)
       if (targetKey === undefined) return undefined
@@ -1997,6 +2015,7 @@ export const make = (operations: Operations) => {
     ownerSubstitution: Type.Substitution,
     results: ReadonlyMap<string, Elaboration.Result>,
     index: DeclarationIndex.Index,
+    resolveCallable: (identity: Type.CallableIdentityArgument) => CallableInstance | undefined,
   ): ReadonlyArray<CallableInstance> => {
     const expressions = callableExpressions(fn)
     const bindings = callableBindings(fn)
@@ -2005,6 +2024,14 @@ export const make = (operations: Operations) => {
     )
     const seen = new Set<string>()
     const instances: Array<CallableInstance> = []
+    const context: EffectOriginContext = Object.freeze({
+      fn,
+      owner,
+      substitution: ownerSubstitution,
+      results,
+      index,
+      resolving: new Set<string>(),
+    })
     for (const section of sections) {
       const site = Hir.executableSiteKey(section.site)
       if (seen.has(site)) continue
@@ -2092,6 +2119,95 @@ export const make = (operations: Operations) => {
           }),
         )
       }
+    }
+    // A staged application splices the base value's environment ahead of its own captures, so
+    // its instance lists every capture the target will receive. Bases resolve in source order:
+    // a section or earlier stage of this body, or a callable this instance was specialized on.
+    for (const expression of expressions) {
+      if (expression._tag !== 'CallableApply' || expression.staged === undefined) continue
+      const staged = expression.staged
+      const site = Hir.executableSiteKey(staged.site)
+      if (seen.has(site)) continue
+      seen.add(site)
+      const identity = callableOriginOf(expression.callee, context)
+      if (identity === undefined) continue
+      const environment = identity.environment
+      const base =
+        environment === undefined
+          ? undefined
+          : (instances.find((candidate) =>
+              Type.equalsCallableEnvironmentIdentity(
+                environment,
+                Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
+              ),
+            ) ?? resolveCallable(identity))
+      if (environment !== undefined && base === undefined) continue
+      const calleeType =
+        expression.callee._tag === 'Unavailable'
+          ? undefined
+          : specializeInstanceType(expression.callee.type, owner, [ownerSubstitution])
+      const type = specializeInstanceType(expression.type, owner, [ownerSubstitution])
+      if (
+        calleeType === undefined ||
+        !Type.isCallable(calleeType) ||
+        !Type.isCallable(type) ||
+        !Type.isRuntimeConcrete(type)
+      )
+        continue
+      const baseCaptures = base?.captures ?? []
+      const remaining = Array.from(
+        { length: baseCaptures.length + calleeType.parameters.length },
+        (_, ordinal) => ordinal,
+      ).filter((ordinal) => !baseCaptures.some((capture) => capture.parameterOrdinal === ordinal))
+      const offset = remaining.length - expression.arguments.length
+      const captures: Array<CallableInstance['captures'][number]> = [...baseCaptures]
+      const captureTypes: Array<Type.Type> = [...(base?.captureTypes ?? [])]
+      let complete = true
+      for (const [ordinal, argument] of expression.arguments.entries()) {
+        const capture = staged.captures.at(ordinal)
+        const parameterOrdinal = remaining.at(offset + ordinal)
+        if (
+          argument._tag === 'Unavailable' ||
+          capture === undefined ||
+          parameterOrdinal === undefined
+        ) {
+          complete = false
+          break
+        }
+        const captureType = specializeInstanceType(argument.type, owner, [ownerSubstitution])
+        if (!Type.isRuntimeConcrete(captureType)) {
+          complete = false
+          break
+        }
+        const callableIdentity = Type.isCallable(captureType)
+          ? callableOriginOf(argument, context)
+          : undefined
+        captures.push(
+          Object.freeze({
+            ordinal: baseCaptures.length + ordinal,
+            parameterOrdinal,
+            access: capture.access,
+            type: captureType,
+            ...(callableIdentity === undefined ? {} : { callableIdentity }),
+          }),
+        )
+        captureTypes.push(captureType)
+      }
+      if (!complete) continue
+      instances.push(
+        Object.freeze({
+          _tag: 'CallableInstance',
+          owner,
+          site: staged.site,
+          target: Hir.callableTargetFromIdentity(identity.target),
+          typeArguments: identity.typeArguments,
+          substitution: base?.substitution ?? new Map(),
+          captureTypes: Object.freeze(captureTypes),
+          captures: Object.freeze(captures),
+          type,
+          mode: type.mode,
+        }),
+      )
     }
     return Object.freeze(instances)
   }

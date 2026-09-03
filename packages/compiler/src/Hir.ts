@@ -735,6 +735,18 @@ export type Expression =
       readonly substitution: Type.Substitution
       readonly evaluation: 'CalleeThenArguments' | 'LeftThenCallable'
       readonly realization: 'Environment' | 'DirectErasedSection'
+      /**
+       * Present when the arguments are a proper trailing suffix of the callee's parameters: the
+       * application stages a section over the callee value, splicing the callee's environment
+       * ahead of the argument captures instead of invoking it. Captures align with `arguments`.
+       */
+      readonly staged?: {
+        readonly site: CallableSiteId
+        readonly captures: ReadonlyArray<{
+          readonly ordinal: number
+          readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+        }>
+      }
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
@@ -1836,7 +1848,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'CallableApply':
       return [
-        `${indent}callable-apply access=${expression.access.toLowerCase()} evaluation=${expression.evaluation} realization=${expression.realization} substitution=${[...expression.substitution.entries()].map(([parameter, argument]) => `${parameter}=${Type.encodeGenericArgument(argument)}`).join(',') || 'none'} ends=${expression.loanEnds.map(borrowText).join(',') || 'none'} held=${expression.heldLoans.map(borrowText).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}callable-apply access=${expression.access.toLowerCase()} evaluation=${expression.evaluation} realization=${expression.realization}${expression.staged === undefined ? '' : ` staged=${executableSiteLabel(expression.staged.site)}[${expression.staged.captures.map((capture) => `#${capture.ordinal}:${capture.access.toLowerCase()}`).join(',')}]`} substitution=${[...expression.substitution.entries()].map(([parameter, argument]) => `${parameter}=${Type.encodeGenericArgument(argument)}`).join(',') || 'none'} ends=${expression.loanEnds.map(borrowText).join(',') || 'none'} held=${expression.heldLoans.map(borrowText).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         ...(expression.evaluation === 'LeftThenCallable'
           ? [
               ...expression.arguments.map(

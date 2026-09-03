@@ -55,6 +55,7 @@ import {
   callableValueByIdentity,
   callableValueType,
   directCallableSectionValueType,
+  stagedCallableValueType,
   effectCompositeShape,
   effectValueByIdentity,
   effectValueType,
@@ -698,11 +699,83 @@ function lowerCallableSectionExpression(
   return Object.freeze({ result: destination })
 }
 
+/**
+ * A staged application builds a new callable value: the callee's environment is spliced ahead of
+ * the argument captures and the callee's target is kept, so no engine needs a thunk.
+ */
+function lowerStagedCallableApply(
+  fn: FunctionLowering,
+  expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
+  site: Hir.CallableSiteId,
+  availableRequirements: FunctionLowering['providedRequirements'],
+): LoweredExpression | undefined {
+  const type = stagedCallableValueType(fn, expression, site)
+  const environment = type?.environment
+  if (type === undefined || environment === undefined) return undefined
+  let base: Mir.LocalId | undefined
+  const sources: Array<Mir.LocalId> = []
+  const lowerCallee = (): boolean => {
+    const lowered = lowerExpression(fn, expression.callee, availableRequirements)
+    if (lowered === undefined || fn.localTypes.at(lowered.result.ordinal)?._tag !== 'CallableValue')
+      return false
+    base = lowered.result
+    return true
+  }
+  const lowerArguments = (): boolean => {
+    for (const argument of expression.arguments) {
+      const lowered = lowerExpression(fn, argument, availableRequirements)
+      if (lowered === undefined) return false
+      sources.push(lowered.result)
+    }
+    return true
+  }
+  const lowered =
+    expression.evaluation === 'LeftThenCallable'
+      ? lowerArguments() && lowerCallee()
+      : lowerCallee() && lowerArguments()
+  if (!lowered || base === undefined) return undefined
+  const baseCount = environment.fields.length - sources.length
+  const captures: Array<{
+    readonly ordinal: number
+    readonly parameterOrdinal: number
+    readonly source: Mir.LocalId
+    readonly access: Type.CaptureAccess
+  }> = []
+  for (const [ordinal, source] of sources.entries()) {
+    const field = environment.fields.find((candidate) => candidate.ordinal === baseCount + ordinal)
+    if (field === undefined) return undefined
+    captures.push(
+      Object.freeze({
+        ordinal: field.ordinal,
+        parameterOrdinal: field.parameterOrdinal,
+        source,
+        access: field.access,
+      }),
+    )
+  }
+  const destination = fn.alloc(type)
+  fn.emit(
+    Object.freeze({
+      _tag: 'MakeCallable',
+      destination,
+      target: type.target,
+      typeArguments: Object.freeze([...Layout.callableTargetArguments(environment)]),
+      base,
+      captures: Object.freeze(captures),
+      type,
+      provenance: authored(expression.span),
+    }),
+  )
+  return Object.freeze({ result: destination })
+}
+
 function lowerCallableApplyExpression(
   fn: FunctionLowering,
   expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
+  if (expression.staged !== undefined)
+    return lowerStagedCallableApply(fn, expression, expression.staged.site, availableRequirements)
   const directSection =
     expression.realization === 'DirectErasedSection' && expression.callee._tag === 'CallableSection'
       ? expression.callee
@@ -726,10 +799,10 @@ function lowerCallableApplyExpression(
   let callableType: Type.Callable | undefined
   let target: Hir.CallableTarget | undefined
   let typeArguments: ReadonlyArray<Type.GenericArgument> = Object.freeze([])
-      const provision = forwardedServiceProvision(fn, expression, availableRequirements)
+  const provision = forwardedServiceProvision(fn, expression, availableRequirements)
   const lowerArguments = (): boolean => {
     for (const argument of expression.arguments) {
-          const lowered = lowerOperandWithProvision(fn, provision, argument, availableRequirements)
+      const lowered = lowerOperandWithProvision(fn, provision, argument, availableRequirements)
       if (lowered === undefined) return false
       arguments_.push(lowered.result)
     }
@@ -748,12 +821,12 @@ function lowerCallableApplyExpression(
         )
       if (directSection !== undefined) {
         for (const capture of directSection.captures) {
-              const lowered = lowerOperandWithProvision(
-                fn,
-                provision,
-                capture.value,
-                availableRequirements,
-              )
+          const lowered = lowerOperandWithProvision(
+            fn,
+            provision,
+            capture.value,
+            availableRequirements,
+          )
           if (lowered === undefined) return false
           captures.push(
             Object.freeze({
@@ -772,14 +845,14 @@ function lowerCallableApplyExpression(
     if (lowered === undefined || loweredType?._tag !== 'CallableValue') return false
     callable = lowered.result
     callableType = loweredType.type
-        // A realized environment names its hidden instance by its type arguments plus the
-        // identities of the callables it captured, exactly as its construction registered it.
+    // A realized environment names its hidden instance by its type arguments plus the
+    // identities of the callables it captured, exactly as its construction registered it.
     typeArguments =
-          loweredType.environment === undefined
-            ? (loweredType.storage?.realization.targetArguments ??
-              loweredType.typeArguments ??
-              Object.freeze([]))
-            : Object.freeze([...Layout.callableTargetArguments(loweredType.environment)])
+      loweredType.environment === undefined
+        ? (loweredType.storage?.realization.targetArguments ??
+          loweredType.typeArguments ??
+          Object.freeze([]))
+        : Object.freeze([...Layout.callableTargetArguments(loweredType.environment)])
     return true
   }
   const lowered =
@@ -798,16 +871,16 @@ function lowerCallableApplyExpression(
       ? undefined
       : effectValueByIdentity(fn.layout, call.resultEffect)) ??
     declaredEffectValue ??
-        fn.type(expression.type) ??
-        (realizedTarget?._tag === 'DeclarationCallableTarget'
-          ? resultCallableValueType(
-              fn.layout,
-              fn.instances,
-              realizedTarget.declaration,
-              typeArguments,
-              fn.semantic(expression.type),
-            )
-          : undefined)
+    fn.type(expression.type) ??
+    (realizedTarget?._tag === 'DeclarationCallableTarget'
+      ? resultCallableValueType(
+          fn.layout,
+          fn.instances,
+          realizedTarget.declaration,
+          typeArguments,
+          fn.semantic(expression.type),
+        )
+      : undefined)
   if (!lowered || type === undefined || callableType === undefined) return undefined
   if (
     realizedTarget?._tag === 'BuiltinCallableTarget' &&
@@ -955,10 +1028,10 @@ function lowerEffectConstructExpression(
       : effectValueByIdentity(fn.layout, call.resultEffect)) ??
     fn.effectResults.get(instanceText(expression.target, typeArguments, staticArguments))
   if (resultType === undefined) return undefined
-      const provision = forwardedServiceProvision(fn, expression, availableRequirements)
+  const provision = forwardedServiceProvision(fn, expression, availableRequirements)
   const arguments_: Array<Mir.LocalId> = []
   for (const argument of expression.arguments) {
-        const lowered = lowerOperandWithProvision(fn, provision, argument, availableRequirements)
+    const lowered = lowerOperandWithProvision(fn, provision, argument, availableRequirements)
     if (lowered === undefined) return undefined
     arguments_.push(lowered.result)
   }
@@ -1634,12 +1707,12 @@ function lowerUnionConvertExpression(
   // Effect access is a semantic ownership coercion. Hidden construction identity has already
   // selected one concrete EffectValue layout, so the runtime representation is unchanged.
   if (expression.conversion === 'EffectAccess') return source
-      if (expression.conversion === 'EffectJoin') {
-        const composite = fn.type(expression.type)
-        return source === undefined || composite?._tag !== 'EffectComposite'
-          ? undefined
-          : packEffectComposite(fn, source, composite, expression.span)
-      }
+  if (expression.conversion === 'EffectJoin') {
+    const composite = fn.type(expression.type)
+    return source === undefined || composite?._tag !== 'EffectComposite'
+      ? undefined
+      : packEffectComposite(fn, source, composite, expression.span)
+  }
   const sourceType = fn.type(expression.sourceType)
   const targetType = fn.type(expression.target)
   const substituted = TypeCompatibility.check(
@@ -1824,7 +1897,7 @@ function lowerMatchExpression(
     const [selectedResult, selectedOperations] = fn.capture(() => {
       const lowered = lowerExpression(fn, arm.result, availableRequirements)
       if (lowered === undefined || resultType._tag !== 'EffectComposite') return lowered
-          return packEffectComposite(fn, lowered, resultType, arm.result.span)
+      return packEffectComposite(fn, lowered, resultType, arm.result.span)
     })
     if (selectedResult === undefined) return undefined
     armStates.set(arm.id.ordinal, delayedEffectState(fn))
@@ -2284,14 +2357,14 @@ function lowerCallExpression(
       ? undefined
       : effectValueByIdentity(fn.layout, call.resultEffect)) ??
     fn.effectResults.get(instanceText(expression.target, typeArguments)) ??
-        fn.type(expression.type) ??
-        resultCallableValueType(
-          fn.layout,
-          fn.instances,
-          expression.target,
-          typeArguments,
-          fn.semantic(expression.type),
-        )
+    fn.type(expression.type) ??
+    resultCallableValueType(
+      fn.layout,
+      fn.instances,
+      expression.target,
+      typeArguments,
+      fn.semantic(expression.type),
+    )
   if (type === undefined) return undefined
   const destination = fn.alloc(type)
   fn.emit(

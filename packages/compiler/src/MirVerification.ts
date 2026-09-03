@@ -805,7 +805,11 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
     case 'MakeEffect':
       return [operation.destination, ...operation.captures.map((capture) => capture.source)]
     case 'MakeCallable':
-      return [operation.destination, ...operation.captures.map((capture) => capture.source)]
+      return [
+        operation.destination,
+        ...(operation.base === undefined ? [] : [operation.base]),
+        ...operation.captures.map((capture) => capture.source),
+      ]
     case 'ApplyCallable':
       return [
         operation.destination,
@@ -1925,7 +1929,10 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'MakeEffect':
       return operation.captures.map((capture) => capture.source)
     case 'MakeCallable':
-      return operation.captures.map((capture) => capture.source)
+      return [
+        ...(operation.base === undefined ? [] : [operation.base]),
+        ...operation.captures.map((capture) => capture.source),
+      ]
     case 'ApplyCallable':
       return [
         ...(operation.callable === undefined ? [] : [operation.callable]),
@@ -5431,9 +5438,33 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const environment = operation.type.environment
           const fields = environment?.fields ?? []
+          // A spliced base contributes the leading fields; its own environment must be the
+          // exact prefix of the new one, both in count and in every field's shape.
+          const base =
+            operation.base === undefined ? undefined : fn.localTypes.at(operation.base.ordinal)
+          let baseFields: ReadonlyArray<Layout.CallableEnvironmentField> | undefined
+          if (operation.base === undefined) baseFields = []
+          else if (base?._tag === 'CallableValue') baseFields = base.environment?.fields ?? []
+          const baseValid =
+            baseFields !== undefined &&
+            (operation.base === undefined ||
+              (base?._tag === 'CallableValue' &&
+                Hir.sameCallableTarget(base.target, operation.target) &&
+                baseFields.every((field, ordinal) => {
+                  const target = fields.at(ordinal)
+                  return (
+                    target !== undefined &&
+                    target.ordinal === field.ordinal &&
+                    target.parameterOrdinal === field.parameterOrdinal &&
+                    target.access === field.access &&
+                    SilkType.equals(target.type, field.type)
+                  )
+                })))
           const capturesValid =
-            operation.captures.length === fields.length &&
-            operation.captures.every((capture, ordinal) => {
+            baseValid &&
+            operation.captures.length + (baseFields?.length ?? 0) === fields.length &&
+            operation.captures.every((capture, offset) => {
+              const ordinal = (baseFields?.length ?? 0) + offset
               const field = fields.at(ordinal)
               const source = fn.localTypes.at(capture.source.ordinal)
               return (
