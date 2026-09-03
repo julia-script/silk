@@ -306,3 +306,95 @@ pub fn main() -> i32 {
     assert.throws(() => (instance.exports.silk_main as () => number)(), WebAssembly.RuntimeError)
   }),
 )
+
+// ISSUE-86: a resumed invocation puts every address-taken root it restores by value back into
+// its private frame slot; the parent's Shared handle must survive two child fibers touching the
+// same log, with or without timer waits.
+const sharedLogScheduler = (children: string) =>
+  `${children}
+effect fn program(log: Shared<Log>) -> i32
+! OutOfMemoryError | TaskIdExhaustedError | Cancelled
+? &mut Scheduler | &mut MonotonicClock {
+  let a = run Fiber.forkChild<i32, never>(child(Shared.clone(&log), 1, 20))
+  let b = run Fiber.forkChild<i32, never>(child(Shared.clone(&log), 2, 10))
+  let ra = run Fiber.join<i32, never>(move a)
+  let rb = run Fiber.join<i32, never>(move b)
+  let entries = Shared.withMut(&log, readLog)
+  drop log
+  return entries
+}
+` +
+  `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.fiber { Fiber, Cancelled }
+import silk.local_scheduler { LocalScheduler, StalledError }
+import silk.monotonic_clock { MonotonicClock }
+import silk.scheduler { Scheduler, TaskIdExhaustedError }
+import silk.shared { Shared }
+import silk.system_clock { SystemClock }
+import silk.system_clock { Instant }
+
+struct ParentClock { mark: Instant }
+effect fn parentNow(self: &mut ParentClock) -> Instant {
+  return SystemClock.make(SystemClock.seconds(&self.mark), SystemClock.nanoseconds(&self.mark))
+}
+effect fn parentResolution(self: &mut ParentClock) -> u64 { return 1 }
+effect fn parentWaitUntil(self: &mut ParentClock, deadline: Instant) -> () {
+  self.mark = move deadline
+  return ()
+}
+effect fn parentWaitFor(self: &mut ParentClock, duration: u64) -> () {
+  let deadline = MonotonicClock.deadlineAfter(&self.mark, duration)
+  return run parentWaitUntil(move self, move deadline)
+}
+impl MonotonicClock for ParentClock {
+  now: ParentClock.parentNow
+  getResolution: ParentClock.parentResolution
+  waitUntil: ParentClock.parentWaitUntil
+  waitFor: ParentClock.parentWaitFor
+}
+struct Log { entries: i32 }
+fn record(self: &mut Log, id: i32) -> () { self.entries = self.entries * 10 + id return () }
+fn readLog(self: &mut Log) -> i32 { return self.entries }
+effect fn recover(error: OutOfMemoryError | TaskIdExhaustedError | Cancelled | StalledError) -> i32 {
+  return match move error {
+    StalledError {} => 94
+    OutOfMemoryError {} => 91
+    TaskIdExhaustedError {} => 92
+    Cancelled {} => 93
+  }
+}
+effect fn run2() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let log = run Shared.make<Log>(Log { entries: 0 }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut scheduler = LocalScheduler.make()
+  let mut clock = ParentClock { mark: SystemClock.make(0, 0) }
+  let scheduled = Effect.catchAll(LocalScheduler.execute(&mut scheduler, program(move log)), recover)
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+  return run move scheduled
+}
+effect fn recoverOom(error: OutOfMemoryError) -> i32 { return 99 }
+pub fn main() -> i32 { return run Effect.catchAll(run2(), recoverOom) }
+`
+agree(
+  'keeps the parent Shared handle across two forked children mutating a shared log',
+  sharedLogScheduler(`effect fn child(log: Shared<Log>, id: i32, duration: u64) -> i32 {
+  Shared.withMut(&log, record(id))
+  drop log
+  return id
+}`),
+  12,
+  'wasm+native',
+)
+agree(
+  'keeps the parent Shared handle across two timer-waiting children mutating a shared log',
+  sharedLogScheduler(`effect fn child(log: Shared<Log>, id: i32, duration: u64) -> i32
+? &mut MonotonicClock {
+  run MonotonicClock.waitFor(duration)
+  Shared.withMut(&log, record(id))
+  drop log
+  return id
+}`),
+  21,
+  'wasm+native',
+)
