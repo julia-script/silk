@@ -694,8 +694,6 @@ const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
       return 'MissingHostInput: no host provider was supplied'
     case 'MissingOsFileSystemHost':
       return 'MissingOsFileSystemHost: no OS filesystem host provider was supplied'
-    case 'MissingSystemClock':
-      return 'MissingSystemClock: no system-clock host provider was supplied'
     case 'MissingMonotonicClock':
       return 'MissingMonotonicClock: no monotonic-clock host provider was supplied'
     case 'MissingRandomHost':
@@ -736,8 +734,6 @@ const blockedSpan = (
     case 'MissingHostInput':
       return undefined
     case 'MissingOsFileSystemHost':
-      return undefined
-    case 'MissingSystemClock':
       return undefined
     case 'MissingMonotonicClock':
       return undefined

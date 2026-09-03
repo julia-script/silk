@@ -384,7 +384,6 @@ export type BlockedReason =
   | { readonly _tag: 'MissingChildProcess' }
   | { readonly _tag: 'MissingHostInput' }
   | { readonly _tag: 'MissingOsFileSystemHost' }
-  | { readonly _tag: 'MissingSystemClock' }
   | { readonly _tag: 'MissingMonotonicClock' }
   | { readonly _tag: 'MissingRandomHost' }
   | {

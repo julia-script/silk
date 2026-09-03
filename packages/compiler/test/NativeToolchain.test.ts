@@ -372,7 +372,7 @@ it.effect('includes the selected native clock runtime in the artifact cache iden
     const target = yield* NativeToolchain.hostTarget()
     const selected = [
       [],
-      ['silk_os_system_clock_now_v1'],
+      ['silk_os_monotonic_clock_now_v1'],
       ['silk_os_monotonic_clock_now_v1', 'silk_os_monotonic_clock_wait_until_v1'],
     ] as const
     const keys = []

@@ -21,8 +21,6 @@ export const symbols = Object.freeze([
   'silk_os_host_argument_v1',
   'silk_os_host_variable_v1',
   'silk_os_host_working_directory_v1',
-  'silk_os_system_clock_now_v1',
-  'silk_os_system_clock_resolution_v1',
   'silk_os_monotonic_clock_now_v1',
   'silk_os_monotonic_clock_resolution_v1',
   'silk_os_monotonic_clock_wait_until_v1',
@@ -997,16 +995,6 @@ int silk_os_host_working_directory_v1(unsigned char *output, size_t capacity, si
   return 0;
 }
 `,
-  silk_os_system_clock_now_v1: `
-int32_t silk_os_system_clock_now_v1(int64_t *seconds, int64_t *nanoseconds) {
-  return (int32_t)silk_clock_read(CLOCK_REALTIME, seconds, nanoseconds);
-}
-`,
-  silk_os_system_clock_resolution_v1: `
-int32_t silk_os_system_clock_resolution_v1(uint64_t *nanoseconds) {
-  return (int32_t)silk_clock_resolution(CLOCK_REALTIME, nanoseconds);
-}
-`,
   silk_os_monotonic_clock_now_v1: `
 int32_t silk_os_monotonic_clock_now_v1(int64_t *seconds, int64_t *nanoseconds) {
   return (int32_t)silk_clock_read(CLOCK_MONOTONIC, seconds, nanoseconds);
@@ -1106,18 +1094,12 @@ const hostInputSymbols: ReadonlySet<Symbol> = new Set([
   'silk_os_host_working_directory_v1',
 ])
 const clockSymbols: ReadonlySet<Symbol> = new Set([
-  'silk_os_system_clock_now_v1',
-  'silk_os_system_clock_resolution_v1',
   'silk_os_monotonic_clock_now_v1',
   'silk_os_monotonic_clock_resolution_v1',
   'silk_os_monotonic_clock_wait_until_v1',
 ])
-const clockReadSymbols: ReadonlySet<Symbol> = new Set([
-  'silk_os_system_clock_now_v1',
-  'silk_os_monotonic_clock_now_v1',
-])
+const clockReadSymbols: ReadonlySet<Symbol> = new Set(['silk_os_monotonic_clock_now_v1'])
 const clockResolutionSymbols: ReadonlySet<Symbol> = new Set([
-  'silk_os_system_clock_resolution_v1',
   'silk_os_monotonic_clock_resolution_v1',
 ])
 const clockWaitSymbols: ReadonlySet<Symbol> = new Set(['silk_os_monotonic_clock_wait_until_v1'])

@@ -266,8 +266,6 @@ const nonScalarBuiltinOperations = Object.freeze([
   'StringUtf8Bytes',
   'StringByteLength',
   'StringEqualsExact',
-  'OsSystemClockNow',
-  'OsSystemClockResolution',
   'OsMonotonicClockNow',
   'OsMonotonicClockResolution',
   'OsMonotonicClockWaitUntil',

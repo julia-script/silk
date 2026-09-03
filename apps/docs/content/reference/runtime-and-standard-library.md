@@ -719,8 +719,8 @@ The following are deliberately outside the first stable model:
 - compiler-selected or overridable default service providers;
 - optional service requirements, including absence, selection, and entry-closure semantics;
 - a stable by-value aggregate ABI and user-selected runtime implementations;
-- runtime suspension, concurrency, scheduler/executor selection, async I/O, streams, networking,
-  entropy, and wall-clock facilities;
+- runtime suspension, concurrency, scheduler/executor selection, async I/O, richer streams,
+  networking, and entropy facilities beyond the currently shipped providers;
 - alternative standard-library profiles or “no-stdlib” project configuration in the official
   toolchain; and
 - omitted struct fields, field defaults, and any deliberate integration with ordinary `Option`.

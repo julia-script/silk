@@ -174,10 +174,6 @@
       "types": "./dist/StandardStreams.d.ts",
       "import": "./dist/StandardStreams.js"
     },
-    "./SystemClock": {
-      "types": "./dist/SystemClock.d.ts",
-      "import": "./dist/SystemClock.js"
-    },
     "./SourceSpan": {
       "types": "./dist/SourceSpan.d.ts",
       "import": "./dist/SourceSpan.js"

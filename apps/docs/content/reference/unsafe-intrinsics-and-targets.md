@@ -1371,3 +1371,31 @@ commits the companions while removing the complete artifact set after a partial 
 [header renderer](../../../../packages/compiler/src/CHeader.ts),
 [manifest renderer](../../../../packages/compiler/src/AbiManifest.ts),
 [driver](../../../../packages/compiler/src/Driver.ts).
+
+### FFI-015 — The OS system clock is an ordinary libc boundary
+
+**Status:** Confirmed
+
+`silk/os_system_clock` declares the C-layout `Timespec` record and the libc functions
+`clock_gettime` and `clock_getres` in ordinary Silk. Its service implementation calls those
+functions with `CLOCK_REALTIME`, validates the returned fraction and resolution, and then constructs
+the portable `SystemClock` values. Darwin and Linux use the same admitted C classes; Linux retains
+the existing `glibc >= 2.17` baseline and needs no `librt` link.
+
+The sealed intrinsic catalog has no system-clock operation, and the generated OS runtime owns no
+`silk_os_system_clock_*` symbol. A reachable native system clock therefore contributes ordinary
+foreign imports resolved by libc. Evaluation without exact `clock_gettime` or `clock_getres`
+bindings returns `ForeignHostUnavailable`; direct WebAssembly emits the same names from
+`silk:runtime/foreign@v1`. Neither execution surface reads ambient host time automatically.
+
+**Boundary:** `OsMonotonicClock` remains on its three target-neutral intrinsics until its separate
+migration. Importing or constructing either provider remains inert; only reachable operations add
+their respective foreign or runtime dependencies.
+
+**Current compiler:** Aligned. The system-clock source owns the declarations and validation, the
+foreign inventory identifies the libc functions, and the old intrinsic operations, evaluator host
+option, reserved runtime names, and generated C functions have been deleted.
+
+**Evidence:** [clock-service specification](../../../../openspec/specs/bootstrap-clock-services/spec.md),
+[system-clock source](../../../../packages/compiler/stdlib/silk/os_system_clock.silk),
+[clock integration tests](../../../../packages/compiler/test/Clock.test.ts).

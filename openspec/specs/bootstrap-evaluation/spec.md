@@ -914,33 +914,26 @@ reinterpret structural-union tags.
 - **WHEN** a program constructs one enum member, copies it, checks equality, reads `value`, and matches it
 - **THEN** evaluation completes with the results implied by that member and its declared discriminant
 
-### Requirement: Evaluation injects independent native clock hosts
+### Requirement: Evaluation injects a native monotonic-clock host
 
-Bootstrap evaluation SHALL accept optional system-clock and monotonic-clock host providers as
-separate configuration from each other and from filesystem, input, process, and stream hosts. The
-system host SHALL supply canonical Unix-epoch reads and resolution. The monotonic host SHALL supply
-canonical non-decreasing reads, resolution, and observable absolute waits. Evaluation SHALL
-preserve exact `i64` and `u64` values without consulting JavaScript wall time unless the caller
-explicitly chooses a real-time host implementation. Host validation SHALL require seconds in
-`[-2^63, 2^63 - 1]`, fractions in `[0, 999_999_999]`, and resolutions in `[1, 2^64 - 1]`; it MUST
-NOT truncate or wrap a `bigint` into those ranges.
+Bootstrap evaluation SHALL accept an optional monotonic-clock host provider as separate
+configuration from filesystem, input, process, stream, and foreign-function hosts. The monotonic
+host SHALL supply canonical non-decreasing reads, resolution, and observable absolute waits.
+Evaluation SHALL preserve exact `i64` and `u64` values without consulting JavaScript wall time
+unless the caller explicitly chooses a real-time host implementation. Host validation SHALL
+require seconds in `[-2^63, 2^63 - 1]`, fractions in `[0, 999_999_999]`, and resolutions in
+`[1, 2^64 - 1]`; it MUST NOT truncate or wrap a `bigint` into those ranges. The system clock MUST
+NOT be exposed as a bespoke clock-host option; it uses the ordinary foreign-host table.
 
-#### Scenario: Evaluate with scripted clocks
+#### Scenario: Evaluate with a scripted monotonic clock
 
-- **WHEN** evaluation receives a fixed system host and a scripted monotonic host
-- **THEN** clock operations return the exact injected values and waits advance or record only the
-  scripted monotonic timeline
+- **WHEN** evaluation receives a scripted monotonic host
+- **THEN** reads return the exact injected values and waits advance or record only the scripted
+  monotonic timeline
 
-#### Scenario: Keep clock hosts independent
+#### Scenario: Preserve wide monotonic-clock values
 
-- **WHEN** evaluation receives only a system-clock host
-- **THEN** a system read can complete while a reachable OS monotonic operation remains blocked for
-  its own missing host
-
-#### Scenario: Preserve wide clock values
-
-- **WHEN** an injected host returns a valid clock component or resolution above JavaScript's exact
-  integer range
+- **WHEN** an injected monotonic host returns a valid component or resolution above JavaScript's exact integer range
 - **THEN** evaluation retains the exact integer value without Number rounding
 
 #### Scenario: Reject values just outside scalar ranges
@@ -961,23 +954,27 @@ NOT truncate or wrap a `bigint` into those ranges.
 - **WHEN** a scripted monotonic host receives a deadline at or before its current mark
 - **THEN** it records the completed wait without moving its timeline backwards
 
-### Requirement: Missing evaluator clock hosts are explicit blocked data
+### Requirement: Missing evaluator clock boundaries are explicit blocked data
 
-A reachable native system-clock operation with no system host SHALL produce
-`MissingSystemClock`; a reachable native monotonic operation with no monotonic host SHALL produce
-`MissingMonotonicClock`. The blocked outcome and inspector presentation SHALL name the missing
-capability and retain the trace preceding it. Evaluation MUST NOT fabricate epoch zero, reuse one
-host for the other clock, read ambient process time, or throw a JavaScript exception for absence.
+A reachable `OsSystemClock` operation SHALL use the ordinary foreign-host table and, without an
+exact binding for `clock_gettime` or `clock_getres`, produce `ForeignHostUnavailable` naming the
+symbol and C-class signature. A reachable native monotonic operation with no monotonic host SHALL
+produce `MissingMonotonicClock`. The blocked outcome and inspector presentation SHALL name the
+missing capability and retain the trace preceding it. Evaluation MUST NOT fabricate epoch zero,
+reuse the monotonic host as a system clock, read ambient process time, or throw a JavaScript
+exception for absence.
 
 #### Scenario: Block a missing system clock
 
-- **WHEN** evaluation reaches `OsSystemClock.now` with no injected system-clock host
-- **THEN** it returns `Blocked(MissingSystemClock)` with the preceding deterministic trace
+- **WHEN** evaluation reaches `OsSystemClock.now` without a `clock_gettime` foreign binding
+- **THEN** it returns `Blocked(ForeignHostUnavailable(clock_gettime))` with the expected
+  `(i32,*mut)->i32` signature and no ambient clock read
 
 #### Scenario: Block a missing monotonic clock
 
 - **WHEN** evaluation reaches an `OsMonotonicClock` read or wait with no injected monotonic host
-- **THEN** it returns `Blocked(MissingMonotonicClock)` without consulting the system-clock host
+- **THEN** it returns `Blocked(MissingMonotonicClock)` without consulting foreign system-clock
+  bindings
 
 ### Requirement: Evaluation receives random bytes only from an injected host
 

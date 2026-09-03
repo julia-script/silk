@@ -38,7 +38,6 @@ import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StandardInput from './StandardInput.js'
 import type * as StandardStreams from './StandardStreams.js'
-import type * as SystemClock from './SystemClock.js'
 import * as Transcendental from './Transcendental.js'
 import * as Type from './Type.js'
 import * as WakeCell from './WakeCell.js'
@@ -263,7 +262,6 @@ interface EvaluationState {
   readonly processCaptures: Array<ReadonlyArray<number>>
   readonly hostInput?: HostInput.Provider
   readonly osFileSystem?: OsFileSystemHost.Provider
-  readonly systemClock?: SystemClock.Provider
   readonly monotonicClock?: MonotonicClock.Provider
   readonly randomHost?: RandomHost.Provider
   readonly foreignHost: ForeignHost.Table
@@ -5327,7 +5325,6 @@ export interface Options {
   readonly childProcess?: ChildProcess.Provider
   readonly hostInput?: HostInput.Provider
   readonly osFileSystem?: OsFileSystemHost.Provider
-  readonly systemClock?: SystemClock.Provider
   readonly monotonicClock?: MonotonicClock.Provider
   readonly randomHost?: RandomHost.Provider
   /** Exact symbol implementations available only to this evaluation. */
@@ -5480,7 +5477,6 @@ export const evaluate = (
     processCaptures: [Object.freeze([]), Object.freeze([])],
     ...(options.hostInput === undefined ? {} : { hostInput: options.hostInput }),
     ...(options.osFileSystem === undefined ? {} : { osFileSystem: options.osFileSystem }),
-    ...(options.systemClock === undefined ? {} : { systemClock: options.systemClock }),
     ...(options.monotonicClock === undefined ? {} : { monotonicClock: options.monotonicClock }),
     ...(options.randomHost === undefined ? {} : { randomHost: options.randomHost }),
     foreignHost,
