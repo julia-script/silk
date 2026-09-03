@@ -4953,7 +4953,9 @@ const emitConditionalOperation = (
     ...selected.operations.flatMap((nested) =>
       emitOperation(nested, state.emitter, state.suspension),
     ),
-    ...state.copy(state.slots(selected.result), state.slots(operation.destination)),
+    ...(state.layout.types.at(selected.result.ordinal)?._tag === 'Bottom'
+      ? []
+      : state.copy(state.slots(selected.result), state.slots(operation.destination))),
   ]
   return [
     Instr.localGet(state.scalar(operation.condition)),

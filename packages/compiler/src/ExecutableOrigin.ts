@@ -1642,7 +1642,12 @@ export const make = (operations: Operations) => {
       return initializer === undefined ? undefined : effectOriginOf(initializer, context)
     }
     if (expression._tag === 'Move') return effectOriginOf(expression.subject, context)
-    if (expression._tag === 'UnionConvert') return effectOriginOf(expression.source, context)
+    // A return-site join has no single exact identity; its composite representation is read
+    // from the expression type instead.
+    if (expression._tag === 'UnionConvert')
+      return expression.conversion === 'EffectJoin'
+        ? undefined
+        : effectOriginOf(expression.source, context)
     if (expression._tag === 'Match') {
       const identities = expression.arms.flatMap((arm) => {
         if (!arm.reachable) return []

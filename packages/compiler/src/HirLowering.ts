@@ -225,6 +225,8 @@ export const hirPatternSelection = (selection: PatternSelectionFact): Hir.Patter
 
 export interface LowerStatementOptions {
   readonly resultType?: SemanticType
+  /** A composite Effect representation every return site packs into (EFF-013). */
+  readonly resultRepresentation?: SemanticType
   readonly functionId?: DeclarationId
   readonly eraseIntrinsicSections?: boolean
   readonly borrowBindingInitializers?: boolean
@@ -360,7 +362,7 @@ export const lowerStatements = (
         if (statement._tag === 'ReturnStatement')
           return Object.freeze({
             _tag: 'Return',
-            expression:
+            expression: effectJoinConvert(
               options.resultType === undefined
                 ? hirExpression(statement.expression)
                 : hirExpectedExpression(
@@ -377,6 +379,9 @@ export const lowerStatements = (
                         })
                       : undefined,
                   ),
+              options.resultRepresentation,
+              statement.syntax.span,
+            ),
             region: statement.region,
             span: statement.expression.syntax.span,
           })
@@ -1551,6 +1556,34 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     _tag: 'Unavailable',
     span: fact.syntax.span,
     ...(cause === undefined ? {} : { cause }),
+  })
+}
+
+/** Wraps one return site so it packs its Effect into the function's composite representation. */
+const effectJoinConvert = (
+  source: Hir.Expression,
+  target: SemanticType | undefined,
+  expectedAt: SourceSpan.SourceSpan,
+): Hir.Expression => {
+  if (
+    target === undefined ||
+    source._tag === 'Unavailable' ||
+    Type.isNever(source.type) ||
+    !Type.isRepresented(target)
+  )
+    return source
+  return Object.freeze({
+    _tag: 'UnionConvert',
+    source,
+    sourceType: source.type,
+    target,
+    conversion: 'EffectJoin',
+    mappings: Object.freeze([]),
+    access: 'Owned',
+    context: 'Return',
+    expectedAt,
+    type: target,
+    span: source.span,
   })
 }
 

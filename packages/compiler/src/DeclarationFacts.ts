@@ -2014,22 +2014,35 @@ export const containsLexicalBorrow = (
 }
 
 /** One stored bare-callable occurrence that denies an aggregate type a target layout. */
-export interface StoredCallable {
+export interface StoredExecutable {
   readonly path: ReadonlyArray<string>
-  readonly callable: Type.Callable
+  readonly contract: Type.Callable | Type.Effect
 }
 
-/** Finds the first aggregate position that retains a bare callable value. */
-export const storedCallable = (
+/**
+ * Finds the first aggregate position that retains a bare callable or Effect value. A bare
+ * executable contract has no hidden concrete identity, so the aggregate cannot lay it out; a
+ * representation parameter (`F: Effect<i32>`) carries that identity instead.
+ */
+export const storedExecutable = (
   self: Index,
   type: Type.Type,
+  kind: 'Callable' | 'Effect',
   seen: ReadonlySet<string> = new Set(),
-): StoredCallable | undefined => {
-  if (Type.isCallable(type)) return Object.freeze({ path: Object.freeze([]), callable: type })
-  if (Type.isFixedArray(type) || Type.isSlice(type)) return storedCallable(self, type.element, seen)
+): StoredExecutable | undefined => {
+  if (Type.isCallable(type))
+    return kind === 'Callable'
+      ? Object.freeze({ path: Object.freeze([]), contract: type })
+      : undefined
+  if (Type.isEffect(type))
+    return kind === 'Effect'
+      ? Object.freeze({ path: Object.freeze([]), contract: type })
+      : undefined
+  if (Type.isFixedArray(type) || Type.isSlice(type))
+    return storedExecutable(self, type.element, kind, seen)
   if (Type.isUnion(type)) {
     for (const member of type.members) {
-      const found = storedCallable(self, member, seen)
+      const found = storedExecutable(self, member, kind, seen)
       if (found !== undefined) return found
     }
     return undefined
@@ -2066,11 +2079,16 @@ export const storedCallable = (
         )
   for (const { field, path } of fields) {
     if (field.declaredType._tag !== 'Resolved' || field.name._tag !== 'Present') continue
-    const found = storedCallable(self, Type.substitute(field.declaredType.type, substitution), next)
+    const found = storedExecutable(
+      self,
+      Type.substitute(field.declaredType.type, substitution),
+      kind,
+      next,
+    )
     if (found !== undefined)
       return Object.freeze({
         path: Object.freeze([...path, field.name.spelling, ...found.path]),
-        callable: found.callable,
+        contract: found.contract,
       })
   }
   return undefined

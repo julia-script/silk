@@ -3034,6 +3034,92 @@ pub fn main() -> i32 {
 }`,
     expected: { _tag: 'Completes', result: 58 },
   },
+  {
+    // FAIL-004: both the protected `i32` and the handler `string` are injected into the recovered
+    // `i32 | string`, so the later `match` finds its active member on every engine.
+    name: 'catch-union-success-match',
+    source: `import silk.effect { Effect }
+struct NotFoundError {}
+effect fn load(flag: bool) -> i32 ! NotFoundError {
+  if flag { fail NotFoundError {} }
+  return 5
+}
+effect fn recover(error: NotFoundError) -> string { return "missing" }
+fn handled(flag: bool) -> Effect<i32 | string> {
+  return Effect.catch<NotFoundError>(load(flag), recover)
+}
+pub fn main() -> i32 {
+  let a = run handled(true)
+  let b = run handled(false)
+  let x = match move a { i32 n => n
+    string _ => 100 }
+  let y = match move b { i32 n => n
+    string _ => 100 }
+  return x + y
+}`,
+    expected: { _tag: 'Completes', result: 105 },
+  },
+  {
+    // FAIL-004: a handler whose success type is `never` contributes no success member; its run
+    // diverges through the failure channel instead of copying into the recovered success.
+    name: 'catch-never-handler',
+    source: `import silk.effect { Effect }
+struct NotFoundError {}
+struct OtherError {}
+effect fn load(flag: bool) -> i32 ! NotFoundError {
+  if flag { fail NotFoundError {} }
+  return 5
+}
+effect fn rethrow(error: NotFoundError) -> never ! OtherError { fail OtherError {} }
+fn handled(flag: bool) -> Effect<i32 ! OtherError> {
+  return Effect.catch<NotFoundError>(load(flag), rethrow)
+}
+effect fn rec(e: OtherError) -> i32 { return 1 }
+pub fn main() -> i32 {
+  let a = run Effect.catch<OtherError>(handled(true), rec)
+  let b = run Effect.catch<OtherError>(handled(false), rec)
+  return a * 10 + b
+}`,
+    expected: { _tag: 'Completes', result: 15 },
+  },
+  {
+    // EFF-013: distinct return sites join under the declared `once Effect<i32>`; each call runs
+    // the alternative its own branch constructed.
+    name: 'effect-return-site-join-once',
+    source: `struct Token { value: i32 }
+impl Drop for Token {
+  fn drop(self: &mut Token) -> () { return () }
+}
+effect fn withToken(t: Token) -> i32 { return t.value }
+fn choose(flag: bool) -> once Effect<i32> {
+  if flag {
+    let t = Token { value: 1 }
+    return withToken(move t)
+  }
+  return effect { return 2 }
+}
+pub fn main() -> i32 {
+  let a = run choose(true)
+  let b = run choose(false)
+  return a * 10 + b
+}`,
+    expected: { _tag: 'Completes', result: 12 },
+  },
+  {
+    // EFF-007: a fail-only `effect {}` block has success type `never` and still carries its
+    // declared failure through Effect.catch.
+    name: 'effect-block-fail-only',
+    source: `import silk.effect { Effect }
+struct ProblemError {}
+fn fallible() -> Effect<i32 ! ProblemError> {
+  return effect { fail ProblemError {} }
+}
+effect fn recover(e: ProblemError) -> i32 { return 7 }
+pub fn main() -> i32 {
+  return run Effect.catch<ProblemError>(fallible(), recover)
+}`,
+    expected: { _tag: 'Completes', result: 7 },
+  },
 ]
 
 /**
