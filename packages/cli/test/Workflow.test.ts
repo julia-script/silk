@@ -204,20 +204,34 @@ it.effect('separates source diagnostics from operational resolver failures durin
 )
 
 it.effect(
-  'builds to the deterministic target and profile path',
+  'builds a native library with deterministic interface companion paths',
   () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const root = yield* fileSystem.makeTempDirectoryScoped()
-      yield* makeProject(root)
+      yield* makeProject(root, 'export "C" fn answer() -> i32 { return 42 }')
+      yield* fileSystem.writeFileString(
+        `${root}/silk.toml`,
+        '[package]\nname = "hello"\nversion = "0.1.0"\nroot = "src/Main.silk"\n\n[build]\nartifact = "shared-library"\n',
+      )
 
       const status = yield* Workflow.build(options(root))
       const project = yield* Project.load({ workingDirectory: root })
 
       assert.strictEqual(status, 0)
       const host = yield* NativeToolchain.hostTarget()
+      const library =
+        process.platform === 'darwin' ? `lib${project.name}.dylib` : `lib${project.name}.so`
       assert.strictEqual(
-        yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/${project.name}`),
+        yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/${library}`),
+        true,
+      )
+      assert.strictEqual(
+        yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/${project.name}.h`),
+        true,
+      )
+      assert.strictEqual(
+        yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/${project.name}.abi.json`),
         true,
       )
     }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
@@ -244,6 +258,14 @@ it.effect(
       assert.strictEqual(
         yield* fileSystem.exists(`${root}/build/llvm/wasm32-unknown-unknown/debug/hello.wasm`),
         true,
+      )
+      assert.strictEqual(
+        yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/hello.h`),
+        false,
+      )
+      assert.strictEqual(
+        yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/hello.abi.json`),
+        false,
       )
     }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
@@ -349,6 +371,7 @@ it.effect('returns source and toolchain failure classes without leaving executab
       backend: LlvmBackend.LlvmBackend,
       profile: 'debug',
       artifactKind: 'NativeExecutable',
+      packageName: 'broken-toolchain',
       destination,
       toolchain: { _tag: 'Toolchain', clang: '/silk-test/missing-clang', llvmAr: 'llvm-ar' },
       scopeName: 'broken-toolchain',

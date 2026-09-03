@@ -118,6 +118,15 @@ build/llvm/x86_64-unknown-linux-gnu/release/libhello.so
 build/llvm/aarch64-apple-darwin/release/libhello.a
 ```
 
+A successful native shared- or static-library build also writes `hello.h` and
+`hello.abi.json` beside the platform library and reports all three paths. The header includes
+`<stdint.h>`, C++ linkage guards, exact-width scalar types, opaque `const void *` / `void *`
+pointers, and recursively valid C function-pointer declarators. The JSON document has schema
+marker `"silkForeignAbi": 1`, the canonical target, and symbol-sorted `exports` and `imports`
+arrays whose entries distinguish functions from data. Both files are regenerated from the
+verified backend inventory on cache hits, so cached and uncached builds produce identical bytes.
+Executables and WebAssembly modules do not produce either companion.
+
 `silk check` analyzes every resolved target in order without backend, Clang, linker, or artifact
 work. Diagnostics and summaries are target-qualified. `silk run` always builds exactly the host
 target and requires a backend that can produce a native executable; manifest foreign/Wasm targets

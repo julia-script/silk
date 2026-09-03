@@ -1223,8 +1223,8 @@ export "C" fn abs(value: i32) -> i32 { return value }
 ```
 
 The artifact records every export with its symbol and classified C signature, sorted by symbol,
-beside the foreign imports. That inventory is the seed for generated headers and ABI manifests,
-which are later proposals.
+beside the foreign imports. That inventory is the source of the generated headers and ABI
+manifests described by [FFI-014](#ffi-014--native-libraries-publish-c-interface-companions).
 
 **Boundary:** Two foreign imports of one symbol agree when their C signatures match; two exports
 never do, because each would define the symbol. An export in a module that is not loaded into
@@ -1240,7 +1240,7 @@ closure-wide symbol map over imports and exports is built at the planning gate b
 construction, and the native backend populates the artifact's export inventory from the MIR
 module.
 
-**Evidence:** [export specification](../../../../openspec/changes/add-export-c-functions/specs/bootstrap-foreign-functions/spec.md),
+**Evidence:** [export specification](../../../../openspec/specs/bootstrap-foreign-functions/spec.md),
 [symbol spelling and reservation](../../../../packages/compiler/src/ForeignSymbol.ts),
 [foreign planning](../../../../packages/compiler/src/ForeignPlanning.ts),
 [native program emission](../../../../packages/compiler/src/NativeProgram.ts).
@@ -1330,3 +1330,44 @@ and C type.
 **Evidence:** [data-symbol specification](../../../../openspec/specs/bootstrap-foreign-functions/spec.md),
 [foreign-static lowering](../../../../packages/compiler/src/LowerExpression.ts),
 [native program emission](../../../../packages/compiler/src/NativeProgram.ts).
+
+### FFI-014 — Native libraries publish C interface companions
+
+**Status:** Confirmed
+
+A successful native shared- or static-library build writes `<package>.h` and
+`<package>.abi.json` beside the platform library and reports all three durable paths. Executables
+and WebAssembly modules write neither companion. A cache hit regenerates both files from the
+verified backend inventory, so the result is byte-identical to an uncached build and cannot retain
+stale package-specific names.
+
+The header includes `<stdint.h>`, a package-derived include guard, and C++ `extern "C"` guards.
+Integer classes use `intN_t` or `uintN_t`, floats use `float` or `double`, and no-argument functions
+use `(void)`. V1 does not expose Silk pointee definitions: immutable and mutable pointers are
+rendered as `const void *` and `void *`. Callback classes are rendered recursively as nested C
+function-pointer declarators, preserving declarator precedence.
+
+The UTF-8 manifest ends with one newline and has this versioned shape:
+
+```json
+{
+  "silkForeignAbi": 1,
+  "target": "aarch64-apple-darwin",
+  "exports": [],
+  "imports": []
+}
+```
+
+Each entry has `kind`, `symbol`, `abi`, and lowercase `direction`. Function entries additionally
+carry `parameters` and `result`; data entries carry `type`. Each direction array is sorted by
+symbol and then kind, and target-sized integers have already been resolved to a fixed-width ABI
+class before serialization.
+
+**Current compiler:** Aligned. `CHeader` and `AbiManifest` render the verified backend inventories,
+the driver invokes them on every native-library success path, and `NativeToolchain` atomically
+commits the companions while removing the complete artifact set after a partial failure.
+
+**Evidence:** [interface-artifact specification](../../../../openspec/specs/native-library-interface-artifacts/spec.md),
+[header renderer](../../../../packages/compiler/src/CHeader.ts),
+[manifest renderer](../../../../packages/compiler/src/AbiManifest.ts),
+[driver](../../../../packages/compiler/src/Driver.ts).

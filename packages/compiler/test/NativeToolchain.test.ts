@@ -689,6 +689,55 @@ it.effect('failed rename removes its temporary sibling and preserves the destina
   }),
 )
 
+it.effect('commits exact native-library interface siblings beside the primary artifact', () =>
+  Effect.gen(function* () {
+    const destination = join(testRoot, 'interface-success', 'libanswer.a')
+    const primary = yield* NativeToolchain.atomicCommit(destination, ascii('archive'))
+    const companions = yield* NativeToolchain.commitLibraryInterface(
+      primary,
+      destination,
+      'answer',
+      ascii('header\n'),
+      ascii('{"silkForeignAbi":1}\n'),
+    )
+    assert.deepStrictEqual(companions, {
+      _tag: 'LibraryInterfaceArtifacts',
+      cHeader: join(testRoot, 'interface-success', 'answer.h'),
+      abiManifest: join(testRoot, 'interface-success', 'answer.abi.json'),
+    })
+    assert.deepStrictEqual(readFileSync(companions.cHeader), ascii('header\n'))
+    assert.deepStrictEqual(readFileSync(companions.abiManifest), ascii('{"silkForeignAbi":1}\n'))
+  }),
+)
+
+it.effect('removes the primary and stale companions when manifest staging fails', () =>
+  Effect.gen(function* () {
+    const directory = join(testRoot, 'interface-failure')
+    const destination = join(directory, 'libanswer.a')
+    const primary = yield* NativeToolchain.atomicCommit(destination, ascii('archive'))
+    const header = join(directory, 'answer.h')
+    const manifest = join(directory, 'answer.abi.json')
+    writeFileSync(header, ascii('stale header\n'))
+    writeFileSync(manifest, ascii('{"stale":true}\n'))
+    const unstagedManifest = new Proxy(ascii('{}\n'), {})
+
+    const result = yield* Effect.result(
+      NativeToolchain.commitLibraryInterface(
+        primary,
+        destination,
+        'answer',
+        ascii('header\n'),
+        unstagedManifest,
+      ),
+    )
+
+    assert.strictEqual(result._tag, 'Failure')
+    assert.strictEqual(existsSync(primary), false)
+    assert.strictEqual(existsSync(header), false)
+    assert.strictEqual(existsSync(manifest), false)
+  }),
+)
+
 it.effect('retries throwing atomic cleanup and leaves no staged sibling', () =>
   Effect.gen(function* () {
     const destination = join(testRoot, 'occupied-cleanup-retry')

@@ -97,6 +97,7 @@ export const run = Effect.fn('BuildExeCommand.run')(function* (
     ...(options.target === undefined ? {} : { target: options.target }),
     profile: options.profile,
     artifactKind: 'NativeExecutable',
+    packageName: 'silk-build-exe',
     destination: options.output,
     toolchain: { _tag: 'Toolchain', clang: options.clang, llvmAr: 'llvm-ar' },
     scopeName: 'silk-build-exe',

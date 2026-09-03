@@ -1,5 +1,8 @@
 import { assert, it } from '@effect/vitest'
+import * as AbiManifest from '../src/AbiManifest.js'
+import type * as Backend from '../src/Backend.js'
 import * as CAbi from '../src/CAbi.js'
+import * as CHeader from '../src/CHeader.js'
 import * as CLayout from '../src/CLayout.js'
 import * as ForeignSymbol from '../src/ForeignSymbol.js'
 import * as Target from '../src/Target.js'
@@ -196,6 +199,110 @@ it('admits recursively C-compatible function pointers and keys their full signat
   const invalidResult = Type.foreignFunction(['i32'], 'bool')
   assert.strictEqual(CAbi.admit(invalidParameter, 'Parameter')._tag, 'NotAdmitted')
   assert.strictEqual(CAbi.admit(invalidResult, 'Parameter')._tag, 'NotAdmitted')
+})
+
+it('renders one exact canonical header for scalars, pointers, nested callbacks, and empty arity', () => {
+  const functions: ReadonlyArray<Backend.ForeignExport> = [
+    {
+      symbol: 'visit',
+      parameters: ['*const', '*mut', 'extern "C" fn(i32,*const)->u8'],
+      result: 'extern "C" fn(u64)->i32',
+    },
+    { symbol: 'answer', parameters: [], result: 'i32' },
+  ]
+  const data: ReadonlyArray<Backend.ForeignStatic> = [
+    { symbol: 'callback_slot', type: 'extern "C" fn(i16)->u16', direction: 'Export' },
+    { symbol: 'mutable_state', type: '*mut', direction: 'Export' },
+    { symbol: 'silk_abi_version', type: 'u32', direction: 'Export' },
+    { symbol: 'host_state', type: '*mut', direction: 'Import' },
+  ]
+  const header = CHeader.make('answer-kit', functions, data)
+  const expected = [
+    '#ifndef SILK_ANSWER_KIT_H',
+    '#define SILK_ANSWER_KIT_H',
+    '',
+    '#include <stdint.h>',
+    '',
+    '#ifdef __cplusplus',
+    'extern "C" {',
+    '#endif',
+    '',
+    'int32_t answer(void);',
+    'extern uint16_t (*const callback_slot)(int16_t arg0);',
+    'extern void *const mutable_state;',
+    'extern const uint32_t silk_abi_version;',
+    'int32_t (*visit(const void *arg0, void *arg1, uint8_t (*arg2)(int32_t arg0, const void *arg1)))(uint64_t arg0);',
+    '',
+    '#ifdef __cplusplus',
+    '}',
+    '#endif',
+    '',
+    '#endif /* SILK_ANSWER_KIT_H */',
+    '',
+  ].join('\n')
+  assert.strictEqual(CHeader.render(header), expected)
+  assert.deepStrictEqual(CHeader.encode(header), new TextEncoder().encode(expected))
+})
+
+it('encodes exact target-qualified ABI manifests for Darwin and Linux', () => {
+  const exports: ReadonlyArray<Backend.ForeignExport> = [
+    { symbol: 'answer', parameters: [], result: 'i32' },
+  ]
+  const data: ReadonlyArray<Backend.ForeignStatic> = [
+    { symbol: 'silk_abi_version', type: 'u32', direction: 'Export' },
+    { symbol: 'host_state', type: '*mut', direction: 'Import' },
+  ]
+  for (const target of [Target.aarch64AppleDarwin, Target.x8664UnknownLinuxGnu]) {
+    const pointerWidth = CAbi.typeText(CAbi.classify('usize', target, 'Parameter'))
+    const imports: ReadonlyArray<Backend.ForeignImport> = [
+      { symbol: 'host_log', parameters: ['*const', pointerWidth], result: 'void' },
+    ]
+    const manifest = AbiManifest.make(target, imports, exports, data)
+    const expected = `${JSON.stringify(
+      {
+        silkForeignAbi: 1,
+        target: target.id,
+        exports: [
+          {
+            kind: 'function',
+            symbol: 'answer',
+            abi: 'C',
+            direction: 'export',
+            parameters: [],
+            result: 'i32',
+          },
+          {
+            kind: 'data',
+            symbol: 'silk_abi_version',
+            abi: 'C',
+            direction: 'export',
+            type: 'u32',
+          },
+        ],
+        imports: [
+          {
+            kind: 'function',
+            symbol: 'host_log',
+            abi: 'C',
+            direction: 'import',
+            parameters: ['*const', pointerWidth],
+            result: 'void',
+          },
+          {
+            kind: 'data',
+            symbol: 'host_state',
+            abi: 'C',
+            direction: 'import',
+            type: '*mut',
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`
+    assert.strictEqual(AbiManifest.render(manifest), expected)
+    assert.deepStrictEqual(AbiManifest.encode(manifest), new TextEncoder().encode(expected))
+  }
 })
 
 it('validates native symbol spelling', () => {

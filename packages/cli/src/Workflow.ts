@@ -39,6 +39,7 @@ export type BuildAttempt =
       readonly status: 0
       readonly artifact: string
       readonly artifactKind: Driver.Compiled['artifactKind']
+      readonly libraryInterface?: NativeToolchain.LibraryInterfaceArtifacts
     }
   | { readonly _tag: 'NotBuilt'; readonly status: 1 | 2 }
 
@@ -55,6 +56,7 @@ export interface CompileOptions {
   readonly target?: string
   readonly profile: ToolchainPlan.OptimizationProfile
   readonly artifactKind: ArtifactKind.ArtifactKind
+  readonly packageName: string
   readonly destination: string
   readonly toolchain: NativeToolchain.Toolchain
   readonly nativeLinkInputs?: ReadonlyArray<NativeLinkInput.NativeLinkInput>
@@ -139,6 +141,7 @@ export const compile = Effect.fn('Workflow.compile')(function* (
       backend: options.backend,
       toolchain: options.toolchain,
       artifactKind: options.artifactKind,
+      packageName: options.packageName,
       ...(options.nativeLinkInputs === undefined
         ? {}
         : { nativeLinkInputs: options.nativeLinkInputs }),
@@ -188,6 +191,9 @@ export const compile = Effect.fn('Workflow.compile')(function* (
       status: 0,
       artifact: outcome.path,
       artifactKind: outcome.artifactKind,
+      ...(outcome.libraryInterface === undefined
+        ? {}
+        : { libraryInterface: outcome.libraryInterface }),
     }
   }
   return { _tag: 'NotBuilt', status: outcomeStatus(outcome) }
@@ -279,6 +285,7 @@ export const buildProject = Effect.fn('Workflow.buildProject')(function* (
         target: plan.target.id,
         profile: plan.profile,
         artifactKind: plan.artifactKind,
+        packageName: plan.project.name,
         destination: plan.destination,
         toolchain: plan.toolchain,
         nativeLinkInputs: plan.nativeLinkInputs,
@@ -574,6 +581,7 @@ export const run = Effect.fn('Workflow.run')(function* (
     target: plan.target.id,
     profile: plan.profile,
     artifactKind: plan.artifactKind,
+    packageName: plan.project.name,
     destination: plan.destination,
     toolchain: plan.toolchain,
     nativeLinkInputs: plan.nativeLinkInputs,

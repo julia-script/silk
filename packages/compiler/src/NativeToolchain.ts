@@ -19,6 +19,7 @@ import * as Result from 'effect/Result'
 import type * as ArtifactKind from './ArtifactKind.js'
 import type * as Backend from './Backend.js'
 import * as NativeLinkInput from './NativeLinkInput.js'
+import * as Project from './Project.js'
 import * as Target from './Target.js'
 import * as ToolchainPlan from './ToolchainPlan.js'
 
@@ -106,6 +107,7 @@ export type ToolchainErrorReason =
       readonly _tag: 'UnsupportedPlan'
       readonly plan: ToolchainPlan.UnsupportedNativePlan
     }
+  | { readonly _tag: 'InvalidPackageName'; readonly name: string }
 
 /** An expected failure at the Node toolchain boundary. */
 export class ToolchainError extends Data.TaggedError('ToolchainError')<{
@@ -174,6 +176,14 @@ const unsupportedPlanError = (plan: ToolchainPlan.UnsupportedNativePlan): Toolch
     stage: 'link',
     message: `NativeToolchain.NativeFinalizer.finalize cannot preserve ${plan.reason} for ${plan.artifactKind} on ${plan.target.id}`,
     reason: { _tag: 'UnsupportedPlan', plan },
+  })
+
+const invalidPackageNameError = (name: string): ToolchainError =>
+  new ToolchainError({
+    operation: 'NativeToolchain.commitLibraryInterface',
+    stage: 'artifact-commit',
+    message: `NativeToolchain.commitLibraryInterface requires a portable package name, received ${name}`,
+    reason: { _tag: 'InvalidPackageName', name },
   })
 
 export interface ArtifactCache {
@@ -379,6 +389,65 @@ export const atomicCommit = Effect.fn('NativeToolchain.atomicCommit')(function* 
   )
 })
 
+const cleanupCommittedOnFailure = <A, E>(
+  path: string,
+  exit: Exit.Exit<A, E>,
+): Effect.Effect<void, ToolchainError> =>
+  Exit.isFailure(exit)
+    ? releaseCleanup(exit, cleanupPath(path, { force: true }, nodeCleanup, 'artifact-cleanup'))
+    : Effect.void
+
+const cleanupCommittedSetOnFailure = <A, E>(
+  paths: ReadonlyArray<string>,
+  exit: Exit.Exit<A, E>,
+): Effect.Effect<void, ToolchainError> =>
+  Exit.isFailure(exit)
+    ? Effect.forEach(
+        paths,
+        (path) =>
+          releaseCleanup(exit, cleanupPath(path, { force: true }, nodeCleanup, 'artifact-cleanup')),
+        { discard: true },
+      )
+    : Effect.void
+
+/** Commits a native library's header and ABI manifest, removing the whole set on failure. */
+export const commitLibraryInterface = Effect.fn('NativeToolchain.commitLibraryInterface')(
+  function* (
+    artifactPath: string,
+    destination: string,
+    packageName: string,
+    cHeader: Uint8Array,
+    abiManifest: Uint8Array,
+  ): Effect.fn.Return<LibraryInterfaceArtifacts, ToolchainError> {
+    const directory = dirname(resolve(destination))
+    const cHeaderDestination = join(directory, `${packageName}.h`)
+    const abiManifestDestination = join(directory, `${packageName}.abi.json`)
+    return yield* Effect.acquireUseRelease(
+      Effect.succeed(resolve(artifactPath)),
+      () =>
+        Effect.gen(function* () {
+          if (!Project.isPackageName(packageName))
+            return yield* invalidPackageNameError(packageName)
+          return yield* Effect.acquireUseRelease(
+            Effect.succeed(Object.freeze([cHeaderDestination, abiManifestDestination])),
+            () =>
+              Effect.gen(function* () {
+                const cHeaderPath = yield* atomicCommit(cHeaderDestination, cHeader)
+                const abiManifestPath = yield* atomicCommit(abiManifestDestination, abiManifest)
+                return Object.freeze({
+                  _tag: 'LibraryInterfaceArtifacts' as const,
+                  cHeader: cHeaderPath,
+                  abiManifest: abiManifestPath,
+                })
+              }),
+            cleanupCommittedSetOnFailure,
+          )
+        }),
+      cleanupCommittedOnFailure,
+    )
+  },
+)
+
 export const makeDiskArtifactCache = (directory: string): ArtifactCache => {
   const root = resolve(directory)
   return Object.freeze({
@@ -541,6 +610,15 @@ export interface FinalArtifact {
   readonly bytes: Uint8Array
   readonly target: Target.Target
   readonly planned?: ToolchainPlan.PlannedCommand
+}
+
+/** Durable C-consumer companions committed beside one native library. */
+export interface LibraryInterfaceArtifacts {
+  readonly _tag: 'LibraryInterfaceArtifacts'
+  /** The durable generated C-header path. */
+  readonly cHeader: string
+  /** The durable generated ABI-manifest path. */
+  readonly abiManifest: string
 }
 
 export const hostTarget = Effect.fn('NativeToolchain.hostTarget')(function* (): Effect.fn.Return<

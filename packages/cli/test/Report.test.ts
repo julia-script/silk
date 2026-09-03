@@ -131,6 +131,7 @@ it('names the executable, target, and symbol count on success', () => {
         symbol: 'silk_main',
       },
     ],
+    foreignImports: [],
     foreignExports: [],
     foreignStatics: [],
     termination: {
@@ -146,6 +147,36 @@ it('names the executable, target, and symbol count on success', () => {
   assert.strictEqual(
     Report.outcome(outcome, source('pub fn main() -> i32 { return 42 }'), 'main.silk'),
     'Compiled main.silk -> /tmp/a.out (llvm, aarch64-apple-darwin, 1 symbols)',
+  )
+})
+
+it('reports every durable native-library path on success', () => {
+  const outcome: Driver.Outcome = {
+    _tag: 'Compiled',
+    backend: 'llvm',
+    artifactKind: 'NativeStaticLibrary',
+    path: '/tmp/libanswer.a',
+    target: { id: 'aarch64-apple-darwin' } as Driver.Compiled['target'],
+    symbols: [],
+    foreignImports: [],
+    foreignExports: [],
+    foreignStatics: [],
+    libraryInterface: {
+      _tag: 'LibraryInterfaceArtifacts',
+      cHeader: '/tmp/answer.h',
+      abiManifest: '/tmp/answer.abi.json',
+    },
+    diagnostics: [],
+    report: [],
+    toolchainIdentity: 'fixture-toolchain',
+  }
+  assert.strictEqual(
+    Report.outcome(outcome, source('export "C" fn answer() -> i32 { return 42 }'), 'main.silk'),
+    [
+      'Compiled main.silk -> /tmp/libanswer.a (llvm, aarch64-apple-darwin, 0 symbols)',
+      'C header: /tmp/answer.h',
+      'ABI manifest: /tmp/answer.abi.json',
+    ].join('\n'),
   )
 })
 

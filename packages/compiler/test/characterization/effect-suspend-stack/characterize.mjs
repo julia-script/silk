@@ -223,6 +223,7 @@ try {
     const destination = join(temporary, `${shape}-${depth}`)
     const compiled = await Effect.runPromise(
       Driver.compile({
+        packageName: 'effect-suspend-stack',
         compilation: { root: SourceFile.make(sourceId, encoder.encode(source)) },
         toolchain: Object.freeze({
           _tag: 'Toolchain',

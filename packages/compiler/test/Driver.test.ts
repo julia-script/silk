@@ -136,6 +136,7 @@ it.effect('compiles a three-module call chain to native execution matching the i
     assert.strictEqual(outcome._tag, 'Compiled')
     assert.strictEqual(interpreted._tag, 'Completed')
     if (outcome._tag !== 'Compiled' || interpreted._tag !== 'Completed') return
+    assert.strictEqual(outcome.libraryInterface, undefined)
     const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, Number(interpreted.result.value))
   }),
@@ -533,6 +534,7 @@ it.effect(
         if (outcome._tag !== 'Compiled') continue
         assert.strictEqual(outcome.backend, backend.id)
         assert.strictEqual(outcome.artifactKind, 'WebAssemblyModule')
+        assert.strictEqual(outcome.libraryInterface, undefined)
         const instance = new WebAssembly.Instance(
           new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path))),
           {},

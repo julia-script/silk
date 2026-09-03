@@ -60,6 +60,7 @@ const compileSource = (
   imports?: Readonly<Record<string, string>>,
   options: {
     readonly artifactKind?: ArtifactKind.ArtifactKind
+    readonly packageName?: string
     readonly nativeLinkInputs?: ReadonlyArray<NativeLinkInput.NativeLinkInput>
     readonly cache?: boolean
   } = {},
@@ -71,6 +72,7 @@ const compileSource = (
     toolchain,
     profile: 'release',
     artifactKind: options.artifactKind ?? 'NativeExecutable',
+    packageName: options.packageName ?? 'compiler-test',
     destination: join(destinationRoot, name),
     ...(options.cache === undefined ? {} : { cache: options.cache }),
     ...(options.nativeLinkInputs === undefined
@@ -117,13 +119,12 @@ const shardedCorpus =
     ? nativeCorpus
     : nativeCorpus.filter((_, index) => index % Number(shard[2]) === Number(shard[1]) - 1)
 
-const librarySource = `fn helper(value: i32) -> i32 { return value + 1 }
-export "C" fn increment(value: i32) -> i32 { return helper(value) }
+const librarySource = `unsafe extern "C" fn abs(value: i32) -> i32
+fn helper(value: i32) -> i32 { return value + 1 }
+export "C" fn increment(value: i32) -> i32 { return unsafe abs(helper(value)) }
 export "C" static silk_abi_version: u32 = 1`
 
-const consumerSource = `#include <stdint.h>
-int32_t increment(int32_t value);
-extern const uint32_t silk_abi_version;
+const consumerSource = `#include "answer.h"
 int main(void) { return increment(40) + (int32_t)silk_abi_version; }
 `
 
@@ -134,7 +135,8 @@ it.effect(
       const sharedName = platform() === 'darwin' ? 'libsilk_answer.dylib' : 'libsilk_answer.so'
       const shared = yield* compileSource(sharedName, librarySource, undefined, {
         artifactKind: 'NativeSharedLibrary',
-        cache: false,
+        packageName: 'answer',
+        cache: true,
       })
       assert.strictEqual(shared._tag, 'Compiled')
       if (shared._tag !== 'Compiled') return
@@ -145,7 +147,25 @@ it.effect(
       assert.deepStrictEqual(shared.foreignStatics, [
         { symbol: 'silk_abi_version', type: 'u32', direction: 'Export' },
       ])
+      assert.deepStrictEqual(
+        shared.foreignImports.map((import_) => import_.symbol),
+        ['abs'],
+      )
+      assert.deepStrictEqual(shared.libraryInterface, {
+        _tag: 'LibraryInterfaceArtifacts',
+        cHeader: join(destinationRoot, 'answer.h'),
+        abiManifest: join(destinationRoot, 'answer.abi.json'),
+      })
       assert.strictEqual('termination' in shared, false)
+      const interfacePhase = shared.report.find((entry) => entry.phase === 'library-interface')
+      assert.deepStrictEqual(
+        interfacePhase === undefined
+          ? undefined
+          : { inputs: interfacePhase.inputs, outputs: interfacePhase.outputs },
+        { inputs: 3, outputs: 2 },
+      )
+      const firstHeader = readFileSync(join(destinationRoot, 'answer.h'))
+      const firstManifest = readFileSync(join(destinationRoot, 'answer.abi.json'))
 
       const symbolDump =
         platform() === 'darwin'
@@ -169,11 +189,39 @@ it.effect(
       writeFileSync(consumerPath, consumerSource)
       const sharedCompile = spawnSync(
         clang,
-        [consumerPath, shared.path, `-Wl,-rpath,${destinationRoot}`, '-o', sharedExecutable],
+        [
+          '-I',
+          destinationRoot,
+          consumerPath,
+          shared.path,
+          `-Wl,-rpath,${destinationRoot}`,
+          '-o',
+          sharedExecutable,
+        ],
         { encoding: 'utf8' },
       )
       assert.strictEqual(sharedCompile.status, 0, sharedCompile.stderr)
       assert.strictEqual(spawnSync(sharedExecutable).status, 42)
+
+      rmSync(join(destinationRoot, 'answer.h'))
+      rmSync(join(destinationRoot, 'answer.abi.json'))
+      const cachedShared = yield* compileSource(sharedName, librarySource, undefined, {
+        artifactKind: 'NativeSharedLibrary',
+        packageName: 'answer',
+        cache: true,
+      })
+      assert.strictEqual(cachedShared._tag, 'Compiled')
+      if (cachedShared._tag !== 'Compiled') return
+      assert.include(
+        cachedShared.report.map((entry) => entry.phase),
+        'backend-cache',
+      )
+      assert.include(
+        cachedShared.report.map((entry) => entry.phase),
+        'artifact-cache',
+      )
+      assert.deepStrictEqual(readFileSync(join(destinationRoot, 'answer.h')), firstHeader)
+      assert.deepStrictEqual(readFileSync(join(destinationRoot, 'answer.abi.json')), firstManifest)
 
       const firstArchive = yield* compileSource(
         'libsilk_answer-first.a',
@@ -181,16 +229,20 @@ it.effect(
         undefined,
         {
           artifactKind: 'NativeStaticLibrary',
+          packageName: 'answer',
           cache: false,
         },
       )
       assert.strictEqual(firstArchive._tag, 'Compiled')
       if (firstArchive._tag !== 'Compiled') return
+      assert.deepStrictEqual(firstArchive.libraryInterface, shared.libraryInterface)
+      assert.deepStrictEqual(readFileSync(join(destinationRoot, 'answer.h')), firstHeader)
+      assert.deepStrictEqual(readFileSync(join(destinationRoot, 'answer.abi.json')), firstManifest)
 
       const staticExecutable = join(destinationRoot, 'static-consumer')
       const staticCompile = spawnSync(
         clang,
-        [consumerPath, firstArchive.path, '-lm', '-o', staticExecutable],
+        ['-I', destinationRoot, consumerPath, firstArchive.path, '-lm', '-o', staticExecutable],
         { encoding: 'utf8' },
       )
       assert.strictEqual(staticCompile.status, 0, staticCompile.stderr)

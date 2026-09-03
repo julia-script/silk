@@ -13,6 +13,7 @@ import * as StaticValue from './StaticValue.js'
 import type * as Target from './Target.js'
 import type * as TerminationModel from './Termination.js'
 import * as Type from './Type.js'
+import type * as CAbi from './CAbi.js'
 
 export interface CodegenRequest {
   readonly mode: 'debug' | 'release'
@@ -65,21 +66,21 @@ export type RuntimeFeature =
  */
 export interface ForeignImport {
   readonly symbol: string
-  readonly parameters: ReadonlyArray<string>
-  readonly result: string
+  readonly parameters: ReadonlyArray<CAbi.TypeText>
+  readonly result: CAbi.TypeText
 }
 
 /** One exported C-callable symbol and the C class spellings of its thunk signature. */
 export interface ForeignExport {
   readonly symbol: string
-  readonly parameters: ReadonlyArray<string>
-  readonly result: string
+  readonly parameters: ReadonlyArray<CAbi.TypeText>
+  readonly result: CAbi.TypeText
 }
 
 /** One native C data symbol retained by an artifact, with its scalar C class. */
 export interface ForeignStatic {
   readonly symbol: string
-  readonly type: string
+  readonly type: CAbi.TypeText
   readonly direction: 'Import' | 'Export'
 }
 

@@ -2,7 +2,9 @@ import * as Config from 'effect/Config'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as ArtifactKind from './ArtifactKind.js'
+import * as AbiManifest from './AbiManifest.js'
 import * as Backend from './Backend.js'
+import * as CHeader from './CHeader.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Frontend from './Frontend.js'
 import * as HeapObservation from './HeapObservation.js'
@@ -153,6 +155,8 @@ export interface CompileRequest {
   readonly toolchain: NativeToolchain.Toolchain
   readonly profile: ToolchainPlan.OptimizationProfile
   readonly artifactKind: ArtifactKind.ArtifactKind
+  /** Validated project package name used for durable artifact identities. */
+  readonly packageName: string
   readonly destination: string
   readonly backend?: Backend.Backend
   /** Ordered, structured native inputs passed after compiler-generated objects. */
@@ -173,8 +177,10 @@ export interface Compiled {
   readonly path: string
   readonly target: Target.Target
   readonly symbols: ReadonlyArray<Backend.SymbolEntry>
+  readonly foreignImports: ReadonlyArray<Backend.ForeignImport>
   readonly foreignExports: ReadonlyArray<Backend.ForeignExport>
   readonly foreignStatics: ReadonlyArray<Backend.ForeignStatic>
+  readonly libraryInterface?: NativeToolchain.LibraryInterfaceArtifacts
   readonly termination?: Backend.Termination
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<DriverPhaseReport>
@@ -235,6 +241,30 @@ export class SourceResolutionFailed extends Data.TaggedError('SourceResolutionFa
 
 /** The closed outcome of one driver run. */
 export type Outcome = Compiled | Rejected | NoEntry | TargetFailed | BackendFailed | ToolchainFailed
+
+const commitLibraryInterface = Effect.fnUntraced(function* (
+  request: CompileRequest,
+  artifactPath: string,
+  artifact: Backend.Artifact,
+  target: Target.Target,
+): Effect.fn.Return<NativeToolchain.LibraryInterfaceArtifacts, NativeToolchain.ToolchainError> {
+  return yield* NativeToolchain.commitLibraryInterface(
+    artifactPath,
+    request.destination,
+    request.packageName,
+    CHeader.encode(
+      CHeader.make(request.packageName, artifact.foreignExports, artifact.foreignStatics),
+    ),
+    AbiManifest.encode(
+      AbiManifest.make(
+        target,
+        artifact.foreignImports,
+        artifact.foreignExports,
+        artifact.foreignStatics,
+      ),
+    ),
+  )
+})
 
 /** Compiles one request end to end, writing its final artifact to the durable destination. */
 export const compile = Effect.fn('Driver.compile')(function* (
@@ -537,6 +567,19 @@ export const compile = Effect.fn('Driver.compile')(function* (
         () => 0,
         { heapBytes },
       )
+      const libraryInterface = ArtifactKind.isLibrary(cacheKind)
+        ? yield* PhaseReport.measureEffectInto(
+            report,
+            'library-interface',
+            artifact.foreignImports.length +
+              artifact.foreignExports.length +
+              artifact.foreignStatics.length,
+            commitLibraryInterface(request, committed.path, artifact, target),
+            () => 2,
+            () => 0,
+            { heapBytes },
+          )
+        : undefined
       return Object.freeze({
         _tag: 'Compiled',
         backend: artifact.backend,
@@ -544,8 +587,10 @@ export const compile = Effect.fn('Driver.compile')(function* (
         path: committed.path,
         target: committed.target,
         symbols: artifact.symbols,
+        foreignImports: artifact.foreignImports,
         foreignExports: artifact.foreignExports,
         foreignStatics: artifact.foreignStatics,
+        ...(libraryInterface === undefined ? {} : { libraryInterface }),
         ...(ArtifactKind.isLibrary(cacheKind) ? {} : { termination: artifact.termination }),
         diagnostics,
         report: Object.freeze([...report]),
@@ -575,6 +620,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
             path: committed.path,
             target: committed.target,
             symbols: artifact.symbols,
+            foreignImports: artifact.foreignImports,
             foreignExports: artifact.foreignExports,
             foreignStatics: artifact.foreignStatics,
             termination: artifact.termination,
@@ -611,6 +657,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
             path: finalized.path,
             target: finalized.target,
             symbols: artifact.symbols,
+            foreignImports: artifact.foreignImports,
             foreignExports: artifact.foreignExports,
             foreignStatics: artifact.foreignStatics,
             termination: artifact.termination,
@@ -679,6 +726,19 @@ export const compile = Effect.fn('Driver.compile')(function* (
         if (artifactCache !== undefined && cacheKey !== undefined) {
           yield* NativeToolchain.writeArtifactCache(artifactCache, cacheKey, linked.bytes)
         }
+        const libraryInterface = ArtifactKind.isLibrary(cacheKind)
+          ? yield* PhaseReport.measureEffectInto(
+              report,
+              'library-interface',
+              artifact.foreignImports.length +
+                artifact.foreignExports.length +
+                artifact.foreignStatics.length,
+              commitLibraryInterface(request, linked.path, artifact, target),
+              () => 2,
+              () => 0,
+              { heapBytes },
+            )
+          : undefined
         return Object.freeze({
           _tag: 'Compiled',
           backend: artifact.backend,
@@ -686,8 +746,10 @@ export const compile = Effect.fn('Driver.compile')(function* (
           path: linked.path,
           target: linked.target,
           symbols: artifact.symbols,
+          foreignImports: artifact.foreignImports,
           foreignExports: artifact.foreignExports,
           foreignStatics: artifact.foreignStatics,
+          ...(libraryInterface === undefined ? {} : { libraryInterface }),
           ...(ArtifactKind.isLibrary(cacheKind) ? {} : { termination: artifact.termination }),
           diagnostics,
           report: Object.freeze([...report]),
