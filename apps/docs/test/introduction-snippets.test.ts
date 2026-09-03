@@ -3,10 +3,12 @@ import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silklang/compiler/Analysis'
 import * as Effect from 'effect/Effect'
 
-const introduction = readFileSync(
+const introductionSource = readFileSync(
   new URL('../app/_introduction/introduction.html', import.meta.url),
   'utf8',
-).replace(/<!--[\s\S]*?-->/g, '')
+)
+
+const introduction = introductionSource.replace(/<!--[\s\S]*?-->/g, '')
 
 const decodeHtml = (source: string): string =>
   source.replace(/&(amp|gt|lt|quot);/g, (_, entity: string) => {
@@ -65,4 +67,18 @@ it.effect('keeps every live landing-page example diagnostics-correct', () =>
 it('keeps landing-page string literals on one source line', () => {
   for (const { source } of liveSnippets)
     assert.isNull(source.match(/"[^"\r\n]*[\r\n][^"]*"/), source)
+})
+
+it('protects snippet whitespace from the HTML formatter', () => {
+  assert.strictEqual(
+    introductionSource.match(/<!-- prettier-ignore -->\s*<silk-snippet\b/g)?.length ?? 0,
+    introduction.match(/<silk-snippet\b/g)?.length ?? 0,
+  )
+})
+
+it('keeps multi-statement snippets readable as source code', () => {
+  assert.match(
+    liveSnippets[3]?.source ?? '',
+    /import silk\.effect \{ Effect \}\n\nstruct NotFoundError \{ id: i32 \}\n\neffect fn load/,
+  )
 })

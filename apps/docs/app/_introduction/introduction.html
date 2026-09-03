@@ -25,11 +25,18 @@
     <span class="lang">silk</span><span class="spacer"></span
     ><span class="live">live · hover for types</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints>
-    import silk.effect { Effect } import silk.logger { Logger, LogError } pub effect fn main() -&gt;
-    () ! LogError { let mut logger = Logger.stdoutProvider() run Effect.log(&quot;Hello!&quot;)
-    |&gt; Effect.provideMut(&amp;mut logger) }</silk-snippet
-  >
+import silk.effect { Effect }
+import silk.logger { Logger, LogError }
+
+pub effect fn main() -&gt; () ! LogError {
+  let mut logger = Logger.stdoutProvider()
+
+  run Effect.log(&quot;Hello!&quot;)
+    |&gt; Effect.provideMut(&amp;mut logger)
+}
+</silk-snippet>
 </figure>
 <p class="live-note">
   Live means the Silk compiler is running in your browser: hover a name for its type and docs —
@@ -196,11 +203,13 @@
   <div class="panebar">
     <span class="lang">silk</span><span class="spacer"></span><span class="frag">fragment</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet>
-    // A: eventually produces an i32 // !E: may fail with BootError // ?R: requires shared access to
-    Clock // and exclusive access to Logger effect fn boot() -&gt; i32 ! BootError ? &amp;Clock |
-    &amp;mut Logger</silk-snippet
-  >
+// A: eventually produces an i32
+// !E: may fail with BootError
+// ?R: requires shared access to Clock and exclusive access to Logger
+effect fn boot() -&gt; i32 ! BootError ? &amp;Clock | &amp;mut Logger
+</silk-snippet>
 </figure>
 <p>
   When Effects are combined, those three parts compose independently. Calling another function does
@@ -222,10 +231,16 @@
     <span class="lang">silk</span><span class="spacer"></span
     ><span class="live">live · hover for types</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints>
-    pub fn main() -&gt; i32 { let eager = 21 let delayed = effect { return eager + 21 } return run
-    delayed }</silk-snippet
-  >
+pub fn main() -&gt; i32 {
+  let eager = 21
+  let delayed = effect {
+    return eager + 21
+  }
+  return run delayed
+}
+</silk-snippet>
 </figure>
 <p>
   Effects are ordinary owned values too. What they capture determines whether they can be reused or
@@ -255,9 +270,12 @@
     <span class="lang">silk</span><span class="spacer"></span
     ><span class="live">live · hover for types</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints>
-    effect fn load() -&gt; i32 ! string { fail &quot;not found&quot; }</silk-snippet
-  >
+effect fn load() -&gt; i32 ! string {
+  fail &quot;not found&quot;
+}
+</silk-snippet>
 </figure>
 <p>
   A failure payload does not have to inherit from an exception hierarchy, implement an
@@ -270,12 +288,24 @@
     <span class="lang">silk</span><span class="spacer"></span
     ><span class="live">live · hover for types</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints>
-    import silk.effect { Effect } struct NotFoundError { id: i32 } effect fn load(id: i32) -&gt; i32
-    ! NotFoundError { fail NotFoundError { id: id } } effect fn recover(error: NotFoundError) -&gt;
-    i32 { return 0 } pub fn main() -&gt; i32 { return run load(42) |&gt; Effect.catch(recover)
-    }</silk-snippet
-  >
+import silk.effect { Effect }
+
+struct NotFoundError { id: i32 }
+
+effect fn load(id: i32) -&gt; i32 ! NotFoundError {
+  fail NotFoundError { id: id }
+}
+
+effect fn recover(error: NotFoundError) -&gt; i32 {
+  return 0
+}
+
+pub fn main() -&gt; i32 {
+  return run load(42) |&gt; Effect.catch(recover)
+}
+</silk-snippet>
 </figure>
 <p>
   <code>recover</code> receives an ordinary owned <code>NotFoundError</code>. It can be mapped,
@@ -332,13 +362,31 @@
     <span class="lang">silk</span><span class="spacer"></span
     ><span class="live">live · hover for types</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints>
-    import silk.effect { Effect } service Clock { effect fn value() -&gt; i32 ? &amp;Clock } struct
-    FixedClock { value: i32 } impl Clock for FixedClock { effect fn value(self: &amp;Self) -&gt; i32
-    { return self.value } } effect fn readClock() -&gt; i32 ? &amp;Clock { return run Clock.value()
-    } pub fn main() -&gt; i32 { let clock = FixedClock { value: 42 } return run Effect.provide(
-    readClock(), &amp;clock, ) }</silk-snippet
-  >
+import silk.effect { Effect }
+
+service Clock {
+  effect fn value() -&gt; i32 ? &amp;Clock
+}
+
+struct FixedClock { value: i32 }
+
+impl Clock for FixedClock {
+  effect fn value(self: &amp;Self) -&gt; i32 {
+    return self.value
+  }
+}
+
+effect fn readClock() -&gt; i32 ? &amp;Clock {
+  return run Clock.value()
+}
+
+pub fn main() -&gt; i32 {
+  let clock = FixedClock { value: 42 }
+  return run Effect.provide(readClock(), &amp;clock)
+}
+</silk-snippet>
 </figure>
 <p>
   <code>readClock</code> never mentions <code>FixedClock</code>; it only asks for
@@ -366,10 +414,17 @@
     <span class="lang">silk</span><span class="spacer"></span
     ><span class="live">live · hover for types</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints>
-    import silk.logger { LogError, LogLevel } service Logger { effect fn log( level: LogLevel,
-    message: string, ) -&gt; () ! LogError ? &amp;mut Logger }</silk-snippet
-  >
+import silk.logger { LogError, LogLevel }
+
+service Logger {
+  effect fn log(
+    level: LogLevel,
+    message: string,
+  ) -&gt; () ! LogError ? &amp;mut Logger
+}
+</silk-snippet>
 </figure>
 <p>
   The contract says nothing about whether a log event goes to stdout, memory, a browser console, a
@@ -381,11 +436,17 @@
     <span class="lang">silk</span><span class="spacer"></span
     ><span class="live">live · hover for types</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints>
-    import silk.effect { Effect } import silk.logger { Logger, LogError } pub effect fn main() -&gt;
-    () ! LogError { let mut logger = Logger.stdoutProvider() run Effect.log(&quot;connected&quot;)
-    |&gt; Effect.provideMut(&amp;mut logger) }</silk-snippet
-  >
+import silk.effect { Effect }
+import silk.logger { Logger, LogError }
+
+pub effect fn main() -&gt; () ! LogError {
+  let mut logger = Logger.stdoutProvider()
+  run Effect.log(&quot;connected&quot;)
+    |&gt; Effect.provideMut(&amp;mut logger)
+}
+</silk-snippet>
 </figure>
 <p>
   Tests do not need a separate universe of flimsy “mock objects.” An in-memory provider is simply
@@ -406,10 +467,17 @@
     <span class="lang">silk</span><span class="spacer"></span
     ><span class="live">live · hover for types</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints>
-    import silk.allocator { Allocator } role Main role Scratch effect fn prepareBuffers() -&gt; () ?
-    &amp;Allocator at Main | &amp;Allocator at Scratch { return () }</silk-snippet
-  >
+import silk.allocator { Allocator }
+
+role Main
+role Scratch
+
+effect fn prepareBuffers() -&gt; () ? &amp;Allocator at Main | &amp;Allocator at Scratch {
+  return ()
+}
+</silk-snippet>
 </figure>
 <p>
   <code>Allocator at Main</code> and <code>Allocator at Scratch</code> are different dependency
@@ -420,20 +488,35 @@
     <span class="lang">silk</span><span class="spacer"></span
     ><span class="live">live · hover for types</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints>
-    import silk.allocator { Allocator } import silk.effect { Effect } role Main role Scratch effect
-    fn prepareBuffers() -&gt; () ? &amp;Allocator at Main | &amp;Allocator at Scratch { return () }
-    pub fn main() -&gt; i32 { let systemAllocator = Allocator.systemAllocatorProvider() let
-    arenaAllocator = Allocator.systemAllocatorProvider() let pending = prepareBuffers() |&gt;
-    Effect.provide&lt;Allocator at Main&gt;(&amp;systemAllocator) |&gt; Effect.provide&lt;Allocator
-    at Scratch&gt;(&amp;arenaAllocator) run pending return 0 }</silk-snippet
-  >
+import silk.allocator { Allocator }
+import silk.effect { Effect }
+
+role Main
+role Scratch
+
+effect fn prepareBuffers() -&gt; () ? &amp;Allocator at Main | &amp;Allocator at Scratch {
+  return ()
+}
+
+pub fn main() -&gt; i32 {
+  let systemAllocator = Allocator.systemAllocatorProvider()
+  let arenaAllocator = Allocator.systemAllocatorProvider()
+  let pending = prepareBuffers()
+    |&gt; Effect.provide&lt;Allocator at Main&gt;(&amp;systemAllocator)
+    |&gt; Effect.provide&lt;Allocator at Scratch&gt;(&amp;arenaAllocator)
+  run pending
+  return 0
+}
+</silk-snippet>
 </figure>
 <p>The access mode is part of the requirement too:</p>
 <figure class="pane">
   <div class="panebar">
     <span class="lang">silk</span><span class="spacer"></span><span class="frag">fragment</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet> ? &amp;Clock</silk-snippet>
 </figure>
 <p>means shared provider access, while:</p>
@@ -441,6 +524,7 @@
   <div class="panebar">
     <span class="lang">silk</span><span class="spacer"></span><span class="frag">fragment</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet> ? &amp;mut Logger</silk-snippet>
 </figure>
 <p>means exclusive provider access.</p>
@@ -487,12 +571,24 @@
     <span class="lang">silk</span><span class="spacer"></span
     ><span class="live">live · hover for types</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints>
-    struct Message { code: i32 } fn inspect(message: &amp;Message) -&gt; i32 { return message.code }
-    fn consume(message: Message) -&gt; i32 { return message.code } pub fn main() -&gt; i32 { let
-    message = Message { code: 42 } let code = inspect(&amp;message) return code + consume(move
-    message) }</silk-snippet
-  >
+struct Message { code: i32 }
+
+fn inspect(message: &amp;Message) -&gt; i32 {
+  return message.code
+}
+
+fn consume(message: Message) -&gt; i32 {
+  return message.code
+}
+
+pub fn main() -&gt; i32 {
+  let message = Message { code: 42 }
+  let code = inspect(&amp;message)
+  return code + consume(move message)
+}
+</silk-snippet>
 </figure>
 <p>The vocabulary is deliberately visible:</p>
 <pre class="diagram"><code>&amp;message       borrow it
@@ -512,10 +608,19 @@ move message   give it away</code></pre>
     <span class="lang">silk</span><span class="spacer"></span
     ><span class="live">live · hover for types</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints expected-diagnostics="OWN0002">
-    struct Token { kind: i32 } struct Envelope { token: Token code: i32 } fn invalid(envelope:
-    Envelope) -&gt; Token { return move envelope.token }</silk-snippet
-  >
+struct Token { kind: i32 }
+
+struct Envelope {
+  token: Token
+  code: i32
+}
+
+fn invalid(envelope: Envelope) -&gt; Token {
+  return move envelope.token
+}
+</silk-snippet>
 </figure>
 <h3>The allocator is a service</h3>
 <p>
@@ -529,11 +634,18 @@ move message   give it away</code></pre>
     <span class="lang">silk</span><span class="spacer"></span
     ><span class="live">live · hover for types</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints>
-    import silk.allocator { OutOfMemoryError } import silk.layout { Layout } service Allocator {
-    effect fn allocate(layout: Layout) -&gt; Allocation ! OutOfMemoryError ? &amp;mut Allocator
-    }</silk-snippet
-  >
+import silk.allocator { OutOfMemoryError }
+import silk.layout { Layout }
+
+service Allocator {
+  effect fn allocate(layout: Layout)
+    -&gt; Allocation
+    ! OutOfMemoryError
+    ? &amp;mut Allocator
+}
+</silk-snippet>
 </figure>
 <p>There is not much left to guess from that signature:</p>
 <pre class="diagram"><code>returns       Allocation
@@ -551,10 +663,10 @@ requires      exclusive Allocator access</code></pre>
   <div class="panebar">
     <span class="lang">silk</span><span class="spacer"></span><span class="frag">fragment</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet>
-    effect fn make&lt;T&gt;(value: T) -&gt; Box&lt;T&gt; ! OutOfMemoryError ? &amp;mut
-    Allocator</silk-snippet
-  >
+effect fn make&lt;T&gt;(value: T) -&gt; Box&lt;T&gt; ! OutOfMemoryError ? &amp;mut Allocator
+</silk-snippet>
 </figure>
 <p>The application then chooses the allocation policy at the boundary:</p>
 <figure class="pane">
@@ -562,13 +674,20 @@ requires      exclusive Allocator access</code></pre>
     <span class="lang">silk</span><span class="spacer"></span
     ><span class="live">live · hover for types</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints>
-    import silk.allocator { Allocator, OutOfMemoryError } import silk.box { Box } import silk.effect
-    { Effect } effect fn boxedAnswer() -&gt; i32 ! OutOfMemoryError { let mut allocator =
-    Allocator.systemAllocatorProvider() let creating = Box.make&lt;i32&gt;(42) |&gt;
-    Effect.provideMut&lt;Allocator&gt;(&amp;mut allocator) let boxed = run creating return
-    Box.into&lt;i32&gt;(move boxed) }</silk-snippet
-  >
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.box { Box }
+import silk.effect { Effect }
+
+effect fn boxedAnswer() -&gt; i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let creating = Box.make&lt;i32&gt;(42)
+    |&gt; Effect.provideMut&lt;Allocator&gt;(&amp;mut allocator)
+  let boxed = run creating
+  return Box.into&lt;i32&gt;(move boxed)
+}
+</silk-snippet>
 </figure>
 <p>
   <code>Box.make</code> makes the allocation visible. <code>provideMut</code> chooses the allocator,
@@ -633,21 +752,41 @@ requires      exclusive Allocator access</code></pre>
     <span class="lang">silk</span><span class="spacer"></span
     ><span class="live">live · hover for types</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints>
-    import silk.allocator { OutOfMemoryError } import silk.effect { Effect } import silk.fiber {
-    Fiber, Cancelled } import silk.local_scheduler { LocalScheduler, StalledError } import
-    silk.monotonic_clock { MonotonicClock } import silk.os_monotonic_clock { OsMonotonicClock }
-    import silk.scheduler { Scheduler, TaskIdExhaustedError } effect fn work() -&gt; i32 { return 42
-    } effect fn program() -&gt; i32 ! OutOfMemoryError | TaskIdExhaustedError | Cancelled ? &amp;mut
-    Scheduler | &amp;mut MonotonicClock { let child = run Fiber.forkChild&lt;i32, never&gt;(work())
-    return run Fiber.join&lt;i32, never&gt;(move child) } effect fn recover( error: OutOfMemoryError
-    | TaskIdExhaustedError | Cancelled | StalledError, ) -&gt; i32 { drop error return -1 } effect
-    fn runProgram(scheduler: &amp;mut LocalScheduler, clock: &amp;mut OsMonotonicClock) -&gt; i32 !
-    OutOfMemoryError | TaskIdExhaustedError | Cancelled | StalledError { let pending =
-    LocalScheduler.execute(move scheduler, program()) |&gt;
-    Effect.provideMut&lt;MonotonicClock&gt;(&amp;mut clock) return run Effect.catchAll(move pending,
-    recover) }</silk-snippet
-  >
+import silk.allocator { OutOfMemoryError }
+import silk.effect { Effect }
+import silk.fiber { Fiber, Cancelled }
+import silk.local_scheduler { LocalScheduler, StalledError }
+import silk.monotonic_clock { MonotonicClock }
+import silk.os_monotonic_clock { OsMonotonicClock }
+import silk.scheduler { Scheduler, TaskIdExhaustedError }
+
+effect fn work() -&gt; i32 {
+  return 42
+}
+
+effect fn program() -&gt; i32
+  ! OutOfMemoryError | TaskIdExhaustedError | Cancelled
+  ? &amp;mut Scheduler | &amp;mut MonotonicClock {
+  let child = run Fiber.forkChild&lt;i32, never&gt;(work())
+  return run Fiber.join&lt;i32, never&gt;(move child)
+}
+
+effect fn recover(
+  error: OutOfMemoryError | TaskIdExhaustedError | Cancelled | StalledError,
+) -&gt; i32 {
+  drop error
+  return -1
+}
+
+effect fn runProgram(scheduler: &amp;mut LocalScheduler, clock: &amp;mut OsMonotonicClock) -&gt; i32
+  ! OutOfMemoryError | TaskIdExhaustedError | Cancelled | StalledError {
+  let pending = LocalScheduler.execute(move scheduler, program())
+    |&gt; Effect.provideMut&lt;MonotonicClock&gt;(&amp;mut clock)
+  return run Effect.catchAll(move pending, recover)
+}
+</silk-snippet>
 </figure>
 <p>The whole idea fits in three lines:</p>
 <pre class="diagram"><code>forkChild(...)        create structured child work
@@ -683,12 +822,19 @@ join(move child)      consume that authority exactly once</code></pre>
     <span class="lang">silk</span><span class="spacer"></span
     ><span class="live">live · hover for types</span>
   </div>
+  <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints>
-    import silk.allocator { OutOfMemoryError } import silk.scheduler { PendingPublication,
-    TaskIdExhaustedError } service Scheduler { effect fn prepare&lt;A, E&gt;( child: once Effect&lt;
-    A ! E ? &amp;mut Scheduler &gt; ) -&gt; PendingPublication&lt;A, E&gt; ! OutOfMemoryError |
-    TaskIdExhaustedError ? &amp;mut Scheduler }</silk-snippet
-  >
+import silk.allocator { OutOfMemoryError }
+import silk.scheduler { PendingPublication, TaskIdExhaustedError }
+
+service Scheduler {
+  effect fn prepare&lt;A, E&gt;(
+    child: once Effect&lt;A ! E ? &amp;mut Scheduler&gt;,
+  ) -&gt; PendingPublication&lt;A, E&gt;
+    ! OutOfMemoryError | TaskIdExhaustedError
+    ? &amp;mut Scheduler
+}
+</silk-snippet>
 </figure>
 <p>
   Alternative local scheduling policies can therefore be ordinary providers. The compiler only
