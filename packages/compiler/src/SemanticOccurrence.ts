@@ -6,10 +6,12 @@ import type * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
 import type * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
+import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
+import * as Option from 'effect/Option'
 
 /** The exact source location and name selection of one source-backed declaration. */
 export interface DeclarationLocation {
@@ -70,6 +72,8 @@ export interface SemanticOccurrence {
   readonly span: SourceSpan.SourceSpan
   readonly role: Role
   readonly resolution: Resolution
+  /** The exact authored import name that supplied this unqualified occurrence, when applicable. */
+  readonly importBinding?: SourceSpan.SourceSpan
   readonly declaration?: DeclarationLocation
   readonly ordinal: number
 }
@@ -1429,6 +1433,89 @@ const collectInherentImpl = (
   collectDeclaredType(head.owner, index, scope, pending)
 }
 
+const unavailableLookupResolution = (
+  lookup: Exclude<NameResolution.Lookup, { readonly _tag: 'Resolved' }>,
+): Resolution => {
+  switch (lookup._tag) {
+    case 'Missing':
+      return Object.freeze({ _tag: 'Missing' })
+    case 'Inaccessible':
+      return Object.freeze({ _tag: 'Inaccessible', cause: lookup.cause })
+    case 'Conflict':
+      return Object.freeze({ _tag: 'Conflicting', cause: lookup.conflict.cause })
+    case 'Unavailable':
+      return Object.freeze({
+        _tag: 'Unavailable',
+        ...(lookup.cause === undefined ? {} : { cause: lookup.cause }),
+      })
+    default:
+      return Object.freeze({ _tag: 'Unavailable' })
+  }
+}
+
+const collectTypePath = (
+  path: DeclarationFacts.TypePathFact,
+  index: DeclarationIndex.Index,
+  scope: NameResolution.ModuleScope | undefined,
+  pending: Array<Pending>,
+): void => {
+  const qualifier = path.segments.length > 1 ? path.segments.at(0) : undefined
+  if (qualifier !== undefined)
+    collectQualifier(qualifier.token, qualifier.spelling, scope, index, pending)
+  const selected = path.segments.at(-1)
+  if (selected === undefined || scope === undefined) return
+  const lookup = NameResolution.lookupPath(scope, index, path)
+  if (lookup._tag === 'Resolved') {
+    push(
+      pending,
+      selected.token.span,
+      'Value',
+      available(identityOfDeclaration(lookup.declaration)),
+      locationOfDeclaration(index, lookup.declaration),
+    )
+    return
+  }
+  push(
+    pending,
+    selected.token.span,
+    'Value',
+    unavailableLookupResolution(lookup),
+    'declaration' in lookup && lookup.declaration !== undefined
+      ? locationOfDeclaration(index, lookup.declaration)
+      : undefined,
+  )
+}
+
+const collectConformance = (
+  conformance: DeclarationFacts.ConformanceFact,
+  index: DeclarationIndex.Index,
+  scope: NameResolution.ModuleScope | undefined,
+  pending: Array<Pending>,
+): void => {
+  for (const typeParameter of conformance.typeParameters)
+    if (typeParameter.name._tag === 'Present')
+      push(
+        pending,
+        typeParameter.name.token.span,
+        'Declaration',
+        available(Object.freeze({ _tag: 'TypeParameterIdentity', id: typeParameter.type })),
+        locationOfTypeParameter(typeParameter),
+      )
+  for (const requirement of conformance.requirements)
+    collectDeclaredType(requirement.capability, index, scope, pending)
+  collectDeclaredType(conformance.capability, index, scope, pending)
+  collectDeclaredType(conformance.provider, index, scope, pending)
+  for (const operation of conformance.operations)
+    if (operation.target._tag === 'TypePath')
+      collectTypePath(operation.target, index, scope, pending)
+  if (conformance.hook !== undefined) {
+    collectDeclaredType(conformance.hook.parameterType, index, scope, pending)
+    collectDeclaredType(conformance.hook.returnType, index, scope, pending)
+    collectRowExpression(conformance.hook.failureRow.expression, index, scope, pending)
+    collectRowExpression(conformance.hook.requirementRow.expression, index, scope, pending)
+  }
+}
+
 const collectImports = (
   scope: NameResolution.ModuleScope | undefined,
   index: DeclarationIndex.Index,
@@ -1492,6 +1579,51 @@ const collectImports = (
   }
 }
 
+const isTrivia = (token: Token.Token): boolean =>
+  token.kind === 'Whitespace' ||
+  token.kind === 'LineComment' ||
+  token.kind === 'DocComment' ||
+  token.kind === 'ModuleDocComment'
+
+const qualifiedOccurrenceStarts = (tokens: ReadonlyArray<Token.Token>): ReadonlySet<number> => {
+  const starts = new Set<number>()
+  let previous: Token.Token | undefined
+  for (const token of tokens) {
+    if (isTrivia(token)) continue
+    if (token.kind === 'Identifier' && previous?.kind === 'Dot') starts.add(token.span.start)
+    previous = token
+  }
+  return starts
+}
+
+const importBindingFor = (
+  occurrence: Omit<SemanticOccurrence, 'ordinal'>,
+  syntax: Elaboration.Result['syntax'],
+  bindings: ReadonlyMap<string, NameResolution.Binding>,
+  qualifiedStarts: ReadonlySet<number>,
+): SourceSpan.SourceSpan | undefined => {
+  if (occurrence.role === 'Import' || occurrence.resolution._tag !== 'Available') return undefined
+  const spelling = Option.getOrUndefined(SourceFile.spelling(syntax.source, occurrence.span))
+  if (spelling === undefined) return undefined
+  const binding = bindings.get(spelling)
+  if (binding?._tag === 'ModuleNamespace') {
+    const identity = occurrence.resolution.identity
+    return identity._tag === 'ImportNamespaceIdentity' &&
+      identity.module === binding.module &&
+      identity.spelling === binding.spelling
+      ? binding.token.span
+      : undefined
+  }
+  if (binding?._tag !== 'ImportedMember' || qualifiedStarts.has(occurrence.span.start))
+    return undefined
+  const identity = occurrence.resolution.identity
+  return identity._tag === 'DeclarationIdentity' &&
+    identityKey(identity) ===
+      identityKey(Object.freeze({ _tag: 'DeclarationIdentity', id: binding.declaration }))
+    ? binding.localToken.span
+    : undefined
+}
+
 /** Builds one module's immutable exact-token occurrence index from recovered compiler facts. */
 export const makeModule = (
   module: string,
@@ -1504,10 +1636,30 @@ export const makeModule = (
   const headers = index.modules.find((candidate) => candidate.module === module)
   for (const member of headers?.members ?? []) collectMember(member, index, scope, pending)
   for (const head of headers?.inherentImpls ?? []) collectInherentImpl(head, index, scope, pending)
+  for (const conformance of headers?.conformances ?? [])
+    collectConformance(conformance, index, scope, pending)
   for (const fn of Elaboration.executableFunctions(result))
     for (const statement of fn.statements) collectStatement(statement, index, scope, pending)
   collectImports(scope, index, pending)
-  pending.sort(
+  const qualifiedStarts = qualifiedOccurrenceStarts(result.syntax.tokens)
+  const bindings = new Map<string, NameResolution.Binding>()
+  for (const binding of scope?.bindings ?? [])
+    if (!bindings.has(binding.spelling)) bindings.set(binding.spelling, binding)
+  const attributed = pending.map((entry): Pending => {
+    const importBinding = importBindingFor(
+      entry.occurrence,
+      result.syntax,
+      bindings,
+      qualifiedStarts,
+    )
+    return importBinding === undefined
+      ? entry
+      : Object.freeze({
+          ...entry,
+          occurrence: Object.freeze({ ...entry.occurrence, importBinding }),
+        })
+  })
+  attributed.sort(
     (left, right) =>
       left.occurrence.span.start - right.occurrence.span.start ||
       left.occurrence.span.end -
@@ -1516,7 +1668,7 @@ export const makeModule = (
       left.ordinal - right.ordinal,
   )
   const occurrences = Object.freeze(
-    pending.map((entry) => Object.freeze({ ...entry.occurrence, ordinal: entry.ordinal })),
+    attributed.map((entry) => Object.freeze({ ...entry.occurrence, ordinal: entry.ordinal })),
   )
   let maximumEnd = 0
   const prefixMaximumEnd = Object.freeze(

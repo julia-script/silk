@@ -13,7 +13,7 @@ import * as Effect from 'effect/Effect'
 import * as Inspectable from 'effect/Inspectable'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
-import { CompletionItemKind, SymbolKind } from 'vscode-languageserver-types'
+import { CompletionItemKind, DiagnosticSeverity, SymbolKind } from 'vscode-languageserver-types'
 import * as Document from '../src/Document.js'
 import * as EmbeddedFormatting from './fixtures/embeddedFormatting.js'
 
@@ -1684,6 +1684,324 @@ const wholeDocument = (text: string) => ({
   start: { line: 0, character: 0 },
   end: positionAt(text, text.length),
 })
+
+it.effect('warns on an unused authored import binding and removes only its selector', () =>
+  Effect.gen(function* () {
+    const source =
+      'import geometry { area, perimeter as boundary }\npub fn main() -> i32 { return area(1, 2) }'
+    const modules = [
+      {
+        module: 'geometry',
+        text: 'pub fn area(width: i32, height: i32) -> i32 { return width * height }\npub fn perimeter(width: i32, height: i32) -> i32 { return width + height }',
+      },
+      { module: 'main', text: source },
+    ]
+    const { document, snapshot } = yield* openProject(modules, 'main')
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const warning = Document.diagnostics(document, snapshot, uriOfModule).find(
+      (diagnostic) => diagnostic.code === 'LSP0004',
+    )
+    assert.strictEqual(warning?.severity, DiagnosticSeverity.Warning)
+    assert.deepEqual(warning?.range, {
+      start: positionOf(source, 'boundary'),
+      end: positionAt(source, source.indexOf('boundary') + 'boundary'.length),
+    })
+    const action = Document.codeActions(
+      document,
+      snapshot,
+      wholeDocument(source),
+      uriOfModule,
+    ).find((candidate) => candidate.diagnostics?.[0]?.code === 'LSP0004')
+    assert.strictEqual(action?.title, 'Remove unused import')
+    assert.isUndefined(action?.edit)
+    assert.isDefined(action)
+    if (action === undefined) return
+    const resolved = Document.resolveCodeAction(
+      document,
+      snapshot,
+      inventoryOf(modules),
+      action,
+      uriOfModule,
+    )
+    const edits = resolved.edit?.changes?.[uriOfModule('main')]
+    assert.deepEqual(edits, [
+      {
+        range: {
+          start: positionAt(source, source.indexOf(', perimeter')),
+          end: positionAt(source, source.indexOf(' }')),
+        },
+        newText: '',
+      },
+    ])
+    assert.isDefined(edits)
+    if (edits === undefined) return
+    const revised = applyDocumentEdits(source, edits)
+    const accepted = yield* openProject(
+      modules.map((entry) => (entry.module === 'main' ? { ...entry, text: revised } : entry)),
+      'main',
+    )
+    assert.deepEqual(Analysis.diagnostics(accepted.snapshot), [])
+    assert.isEmpty(
+      Document.diagnostics(accepted.document, accepted.snapshot, uriOfModule).filter(
+        (diagnostic) => diagnostic.code === 'LSP0004',
+      ),
+    )
+
+    const stale = Document.make({ ...document, version: 2 })
+    assert.include(
+      Document.resolveCodeAction(stale, snapshot, inventoryOf(modules), action, uriOfModule)
+        .disabled?.reason ?? '',
+      'revision',
+    )
+  }),
+)
+
+it.effect('attributes import use to the exact authored binding', () =>
+  Effect.gen(function* () {
+    const library =
+      'pub fn area(width: i32, height: i32) -> i32 { return width * height }\npub fn perimeter(width: i32, height: i32) -> i32 { return width + height }'
+    const cases = [
+      {
+        label: 'qualified access does not use a direct selector',
+        source:
+          'import geometry { area }\nimport geometry as geo\npub fn main() -> i32 { return geo.area(1, 2) }',
+        unused: ['area'],
+      },
+      {
+        label: 'only the unreferenced alias of one declaration is unused',
+        source:
+          'import geometry { area as used, area as idle }\npub fn main() -> i32 { return used(1, 2) }',
+        unused: ['idle'],
+      },
+      {
+        label: 'a direct hybrid selector does not use its namespace',
+        source: 'import geometry as geo { area }\npub fn main() -> i32 { return area(1, 2) }',
+        unused: ['geo'],
+      },
+      {
+        label: 'a hybrid namespace use does not use its direct selector',
+        source: 'import geometry as geo { area }\npub fn main() -> i32 { return geo.area(1, 2) }',
+        unused: ['area'],
+      },
+      {
+        label: 'a local parameter shadows rather than uses an import',
+        source: 'import geometry { area }\npub fn main(area: i32) -> i32 { return area }',
+        unused: ['area'],
+      },
+    ]
+    for (const testCase of cases) {
+      const { snapshot } = yield* openProject(
+        [
+          { module: 'geometry', text: library },
+          { module: 'main', text: testCase.source },
+        ],
+        'main',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [], testCase.label)
+      assert.deepEqual(
+        Analysis.unusedImports(snapshot, 'main').map(({ spelling }) => spelling),
+        testCase.unused,
+        testCase.label,
+      )
+    }
+
+    const repeated =
+      'import geometry { area }\nimport geometry { area }\npub fn main() -> i32 { return area(1, 2) }'
+    const { snapshot } = yield* openProject(
+      [
+        { module: 'geometry', text: library },
+        { module: 'main', text: repeated },
+      ],
+      'main',
+    )
+    assert.deepEqual(Analysis.unusedImports(snapshot, 'main'), [])
+  }),
+)
+
+it.effect('counts conformance heads and mappings as import uses', () =>
+  Effect.gen(function* () {
+    const library = `pub interface Printable { fn print(value: &Self) -> i32 }
+pub struct Witness {}
+impl Witness { pub fn printItem(value: &Witness) -> i32 { return 1 } }`
+    const source = `import library { Printable, Witness }
+pub struct Item {}
+impl Printable for Item { print: Witness.printItem }`
+    const { snapshot } = yield* openProject(
+      [
+        { module: 'library', text: library },
+        { module: 'main', text: source },
+      ],
+      'main',
+    )
+    // The incompatible witness is intentional: a rejected mapping still semantically references
+    // its authored target and must not cascade into an unrelated unused-import warning.
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map(({ code }) => code),
+      ['SEM0083'],
+    )
+    assert.deepEqual(Analysis.unusedImports(snapshot, 'main'), [])
+  }),
+)
+
+it.effect('plans only trivia-safe import removals', () =>
+  Effect.gen(function* () {
+    const declaration = `pub fn area(width: i32, height: i32) -> i32 { return width * height }
+pub fn perimeter(width: i32, height: i32) -> i32 { return width + height }
+pub fn diagonal(width: i32, height: i32) -> i32 { return width + height }`
+    const removalText = (
+      source: string,
+      snapshot: Analysis.FrontendSnapshot,
+      spelling: string,
+    ): string | undefined => {
+      const binding = Analysis.unusedImports(snapshot, 'main').find(
+        (candidate) => candidate.spelling === spelling,
+      )
+      const edit = binding?.change?.changes.get('main')?.at(0)
+      return edit === undefined ? undefined : source.slice(edit.span.start, edit.span.end)
+    }
+
+    const listCases = [
+      {
+        source:
+          'import geometry { area, perimeter }\npub fn main() -> i32 { return perimeter(1, 2) }',
+        spelling: 'area',
+        removed: ' area,',
+      },
+      {
+        source:
+          'import geometry { area, perimeter, diagonal }\npub fn main() -> i32 { return area(1, 2) + diagonal(1, 2) }',
+        spelling: 'perimeter',
+        removed: ' perimeter,',
+      },
+      {
+        source: 'import geometry { area, perimeter }\npub fn main() -> i32 { return area(1, 2) }',
+        spelling: 'perimeter',
+        removed: ', perimeter',
+      },
+    ]
+    for (const testCase of listCases) {
+      const { snapshot } = yield* openProject(
+        [
+          { module: 'geometry', text: declaration },
+          { module: 'main', text: testCase.source },
+        ],
+        'main',
+      )
+      assert.strictEqual(
+        removalText(testCase.source, snapshot, testCase.spelling),
+        testCase.removed,
+      )
+    }
+
+    const hybridNamespace =
+      'import geometry as geo { area }\npub fn main() -> i32 { return area(1, 2) }'
+    const direct = yield* openProject(
+      [
+        { module: 'geometry', text: declaration },
+        { module: 'main', text: hybridNamespace },
+      ],
+      'main',
+    )
+    assert.strictEqual(removalText(hybridNamespace, direct.snapshot, 'geo'), ' as geo')
+
+    const hybridMember =
+      'import geometry as geo { area }\npub fn main() -> i32 { return geo.area(1, 2) }'
+    const qualified = yield* openProject(
+      [
+        { module: 'geometry', text: declaration },
+        { module: 'main', text: hybridMember },
+      ],
+      'main',
+    )
+    assert.strictEqual(removalText(hybridMember, qualified.snapshot, 'area'), ' { area }')
+
+    const nonFirst =
+      'import geometry\nimport unused\npub fn main() -> i32 { return geometry.area(1, 2) }'
+    const whole = yield* openProject(
+      [
+        { module: 'geometry', text: declaration },
+        { module: 'unused', text: 'pub fn value() -> i32 { return 1 }' },
+        { module: 'main', text: nonFirst },
+      ],
+      'main',
+    )
+    assert.strictEqual(removalText(nonFirst, whole.snapshot, 'unused'), 'import unused\n')
+
+    const crlf = 'import geometry\r\npub fn main() -> i32 { return 0 }'
+    const windows = yield* openProject(
+      [
+        { module: 'geometry', text: declaration },
+        { module: 'main', text: crlf },
+      ],
+      'main',
+    )
+    assert.strictEqual(removalText(crlf, windows.snapshot, 'geometry'), 'import geometry\r\n')
+
+    const commented =
+      'import geometry { area, perimeter // belongs to perimeter\n}\npub fn main() -> i32 { return area(1, 2) }'
+    const comment = yield* openProject(
+      [
+        { module: 'geometry', text: declaration },
+        { module: 'main', text: commented },
+      ],
+      'main',
+    )
+    assert.strictEqual(removalText(commented, comment.snapshot, 'perimeter'), undefined)
+
+    const recovered = 'import geometry { area'
+    const recovery = yield* openProject(
+      [
+        { module: 'geometry', text: declaration },
+        { module: 'main', text: recovered },
+      ],
+      'main',
+    )
+    assert.isNotEmpty(Analysis.diagnostics(recovery.snapshot))
+    assert.deepEqual(Analysis.unusedImports(recovery.snapshot, 'main'), [])
+
+    const invalid = `import alpha { value }
+import beta { value }
+import library { hidden, missing, width }`
+    const failures = yield* openProject(
+      [
+        { module: 'alpha', text: 'pub fn value() -> i32 { return 1 }' },
+        { module: 'beta', text: 'pub fn value() -> i32 { return 2 }' },
+        {
+          module: 'library',
+          text: `fn hidden() -> i32 { return 0 }
+pub struct Gadget { pub size: i32 }
+impl Gadget { pub fn width(self: &Self) -> i32 { return self.size } }`,
+        },
+        { module: 'main', text: invalid },
+      ],
+      'main',
+    )
+    assert.isAtLeast(Analysis.diagnostics(failures.snapshot).length, 4)
+    assert.deepEqual(Analysis.unusedImports(failures.snapshot, 'main'), [])
+  }),
+)
+
+it.effect('keeps redundancy ownership local to its import declaration', () =>
+  Effect.gen(function* () {
+    const source = `import geometry { area }
+import geometry { area }
+import geometry as unused
+pub fn main() -> i32 { return area(1, 2) }`
+    const { document, snapshot } = yield* openProject(
+      [
+        { module: 'geometry', text: geometry },
+        { module: 'main', text: source },
+      ],
+      'main',
+    )
+    assert.deepEqual(
+      Document.diagnostics(document, snapshot, uriOfModule)
+        .filter(({ source: owner }) => owner === 'silk-lsp')
+        .map(({ code }) => code),
+      ['LSP0001', 'LSP0004'],
+    )
+  }),
+)
 
 const redundantAlias =
   'import geometry as geometry\npub fn main() -> i32 { return geometry.area(1, 2) }'

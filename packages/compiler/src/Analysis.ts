@@ -22,6 +22,7 @@ import * as Intrinsic from './Intrinsic.js'
 import * as ForeignAvailability from './ForeignAvailability.js'
 import * as ForeignPlanning from './ForeignPlanning.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
+import * as ImportUsage from './ImportUsage.js'
 import * as Layout from './Layout.js'
 import * as LlvmBackend from './LlvmBackend.js'
 import type * as Mir from './Mir.js'
@@ -231,6 +232,19 @@ export const resolutionFailures = (
 export const declarationIndex = (self: FrontendSnapshot): DeclarationIndex.Index => self.index
 
 export const nameResolution = (self: FrontendSnapshot): NameResolution.Resolution => self.resolution
+/** Returns valid authored import bindings that have no semantic use in their module. */
+export const unusedImports = (
+  self: FrontendSnapshot,
+  module: string,
+): ReadonlyArray<ImportUsage.UnusedBinding> => {
+  const syntax = self.results.get(module)?.syntax
+  if (syntax === undefined) return []
+  return ImportUsage.unused(
+    syntax,
+    self.resolution.modules.find((scope) => scope.module === module),
+    self.semanticOccurrences.modules.get(module),
+  )
+}
 export const moduleScope = (
   self: FrontendSnapshot,
   module: string,

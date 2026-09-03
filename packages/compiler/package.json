@@ -114,6 +114,10 @@
       "types": "./dist/SourceAction.d.ts",
       "import": "./dist/SourceAction.js"
     },
+    "./ImportUsage": {
+      "types": "./dist/ImportUsage.d.ts",
+      "import": "./dist/ImportUsage.js"
+    },
     "./SourceOrigin": {
       "types": "./dist/SourceOrigin.d.ts",
       "import": "./dist/SourceOrigin.js"
