@@ -556,11 +556,14 @@ export function lowerExpressionInner(
         if (lowered === undefined || loweredType?._tag !== 'CallableValue') return false
         callable = lowered.result
         callableType = loweredType.type
+        // A realized environment names its hidden instance by its type arguments plus the
+        // identities of the callables it captured, exactly as its construction registered it.
         typeArguments =
-          loweredType.environment?.callable.typeArguments ??
-          loweredType.storage?.realization.targetArguments ??
-          loweredType.typeArguments ??
-          Object.freeze([])
+          loweredType.environment === undefined
+            ? (loweredType.storage?.realization.targetArguments ??
+              loweredType.typeArguments ??
+              Object.freeze([]))
+            : Object.freeze([...Layout.callableTargetArguments(loweredType.environment)])
         return true
       }
       const lowered =
