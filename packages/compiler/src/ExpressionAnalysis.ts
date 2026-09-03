@@ -1966,7 +1966,9 @@ export const analyzePattern = (
   if (node.kind === 'BindingPattern') {
     // `Member name` binds the entire member payload: no field destructuring, nothing omitted.
     const bindingTargetSyntax =
-      SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
+      SyntaxTree.directNode(node, 'AppliedType') ??
+      SyntaxTree.directNode(node, 'FixedArrayType') ??
+      childNode(node, 'TypePath')
     const bindingTarget = resolvePatternType(source, bindingTargetSyntax, resolution, declaration)
     const bindingDiagnostics: Array<Diagnostic.Diagnostic> = [...bindingTarget.diagnostics]
     const member = bindingTarget.type

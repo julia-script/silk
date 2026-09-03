@@ -92,6 +92,18 @@ export const lowerBuiltinExpression = (
   }
   const argumentLocals = lowerBuiltinArguments(fn, expression, intrinsic)
   if (argumentLocals === undefined) return undefined
+  return lowerBuiltinOperation(fn, expression, argumentLocals)
+}
+
+/**
+ * Lowers one builtin operation over already-lowered operands. Kept apart from the operand walk so
+ * the recursion through nested operands only stacks the small dispatch frames, not this one.
+ */
+const lowerBuiltinOperation = (
+  fn: FunctionLowering,
+  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
+  argumentLocals: ReadonlyArray<Mir.LocalId>,
+): LoweredExpression | undefined => {
   const finishBuiltin = (result: Mir.LocalId): { readonly result: Mir.LocalId } => {
     const slot = argumentLocals.at(0)
     let inherited: ReadonlyArray<Hir.BorrowId> = []

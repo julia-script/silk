@@ -8489,56 +8489,66 @@ const emitBody = (
     }
   }
 
+  // Sequential regions (a forward chain, a conditional's or loop's following region) are walked
+  // in a loop: a straight-line function is one region per statement, and that length must not
+  // become JavaScript stack depth. Only nested blocks recurse.
   const emitRegion = (
-    id: Mir.RegionId,
+    start: Mir.RegionId,
     labels: ReadonlyArray<Label>,
     stop?: Mir.RegionId,
   ): ReadonlyArray<Instr.Instr> => {
-    if (stop?.ordinal === id.ordinal) return []
-    const region = regions.get(id.ordinal)
-    if (region === undefined)
-      throw new RangeError(`Wasm backend reached missing region r${id.ordinal}`)
-    if (region._tag === 'OperationRegion' || region._tag === 'CleanupRegion') {
-      const operations = region._tag === 'OperationRegion' ? region.operations : region.releases
-      return [
-        ...operations.flatMap((operation) => emitOperation(operation, context, suspensionContext)),
-        ...emitOutcome(region.outcome, labels, stop),
-      ]
-    }
-    if (region._tag === 'ConditionalRegion') {
-      const innerLabels = Object.freeze([{ _tag: 'If' as const }, ...labels])
-      return [
-        Instr.localGet(scalar(region.condition)),
-        Instr.ifElse(
-          Instr.emptyBlockType,
-          emitRegion(region.taken, innerLabels, region.following),
-          emitRegion(region.otherwise, innerLabels, region.following),
+    const output: Array<Instr.Instr> = []
+    let id: Mir.RegionId | undefined = start
+    while (id !== undefined && stop?.ordinal !== id.ordinal) {
+      const region = regions.get(id.ordinal)
+      if (region === undefined)
+        throw new RangeError(`Wasm backend reached missing region r${id.ordinal}`)
+      if (region._tag === 'OperationRegion' || region._tag === 'CleanupRegion') {
+        const operations = region._tag === 'OperationRegion' ? region.operations : region.releases
+        for (const operation of operations)
+          output.push(...emitOperation(operation, context, suspensionContext))
+        if (region.outcome._tag === 'Forward') {
+          id = region.outcome.target
+          continue
+        }
+        output.push(...emitOutcome(region.outcome, labels, stop))
+        return output
+      }
+      if (region._tag === 'ConditionalRegion') {
+        const innerLabels = Object.freeze([{ _tag: 'If' as const }, ...labels])
+        output.push(
+          Instr.localGet(scalar(region.condition)),
+          Instr.ifElse(
+            Instr.emptyBlockType,
+            emitRegion(region.taken, innerLabels, region.following),
+            emitRegion(region.otherwise, innerLabels, region.following),
+          ),
+        )
+        id = region.following
+        continue
+      }
+      const condition = regions.get(region.condition.ordinal)
+      if (condition?._tag !== 'OperationRegion' || condition.outcome._tag !== 'Yield') {
+        throw new RangeError('Wasm loop condition is not one yielding operation region')
+      }
+      const loopLabels: ReadonlyArray<Label> = Object.freeze([
+        { _tag: 'Repeat', loop: region.loop.ordinal },
+        { _tag: 'Exit', loop: region.loop.ordinal },
+        ...labels,
+      ])
+      const loopBody = [
+        ...condition.operations.flatMap((operation) =>
+          emitOperation(operation, context, suspensionContext),
         ),
-        ...(region.following === undefined ? [] : emitRegion(region.following, labels, stop)),
+        Instr.localGet(scalar(region.conditionValue)),
+        Instr.op('i32.eqz'),
+        Instr.brIf(branchDepth(loopLabels, 'Exit', region.loop.ordinal)),
+        ...emitRegion(region.body, loopLabels),
       ]
+      output.push(Instr.block(Instr.emptyBlockType, [Instr.loop(Instr.emptyBlockType, loopBody)]))
+      id = region.following
     }
-    const condition = regions.get(region.condition.ordinal)
-    if (condition?._tag !== 'OperationRegion' || condition.outcome._tag !== 'Yield') {
-      throw new RangeError('Wasm loop condition is not one yielding operation region')
-    }
-    const loopLabels: ReadonlyArray<Label> = Object.freeze([
-      { _tag: 'Repeat', loop: region.loop.ordinal },
-      { _tag: 'Exit', loop: region.loop.ordinal },
-      ...labels,
-    ])
-    const loopBody = [
-      ...condition.operations.flatMap((operation) =>
-        emitOperation(operation, context, suspensionContext),
-      ),
-      Instr.localGet(scalar(region.conditionValue)),
-      Instr.op('i32.eqz'),
-      Instr.brIf(branchDepth(loopLabels, 'Exit', region.loop.ordinal)),
-      ...emitRegion(region.body, loopLabels),
-    ]
-    return [
-      Instr.block(Instr.emptyBlockType, [Instr.loop(Instr.emptyBlockType, loopBody)]),
-      ...emitRegion(region.following, labels, stop),
-    ]
+    return output
   }
 
   const resumeDispatch = (): ReadonlyArray<Instr.Instr> => {

@@ -1886,9 +1886,12 @@ export const analyzeFunctionItem = (
   )
   // A foreign function is callable only; the call path discards this item and resolves the
   // declaration directly, so the diagnostic survives exactly at first-class uses.
-  const foreign = foreignFirstClassDiagnostic(reference, node)
+  // A static function has no runtime function item either (STATIC-001).
+  const firstClass =
+    foreignFirstClassDiagnostic(reference, node) ??
+    staticFirstClassDiagnostic(reference, node, resolution)
   const type =
-    callable === undefined || foreign !== undefined
+    callable === undefined || firstClass !== undefined
       ? unavailableExpressionType
       : availableExpressionType(callable)
   return Object.freeze({
@@ -1900,10 +1903,24 @@ export const analyzeFunctionItem = (
       type,
       syntax: node,
     }),
-    diagnostics: Object.freeze(foreign === undefined ? [] : [foreign]),
-    type: foreign === undefined ? callable : undefined,
+    diagnostics: Object.freeze(firstClass === undefined ? [] : [firstClass]),
+    type: firstClass === undefined ? callable : undefined,
   })
 }
+
+const staticFirstClassDiagnostic = (
+  reference: CallReferenceFact,
+  node: SyntaxTree.Node,
+  resolution: ResolutionContext,
+): Diagnostic.Diagnostic | undefined =>
+  reference._tag === 'Resolved' && reference.declaration.phase === 'Static'
+    ? Diagnostic.staticPhaseViolation(
+        `static function ${reference.spelling} as a runtime callable`,
+        resolution.staticContext?.environment.target ?? 'unselected-target',
+        Object.freeze([]),
+        node.span,
+      )
+    : undefined
 
 const foreignFirstClassDiagnostic = (
   reference: CallReferenceFact,

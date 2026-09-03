@@ -216,6 +216,7 @@ export type Entry =
         | 'InvalidOrdinaryEntryResult'
         | 'InvalidEffectEntryResult'
         | 'EffectEntryRequirements'
+        | 'UnavailableEntryBody'
         | 'InvalidSource'
       readonly requirements?: ReadonlyArray<Type.Requirement>
     }

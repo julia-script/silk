@@ -421,6 +421,8 @@ export const exportSuspendsCode = 'SEM0201' as const
 export const ambiguousSuppliedOperationCode = 'SEM0202' as const
 /** Stable code for naming a conformance-supplied receiver operation as a value instead of calling it. */
 export const suppliedOperationValueCode = 'SEM0203' as const
+/** Stable code for a root `main` whose declaration shape is not a valid program entry. */
+export const invalidEntryShapeCode = 'SEM0204' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -668,6 +670,7 @@ export type Code =
   | typeof exportSuspendsCode
   | typeof ambiguousSuppliedOperationCode
   | typeof suppliedOperationValueCode
+  | typeof invalidEntryShapeCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -1386,6 +1389,7 @@ export type Reason =
       readonly receiver: string
       readonly member: string
     }
+  | { readonly _tag: 'InvalidEntryShape'; readonly detail: string }
   | {
       readonly _tag: 'AmbiguousSuppliedOperation'
       readonly receiver: string
@@ -2755,6 +2759,17 @@ export const suppliedOperationValue = (
     severity: 'error',
     message: `${member} is supplied to ${receiver} by an interface and must be called; it has no value form`,
     reason: Object.freeze({ _tag: 'SuppliedOperationValue', receiver, member }),
+    span,
+  })
+
+export const invalidEntryShape = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidEntryShapeCode,
+    severity: 'error',
+    message: `Entry \`main\` ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidEntryShape', detail }),
     span,
   })
 

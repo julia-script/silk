@@ -215,7 +215,15 @@ export const hasCompleteAppliedPostfix = (
       token.kind !== 'At' &&
       token.kind !== 'MutKeyword' &&
       token.kind !== 'Star' &&
-      token.kind !== 'ConstKeyword'
+      token.kind !== 'ConstKeyword' &&
+      // Callable contracts as type arguments: `fn(i32) -> i32`, `once fn() -> A`,
+      // `effect fn() -> A ! E ? &R`.
+      token.kind !== 'FnKeyword' &&
+      token.kind !== 'OnceKeyword' &&
+      token.kind !== 'EffectKeyword' &&
+      token.kind !== 'Arrow' &&
+      token.kind !== 'Bang' &&
+      token.kind !== 'Question'
     )
       return false
     index += 1
@@ -566,9 +574,20 @@ export const primaryKind = (
 
 export const remainingRightParentheses = (state: State): number => {
   let count = 0
+  // Braces opened inside the scan belong to struct or record literals in argument position, so
+  // their closing brace does not end the enclosing block.
+  let braceDepth = 0
   for (let index = state.index; index < state.lexical.tokens.length; index += 1) {
     const token = state.lexical.tokens.at(index)
     if (token === undefined) break
+    if (token.kind === 'LeftBrace') {
+      braceDepth += 1
+      continue
+    }
+    if (token.kind === 'RightBrace' && braceDepth > 0) {
+      braceDepth -= 1
+      continue
+    }
     let followingIndex = index + 1
     let following = state.lexical.tokens.at(followingIndex)
     while (following !== undefined && isTrivia(following.kind)) {
@@ -878,7 +897,7 @@ export function parseStructLiteralExpression(
     const field = expect(state, 'Identifier', ['Colon', ...expressionStarts, 'RightBrace'])
     const colon = expect(field.state, 'Colon', [...expressionStarts, 'Comma', 'RightBrace'])
     const value = parseChildExpression(colon.state, depth, true, (childDepth) =>
-      parseExpression(colon.state, reservedForEnclosingCalls, 'Identifier', true, childDepth),
+      parseExpression(colon.state, 0, 'Identifier', true, childDepth),
     )
     const initializer = syntaxNode(value.state, 'StructFieldInitializer', [
       ...field.elements,
@@ -927,7 +946,7 @@ export function parseContextualRecordLiteralExpression(
     const field = expect(state, 'Identifier', ['Colon', ...expressionStarts, 'RightBrace'])
     const colon = expect(field.state, 'Colon', [...expressionStarts, 'Comma', 'RightBrace'])
     const value = parseChildExpression(colon.state, depth, true, (childDepth) =>
-      parseExpression(colon.state, reservedForEnclosingCalls, 'Identifier', true, childDepth),
+      parseExpression(colon.state, 0, 'Identifier', true, childDepth),
     )
     children = Object.freeze([
       ...children,
@@ -1010,7 +1029,7 @@ export function parseAppliedMemberExpression(
     const field = expect(state, 'Identifier', ['Colon', ...expressionStarts, 'RightBrace'])
     const colon = expect(field.state, 'Colon', [...expressionStarts, 'Comma', 'RightBrace'])
     const value = parseChildExpression(colon.state, depth, true, (childDepth) =>
-      parseExpression(colon.state, reservedForEnclosingCalls, 'Identifier', true, childDepth),
+      parseExpression(colon.state, 0, 'Identifier', true, childDepth),
     )
     children = Object.freeze([
       ...children,
@@ -1175,6 +1194,32 @@ export const isNominalPatternStart = (state: State): boolean => {
   return following === 'Dot' && peek(state, 3) === 'LeftBrace'
 }
 
+/**
+ * True for `[element; count] name`: a complete fixed-array type followed by its whole-value
+ * binding (PATT-016, PATT-018). Any other `[` in pattern position stays a damaged pattern.
+ */
+const isFixedArrayBindingPatternStart = (state: State): boolean => {
+  let index = state.index
+  let depth = 0
+  for (; index < state.lexical.tokens.length; index += 1) {
+    const token = state.lexical.tokens.at(index)
+    if (token === undefined || token.kind === 'EndOfFile') return false
+    if (token.kind === 'LeftBracket') depth += 1
+    else if (token.kind === 'RightBracket') {
+      depth -= 1
+      if (depth === 0) break
+    } else if (token.kind === 'FatArrow' || token.kind === 'Equals' || token.kind === 'LeftBrace')
+      return false
+  }
+  index += 1
+  let token = state.lexical.tokens.at(index)
+  while (token !== undefined && isTrivia(token.kind)) {
+    index += 1
+    token = state.lexical.tokens.at(index)
+  }
+  return token?.kind === 'Identifier'
+}
+
 export const isEnumMemberPatternStart = (state: State): boolean => {
   if (
     nextSignificantKind(state) !== 'Identifier' ||
@@ -1274,7 +1319,7 @@ export function parsePattern(
     return parseIntegerPattern(initial)
   const nonNominalTypePrimary =
     kind === 'Ampersand' ||
-    kind === 'LeftBracket' ||
+    (kind === 'LeftBracket' && !isFixedArrayBindingPatternStart(initial)) ||
     kind === 'LeftParenthesis' ||
     kind === 'FnKeyword' ||
     kind === 'UnsafeKeyword' ||
@@ -1820,11 +1865,29 @@ export function parsePrimaryExpression(
   return parseIntegerLiteralExpression(initial)
 }
 
+/** True when a line break separates the parser position from the next significant token. */
+const lineBreakBefore = (state: State): boolean => {
+  for (let index = state.index; index < state.lexical.tokens.length; index += 1) {
+    const token = state.lexical.tokens.at(index)
+    if (token === undefined || !isTrivia(token.kind)) return false
+    if (
+      token.kind === 'Whitespace' &&
+      Option.exists(SourceFile.spelling(state.lexical.source, token.span), (text) =>
+        text.includes('\n'),
+      )
+    )
+      return true
+  }
+  return false
+}
+
 export function parseProjectionChain(initial: NodeResult, depth: number): NodeResult {
   let result = initial
   while (
     nextSignificantKind(result.state) === 'Dot' ||
-    nextSignificantKind(result.state) === 'LeftBracket' ||
+    // An index projection stays on the line of its subject: a `[` opening the next line starts a
+    // new construct, such as a fixed-array type pattern in the next match arm.
+    (nextSignificantKind(result.state) === 'LeftBracket' && !lineBreakBefore(result.state)) ||
     nextSignificantKind(result.state) === 'LeftParenthesis' ||
     (result.node.kind === 'AppliedMemberExpression' &&
       hasCompleteAppliedMemberCallSuffix(result.state))
@@ -1976,6 +2039,9 @@ export function parseInfixExpression(
     depth,
   )
   let nonAssociativePrecedence: number | undefined
+  // Each iteration nests the accumulated left operand one edge deeper, so the chain length counts
+  // toward the EXPR-006 budget exactly as an explicitly nested tree would.
+  let chainDepth = depth
 
   for (;;) {
     const kind = nextSignificantKind(left.state)
@@ -1985,15 +2051,19 @@ export function parseInfixExpression(
     if (info.associativity === 'None' && nonAssociativePrecedence === info.precedence) break
 
     const operator = expect(left.state, kind, [...expressionStarts, ...expressionFollowing])
-    const right = parseChildExpression(operator.state, depth, allowStructLiteral, (childDepth) =>
-      parseInfixExpression(
-        operator.state,
-        reservedForEnclosingCalls,
-        recoveryKind,
-        info.precedence + 1,
-        allowStructLiteral,
-        childDepth,
-      ),
+    const right = parseChildExpression(
+      operator.state,
+      chainDepth,
+      allowStructLiteral,
+      (childDepth) =>
+        parseInfixExpression(
+          operator.state,
+          reservedForEnclosingCalls,
+          recoveryKind,
+          info.precedence + 1,
+          allowStructLiteral,
+          childDepth,
+        ),
     )
     left = Object.freeze({
       state: right.state,
@@ -2003,6 +2073,8 @@ export function parseInfixExpression(
         right.node,
       ]),
     })
+    if (right.node.kind === 'Error') break
+    chainDepth = ExpressionNesting.child(chainDepth)
     if (info.associativity === 'None') nonAssociativePrecedence = info.precedence
   }
 
@@ -2024,9 +2096,10 @@ export function parseExpression(
     allowStructLiteral,
     depth,
   )
+  let chainDepth = depth
   while (nextSignificantKind(left.state) === 'PipeGreater') {
     const pipe = expect(left.state, 'PipeGreater', [...expressionStarts, ...expressionFollowing])
-    const target = parseChildExpression(pipe.state, depth, allowStructLiteral, (childDepth) =>
+    const target = parseChildExpression(pipe.state, chainDepth, allowStructLiteral, (childDepth) =>
       parseInfixExpression(
         pipe.state,
         reservedForEnclosingCalls,
@@ -2044,6 +2117,8 @@ export function parseExpression(
         target.node,
       ]),
     })
+    if (target.node.kind === 'Error') break
+    chainDepth = ExpressionNesting.child(chainDepth)
   }
   return left
 }

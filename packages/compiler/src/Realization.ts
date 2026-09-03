@@ -32,7 +32,60 @@ const instanceViolationDiagnostics = (
     InstanceDiagnostics.storedEffectViolations(discovery, self.index),
     ExecutableProperty.violationDiagnostics(discovery, self.index),
     ...(entryDiagnostic === undefined ? [] : [[entryDiagnostic]]),
+    entryShapeDiagnostics(self, discovery),
   )
+}
+
+/**
+ * ENTRY-001/002/004/005: a root `main` whose declared shape cannot be an entry is reported at its
+ * declaration. An absent or untyped `main` stays a discovery reason: the first has no declaration
+ * to point at and the second already carries the ordinary missing-result diagnostic.
+ */
+const entryShapeDiagnostics = (
+  self: Frontend,
+  discovery: Instances.Discovery,
+): ReadonlyArray<Diagnostic.Diagnostic> => {
+  if (discovery.entry._tag !== 'Unavailable') return Object.freeze([])
+  const root = self.results.get(discovery.rootModule)
+  if (root === undefined) return Object.freeze([])
+  const lookup = Elaboration.declarationByName(root, 'main')
+  if (lookup._tag === 'Missing') return Object.freeze([])
+  const declarations = lookup._tag === 'Resolved' ? [lookup.declaration] : lookup.declarations
+  const detail = entryShapeDetail(discovery.entry)
+  if (detail === undefined) return Object.freeze([])
+  return Object.freeze(
+    declarations.map((declaration) =>
+      Diagnostic.invalidEntryShape(detail, declaration.syntax.span),
+    ),
+  )
+}
+
+const entryShapeDetail = (
+  entry: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>,
+): string | undefined => {
+  switch (entry.reason) {
+    case 'AmbiguousEntry':
+      return 'is declared more than once in the root module'
+    case 'StaticEntry':
+      return 'must be a runtime function'
+    case 'GenericEntry':
+      return 'must not declare type parameters'
+    case 'ParameterizedEntry':
+      return 'must take no parameters'
+    case 'PrivateEntry':
+      return 'must be declared `pub`'
+    case 'InvalidOrdinaryEntryResult':
+      return 'must explicitly return `()` or `i32` when it is an ordinary function'
+    case 'InvalidEffectEntryResult':
+      return 'must succeed with `()` when it is an effect function'
+    case 'EffectEntryRequirements':
+      return `has unresolved requirements: ${(entry.requirements ?? []).map((requirement) => Type.encodeRequirement(requirement)).join(', ')}`
+    case 'MissingEntry':
+    case 'UntypedEntry':
+    case 'UnavailableEntryBody':
+    case 'InvalidSource':
+      return undefined
+  }
 }
 
 function discoverAndLower(
@@ -355,6 +408,7 @@ import * as Backend from './Backend.js'
 import * as BackendRegistry from './BackendRegistry.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as Elaboration from './Elaboration.js'
 import * as ExecutableProperty from './ExecutableProperty.js'
 import * as ExecutionBoundary from './ExecutionBoundary.js'
 import * as ForeignAvailability from './ForeignAvailability.js'
@@ -373,7 +427,7 @@ import * as ProvisionalMir from './ProvisionalMir.js'
 import * as SuspensionMir from './SuspensionMir.js'
 import * as SuspensionOwnership from './SuspensionOwnership.js'
 import * as Target from './Target.js'
-import type * as Type from './Type.js'
+import * as Type from './Type.js'
 
 const normalizeMir = (
   program: Mir.Module,

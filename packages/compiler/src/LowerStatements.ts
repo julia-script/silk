@@ -243,37 +243,57 @@ export const lowerSequence = (
   armExit?: Ownership.ExitPlan,
 ): Mir.RegionId | undefined => {
   const id = reserved ?? fn.reserve()
-  const [statement, ...rest] = statements
-  if (statement === undefined) {
-    const [, releases] = fn.capture(() => emitReleases(fn, armExit))
-    if (releases.length > 0) {
-      fn.publish(
-        Object.freeze({
-          _tag: 'CleanupRegion',
-          id,
-          ...ownerFields(ownerLoop),
-          releases: Object.freeze(
-            releases.flatMap((operation) =>
-              operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
-            ),
-          ),
-          outcome: terminal,
-        }),
-      )
-    } else {
-      fn.publish(
-        Object.freeze({
-          _tag: 'OperationRegion',
-          id,
-          ...ownerFields(ownerLoop),
-          operations: Object.freeze([]),
-          outcome: terminal,
-        }),
-      )
-    }
-    return id
+  // Iterative: a sequence is as long as the author wrote it, so its length must not become
+  // JavaScript stack depth. Only nested blocks recurse.
+  let region = id
+  for (const statement of statements) {
+    const following = lowerStatement(fn, statement, exits, ownerLoop, terminal, region)
+    if (following === undefined) return undefined
+    if (following === 'Terminated') return id
+    region = following
   }
+  const [, releases] = fn.capture(() => emitReleases(fn, armExit))
+  if (releases.length > 0) {
+    fn.publish(
+      Object.freeze({
+        _tag: 'CleanupRegion',
+        id: region,
+        ...ownerFields(ownerLoop),
+        releases: Object.freeze(
+          releases.flatMap((operation) =>
+            operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
+          ),
+        ),
+        outcome: terminal,
+      }),
+    )
+  } else {
+    fn.publish(
+      Object.freeze({
+        _tag: 'OperationRegion',
+        id: region,
+        ...ownerFields(ownerLoop),
+        operations: Object.freeze([]),
+        outcome: terminal,
+      }),
+    )
+  }
+  return id
+}
 
+/**
+ * Lowers one statement into the region `id`. Returns the reserved region the next statement
+ * continues into, `'Terminated'` when the statement ends its sequence, or `undefined` when the
+ * statement cannot be lowered.
+ */
+const lowerStatement = (
+  fn: FunctionLowering,
+  statement: Hir.Statement,
+  exits: ExitIndex,
+  ownerLoop: Mir.LoopId | undefined,
+  terminal: Mir.Outcome,
+  id: Mir.RegionId,
+): Mir.RegionId | 'Terminated' | undefined => {
   if (statement._tag === 'UnavailableStatement') {
     fn.publish(
       Object.freeze({
@@ -288,7 +308,7 @@ export const lowerSequence = (
         }),
       }),
     )
-    return id
+    return 'Terminated'
   }
 
   if (statement._tag === 'Bind') {
@@ -319,9 +339,7 @@ export const lowerSequence = (
           }),
         }),
       )
-      return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
-        ? undefined
-        : id
+      return following
     }
     const staticCallable = callableRecipe(fn, statement.initializer)
     const staticCallableType =
@@ -354,9 +372,7 @@ export const lowerSequence = (
           }),
         }),
       )
-      return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
-        ? undefined
-        : id
+      return following
     }
     const forwardedRequirement = inlineForwardedRequirement(fn, statement.initializer)
     const forwardedResultEffect =
@@ -424,9 +440,7 @@ export const lowerSequence = (
           }),
         }),
       )
-      return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
-        ? undefined
-        : id
+      return following
     }
     const [initializer, operations] = fn.capture(() => {
       const lowered = lowerExpression(fn, statement.initializer)
@@ -468,9 +482,7 @@ export const lowerSequence = (
         }),
       }),
     )
-    return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
-      ? undefined
-      : id
+    return following
   }
 
   if (statement._tag === 'PatternBind') {
@@ -492,9 +504,7 @@ export const lowerSequence = (
         }),
       }),
     )
-    return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
-      ? undefined
-      : id
+    return following
   }
 
   if (statement._tag === 'Evaluate') {
@@ -514,9 +524,7 @@ export const lowerSequence = (
         }),
       }),
     )
-    return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
-      ? undefined
-      : id
+    return following
   }
 
   if (statement._tag === 'Write') {
@@ -581,9 +589,7 @@ export const lowerSequence = (
         }),
       }),
     )
-    return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
-      ? undefined
-      : id
+    return following
   }
 
   if (statement._tag === 'Drop') {
@@ -613,9 +619,7 @@ export const lowerSequence = (
           }),
         }),
       )
-      return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
-        ? undefined
-        : id
+      return following
     }
     const [lowered, operations] = fn.capture(() => lowerExpression(fn, statement.expression))
     if (lowered === undefined) return undefined
@@ -710,9 +714,7 @@ export const lowerSequence = (
         }),
       }),
     )
-    return lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
-      ? undefined
-      : id
+    return following
   }
 
   if (statement._tag === 'Unsafe') {
@@ -745,11 +747,10 @@ export const lowerSequence = (
         forward,
         body,
         exits.scopeEnds.get(spanKey(statement.span)),
-      ) === undefined ||
-      lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined
+      ) === undefined
     )
       return undefined
-    return id
+    return following
   }
 
   if (statement._tag === 'If' || statement._tag === 'IfLet') {
@@ -896,9 +897,7 @@ export const lowerSequence = (
           }),
         )
       }
-    if (lowerSequence(fn, rest, exits, ownerLoop, terminal, following, armExit) === undefined)
-      return undefined
-    return id
+    return following
   }
 
   if (statement._tag === 'While') {
@@ -1045,9 +1044,7 @@ export const lowerSequence = (
         }),
       )
     }
-    if (lowerSequence(fn, rest, exits, ownerLoop, terminal, continuation, armExit) === undefined)
-      return undefined
-    return id
+    return continuation
   }
 
   if (statement._tag === 'Break' || statement._tag === 'Continue') {
@@ -1099,7 +1096,7 @@ export const lowerSequence = (
         }),
       )
     }
-    return id
+    return 'Terminated'
   }
 
   if (statement._tag === 'Fail') {
@@ -1118,7 +1115,7 @@ export const lowerSequence = (
           }),
         }),
       )
-      return id
+      return 'Terminated'
     }
     const [failedValue, operations] = fn.capture(() => {
       const failed = lowerExpression(fn, statement.expression)
@@ -1212,7 +1209,7 @@ export const lowerSequence = (
         }),
       )
     }
-    return id
+    return 'Terminated'
   }
 
   const [returnedValue, operations] = fn.capture(() => {
@@ -1282,5 +1279,5 @@ export const lowerSequence = (
       }),
     )
   }
-  return id
+  return 'Terminated'
 }
