@@ -1685,6 +1685,46 @@ const wholeDocument = (text: string) => ({
   end: positionAt(text, text.length),
 })
 
+it.effect('warns on an unused authored import binding and removes only its selector', () =>
+  Effect.gen(function* () {
+    const source =
+      'import geometry { area, perimeter as boundary }\npub fn main() -> i32 { return area(1, 2) }'
+    const { document, snapshot } = yield* openProject(
+      [
+        {
+          module: 'geometry',
+          text: 'pub fn area(width: i32, height: i32) -> i32 { return width * height }\npub fn perimeter(width: i32, height: i32) -> i32 { return width + height }',
+        },
+        { module: 'main', text: source },
+      ],
+      'main',
+    )
+    const warning = Document.diagnostics(document, snapshot, uriOfModule).find(
+      (diagnostic) => diagnostic.code === 'LSP0004',
+    )
+    assert.deepEqual(warning?.range, {
+      start: positionOf(source, 'boundary'),
+      end: positionAt(source, source.indexOf('boundary') + 'boundary'.length),
+    })
+    const action = Document.codeActions(
+      document,
+      snapshot,
+      wholeDocument(source),
+      uriOfModule,
+    ).find((candidate) => candidate.diagnostics?.[0]?.code === 'LSP0004')
+    assert.strictEqual(action?.title, 'Remove unused import')
+    assert.deepEqual(action?.edit?.changes?.[uriOfModule('main')], [
+      {
+        range: {
+          start: positionAt(source, source.indexOf(', perimeter')),
+          end: positionAt(source, source.indexOf(' }')),
+        },
+        newText: '',
+      },
+    ])
+  }),
+)
+
 const redundantAlias =
   'import geometry as geometry\npub fn main() -> i32 { return geometry.area(1, 2) }'
 

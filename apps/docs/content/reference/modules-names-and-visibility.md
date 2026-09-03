@@ -893,3 +893,15 @@ imports, and owns optional redundancy warnings and consolidation actions. Reposi
 fixtures, tests, and generated documentation use the same explicit-import model.
 
 Re-exports remain deferred: `pub import` is unsupported and ordinary imports are not exported.
+
+## Unused import tooling
+
+The language server reports `LSP0004` on each valid namespace or selected-member import binding that
+has no semantic use in its module. Aliases are tracked as authored bindings, so using one alias does
+not make another alias used. Import declarations, comments, and matching text are not uses.
+
+The **Remove unused import** quick fix removes only the selector and its owned delimiter, or removes
+the whole declaration when it is the final binding. The fix is omitted when comment or trivia
+ownership is ambiguous. Plans are tied to the analyzed source snapshot and are not applied at stale
+offsets. This is a tooling warning: it does not affect compiler diagnostics, lowering, code
+generation, or command success. Imports themselves have no runtime behavior.

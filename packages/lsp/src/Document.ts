@@ -303,7 +303,41 @@ export const diagnostics = (
 ): ReadonlyArray<LspDiagnostic> => [
   ...compilerDiagnostics(self, snapshot, uriOf),
   ...importRedundancies(self, snapshot).map((entry) => entry.diagnostic),
+  ...unusedImportWarnings(self, snapshot).map((entry) => entry.diagnostic),
 ]
+
+interface UnusedImportWarning {
+  readonly diagnostic: LspDiagnostic
+  readonly change?: SourceAction.ChangePlan
+}
+
+const unusedImportWarnings = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+): ReadonlyArray<UnusedImportWarning> => {
+  const redundancies = importRedundancies(self, snapshot)
+  if (redundancies.some((entry) => entry.diagnostic.code !== 'LSP0002')) return []
+  return Analysis.unusedImports(snapshot, self.module).flatMap((binding) => {
+    const declarationRange = LineIndex.rangeOf(self.index, binding.declarationSpan)
+    const ownedElsewhere = redundancies.some(
+      (entry) =>
+        entry.diagnostic.code !== 'LSP0002' && overlaps(entry.diagnostic.range, declarationRange),
+    )
+    if (ownedElsewhere) return []
+    return [
+      Object.freeze({
+        diagnostic: {
+          range: LineIndex.rangeOf(self.index, binding.span),
+          severity: DiagnosticSeverity.Warning,
+          code: 'LSP0004',
+          source: 'silk-lsp',
+          message: `Imported binding '${binding.spelling}' is never used`,
+        },
+        ...(binding.change === undefined ? {} : { change: binding.change }),
+      }),
+    ]
+  })
+}
 
 /** Tests whether two protocol ranges share at least one position. */
 const overlaps = (left: Range, right: Range): boolean =>
@@ -609,7 +643,23 @@ export const codeActions = (
           ]
         : [],
   )
-  return [...compiler, ...redundancy]
+  const unused = unusedImportWarnings(self, snapshot).flatMap(
+    (entry): ReadonlyArray<CodeAction> => {
+      if (!overlaps(entry.diagnostic.range, range) || entry.change === undefined) return []
+      const edit = workspaceEdit(self, snapshot, entry.change, uriOf)
+      return edit === undefined
+        ? []
+        : [
+            {
+              title: 'Remove unused import',
+              kind: CodeActionKind.QuickFix,
+              diagnostics: [entry.diagnostic],
+              edit,
+            },
+          ]
+    },
+  )
+  return [...compiler, ...redundancy, ...unused]
 }
 
 export const disableCodeAction = (action: CodeAction, reason: string): CodeAction => {

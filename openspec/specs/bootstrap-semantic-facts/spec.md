@@ -1423,3 +1423,13 @@ identity. A failed projection SHALL retain an explicit failed fact instead of fa
 - **WHEN** `value.*` is analyzed and `value` is not reference-typed
 - **THEN** analysis reports the dedicated invalid-referent diagnostic
 - **AND** the projection fact is unavailable
+# Delta: semantic facts
+
+## ADDED Requirements
+
+### Requirement: Authored import binding use
+The frontend SHALL classify each valid effective namespace and selected-member import by authored local binding identity. Import syntax, comments, and spelling alone SHALL NOT count as semantic use; aliases of one canonical declaration and shadowed locals SHALL remain independent.
+
+#### Scenario: Alias is unused
+- **WHEN** one canonical declaration is imported under two aliases and only one alias is referenced
+- **THEN** only the unreferenced authored binding is unused
