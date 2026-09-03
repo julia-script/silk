@@ -1106,10 +1106,10 @@ extern "C" struct Bad {
       })),
       [
         { code: 'SEM0185', reason: 'UnsupportedForeignAbi', text: '"system"' },
-        { code: 'SEM0204', reason: 'GenericCLayoutRecord', text: '<T>' },
-        { code: 'SEM0205', reason: 'UnsupportedCLayoutField', text: 'bool' },
-        { code: 'SEM0205', reason: 'UnsupportedCLayoutField', text: '[u8; 0]' },
-        { code: 'SEM0205', reason: 'UnsupportedCLayoutField', text: 'Ordinary' },
+        { code: 'SEM0205', reason: 'GenericCLayoutRecord', text: '<T>' },
+        { code: 'SEM0206', reason: 'UnsupportedCLayoutField', text: 'bool' },
+        { code: 'SEM0206', reason: 'UnsupportedCLayoutField', text: '[u8; 0]' },
+        { code: 'SEM0206', reason: 'UnsupportedCLayoutField', text: 'Ordinary' },
       ],
     )
     assert.strictEqual(named('Ordinary')?.layout._tag, 'Silk')
@@ -1137,7 +1137,7 @@ extern "C" struct Right { left: Left }`,
     )
     assert.deepEqual(
       index.diagnostics.map((diagnostic) => diagnostic.code),
-      ['SEM0020', 'SEM0205', 'SEM0020', 'SEM0205', 'SEM0205'],
+      ['SEM0020', 'SEM0206', 'SEM0020', 'SEM0206', 'SEM0206'],
     )
   }),
 )
@@ -1365,7 +1365,6 @@ it.effect('resolves direct generic slice parameters and rejects borrowed storage
       })),
       [
         { code: 'SEM0054', position: 'parameter' },
-        { code: 'SEM0091', position: undefined },
         { code: 'SEM0054', position: 'field' },
       ],
     )

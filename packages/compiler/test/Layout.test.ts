@@ -276,11 +276,12 @@ pub fn main() -> i32 {
           offset: field.offset,
         })),
         [
-          { access: 'Exclusive', representation: 'Borrow', offset: 0 },
-          { access: 'Take', representation: 'Value', offset: target.pointerSize },
+          // A slice capture is already a stable borrow descriptor and is stored inline.
+          { access: 'Exclusive', representation: 'Value', offset: 0 },
+          { access: 'Take', representation: 'Value', offset: target.pointerSize * 2 },
         ],
       )
-      assert.strictEqual(environment.size, target.pointerSize === 4 ? 8 : 16)
+      assert.strictEqual(environment.size, target.pointerSize === 4 ? 12 : 24)
       assert.deepEqual(environment.view, {
         codeOffset: 0,
         environmentOffset: target.pointerSize,

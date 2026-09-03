@@ -225,6 +225,8 @@ export const hirPatternSelection = (selection: PatternSelectionFact): Hir.Patter
 
 export interface LowerStatementOptions {
   readonly resultType?: SemanticType
+  /** A composite Effect representation every return site packs into (EFF-013). */
+  readonly resultRepresentation?: SemanticType
   readonly functionId?: DeclarationId
   readonly eraseIntrinsicSections?: boolean
   readonly borrowBindingInitializers?: boolean
@@ -257,32 +259,46 @@ export const lowerStatements = (
             region: statement.region,
             span: statement.syntax.span,
           })
-        if (statement._tag === 'BindStatement')
+        if (statement._tag === 'BindStatement') {
+          const binding = statement.binding
+          const initializer = (): Hir.Expression => {
+            if (
+              options.borrowBindingInitializers &&
+              binding.initializer._tag === 'Borrow' &&
+              options.functionId !== undefined
+            )
+              return hirExpression(
+                binding.initializer,
+                Object.freeze({
+                  _tag: 'BorrowId',
+                  function: options.functionId,
+                  callSpan: binding.initializer.syntax.span,
+                  ordinal: 0,
+                }),
+              )
+            // A declared union is the binding's type: the initializer injects at the boundary.
+            if (
+              binding.declaredType?._tag === 'Resolved' &&
+              Type.isUnion(binding.declaredType.type)
+            )
+              return hirExpectedExpression(
+                binding.initializer,
+                binding.declaredType.type,
+                'Binding',
+                binding.syntax.span,
+              )
+            return hirExpression(binding.initializer)
+          }
           return Object.freeze({
             _tag: 'Bind',
-            binding: statement.binding.id,
-            name:
-              statement.binding.name._tag === 'Present'
-                ? statement.binding.name.spelling
-                : undefined,
-            mutability: statement.binding.mutability,
-            initializer:
-              options.borrowBindingInitializers &&
-              statement.binding.initializer._tag === 'Borrow' &&
-              options.functionId !== undefined
-                ? hirExpression(
-                    statement.binding.initializer,
-                    Object.freeze({
-                      _tag: 'BorrowId',
-                      function: options.functionId,
-                      callSpan: statement.binding.initializer.syntax.span,
-                      ordinal: 0,
-                    }),
-                  )
-                : hirExpression(statement.binding.initializer),
+            binding: binding.id,
+            name: binding.name._tag === 'Present' ? binding.name.spelling : undefined,
+            mutability: binding.mutability,
+            initializer: initializer(),
             region: statement.region,
-            span: statement.binding.syntax.span,
+            span: binding.syntax.span,
           })
+        }
         if (statement._tag === 'PatternBindStatement')
           return Object.freeze({
             _tag: 'PatternBind',
@@ -360,7 +376,7 @@ export const lowerStatements = (
         if (statement._tag === 'ReturnStatement')
           return Object.freeze({
             _tag: 'Return',
-            expression:
+            expression: effectJoinConvert(
               options.resultType === undefined
                 ? hirExpression(statement.expression)
                 : hirExpectedExpression(
@@ -377,6 +393,9 @@ export const lowerStatements = (
                         })
                       : undefined,
                   ),
+              options.resultRepresentation,
+              statement.syntax.span,
+            ),
             region: statement.region,
             span: statement.expression.syntax.span,
           })
@@ -1276,11 +1295,30 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
           hirExpression(argument.expression, argumentBorrowId(argument, ordinal)),
         ),
       ),
-      loanEnds: loanEndsOf(fact.arguments, (ordinal) => returnedBorrowOrdinal !== ordinal),
+      // A staged application retains every argument loan inside the new environment.
+      loanEnds: loanEndsOf(
+        fact.arguments,
+        (ordinal) => fact.staged === undefined && returnedBorrowOrdinal !== ordinal,
+      ),
       heldLoans: Object.freeze([
-        ...loanEndsOf(fact.arguments, (ordinal) => returnedBorrowOrdinal === ordinal),
+        ...loanEndsOf(
+          fact.arguments,
+          (ordinal) => fact.staged !== undefined || returnedBorrowOrdinal === ordinal,
+        ),
         ...(returnedCaptureLoan === undefined ? [] : [returnedCaptureLoan]),
       ]),
+      ...(fact.staged === undefined
+        ? {}
+        : {
+            staged: Object.freeze({
+              site: fact.staged.site,
+              captures: Object.freeze(
+                fact.staged.captures.map((capture) =>
+                  Object.freeze({ ordinal: capture.ordinal, access: capture.access }),
+                ),
+              ),
+            }),
+          }),
       access: fact.mode,
       substitution: fact.substitution,
       evaluation:
@@ -1573,6 +1611,34 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     _tag: 'Unavailable',
     span: fact.syntax.span,
     ...(cause === undefined ? {} : { cause }),
+  })
+}
+
+/** Wraps one return site so it packs its Effect into the function's composite representation. */
+const effectJoinConvert = (
+  source: Hir.Expression,
+  target: SemanticType | undefined,
+  expectedAt: SourceSpan.SourceSpan,
+): Hir.Expression => {
+  if (
+    target === undefined ||
+    source._tag === 'Unavailable' ||
+    Type.isNever(source.type) ||
+    !Type.isRepresented(target)
+  )
+    return source
+  return Object.freeze({
+    _tag: 'UnionConvert',
+    source,
+    sourceType: source.type,
+    target,
+    conversion: 'EffectJoin',
+    mappings: Object.freeze([]),
+    access: 'Owned',
+    context: 'Return',
+    expectedAt,
+    type: target,
+    span: source.span,
   })
 }
 

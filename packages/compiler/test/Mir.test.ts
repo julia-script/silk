@@ -789,7 +789,7 @@ pub fn main() -> i32 {
       'aarch64-apple-darwin',
     )
     const diagnostics = Analysis.diagnostics(snapshot).filter(
-      (diagnostic) => diagnostic.code === 'SEM0206',
+      (diagnostic) => diagnostic.code === 'SEM0207',
     )
     const invalidPointer = Analysis.diagnostics(snapshot).filter(
       (diagnostic) => diagnostic.code === 'SEM0187',

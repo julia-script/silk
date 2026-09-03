@@ -221,16 +221,14 @@ const storedExecutable = (
   type: Type.Type,
   kind: 'Callable' | 'Effect',
 ): StoredExecutable | undefined => {
-  if (kind === 'Callable') {
-    const bare = DeclarationFacts.storedCallable(index, type)
-    if (bare !== undefined)
-      return Object.freeze({
-        path: bare.path,
-        contract: bare.callable,
-        represented: false,
-        open: false,
-      })
-  }
+  const bare = DeclarationFacts.storedExecutable(index, type, kind)
+  if (bare !== undefined)
+    return Object.freeze({
+      path: bare.path,
+      contract: bare.contract,
+      represented: false,
+      open: false,
+    })
   const represented = storedRepresentation(index, type, kind)
   return represented === undefined
     ? undefined
@@ -319,7 +317,10 @@ const storedExecutableViolations = (
           reported.push(key)
           const path = found.path.length === 0 ? undefined : found.path.join('.')
           const related = specializing === undefined ? undefined : expression.span
-          if (kind === 'Callable' && Type.isCallable(found.contract))
+          if (
+            (kind === 'Callable' && Type.isCallable(found.contract)) ||
+            (kind === 'Effect' && !found.represented && Type.isEffect(found.contract))
+          )
             return [
               Diagnostic.storedCallableConstruction(
                 Type.encode(aggregate),
@@ -328,6 +329,7 @@ const storedExecutableViolations = (
                 span,
                 related,
                 found.represented,
+                kind === 'Callable' ? 'callable' : 'Effect',
               ),
             ]
           if (kind === 'Effect' && Type.isEffect(found.contract))

@@ -770,10 +770,10 @@ pub fn main() -> i32 { unsafe install(silk_test_wait_v1) return 0 }`
       failure.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.reason._tag]),
       [
         ['SEM0201', 'ExportSuspends'],
-        ['SEM0206', 'InvalidForeignCallback'],
+        ['SEM0207', 'InvalidForeignCallback'],
       ],
     )
-    const callback = failure.diagnostics.find((diagnostic) => diagnostic.code === 'SEM0206')
+    const callback = failure.diagnostics.find((diagnostic) => diagnostic.code === 'SEM0207')
     assert.strictEqual(
       callback === undefined
         ? undefined

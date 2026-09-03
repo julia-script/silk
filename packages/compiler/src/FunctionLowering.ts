@@ -181,7 +181,9 @@ export class FunctionLowering {
         this.temporaryBorrowOwners.delete(borrowKey(operation.borrow))
       }
     }
-    if (operation._tag === 'MakeCallable')
+    // A staged section's captures are only the tail of its environment, so it never serves as a
+    // complete definition for the erased checked-scalar fast path.
+    if (operation._tag === 'MakeCallable' && operation.base === undefined)
       this.callableDefinitions.set(operation.destination.ordinal, operation)
     if (operation._tag === 'Move') {
       const definition = this.callableDefinitions.get(operation.source.ordinal)

@@ -78,8 +78,9 @@ const backendEmissionCacheKey = (
 }
 
 interface CachedEmissionHeader {
-  readonly schema: 3
+  readonly schema: 4
   readonly module: string
+  readonly report: Backend.Termination['report']
   readonly symbols: Backend.LlvmBitcodeArtifact['symbols']
   readonly nativeRuntimeSymbols: ReadonlyArray<string>
   readonly runtimeFeatures: Backend.LlvmBitcodeArtifact['runtimeFeatures']
@@ -91,8 +92,9 @@ interface CachedEmissionHeader {
 const encodeCachedEmission = (artifact: Backend.LlvmBitcodeArtifact): Uint8Array | undefined => {
   try {
     const header: CachedEmissionHeader = {
-      schema: 3,
+      schema: 4,
       module: artifact.module,
+      report: artifact.termination.report,
       symbols: artifact.symbols,
       nativeRuntimeSymbols: artifact.nativeRuntimeSymbols,
       runtimeFeatures: artifact.runtimeFeatures,
@@ -124,7 +126,7 @@ const decodeCachedEmission = (
     const header: CachedEmissionHeader = JSON.parse(
       new TextDecoder().decode(bytes.subarray(4, 4 + jsonLength)),
     )
-    if (header.schema !== 3) return undefined
+    if (header.schema !== 4) return undefined
     const bitcode = bytes.slice(4 + jsonLength)
     // `control` and `ir` are never read on the driver path; the cast records that this artifact
     // stays internal to the driver rather than flowing back out through Backend.emit.
@@ -134,7 +136,7 @@ const decodeCachedEmission = (
       module: header.module,
       target,
       symbols: header.symbols,
-      termination: Backend.terminationOf(program),
+      termination: Backend.terminationOf(program, header.report),
       nativeRuntimeSymbols: header.nativeRuntimeSymbols,
       runtimeFeatures: header.runtimeFeatures,
       foreignImports: header.foreignImports,

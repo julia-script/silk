@@ -106,6 +106,7 @@ import {
   analyzeFunctionBody,
   analyzeStatements,
   reachableCallableWrites,
+  returnFlowOf,
   unsafeCallDiagnostic,
 } from './StatementAnalysis.js'
 import * as StaticEvaluation from './StaticEvaluation.js'
@@ -916,6 +917,9 @@ export const analyzeMove = (
   })
 }
 
+const borrowsConstant = (subject: ExpressionFact): boolean =>
+  subject._tag === 'Grouped' ? borrowsConstant(subject.expression) : subject._tag === 'Constant'
+
 export const borrowRoot = (subject: ExpressionFact): BorrowRootFact | undefined => {
   if (subject._tag === 'Grouped') return borrowRoot(subject.expression)
   if (subject._tag === 'ReferentProjection' && subject.state._tag === 'Resolved') {
@@ -1087,6 +1091,17 @@ export const borrowSubject = (
 ): ExpressionResult => {
   const subject = subjectResult?.fact ?? unavailableExpression(node)
   const diagnostics = subjectResult?.diagnostics ?? Object.freeze([])
+  if (borrowsConstant(subject))
+    return unavailableBorrow(
+      node,
+      access,
+      subject,
+      diagnostics,
+      Diagnostic.invalidConstant(
+        'constants are immediate values and cannot be borrowed',
+        node.span,
+      ),
+    )
   const sourceType = subjectResult?.type
   const root =
     borrowRoot(subject) ??
@@ -2010,7 +2025,9 @@ export const analyzePattern = (
   if (node.kind === 'BindingPattern') {
     // `Member name` binds the entire member payload: no field destructuring, nothing omitted.
     const bindingTargetSyntax =
-      SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
+      SyntaxTree.directNode(node, 'AppliedType') ??
+      SyntaxTree.directNode(node, 'FixedArrayType') ??
+      childNode(node, 'TypePath')
     const bindingTarget = resolvePatternType(source, bindingTargetSyntax, resolution, declaration)
     const bindingDiagnostics: Array<Diagnostic.Diagnostic> = [...bindingTarget.diagnostics]
     const member = bindingTarget.type
@@ -2730,7 +2747,21 @@ export const analyzeMatch = (
       ? [Hir.executableSiteKey(arm.result.site)]
       : [],
   )
-  const erasesCallableIdentity = new Set(callableSites).size > 1
+  // Every reachable arm must construct the same exact callable: a structural callable type names
+  // a contract, not a universal representation the arms could be erased into.
+  const callableIdentities =
+    joined._tag === 'Joined' && Type.isCallable(joined.type)
+      ? arms.flatMap((arm) => {
+          const representation = arm.reachable ? representationOfExpression(arm.result) : undefined
+          return representation !== undefined &&
+            Type.isExactRepresentationArgument(representation) &&
+            Type.isCallableIdentityArgument(representation.identity)
+            ? [Type.genericArgumentKey(representation.identity)]
+            : []
+        })
+      : []
+  const erasesCallableIdentity =
+    new Set(callableSites).size > 1 || new Set(callableIdentities).size > 1
   if (erasesCallableIdentity) diagnostics.push(Diagnostic.callableIdentityErasure(node.span))
   let type: ExpressionTypeFact
   if (
@@ -6493,6 +6524,115 @@ const conformanceOperationCandidates = (
   )
 
 /**
+ * Resolves a bare qualified call `Contract.operation(...)` whose caller has no bound for the
+ * contract: the receiver operand's own type selects the conformance. A parameter-typed receiver
+ * has no bound to select through and is reported as such; a nominal receiver selects its unique
+ * proved conformance of the contract, and two applications are reported as ambiguous. A call with
+ * no receiver operand, or none the contract can read, resolves nothing here.
+ */
+const concreteContractOperationReference = (
+  contract: DeclarationFacts.ContractFact,
+  member: string,
+  memberToken: Token.Token,
+  argumentsResult: ArgumentsResult,
+  resolution: ResolutionContext,
+):
+  | {
+      readonly _tag: 'Resolved'
+      readonly reference: Extract<
+        CallReferenceFact,
+        { readonly _tag: 'ResolvedInterfaceOperation' }
+      >
+    }
+  | { readonly _tag: 'Rejected'; readonly diagnostic: Diagnostic.Diagnostic }
+  | undefined => {
+  if (contract.canonical._tag !== 'Canonical') return undefined
+  const source = contract.operationContracts.find(
+    (candidate) =>
+      candidate.declaration.name._tag === 'Present' &&
+      candidate.declaration.name.spelling === member,
+  )
+  // An ambient service operation takes its provider from the Effect environment, never from an
+  // argument, so the synthesized receiver operand selects nothing here.
+  if (source === undefined || source.operands.some((operand) => operand.parameter.id.ordinal < 0))
+    return undefined
+  const receiverOrdinal = source.operands.findIndex((operand) => {
+    if (operand.type._tag !== 'Resolved') return false
+    const type = operand.type.type
+    return Type.equals(Type.isReference(type) ? type.target : type, contract.self)
+  })
+  const receiver = receiverOrdinal < 0 ? undefined : argumentsResult.facts.at(receiverOrdinal)
+  if (receiver === undefined || receiver.type._tag !== 'Available') return undefined
+  const receiverType = Type.isReference(receiver.type.type)
+    ? receiver.type.type.target
+    : receiver.type.type
+  const contractName = contract.canonical.id.name
+  if (Type.isParameter(receiverType))
+    return Object.freeze({
+      _tag: 'Rejected',
+      diagnostic: Diagnostic.invalidConformance(
+        `${Type.encode(receiverType)} does not implement ${contractName}`,
+        memberToken.span,
+      ),
+    })
+  if (!Type.isNominal(receiverType)) return undefined
+  const canonical = contract.canonical.id
+  const supplied = ConformanceProof.implementedContracts(
+    resolution.index,
+    resolution.scope.module,
+    receiverType,
+  ).flatMap((capability) => {
+    if (capability.module !== canonical.module || capability.name !== canonical.name) return []
+    const application = DeclarationFacts.interfaceApplication(contract, capability, receiverType)
+    const operation = application?.operations.find(
+      (candidate) =>
+        candidate.declaration.name._tag === 'Present' &&
+        candidate.declaration.name.spelling === member,
+    )
+    return application?.available === true && operation !== undefined
+      ? [Object.freeze({ capability, operation })]
+      : []
+  })
+  if (supplied.length === 0)
+    return Object.freeze({
+      _tag: 'Rejected',
+      diagnostic: Diagnostic.invalidConformance(
+        `${Type.encode(receiverType)} does not implement ${contractName}`,
+        memberToken.span,
+      ),
+    })
+  if (supplied.length > 1)
+    return Object.freeze({
+      _tag: 'Rejected',
+      diagnostic: Diagnostic.ambiguousSuppliedOperation(
+        Type.encode(receiverType),
+        member,
+        supplied.map(({ capability }) => Type.encode(capability)),
+        memberToken.span,
+      ),
+    })
+  const selected = supplied.at(0)
+  const selectedContract =
+    selected === undefined ? undefined : interfaceOperationContract(selected.operation)
+  if (selected === undefined || selectedContract === undefined) return undefined
+  return Object.freeze({
+    _tag: 'Resolved',
+    reference: Object.freeze({
+      _tag: 'ResolvedInterfaceOperation' as const,
+      spelling: `${Type.encode(selected.capability)}.${member}`,
+      token: memberToken,
+      capability: selected.capability,
+      provider: receiverType,
+      operation: member,
+      declaration: selectedContract.declaration,
+      interfaceContract: selectedContract.contract,
+      parameters: selectedContract.parameters,
+      result: selectedContract.result,
+    }),
+  })
+}
+
+/**
  * Resolves the member a value-side spelling `receiver.member(...)` names, mirroring the type-side
  * `lookupAssociated`: an inherent member of a nominal receiver, the unique receiver operation among
  * a type parameter's declared bounds, or — only where the receiver's own type has no such member at
@@ -7558,6 +7698,16 @@ export const effectExpressionAccess = (
     return expression.type.type.access
   if (expression.type._tag === 'Available' && Type.isCallable(expression.type.type))
     return expression.type.type.mode
+  // An owned affine value (a fresh temporary or a call result) enters the environment by
+  // ownership whether or not the source spelled `move`, so running consumes it.
+  if (
+    expression.type._tag === 'Available' &&
+    index !== undefined &&
+    !Type.isReference(expression.type.type) &&
+    !Type.isSlice(expression.type.type) &&
+    !ConformanceProof.copyType(index, expression.type.type, assumptions)
+  )
+    return 'Take'
   return 'Shared'
 }
 
@@ -7731,12 +7881,16 @@ export const effectCaptureFacts = (
     } else {
       reference = undefined
     }
+    // A shared callable or Effect value duplicates freely (CALLABLE-002 / EFFECT-OWN-002), so a
+    // body reading one captures a copy rather than a loan on the outer binding.
     const copy =
       fact.type._tag === 'Available' &&
       !Type.containsViewBorrow(fact.type.type) &&
-      (index === undefined
-        ? typeof fact.type.type === 'string'
-        : ConformanceProof.copyType(index, fact.type.type, assumptions))
+      ((Type.isCallable(fact.type.type) && fact.type.type.mode === 'Shared') ||
+        (Type.isEffect(fact.type.type) && fact.type.type.access === 'Shared') ||
+        (index === undefined
+          ? typeof fact.type.type === 'string'
+          : ConformanceProof.copyType(index, fact.type.type, assumptions)))
     if (fact.reference._tag === 'ResolvedPattern') {
       const owner = fact.reference.binding.id.arm.match.function
       if (
@@ -7748,6 +7902,16 @@ export const effectCaptureFacts = (
       return
     }
     recordReference(reference, requested, fact.syntax.span, copy, fact)
+  }
+  const consumingAccess = (fact: ExpressionFact): EffectCaptureFact['access'] => {
+    if (fact.type._tag !== 'Available') return 'Shared'
+    const type = fact.type.type
+    if (Type.containsViewBorrow(type)) return 'Shared'
+    const copy =
+      index === undefined
+        ? typeof type === 'string'
+        : ConformanceProof.copyType(index, type, assumptions)
+    return copy ? 'Shared' : 'Take'
   }
   const expression = (
     fact: ExpressionFact,
@@ -7890,7 +8054,9 @@ export const effectCaptureFacts = (
         case 'ReturnStatement':
         case 'FailStatement':
         case 'DropStatement':
-          expression(statement.expression)
+          // An owned affine operand leaves with the outcome or is cleaned here, so its capture is
+          // consumed; a Copy value or a borrowed view is only read through its capture.
+          expression(statement.expression, consumingAccess(statement.expression))
           break
         case 'BreakStatement':
         case 'ContinueStatement':
@@ -8249,7 +8415,11 @@ const analyzeAnonymousCallable = (
       retainedDependencies: Object.freeze([]),
       typeArguments: Object.freeze(declaration.typeParameters.map((parameter) => parameter.type)),
       ...(environmentOwner === undefined ? {} : { environmentOwner }),
-      substitution: new Map(),
+      // The hidden body is generic over exactly the owner's parameters; naming each as itself
+      // lets an owner instance's substitution specialize the section like any other call site.
+      substitution: new Map(
+        declaration.typeParameters.map((parameter) => [Type.key(parameter.type), parameter.type]),
+      ),
       mode,
       type: callable === undefined ? unavailableExpressionType : availableExpressionType(callable),
       syntax: node,
@@ -8298,12 +8468,10 @@ export function analyzeExpression(
     if (analyzed === undefined) return undefined
     const invokesUnsafe = (() => {
       const fact = analyzed.fact
-      if (fact._tag === 'CallableApply')
-        return (
-          fact.callee.type._tag === 'Available' &&
-          Type.isCallable(fact.callee.type.type) &&
-          fact.callee.type.type.unsafe
-        )
+      // The resolved contract is the one the call was checked against: a bound-typed callee
+      // (`F: unsafe fn(i32) -> i32`) keeps its bound's qualifier even when a specialization later
+      // selects a safe implementation.
+      if (fact._tag === 'CallableApply') return fact.contract?.unsafe === true
       if (fact._tag !== 'Call') return false
       switch (fact.reference._tag) {
         case 'Resolved':
@@ -8395,7 +8563,10 @@ export function analyzeExpression(
       expression.type._tag === 'Available' ? [expression.type.type] : [],
     )
     let success: Type.Type | undefined
-    if (returned.length > 0 && returnedTypes.length === returned.length) {
+    // A block whose every path ends in `fail` never produces a value: its success type is `never`
+    // (EFF-007), and the recorded failures still form its failure channel.
+    if (returned.length === 0 && !returnFlowOf(statements).fallsThrough) success = 'never'
+    else if (returned.length > 0 && returnedTypes.length === returned.length) {
       const joined = Match.join(returnedTypes)
       if (joined._tag === 'Joined') success = joined.type
       else {
@@ -9070,45 +9241,12 @@ export function analyzeExpression(
         )
       }
     }
+    // A bound on the caller wins for interfaces and services alike (SERV-003): only an operation
+    // no bound supplies reaches the ambient service path.
     if (
       qualifierLookup._tag === 'Resolved' &&
-      qualifierLookup.declaration._tag === 'ServiceDeclaration'
-    ) {
-      const operation = serviceOperation(qualifierLookup.declaration, member)
-      const diagnostic =
-        operation === undefined
-          ? Diagnostic.unknownActorOperation(qualifier, member, memberToken.span)
-          : undefined
-      let reference: CallReferenceFact
-      if (operation === undefined) {
-        reference = Object.freeze({
-          _tag: 'Missing',
-          spelling: `${qualifier}.${member}`,
-          token: memberToken,
-          ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
-        })
-      } else {
-        reference = Object.freeze({
-          _tag: 'ResolvedServiceOperation',
-          spelling: `${qualifier}.${member}`,
-          token: memberToken,
-          service: qualifierLookup.declaration,
-          operation,
-        })
-      }
-      return finishDeclarationCall(
-        node,
-        reference,
-        argumentsResult,
-        callTypeArguments,
-        diagnostic,
-        declaration,
-        resolution,
-      )
-    }
-    if (
-      qualifierLookup._tag === 'Resolved' &&
-      qualifierLookup.declaration._tag === 'InterfaceDeclaration'
+      (qualifierLookup.declaration._tag === 'InterfaceDeclaration' ||
+        qualifierLookup.declaration._tag === 'ServiceDeclaration')
     ) {
       const bound = boundOperationReference(
         declaration,
@@ -9146,6 +9284,72 @@ export function analyzeExpression(
           callTypeArguments,
           resolution,
         )
+      const concrete = concreteContractOperationReference(
+        qualifierLookup.declaration,
+        member,
+        memberToken,
+        argumentsResult,
+        resolution,
+      )
+      if (concrete?._tag === 'Resolved')
+        return finishInterfaceOperationCall(
+          node,
+          concrete.reference,
+          argumentsResult,
+          callTypeArguments,
+          resolution,
+        )
+      if (concrete?._tag === 'Rejected')
+        return finishDeclarationCall(
+          node,
+          Object.freeze({
+            _tag: 'Missing',
+            spelling: `${qualifier}.${member}`,
+            token: memberToken,
+            cause: Diagnostic.identity(concrete.diagnostic),
+          }),
+          argumentsResult,
+          callTypeArguments,
+          concrete.diagnostic,
+          declaration,
+          resolution,
+        )
+    }
+    if (
+      qualifierLookup._tag === 'Resolved' &&
+      qualifierLookup.declaration._tag === 'ServiceDeclaration'
+    ) {
+      const operation = serviceOperation(qualifierLookup.declaration, member)
+      const diagnostic =
+        operation === undefined
+          ? Diagnostic.unknownActorOperation(qualifier, member, memberToken.span)
+          : undefined
+      let reference: CallReferenceFact
+      if (operation === undefined) {
+        reference = Object.freeze({
+          _tag: 'Missing',
+          spelling: `${qualifier}.${member}`,
+          token: memberToken,
+          ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
+        })
+      } else {
+        reference = Object.freeze({
+          _tag: 'ResolvedServiceOperation',
+          spelling: `${qualifier}.${member}`,
+          token: memberToken,
+          service: qualifierLookup.declaration,
+          operation,
+        })
+      }
+      return finishDeclarationCall(
+        node,
+        reference,
+        argumentsResult,
+        callTypeArguments,
+        diagnostic,
+        declaration,
+        resolution,
+      )
     }
     if (
       qualifierLookup._tag === 'Resolved' &&
@@ -9474,19 +9678,9 @@ export const finishDeclarationCall = (
                 ? callContract.fact.substitution
                 : new Map<string, Type.GenericArgument>()
             const success = Type.substitute(callable.returnType.type, substitution)
-            if (callable.functionKind !== 'Effect')
-              return Type.isEffect(success)
-                ? Type.effectWithRows(
-                    success.success,
-                    success.failureRow,
-                    effectCaptureAccess(
-                      argumentsResult.facts,
-                      resolution.index,
-                      copyAssumptionsOf(caller),
-                    ),
-                    success.requirementRow,
-                  )
-                : success
+            // An ordinary function's declared result is its contract; the Effect it returns
+            // carries the run access the declaration spelled, not one derived from the call.
+            if (callable.functionKind !== 'Effect') return success
             return Type.effectWithRows(
               success,
               Type.substituteFailureRow(callable.failureRow.row, substitution),

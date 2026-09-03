@@ -22,7 +22,7 @@ import {
 import * as ExpressionNesting from './ExpressionNesting.js'
 import { expressionStarts, topLevelFollowing, typeStarts } from './Grammar.js'
 import { parseImportDeclaration } from './Import.js'
-import { parseBlock } from './Statement.js'
+import { parseBlock, parseImplicitUnitReturnStatement } from './Statement.js'
 import {
   parseFailureRow,
   parseParameterList,
@@ -1163,8 +1163,11 @@ const parseSymbolTail = (
 
 const parseMissingBlock = (initial: State): NodeResult => {
   const leftBrace = expect(initial, 'LeftBrace', topLevelFollowing)
+  // Semantic analysis relies on every function block ending in a terminal statement; the missing
+  // block keeps that guarantee the same way an authored block without a return does.
+  const terminal = parseImplicitUnitReturnStatement(leftBrace.state)
   return Object.freeze({
-    state: leftBrace.state,
-    node: syntaxNode(leftBrace.state, 'Block', leftBrace.elements),
+    state: terminal.state,
+    node: syntaxNode(terminal.state, 'Block', [...leftBrace.elements, terminal.node]),
   })
 }

@@ -221,6 +221,7 @@ export type Entry =
         | 'InvalidOrdinaryEntryResult'
         | 'InvalidEffectEntryResult'
         | 'EffectEntryRequirements'
+        | 'UnavailableEntryBody'
         | 'MissingLibraryExport'
         | 'InvalidSource'
       readonly requirements?: ReadonlyArray<Type.Requirement>
@@ -1123,6 +1124,32 @@ export const discover = (
     }
   }
   const recordedCallables = new Map<string, CallableInstance>()
+  /** Finds the already-discovered environment a hidden callable identity names. */
+  const resolveRecordedCallable = (
+    identity: Type.CallableIdentityArgument,
+  ): CallableInstance | undefined => {
+    const environment = identity.environment
+    if (environment === undefined) return undefined
+    for (const candidate of recordedCallables.values()) {
+      if (
+        Type.equalsCallableEnvironmentIdentity(
+          environment,
+          callableEnvironmentIdentity(candidate),
+        ) &&
+        Hir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
+        candidate.typeArguments.length === identity.typeArguments.length &&
+        candidate.typeArguments.every((argument, ordinal) => {
+          const expected = identity.typeArguments.at(ordinal)
+          return (
+            expected !== undefined &&
+            Type.genericArgumentKey(argument) === Type.genericArgumentKey(expected)
+          )
+        })
+      )
+        return candidate
+    }
+    return undefined
+  }
   const recordedCalls = new Map<string, CallInstance>()
   const providerCalls = new Map<string, CallInstance>()
   const scannedContexts = new Set<string>()
@@ -1282,9 +1309,11 @@ export const discover = (
         parameters,
         key.typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
       )
-      if (substitution === undefined) continue
-      const specialization = specialize(fn, substitution, index)
-      if (specialization === undefined) {
+      // A key whose arguments no longer fit the declaration's binders is as unreachable as one
+      // that cannot be made concrete; both are reported rather than silently dropped.
+      const specialization =
+        substitution === undefined ? undefined : specialize(fn, substitution, index)
+      if (substitution === undefined || specialization === undefined) {
         specializationFailures.set(
           keyText(key),
           Object.freeze({
@@ -1308,14 +1337,20 @@ export const discover = (
               function: fn,
               substitution,
               specialization,
-              effectSuccesses: effectSuccesses(fn, key, substitution, results, index),
               ...(resultCallable === undefined ? {} : { resultCallable }),
               ...(resultEffect === undefined ? {} : { resultEffect }),
             }),
           }),
         )
       }
-      for (const callable of concreteCallables(fn, key, substitution, results, index)) {
+      for (const callable of concreteCallables(
+        fn,
+        key,
+        substitution,
+        results,
+        index,
+        resolveRecordedCallable,
+      )) {
         recordedCallables.set(callableIdentity(callable), callable)
       }
       const cleanupHooks = cleanupPrepassTargets(fn, residual.fact, substitution)
@@ -1544,6 +1579,9 @@ export const discover = (
     }
   }
 
+  // Success identities may resolve through another instance's block, so they are traced only once
+  // every instance is prepared.
+  const preparedInstances = [...prepared.values()].map((candidate) => candidate.instance)
   const instances = Object.freeze(
     [...prepared.values()].map(({ instance, fact }) => {
       const checked = Ownership.checkResidualFunction(
@@ -1557,7 +1595,18 @@ export const discover = (
           `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
           diagnostic,
         )
-      return Object.freeze({ ...instance, ownership: checked.ownership })
+      return Object.freeze({
+        ...instance,
+        effectSuccesses: effectSuccesses(
+          instance.function,
+          instance.key,
+          instance.substitution,
+          results,
+          index,
+          preparedInstances,
+        ),
+        ownership: checked.ownership,
+      })
     }),
   )
   const unavailableOwnership = Object.freeze(

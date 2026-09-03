@@ -417,16 +417,19 @@ it.effect(
       const source = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.filesystem { FileError, FileSystem, Path }
-pub effect fn main() -> i32 ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator {
+pub effect fn main() -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator {
   let path = run Path.root()
   let info = run FileSystem.stat(&path)
-  return 42
+  return ()
 }`
       const snapshot = yield* Analysis.ofSourceRealized(
         'file-system-acceptance/unprovided',
         encoder.encode(source),
       )
-      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        ['SEM0204'],
+      )
       const mir = Analysis.loweredMir(snapshot)
       assert.strictEqual(mir.entry._tag, 'UnavailableEntry')
     }),

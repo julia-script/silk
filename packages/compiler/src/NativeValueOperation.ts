@@ -43,8 +43,6 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     types,
     usizeType,
   } = context
-  const initialTrapBlock = context.state.trapBlock
-  const trapBlock = initialTrapBlock
   const checkOrdinal = context.state.checkOrdinal
   switch (operation._tag) {
     case 'BindMatch': {
@@ -289,6 +287,5 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
   }
-  if (trapBlock !== initialTrapBlock) context.state.trapBlock = trapBlock
   context.state.checkOrdinal = checkOrdinal
 })

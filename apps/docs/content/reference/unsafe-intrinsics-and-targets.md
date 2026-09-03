@@ -1284,7 +1284,7 @@ function pointer before entry and do not invent host addresses.
 
 **Diagnostics:** A C function-pointer type containing any parameter or result outside the admitted
 C subset reports `SEM0187` at that type wherever it is declared. An ineligible value at a C
-callback conversion reports `SEM0206` at the value. An otherwise valid callback operation on a
+callback conversion reports `SEM0207` at the value. An otherwise valid callback operation on a
 non-native execution surface reports `SEM0193` with the foreign symbol and surface.
 
 **Current compiler:** Aligned. Semantic analysis records the contextual address conversion, MIR
@@ -1320,7 +1320,7 @@ so.
 
 **Diagnostics:** Invalid ABI types report `SEM0187`; invalid initializers report `SEM0086`; reads
 outside an unsafe boundary report `SEM0082`; and reachable statics on non-native surfaces report
-`SEM0207` naming the symbol and surface. Symbol spelling, reservation, and closure-wide collision
+`SEM0208` naming the symbol and surface. Symbol spelling, reservation, and closure-wide collision
 rules reuse `SEM0190`–`SEM0192`.
 
 **Current compiler:** Aligned. The declaration surface, HIR/MIR, availability planner, LLVM global

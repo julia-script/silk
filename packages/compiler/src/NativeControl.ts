@@ -2,7 +2,6 @@ import type * as LlvmBlock from '@silklang/llvm/Block'
 import type * as Builder from '@silklang/llvm/Builder'
 import * as Constant from '@silklang/llvm/Constant'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
-import * as Intrinsic from '@silklang/llvm/Intrinsic'
 import type * as LlvmError from '@silklang/llvm/LlvmError'
 import type * as LlvmType from '@silklang/llvm/Type'
 import type * as Value from '@silklang/llvm/Value'
@@ -15,6 +14,7 @@ import * as NativeAggregate from './NativeAggregate.js'
 import * as NativeDebug from './NativeDebug.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import * as NativeSuspension from './NativeSuspension.js'
+import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
 import * as SilkType from './Type.js'
 
@@ -30,6 +30,7 @@ export interface Context {
   readonly failure: NativeAggregate.FailureContext
   readonly suspension: NativeSuspension.ReturnContext
   readonly debug: NativeDebug.LocationContext
+  readonly termination: NativeTermination.FunctionContext
 }
 
 const read = (context: Context, local: Mir.LocalId): ReadonlyArray<Value.Input> => {
@@ -196,6 +197,7 @@ export const emit = Effect.fnUntraced(function* (
   const block = Object.freeze({ id: blockId })
   switch (terminator._tag) {
     case 'PropagateEffectFailure': {
+      yield* NativeTermination.storePropagated(context.termination)
       const source = readLocal(terminator.source)
       const sourceTag = terminator.sourceType._tag === 'Union' ? source.at(0) : undefined
       let mappedTag: Value.Input
@@ -319,8 +321,11 @@ export const emit = Effect.fnUntraced(function* (
       break
     }
     case 'Trap': {
-      yield* Intrinsic.call(body, 'trap', [], [])
-      const instruction = yield* FunctionBody.unreachable(body)
+      const instruction = yield* NativeTermination.emitTrap(
+        context.termination,
+        terminator.reason,
+        terminator.provenance.span,
+      )
       yield* NativeDebug.locate(context.debug, terminator.provenance.span, instruction)
       break
     }

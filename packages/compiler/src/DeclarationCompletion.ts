@@ -25,6 +25,7 @@ import {
   interfaceApplication,
   interfaceOperationContracts,
   returnedBorrow,
+  returnsStaticView,
 } from './DeclarationFacts.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as NameResolution from './NameResolution.js'
@@ -1659,7 +1660,8 @@ export const complete = (
             containsPositionRestrictedBorrow(
               Type.typeArgumentAt(member.returnType.type, 0) ?? 'never',
             )) &&
-          (!Type.isViewBorrow(member.returnType.type) || returnedBorrow(member) === undefined)
+          (!Type.isViewBorrow(member.returnType.type) ||
+            (returnedBorrow(member) === undefined && !returnsStaticView(member)))
         ) {
           diagnostics.push(
             Type.isViewBorrow(member.returnType.type)

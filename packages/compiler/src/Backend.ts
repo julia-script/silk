@@ -11,7 +11,7 @@ import * as MirVerification from './MirVerification.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as StaticValue from './StaticValue.js'
 import type * as Target from './Target.js'
-import type * as TerminationModel from './Termination.js'
+import * as TerminationModel from './Termination.js'
 import * as Type from './Type.js'
 import type * as CAbi from './CAbi.js'
 
@@ -225,11 +225,11 @@ export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
   return yield* self.emit(program, request)
 })
 
-export const terminationOf = (program: Mir.Module): Termination => {
-  if (program.entry._tag === 'UnavailableEntry') {
-    throw new RangeError(`Cannot emit unavailable entry: ${program.entry.reason}`)
-  }
-  const logicalFrames = Object.freeze(
+/** Every source-level function that can appear in a logical failure path, in stable ordinal order. */
+export const logicalFrameEntries = (
+  program: Mir.Module,
+): ReadonlyArray<{ readonly fn: Mir.MirFunction; readonly frame: TerminationModel.LogicalFrame }> =>
+  Object.freeze(
     program.functions.flatMap((fn) => {
       if (fn.id.name === '$effect-entry' || fn.id.name === '$unit-entry') return []
       const region = fn.regions.find((candidate) => candidate.id.ordinal === fn.entry.ordinal)
@@ -241,9 +241,20 @@ export const terminationOf = (program: Mir.Module): Termination => {
       } else {
         provenance = region?.provenance.span
       }
-      return provenance === undefined ? [] : [Object.freeze({ function: fn.id, provenance })]
+      return provenance === undefined
+        ? []
+        : [Object.freeze({ fn, frame: Object.freeze({ function: fn.id, provenance }) })]
     }),
   )
+
+export const terminationOf = (
+  program: Mir.Module,
+  report: TerminationModel.Report = TerminationModel.emptyReport,
+): Termination => {
+  if (program.entry._tag === 'UnavailableEntry') {
+    throw new RangeError(`Cannot emit unavailable entry: ${program.entry.reason}`)
+  }
+  const logicalFrames = Object.freeze(logicalFrameEntries(program).map((entry) => entry.frame))
   return Object.freeze({
     _tag: 'EntryTermination',
     success:
@@ -259,6 +270,7 @@ export const terminationOf = (program: Mir.Module): Termination => {
           )
         : Object.freeze([]),
     logicalFrames,
+    report,
   })
 }
 

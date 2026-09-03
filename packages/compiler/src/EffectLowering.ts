@@ -126,13 +126,11 @@ export const lowerRunEffectValue = (
   span: SourceSpan.SourceSpan,
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.providedRequirements,
 ): LoweredExpression | undefined => {
-  const successType = fn.type(success)
-  if (
-    successType === undefined ||
-    successType._tag === 'EffectOutcome' ||
-    successType._tag === 'EffectValue'
-  )
-    return undefined
+  // A success that is itself an Effect is the value the environment's success identity names.
+  const successType = Type.isEffect(fn.semantic(success))
+    ? effectValueByIdentity(fn.layout, effectType.environment.successEffectIdentity ?? '')
+    : fn.type(success)
+  if (successType === undefined || successType._tag === 'EffectOutcome') return undefined
   const outcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
     _tag: 'EffectOutcome',
     type: effectType.type,
@@ -413,6 +411,51 @@ export const callableEffectValue = (
   return result?._tag === 'EffectValue' ? result : undefined
 }
 
+/**
+ * Injects a run result into the recovered success type. A `never` source diverged before producing
+ * a value, so it flows through unchanged; a member of the `A | B` union is injected or widened.
+ */
+const injectSuccess = (
+  fn: FunctionLowering,
+  source: Mir.LocalId,
+  from: Type.Type,
+  to: Type.Type,
+  span: SourceSpan.SourceSpan,
+): Mir.LocalId | undefined => {
+  if (Type.equals(from, to) || Type.isNever(from)) return source
+  const conversion = TypeCompatibility.check(from, to)
+  const sourceType = fn.type(from)
+  const targetType = fn.type(to)
+  const sourceShape = Layout.callingShape(fn.layout, from)
+  const targetShape = Layout.callingShape(fn.layout, to)
+  if (
+    (conversion._tag !== 'Inject' && conversion._tag !== 'Widen') ||
+    sourceType === undefined ||
+    sourceType._tag === 'EffectOutcome' ||
+    targetType?._tag !== 'Union' ||
+    sourceShape === undefined ||
+    targetShape === undefined
+  )
+    return undefined
+  const destination = fn.alloc(targetType)
+  fn.emit(
+    Object.freeze({
+      _tag: 'ConvertUnion' as const,
+      destination,
+      source,
+      sourceType,
+      targetType,
+      conversion: conversion._tag,
+      mappings: conversion.mappings,
+      sourceShape,
+      targetShape,
+      access: 'Owned' as const,
+      provenance: generated(span),
+    }),
+  )
+  return destination
+}
+
 export const lowerEffectCatch = (
   fn: FunctionLowering,
   expression: Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }>,
@@ -491,40 +534,14 @@ export const lowerEffectCatch = (
     )
     if (succeeded === undefined) return undefined
     for (const drop of unusedHandlerDrop()) fn.emit(drop)
-    if (Type.equals(protectedEffect.success, resultEffect.success)) {
-      endRunLoans(fn, runSpan)
-      return succeeded
-    }
-    const conversion = TypeCompatibility.check(protectedEffect.success, resultEffect.success)
-    const sourceType = fn.type(protectedEffect.success)
-    const targetType = fn.type(resultEffect.success)
-    const sourceShape = Layout.callingShape(fn.layout, protectedEffect.success)
-    const targetShape = Layout.callingShape(fn.layout, resultEffect.success)
-    if (
-      conversion._tag !== 'Inject' ||
-      sourceType === undefined ||
-      sourceType._tag === 'EffectOutcome' ||
-      targetType?._tag !== 'Union' ||
-      sourceShape === undefined ||
-      targetShape === undefined
+    const destination = injectSuccess(
+      fn,
+      succeeded.result,
+      protectedEffect.success,
+      resultEffect.success,
+      expression.span,
     )
-      return undefined
-    const destination = fn.alloc(targetType)
-    fn.emit(
-      Object.freeze({
-        _tag: 'ConvertUnion' as const,
-        destination,
-        source: succeeded.result,
-        sourceType,
-        targetType,
-        conversion: 'Inject' as const,
-        mappings: conversion.mappings,
-        sourceShape,
-        targetShape,
-        access: 'Owned' as const,
-        provenance: generated(expression.span),
-      }),
-    )
+    if (destination === undefined) return undefined
     endRunLoans(fn, runSpan)
     return Object.freeze({ result: destination })
   }
@@ -547,6 +564,39 @@ export const lowerEffectCatch = (
     availableRequirements,
   )
   if (caught === undefined) return undefined
+  // The handler runs with its own success type; `never` diverges and a member of `A | B` is
+  // injected so both paths meet the recovered union (FAIL-004).
+  const runHandler = (applied: Mir.LocalId): LoweredExpression | undefined => {
+    const handled = lowerRunEffectValue(
+      fn,
+      applied,
+      handlerEffectType,
+      handlerEffectType.type.success,
+      runSpan,
+      availableRequirements,
+    )
+    if (handled === undefined) return undefined
+    const result = injectSuccess(
+      fn,
+      handled.result,
+      handlerEffectType.type.success,
+      resultEffect.success,
+      expression.span,
+    )
+    return result === undefined ? undefined : Object.freeze({ result })
+  }
+  const [takenResult, takenOperations] = fn.capture(() => {
+    for (const drop of unusedHandlerDrop()) fn.emit(drop)
+    return injectSuccess(
+      fn,
+      caught.success,
+      protectedEffect.success,
+      resultEffect.success,
+      expression.span,
+    )
+  })
+  if (takenResult === undefined) return undefined
+  const taken = Object.freeze({ operations: takenOperations, result: takenResult })
 
   const successType = fn.type(resultEffect.success)
   const successShape = Layout.callingShape(fn.layout, resultEffect.success)
@@ -597,14 +647,7 @@ export const lowerEffectCatch = (
           provenance: generated(expression.span),
         }),
       )
-      return lowerRunEffectValue(
-        fn,
-        applied,
-        handlerEffectType,
-        resultEffect.success,
-        runSpan,
-        availableRequirements,
-      )
+      return runHandler(applied)
     })
     if (handled === undefined) return undefined
     const destination = fn.alloc(successType)
@@ -613,7 +656,7 @@ export const lowerEffectCatch = (
         _tag: 'Conditional' as const,
         destination,
         condition: caught.valid,
-        taken: Object.freeze({ operations: unusedHandlerDrop(), result: caught.success }),
+        taken,
         otherwise: Object.freeze({ operations: handledOperations, result: handled.result }),
         type: successType,
         resultShape: successShape,
@@ -710,14 +753,7 @@ export const lowerEffectCatch = (
             provenance: generated(expression.span),
           }),
         )
-        return lowerRunEffectValue(
-          fn,
-          applied,
-          handlerEffectType,
-          resultEffect.success,
-          runSpan,
-          availableRequirements,
-        )
+        return runHandler(applied)
       }
       const target = Type.failureMembers(propagationEffect).findIndex((candidate) =>
         Type.equals(candidate, member),
@@ -801,7 +837,7 @@ export const lowerEffectCatch = (
       _tag: 'Conditional' as const,
       destination,
       condition: caught.valid,
-      taken: Object.freeze({ operations: unusedHandlerDrop(), result: caught.success }),
+      taken,
       otherwise: Object.freeze({
         operations: Object.freeze([innerOperation]),
         result: innerResult,

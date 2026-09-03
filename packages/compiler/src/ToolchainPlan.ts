@@ -8,8 +8,10 @@ import type * as Backend from './Backend.js'
 import type * as ArtifactKind from './ArtifactKind.js'
 import * as CoroutineRuntime from './CoroutineRuntime.js'
 import * as NativeLinkInput from './NativeLinkInput.js'
+import * as NativeTermination from './NativeTermination.js'
 import * as OsRuntime from './OsRuntime.js'
 import type * as Target from './Target.js'
+import type * as Termination from './Termination.js'
 
 /** The fixed optimization profiles. There is no configurable pass pipeline. */
 export type OptimizationProfile = 'debug' | 'release' | 'release-with-debug'
@@ -262,8 +264,98 @@ const translationUnitPreamble = `#if defined(__APPLE__)
 #endif
 `
 
-const failureBytes = (identity: string): ReadonlyArray<number> =>
-  Array.from(new TextEncoder().encode(`Error: ${identity}\n`))
+/** Renders text as a C string literal; octal escapes keep every byte outside printable ASCII exact. */
+export const cString = (text: string): string => {
+  let rendered = '"'
+  for (const byte of new TextEncoder().encode(text)) {
+    if (byte === 0x22 || byte === 0x5c || byte === 0x3f) {
+      rendered += `\\${String.fromCharCode(byte)}`
+    } else if (byte >= 0x20 && byte < 0x7f) {
+      rendered += String.fromCharCode(byte)
+    } else {
+      rendered += `\\${byte.toString(8).padStart(3, '0')}`
+    }
+  }
+  return `${rendered}"`
+}
+
+const cStringTable = (name: string, entries: ReadonlyArray<string>): string =>
+  `static const char *const ${name}[] = { ${entries.length === 0 ? '0' : entries.map(cString).join(', ')} };`
+
+/* Best-effort stderr writer shared by the unhandled-error and fatal-trap reports. */
+const reportSupportSource = `#include <stddef.h>
+#include <string.h>
+#include <unistd.h>
+
+static int silk_write_all(const unsigned char *bytes, size_t length) {
+  size_t offset = 0;
+  while (offset < length) {
+    const ssize_t written = write(2, bytes + offset, length - offset);
+    if (written <= 0) return 0;
+    offset += (size_t)written;
+  }
+  return 1;
+}
+
+static int silk_write_text(const char *text) {
+  return silk_write_all((const unsigned char *)text, strlen(text));
+}
+`
+
+const trapReportSource = (report: Termination.Report): string => `
+${cStringTable(
+  'silk_trap_reasons',
+  report.trapSites.map((site) => site.reason),
+)}
+${cStringTable(
+  'silk_trap_origins',
+  report.trapSites.map((site) => site.origin),
+)}
+
+void ${NativeTermination.trapReportSymbol}(int site) {
+  if (site <= 0 || site > ${report.trapSites.length}) return;
+  silk_write_text("fatal trap: ");
+  silk_write_text(silk_trap_reasons[site - 1]);
+  silk_write_text("\\n  at ");
+  silk_write_text(silk_trap_origins[site - 1]);
+  silk_write_text("\\n");
+}
+`
+
+const failurePathSource = (report: Termination.Report): string => `
+extern int ${NativeTermination.failureSiteSymbol};
+extern int ${NativeTermination.failureDepthSymbol};
+extern int ${NativeTermination.failurePathSymbol}[${NativeTermination.pathCapacity}];
+extern int ${NativeTermination.causeSiteSymbol};
+extern int ${NativeTermination.causeDepthSymbol};
+extern int ${NativeTermination.causePathSymbol}[${NativeTermination.pathCapacity}];
+${cStringTable('silk_frame_labels', report.frames)}
+${cStringTable(
+  'silk_failure_origins',
+  report.failureSites.map((site) => site.origin),
+)}
+${cStringTable(
+  'silk_failure_identities',
+  report.failureSites.map((site) => site.identity),
+)}
+
+static int silk_write_path(int site, int depth, const int *path) {
+  int ok = 1;
+  if (site <= 0 || site > ${report.failureSites.length}) return ok;
+  ok &= silk_write_text("  at ");
+  ok &= silk_write_text(silk_failure_origins[site - 1]);
+  ok &= silk_write_text("\\n");
+  if (depth > ${NativeTermination.pathCapacity}) depth = ${NativeTermination.pathCapacity};
+  for (int index = 1; index < depth; index += 1) {
+    const int frame = path[index];
+    if (frame < 0 || frame >= ${report.frames.length}) continue;
+    ok &= silk_write_text("  at ");
+    ok &= silk_write_text(silk_frame_labels[frame]);
+    ok &= silk_write_text("\\n");
+  }
+  return ok;
+}
+`
 
 const runtimeSourceFor = (
   nativeRuntimeSymbols: ReadonlyArray<string> = Object.freeze([]),
@@ -306,46 +398,53 @@ export const executableSource = (
   const initializeCommandLine = needsCommandLine
     ? '  silk_host_argc_v1 = argc;\n  silk_host_argv_v1 = argv;\n'
     : ''
-  if (termination.failures.length === 0)
-    return `${runtime}
+  const { report } = termination
+  const reportsFailures = termination.failures.length > 0
+  const reportsTraps = report.trapSites.length > 0
+  const reportsPaths = reportsFailures && report.failureSites.length > 0
+  const prelude = `${runtime}
 extern int silk_main(void);
-
+${reportsFailures || reportsTraps ? reportSupportSource : ''}
+${reportsTraps ? trapReportSource(report) : ''}
+${reportsPaths ? failurePathSource(report) : ''}`
+  if (!reportsFailures)
+    return `${prelude}
 int main(${mainParameters}) {
 ${initializeCommandLine}
   return silk_main();
 }
 `
-  const declarations = termination.failures.map(
-    (failure) =>
-      `static const unsigned char silk_failure_${failure.tag}[] = { ${failureBytes(failure.identity).join(', ')} };`,
-  )
   const cases = termination.failures.map(
     (failure) =>
-      `    case ${failure.tag}:\n      return silk_write_all(silk_failure_${failure.tag}, sizeof(silk_failure_${failure.tag})) ? 1 : 2;`,
+      `    case ${failure.tag}:\n      identity = ${cString(failure.identity)};\n      break;`,
   )
-  return `${runtime}
-extern int silk_main(void);
-${declarations.join('\n')}
-
-static int silk_write_all(const unsigned char *bytes, size_t length) {
-  size_t offset = 0;
-  while (offset < length) {
-    const ssize_t written = write(2, bytes + offset, length - offset);
-    if (written <= 0) return 0;
-    offset += (size_t)written;
+  const paths = reportsPaths
+    ? `  ok &= silk_write_path(${NativeTermination.failureSiteSymbol}, ${NativeTermination.failureDepthSymbol}, ${NativeTermination.failurePathSymbol});
+  if (${NativeTermination.causeSiteSymbol} > 0 && ${NativeTermination.causeSiteSymbol} <= ${report.failureSites.length}) {
+    ok &= silk_write_text("while handling: ");
+    ok &= silk_write_text(silk_failure_identities[${NativeTermination.causeSiteSymbol} - 1]);
+    ok &= silk_write_text("\\n");
+    ok &= silk_write_path(${NativeTermination.causeSiteSymbol}, ${NativeTermination.causeDepthSymbol}, ${NativeTermination.causePathSymbol});
   }
-  return 1;
-}
+`
+    : ''
+  return `${prelude}
+extern int ${NativeTermination.failureTagSymbol};
 
 int main(${mainParameters}) {
 ${initializeCommandLine}
-  const int tag = silk_main();
-  if (tag == 0) return 0;
-  switch (tag) {
+  if (silk_main() == 0) return 0;
+  const char *identity = 0;
+  switch (${NativeTermination.failureTagSymbol}) {
 ${cases.join('\n')}
     default:
       return 2;
   }
+  int ok = 1;
+  ok &= silk_write_text("unhandled error: ");
+  ok &= silk_write_text(identity);
+  ok &= silk_write_text("\\n");
+${paths}  return ok ? 1 : 2;
 }
 `
 }

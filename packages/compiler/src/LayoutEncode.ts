@@ -222,7 +222,7 @@ export const encode = (self: Plan): string =>
     ),
     ...self.literalVerdicts.map(
       (verdict) =>
-        `usize-literal ${verdict.value.toString()} bits=${verdict.bits} ${verdict._tag === 'AvailableUsizeLiteral' ? 'available' : `unavailable cause=${verdict.cause.code}`} [${verdict.span.start}, ${verdict.span.end})`,
+        `${verdict.type}-literal ${verdict.value.toString()} bits=${verdict.bits} ${verdict._tag === 'AvailableWordLiteral' ? 'available' : `unavailable cause=${verdict.cause.code}`} [${verdict.span.start}, ${verdict.span.end})`,
     ),
     '',
   ].join('\n')
@@ -246,9 +246,9 @@ export const encodeCatalog = (self: Catalog): string =>
     ...self.entries.flatMap((candidate) =>
       candidate._tag === 'LayoutEntry' ? entryLines(candidate) : [unavailableText(candidate)],
     ),
-    ...self.usizeConstants.map(
+    ...self.wordConstants.map(
       (constant) =>
-        `usize-constant ${constant.value.toString()} [${constant.span.sourceId}:${constant.span.start}, ${constant.span.end})`,
+        `${constant.type}-constant ${constant.value.toString()} [${constant.span.sourceId}:${constant.span.start}, ${constant.span.end})`,
     ),
     '',
   ].join('\n')

@@ -235,6 +235,35 @@ export const callableValueByIdentity = (
   })
 }
 
+/** The exact callable a specialized target returns through a structural callable result type. */
+export const resultCallableValueType = (
+  layout: Layout.Plan,
+  instances: ReadonlyArray<Instances.Instance>,
+  target: { readonly module: string; readonly name: string },
+  typeArguments: ReadonlyArray<Type.GenericArgument>,
+  type: Type.Type,
+): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
+  const contract = Type.isRepresented(type) ? type.contract : type
+  if (!Type.isCallable(contract)) return undefined
+  const visible = typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument))
+  const identities = instances.flatMap((instance) =>
+    instance.key.declaration.module === target.module &&
+    instance.key.declaration.name === target.name &&
+    instance.resultCallable !== undefined &&
+    sameArguments(
+      instance.key.typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
+      visible,
+    )
+      ? [instance.resultCallable]
+      : [],
+  )
+  const identity = identities.at(0)
+  return identity === undefined ||
+    identities.some((candidate) => !Type.equalsGenericArgument(candidate, identity))
+    ? undefined
+    : callableValueByIdentity(layout, identity, contract)
+}
+
 export const sameArguments = (
   left: ReadonlyArray<Type.GenericArgument>,
   right: ReadonlyArray<Type.GenericArgument>,
@@ -568,6 +597,34 @@ export const callableValueType = (
     site: section.site,
     environment,
   })
+}
+
+/** The environment-bearing value type a staged application builds at its own site. */
+export const stagedCallableValueType = (
+  fn: FunctionLowering,
+  expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
+  site: Hir.CallableSiteId,
+): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
+  const expected = Type.substitute(expression.type, fn.substitution)
+  const candidates = fn.layout.callableEnvironments.filter(
+    (
+      candidate,
+    ): candidate is Extract<Layout.CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> =>
+      candidate._tag === 'CallableEnvironment' &&
+      Instances.keyText(candidate.callable.owner) === Instances.keyText(fn.owner.key) &&
+      sameSite(candidate.callable.site, site) &&
+      (!Type.isRuntimeConcrete(expected) || Type.equals(candidate.callable.type, expected)),
+  )
+  const environment = candidates.length === 1 ? candidates.at(0) : undefined
+  return environment === undefined
+    ? undefined
+    : Object.freeze({
+        _tag: 'CallableValue',
+        type: environment.callable.type,
+        target: environment.callable.target,
+        site,
+        environment,
+      })
 }
 
 export const directCallableSectionValueType = (

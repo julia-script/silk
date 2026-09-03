@@ -439,10 +439,7 @@ pub fn main() -> i32 {
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
-    assert.strictEqual(
-      evaluated.trace.filter((event) => event._tag === 'ReplacementCleanup').length,
-      1,
-    )
+    assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'Replacement').length, 1)
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
@@ -766,9 +763,6 @@ pub fn main() -> i32 {
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
-    assert.strictEqual(
-      evaluated.trace.filter((event) => event._tag === 'ReplacementCleanup').length,
-      1,
-    )
+    assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'Replacement').length, 1)
   }),
 )

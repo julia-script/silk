@@ -75,6 +75,15 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
       parameterTypes,
     )
     const symbol = suspendable ? `${publicSymbol}$suspend_step` : publicSymbol
+    const isMachine = machineEntry !== undefined && Mir.matchesInstanceKey(fn, machineEntry)
+    const driver = suspendable
+      ? yield* FunctionActor.declare(
+          context.builder,
+          isMachine ? publicSymbol : `${publicSymbol}$drive`,
+          yield* LlvmType.functionType(context.builder, resultType, parameters),
+          { visibility: 'hidden' },
+        )
+      : undefined
     declared.push(
       Object.freeze({
         fn,
@@ -87,6 +96,7 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
         emittedResultType,
         resultLaneCount,
         suspendable,
+        ...(driver === undefined ? {} : { driver }),
         parameterTypes,
         linear: linearize(fn),
       }),

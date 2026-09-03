@@ -11,9 +11,11 @@ import * as NativeArith from './NativeArith.js'
 import * as NativeDebug from './NativeDebug.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
+import * as NativeTermination from './NativeTermination.js'
 import * as NativeTranscendental from './NativeTranscendental.js'
 import * as NativeType from './NativeType.js'
 import * as Scalar from './Scalar.js'
+import type * as SourceSpan from './SourceSpan.js'
 
 type Operation = Extract<
   LinearOperation,
@@ -39,6 +41,7 @@ export const emitFloatToIntegerGuard = Effect.fnUntraced(function* (
   source: Scalar.FloatScalar,
   target: Scalar.IntegerScalar,
   name: string,
+  span: SourceSpan.SourceSpan,
 ) {
   const { body, builder, program } = context
   const floatType = source.spelling === 'f32' ? context.f32 : context.f64
@@ -73,10 +76,13 @@ export const emitFloatToIntegerGuard = Effect.fnUntraced(function* (
     `${name}_above`,
   )
   const invalid = yield* FunctionBody.binary(body, 'or', below, above, `${name}_invalid`)
-  if (context.state.trapBlock === undefined)
-    context.state.trapBlock = yield* LlvmBlock.make(body, 'arith_trap')
   const continueBlock = yield* LlvmBlock.make(body, `${name}_ok`)
-  yield* FunctionBody.conditionalBranch(body, invalid, context.state.trapBlock, continueBlock)
+  yield* FunctionBody.conditionalBranch(
+    body,
+    invalid,
+    yield* NativeTermination.trapBlock(context.termination, 'arithmetic overflow', span),
+    continueBlock,
+  )
   yield* LlvmBlock.setInsertionPoint(body, continueBlock)
 })
 
@@ -97,8 +103,6 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     types,
     unsignedOverflowSignatures,
   } = context
-  const initialTrapBlock = context.state.trapBlock
-  let trapBlock = initialTrapBlock
   let checkOrdinal = context.state.checkOrdinal
   switch (operation._tag) {
     case 'ConvertInteger': {
@@ -108,6 +112,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         operation.sourceType,
         operation.type,
         `convert${operation.destination.ordinal}`,
+        operation.provenance.span,
       )
       nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
       break
@@ -154,6 +159,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           source,
           target,
           `convert${operation.destination.ordinal}`,
+          operation.provenance.span,
         )
         if (target.signedness === 'Signed') {
           kind = 'fptosi'
@@ -797,7 +803,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         break
       }
       if (operation.operator === 'ShiftLeft' || operation.operator === 'ShiftRight') {
-        if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'arith_trap')
+        const trapBlock = yield* NativeTermination.trapBlock(
+          context.termination,
+          'invalid shift count',
+          operation.provenance.span,
+        )
         let width: number
         if (scalar === undefined) {
           width = 32
@@ -970,9 +980,6 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         break
       }
       let result: Value.Value
-      if (trapBlock === undefined) {
-        trapBlock = yield* LlvmBlock.make(body, 'arith_trap')
-      }
       if (
         operation.operator === 'Add' ||
         operation.operator === 'Subtract' ||
@@ -1020,7 +1027,16 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         const valuePart = yield* FunctionBody.extractValue(body, pair, [0], `arith${ordinal}`)
         const overflowed = yield* FunctionBody.extractValue(body, pair, [1], `arith${ordinal}_flag`)
         const continueBlock = yield* LlvmBlock.make(body, `arith${ordinal}_ok`)
-        yield* FunctionBody.conditionalBranch(body, overflowed, trapBlock, continueBlock)
+        yield* FunctionBody.conditionalBranch(
+          body,
+          overflowed,
+          yield* NativeTermination.trapBlock(
+            context.termination,
+            'arithmetic overflow',
+            operation.provenance.span,
+          ),
+          continueBlock,
+        )
         yield* LlvmBlock.setInsertionPoint(body, continueBlock)
         result = valuePart
       } else {
@@ -1032,7 +1048,19 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           zero,
           `div${ordinal}_zero`,
         )
-        let trapping: Value.Value = zeroDivisor
+        const continueBlock = yield* LlvmBlock.make(body, `div${ordinal}_ok`)
+        const nonZero = yield* LlvmBlock.make(body, `div${ordinal}_nonzero`)
+        yield* FunctionBody.conditionalBranch(
+          body,
+          zeroDivisor,
+          yield* NativeTermination.trapBlock(
+            context.termination,
+            'division by zero',
+            operation.provenance.span,
+          ),
+          nonZero,
+        )
+        yield* LlvmBlock.setInsertionPoint(body, nonZero)
         if (!unsigned) {
           const minimum = yield* Constant.integerSigned(
             builder,
@@ -1063,16 +1091,19 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             negativeOneDivisor,
             `div${ordinal}_overflow`,
           )
-          trapping = yield* FunctionBody.binary(
+          yield* FunctionBody.conditionalBranch(
             body,
-            'or',
-            zeroDivisor,
             overflowCase,
-            `div${ordinal}_trapping`,
+            yield* NativeTermination.trapBlock(
+              context.termination,
+              'arithmetic overflow',
+              operation.provenance.span,
+            ),
+            continueBlock,
           )
+        } else {
+          yield* FunctionBody.branch(body, continueBlock)
         }
-        const continueBlock = yield* LlvmBlock.make(body, `div${ordinal}_ok`)
-        yield* FunctionBody.conditionalBranch(body, trapping, trapBlock, continueBlock)
         yield* LlvmBlock.setInsertionPoint(body, continueBlock)
         let opcode: 'udiv' | 'sdiv' | 'urem' | 'srem'
         if (operation.operator === 'Divide') opcode = unsigned ? 'udiv' : 'sdiv'
@@ -1085,6 +1116,5 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
   }
-  if (trapBlock !== initialTrapBlock) context.state.trapBlock = trapBlock
   context.state.checkOrdinal = checkOrdinal
 })

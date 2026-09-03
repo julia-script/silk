@@ -625,6 +625,40 @@ pub fn main() -> i32 {
   }),
 )
 
+it('retains every runtime effect-function argument in declaration order', () => {
+  const result = elaborate(
+    'hir://effect-function-arguments.silk',
+    `struct Guard {}
+effect fn hold(
+  first: Guard,
+  shared: &[i32],
+  middle: Guard,
+  exclusive: &mut [i32],
+  last: Guard
+) -> () {
+  drop middle
+  return ()
+}`,
+  )
+  const hold = result.hir.functions.at(0)
+  const returned = hold === undefined ? undefined : Hir.returned(hold)
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(returned?._tag, 'EffectBlock')
+  if (returned?._tag !== 'EffectBlock') return
+  assert.deepEqual(
+    returned.captures.map((capture) => [capture.parameter?.ordinal, capture.access]),
+    [
+      [0, 'Take'],
+      [1, 'Shared'],
+      [2, 'Take'],
+      [3, 'Exclusive'],
+      [4, 'Take'],
+    ],
+  )
+  assert.strictEqual(returned.type.access, 'Take')
+})
+
 it('retains effect blocks as lazy statement regions with canonical captures', () => {
   const result = elaborate(
     'hir://effect-block.silk',

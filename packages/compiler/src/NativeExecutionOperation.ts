@@ -25,6 +25,7 @@ import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeSuspension from './NativeSuspension.js'
+import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
 import * as SilkType from './Type.js'
 
@@ -1727,12 +1728,16 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           body,
           `drive${operation.destination.ordinal}_direct_accepted`,
         )
-        if (context.state.trapBlock === undefined)
-          context.state.trapBlock = yield* LlvmBlock.make(
-            body,
-            `drive${operation.destination.ordinal}_rejected`,
-          )
-        yield* FunctionBody.conditionalBranch(body, valid, accepted, context.state.trapBlock)
+        yield* FunctionBody.conditionalBranch(
+          body,
+          valid,
+          accepted,
+          yield* NativeTermination.trapBlock(
+            context.termination,
+            'invalid execution drive',
+            operation.provenance.span,
+          ),
+        )
         yield* LlvmBlock.setInsertionPoint(body, accepted)
         yield* FunctionBody.store(
           body,
@@ -1955,12 +1960,16 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           body,
           `drive${operation.destination.ordinal}_accepted`,
         )
-        if (context.state.trapBlock === undefined)
-          context.state.trapBlock = yield* LlvmBlock.make(
-            body,
-            `drive${operation.destination.ordinal}_rejected`,
-          )
-        yield* FunctionBody.conditionalBranch(body, valid, accepted, context.state.trapBlock)
+        yield* FunctionBody.conditionalBranch(
+          body,
+          valid,
+          accepted,
+          yield* NativeTermination.trapBlock(
+            context.termination,
+            'invalid execution drive',
+            operation.provenance.span,
+          ),
+        )
         yield* LlvmBlock.setInsertionPoint(body, accepted)
         yield* FunctionBody.store(
           body,

@@ -1418,6 +1418,30 @@ pub fn main() -> i32 {
 pub fn main() -> i32 { return combine(3)(2)(1) }`,
     expected: { _tag: 'Completes', result: 123 },
   },
+  // CALLABLE-002: every stage may pass through a binding, keeping the captured suffix in place.
+  {
+    name: 'staged-callable-bindings',
+    source: `fn combine(a: i32, b: i32, c: i32) -> i32 {
+  return a * 100 + b * 10 + c
+}
+pub fn main() -> i32 {
+  let withThree = combine(3)
+  let withTwoAndThree = withThree(2)
+  return withTwoAndThree(1)
+}`,
+    expected: { _tag: 'Completes', result: 123 },
+  },
+  // CALLABLE-002: a stage over an erased callable parameter splices the hidden environment.
+  {
+    name: 'staged-callable-parameter',
+    source: `fn combine(a: i32, b: i32, c: i32) -> i32 { return a * 100 + b * 10 + c }
+fn stage(f: fn(i32, i32) -> i32) -> i32 {
+  let g = f(2)
+  return g(1)
+}
+pub fn main() -> i32 { return stage(combine(3)) - 123 + 42 }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // JUL-72: one source-defined anonymous environment covers Copy, shared, exclusive, and moved
   // captures so the evaluator/native differential owns backend parity for the feature.
   {
@@ -3034,6 +3058,92 @@ pub fn main() -> i32 {
 }`,
     expected: { _tag: 'Completes', result: 58 },
   },
+  {
+    // FAIL-004: both the protected `i32` and the handler `string` are injected into the recovered
+    // `i32 | string`, so the later `match` finds its active member on every engine.
+    name: 'catch-union-success-match',
+    source: `import silk.effect { Effect }
+struct NotFoundError {}
+effect fn load(flag: bool) -> i32 ! NotFoundError {
+  if flag { fail NotFoundError {} }
+  return 5
+}
+effect fn recover(error: NotFoundError) -> string { return "missing" }
+fn handled(flag: bool) -> Effect<i32 | string> {
+  return Effect.catch<NotFoundError>(load(flag), recover)
+}
+pub fn main() -> i32 {
+  let a = run handled(true)
+  let b = run handled(false)
+  let x = match move a { i32 n => n
+    string _ => 100 }
+  let y = match move b { i32 n => n
+    string _ => 100 }
+  return x + y
+}`,
+    expected: { _tag: 'Completes', result: 105 },
+  },
+  {
+    // FAIL-004: a handler whose success type is `never` contributes no success member; its run
+    // diverges through the failure channel instead of copying into the recovered success.
+    name: 'catch-never-handler',
+    source: `import silk.effect { Effect }
+struct NotFoundError {}
+struct OtherError {}
+effect fn load(flag: bool) -> i32 ! NotFoundError {
+  if flag { fail NotFoundError {} }
+  return 5
+}
+effect fn rethrow(error: NotFoundError) -> never ! OtherError { fail OtherError {} }
+fn handled(flag: bool) -> Effect<i32 ! OtherError> {
+  return Effect.catch<NotFoundError>(load(flag), rethrow)
+}
+effect fn rec(e: OtherError) -> i32 { return 1 }
+pub fn main() -> i32 {
+  let a = run Effect.catch<OtherError>(handled(true), rec)
+  let b = run Effect.catch<OtherError>(handled(false), rec)
+  return a * 10 + b
+}`,
+    expected: { _tag: 'Completes', result: 15 },
+  },
+  {
+    // EFF-013: distinct return sites join under the declared `once Effect<i32>`; each call runs
+    // the alternative its own branch constructed.
+    name: 'effect-return-site-join-once',
+    source: `struct Token { value: i32 }
+impl Drop for Token {
+  fn drop(self: &mut Token) -> () { return () }
+}
+effect fn withToken(t: Token) -> i32 { return t.value }
+fn choose(flag: bool) -> once Effect<i32> {
+  if flag {
+    let t = Token { value: 1 }
+    return withToken(move t)
+  }
+  return effect { return 2 }
+}
+pub fn main() -> i32 {
+  let a = run choose(true)
+  let b = run choose(false)
+  return a * 10 + b
+}`,
+    expected: { _tag: 'Completes', result: 12 },
+  },
+  {
+    // EFF-007: a fail-only `effect {}` block has success type `never` and still carries its
+    // declared failure through Effect.catch.
+    name: 'effect-block-fail-only',
+    source: `import silk.effect { Effect }
+struct ProblemError {}
+fn fallible() -> Effect<i32 ! ProblemError> {
+  return effect { fail ProblemError {} }
+}
+effect fn recover(e: ProblemError) -> i32 { return 7 }
+pub fn main() -> i32 {
+  return run Effect.catch<ProblemError>(fallible(), recover)
+}`,
+    expected: { _tag: 'Completes', result: 7 },
+  },
 ]
 
 /**
@@ -3421,7 +3531,193 @@ export "C" fn silk_test_export_touch() -> () {
 export "C" fn silk_test_export_touched() -> i32 { return unsafe silk_test_export_noted() }
 pub fn main() -> i32 { return unsafe silk_test_export_checksum() }`
 
+/** Replacement cleanup: a displaced local, field, array element, and slice element clean once. */
+export const replaceCleanupProgram = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+import silk.format { Format }
+import silk.writer { Writer, WriterError }
+
+struct Log {
+  slots: [i32; 16]
+  count: usize
+}
+struct Tracer {
+  id: i32
+  log: Shared<Log>
+}
+fn record(log: &mut Log, id: i32) -> i32 {
+  log.slots[log.count] = id
+  log.count = log.count + 1
+  return 0
+}
+impl Drop for Tracer {
+  fn drop(self: &mut Tracer) -> () {
+    let id = self.id
+    let r = Shared.withMut<Log, i32>(&self.log, record(id))
+    return ()
+  }
+}
+fn encode(log: &Log) -> i32 {
+  let mut r = 0
+  let mut i: usize = 0
+  while i < log.count {
+    r = r * 10 + log.slots[i]
+    i = i + 1
+  }
+  return r
+}
+fn tracer(id: i32, log: &Shared<Log>) -> Tracer {
+  return Tracer { id: id, log: Shared.clone<Log>(log) }
+}
+effect fn printLog(log: &Shared<Log>) -> () ! WriterError {
+  let code = Shared.with<Log, i32>(log, encode)
+  let mut writer = Writer.stdoutWriterProvider()
+  return run (Format.display(&code) |> Effect.provideMut<Writer>(&mut writer))
+}
+effect fn makeLog() -> Shared<Log> ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run (Shared.make<Log>(Log { slots: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], count: 0 }) |> Effect.provideMut<Allocator>(&mut allocator))
+}
+effect fn recoverAny(e: OutOfMemoryError | WriterError) -> i32 { return -1 }
+struct Pair {
+  first: Tracer
+  second: Tracer
+}
+fn localReplace(log: &Shared<Log>) -> i32 {
+  let mut a = tracer(1, log)
+  a = tracer(2, log)
+  return 0
+}
+fn fieldReplace(log: &Shared<Log>) -> i32 {
+  let mut p = Pair { first: tracer(3, log), second: tracer(4, log) }
+  p.first = tracer(5, log)
+  return 0
+}
+fn arrayReplace(log: &Shared<Log>) -> i32 {
+  let mut arr = [tracer(6, log)]
+  arr[0] = tracer(7, log)
+  return 0
+}
+fn sliceReplace(values: &mut [Tracer], log: &Shared<Log>) -> i32 {
+  values[0] = tracer(9, log)
+  return 0
+}
+fn paramReplace(mut t: Tracer, log: &Shared<Log>) -> i32 {
+  t = tracer(9, log)
+  return 0
+}
+effect fn body() -> i32 ! OutOfMemoryError | WriterError {
+  let log = run makeLog()
+  let a = localReplace(&log)
+  let b = fieldReplace(&log)
+  let c = arrayReplace(&log)
+  let mut arr = [tracer(8, &log)]
+  let d = sliceReplace(&mut arr, &log)
+  drop arr
+  run printLog(&log)
+  return 0
+}
+pub fn main() -> i32 {
+  return run Effect.catchAll(body(), recoverAny)
+}`
+
+/** Replacement cleanup runs at the write, before an explicit drop and scope exit. */
+export const replaceDropProgram = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+import silk.format { Format }
+import silk.writer { Writer, WriterError }
+
+struct Log {
+  slots: [i32; 16]
+  count: usize
+}
+struct Tracer {
+  id: i32
+  log: Shared<Log>
+}
+fn record(log: &mut Log, id: i32) -> i32 {
+  log.slots[log.count] = id
+  log.count = log.count + 1
+  return 0
+}
+impl Drop for Tracer {
+  fn drop(self: &mut Tracer) -> () {
+    let id = self.id
+    let r = Shared.withMut<Log, i32>(&self.log, record(id))
+    return ()
+  }
+}
+fn encode(log: &Log) -> i32 {
+  let mut r = 0
+  let mut i: usize = 0
+  while i < log.count {
+    r = r * 10 + log.slots[i]
+    i = i + 1
+  }
+  return r
+}
+fn tracer(id: i32, log: &Shared<Log>) -> Tracer {
+  return Tracer { id: id, log: Shared.clone<Log>(log) }
+}
+effect fn printLog(log: &Shared<Log>) -> () ! WriterError {
+  let code = Shared.with<Log, i32>(log, encode)
+  let mut writer = Writer.stdoutWriterProvider()
+  return run (Format.display(&code) |> Effect.provideMut<Writer>(&mut writer))
+}
+effect fn makeLog() -> Shared<Log> ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run (Shared.make<Log>(Log { slots: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], count: 0 }) |> Effect.provideMut<Allocator>(&mut allocator))
+}
+effect fn recoverAny(e: OutOfMemoryError | WriterError) -> i32 { return -1 }
+fn replaceAndDrop(log: &Shared<Log>) -> i32 {
+  let mut a = tracer(1, log)
+  let b = tracer(2, log)
+  a = tracer(3, log)
+  drop b
+  let c = tracer(4, log)
+  return 0
+}
+effect fn body() -> i32 ! OutOfMemoryError | WriterError {
+  let log = run makeLog()
+  let s = replaceAndDrop(&log)
+  run printLog(&log)
+  return 0
+}
+pub fn main() -> i32 {
+  return run Effect.catchAll(body(), recoverAny)
+}`
+
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
+  {
+    name: 'replace-cleanup',
+    source: 'pub fn main() -> i32 { return 0 }',
+    nativeSource: replaceCleanupProgram,
+    nativeStdout: '123546789',
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'replace-drop',
+    source: 'pub fn main() -> i32 { return 0 }',
+    nativeSource: replaceDropProgram,
+    nativeStdout: '1243',
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'effect-borrow-escape',
+    source: `import silk.effect { Effect }
+effect fn inspect(values: &[i32]) -> i32 { return values[0] + values[1] }
+fn make() -> Effect<i32> {
+  let v = [20, 22]
+  return inspect(&v)
+}
+pub fn main() -> i32 {
+  let e = make()
+  return run e
+}`,
+    expected: { _tag: 'Trap' },
+  },
   ...corpus,
   {
     name: 'foreign-export-roundtrip',

@@ -66,7 +66,7 @@ it.effect('retains exact contextual magnitudes and target-owned usize layout fac
       3,
     )
     assert.strictEqual(
-      plan.value.literalVerdicts.every((verdict) => verdict._tag === 'AvailableUsizeLiteral'),
+      plan.value.literalVerdicts.every((verdict) => verdict._tag === 'AvailableWordLiteral'),
       true,
     )
   }),
@@ -123,8 +123,9 @@ it.effect('rejects an exact usize magnitude outside the selected target before M
       ['LAY0001'],
     )
     const diagnostic = snapshot.diagnostics.at(0)
-    assert.strictEqual(diagnostic?.reason._tag, 'UsizeTargetOutOfRange')
-    if (diagnostic?.reason._tag === 'UsizeTargetOutOfRange') {
+    assert.strictEqual(diagnostic?.reason._tag, 'WordLiteralOutOfRange')
+    if (diagnostic?.reason._tag === 'WordLiteralOutOfRange') {
+      assert.strictEqual(diagnostic.reason.type, 'usize')
       assert.strictEqual(diagnostic.reason.spelling, '4294967296')
       assert.strictEqual(diagnostic.reason.bits, 32)
       assert.strictEqual(diagnostic.reason.target, 'wasm32-unknown-unknown')

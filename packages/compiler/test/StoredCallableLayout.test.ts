@@ -134,8 +134,9 @@ pub fn main() -> i32 {
       const represented = representedEntry(plan)
       assert.strictEqual(represented.representation._tag, 'CallableEnvironment')
       if (represented.representation._tag !== 'CallableEnvironment') continue
-      assert.strictEqual(represented.representation.fields.at(0)?.representation, 'Borrow')
-      assert.strictEqual(represented.size, target.pointerSize)
+      // A slice capture is already a stable borrow descriptor and is stored inline.
+      assert.strictEqual(represented.representation.fields.at(0)?.representation, 'Value')
+      assert.strictEqual(represented.size, target.pointerSize * 2)
       assert.strictEqual(represented.alignment, target.pointerAlignment)
       assert.deepEqual(LayoutVerify.verify(plan), [])
     }

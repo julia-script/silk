@@ -173,7 +173,7 @@ const operationText = (operation: Operation): string => {
     case 'MakeEffect':
       return `${localText(operation.destination)} = make-effect ${targetText(operation.runner)} captures=${operation.captures.map((capture) => `${localText(capture.source)}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'MakeCallable':
-      return `${localText(operation.destination)} = make-callable ${callableTargetText(operation.target)} captures=${operation.captures.map((capture) => `#${capture.ordinal}->p${capture.parameterOrdinal}:${localText(capture.source)}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = make-callable ${callableTargetText(operation.target)}${operation.base === undefined ? '' : ` base=${localText(operation.base)}`} captures=${operation.captures.map((capture) => `#${capture.ordinal}->p${capture.parameterOrdinal}:${localText(capture.source)}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ApplyCallable': {
       let target = '?'
       if (operation.callable !== undefined) target = localText(operation.callable)

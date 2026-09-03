@@ -285,7 +285,18 @@ it.each(shardedCorpus)(
       )
 
       if (program.expected._tag === 'UnavailableEntry') {
-        assert.strictEqual(outcome._tag, 'NoEntry', program.name)
+        if (program.expected.reason === 'MissingEntry') {
+          assert.strictEqual(outcome._tag, 'NoEntry', program.name)
+        } else {
+          assert.strictEqual(outcome._tag, 'Rejected', program.name)
+          assert.deepEqual(
+            outcome._tag === 'Rejected'
+              ? outcome.diagnostics.map((diagnostic) => diagnostic.code)
+              : [],
+            ['SEM0204'],
+            program.name,
+          )
+        }
         return
       }
 

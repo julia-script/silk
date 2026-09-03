@@ -427,7 +427,9 @@ effect fn runPressure() -> i32 ! OutOfMemoryError {
   if result != 42 { return 5 }
   if result != 42 { return 6 }
   if order != 123 { return 7 }
-  if lifecycle != 15263 { return 8 }
+  // Dropping the unrun publication Effect cleans its captured producer and payload at that point
+  // (an owned capture is consumed by the environment), which orders those cleanups earlier.
+  if lifecycle != 14815 { return 8 }
   return 42
 }
 

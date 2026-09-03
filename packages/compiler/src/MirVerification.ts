@@ -808,7 +808,11 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
     case 'MakeEffect':
       return [operation.destination, ...operation.captures.map((capture) => capture.source)]
     case 'MakeCallable':
-      return [operation.destination, ...operation.captures.map((capture) => capture.source)]
+      return [
+        operation.destination,
+        ...(operation.base === undefined ? [] : [operation.base]),
+        ...operation.captures.map((capture) => capture.source),
+      ]
     case 'ApplyCallable':
       return [
         operation.destination,
@@ -1933,7 +1937,10 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'MakeEffect':
       return operation.captures.map((capture) => capture.source)
     case 'MakeCallable':
-      return operation.captures.map((capture) => capture.source)
+      return [
+        ...(operation.base === undefined ? [] : [operation.base]),
+        ...operation.captures.map((capture) => capture.source),
+      ]
     case 'ApplyCallable':
       return [
         ...(operation.callable === undefined ? [] : [operation.callable]),
@@ -3041,9 +3048,21 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
     }
 
     const color = new Map<number, 0 | 1 | 2>()
-    const visit = (region: Region): void => {
-      color.set(region.id.ordinal, 1)
-      for (const [target] of regionTargets(region)) {
+    // Explicit stack: region depth is authored statement count, not JavaScript stack depth.
+    const visit = (root: Region): void => {
+      const pending: Array<{ readonly region: Region; readonly targets: Array<RegionId> }> = [
+        { region: root, targets: regionTargets(root).map(([target]) => target) },
+      ]
+      color.set(root.id.ordinal, 1)
+      while (pending.length > 0) {
+        const frame = pending.at(-1)
+        if (frame === undefined) break
+        const target = frame.targets.shift()
+        if (target === undefined) {
+          color.set(frame.region.id.ordinal, 2)
+          pending.pop()
+          continue
+        }
         const targetRegion = byId.get(target.ordinal)
         if (targetRegion === undefined) continue
         if (color.get(target.ordinal) === 1) {
@@ -3052,13 +3071,18 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               _tag: 'Violation',
               rule: 'StructuralCycle',
               function: fn.id,
-              region: region.id,
-              detail: `structural edge r${region.id.ordinal} -> r${target.ordinal} forms a cycle`,
+              region: frame.region.id,
+              detail: `structural edge r${frame.region.id.ordinal} -> r${target.ordinal} forms a cycle`,
             }),
           )
-        } else if (color.get(target.ordinal) !== 2) visit(targetRegion)
+        } else if (color.get(target.ordinal) !== 2) {
+          color.set(target.ordinal, 1)
+          pending.push({
+            region: targetRegion,
+            targets: regionTargets(targetRegion).map(([candidate]) => candidate),
+          })
+        }
       }
-      color.set(region.id.ordinal, 2)
     }
     for (const region of [...fn.regions].sort((a, b) => a.id.ordinal - b.id.ordinal)) {
       if (color.get(region.id.ordinal) === undefined) visit(region)
@@ -5646,9 +5670,33 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const environment = operation.type.environment
           const fields = environment?.fields ?? []
+          // A spliced base contributes the leading fields; its own environment must be the
+          // exact prefix of the new one, both in count and in every field's shape.
+          const base =
+            operation.base === undefined ? undefined : fn.localTypes.at(operation.base.ordinal)
+          let baseFields: ReadonlyArray<Layout.CallableEnvironmentField> | undefined
+          if (operation.base === undefined) baseFields = []
+          else if (base?._tag === 'CallableValue') baseFields = base.environment?.fields ?? []
+          const baseValid =
+            baseFields !== undefined &&
+            (operation.base === undefined ||
+              (base?._tag === 'CallableValue' &&
+                Hir.sameCallableTarget(base.target, operation.target) &&
+                baseFields.every((field, ordinal) => {
+                  const target = fields.at(ordinal)
+                  return (
+                    target !== undefined &&
+                    target.ordinal === field.ordinal &&
+                    target.parameterOrdinal === field.parameterOrdinal &&
+                    target.access === field.access &&
+                    SilkType.equals(target.type, field.type)
+                  )
+                })))
           const capturesValid =
-            operation.captures.length === fields.length &&
-            operation.captures.every((capture, ordinal) => {
+            baseValid &&
+            operation.captures.length + (baseFields?.length ?? 0) === fields.length &&
+            operation.captures.every((capture, offset) => {
+              const ordinal = (baseFields?.length ?? 0) + offset
               const field = fields.at(ordinal)
               const source = fn.localTypes.at(capture.source.ordinal)
               return (

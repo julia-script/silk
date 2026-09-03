@@ -421,14 +421,16 @@ export const exportSuspendsCode = 'SEM0201' as const
 export const ambiguousSuppliedOperationCode = 'SEM0202' as const
 /** Stable code for naming a conformance-supplied receiver operation as a value instead of calling it. */
 export const suppliedOperationValueCode = 'SEM0203' as const
+/** Stable code for a root `main` whose declaration shape is not a valid program entry. */
+export const invalidEntryShapeCode = 'SEM0204' as const
 /** Stable code for a C-layout record that declares type parameters. */
-export const genericCLayoutRecordCode = 'SEM0204' as const
+export const genericCLayoutRecordCode = 'SEM0205' as const
 /** Stable code for a C-layout record field outside the closed C object subset. */
-export const unsupportedCLayoutFieldCode = 'SEM0205' as const
+export const unsupportedCLayoutFieldCode = 'SEM0206' as const
 /** Stable code for a value that cannot become an exact noncapturing C callback address. */
-export const invalidForeignCallbackCode = 'SEM0206' as const
+export const invalidForeignCallbackCode = 'SEM0207' as const
 /** Stable code for reachable C data on an execution surface without native symbol linkage. */
-export const foreignStaticTargetUnavailableCode = 'SEM0207' as const
+export const foreignStaticTargetUnavailableCode = 'SEM0208' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -453,11 +455,11 @@ export const storedEffectRunAccessCode = 'OWN0015' as const
 export const localSharedAccessEscapeCode = 'OWN0016' as const
 /** Stable code for an owner consumed in only some arms of a branch merge. */
 export const incompatibleArmMergeCode = 'OWN0017' as const
-/** Stable code for returning a callable that borrows storage owned by the returning function. */
-export const callableBorrowEscapeCode = 'OWN0018' as const
+/** Stable code for returning a callable or Effect that borrows storage owned by the returning function. */
+export const executableBorrowEscapeCode = 'OWN0018' as const
 
-/** Stable code for an exact `usize` magnitude outside the selected target word. */
-export const usizeTargetOutOfRangeCode = 'LAY0001' as const
+/** Stable code for an exact `usize` or `isize` literal outside the selected target word. */
+export const wordLiteralOutOfRangeCode = 'LAY0001' as const
 
 /** Every stable diagnostic code any phase can produce. */
 export type Code =
@@ -676,6 +678,7 @@ export type Code =
   | typeof exportSuspendsCode
   | typeof ambiguousSuppliedOperationCode
   | typeof suppliedOperationValueCode
+  | typeof invalidEntryShapeCode
   | typeof genericCLayoutRecordCode
   | typeof unsupportedCLayoutFieldCode
   | typeof invalidForeignCallbackCode
@@ -696,8 +699,8 @@ export type Code =
   | typeof storedEffectRunAccessCode
   | typeof localSharedAccessEscapeCode
   | typeof incompatibleArmMergeCode
-  | typeof callableBorrowEscapeCode
-  | typeof usizeTargetOutOfRangeCode
+  | typeof executableBorrowEscapeCode
+  | typeof wordLiteralOutOfRangeCode
 
 /** A semantic declaration identity carried structurally to avoid a module cycle. */
 export interface DeclarationEntity {
@@ -999,10 +1002,12 @@ export type Reason =
   | { readonly _tag: 'ProviderBackedFailure'; readonly type: string }
   | { readonly _tag: 'InvalidEffectProvision'; readonly detail: string }
   | {
-      readonly _tag: 'UsizeTargetOutOfRange'
+      readonly _tag: 'WordLiteralOutOfRange'
+      readonly type: 'usize' | 'isize'
       readonly spelling: string
       readonly target: string
       readonly bits: 32 | 64
+      readonly minimum: string
       readonly maximum: string
     }
   | {
@@ -1352,7 +1357,8 @@ export type Reason =
   | { readonly _tag: 'IncompatibleArmMerge'; readonly spelling: string }
   | { readonly _tag: 'MatchBorrowEscape'; readonly spelling: string }
   | {
-      readonly _tag: 'CallableBorrowEscape'
+      readonly _tag: 'ExecutableBorrowEscape'
+      readonly executable: 'Callable' | 'Effect'
       readonly spelling: string
       readonly access: 'Shared' | 'Exclusive'
     }
@@ -1411,6 +1417,7 @@ export type Reason =
       readonly receiver: string
       readonly member: string
     }
+  | { readonly _tag: 'InvalidEntryShape'; readonly detail: string }
   | {
       readonly _tag: 'AmbiguousSuppliedOperation'
       readonly receiver: string
@@ -2842,6 +2849,17 @@ export const suppliedOperationValue = (
     span,
   })
 
+export const invalidEntryShape = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidEntryShapeCode,
+    severity: 'error',
+    message: `Entry \`main\` ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidEntryShape', detail }),
+    span,
+  })
+
 export const inaccessibleStructConstruction = (
   type: string,
   span: SourceSpan.SourceSpan,
@@ -3535,6 +3553,7 @@ export const storedCallableConstruction = (
   span: SourceSpan.SourceSpan,
   constructedAt?: SourceSpan.SourceSpan,
   represented = false,
+  kind: 'callable' | 'Effect' = 'callable',
 ): Diagnostic => {
   const site = field === undefined ? 'its element' : `field ${field}`
   return Object.freeze({
@@ -3544,7 +3563,7 @@ export const storedCallableConstruction = (
     severity: 'error',
     message: represented
       ? `Cannot construct ${aggregate}: ${site} retains the static identity of ${callable}, but represented callable storage has no supported runtime layout`
-      : `Cannot construct ${aggregate}: ${site} would store the callable ${callable}, whose environment layout depends on a hidden concrete identity that ${aggregate} does not carry`,
+      : `Cannot construct ${aggregate}: ${site} would store the ${kind} ${callable}, whose environment layout depends on a hidden concrete identity that ${aggregate} does not carry`,
     reason: Object.freeze({
       _tag: 'StoredCallableConstruction',
       aggregate,
@@ -3886,25 +3905,29 @@ export const unknownOwnedCallableReturn = (span: SourceSpan.SourceSpan): Diagnos
   })
 
 /** Creates the target-owned diagnostic for a `usize` literal outside its selected word. */
-export const usizeTargetOutOfRange = (
+export const wordLiteralTargetOutOfRange = (
+  type: 'usize' | 'isize',
   spelling: string,
   target: string,
   bits: 32 | 64,
   span: SourceSpan.SourceSpan,
 ): Diagnostic => {
-  const maximum = bits === 32 ? '4294967295' : '18446744073709551615'
+  const minimum = type === 'usize' ? 0n : -(1n << BigInt(bits - 1))
+  const maximum = type === 'usize' ? (1n << BigInt(bits)) - 1n : (1n << BigInt(bits - 1)) - 1n
   return Object.freeze({
     _tag: 'Diagnostic',
     phase: 'layout',
-    code: usizeTargetOutOfRangeCode,
+    code: wordLiteralOutOfRangeCode,
     severity: 'error',
-    message: `usize literal ${spelling} exceeds the ${bits}-bit range for ${target}`,
+    message: `${type} literal ${spelling} exceeds the ${bits}-bit range for ${target}`,
     reason: Object.freeze({
-      _tag: 'UsizeTargetOutOfRange',
+      _tag: 'WordLiteralOutOfRange',
+      type,
       spelling,
       target,
       bits,
-      maximum,
+      minimum: minimum.toString(),
+      maximum: maximum.toString(),
     }),
     span,
   })
@@ -4672,7 +4695,7 @@ export const invalidReturnedBorrowSignature = (span: SourceSpan.SourceSpan): Dia
     code: invalidReturnedBorrowSignatureCode,
     severity: 'error',
     message:
-      'A returned borrowed view must belong to an ordinary function with exactly one borrowed parameter; an exclusive result requires an exclusive parameter',
+      'A returned borrowed view must belong to an ordinary function with exactly one borrowed parameter, or with none when only program-lifetime literals are returned; an exclusive result requires an exclusive parameter',
     reason: Object.freeze({ _tag: 'InvalidReturnedBorrowSignature' }),
     span,
   })
@@ -4684,7 +4707,7 @@ export const invalidReturnedBorrowOrigin = (span: SourceSpan.SourceSpan): Diagno
     code: invalidReturnedBorrowOriginCode,
     severity: 'error',
     message:
-      "The returned borrowed view does not originate from the function's single borrowed parameter",
+      "The returned borrowed view does not originate from the function's single borrowed parameter or a program-lifetime literal",
     reason: Object.freeze({ _tag: 'InvalidReturnedBorrowOrigin' }),
     span,
   })
@@ -5475,7 +5498,8 @@ export const matchBorrowEscape = (spelling: string, span: SourceSpan.SourceSpan)
   })
 
 /** Rejects a callable environment whose borrowed root ends when its creating function returns. */
-export const callableBorrowEscape = (
+export const executableBorrowEscape = (
+  executable: 'Callable' | 'Effect',
   spelling: string,
   access: 'Shared' | 'Exclusive',
   span: SourceSpan.SourceSpan,
@@ -5484,13 +5508,13 @@ export const callableBorrowEscape = (
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
-    code: callableBorrowEscapeCode,
+    code: executableBorrowEscapeCode,
     severity: 'error',
-    message: `Callable cannot escape with a ${access.toLowerCase()} borrow of local ${spelling}`,
-    reason: Object.freeze({ _tag: 'CallableBorrowEscape', spelling, access }),
+    message: `${executable} cannot escape with a ${access.toLowerCase()} borrow of local ${spelling}`,
+    reason: Object.freeze({ _tag: 'ExecutableBorrowEscape', executable, spelling, access }),
     span,
     relatedSpans: Object.freeze([
-      Object.freeze({ label: 'callable escapes here', span: returnSpan }),
+      Object.freeze({ label: `${executable.toLowerCase()} escapes here`, span: returnSpan }),
     ]),
   })
 

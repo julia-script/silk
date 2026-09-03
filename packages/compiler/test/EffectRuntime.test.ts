@@ -276,6 +276,25 @@ pub effect fn main() -> () ! OutOfMemoryError {
   discard(move pending)
   return ()
 }`
+const unusedOwnedParameterCleanupSource = `import silk.layout { Layout }
+struct Payload { storage: Allocation }
+impl Drop for Payload {
+  fn drop(self: &mut Payload) -> () { return () }
+}
+effect fn payload() -> Payload ! Intrinsic.StorageFailure {
+  let layout = Layout.of<i32>()
+  let storage = run Intrinsic.systemAllocationAcquire(move layout)
+  return Payload { storage: move storage }
+}
+effect fn hold(first: Payload, middle: Payload, last: Payload) -> () {
+  drop middle
+  return ()
+}
+pub effect fn main() -> () ! Intrinsic.StorageFailure {
+  let pending = hold(run payload(), run payload(), run payload())
+  drop pending
+  return ()
+}`
 
 it.effect('passes, returns, stores, captures, and specializes closed Effect values', () =>
   Effect.gen(function* () {
@@ -372,6 +391,25 @@ it.effect('releases a dropped unrun Effect environment once across an ordinary c
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 0)
+  }),
+)
+
+it.effect('releases unused owned effect-function arguments in reverse declaration order', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'effect-runtime/unused-owned-arguments',
+      ascii(unusedOwnedParameterCleanupSource),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    assert.deepEqual(
+      evaluated.trace.flatMap((event): ReadonlyArray<number> =>
+        event._tag === 'AllocationRelease' ? [event.ticket] : [],
+      ),
+      [2, 1, 0],
+    )
   }),
 )
 

@@ -6,7 +6,7 @@ import { afterAll, assert, it } from '@effect/vitest'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as OsRuntime from '../src/OsRuntime.js'
-import type * as Termination from '../src/Termination.js'
+import * as Termination from '../src/Termination.js'
 import * as ToolchainPlan from '../src/ToolchainPlan.js'
 
 const testRoot = mkdtempSync(join(tmpdir(), 'silk-os-clock-runtime-'))
@@ -25,6 +25,7 @@ const termination = (...identities: ReadonlyArray<string>): Termination.Contract
       identities.map((identity, ordinal) => Object.freeze({ tag: ordinal + 1, identity })),
     ),
     logicalFrames: Object.freeze([]),
+    report: Termination.emptyReport,
   })
 
 const clockSymbols = Object.freeze([

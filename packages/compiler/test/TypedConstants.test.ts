@@ -288,7 +288,7 @@ pub fn main() -> i32 { return 0 }`
     )
     assert.notInclude(
       Analysis.diagnostics(native).map((diagnostic) => diagnostic.code),
-      Diagnostic.usizeTargetOutOfRangeCode,
+      Diagnostic.wordLiteralOutOfRangeCode,
     )
 
     const wasm = yield* Analysis.ofSourceRealized(
@@ -297,7 +297,7 @@ pub fn main() -> i32 { return 0 }`
       'wasm32-unknown-unknown',
     )
     const overflow = Analysis.diagnostics(wasm).filter(
-      (diagnostic) => diagnostic.code === Diagnostic.usizeTargetOutOfRangeCode,
+      (diagnostic) => diagnostic.code === Diagnostic.wordLiteralOutOfRangeCode,
     )
     assert.strictEqual(overflow.length, 1)
     assert.strictEqual(overflow[0]?.span.start, input.indexOf(wide))

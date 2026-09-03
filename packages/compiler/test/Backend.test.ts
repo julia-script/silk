@@ -331,7 +331,8 @@ it.effect('emits checked arithmetic through overflow intrinsics and guarded divi
 
     assert.include(artifact.ir, 'llvm.smul.with.overflow')
     assert.include(artifact.ir, 'llvm.ssub.with.overflow')
-    assert.include(artifact.ir, 'arith_trap')
+    assert.include(artifact.ir, 'trap_site')
+    assert.include(artifact.ir, '@silk_trap_report_v1')
     assert.include(division.ir, 'sdiv')
     assert.include(division.ir, 'icmp eq')
     assert.include(division.ir, '@llvm.trap()')

@@ -13,6 +13,7 @@ import * as NativeDebug from './NativeDebug.js'
 import * as NativeLanePointer from './NativeLanePointer.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
+import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as SilkType from './Type.js'
@@ -51,8 +52,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     types,
     usizeType,
   } = context
-  const initialTrapBlock = context.state.trapBlock
-  let trapBlock = initialTrapBlock
+  let trapBlock: LlvmBlock.Block | undefined
   let checkOrdinal = context.state.checkOrdinal
   switch (operation._tag) {
     case 'Move': {
@@ -97,7 +97,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         ) {
           throw new RangeError('LLVM slice borrow lost its canonical lanes')
         }
-        if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
+        trapBlock = yield* NativeTermination.trapBlock(
+          context.termination,
+          'index out of bounds',
+          selector.provenance.span,
+        )
         const index = NativeStorage.readScalar(nativeStorage, selector.index)
         const inBounds = yield* FunctionBody.integerCompare(
           body,
@@ -221,7 +225,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           usizeType ?? i32,
           BigInt(offset.length),
         )
-        if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
+        trapBlock = yield* NativeTermination.trapBlock(
+          context.termination,
+          'index out of bounds',
+          offset.span,
+        )
         const inBounds = yield* FunctionBody.integerCompare(
           body,
           'ult',
@@ -534,7 +542,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               usizeType ?? i32,
               BigInt(selector.length),
             )
-            if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
+            trapBlock = yield* NativeTermination.trapBlock(
+              context.termination,
+              'index out of bounds',
+              selector.provenance.span,
+            )
             const inBounds = yield* FunctionBody.integerCompare(
               body,
               'ult',
@@ -637,7 +649,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         if (base === undefined || length === undefined) {
           throw new RangeError('LLVM slice read lost its address or length lane')
         }
-        if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
+        trapBlock = yield* NativeTermination.trapBlock(
+          context.termination,
+          'index out of bounds',
+          selector.provenance.span,
+        )
         const index = NativeStorage.readScalar(nativeStorage, selector.index)
         const inBounds = yield* FunctionBody.integerCompare(
           body,
@@ -741,7 +757,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           : [],
       )
       for (const [runtimeOrdinal, selector] of runtimeSelectors.entries()) {
-        if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
+        trapBlock = yield* NativeTermination.trapBlock(
+          context.termination,
+          'index out of bounds',
+          selector.span,
+        )
         const limit = yield* Constant.integerUnsigned(
           builder,
           usizeType ?? i32,
@@ -873,7 +893,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         if (selector?._tag !== 'SliceElementSelector' || length === undefined) {
           throw new RangeError('LLVM slice write check lost its canonical lanes')
         }
-        if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
+        trapBlock = yield* NativeTermination.trapBlock(
+          context.termination,
+          'index out of bounds',
+          selector.provenance.span,
+        )
         const inBounds = yield* FunctionBody.integerCompare(
           body,
           'ult',
@@ -905,7 +929,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           : [],
       )
       for (const [runtimeOrdinal, selector] of runtimeSelectors.entries()) {
-        if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
+        trapBlock = yield* NativeTermination.trapBlock(
+          context.termination,
+          'index out of bounds',
+          selector.span,
+        )
         const limit = yield* Constant.integerUnsigned(
           builder,
           usizeType ?? i32,
@@ -1040,6 +1068,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             ),
           )
         }
+        yield* NativeStorage.reloadAddressRoots(nativeStorage)
         break
       }
       if (operation.rootType._tag === 'Slice') {
@@ -1113,6 +1142,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           )
         }
         checkOrdinal += 1
+        yield* NativeStorage.reloadAddressRoots(nativeStorage)
         break
       }
       const rootLanes = NativeType.valueLanesFor(types, operation.rootType)
@@ -1244,6 +1274,5 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
   }
-  if (trapBlock !== initialTrapBlock) context.state.trapBlock = trapBlock
   context.state.checkOrdinal = checkOrdinal
 })

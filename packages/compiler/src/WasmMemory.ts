@@ -167,6 +167,18 @@ export const framePlan = (
     (operation): operation is Extract<Mir.Operation, { readonly _tag: 'BeginLoan' }> =>
       operation._tag === 'BeginLoan',
   )
+  /** The roots whose address a borrow-shaped capture of one closure formation hands out. */
+  const capturedRoots = (
+    operation: Extract<Mir.Operation, { readonly _tag: 'MakeEffect' | 'MakeCallable' }>,
+  ): ReadonlyArray<number> =>
+    operation.captures.flatMap((capture, ordinal) =>
+      (operation._tag === 'MakeEffect'
+        ? operation.type.environment.fields.at(ordinal)?.representation === 'Borrow'
+        : capture.access === 'Shared' || capture.access === 'Exclusive') &&
+      fn.localTypes.at(capture.source.ordinal)?._tag !== 'EnvironmentBorrow'
+        ? [capture.source.ordinal]
+        : [],
+    )
   const escaping = new Set([
     ...formations.flatMap((operation) =>
       operation.sourceType._tag === 'Slice' ||
@@ -177,14 +189,7 @@ export const framePlan = (
     ),
     ...MirVerification.operations(fn).flatMap((operation) =>
       operation._tag === 'MakeEffect' || operation._tag === 'MakeCallable'
-        ? operation.captures.flatMap((capture, ordinal) =>
-            (operation._tag === 'MakeEffect'
-              ? operation.type.environment.fields.at(ordinal)?.representation === 'Borrow'
-              : capture.access === 'Shared' || capture.access === 'Exclusive') &&
-            fn.localTypes.at(capture.source.ordinal)?._tag !== 'EnvironmentBorrow'
-              ? [capture.source.ordinal]
-              : [],
-          )
+        ? capturedRoots(operation)
         : [],
     ),
   ])
@@ -246,14 +251,19 @@ export const framePlan = (
     cursor += storage.size
     alignment = Math.max(alignment, storage.alignment)
   }
-  const localRoots = new Map<number, Set<number>>(
-    [...escaping].map((local) => [local, new Set([local])] as const),
-  )
-  const include = (destination: Mir.LocalId, sources: ReadonlyArray<Mir.LocalId>): boolean => {
+  // A root reaches its own storage only through the borrow formed over it: the root local
+  // passed by value hands out lanes, not an address, so it never seeds itself.
+  const localRoots = new Map<number, Set<number>>()
+  const include = (
+    destination: Mir.LocalId,
+    sources: ReadonlyArray<Mir.LocalId>,
+    formed: ReadonlyArray<number> = [],
+  ): boolean => {
     const destinationType = fn.localTypes.at(destination.ordinal)
     if (destinationType === undefined || !carriesBorrowAddress(plan, destinationType)) return false
     const selected = localRoots.get(destination.ordinal) ?? new Set<number>()
     const previous = selected.size
+    for (const root of formed) if (escaping.has(root)) selected.add(root)
     for (const source of sources) {
       for (const root of localRoots.get(source.ordinal) ?? []) selected.add(root)
     }
@@ -267,7 +277,8 @@ export const framePlan = (
     for (const operation of operations) {
       switch (operation._tag) {
         case 'BeginLoan':
-          changed = include(operation.destination, [operation.root]) || changed
+          changed =
+            include(operation.destination, [operation.root], [operation.root.ordinal]) || changed
           break
         case 'Move':
         case 'Project':
@@ -295,7 +306,13 @@ export const framePlan = (
           changed =
             include(
               operation.destination,
-              operation.captures.map((capture) => capture.source),
+              [
+                ...(operation._tag === 'MakeCallable' && operation.base !== undefined
+                  ? [operation.base]
+                  : []),
+                ...operation.captures.map((capture) => capture.source),
+              ],
+              capturedRoots(operation),
             ) || changed
           break
         case 'ApplyCallable':

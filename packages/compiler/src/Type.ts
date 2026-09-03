@@ -1323,12 +1323,13 @@ export const representationAdmissibility = (
   let requiredAccess: CallableMode | Effect['access']
   let actualAccess: CallableMode | Effect['access']
   if (contract._tag === 'CallableType' && requiredBound._tag === 'CallableType') {
+    // A safe callable satisfies an unsafe bound (it asks less of the caller); the reverse does not.
     structuralContract = callable(
       contract.parameters,
       contract.result,
       requiredBound.mode,
       contract.schema,
-      contract.unsafe,
+      contract.unsafe || requiredBound.unsafe,
     )
     requiredAccess = requiredBound.mode
     actualAccess = contract.mode
@@ -1830,8 +1831,14 @@ const computeKey = (self: Type): string => {
       failureRowPolicy(),
       self.failureRow,
     )}?${RowAlgebra.key(requirementRowPolicy(), self.requirementRow)}>`
+  // A callable use bound (`fn` versus `once fn`) selects the stored field's invocation and cleanup
+  // realization, so one exact callable admitted under two bounds is two field types.
   if (isRepresented(self))
-    return `represented:${key(self.contract)}:${genericArgumentKey(self.representation.argument)}`
+    return `represented:${key(self.contract)}:${
+      isCallable(self.representation.requiredBound)
+        ? `${key(self.representation.requiredBound)}:`
+        : ''
+    }${genericArgumentKey(self.representation.argument)}`
   return `union:${self.members.map(key).join('|')}`
 }
 
