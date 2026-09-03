@@ -949,7 +949,10 @@ function* executeFunction(
         if (callable === undefined)
           throw new RangeError('Callable cleanup referenced a missing evaluator identity')
         const wasAvailable = callable.state === 'Available'
-        if (callable.state !== 'Consumed') callable.state = 'Released'
+        // A Copy environment is duplicated by value, so cleaning one copy leaves every other copy
+        // (and the ticket they share) invocable.
+        const copyEnvironment = owner.captures.every((capture) => capture.access === 'Copy')
+        if (callable.state !== 'Consumed' && !copyEnvironment) callable.state = 'Released'
         trace.push(
           Object.freeze({
             _tag: 'CallableCleanup',

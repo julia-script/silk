@@ -235,6 +235,35 @@ export const callableValueByIdentity = (
   })
 }
 
+/** The exact callable a specialized target returns through a structural callable result type. */
+export const resultCallableValueType = (
+  layout: Layout.Plan,
+  instances: ReadonlyArray<Instances.Instance>,
+  target: { readonly module: string; readonly name: string },
+  typeArguments: ReadonlyArray<Type.GenericArgument>,
+  type: Type.Type,
+): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
+  const contract = Type.isRepresented(type) ? type.contract : type
+  if (!Type.isCallable(contract)) return undefined
+  const visible = typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument))
+  const identities = instances.flatMap((instance) =>
+    instance.key.declaration.module === target.module &&
+    instance.key.declaration.name === target.name &&
+    instance.resultCallable !== undefined &&
+    sameArguments(
+      instance.key.typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
+      visible,
+    )
+      ? [instance.resultCallable]
+      : [],
+  )
+  const identity = identities.at(0)
+  return identity === undefined ||
+    identities.some((candidate) => !Type.equalsGenericArgument(candidate, identity))
+    ? undefined
+    : callableValueByIdentity(layout, identity, contract)
+}
+
 export const sameArguments = (
   left: ReadonlyArray<Type.GenericArgument>,
   right: ReadonlyArray<Type.GenericArgument>,

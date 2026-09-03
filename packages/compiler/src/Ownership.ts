@@ -1690,19 +1690,39 @@ const analyzeLoans = (
           return []
       }
     })
+  // The root a captured loan is tied to. A borrow of a borrowed parameter reborrows the caller's
+  // loan, so the callable may leave this function with it; only a root this function owns ends here.
+  const capturedLoanRoot = (
+    expression: Elaboration.ExpressionFact,
+  ): { readonly spelling: string; readonly ownedHere: boolean } | undefined => {
+    if (expression._tag === 'Grouped') return capturedLoanRoot(expression.expression)
+    if (expression._tag === 'Move') return capturedLoanRoot(expression.subject)
+    if (expression._tag === 'Borrow') return capturedLoanRoot(expression.subject)
+    if (expression._tag !== 'Identifier') return undefined
+    if (expression.reference._tag === 'ResolvedBinding')
+      return Object.freeze({ spelling: expression.reference.spelling, ownedHere: true })
+    if (expression.reference._tag !== 'Resolved') return undefined
+    const declared = expression.reference.parameter.declaredType
+    const borrowedParameter =
+      declared._tag === 'Resolved' &&
+      (Type.isReference(declared.type) || Type.isSlice(declared.type))
+    return Object.freeze({ spelling: expression.reference.spelling, ownedHere: !borrowedParameter })
+  }
   const diagnosedEscapes = new Set<string>()
   for (const returned of returnedExpressions(fn.statements)) {
     const callable = returnedCallable(returned)
     if (callable === undefined) continue
     for (const capture of callable.captures) {
       if (capture.access !== 'Shared' && capture.access !== 'Exclusive') continue
+      const root = capturedLoanRoot(capture.expression)
+      if (root !== undefined && !root.ownedHere) continue
       const key = captureKey(capture.expression.syntax.span, capture.ordinal)
       returnedCallableCaptures.add(key)
       if (diagnosedEscapes.has(key)) continue
       diagnosedEscapes.add(key)
       diagnostics.push(
         Diagnostic.callableBorrowEscape(
-          directSite(capture.expression)?.spelling ?? '?',
+          root?.spelling ?? '?',
           capture.access,
           capture.expression.syntax.span,
           returned.syntax.span,

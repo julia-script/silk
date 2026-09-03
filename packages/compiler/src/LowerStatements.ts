@@ -526,7 +526,11 @@ export const lowerSequence = (
         ? borrowedWriteRoot(fn, place.root)
         : ownedWriteRoot(fn, place.root)
     const rootType = root === undefined ? undefined : fn.localTypes.at(root.ordinal)
-    const type = fn.type(place.type)
+    // A whole callable binding keeps its exact representation; the written value carries the same
+    // identity once analysis admitted the write.
+    const type =
+      fn.type(place.type) ??
+      (rootType?._tag === 'CallableValue' && place.selectors.length === 0 ? rootType : undefined)
     const [written, operations] = fn.capture(() => {
       if (root === undefined || rootType === undefined || type === undefined) return false
       const selectors =

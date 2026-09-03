@@ -62,6 +62,7 @@ import {
   instanceText,
   providerBindings,
   requirementsFor,
+  resultCallableValueType,
   runtimeRequirementArguments,
   storedCallableValueType,
   storedEffectValueType,
@@ -545,7 +546,16 @@ export function lowerExpressionInner(
           ? undefined
           : effectValueByIdentity(fn.layout, call.resultEffect)) ??
         declaredEffectValue ??
-        fn.type(expression.type)
+        fn.type(expression.type) ??
+        (realizedTarget?._tag === 'DeclarationCallableTarget'
+          ? resultCallableValueType(
+              fn.layout,
+              fn.instances,
+              realizedTarget.declaration,
+              typeArguments,
+              fn.semantic(expression.type),
+            )
+          : undefined)
       if (!lowered || type === undefined || callableType === undefined) return undefined
       if (
         realizedTarget?._tag === 'BuiltinCallableTarget' &&
@@ -2024,7 +2034,14 @@ export function lowerExpressionInner(
           ? undefined
           : effectValueByIdentity(fn.layout, call.resultEffect)) ??
         fn.effectResults.get(instanceText(expression.target, typeArguments)) ??
-        fn.type(expression.type)
+        fn.type(expression.type) ??
+        resultCallableValueType(
+          fn.layout,
+          fn.instances,
+          expression.target,
+          typeArguments,
+          fn.semantic(expression.type),
+        )
       if (type === undefined) return undefined
       const destination = fn.alloc(type)
       fn.emit(

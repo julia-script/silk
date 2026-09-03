@@ -386,7 +386,7 @@ pub fn main() -> i32 { return 0 }`)
 
     assert.deepEqual(
       Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
-      ['OWN0011', 'SEM0144'],
+      ['OWN0011', 'SEM0080', 'SEM0144'],
     )
   }),
 )
@@ -497,7 +497,21 @@ pub fn main() -> i32 { return 0 }`)
 
     assert.deepEqual(
       Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
-      ['SEM0144', 'SEM0144', 'SEM0144', 'SEM0144', 'SEM0144'],
+      [
+        'SEM0080',
+        'SEM0080',
+        'SEM0080',
+        'SEM0080',
+        'SEM0080',
+        'SEM0144',
+        'SEM0080',
+        'SEM0144',
+        'SEM0144',
+        'SEM0080',
+        'SEM0080',
+        'SEM0144',
+        'SEM0080',
+      ],
     )
   }),
 )

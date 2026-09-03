@@ -29,6 +29,7 @@ import type {
 } from './ValueType.js'
 import {
   callableValueByIdentity,
+  resultCallableValueType,
   effectValueByIdentity,
   effectValueType,
   instanceText,
@@ -270,7 +271,14 @@ export const lowerInstance = (
           effectOutcome ?? instance.specialization.result,
           new Map(),
         ) ??
-        mirType(effectOutcome ?? instance.specialization.result, new Map(), layout))
+        mirType(effectOutcome ?? instance.specialization.result, new Map(), layout) ??
+        resultCallableValueType(
+          layout,
+          instances,
+          instance.key.declaration,
+          instance.key.typeArguments,
+          instance.specialization.result,
+        ))
       : i32)
   if (resultType === undefined) {
     return trapFunction(instance, 'unavailable contract type', bodySpan(fn))

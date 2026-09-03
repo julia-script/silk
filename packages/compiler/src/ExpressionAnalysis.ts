@@ -2685,7 +2685,21 @@ export const analyzeMatch = (
       ? [Hir.executableSiteKey(arm.result.site)]
       : [],
   )
-  const erasesCallableIdentity = new Set(callableSites).size > 1
+  // Every reachable arm must construct the same exact callable: a structural callable type names
+  // a contract, not a universal representation the arms could be erased into.
+  const callableIdentities =
+    joined._tag === 'Joined' && Type.isCallable(joined.type)
+      ? arms.flatMap((arm) => {
+          const representation = arm.reachable ? representationOfExpression(arm.result) : undefined
+          return representation !== undefined &&
+            Type.isExactRepresentationArgument(representation) &&
+            Type.isCallableIdentityArgument(representation.identity)
+            ? [Type.genericArgumentKey(representation.identity)]
+            : []
+        })
+      : []
+  const erasesCallableIdentity =
+    new Set(callableSites).size > 1 || new Set(callableIdentities).size > 1
   if (erasesCallableIdentity) diagnostics.push(Diagnostic.callableIdentityErasure(node.span))
   let type: ExpressionTypeFact
   if (

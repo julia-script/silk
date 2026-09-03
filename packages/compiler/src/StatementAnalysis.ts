@@ -42,6 +42,7 @@ import {
   bindingName,
   coverageMembersOf,
   enumFactByType,
+  representationOfExpression,
   statementExpressionNode,
   unsafeCallAuthorized,
 } from './ExpressionAnalysis.js'
@@ -1248,6 +1249,28 @@ export const analyzeStatements = (
         root.inferredType._tag === 'Available' &&
         Type.isCallable(root.inferredType.type)
       ) {
+        // A callable binding keeps the exact representation it was initialized with; writing a
+        // callable of another construction site would erase that identity behind the structural type.
+        // Deferred writes inside an Effect body are governed by the captured-callable mutation rule.
+        const identityOf = (expression: ExpressionFact): string | undefined => {
+          const representation = representationOfExpression(expression)
+          return representation !== undefined &&
+            Type.isExactRepresentationArgument(representation) &&
+            Type.isCallableIdentityArgument(representation.identity)
+            ? Type.genericArgumentKey(representation.identity)
+            : undefined
+        }
+        const current = identityOf(root.initializer)
+        const written = identityOf(value.fact)
+        if (
+          compatible &&
+          !context.effectBlock &&
+          destination.fact._tag === 'Identifier' &&
+          current !== undefined &&
+          written !== undefined &&
+          current !== written
+        )
+          context.diagnostics.push(Diagnostic.callableIdentityErasure(valueNode.span))
         context.resolution.writtenCallableBindings?.add(root.id.ordinal)
       }
       facts.push(

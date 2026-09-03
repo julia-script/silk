@@ -24,7 +24,10 @@ it('separates exact identity, required bounds, and per-use admissibility', () =>
 
   assert.strictEqual(sharedUse.representation.admissibility._tag, 'Admitted')
   assert.strictEqual(onceUse.representation.admissibility._tag, 'Admitted')
-  assert.strictEqual(Type.equals(sharedUse, onceUse), true)
+  // One exact callable admitted under `fn` and `once fn` keeps one identity but is two field
+  // types: the use bound selects the stored field's invocation and cleanup realization.
+  assert.strictEqual(Type.equals(sharedUse, onceUse), false)
+  assert.strictEqual(Type.equals(sharedUse, Type.represented(shared, shared, exact)), true)
   assert.strictEqual(
     Type.equalsGenericArgument(sharedUse.representation.argument, onceUse.representation.argument),
     true,
