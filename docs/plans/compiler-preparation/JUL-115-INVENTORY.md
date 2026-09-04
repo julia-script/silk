@@ -15,10 +15,16 @@ evidence for every affected test registration.
 
 ## Final package graph
 
-The lockfile contained 11 workspace importers at implementation start and contains 10 after this
-change. The only removed importer is `packages/wasm`. The compiler dependency on
-`@silklang/wasm`, the docs-app dependency, package exports, workspace scripts, release validation,
-and lockfile entries are absent.
+The lockfile contained these 13 importers at implementation start: `.`, `apps/docs`, `apps/vscode`,
+`examples/tiny-language`, `packages/cli`, `packages/compiler`, `packages/docgen`,
+`packages/editor-support`, `packages/formatter`, `packages/llvm`, `packages/lsp`,
+`packages/platform-webcontainer`, and `packages/wasm`. It now contains the same list except for
+`packages/wasm`: 12 importers including the root, or 11 non-root importers.
+
+The removed dependency edges are `apps/docs -> @silklang/wasm` and
+`@silklang/compiler -> @silklang/wasm`; the removed workspace node is `packages/wasm`. The package
+exports, workspace scripts, release validation, and lockfile entries for the deleted package are
+absent.
 
 ## Deleted surfaces
 
@@ -30,7 +36,11 @@ and lockfile entries are absent.
 - Product/tooling: the current Labs route, navigation, workbench/state, presets, panes, worker
   protocol, tests, fixtures, examples, documentation, and evaluator inspection/LSP fields.
 - Historical implementation records: archived changes devoted solely to the removed evaluator,
-  direct backend, engine parity, foreign host, and evaluator test-inventory implementations.
+  direct backend, engine parity, foreign host, evaluator test-inventory implementations, and the
+  deleted Labs-only bootstrap/nested-value flow visualizations.
+
+The Labs-only archives removed in the final review were
+`2026-08-04-visualize-bootstrap-data-flow` and `2026-08-05-visualize-nested-value-flow`.
 
 ## Surviving authoritative evidence
 

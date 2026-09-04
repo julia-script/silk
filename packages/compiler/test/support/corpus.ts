@@ -3570,6 +3570,90 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 180 },
   },
+  {
+    // A source-defined StandardInput provider proves committed counts, partial replacement, EOF,
+    // and typed provider failure without any evaluator or OS-host adapter.
+    name: 'standard-input-source-provider',
+    source: `import silk.effect { Effect }
+import silk.standard_input { ReadOutcome, StandardInput, StreamReadError }
+import silk.u8 as u8
+import silk.usize as usize
+struct Scripted { bytes: [u8; 5] length: usize offset: usize chunk: usize }
+fn scripted() -> Scripted {
+  return Scripted {
+    bytes: [u8.toU8(10), u8.toU8(20), u8.toU8(30), u8.toU8(40), u8.toU8(50)],
+    length: usize.add(0, 5),
+    offset: usize.ZERO,
+    chunk: usize.add(0, 2),
+  }
+}
+effect fn read(self: &mut Scripted, buffer: &mut [u8]) -> ReadOutcome ! StreamReadError {
+  if self.offset == self.length { return StandardInput.endOfInput() }
+  let mut limit = self.chunk
+  let remaining = self.length - self.offset
+  if remaining < limit { limit = remaining }
+  if buffer.length < limit { limit = buffer.length }
+  let source = self.bytes
+  let mut index = usize.ZERO
+  while index < limit {
+    buffer[index] = source[self.offset + index]
+    index = index + usize.ONE
+  }
+  self.offset = self.offset + limit
+  return StandardInput.filled(limit)
+}
+impl StandardInput for Scripted { read: Scripted.read }
+struct Broken {}
+effect fn broken(self: &mut Broken, buffer: &mut [u8]) -> ReadOutcome ! StreamReadError {
+  fail StandardInput.readFailure()
+}
+impl StandardInput for Broken { read: Broken.broken }
+effect fn verify() -> i32 ! StreamReadError {
+  let mut provider = scripted()
+  let mut buffer = [u8.toU8(0), u8.toU8(0), u8.toU8(0), u8.toU8(0), u8.toU8(0)]
+  let first = run Effect.provideMut(StandardInput.receive(&mut buffer), &mut provider)
+  if StandardInput.count(&first) != usize.add(0, 2) { return 1 }
+  if buffer[usize.ZERO] != u8.toU8(10) { return 2 }
+  if buffer[usize.add(0, 2)] != u8.toU8(0) { return 3 }
+  let second = run Effect.provideMut(StandardInput.receive(&mut buffer), &mut provider)
+  if StandardInput.count(&second) != usize.add(0, 2) { return 4 }
+  if buffer[usize.ZERO] != u8.toU8(30) { return 5 }
+  let third = run Effect.provideMut(StandardInput.receive(&mut buffer), &mut provider)
+  if StandardInput.count(&third) != usize.ONE { return 6 }
+  if buffer[usize.ZERO] != u8.toU8(50) { return 7 }
+  let ended = run Effect.provideMut(StandardInput.receive(&mut buffer), &mut provider)
+  if !StandardInput.isEndOfInput(&ended) { return 8 }
+  if StandardInput.count(&ended) != usize.ZERO { return 9 }
+  let mut brokenProvider = Broken {}
+  let failed = run Effect.provideMut(StandardInput.receive(&mut buffer), &mut brokenProvider)
+  return 10
+}
+effect fn recover(error: StreamReadError) -> i32 { return 42 }
+pub fn main() -> i32 { return run Effect.catchAll(verify(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    // Path construction must publish no partial owner when its selected allocator refuses.
+    name: 'path-allocation-quota-refusal',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.filesystem { FileError, Path }
+import silk.layout { Layout }
+struct QuotaAllocator {}
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  fail OutOfMemoryError {}
+}
+impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
+effect fn build() -> i32 ! FileError | OutOfMemoryError {
+  let mut allocator = QuotaAllocator {}
+  let path = run Path.make("/never-owned") |> Effect.provideMut(&mut allocator)
+  drop path
+  return 1
+}
+effect fn recover(error: FileError | OutOfMemoryError) -> i32 { return 42 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // folded from StaticByteViewIndexing.test.ts: out-of-bounds static byte read traps.
   {
     name: 'static-byte-view-bounds',

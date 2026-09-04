@@ -8,7 +8,7 @@ Defines the user-visible Silk language-tool commands for project checking, build
 
 ### Requirement: Project-oriented command surface
 
-The root `silk` command SHALL expose `init`, `build`, `check`, `clean`, `format`, `run`, and `build-exe`. `init` SHALL accept an optional path and package-name override. Project compilation commands SHALL accept a shared optional `--manifest-path`, one `--backend`, repeatable `--target`, and profile selection. Repeated command-line targets SHALL replace rather than append to manifest targets. `--release` SHALL select the release profile and SHALL conflict with an explicitly different `--profile`.
+The root `silk` command SHALL expose `init`, `build`, `check`, `clean`, `format`, `run`, and `build-exe`. `init` SHALL accept an optional path and package-name override. Project compilation commands SHALL accept a shared optional `--manifest-path`, repeatable `--target`, and profile selection. Repeated command-line targets SHALL replace rather than append to manifest targets. `--release` SHALL select the release profile and SHALL conflict with an explicitly different `--profile`.
 
 #### Scenario: Display root help
 

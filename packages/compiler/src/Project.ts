@@ -4,7 +4,6 @@ import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
 import { parse, TomlDate, type TomlTable, type TomlValue } from 'smol-toml'
 import * as ArtifactKind from './ArtifactKind.js'
-import type * as Backend from './Backend.js'
 import * as NativeLinkInput from './NativeLinkInput.js'
 import * as SourceEntry from './SourceEntry.js'
 import * as TargetSelector from './TargetSelector.js'
@@ -25,7 +24,6 @@ export interface Project {
 
 /** Materialized project build defaults, including an absolute manifest-relative output root. */
 export interface BuildConfiguration {
-  readonly backend: Backend.Id
   readonly targets: ReadonlyArray<TargetSelector.TargetSelector>
   readonly outputDirectory: string
   readonly artifact: Exclude<ArtifactKind.ArtifactKind, 'WebAssemblyModule'>
@@ -180,11 +178,8 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
   if (buildTable !== undefined && !isTable(buildTable)) {
     return yield* invalidManifest(manifestPath, '[build] must be a table')
   }
-  const backendValue = buildTable?.backend ?? 'llvm'
-  if (backendValue !== 'llvm') {
-    return yield* invalidManifest(manifestPath, 'build.backend must be llvm')
-  }
-  const backend: Backend.Id = 'llvm'
+  if (buildTable?.backend !== undefined)
+    return yield* invalidManifest(manifestPath, 'build.backend is not a supported field')
   const defaultTargets: ReadonlyArray<TargetSelector.TargetSelector> = ['host']
   const targetsValue = buildTable?.targets ?? defaultTargets
   if (
@@ -246,7 +241,6 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
     version,
     root,
     sourceRoot,
-    backend,
     targets: Object.freeze([...targetsValue]) as ReadonlyArray<TargetSelector.TargetSelector>,
     outputDirectory,
     artifact,
@@ -341,7 +335,6 @@ export const load = Effect.fn('Project.load')(function* (
     directory,
     entry,
     build: Object.freeze({
-      backend: manifest.backend,
       targets: manifest.targets,
       outputDirectory: path.resolve(directory, manifest.outputDirectory),
       artifact: manifest.artifact,

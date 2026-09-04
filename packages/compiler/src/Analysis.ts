@@ -1151,21 +1151,12 @@ export const diagnostics = (self: FrontendSnapshot): ReadonlyArray<Diagnostic.Di
 export const phases = (self: FrontendSnapshot): ReadonlyArray<PhaseReport.PhaseReport> =>
   self.report
 
-/** Emits the snapshot's lowered program through the nominal backend service. */
-/**
- * Emits the snapshot's lowered program.
- *
- * LLVM is the default backend independently of the snapshot target. Passing a backend explicitly
- * preserves that selection and compatibility is validated at the backend boundary.
- */
-export const codegen = Effect.fn('Analysis.codegen')(function* <
-  A extends Backend.Artifact = Backend.LlvmBitcodeArtifact,
->(
+/** Emits the snapshot's lowered program through LLVM. */
+export const codegen = Effect.fn('Analysis.codegen')(function* (
   self: Snapshot,
   request: Backend.CodegenRequest,
-  backend?: Backend.Backend<A>,
 ): Effect.fn.Return<
-  A,
+  Backend.LlvmBitcodeArtifact,
   Backend.BackendError | Target.TargetError | AnalysisUnavailable | CodegenUnavailable
 > {
   if (Diagnostic.hasErrors(self.diagnostics) || self.closure.resolutionFailures.length > 0) {
@@ -1176,9 +1167,7 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
       resolutionFailures: self.closure.resolutionFailures,
     })
   }
-  // The cast closes the generic default/override variance gap: omitted selection is LLVM, while
-  // an explicit backend determines A at the call site.
-  const selected = backend ?? (LlvmBackend.LlvmBackend as Backend.Backend<A>)
+  const selected = LlvmBackend.LlvmBackend
   if (self.mir._tag === 'Unavailable') return yield* self.mir.error
   const violations = MirVerification.verify(self.mir.value)
   if (violations.length > 0) {

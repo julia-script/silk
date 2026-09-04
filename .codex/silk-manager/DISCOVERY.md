@@ -36,10 +36,10 @@ evidence to the coordinator, which is the only Linear writer.
 
 ### Scout A — compiler and runtime stability
 
-Inspect the compiler pipeline, ownership and cleanup planning, evaluator, LLVM path, direct Wasm
-path, standard library runtime contracts, and differential tests. Look for reachable correctness
-gaps, backend disagreement, untested failure or cleanup paths, diagnostic mismatches, nondeterminism,
-and brittle boundary handling.
+Inspect the compiler pipeline, ownership and cleanup planning, LLVM-native and LLVM-to-Wasm paths,
+standard library runtime contracts, and acceptance tests. Look for reachable correctness gaps,
+target disagreement, untested failure or cleanup paths, diagnostic mismatches, nondeterminism, and
+brittle boundary handling.
 
 ### Scout B — documentation and public surfaces
 
@@ -121,8 +121,8 @@ Leave verification of that impact, final design, and worth to triage.
 
 Build a coverage ledger for these areas:
 
-- compiler frontend, analysis, HIR, MIR, ownership, evaluator, and diagnostics;
-- LLVM and direct Wasm backends plus builder packages;
+- compiler frontend, analysis, HIR, MIR, ownership, compile-time evaluation, and diagnostics;
+- LLVM-native and LLVM-to-Wasm lowering, finalization, and runtime support;
 - standard library and runtime services;
 - CLI, formatter, LSP, editor support, docgen, VS Code, and webcontainer platform;
 - reference docs, tutorials, generated docs, READMEs, and examples;

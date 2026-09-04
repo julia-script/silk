@@ -257,7 +257,7 @@ later growth of the compiler-private execution stack remains fatal and does not 
 runtime trap according to the program-termination rules.
 
 **Evidence:** [fatal traps](typed-failures.md#fail-007--a-trap-is-fatal-and-remains-outside-effect-outcomes),
-[execution-storage requirements](../../../../openspec/changes/archive/2026-08-19-align-effect-suspension-coroutine-storage/specs/bootstrap-evaluation/spec.md).
+[execution-storage requirements](independent-execution.md#exec-001--construction-is-lazy-explicit-and-caller-funded).
 
 ## Execution and composition
 

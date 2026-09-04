@@ -9,8 +9,6 @@ import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as TestClock from 'effect/testing/TestClock'
 import * as Analysis from '../src/Analysis.js'
-import type * as Backend from '../src/Backend.js'
-import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as PhaseReport from '../src/PhaseReport.js'
@@ -166,53 +164,10 @@ pub fn main() -> i32 { return consume([]) }`,
   }),
 )
 
-it.effect(
-  'routes emission through an injected backend service',
-  () =>
-    Effect.gen(function* () {
-      let emissions = 0
-      const spy: Backend.Backend = {
-        _tag: 'Backend',
-        id: 'llvm',
-        name: 'Spy LLVM',
-        targets: LlvmBackend.LlvmBackend.targets,
-        emit: (program, request) => {
-          emissions += 1
-          return LlvmBackend.LlvmBackend.emit(program, request)
-        },
-      }
-      const outcome = yield* compileSource(
-        'injected-backend',
-        'pub fn main() -> i32 { return 42 }',
-        {
-          backend: spy,
-        },
-      )
-
-      assert.strictEqual(emissions, 1)
-      assert.strictEqual(outcome._tag, 'Compiled')
-    }),
-  15_000,
-)
-
 it.effect('gates source rejection and operational resolution failure before backend work', () =>
   Effect.gen(function* () {
-    let emissions = 0
-    const spy: Backend.Backend = {
-      _tag: 'Backend',
-      id: 'llvm',
-      name: 'Gate Spy',
-      targets: LlvmBackend.LlvmBackend.targets,
-      emit: (program, request) => {
-        emissions += 1
-        return LlvmBackend.LlvmBackend.emit(program, request)
-      },
-    }
-    const rejected = yield* compileSource('rejected', 'pub fn main() -> Mystery { return 42 }', {
-      backend: spy,
-    })
+    const rejected = yield* compileSource('rejected', 'pub fn main() -> Mystery { return 42 }')
     assert.strictEqual(rejected._tag, 'Rejected')
-    assert.strictEqual(emissions, 0)
     assert.strictEqual(
       rejected.report.some((entry) => entry.phase === 'target-layout'),
       false,
@@ -243,7 +198,6 @@ it.effect('gates source rejection and operational resolution failure before back
         profile: 'release',
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'resolution-failed'),
-        backend: spy,
       }).pipe(Effect.provide(resolver)),
     )
     assert.strictEqual(failed._tag, 'Failure')
@@ -259,7 +213,6 @@ it.effect('gates source rejection and operational resolution failure before back
         false,
       )
     }
-    assert.strictEqual(emissions, 0)
   }),
 )
 
@@ -313,23 +266,15 @@ it.effect(
             component.kind !== 'RuntimeSupport' || !component.id.endsWith('/Intrinsic.i32Add'),
         ),
       )
-      let emissions = 0
-      const backend: Backend.Backend = {
-        ...LlvmBackend.LlvmBackend,
-        emit: (program, request) => {
-          emissions += 1
-          return LlvmBackend.LlvmBackend.emit(program, request)
-        },
-      }
       const outcome = yield* compileSource(
         'missing-runtime',
         'pub fn main() -> i32 { return Intrinsic.i32Add(20, 22) }',
-        { backend, distribution },
+        { distribution },
       )
 
       assert.strictEqual(outcome._tag, 'ToolchainFailed')
-      assert.strictEqual(emissions, 0)
       assert.strictEqual(outcome.report.at(-1)?.phase, 'toolchain-target')
+      assert.isFalse(outcome.report.some((entry) => entry.phase === 'backend'))
     }),
 )
 

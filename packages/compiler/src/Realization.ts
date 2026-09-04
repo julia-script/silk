@@ -128,16 +128,16 @@ function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
   options: Options & { readonly artifactKind?: ArtifactKind.ArtifactKind },
-  backend: Backend.Backend,
+  prepareForEmission: true,
 ): Preparation
 function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
   options: Options & { readonly artifactKind?: ArtifactKind.ArtifactKind },
-  backend?: Backend.Backend,
+  prepareForEmission = false,
 ): Realization | Preparation {
   const report = [...self.report]
-  if (backend !== undefined && Diagnostic.hasErrors(self.diagnostics))
+  if (prepareForEmission && Diagnostic.hasErrors(self.diagnostics))
     return Object.freeze({
       _tag: 'Rejected',
       diagnostics: self.diagnostics,
@@ -159,7 +159,7 @@ function discoverAndLower(
     'instance-discovery',
     self.results.size,
     () =>
-      targetSelection._tag === 'Unavailable' || (backend === undefined && specializationInvalid)
+      targetSelection._tag === 'Unavailable' || (!prepareForEmission && specializationInvalid)
         ? Instances.invalid(self.closure.rootModule)
         : Instances.discover(
             self.closure.rootModule,
@@ -193,14 +193,14 @@ function discoverAndLower(
     instanceViolationDiagnostics(self, instances),
     foreignStaticDiagnostics,
   )
-  if (backend !== undefined && Diagnostic.hasErrors(baseDiagnostics))
+  if (prepareForEmission && Diagnostic.hasErrors(baseDiagnostics))
     return Object.freeze({
       _tag: 'Rejected',
       diagnostics: baseDiagnostics,
       report: Object.freeze(report),
     })
   const foreignDiagnostics =
-    backend === undefined || targetSelection._tag === 'Unavailable'
+    !prepareForEmission || targetSelection._tag === 'Unavailable'
       ? Object.freeze([])
       : ForeignAvailability.select(instances.foreignCalls, targetSelection.target)
   if (foreignDiagnostics.length > 0)
@@ -210,7 +210,7 @@ function discoverAndLower(
       report: Object.freeze(report),
     })
   const analysisUnavailable = (() => {
-    if (backend !== undefined) return undefined
+    if (prepareForEmission) return undefined
     if (Diagnostic.hasErrors(foreignStaticDiagnostics))
       return new AnalysisUnavailable({
         operation: 'Analysis.realize',
@@ -244,19 +244,7 @@ function discoverAndLower(
       const selection = targetSelection
       if (selection._tag === 'Unavailable')
         return Object.freeze({ _tag: 'Unavailable' as const, selection, error: selection.error })
-      if (backend !== undefined) {
-        const compatible = BackendRegistry.requireTarget(backend, selection.target)
-        if (compatible._tag === 'Failure')
-          return Object.freeze({
-            _tag: 'BackendUnavailable' as const,
-            selection,
-            error: new Backend.BackendError({
-              operation: 'Backend.emit',
-              backend: backend.id,
-              message: compatible.failure.message,
-              reason: { _tag: 'UnsupportedTarget', target: selection.target.id },
-            }),
-          })
+      if (prepareForEmission) {
         const availability = IntrinsicAvailability.select(instances.intrinsics, selection.target)
         if (availability._tag === 'Unavailable')
           return Object.freeze({
@@ -290,13 +278,6 @@ function discoverAndLower(
     options,
   )
 
-  if (targetLayout._tag === 'BackendUnavailable')
-    return Object.freeze({
-      _tag: 'BackendFailed',
-      error: targetLayout.error,
-      diagnostics: baseDiagnostics,
-      report: Object.freeze(report),
-    })
   if (targetLayout._tag === 'IntrinsicUnavailable')
     return Object.freeze({
       _tag: 'TargetFailed',
@@ -304,14 +285,14 @@ function discoverAndLower(
       diagnostics: baseDiagnostics,
       report: Object.freeze(report),
     })
-  if (backend !== undefined && targetLayout._tag === 'Unavailable')
+  if (prepareForEmission && targetLayout._tag === 'Unavailable')
     return Object.freeze({
       _tag: 'TargetFailed',
       error: targetLayout.error,
       diagnostics: baseDiagnostics,
       report: Object.freeze(report),
     })
-  if (backend !== undefined && instances.entry._tag === 'Unavailable')
+  if (prepareForEmission && instances.entry._tag === 'Unavailable')
     return Object.freeze({
       _tag: 'NoEntry',
       reason: instances.entry.reason,
@@ -327,7 +308,7 @@ function discoverAndLower(
     ...(targetLayout._tag === 'Available' ? [targetLayout.layout.diagnostics] : []),
   )
   if (
-    backend !== undefined &&
+    prepareForEmission &&
     targetLayout._tag === 'Available' &&
     Diagnostic.hasErrors(targetLayout.layout.diagnostics)
   )
@@ -338,7 +319,7 @@ function discoverAndLower(
     })
 
   const targetLiteralError =
-    backend === undefined &&
+    !prepareForEmission &&
     targetLayout._tag === 'Available' &&
     Diagnostic.hasErrors(targetLayout.layout.diagnostics)
       ? new AnalysisUnavailable({
@@ -370,7 +351,7 @@ function discoverAndLower(
         )
       : undefined
 
-  if (backend !== undefined) {
+  if (prepareForEmission) {
     if (targetLayout._tag !== 'Available' || program === undefined)
       throw new RangeError('Driver lowering reached an unavailable target after its gates')
     const planning = ForeignPlanning.check(program, targetLayout.target)
@@ -432,15 +413,13 @@ export const realize = (
 /** Prepares valid runtime facts for Driver while stopping at each artifact-production gate. */
 export const prepare = (
   self: Frontend,
-  backend: Backend.Backend,
   targetId: string | undefined = self.requestedTarget,
   options: Options & { readonly artifactKind?: ArtifactKind.ArtifactKind } = {},
-): Preparation => discoverAndLower(self, targetId, options, backend)
+): Preparation => discoverAndLower(self, targetId, options, true)
 
 import { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import * as ArtifactKind from './ArtifactKind.js'
 import * as Backend from './Backend.js'
-import * as BackendRegistry from './BackendRegistry.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'

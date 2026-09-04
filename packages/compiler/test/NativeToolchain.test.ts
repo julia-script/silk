@@ -420,6 +420,27 @@ it.effect('includes the selected native clock runtime in the artifact cache iden
   }),
 )
 
+it.effect('includes the LLVM-Wasm freestanding runtime in the artifact cache identity', () =>
+  Effect.gen(function* () {
+    const bitcode = Uint8Array.from([0, 1, 2, 3])
+    const keyFor = (runtimeSource: string) =>
+      NativeToolchain.artifactCacheKey(
+        toolchain,
+        'WebAssemblyModule',
+        Target.wasm32UnknownUnknown,
+        'release',
+        bitcode,
+        runtimeSource,
+        join(testRoot, 'runtime.wasm'),
+      )
+    const original = yield* keyFor('freestanding runtime v1')
+    const changed = yield* keyFor('freestanding runtime v2')
+    assert.notStrictEqual(original, changed)
+    assert.match(original, /\.wasm$/)
+    assert.match(changed, /\.wasm$/)
+  }),
+)
+
 it.effect('separates every final artifact kind in cache identity and extension', () =>
   Effect.gen(function* () {
     const target = yield* NativeToolchain.hostTarget()

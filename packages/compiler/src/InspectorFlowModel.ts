@@ -40,7 +40,6 @@ const typeText = (type: Type.Type): string => {
 }
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
-export type FlowLayer = 'Semantic'
 
 export type FlowNodeKind =
   | 'Argument'
@@ -50,11 +49,6 @@ export type FlowNodeKind =
   | 'CallResult'
   | 'FunctionReturn'
   | 'Terminal'
-
-export interface FlowEvidence {
-  readonly order: number
-  readonly value?: number | bigint
-}
 
 export interface FlowGroup {
   readonly _tag: 'FlowGroup'
@@ -79,7 +73,6 @@ export interface FlowNode {
   readonly detail: string
   readonly depth: number
   readonly ordinal: number | undefined
-  readonly layer: FlowLayer
   readonly state: FlowItemState
   readonly span: SourceSpan.SourceSpan
 }
@@ -92,14 +85,12 @@ export interface FlowEdge {
   readonly to: string
   readonly label: string
   readonly depth: number
-  readonly layer: FlowLayer
   readonly state: FlowItemState
   readonly span: SourceSpan.SourceSpan
 }
 
 export interface FlowModel {
   readonly _tag: 'FlowModel'
-  readonly mode: 'Semantic'
   readonly status: 'Complete' | 'Incomplete' | 'Empty'
   readonly summary: string
   readonly groups: ReadonlyArray<FlowGroup>
@@ -246,7 +237,6 @@ const semanticNode = (
     detail,
     depth: group.depth,
     ordinal,
-    layer: 'Semantic',
     state,
     span,
   })
@@ -268,7 +258,6 @@ const semanticEdge = (
     to,
     label,
     depth: group.depth,
-    layer: 'Semantic',
     state,
     span,
   })
@@ -664,7 +653,6 @@ const projectCall = (
 const emptyModel = (): FlowModel =>
   Object.freeze({
     _tag: 'FlowModel',
-    mode: 'Semantic',
     status: 'Empty',
     summary: 'No call expression is available for data-flow projection.',
     groups: Object.freeze([]),
@@ -743,7 +731,6 @@ export const projectDataFlow = (analysis: Elaboration.Result): FlowModel => {
   const modeSummary = 'Semantic relationships only.'
   return Object.freeze({
     _tag: 'FlowModel',
-    mode: 'Semantic',
     status: root.complete ? 'Complete' : 'Incomplete',
     summary: `${nestedCount === 0 ? 'One call site' : `${nestedCount + 1} nested call sites`} projected. ${modeSummary}`,
     groups: Object.freeze(groups),

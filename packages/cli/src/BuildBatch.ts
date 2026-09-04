@@ -1,4 +1,3 @@
-import * as BackendRegistry from '@silklang/compiler/BackendRegistry'
 import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
 import type * as Project from '@silklang/compiler/Project'
 import * as TargetSelector from '@silklang/compiler/TargetSelector'
@@ -7,14 +6,13 @@ import * as Data from 'effect/Data'
 import * as Result from 'effect/Result'
 import * as BuildPlan from './BuildPlan.js'
 
-/** One preflighted backend and an ordered non-empty collection of single-target plans. */
+/** One preflighted ordered non-empty collection of single-target LLVM plans. */
 export interface BuildBatch {
   readonly _tag: 'BuildBatch'
   readonly plans: readonly [BuildPlan.BuildPlan, ...Array<BuildPlan.BuildPlan>]
 }
 
 export type BuildBatchErrorReason =
-  | { readonly _tag: 'Backend'; readonly error: BackendRegistry.BackendRegistryError }
   | { readonly _tag: 'Target'; readonly error: TargetSelector.TargetSelectorError }
   | { readonly _tag: 'Plan'; readonly error: BuildPlan.BuildPlanError }
   | { readonly _tag: 'EmptyTargets' }
@@ -27,7 +25,6 @@ export class BuildBatchError extends Data.TaggedError('BuildBatchError')<{
 }> {}
 
 export interface Options {
-  readonly backend?: string
   readonly targets?: ReadonlyArray<string>
   readonly profile: ToolchainPlan.OptimizationProfile
   readonly purpose?: BuildPlan.Purpose
@@ -35,21 +32,11 @@ export interface Options {
   readonly llvmAr?: string
 }
 
-/** Resolves one backend and all targets before returning any executable build work. */
+/** Resolves all targets before returning any executable build work. */
 export const make = (
   project: Project.Project,
   options: Options,
 ): Result.Result<BuildBatch, BuildBatchError> => {
-  const selectedBackend = BackendRegistry.resolve(options.backend ?? project.build.backend)
-  if (Result.isFailure(selectedBackend)) {
-    return Result.fail(
-      new BuildBatchError({
-        operation: 'BuildBatch.make',
-        message: selectedBackend.failure.message,
-        reason: { _tag: 'Backend', error: selectedBackend.failure },
-      }),
-    )
-  }
   const selectors = options.targets ?? project.build.targets
   const selectedTargets = TargetSelector.resolveAll(selectors, NativeToolchain.hostSelection())
   if (Result.isFailure(selectedTargets)) {
@@ -64,7 +51,6 @@ export const make = (
   const plans: Array<BuildPlan.BuildPlan> = []
   for (const target of selectedTargets.success) {
     const plan = BuildPlan.make(project, {
-      backend: selectedBackend.success,
       target,
       profile: options.profile,
       ...(options.purpose === undefined ? {} : { purpose: options.purpose }),

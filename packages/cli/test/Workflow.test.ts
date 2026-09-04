@@ -1,6 +1,5 @@
 import { existsSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
-import * as LlvmBackend from '@silklang/compiler/LlvmBackend'
 import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
 import * as Project from '@silklang/compiler/Project'
 import * as Config from 'effect/Config'
@@ -37,6 +36,14 @@ effect fn program() -> i32 ! OutOfMemoryError {
   let mut values = Vector.make<i32>()
   let appended = run Vector.append<i32>(&mut values, 41)
     |> Effect.provideMut<Allocator>(&mut allocator)
+  let appendedTwo = run Vector.append<i32>(&mut values, 0)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let appendedThree = run Vector.append<i32>(&mut values, 0)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let appendedFour = run Vector.append<i32>(&mut values, 0)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let appendedFive = run Vector.append<i32>(&mut values, 0)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let one = run Effect.suspend(effect { return 1 })
   let text = "silk"
   let bytes = Intrinsic.stringUtf8Bytes(text)
@@ -44,6 +51,7 @@ effect fn program() -> i32 ! OutOfMemoryError {
   if Intrinsic.stringByteLength(text) != 4 { return 2 }
   if bytes.length != 4 { return 3 }
   if u8.toI32(bytes[0]) != 115 { return 4 }
+  if Vector.length<i32>(&values) != 5 { return 5 }
   return Vector.get<i32>(&values, 0) + one
 }
 
@@ -284,7 +292,7 @@ it.effect(
       yield* makeProject(root, llvmWasmRuntimeSource)
       yield* fileSystem.writeFileString(
         `${root}/silk.toml`,
-        '[package]\nname = "hello"\nversion = "0.1.0"\nroot = "src/Main.silk"\n\n[build]\nbackend = "llvm"\ntargets = ["host", "wasm32-unknown-unknown"]\n',
+        '[package]\nname = "hello"\nversion = "0.1.0"\nroot = "src/Main.silk"\n\n[build]\ntargets = ["host", "wasm32-unknown-unknown"]\n',
       )
       const reports: Array<string> = []
       const reportingConsole: Console.Console = Object.assign(Object.create(console), {
@@ -381,22 +389,7 @@ pub fn main() -> i32 {
   }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
-it.effect('preflights incompatible batches before creating output', () =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem
-    const root = yield* fileSystem.makeTempDirectoryScoped()
-    yield* makeProject(root)
-    const status = yield* Workflow.build({
-      ...options(root),
-      backend: 'not-a-backend',
-      targets: ['host'],
-    })
-    assert.strictEqual(status, 2)
-    assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
-  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
-)
-
-it.effect('checks every configured target without creating output and keeps run host-only', () =>
+it.effect('checks every configured target without creating output', () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
     const root = yield* fileSystem.makeTempDirectoryScoped()
@@ -408,8 +401,6 @@ it.effect('checks every configured target without creating output and keeps run 
       }),
       0,
     )
-    assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
-    assert.strictEqual(yield* Workflow.run({ ...options(root), backend: 'not-a-backend' }), 2)
     assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
   }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
@@ -426,7 +417,6 @@ it.effect('returns source and toolchain failure classes without leaving executab
     const destination = `${root}/broken-toolchain`
     const attempted = yield* Workflow.compile({
       entry: project.entry,
-      backend: LlvmBackend.LlvmBackend,
       profile: 'debug',
       artifactKind: 'NativeExecutable',
       packageName: 'broken-toolchain',

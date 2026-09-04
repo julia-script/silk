@@ -26,7 +26,6 @@ describe('projectDataFlow', () => {
   it('projects the canonical flat semantic path without evaluation claims', () => {
     const flow = projectDataFlow(analyze('memory/flow-complete', identitySource))
 
-    expect(flow.mode).toBe('Semantic')
     expect(flow.status).toBe('Complete')
     expect(flow.groups).toHaveLength(1)
     expect(flow.nodes.map((item) => item.kind)).toEqual([
@@ -62,7 +61,6 @@ describe('projectDataFlow', () => {
 
     expect(children.map((group) => group.ordinal)).toEqual([0, 1])
     expect(new Set(children.map((group) => group.id)).size).toBe(2)
-    expect(flow.mode).toBe('Semantic')
   })
 
   it('terminates an unavailable inner type contract without inventing an enclosing result', () => {

@@ -58,12 +58,9 @@ it.effect('roots native libraries at C exports without selecting main', () =>
 export "C" fn increment(value: i32) -> i32 { return helper(value) }
 pub fn main() -> i32 { return 0 }`),
     )
-    const prepared = Realization.prepare(
-      frontend,
-      LlvmBackend.LlvmBackend,
-      'aarch64-apple-darwin',
-      { artifactKind: 'NativeSharedLibrary' },
-    )
+    const prepared = Realization.prepare(frontend, 'aarch64-apple-darwin', {
+      artifactKind: 'NativeSharedLibrary',
+    })
     assert.strictEqual(prepared._tag, 'Prepared')
     if (prepared._tag !== 'Prepared') return
     assert.strictEqual(prepared.program.entry._tag, 'LibraryEntry')
@@ -92,12 +89,9 @@ it.effect('rejects a native library with no C export root', () =>
       'library/Empty',
       ascii('pub fn helper() -> i32 { return 42 }'),
     )
-    const prepared = Realization.prepare(
-      frontend,
-      LlvmBackend.LlvmBackend,
-      'aarch64-apple-darwin',
-      { artifactKind: 'NativeStaticLibrary' },
-    )
+    const prepared = Realization.prepare(frontend, 'aarch64-apple-darwin', {
+      artifactKind: 'NativeStaticLibrary',
+    })
     assert.strictEqual(prepared._tag, 'NoEntry')
     if (prepared._tag === 'NoEntry') assert.strictEqual(prepared.reason, 'MissingLibraryExport')
   }),

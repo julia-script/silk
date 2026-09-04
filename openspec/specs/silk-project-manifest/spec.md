@@ -80,10 +80,10 @@ including resolution of `host`, and required parent directories SHALL be created
 
 ### Requirement: Optional build defaults
 
-The manifest SHALL accept an optional `[build]` table with `backend`, `targets`, `output-dir`,
-`artifact`, and `native-link-inputs`. Artifact values SHALL be `executable`, `shared-library`, or
-`static-library`, defaulting to `executable`; native library kinds SHALL require backend `llvm` and
-native targets. `native-link-inputs` SHALL be an ordered array of inline tables, each containing
+The manifest SHALL accept an optional `[build]` table with `targets`, `output-dir`, `artifact`, and
+`native-link-inputs`. Artifact values SHALL be `executable`, `shared-library`, or `static-library`,
+defaulting to `executable`; native library kinds SHALL require native targets.
+`native-link-inputs` SHALL be an ordered array of inline tables, each containing
 exactly one input form: `object`, `static-archive`, `search-path`, or `framework`, or a `library`
 paired with mode `static` or `dynamic`. Paths SHALL be non-empty manifest-relative paths that do not
 escape the project and SHALL materialize as absolute paths. Names SHALL be non-empty and SHALL NOT
@@ -93,17 +93,17 @@ loading with a typed project error; WebAssembly planning SHALL reject non-empty 
 #### Scenario: Apply sparse defaults
 
 - **WHEN** the manifest contains no `[build]` table
-- **THEN** project building selects backend `llvm`, target `host`, artifact `executable`, output directory `build`, and no native link inputs
+- **THEN** project building selects target `host`, artifact `executable`, output directory `build`, and no native link inputs
 
 #### Scenario: Select multiple targets
 
-- **WHEN** `[build]` declares `backend = "llvm"` and `targets = ["host", "wasm32-unknown-unknown"]`
+- **WHEN** `[build]` declares `targets = ["host", "wasm32-unknown-unknown"]`
 - **THEN** target selectors retain their declared order and `host` resolves to the canonical current-host triple before planning
 
-#### Scenario: Reject an unknown backend
+#### Scenario: Reject a removed backend selector
 
-- **WHEN** `[build]` selects any backend other than `llvm`
-- **THEN** project planning fails before creating or replacing any artifact
+- **WHEN** `[build]` declares a `backend` field
+- **THEN** project loading fails before creating or replacing any artifact
 
 #### Scenario: Deduplicate target selectors
 

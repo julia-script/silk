@@ -32,7 +32,6 @@ it.effect('loads the minimal manifest and defaults the source root to the entry 
     assert.strictEqual(project.entry.module, 'Main')
     assert.strictEqual(project.entry.sourceRoot, `${root}/src`)
     assert.deepStrictEqual(project.build, {
-      backend: 'llvm',
       targets: ['host'],
       outputDirectory: `${root}/build`,
       artifact: 'NativeExecutable',
@@ -131,18 +130,17 @@ it.effect('rejects malformed TOML and invalid package names', () =>
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 
-it.effect('materializes explicit build configuration and WebAssembly selection', () =>
+it.effect('materializes explicit build configuration and WebAssembly target selection', () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
     const root = yield* fileSystem.makeTempDirectoryScoped()
     yield* writeFile(`${root}/src/Main.silk`, source)
     yield* writeFile(
       `${root}/silk.toml`,
-      '[package]\nname = "configured"\nversion = "1.2.3-beta.1+build.7"\nroot = "src/Main.silk"\n\n[build]\nbackend = "llvm"\ntargets = ["host", "wasm32-unknown-unknown"]\noutput-dir = "artifacts"\nartifact = "shared-library"\nnative-link-inputs = [{ search-path = "native/lib" }, { library = "c", mode = "dynamic" }, { object = "native/add.o" }, { static-archive = "native/libmath.a" }, { framework = "CoreFoundation" }]\n',
+      '[package]\nname = "configured"\nversion = "1.2.3-beta.1+build.7"\nroot = "src/Main.silk"\n\n[build]\ntargets = ["host", "wasm32-unknown-unknown"]\noutput-dir = "artifacts"\nartifact = "shared-library"\nnative-link-inputs = [{ search-path = "native/lib" }, { library = "c", mode = "dynamic" }, { object = "native/add.o" }, { static-archive = "native/libmath.a" }, { framework = "CoreFoundation" }]\n',
     )
     const configured = yield* Project.load({ workingDirectory: root })
     assert.deepStrictEqual(configured.build, {
-      backend: 'llvm',
       targets: ['host', 'wasm32-unknown-unknown'],
       outputDirectory: `${root}/artifacts`,
       artifact: 'NativeSharedLibrary',
@@ -157,7 +155,7 @@ it.effect('materializes explicit build configuration and WebAssembly selection',
 
     yield* writeFile(
       `${root}/silk.toml`,
-      '[package]\nname = "configured"\nversion = "1.2.3"\nroot = "src/Main.silk"\n\n[build]\nbackend = "llvm"\ntargets = ["wasm32-unknown-unknown"]\n',
+      '[package]\nname = "configured"\nversion = "1.2.3"\nroot = "src/Main.silk"\n\n[build]\ntargets = ["wasm32-unknown-unknown"]\n',
     )
     const wasm = yield* Project.load({ workingDirectory: root })
     assert.deepStrictEqual(wasm.build.targets, ['wasm32-unknown-unknown'])
@@ -171,7 +169,7 @@ it.effect('rejects malformed build metadata before loading the entry', () =>
     const invalid = [
       '[package]\nname = "invalid"\nversion = "1.0"\nroot = "Main.silk"\n',
       '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\ntargets = []\n',
-      '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nbackend = "native"\n',
+      '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nbackend = "llvm"\n',
       '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\noutput-dir = "../outside"\n',
       '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nartifact = "dynamic-library"\n',
       '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nnative-link-inputs = [{ library = "-Wl,--export-dynamic", mode = "dynamic" }]\n',

@@ -494,7 +494,113 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
     const deepPaths = Object.keys(manifest.exports)
       .filter((entry) => entry !== '.')
       .sort()
+    expect(deepPaths).toEqual([
+      './AggregateIdentity',
+      './Analysis',
+      './ArtifactKind',
+      './AutoImport',
+      './Backend',
+      './CallableContract',
+      './CleanupPlan',
+      './Completion',
+      './ConformanceGoal',
+      './ConformanceHead',
+      './Constraint',
+      './DeclarationFacts',
+      './DeclarationIndex',
+      './Diagnostic',
+      './DocBlock',
+      './Driver',
+      './Elaboration',
+      './ExecutableProperty',
+      './ExecutionAffinity',
+      './ExecutionBoundary',
+      './ExecutionLifecycle',
+      './ExecutionPackage',
+      './FieldRealization',
+      './FileSourceResolver',
+      './FiniteRow',
+      './FloatingPoint',
+      './FormattedDocument',
+      './HeapObservation',
+      './Hir',
+      './ImportPath',
+      './ImportPlan',
+      './ImportUsage',
+      './InspectorFlowModel',
+      './InspectorPanels',
+      './InspectorProjectBackend',
+      './InspectorProjectSyntax',
+      './InspectorRegistry',
+      './InspectorRow',
+      './Instances',
+      './InterfaceWitnessCompatibility',
+      './Intrinsic',
+      './IntrinsicAvailability',
+      './Layout',
+      './LayoutEncode',
+      './LayoutVerify',
+      './Lexer',
+      './LiteralForm',
+      './LlvmBackend',
+      './LocalSharedOwnership',
+      './Lower',
+      './Match',
+      './Mir',
+      './MirEncoding',
+      './MirVerification',
+      './ModuleClosure',
+      './ModuleSemantics',
+      './ModuleSummary',
+      './ModuleSurface',
+      './ModuleTooling',
+      './NameResolution',
+      './NativeLinkInput',
+      './NativeToolchain',
+      './NodeHeapObservation',
+      './Operator',
+      './Ownership',
+      './Parser',
+      './PhaseReport',
+      './Presentation',
+      './Project',
+      './ProjectAnalysis',
+      './ProviderSelection',
+      './RepresentationField',
+      './RequirementRow',
+      './Residualization',
+      './RowAlgebra',
+      './Scalar',
+      './SemanticInvalidation',
+      './SemanticOccurrence',
+      './SourceAction',
+      './SourceEntry',
+      './SourceFile',
+      './SourceOrigin',
+      './SourceResolver',
+      './SourceSpan',
+      './StaticEvaluation',
+      './StaticValue',
+      './Stdlib',
+      './SuspensionMode',
+      './SyntaxCorrespondence',
+      './SyntaxFile',
+      './SyntaxFormatter',
+      './SyntaxTree',
+      './Target',
+      './TargetSelector',
+      './Termination',
+      './Token',
+      './ToolchainIntegrity',
+      './ToolchainPlan',
+      './Transcendental',
+      './Type',
+      './TypeCompatibility',
+      './TypeHint',
+      './WorkspaceInventory',
+    ])
     for (const removed of [
+      './BackendRegistry',
       './BootstrapEvaluation',
       './ChildProcess',
       './ForeignHost',
@@ -510,8 +616,65 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
     expect(deepPaths).toContain('./LlvmBackend')
     expect(existsSync(resolve(packedRoot, 'dist/index.js'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'dist/index.d.ts'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'README.md'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'LICENSE'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/manifest.json'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/allocator.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/effect.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/logger.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/numeric.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/os_filesystem.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/option.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/result.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/writer.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/vector.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/core.silk'))).toBe(false)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/logging.silk'))).toBe(false)
     expect(existsSync(resolve(packedRoot, 'src'))).toBe(false)
+    const sourceStdlibManifest = JSON.parse(
+      readFileSync(resolve(compilerPackageRoot, 'stdlib/manifest.json'), 'utf8'),
+    ) as ReadonlyArray<{ readonly path: string }>
+    expect(JSON.parse(readFileSync(resolve(packedRoot, 'stdlib/manifest.json'), 'utf8'))).toEqual(
+      sourceStdlibManifest,
+    )
+    for (const entry of sourceStdlibManifest) {
+      expect(existsSync(resolve(packedRoot, 'stdlib', entry.path))).toBe(true)
+    }
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/effect.silk'), 'utf8')).toContain(
+      'pub effect fn mapBoth',
+    )
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/allocator.silk'), 'utf8')).toContain(
+      'pub service Allocator',
+    )
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/logger.silk'), 'utf8')).toContain(
+      'pub service Logger',
+    )
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/option.silk'), 'utf8')).toContain(
+      'pub union Option<T>',
+    )
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/os_filesystem.silk'), 'utf8')).toContain(
+      'pub struct OsFileSystem',
+    )
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/result.silk'), 'utf8')).toContain(
+      'pub union Result<A, F>',
+    )
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/writer.silk'), 'utf8')).toContain(
+      'pub service Writer',
+    )
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/vector.silk'), 'utf8')).toContain(
+      'pub struct Vector<T>',
+    )
+
+    const packedFiles = (directory: string): ReadonlyArray<string> =>
+      readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+        const path = resolve(directory, entry.name)
+        return entry.isDirectory() ? packedFiles(path) : [path]
+      })
+    const compilerFiles = packedFiles(packedRoot)
+    expect(compilerFiles.filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))).toEqual(
+      [],
+    )
+    expect(compilerFiles.filter((file) => file.includes('syntax-inspector'))).toEqual([])
 
     const consumerRoot = resolve(temporary, 'consumer')
     mkdirSync(consumerRoot)

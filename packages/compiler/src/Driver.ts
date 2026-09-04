@@ -10,6 +10,7 @@ import * as Frontend from './Frontend.js'
 import * as HeapObservation from './HeapObservation.js'
 import type * as Instances from './Instances.js'
 import * as LlvmBackend from './LlvmBackend.js'
+import * as LlvmWasmRuntime from './LlvmWasmRuntime.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as NativeLinkInput from './NativeLinkInput.js'
 import * as NativeToolchain from './NativeToolchain.js'
@@ -159,7 +160,6 @@ export interface CompileRequest {
   /** Validated project package name used for durable artifact identities. */
   readonly packageName: string
   readonly destination: string
-  readonly backend?: Backend.Backend
   /** Ordered, structured native inputs passed after compiler-generated objects. */
   readonly nativeLinkInputs?: ReadonlyArray<NativeLinkInput.NativeLinkInput>
   readonly scopeName?: string
@@ -332,7 +332,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
       report: Object.freeze([...report]),
     })
   }
-  const backend = request.backend ?? LlvmBackend.LlvmBackend
+  const backend = LlvmBackend.LlvmBackend
   const hostSelection =
     request.compilation.target === undefined ? NativeToolchain.hostSelection() : undefined
   if (hostSelection?._tag === 'Unavailable')
@@ -356,7 +356,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
       diagnostics: frontend.diagnostics,
       report: Object.freeze([...report]),
     })
-  const preparation = Realization.prepare(frontend, backend, targetId, {
+  const preparation = Realization.prepare(frontend, targetId, {
     heapBytes,
     artifactKind: request.artifactKind,
   })
@@ -537,6 +537,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
       artifact.termination,
       artifact.nativeRuntimeSymbols,
     )
+  else if (cacheKind === 'WebAssemblyModule') runtimeSource = LlvmWasmRuntime.source
   else if (ArtifactKind.isLibrary(cacheKind))
     runtimeSource = ToolchainPlan.runtimeSource(artifact.nativeRuntimeSymbols)
   const cacheKey =

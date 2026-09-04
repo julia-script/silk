@@ -235,7 +235,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
       }
       return {
         rows: flowRows(flow),
-        meta: `${flow.status.toLowerCase()} · ${flow.mode.toLowerCase()}`,
+        meta: flow.status.toLowerCase(),
       }
     },
   },
@@ -247,8 +247,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
     group: 'semantics',
     /**
      * One aggregate story in one pane: literal field mappings (source order vs canonical order),
-     * the projection chain, the compiler-owned scalar calling shapes, and — after a run — the
-     * Construct/Project/Cleanup events that realized them.
+     * projection chains, and compiler-owned scalar calling shapes.
      */
     project: ({ snapshot, root }) => {
       const literals = Analysis.expressionsOf(snapshot, root).filter(
