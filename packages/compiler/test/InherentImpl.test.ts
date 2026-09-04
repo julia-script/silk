@@ -41,6 +41,89 @@ impl Counter {
 }
 `
 
+it.effect('classifies inherent receivers and keeps members out of root scope', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`${counter}
+pub struct Runner {}
+impl Runner { pub fn go(self: i32) -> i32 { return self } }
+pub fn main() -> i32 { return Runner.go(42) }`)
+    assert.deepEqual(codes(self), [])
+    const receiver = (name: string): boolean | undefined => {
+      const lookup = Analysis.memberByName(self, 'root', name)
+      return lookup._tag === 'Resolved' && lookup.declaration._tag === 'FunctionDeclaration'
+        ? lookup.declaration.associatedMember?.receiver
+        : undefined
+    }
+    assert.strictEqual(receiver('Counter.read'), true)
+    assert.strictEqual(receiver('Counter.plus'), true)
+    assert.strictEqual(receiver('Counter.zero'), false)
+    assert.strictEqual(receiver('Runner.go'), false)
+    assert.strictEqual(Analysis.memberByName(self, 'root', 'read')._tag, 'Missing')
+  }),
+)
+
+it.effect('resolves imported inherent members through their declaring owner', () =>
+  Effect.gen(function* () {
+    const self = yield* analyzeModules('app', [
+      [
+        'widgets',
+        `pub struct Gadget { pub size: i32 }
+impl Gadget {
+  pub fn make(size: i32) -> Self { return Gadget { size: size } }
+  fn secret() -> i32 { return 1 }
+  pub fn width(self: &Self) -> i32 { return self.size }
+}
+pub fn helper() -> i32 { return 2 }`,
+      ],
+      [
+        'app',
+        `import widgets { Gadget }
+pub fn main() -> i32 {
+  let gadget = Gadget.make(42)
+  return Gadget.width(&gadget)
+}`,
+      ],
+    ])
+    assert.deepEqual(codes(self), [])
+    for (const member of ['Gadget.make', 'Gadget.width']) {
+      const resolved = Analysis.memberByName(self, 'widgets', member)
+      assert.strictEqual(resolved._tag, 'Resolved', member)
+      if (resolved._tag === 'Resolved') {
+        assert.strictEqual(resolved.declaration.canonical._tag, 'Canonical')
+        if (resolved.declaration.canonical._tag === 'Canonical')
+          assert.strictEqual(resolved.declaration.canonical.id.module, 'widgets')
+      }
+    }
+    assert.strictEqual(Analysis.memberByName(self, 'app', 'make')._tag, 'Missing')
+  }),
+)
+
+it.effect('prefers an inherent member over a matching module projection', () =>
+  Effect.gen(function* () {
+    const self = yield* analyzeModules('app', [
+      [
+        'counter',
+        `pub struct Counter { value: i32 }
+pub fn make() -> Counter { return Counter { value: 1 } }
+impl Counter { pub fn make() -> Self { return Counter { value: 42 } } }
+pub fn read(counter: &Counter) -> i32 { return counter.value }`,
+      ],
+      [
+        'app',
+        `import counter { Counter, read }
+pub fn main() -> i32 { let made = Counter.make() return read(&made) }`,
+      ],
+    ])
+    assert.deepEqual(codes(self), [])
+    const member = Analysis.memberByName(self, 'counter', 'Counter.make')
+    const free = Analysis.memberByName(self, 'counter', 'make')
+    assert.strictEqual(member._tag, 'Resolved')
+    assert.strictEqual(free._tag, 'Resolved')
+    if (member._tag === 'Resolved' && free._tag === 'Resolved')
+      assert.notStrictEqual(member.declaration, free.declaration)
+  }),
+)
+
 it.effect('rejects invalid heads, duplicate members, collisions, and hooks', () =>
   Effect.gen(function* () {
     const specializedSource = `pub union Option<T> { None, Some { pub value: T } }

@@ -3,6 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as InstanceDiagnostics from '../src/InstanceDiagnostics.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Projections from './support/projections.js'
@@ -29,6 +30,80 @@ const analyzed = (
 
 const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message)
+
+it.effect(
+  'selects concrete source witnesses for fallback, specialization, and Effect adaptation',
+  () =>
+    Effect.gen(function* () {
+      const fallback = yield* analyzed(
+        'interface-operation-witness/provider-evidence',
+        `interface Seed<A> { fn seed() -> A }
+interface Encodable<A> { fn encode(self: &Self) -> A }
+struct Age { value: i32 }
+impl Seed<i32> for Age { fn seed() -> i32 { return 20 } }
+impl Encodable<i32> for Age { fn encode(self: &Self) -> i32 { return self.value } }
+fn seeded<T: Seed<i32>>() -> i32 { return Seed<i32>.seed() }
+fn encodeConcrete<T: Encodable<i32>>(age: &Age) -> i32 {
+  return Encodable<i32>.encode(age)
+}
+pub fn main() -> i32 {
+  let age = Age { value: 22 }
+  return seeded<Age>() + encodeConcrete<Age>(&age)
+}`,
+      )
+      assert.deepEqual(Analysis.diagnostics(fallback), [])
+      const fallbackInstances = Analysis.instancesOf(fallback).instances.map(
+        (instance) => instance.key.declaration.name,
+      )
+      assert.include(fallbackInstances, 'impl@0.seed')
+      assert.include(fallbackInstances, 'impl@1.encode')
+
+      const specialized = yield* analyzed(
+        'bound-operation-witness/per-specialization',
+        `import silk.u64 as u64
+interface Keyed { fn digest(left: &Self, right: &Self) -> u64 }
+struct Cell { weight: i32 }
+struct Tag { code: u64 }
+fn cellDigest(left: &Cell, right: &Cell) -> u64 { return 10 }
+fn tagDigest(left: &Tag, right: &Tag) -> u64 { return u64.wrappingAdd(left.code, right.code) }
+impl Keyed for Cell { digest: Cell.cellDigest }
+impl Keyed for Tag { digest: Tag.tagDigest }
+fn digestOf<T: Keyed>(left: T, right: T) -> u64 { return Keyed.digest(&left, &right) }
+pub fn main() -> i32 {
+  let cell = digestOf<Cell>(Cell { weight: 1 }, Cell { weight: 2 })
+  let tag = digestOf<Tag>(Tag { code: 30 }, Tag { code: 2 })
+  return u64.toI32(u64.wrappingAdd(cell, tag))
+}`,
+      )
+      assert.deepEqual(Analysis.diagnostics(specialized), [])
+      const targets = Analysis.instancesOf(specialized).instances.map(
+        (instance) => instance.key.declaration.name,
+      )
+      assert.include(targets, 'cellDigest')
+      assert.include(targets, 'tagDigest')
+
+      const adapted = yield* analyzed(
+        'bound-operation-witness/effect-operator-boundary',
+        `interface Combined { operator + effect fn add(left: &Self, right: &Self) -> Self }
+struct Cell { code: i32 }
+fn cellAdd(left: &Cell, right: &Cell) -> Cell {
+  return Cell { code: left.code + right.code }
+}
+impl Combined for Cell { add: Cell.cellAdd }
+fn combined<T: Combined>(left: T, right: T) -> T { return run ((&left) + (&right)) }
+pub fn main() -> i32 {
+  let cell = combined<Cell>(Cell { code: 20 }, Cell { code: 1 })
+  return cell.code + 21
+}`,
+      )
+      assert.deepEqual(Analysis.diagnostics(adapted), [])
+      assert.include(
+        Analysis.instancesOf(adapted).instances.map((instance) => instance.key.declaration.name),
+        'cellAdd',
+      )
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(adapted)), [])
+    }),
+)
 
 it.effect('keeps invalid applied interface operations out of realization', () =>
   Effect.gen(function* () {

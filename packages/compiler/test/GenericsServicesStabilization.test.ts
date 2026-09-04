@@ -61,6 +61,24 @@ struct Age { years: i32 }
 impl Encodable<i32> for Age { fn encode(value: &Self) -> i32 { return value.years } }
 `
 
+it.effect('resolves a service-bound call with a self-named receiver', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'stabilization/service-bound-self-name',
+      ascii(`service Clock { fn now(self: &Self) -> i64 }
+struct SystemClock {}
+impl Clock for SystemClock { fn now(self: &Self) -> i64 { return 7 } }
+fn acceptsClock<T: Clock>(provider: &T) -> i64 { return Clock.now(provider) }
+pub fn main() -> i32 { let clock = SystemClock {} drop acceptsClock(&clock) return 42 }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.include(
+      Analysis.instancesOf(snapshot).instances.map((instance) => instance.key.declaration.name),
+      'impl@0.now',
+    )
+  }),
+)
+
 it.effect('reports two applications supplying a bare qualified call as ambiguous', () =>
   rejects(
     'stabilization/bare-qualified-ambiguous',

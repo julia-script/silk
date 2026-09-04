@@ -5,6 +5,37 @@ import * as Analysis from '../src/Analysis.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
+const namespaceProgram = `import silk.option { Option }
+import silk.result { Result }
+import silk.vector { Vector }
+pub fn main() -> i32 {
+  let values = Vector.make<i32>()
+  let optional = Option.some<i32>(40)
+  let result = Result.succeed<i32, i32>(2)
+  drop values
+  drop optional
+  drop result
+  return 42
+}`
+
+it.effect('resolves Option, Result, and Vector operations through their namespaces', () =>
+  Effect.gen(function* () {
+    const module = 'stdlib-namespace/qualified'
+    const snapshot = yield* Analysis.ofSourceRealized(module, ascii(namespaceProgram))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    for (const [spelling, expectedModule] of [
+      ['Vector.make', 'silk/vector'],
+      ['Option.some', 'silk/option'],
+      ['Result.succeed', 'silk/result'],
+    ] as const) {
+      const offset = namespaceProgram.indexOf(spelling) + spelling.indexOf('.') + 1
+      const occurrence = Analysis.semanticOccurrenceAt(snapshot, module, offset)
+      assert.strictEqual(occurrence?.role, 'Value', spelling)
+      assert.strictEqual(occurrence?.declaration?.module, expectedModule, spelling)
+    }
+  }),
+)
+
 it.effect('resolves selected scope actors for nonprimitive operation modules', () =>
   Effect.gen(function* () {
     const source = `import silk.execution { Execution }

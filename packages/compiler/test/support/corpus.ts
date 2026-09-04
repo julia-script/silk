@@ -77,6 +77,11 @@ const transcendentalVectors: ReadonlyArray<TranscendentalVector> = [
   },
 ]
 
+const localSchedulerImplementation = readFileSync(
+  new URL('../../stdlib/silk/local_scheduler.silk', import.meta.url),
+  'utf8',
+)
+
 /** Canonical-bits transcendental program with independently committed native expectations. */
 export const transcendentalCanonicalBits = `import silk.f32 as f32
 import silk.f64 as f64
@@ -6263,6 +6268,285 @@ effect fn build() -> i32 ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'owned-allocation-provider-matrix',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+struct QuotaAllocator { remaining: i32 }
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  if self.remaining == 0 { fail OutOfMemoryError {} }
+  self.remaining = self.remaining - 1
+  let mut inner = Allocator.systemAllocatorProvider()
+  return run Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
+}
+impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
+effect fn attempt(quota: i32) -> i32 ! OutOfMemoryError {
+  let mut allocator = QuotaAllocator { remaining: quota }
+  let first = run Allocator.allocate(Layout.of<[i32; 2]>())
+    |> Effect.provideMut(&mut allocator)
+  let second = run Allocator.allocate(Layout.of<[i32; 2]>())
+    |> Effect.provideMut(&mut allocator)
+  drop first
+  drop second
+  if allocator.remaining != quota - 2 { return 2 }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
+fn probe(quota: i32) -> i32 { return run Effect.catchAll(attempt(quota), recover) }
+pub fn main() -> i32 {
+  if probe(0) != 7 { return 1 }
+  if probe(1) != 7 { return 2 }
+  if probe(2) != 42 { return 3 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'scheduler-task-id-boundary',
+    source: `${localSchedulerImplementation}
+
+fn requireReserved(selected: ReservedIdentity | Refused) -> u64 {
+  return match move selected {
+    ReservedIdentity { identity } => identity.value
+    Refused {} => u64.MIN
+  }
+}
+fn verifyTaskIdRefusal(selected: ReservedIdentity | Refused, fresh: u64) -> i32 {
+  return match move selected {
+    ReservedIdentity { identity } => -3
+    Refused {} => verifyFreshTaskId(fresh)
+  }
+}
+fn verifyFreshTaskId(fresh: u64) -> i32 {
+  if fresh != 0 { return -4 }
+  return 42
+}
+fn taskIdBoundary() -> i32 {
+  let mut nearLimit = TaskIdSource { next: 18446744073709551614, exhausted: false }
+  let first = requireReserved(reserveIdentityStep(&mut nearLimit))
+  let second = requireReserved(reserveIdentityStep(&mut nearLimit))
+  let refused = reserveIdentityStep(&mut nearLimit)
+  let mut freshSource = TaskIdSource { next: 0, exhausted: false }
+  let fresh = requireReserved(reserveIdentityStep(&mut freshSource))
+  if first != 18446744073709551614 { return -1 }
+  if second != u64.MAX { return -2 }
+  return verifyTaskIdRefusal(move refused, fresh)
+}
+pub fn main() -> i32 { return taskIdBoundary() }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'execution-unused-nominal-union-callback-cleanup',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
+import silk.i8 as i8
+import silk.layout { Layout }
+import silk.shared { Shared }
+struct Counter { value: i32 }
+fn increment(counter: &mut Counter) -> i32 {
+  counter.value = counter.value + 1
+  return counter.value
+}
+fn read(counter: &Counter) -> i32 { return counter.value }
+struct Guard { left: i8 right: i8 storage: Allocation counter: Shared<Counter> }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    if i8.toI32(self.left) + i8.toI32(self.right) != 42 { let boom = 1 / 0 }
+    let changed = Shared.withMut<Counter, i32>(&self.counter, increment)
+    return ()
+  }
+}
+union Choice { Small { marker: i8, guard: Guard }, Wide { value: i64 } }
+fn ready(state: &()) -> () { return () }
+fn complete(state: (), value: i32) -> () { return () }
+fn suspend(state: (), execution: Intrinsic.Execution<i32>, choice: Choice) -> () {
+  drop execution
+  drop choice
+  return ()
+}
+fn suspendWith(choice: Choice) -> some<F: once fn((), Intrinsic.Execution<i32>) -> ()> F {
+  return suspend(move choice)
+}
+effect fn packaged(counter: &Shared<Counter>) -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let storage = run Allocator.allocate(Layout.of<i32>())
+  let choice = Choice.Small {
+    marker: i8.toI8(7),
+    guard: Guard {
+      left: i8.toI8(19), right: i8.toI8(23), storage: move storage,
+      counter: Shared.clone<Counter>(counter),
+    },
+  }
+  let execution = run Execution.make(effect { return 42 }, (), ready)
+  let driven = run Execution.drive(move execution, (), complete, suspendWith(move choice))
+  let count = Shared.with<Counter, i32>(counter, read)
+  if count != 1 { return 1 }
+  return 42
+}
+effect fn program() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let counter = run Shared.make<Counter>(Counter { value: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let result = run packaged(&counter) |> Effect.provideMut<Allocator>(&mut allocator)
+  drop counter
+  return result
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 2 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'logging-composition',
+    source: `import silk.effect { Effect }
+import silk.logger { LogError, Logger }
+effect fn logAndKeep(value: i32) -> i32 ! LogError ? &mut Logger {
+  let logged = run Effect.logDebug("composed")
+  return value
+}
+effect fn storedLog() -> i32 ! LogError ? &mut Logger {
+  let logged = run Effect.log("stored")
+  return 1
+}
+effect fn value(number: i32) -> i32 { return number }
+effect fn composed() -> i32 ! LogError ? &mut Logger {
+  let direct = run Effect.log("direct")
+  let piped = run Effect.log("piped")
+  let stored = storedLog()
+  let storedValue = run stored
+  let tapped = run (value(20) |> Effect.tap(logAndKeep))
+  let flatMapped = run (value(21) |> Effect.flatMap(logAndKeep))
+  if storedValue != 1 || tapped != 20 || flatMapped != 21 { return 2 }
+  return 42
+}
+effect fn program() -> i32 ! LogError {
+  let mut logger = Logger.inMemoryProvider()
+  let result = run composed() |> Effect.provideMut(&mut logger)
+  if Logger.length(&logger) != 5 { return 1 }
+  return result
+}
+effect fn recover(error: LogError) -> i32 { return 3 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'multi-affine-effect-return',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.usize as usize
+import silk.vector { Vector }
+struct Step { pc: usize opcode: u8 depth: usize top: i32 }
+struct VmDiagnostic { pc: usize code: usize }
+struct Returned { first: Vector<Step> second: Vector<VmDiagnostic> result: i32 fingerprint: i32 }
+effect fn pushStep(values: &mut Vector<Step>, step: Step) -> () ! OutOfMemoryError ? &mut Allocator {
+  return run Vector.append<Step>(move values, move step)
+}
+fn finish(first: Vector<Step>, second: Vector<VmDiagnostic>, result: i32, fingerprint: i32) -> Returned {
+  return Returned { first: move first, second: move second, result: result, fingerprint: fingerprint }
+}
+effect fn build() -> Returned ! OutOfMemoryError ? &mut Allocator {
+  let mut first = Vector.make<Step>()
+  let mut index = usize.add(0, 0)
+  while index < 6 {
+    let step = Step { pc: index, opcode: 1, depth: index + 1, top: usize.toI32(index) }
+    run pushStep(&mut first, move step)
+    index = index + 1
+  }
+  let second = Vector.make<VmDiagnostic>()
+  return finish(move first, move second, 5, 7)
+}
+fn observeValues(
+  first: Vector<Step>,
+  second: Vector<VmDiagnostic>,
+  result: i32,
+  fingerprint: i32
+) -> i32 {
+  if Vector.length<Step>(&first) != 6 { return 1 }
+  if Vector.length<VmDiagnostic>(&second) != 0 { return 2 }
+  return result + fingerprint + 30
+}
+fn observe(returned: Returned) -> i32 {
+  return match move returned {
+    Returned { first, second, result, fingerprint } =>
+      observeValues(move first, move second, result, fingerprint)
+  }
+}
+effect fn execute() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let returned = run build() |> Effect.provideMut(&mut allocator)
+  return observe(move returned)
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 3 }
+pub fn main() -> i32 { return run Effect.catchAll(execute(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'effect-access-forwarding',
+    source: `struct Payload { value: i32 }
+fn forwardReusable(self: mut Effect<i32>) -> mut Effect<i32> { return move self }
+fn forwardOnce(self: once Effect<Payload>) -> once Effect<Payload> { return move self }
+pub fn main() -> i32 {
+  let mut counter = 40
+  let pending = effect { counter = counter + 1 return counter }
+  let forwarded = forwardReusable(move pending)
+  let first = run forwarded
+  let second = run forwarded
+  drop forwarded
+  let payload = Payload { value: 42 }
+  let singlePending = effect { return move payload }
+  let single = forwardOnce(move singlePending)
+  let result = run single
+  if first != 41 || second != 42 || result.value != 42 { return 1 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'opaque-effect',
+    source: `fn make(value: i32) -> some<F: Effect<i32>> F {
+  return effect { return value }
+}
+pub fn main() -> i32 { return run make(42) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'slot-nominal-union-cleanup-lanes',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.i8 as i8
+import silk.layout { Layout }
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
+struct Guard { left: i8 right: i8 }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let observed = i8.toI32(self.left) + i8.toI32(self.right)
+    if observed != 42 { let boom = 1 / 0 }
+    return ()
+  }
+}
+union Choice { Small { marker: i8, guard: Guard }, Wide { value: i64 } }
+effect fn store() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let allocation = run Allocator.allocate(Layout.of<[Choice; 1]>())
+    |> Effect.provideMut(&mut allocator)
+  unsafe {
+    let mut buffer = RawBuffer.from<Choice>(move allocation, 1)
+    let value = Choice.Small {
+      marker: i8.toI8(7),
+      guard: Guard { left: i8.toI8(19), right: i8.toI8(23) },
+    }
+    let written = Slot.write(RawBuffer.slot(&mut buffer, 0), move value)
+    let cleared = Slot.dropValue(RawBuffer.slot(&mut buffer, 0))
+    drop buffer
+    return 42
+  }
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

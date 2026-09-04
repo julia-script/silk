@@ -796,3 +796,39 @@ pub fn main() -> i32 {
     )
   }),
 )
+
+it.effect('rejects copying a non-Copy slot element with a conformance diagnostic', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'slot-copy/non-copy',
+      ascii(`import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
+struct Guard { storage: Allocation }
+effect fn store() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let allocation = run Allocator.allocate(Layout.of<[Guard; 1]>())
+    |> Effect.provideMut(&mut allocator)
+  let payload = run Allocator.allocate(Layout.of<[i32; 1]>())
+    |> Effect.provideMut(&mut allocator)
+  unsafe {
+    let mut buffer = RawBuffer.from<Guard>(move allocation, 1)
+    let written = Slot.write(RawBuffer.slot(&mut buffer, 0), Guard { storage: move payload })
+    let copied = Slot.copy(RawBuffer.slot(&mut buffer, 0))
+    drop copied
+    drop buffer
+    return 42
+  }
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0083'],
+    )
+  }),
+)
