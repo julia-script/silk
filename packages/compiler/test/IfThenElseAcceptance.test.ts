@@ -1,9 +1,47 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const requirements = `import silk.effect { Effect }
+service Alpha { effect fn alpha() -> i32 ? &Alpha }
+service Beta { effect fn beta() -> i32 ? &Beta }
+struct Fixed { value: i32 }
+effect fn alpha(self: &Fixed) -> i32 { return self.value }
+effect fn beta(self: &Fixed) -> i32 { return self.value }
+impl Alpha for Fixed { alpha: Fixed.alpha }
+impl Beta for Fixed { beta: Fixed.beta }
+effect fn fromAlpha() -> i32 ? &Alpha { return run Alpha.alpha() }
+effect fn fromBeta() -> i32 ? &Beta { return run Beta.beta() }
+pub fn main() -> i32 {
+  let alphaProvider = Fixed { value: 3 }
+  let betaProvider = Fixed { value: 4 }
+  let chosen = Effect.ifThenElse(true, fromAlpha, fromBeta)
+  let provided = Effect.provide<Beta>(
+    Effect.provide<Alpha>(move chosen, &alphaProvider),
+    &betaProvider,
+  )
+  return run provided
+}`
+
+it.effect('unions the requirement rows of both arms before provisioning', () =>
+  Effect.gen(function* () {
+    const module = 'if-then-else/requirements'
+    const snapshot = yield* Analysis.ofSourceRealized(
+      module,
+      ascii(requirements),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const available = Analysis.expressionsOf(snapshot, module).flatMap((expression) =>
+      expression.type._tag === 'Available' ? [Type.encode(expression.type.type)] : [],
+    )
+    assert.include(available, `Effect<i32 ? &${module}.Alpha | &${module}.Beta>`)
+  }),
+)
 
 /**
  * The #98 cleanup criterion, as reworded by the 2026-08-13 decision: it is about "an arm that

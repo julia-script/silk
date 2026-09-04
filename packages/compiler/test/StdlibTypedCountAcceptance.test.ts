@@ -1,5 +1,11 @@
 import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Stdlib from '../src/Stdlib.js'
+
+const ascii = (value: string): Uint8Array =>
+  Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const decoder = new TextDecoder()
 
@@ -41,3 +47,58 @@ it('declares the shared usize counts once and ships no private counted identity'
       `${module} names no shared typed count`,
     )
 })
+
+const growth = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.effect { Effect }
+import silk.vector { Vector }
+
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut values = Vector.make<i32>()
+  run Vector.append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
+  run Vector.append<i32>(&mut values, 32) |> Effect.provideMut(&mut allocator)
+  return Vector.get<i32>(&values, 0) + Vector.get<i32>(&values, 1)
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
+
+it.effect('lowers shared typed counts directly without an identity call', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'typed-count-acceptance/growth',
+      ascii(growth),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(
+      mir.functions.filter((fn) => fn.id.name === 'counted').map((fn) => fn.id.module),
+      [],
+    )
+    assert.isFalse(
+      mir.functions.some((fn) =>
+        MirVerification.operations(fn).some(
+          (operation) => operation._tag === 'Call' && operation.target.name === 'counted',
+        ),
+      ),
+    )
+    const made = mir.functions.find(
+      (fn) => fn.id.module === 'silk/vector' && fn.id.name === 'Vector.make',
+    )
+    assert.isDefined(made)
+    if (made === undefined) return
+    assert.deepEqual(
+      MirVerification.operations(made).map((operation) => operation._tag),
+      ['ConstructArray', 'Construct', 'ConvertUnion', 'Literal', 'Literal', 'Construct'],
+    )
+    assert.deepEqual(
+      MirVerification.operations(made).flatMap((operation) =>
+        operation._tag === 'Literal'
+          ? [`${operation.value.toString()} : ${operation.type._tag}`]
+          : [],
+      ),
+      ['0 : usize', '0 : usize'],
+    )
+  }),
+)

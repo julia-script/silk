@@ -4,6 +4,47 @@ import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 
+const checkedIntegerSource = `import silk.i16 as i16
+import silk.u8 as u8
+import silk.option { Option }
+fn overflow() -> Option<u8> { return u8.checkedAdd(255, 1) }
+fn convert() -> Option<u8> { return i16.checkedToU8(255) }
+fn section() -> Option<u8> {
+  let addOne = u8.checkedAdd(1)
+  return addOne(u8.add(40, 1))
+}
+pub fn main() -> i32 {
+  let failed = match move overflow() {
+    Option<u8>.None => 40
+    Option<u8>.Some { value } => u8.toI32(value)
+  }
+  let converted = match move convert() {
+    Option<u8>.None => 0
+    Option<u8>.Some { value } => u8.toI32(value)
+  }
+  let sectioned = match move section() {
+    Option<u8>.None => 0
+    Option<u8>.Some { value } => u8.toI32(value)
+  }
+  return failed + converted + sectioned - 295
+}`
+
+it.effect('lowers checked integer outcomes through native and Wasm LLVM targets', () =>
+  Effect.gen(function* () {
+    for (const target of ['aarch64-apple-darwin', 'wasm32-unknown-unknown'] as const) {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        `integer/checked-${target}`,
+        new TextEncoder().encode(checkedIntegerSource),
+        target,
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const artifact = yield* Analysis.codegen(snapshot, { mode: 'debug' })
+      assert.include(artifact.ir, `target triple = "${target}"`)
+      assert.isAbove(artifact.bitcode.length, 0)
+    }
+  }),
+)
+
 const contextualCallSource = `import silk.u8 as u8
 fn selectByte(
   source: &[u8],

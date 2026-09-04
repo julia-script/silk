@@ -7,6 +7,27 @@ const encoder = new TextEncoder()
 const snapshot = (source: string, target?: string) =>
   Analysis.ofSourceRealized('user-services/main', encoder.encode(source), target)
 
+const sharedSource = `import silk.effect { Effect }
+service Counter { effect fn get() -> i32 ? &Counter }
+struct Fixed { value: i32 }
+effect fn get(self: &Fixed) -> i32 { return self.value }
+impl Counter for Fixed { get: Fixed.get }
+effect fn read() -> i32 ? &Counter { return run Counter.get() }
+pub fn main() -> i32 {
+  let fixed = Fixed { value: 42 }
+  return run Effect.provide(read(), &fixed)
+}`
+
+it.effect('lowers shared source service dispatch through native LLVM', () =>
+  Effect.gen(function* () {
+    const native = yield* snapshot(sharedSource, 'aarch64-apple-darwin')
+    assert.deepEqual(Analysis.diagnostics(native), [])
+    const llvm = yield* Analysis.codegen(native, { mode: 'release' })
+    assert.include(llvm.ir, 'define')
+    assert.notInclude(llvm.ir, 'Counter')
+  }),
+)
+
 it.effect('rejects a generic service witness bound its header never promises', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`interface Marker<T> { fn mark(value: T) -> i32 }

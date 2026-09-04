@@ -1,6 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const encoder = new TextEncoder()
 
@@ -31,5 +33,50 @@ pub fn main() -> i32 {
       (instance) => instance.key.declaration.name === 'next',
     )
     assert.strictEqual(implementations.length, 1)
+  }),
+)
+
+it.effect('retains every provider target forwarded through reachable Effect branches', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'effect-forwarding/service-branches',
+      encoder.encode(`import silk.effect { Effect }
+service Choice {
+  effect fn left() -> i32 ? &mut Choice
+  effect fn right() -> i32 ? &mut Choice
+}
+struct Provider {}
+effect fn left(self: &mut Provider) -> i32 { return 20 }
+effect fn right(self: &mut Provider) -> i32 { return 22 }
+impl Choice for Provider { left: Provider.left right: Provider.right }
+struct First {}
+struct Second {}
+effect fn select(input: First | Second) -> i32 ? &mut Choice {
+  return match move input {
+    First {} => run Choice.left()
+    Second {} => run Choice.right()
+  }
+}
+effect fn use(input: First | Second) -> i32 ? &mut Choice {
+  return run select(move input)
+}
+pub fn main() -> i32 {
+  let provider = Provider {}
+  return run Effect.bindRequirementOwned<Choice>(use(Second {}), move provider)
+}`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const providerTargets = Analysis.instancesOf(self).calls.filter(
+      (call) =>
+        call.owner.declaration.name === 'select' &&
+        (call.target.declaration.name === 'left' || call.target.declaration.name === 'right'),
+    )
+    assert.deepEqual(providerTargets.map((call) => call.target.declaration.name).sort(), [
+      'left',
+      'right',
+    ])
+    const mir = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(mir), [], MirEncoding.encode(mir))
   }),
 )

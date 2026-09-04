@@ -6215,9 +6215,11 @@ effect fn both() -> i32 ? &mut Counter {
   return run Counter.get()
 }
 pub fn main() -> i32 {
-  return run Effect.bindRequirementOwned<Counter>(both(), Cell { value: 1 })
+  let observed = run Effect.bindRequirementOwned<Counter>(both(), Cell { value: 1 })
+  if observed != 3 { return 1 }
+  return 42
 }`,
-    expected: { _tag: 'Completes', result: 3 },
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'owned-allocation-forwarded-provider-mutation',

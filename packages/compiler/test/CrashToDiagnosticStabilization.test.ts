@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Diagnostic from '../src/Diagnostic.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 /**
  * INV-1: `Analysis.*` never throws. Every program here used to die inside the compiler (a stack
@@ -31,6 +32,17 @@ const spans = (
 const chain = (count: number, operator: string, term: string): string =>
   Array.from({ length: count }, () => term).join(` ${operator} `)
 
+it.effect('lowers a 257-term left-nested arithmetic chain without host recursion', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'stabilization/chain-257',
+      `pub fn main() -> i32 {\n  return ${chain(257, '+', '1')}\n}\n`,
+    )
+    assert.deepEqual(codes(snapshot), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+  }),
+)
+
 it.effect('rejects a chain nesting past EXPR-006 with PAR0005 instead of overflowing', () =>
   Effect.gen(function* () {
     const plus = yield* realized(
@@ -49,6 +61,20 @@ it.effect('rejects a chain nesting past EXPR-006 with PAR0005 instead of overflo
     )
     assert.deepEqual(codes(pipe), [Diagnostic.expressionNestingLimitExceededCode])
   }),
+)
+
+it.effect(
+  'lowers a 5000-statement function without host recursion',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* realized(
+        'stabilization/statements-5000',
+        `pub fn main() -> i32 {\n  let mut x = 0\n${'  x = x + 1\n'.repeat(5000)}  return x - 4958\n}\n`,
+      )
+      assert.deepEqual(codes(snapshot), [])
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    }),
+  240_000,
 )
 
 // ISSUE-43 — a callable contract as an explicit generic argument in expression position.

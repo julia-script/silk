@@ -240,10 +240,7 @@ it.effect('releases Box.into storage exactly once after transferring the element
           )
         case 'CallableCleanup':
         case 'EffectCleanup':
-          return plan.slots.reduce(
-            (count, slot) => count + countRawBufferReleases(slot.cleanup),
-            0,
-          )
+          return plan.slots.reduce((count, slot) => count + countRawBufferReleases(slot.cleanup), 0)
         case 'EffectCompositeCleanup':
           return plan.alternatives.reduce(
             (count, alternative) => count + countRawBufferReleases(alternative),
@@ -258,10 +255,7 @@ it.effect('releases Box.into storage exactly once after transferring the element
       (operation) => operation._tag === 'Drop',
     )
     assert.strictEqual(
-      releases.reduce(
-        (count, release) => count + countRawBufferReleases(release.cleanup),
-        0,
-      ),
+      releases.reduce((count, release) => count + countRawBufferReleases(release.cleanup), 0),
       1,
     )
   }),

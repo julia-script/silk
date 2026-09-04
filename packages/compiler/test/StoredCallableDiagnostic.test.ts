@@ -37,6 +37,28 @@ const diagnosticView = (snapshot: Analysis.FrontendSnapshot) =>
 const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message)
 
+const accepted = `import silk.i32 as i32
+struct Parser { decode: fn(i32) -> i32 }
+struct Nested { parser: Parser }
+fn size(self: &Parser) -> i32 { return 1 }
+fn unreachableConstruction() -> i32 {
+  let parser = Parser { decode: i32.add(1) }
+  return parser.decode(41)
+}
+pub fn main() -> i32 { return 42 }`
+
+it.effect('keeps declaration-only and unreachable callable fields out of realization', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyzed('stored-callable/accepted', accepted)
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.isFalse(
+      Analysis.instancesOf(snapshot).instances.some(
+        (instance) => instance.key.declaration.name === 'unreachableConstruction',
+      ),
+    )
+  }),
+)
+
 /** The minimal reproducer from #184, repaired so declaration and semantic analysis accept it. */
 const reproducer = `import silk.i32 as i32
 struct Parser<A> {

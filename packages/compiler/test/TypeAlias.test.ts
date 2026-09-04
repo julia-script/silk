@@ -73,6 +73,28 @@ const failureMembers = (
   return lookup.declaration.failureRow.failures.map(Type.encode)
 }
 
+it.effect('erases a union alias and injects a member at the return boundary', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`struct Circle {}
+struct Square {}
+type Shape = Circle | Square
+fn make(flag: bool) -> Shape {
+  if flag { return Circle {} }
+  return Square {}
+}
+fn describe(shape: Shape) -> i32 {
+  return match move shape {
+    Circle {} => 1
+    Square {} => 2
+  }
+}
+pub fn main() -> i32 { return describe(make(false)) }`)
+    assert.deepEqual(codes(self), [])
+    assert.strictEqual(memberType(self, 'root', 'Shape'), memberType(self, 'root', 'describe'))
+    assert.strictEqual(memberType(self, 'root', 'Shape'), 'root.Circle | root.Square')
+  }),
+)
+
 it.effect('constructs through an applied alias with the alias arguments, not inferred ones', () =>
   Effect.gen(function* () {
     const program = (head: string) => `struct Point<T> { x: T y: T }

@@ -29,6 +29,20 @@ const multiSnapshot = (rootModule: string, sources: ReadonlyMap<string, Uint8Arr
   )
 }
 
+it.effect('lets a value-scope callable shadow a named tuple constructor', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'tuple-values/shadow',
+      ascii(`tuple Point(i32)
+fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { let Point = identity return Point(42) }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const returned = Analysis.rootAnalysis(self).functions.at(1)?.returnedExpression
+    assert.strictEqual(returned?._tag, 'CallableApply')
+  }),
+)
+
 it.effect('reports aggregate-specific construction diagnostics', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.ofSource(
