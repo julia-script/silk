@@ -33,3 +33,51 @@ pub fn main() -> i32 { return pick(A {}) }`,
     )
   }),
 )
+
+it.effect('keeps callable reassignment tied to one construction identity', () =>
+  Effect.gen(function* () {
+    assert.deepEqual(
+      yield* codesOf(
+        'callable-stabilization/reassign-named',
+        `fn inc(v: i32) -> i32 { return v + 1 }
+fn dec(v: i32) -> i32 { return v - 1 }
+pub fn main() -> i32 {
+  let mut f = inc
+  f = dec
+  return f(43)
+}`,
+      ),
+      ['SEM0080'],
+    )
+    assert.deepEqual(
+      yield* codesOf(
+        'callable-stabilization/reassign-anonymous',
+        `pub fn main() -> i32 {
+  let a = fn(v: i32) -> i32 { return v + 1 }
+  let b = fn(v: i32) -> i32 { return v + 2 }
+  let mut choice = a
+  choice = b
+  return choice(40)
+}`,
+      ),
+      ['SEM0080'],
+    )
+  }),
+)
+
+it.effect('rejects a returned section whose borrow is rooted in a local', () =>
+  Effect.gen(function* () {
+    assert.deepEqual(
+      yield* codesOf(
+        'callable-stabilization/escape-local-root',
+        `fn read(value: i32, values: &mut [i32]) -> i32 { return value + values[0] }
+fn make() -> mut fn(i32) -> i32 {
+  let mut values = [0]
+  return read(&mut values)
+}
+pub fn main() -> i32 { let mut f = make() return f(1) }`,
+      ),
+      ['OWN0018'],
+    )
+  }),
+)

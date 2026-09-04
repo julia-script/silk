@@ -3,6 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import type * as CleanupPlan from '../src/CleanupPlan.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as NameResolution from '../src/NameResolution.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -194,6 +195,75 @@ it.effect('plans one hook call per box rather than inlining the held value', () 
         : undefined
     const left = branch?._tag === 'StructCleanup' ? branch.fields.at(0)?.cleanup : undefined
     assert.strictEqual(left?._tag, 'HookCleanup')
+  }),
+)
+
+it.effect('releases Box.into storage exactly once after transferring the element', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'box-heap-indirection/into-cleanup',
+      ascii(accessors),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const into = Analysis.loweredMir(snapshot).functions.find(
+      (fn) => fn.id.module === 'silk/box' && fn.id.name === 'Box.into',
+    )
+    if (into === undefined) return assert.fail('expected Box.into MIR')
+
+    const countRawBufferReleases = (plan: CleanupPlan.CleanupPlan): number => {
+      switch (plan._tag) {
+        case 'RawBufferCleanup':
+          return 1
+        case 'HookCleanup':
+          return countRawBufferReleases(plan.inner)
+        case 'StructCleanup':
+          return plan.fields.reduce(
+            (count, field) => count + countRawBufferReleases(field.cleanup),
+            0,
+          )
+        case 'NominalUnionCleanup':
+          return plan.variants.reduce(
+            (count, variant) =>
+              count +
+              variant.fields.reduce(
+                (fieldCount, field) => fieldCount + countRawBufferReleases(field.cleanup),
+                0,
+              ),
+            0,
+          )
+        case 'ArrayCleanup':
+          return countRawBufferReleases(plan.element)
+        case 'UnionCleanup':
+          return plan.cases.reduce(
+            (count, entry) => count + countRawBufferReleases(entry.cleanup),
+            0,
+          )
+        case 'CallableCleanup':
+        case 'EffectCleanup':
+          return plan.slots.reduce(
+            (count, slot) => count + countRawBufferReleases(slot.cleanup),
+            0,
+          )
+        case 'EffectCompositeCleanup':
+          return plan.alternatives.reduce(
+            (count, alternative) => count + countRawBufferReleases(alternative),
+            0,
+          )
+        default:
+          return 0
+      }
+    }
+
+    const releases = MirVerification.operations(into).filter(
+      (operation) => operation._tag === 'Drop',
+    )
+    assert.strictEqual(
+      releases.reduce(
+        (count, release) => count + countRawBufferReleases(release.cleanup),
+        0,
+      ),
+      1,
+    )
   }),
 )
 

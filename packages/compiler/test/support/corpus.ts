@@ -4849,8 +4849,8 @@ effect fn build() -> i32 ! OutOfMemoryError {
   let sum = Shared.with<Counter, i32>(&counter, readSum)
   drop counter
   if failureResult != 7 || suspensionResult != 42 { return 1 }
-  if sum != 10 { return 20 + sum }
-  if count != 3 { return count }
+  if sum != 10 { return 2 }
+  if count != 3 { return 3 }
   return 42
 }
 effect fn recoverAllocation(error: OutOfMemoryError) -> i32 { return -1 }
@@ -6149,6 +6149,118 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'float-operation-matrix',
     source: floatOperationMatrix,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'callable-return-and-borrow-contracts',
+    source: `struct Token { value: i32 }
+fn inc2(value: i32) -> i32 { return value + 2 }
+fn returnedNamed() -> fn(i32) -> i32 { return inc2 }
+fn returnedAnonymous(offset: i32) -> fn(i32) -> i32 {
+  return fn(value: i32) -> i32 { return value + offset }
+}
+fn combine(left: i32, right: i32) -> i32 { return left * 10 + right }
+fn returnedSection() -> fn(i32) -> i32 { return combine(2) }
+fn returnedOnce(token: Token) -> once fn() -> Token {
+  return fn() -> Token { return move token }
+}
+fn returnedCopyBinding() -> fn() -> i32 {
+  let value = 42
+  return fn() -> i32 { return value }
+}
+fn pass(operation: fn(i32) -> i32) -> fn(i32) -> i32 { return operation }
+fn select(value: i32, values: &[i32]) -> i32 { return value + values[0] }
+fn returnedBorrow(values: &[i32]) -> fn(i32) -> i32 { return select(&values) }
+fn selectMut(value: i32, values: &mut [i32]) -> i32 {
+  values[0] = values[0] + 1
+  return value + values[0]
+}
+fn returnedExclusiveBorrow(values: &mut [i32]) -> mut fn(i32) -> i32 {
+  return selectMut(&mut values)
+}
+pub fn main() -> i32 {
+  if returnedNamed()(40) != 42 { return 1 }
+  if returnedAnonymous(2)(40) != 42 { return 2 }
+  if returnedSection()(4) != 42 { return 3 }
+  if pass(inc2)(40) != 42 { return 4 }
+  let take = returnedOnce(Token { value: 42 })
+  let token = take()
+  if token.value != 42 { return 5 }
+  if returnedCopyBinding()() != 42 { return 6 }
+  let values = [40]
+  if returnedBorrow(&values)(2) != 42 { return 7 }
+  let mut mutableValues = [40]
+  let mut callback = returnedExclusiveBorrow(&mut mutableValues)
+  let result = callback(1)
+  drop callback
+  if result != 42 || mutableValues[0] != 41 { return 8 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'owned-provider-shared-dispatch',
+    source: `import silk.effect { Effect }
+service Counter {
+  effect fn get() -> i32 ? &Counter
+  effect fn bump() -> () ? &mut Counter
+}
+struct Cell { value: i32 }
+effect fn get(self: &Cell) -> i32 { return self.value }
+effect fn bump(self: &mut Cell) -> () { self.value = self.value + 1 }
+impl Counter for Cell { get: Cell.get bump: Cell.bump }
+effect fn both() -> i32 ? &mut Counter {
+  run Counter.bump()
+  run Counter.bump()
+  return run Counter.get()
+}
+pub fn main() -> i32 {
+  return run Effect.bindRequirementOwned<Counter>(both(), Cell { value: 1 })
+}`,
+    expected: { _tag: 'Completes', result: 3 },
+  },
+  {
+    name: 'owned-allocation-forwarded-provider-mutation',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+struct CountingAllocator { hits: i32 }
+effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  self.hits = self.hits + 1
+  let mut inner = Allocator.systemAllocatorProvider()
+  return run Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
+}
+impl Allocator for CountingAllocator { allocate: CountingAllocator.allocate }
+effect fn forwarded(layout: Layout) -> Allocation ! OutOfMemoryError ? &mut Allocator {
+  return run Allocator.allocate(move layout)
+}
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = CountingAllocator { hits: 0 }
+  let block = run forwarded(Layout.of<[i32; 2]>()) |> Effect.provideMut(&mut allocator)
+  drop block
+  if allocator.hits != 1 { return 2 }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 3 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'zero-sized-copy-vector-read',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.vector { Vector }
+struct Marker {}
+impl Copy for Marker {}
+fn observe(value: Marker) -> i32 { return 42 }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut values = Vector.make<Marker>()
+  run Vector.append<Marker>(&mut values, Marker {}) |> Effect.provideMut(&mut allocator)
+  return observe(Vector.get<Marker>(&values, 0))
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
