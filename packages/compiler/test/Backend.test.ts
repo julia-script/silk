@@ -164,6 +164,33 @@ it.effect('emits native debug metadata only for debug requests', () =>
   }),
 )
 
+it.effect('keeps string identity in deterministic LLVM debug metadata only', () =>
+  Effect.gen(function* () {
+    const source = `fn pass(value: string) -> string { return value }
+fn byteCount(value: &[u8]) -> usize { return value.length }
+pub fn main() -> i32 {
+  let text = pass("caf\\u{e9}")
+  if byteCount(Intrinsic.stringUtf8Bytes(text)) == 5 { return 42 }
+  return 0
+}`
+    const request = {
+      mode: 'debug' as const,
+      sources: new Map([['golden/program', ascii(source)]]),
+    }
+    const first = yield* emit(source, request)
+    const second = yield* emit(source, request)
+    const release = yield* emit(source, { mode: 'release' })
+
+    assert.include(first.ir, '!DIStringType(name: "string"')
+    assert.include(first.ir, 'encoding: DW_ATE_UTF')
+    assert.include(first.ir, 'name: "&[u8]"')
+    assert.notInclude(release.ir, 'DIStringType')
+    assert.notInclude(release.ir, 'DW_ATE_UTF')
+    assert.strictEqual(first.ir, second.ir)
+    assert.deepEqual(first.bitcode, second.bitcode)
+  }),
+)
+
 const arithmeticSource =
   'import silk.i32 as i32\npub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }'
 

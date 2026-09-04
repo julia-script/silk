@@ -2042,6 +2042,12 @@ pub fn main() -> i32 {
     expected: { _tag: 'Trap' },
   },
   {
+    name: 'float-to-subword-out-of-range-trap',
+    source:
+      'import silk.f64 as f64\nimport silk.u8 as u8\npub fn main() -> i32 { return u8.toI32(f64.toU8(300.0)) }',
+    expected: { _tag: 'Trap' },
+  },
+  {
     name: 'operator-negation-overflow-trap',
     source: 'pub fn main() -> i32 { return -(-2147483648) }',
     expected: { _tag: 'Trap' },

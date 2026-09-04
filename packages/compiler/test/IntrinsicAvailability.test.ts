@@ -333,6 +333,28 @@ pub fn main() -> i32 { let n = size()
   }),
 )
 
+it.effect('keeps unreachable foreign declarations out of LLVM-to-Wasm planning', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(
+      `unsafe extern "C" fn abs(value: i32) -> i32
+unsafe extern "C" fn install(callback: extern "C" fn(i32) -> i32) -> ()
+unsafe extern "C" static environment: *mut *mut u8 as "environ"
+pub fn main() -> i32 { return 42 }`,
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(self.instances.foreignCalls, [])
+    const program = Analysis.loweredMir(self)
+    assert.deepEqual(program.foreignCalls, [])
+    assert.deepEqual(program.foreignStatics, [])
+    const artifact = yield* Analysis.codegen(self, { mode: 'release' })
+    assert.deepEqual(artifact.foreignImports, [])
+    assert.notInclude(artifact.ir, '@abs')
+    assert.notInclude(artifact.ir, '@install')
+    assert.notInclude(artifact.ir, '@environ')
+  }),
+)
+
 const twoModules = (dependencyAbs: string) =>
   Analysis.makeRealized({
     root: SourceFile.make(
