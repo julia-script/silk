@@ -83,13 +83,13 @@
 - [x] 6.3 Review the complete diff against every JUL-105 acceptance item and green-field cleanup;
       verify strict OpenSpec validation, no expression-only arm assumptions, no general block values,
       no compatibility paths, and no runtime evaluator or independent Wasm backend.
-- [ ] 6.4 Run `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, then `pnpm test`, followed by
+- [x] 6.4 Run `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, then `pnpm test`, followed by
       `pnpm check`; run `pnpm release:candidate` when package contents or exports change and record exact
       results, pre-existing failures, and any remaining gap without claiming completion prematurely.
-- [ ] 6.5 Obtain independent implementation review and a separate test-economics reviewer approval;
+- [x] 6.5 Obtain independent implementation review and a separate test-economics reviewer approval;
       verify findings, compare focused base/branch timings under equivalent conditions in an isolated
       base checkout, fix valid issues, and rerun affected checks until the final committed diff is
       approved.
-- [ ] 6.6 Commit only JUL-105 changes, push the feature branch, and create or reuse a draft PR to
+- [x] 6.6 Commit only JUL-105 changes, push the feature branch, and create or reuse a draft PR to
       `main`; read back its URL and draft state, then update Linear with acceptance/check/test-review
       evidence and the exact PR-head Review baseline, move to In Review, and read back the issue.
