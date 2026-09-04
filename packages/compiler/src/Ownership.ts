@@ -3021,11 +3021,26 @@ const checkFunction = (
       Type.isNever(Type.failureType(expression.subject.type))
     )
       return
+    // Immediate owned bindings transfer the source value into a provider bracket. That
+    // bracket releases on both outcomes: lowering emits the normal drop, while propagation
+    // must retain its owner until the protected execution has produced an outcome.
+    const failureLive = new Set(live)
+    let protectedEffect: Hir.Expression = expression.subject
+    while (protectedEffect._tag === 'EffectBindRequirement') {
+      const provider = protectedEffect.provider
+      if (provider.selectionAccess === 'Take') {
+        if (provider.binding !== undefined)
+          failureLive.add(siteKey({ _tag: 'Let', binding: provider.binding }))
+        else if (provider.parameter !== undefined)
+          failureLive.add(siteKey({ _tag: 'Parameter', parameter: provider.parameter }))
+      }
+      protectedEffect = protectedEffect.protected
+    }
     exits.push(
       Object.freeze({
         kind: 'Propagation',
         span: expression.span,
-        sites: frameSitesInnerFirst(state.execution?.frames ?? [], live),
+        sites: frameSitesInnerFirst(state.execution?.frames ?? [], failureLive),
         ...transferCleanup(),
       }),
     )
