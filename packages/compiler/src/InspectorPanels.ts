@@ -34,7 +34,6 @@ export const backendEmission = (
   mode: 'release' | 'debug',
 ): Emission => {
   try {
-    const selection = Analysis.targetOf(snapshot)
     return {
       _tag: 'Emitted',
       artifact: Effect.runSync(Analysis.codegen(snapshot, { mode })),

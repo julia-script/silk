@@ -201,9 +201,6 @@ const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
 
 const callId = (call: CallFact): string => `call-${call.syntax.span.start}-${call.syntax.span.end}`
 
-const sameSpan = (left: SourceSpan.SourceSpan, right: SourceSpan.SourceSpan): boolean =>
-  left.sourceId === right.sourceId && left.start === right.start && left.end === right.end
-
 const sameDeclaration = (
   left: Elaboration.DeclarationFact,
   right: Elaboration.DeclarationFact,
