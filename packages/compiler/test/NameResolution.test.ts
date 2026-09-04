@@ -202,6 +202,7 @@ it.effect('keeps HIR, MIR, diagnostics, and instances deterministic across fresh
       'library/Answer': threeModuleSources['library/Answer'],
       'app/Main': threeModuleSources['app/Main'],
     })
+    const wasm = yield* snapshot('app/Main', threeModuleSources, 'wasm32-unknown-unknown')
     assert.deepEqual(
       [...forward.results.values()].map((result) => Hir.encode(result.hir)),
       [...reverse.results.values()].map((result) => Hir.encode(result.hir)),
@@ -212,6 +213,19 @@ it.effect('keeps HIR, MIR, diagnostics, and instances deterministic across fresh
     )
     assert.deepEqual(forward.instances, reverse.instances)
     assert.deepEqual(forward.diagnostics, reverse.diagnostics)
+    assert.deepEqual(
+      [...forward.results.values()].map((result) => Hir.encode(result.hir)),
+      [...wasm.results.values()].map((result) => Hir.encode(result.hir)),
+    )
+    const functionBodies = (candidate: Analysis.Snapshot): string => {
+      const encoded = MirEncoding.encode(Analysis.loweredMir(candidate))
+      return encoded.slice(encoded.indexOf('\nfn '))
+    }
+    assert.strictEqual(functionBodies(forward), functionBodies(wasm))
+    const instanceKeys = (candidate: Analysis.Snapshot) =>
+      candidate.instances.instances.map((instance) => instance.key)
+    assert.deepEqual(instanceKeys(forward), instanceKeys(wasm))
+    assert.deepEqual(wasm.diagnostics, [])
   }),
 )
 

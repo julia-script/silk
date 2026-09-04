@@ -3,6 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as Lexer from '../src/Lexer.js'
+import type * as Mir from '../src/Mir.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
@@ -138,5 +139,30 @@ pub fn main() -> i32 { return 0 }`),
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
       [Diagnostic.useAfterMoveCode],
     )
+  }),
+)
+
+it.effect('isolates an affine move inside the selected short-circuit MIR branch', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'short-circuit/affine-mir-branch',
+      ascii(`struct Flag { value: bool }
+fn unwrap(flag: Flag) -> bool { return flag.value }
+fn choose(gate: bool, flag: Flag) -> bool { return gate && unwrap(move flag) }
+pub fn main() -> i32 { if choose(false, Flag { value: true }) { return 1 } return 42 }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const choose = Analysis.loweredMir(snapshot).functions.find((fn) => fn.id.name === 'choose')
+    if (choose === undefined) return assert.fail('expected choose MIR')
+    const topLevel = choose.regions.flatMap((region) =>
+      region._tag === 'OperationRegion' ? region.operations : [],
+    )
+    const shortCircuit = topLevel.find(
+      (operation): operation is Mir.ShortCircuitOperation => operation._tag === 'ShortCircuit',
+    )
+    if (shortCircuit === undefined) return assert.fail('expected short-circuit MIR operation')
+    assert.strictEqual(shortCircuit.operator, 'And')
+    assert.isTrue(shortCircuit.right.operations.some((operation) => operation._tag === 'Call'))
+    assert.isFalse(topLevel.some((operation) => operation._tag === 'Call'))
   }),
 )

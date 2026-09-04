@@ -236,6 +236,36 @@ it('computes browser-safe SHA-256 identities over exact UTF-8 bytes', () => {
     )
 })
 
+it.effect('keeps allocation metrics outside an unmetered program closure and MIR', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'stdlib/unmetered-allocation',
+      ascii(`import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let block = run Allocator.allocate(Layout.of<[i32; 2]>()) |> Effect.provideMut(&mut allocator)
+  drop block
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.notInclude(
+      Analysis.modules(snapshot).map((module) => module.name),
+      'silk/metrics',
+    )
+    assert.deepEqual(
+      Analysis.loweredMir(snapshot)
+        .functions.filter((fn) => fn.id.module === 'silk/metrics')
+        .map((fn) => fn.id.name),
+      [],
+    )
+  }),
+)
+
 it('declares one discoverable namespace for every standard-library module', () => {
   // Catalog namespaces drive tooling discovery only; they never enter source scope implicitly.
   assert.deepEqual(

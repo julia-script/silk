@@ -180,6 +180,36 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('realizes mixed usize and i32 union lanes for native and LLVM-to-Wasm targets', () =>
+  Effect.gen(function* () {
+    const program = `struct Wide { value: usize }
+struct Narrow { value: i32 }
+fn decode(flag: bool) -> Wide | Narrow {
+  if flag { return Wide { value: 4294967295 } }
+  return Narrow { value: 7 }
+}
+fn inspect(input: Wide | Narrow) -> i32 {
+  return match &input {
+    Wide { value } if value > 2147483647 => 42
+    Wide { value } => 0
+    Narrow { value } => value
+  }
+}
+pub fn main() -> i32 { return inspect(decode(true)) }`
+    const native = yield* source(program, 'aarch64-apple-darwin')
+    const wasm = yield* source(program, 'wasm32-unknown-unknown')
+    assert.deepEqual(native.diagnostics, [])
+    assert.deepEqual(wasm.diagnostics, [])
+
+    const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
+    const wasmArtifact = yield* Analysis.codegen(wasm, { mode: 'release' })
+    assert.match(nativeArtifact.ir, /\{ i32, i64 \}/)
+    assert.include(nativeArtifact.ir, 'trunc i64')
+    assert.match(wasmArtifact.ir, /\{ i32, i32 \}/)
+    assert.strictEqual(wasmArtifact.target.id, 'wasm32-unknown-unknown')
+  }),
+)
+
 it.effect('rejects malformed usize target verdicts and MIR literals as verifier data', () =>
   Effect.gen(function* () {
     const snapshot = yield* source(sharedUnsigned, 'wasm32-unknown-unknown')

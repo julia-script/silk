@@ -995,3 +995,35 @@ pub fn main() -> i32 { return 0 }`),
     assert.deepEqual(codes(yield* program('return nested(deep)')), ['SEM0012'])
   }),
 )
+
+it.effect('keeps specialization identities stable across native and LLVM-Wasm targets', () =>
+  Effect.gen(function* () {
+    const bytes = new TextEncoder().encode(`fn identity<T>(value: T) -> T { return move value }
+pub fn main() -> i32 { let flag = identity(true) if flag { return identity<i32>(42) } return 0 }`)
+    const native = yield* Analysis.ofSourceRealized(
+      'generics/cross-target-identities',
+      bytes,
+      'aarch64-apple-darwin',
+    )
+    const wasm = yield* Analysis.ofSourceRealized(
+      'generics/cross-target-identities',
+      bytes,
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(native), [])
+    assert.deepEqual(Analysis.diagnostics(wasm), [])
+    const identities = (snapshot: Analysis.Snapshot) =>
+      Analysis.instancesOf(snapshot).instances.map((instance) => ({
+        declaration: instance.key.declaration,
+        typeArguments: instance.key.typeArguments.map(Type.encodeGenericArgument),
+      }))
+    assert.deepEqual(identities(native), identities(wasm))
+
+    const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
+    const wasmArtifact = yield* Analysis.codegen(wasm, { mode: 'release' })
+    assert.deepEqual(
+      nativeArtifact.symbols.map(({ symbol, declaration }) => ({ symbol, declaration })),
+      wasmArtifact.symbols.map(({ symbol, declaration }) => ({ symbol, declaration })),
+    )
+  }),
+)

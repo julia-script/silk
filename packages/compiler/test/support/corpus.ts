@@ -13,6 +13,7 @@ import {
   ownedProviderSuspendedSuccess,
 } from './ownedAllocatorSuspension.js'
 import { recoveredProvidedWrite, recoveredWriterModule } from './recoveredProvidedWrite.js'
+import { floatOperationMatrix, integerOperationMatrix } from './scalarOperationMatrix.js'
 import { storedCatchSuspension } from './storedCatchSuspension.js'
 
 // Folded from Transcendental.test.ts: every runtime bit pattern is committed independently of the
@@ -6141,6 +6142,364 @@ const pressurePrograms: ReadonlyArray<CorpusProgram> = [
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
+    name: 'integer-operation-matrix',
+    source: integerOperationMatrix,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'float-operation-matrix',
+    source: floatOperationMatrix,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'allocation-metrics-semantics',
+    source: `import silk.metrics { Metrics }
+pub fn main() -> i32 {
+  let mut counts = Metrics.make()
+  Metrics.recordAcquire(&mut counts)
+  Metrics.recordAcquire(&mut counts)
+  Metrics.recordAcquire(&mut counts)
+  let peak = Metrics.copy(&counts)
+  if peak.acquired != 3 || peak.released != 0 || peak.peakLive != 3 { return 1 }
+  if Metrics.live(&peak) != 3 { return 2 }
+  Metrics.recordRelease(&mut counts)
+  let afterOne = Metrics.copy(&counts)
+  if afterOne.acquired != 3 || afterOne.released != 1 || afterOne.peakLive != 3 { return 3 }
+  if Metrics.live(&afterOne) != 2 || Metrics.live(&peak) != 3 { return 4 }
+  Metrics.recordRelease(&mut counts)
+  Metrics.recordRelease(&mut counts)
+  if Metrics.live(&counts) != 0 || counts.peakLive != 3 { return 5 }
+  Metrics.recordAcquire(&mut counts)
+  if Metrics.live(&counts) != 1 || counts.peakLive != 3 { return 6 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'slot-copy-structural-union',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
+import silk.u8 as u8
+struct Left { value: i32 }
+impl Copy for Left {}
+struct Right { marker: u8 value: i32 }
+impl Copy for Right {}
+struct EmptyEvent {}
+impl Copy for EmptyEvent {}
+fn left(value: i32) -> EmptyEvent | Left | Right { return Left { value: value } }
+fn right(marker: u8, value: i32) -> EmptyEvent | Left | Right {
+  return Right { marker: marker, value: value }
+}
+fn empty() -> EmptyEvent | Left | Right { return EmptyEvent {} }
+fn observed(input: EmptyEvent | Left | Right) -> i32 {
+  return match move input {
+    EmptyEvent {} => 5
+    Left { value } => value
+    Right { marker, value } => u8.toI32(marker) + value
+  }
+}
+effect fn store() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let allocation = run Allocator.allocate(Layout.of<[EmptyEvent | Left | Right; 3]>())
+    |> Effect.provideMut(&mut allocator)
+  unsafe {
+    let mut buffer = RawBuffer.from<EmptyEvent | Left | Right>(move allocation, 3)
+    Slot.write<EmptyEvent | Left | Right>(RawBuffer.slot(&mut buffer, 0), left(7))
+    Slot.write<EmptyEvent | Left | Right>(RawBuffer.slot(&mut buffer, 1), right(3, 11))
+    Slot.write<EmptyEvent | Left | Right>(RawBuffer.slot(&mut buffer, 2), empty())
+    let slotCopy = Slot.copy(RawBuffer.slot(&mut buffer, 0))
+    let sharedLeft = RawBuffer.read<EmptyEvent | Left | Right>(&buffer, 0)
+    let sharedRight = RawBuffer.read<EmptyEvent | Left | Right>(&buffer, 1)
+    let sharedEmpty = RawBuffer.read<EmptyEvent | Left | Right>(&buffer, 2)
+    let takenLeft = Slot.take(RawBuffer.slot(&mut buffer, 0))
+    let takenRight = Slot.take(RawBuffer.slot(&mut buffer, 1))
+    let takenEmpty = Slot.take(RawBuffer.slot(&mut buffer, 2))
+    drop buffer
+    return observed(move slotCopy) + observed(move sharedLeft) + observed(move sharedRight) +
+      observed(move sharedEmpty) + observed(move takenLeft) + observed(move takenRight) +
+      observed(move takenEmpty)
+  }
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
+    expected: { _tag: 'Completes', result: 59 },
+  },
+  {
+    name: 'packed-subword-reference',
+    source: `import silk.i16 as i16
+import silk.i8 as i8
+import silk.u16 as u16
+import silk.u8 as u8
+struct Packed { first: u8 second: i8 third: u16 fourth: i16 }
+fn peek(self: &Packed) -> i32 {
+  return u8.toI32(self.first) + i8.toI32(self.second) + u16.toI32(self.third) + i16.toI32(self.fourth)
+}
+pub fn main() -> i32 {
+  let packed = Packed { first: 7, second: -5, third: 200, fourth: -9 }
+  return 50 + peek(&packed)
+}`,
+    expected: { _tag: 'Completes', result: 243 },
+  },
+  {
+    name: 'else-if-chain',
+    source: `fn classify(value: i32) -> i32 {
+  if value < 0 { return 0 }
+  else if value < 10 { return 1 }
+  else if value < 100 { return 2 }
+  else { return 3 }
+  return 4
+}
+pub fn main() -> i32 {
+  if classify(0 - 5) != 0 { return 1 }
+  if classify(5) != 1 { return 2 }
+  if classify(50) != 2 { return 3 }
+  if classify(500) != 3 { return 4 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'raw-string-delimiters',
+    source: `import silk.usize as usize
+import silk.string { String }
+pub fn main() -> i32 {
+  let single = r"\\n"
+  if usize.toI32(String.byteLength(single)) != 2 { return 1 }
+  let helpText = r"""
+Usage: silk build
+  --target \\path\\to\\dir
+"""
+  let bytes = String.utf8Bytes(helpText)
+  if bytes[usize.ZERO] != 10 { return 2 }
+  if bytes[usize.add(30, 0)] != 92 { return 3 }
+  if usize.toI32(String.byteLength(helpText)) != 43 { return 4 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'effect-entry-evaluate-ordering',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+struct Stop {}
+struct Audit { trace: i32 }
+fn record(audit: &mut Audit, value: i32) -> i32 {
+  audit.trace = audit.trace * 10 + value
+  return audit.trace
+}
+fn read(audit: &Audit) -> i32 { return audit.trace }
+effect fn ordered(audit: Shared<Audit>) -> () ! Stop {
+  let first = Shared.withMut<Audit, i32>(&audit, record(1))
+  run effect { let second = Shared.withMut<Audit, i32>(&audit, record(2)) return () }
+  fail Stop {}
+  let forbidden = Shared.withMut<Audit, i32>(&audit, record(9))
+  return ()
+}
+effect fn recover(error: Stop) -> () { return () }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let audit = run Shared.make<Audit>(Audit { trace: 0 }) |> Effect.provideMut(&mut allocator)
+  run Effect.catchAll(ordered(Shared.clone<Audit>(&audit)), recover)
+  let trace = Shared.with<Audit, i32>(&audit, read)
+  drop audit
+  if trace != 12 { return trace }
+  return 42
+}
+effect fn recoverAllocation(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recoverAllocation) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'box-tree-recursive-cleanup',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.box { Box }
+import silk.effect { Effect }
+import silk.shared { Shared }
+import silk.usize as usize
+struct Counter { value: i32 }
+fn increment(counter: &mut Counter) -> i32 { counter.value = counter.value + 1 return counter.value }
+fn read(counter: &Counter) -> i32 { return counter.value }
+struct Leaf {}
+struct Branch { left: Box<Tree> right: Box<Tree> }
+struct Shape { kind: Leaf | Branch }
+struct Tree { shape: Shape value: i32 counter: Shared<Counter> }
+impl Drop for Tree {
+  fn drop(self: &mut Tree) -> () {
+    let changed = Shared.withMut<Counter, i32>(&self.counter, increment)
+    return ()
+  }
+}
+fn leaf(value: i32, counter: &Shared<Counter>) -> Tree {
+  return Tree { shape: Shape { kind: Leaf {} }, value: value, counter: Shared.clone(counter) }
+}
+effect fn branch(left: Tree, right: Tree, value: i32, counter: &Shared<Counter>)
+  -> Tree ! OutOfMemoryError ? &mut Allocator {
+  let boxedLeft = run Box.make<Tree>(move left)
+  let boxedRight = run Box.make<Tree>(move right)
+  return Tree {
+    shape: Shape { kind: Branch { left: move boxedLeft, right: move boxedRight } },
+    value: value,
+    counter: Shared.clone(counter)
+  }
+}
+fn total(tree: &Tree) -> i32 { return tree.value + shapeTotal(&tree.shape) }
+fn shapeTotal(shape: &Shape) -> i32 {
+  return match &shape.kind {
+    Leaf nothing => 0
+    Branch { left, right } => boxTotal(Box.get<Tree>(&left)) + boxTotal(Box.get<Tree>(&right))
+  }
+}
+fn boxTotal(view: &[Tree]) -> i32 {
+  return match &view[usize.ZERO] { Tree { shape, value, counter } => value + shapeTotal(&shape) }
+}
+effect fn build(counter: &Shared<Counter>) -> Tree ! OutOfMemoryError ? &mut Allocator {
+  let left = run branch(leaf(1, counter), leaf(2, counter), 4, counter)
+  let right = run branch(leaf(8, counter), leaf(16, counter), 32, counter)
+  return run branch(move left, move right, 64, counter)
+}
+effect fn measure() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let counter = run Shared.make<Counter>(Counter { value: 0 }) |> Effect.provideMut(&mut allocator)
+  let built = run build(&counter) |> Effect.provideMut(&mut allocator)
+  if total(&built) != 127 { return 1 }
+  drop built
+  let released = Shared.with<Counter, i32>(&counter, read)
+  drop counter
+  if released != 7 { return released }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(measure(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'vector-move-only-cleanup-order',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+import silk.vector { Vector }
+struct Audit { count: i32 trace: i32 }
+fn record(audit: &mut Audit, value: i32) -> i32 {
+  audit.count = audit.count + 1
+  audit.trace = audit.trace * 10 + value
+  return audit.trace
+}
+fn count(audit: &Audit) -> i32 { return audit.count }
+fn trace(audit: &Audit) -> i32 { return audit.trace }
+struct Entry { value: i32 audit: Shared<Audit> }
+impl Drop for Entry {
+  fn drop(self: &mut Entry) -> () {
+    let value = self.value
+    let changed = Shared.withMut<Audit, i32>(&self.audit, record(value))
+    return ()
+  }
+}
+fn entry(value: i32, audit: &Shared<Audit>) -> Entry {
+  return Entry { value: value, audit: Shared.clone(audit) }
+}
+effect fn append(values: &mut Vector<Entry>, value: i32, audit: &Shared<Audit>)
+  -> () ! OutOfMemoryError ? &mut Allocator {
+  let appended = run Vector.append<Entry>(move values, entry(value, audit))
+  return ()
+}
+effect fn measure() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let audit = run Shared.make<Audit>(Audit { count: 0, trace: 0 }) |> Effect.provideMut(&mut allocator)
+  let mut dropped = Vector.make<Entry>()
+  run append(&mut dropped, 3, &audit) |> Effect.provideMut(&mut allocator)
+  run append(&mut dropped, 5, &audit) |> Effect.provideMut(&mut allocator)
+  run append(&mut dropped, 7, &audit) |> Effect.provideMut(&mut allocator)
+  drop dropped
+  if Shared.with<Audit, i32>(&audit, trace) != 357 { return 1 }
+  let mut replaced = Vector.make<Entry>()
+  run append(&mut replaced, 3, &audit) |> Effect.provideMut(&mut allocator)
+  run append(&mut replaced, 5, &audit) |> Effect.provideMut(&mut allocator)
+  Vector.set<Entry>(&mut replaced, 0, entry(9, &audit))
+  if Shared.with<Audit, i32>(&audit, trace) != 3573 { return 2 }
+  drop replaced
+  if Shared.with<Audit, i32>(&audit, trace) != 357395 { return 3 }
+  let mut truncated = Vector.make<Entry>()
+  run append(&mut truncated, 3, &audit) |> Effect.provideMut(&mut allocator)
+  run append(&mut truncated, 5, &audit) |> Effect.provideMut(&mut allocator)
+  run append(&mut truncated, 7, &audit) |> Effect.provideMut(&mut allocator)
+  Vector.truncate<Entry>(&mut truncated, 1)
+  if Shared.with<Audit, i32>(&audit, trace) != 35739557 { return 4 }
+  drop truncated
+  let finalTrace = Shared.with<Audit, i32>(&audit, trace)
+  let finalCount = Shared.with<Audit, i32>(&audit, count)
+  drop audit
+  if finalTrace != 357395573 || finalCount != 9 { return 5 }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(measure(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'recursive-box-chain-shallow-cleanup',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.box { Box }
+import silk.effect { Effect }
+import silk.shared { Shared }
+import silk.usize as usize
+struct Counter { value: i32 }
+fn increment(counter: &mut Counter) -> i32 { counter.value = counter.value + 1 return counter.value }
+fn read(counter: &Counter) -> i32 { return counter.value }
+struct End {}
+struct Link { next: Box<Chain> counter: Shared<Counter> }
+impl Drop for Link {
+  fn drop(self: &mut Link) -> () {
+    let changed = Shared.withMut<Counter, i32>(&self.counter, increment)
+    return ()
+  }
+}
+struct Step { kind: End | Link }
+struct Chain { step: Step }
+fn stepDepth(step: &Step) -> i32 {
+  return match &step.kind {
+    End nothing => 0
+    Link { next, counter } => viewDepth(Box.get<Chain>(&next))
+  }
+}
+fn viewDepth(view: &[Chain]) -> i32 {
+  return match &view[usize.ZERO] { Chain { step } => 1 + stepDepth(&step) }
+}
+effect fn build(depth: i32, counter: &Shared<Counter>)
+  -> Chain ! OutOfMemoryError ? &mut Allocator {
+  let mut current = Chain { step: Step { kind: End {} } }
+  let mut remaining = depth
+  while remaining > 0 {
+    let taken = Intrinsic.replace(current, Chain { step: Step { kind: End {} } })
+    let boxed = run Box.make<Chain>(move taken)
+    current = Chain { step: Step { kind: Link {
+      next: move boxed,
+      counter: Shared.clone(counter)
+    } } }
+    remaining = remaining - 1
+  }
+  return move current
+}
+effect fn measure() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let counter = run Shared.make<Counter>(Counter { value: 0 }) |> Effect.provideMut(&mut allocator)
+  let built = run build(64, &counter) |> Effect.provideMut(&mut allocator)
+  if stepDepth(&built.step) != 64 { return 1 }
+  drop built
+  let released = Shared.with<Counter, i32>(&counter, read)
+  drop counter
+  if released != 64 { return released }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(measure(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'replace-cleanup',
     source: 'pub fn main() -> i32 { return 0 }',
     nativeSource: replaceCleanupProgram,
@@ -6394,7 +6753,7 @@ pub effect fn main() -> () ! WriterError {
   {
     name: 'scheduler-fiber-nested-cancellation',
     source: schedulerFiber('local-scheduler-nested-cancellation'),
-    expected: { _tag: 'Trap' },
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'scheduler-fiber-timers',
