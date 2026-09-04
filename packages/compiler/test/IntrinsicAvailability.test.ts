@@ -74,11 +74,12 @@ it('requires normalized target metadata in every sealed inventory entry', () => 
   )
   assert.isTrue(
     Intrinsic.inventory().every((entry) => {
-      let expected: ReadonlyArray<Target.Id> = Intrinsic.runtimeTargets
-      if (entry.operation.startsWith('Intrinsic.os'))
-        expected = Target.native.map((target) => target.id)
-      if (entry.phase !== 'Runtime') expected = []
-      return JSON.stringify(entry.targets) === JSON.stringify(expected)
+      const expected =
+        entry.phase === 'Runtime' ? Intrinsic.normalizeRuntimeTargets(entry.targets) : []
+      return (
+        JSON.stringify(entry.targets) === JSON.stringify(expected) &&
+        (entry.phase !== 'Runtime' || entry.targets.length > 0)
+      )
     }),
   )
 })

@@ -168,7 +168,6 @@ pub fn main() -> i32 {
 export const scalarDisplayAcceptance = `import silk.effect { Effect }
 import silk.format { Format }
 import silk.u8 as u8
-import silk.usize as usize
 import silk.writer { Writer, WriterError }
 
 struct Capture { index: usize valid: bool }
@@ -1296,6 +1295,155 @@ pub fn main() -> i32 {
   return result
 }`
 
+const hashedMapOrder = (
+  seed: number,
+  digest: number,
+): string => `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
+import silk.effect { Effect }
+import silk.hash { Hash, Word }
+import silk.hash_map { HashMap }
+import silk.i32 as i32
+import silk.u64 as u64
+import silk.usize as usize
+
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut map = HashMap.make<Word, i32>(Hash.seed(${seed}))
+  let mut key = 0
+  while key < 12 {
+    let previous = run HashMap.insert<Word, i32>(&mut map, Hash.word(i32.toU64(key * 7 + 1)), key)
+      |> Effect.provideMut(&mut allocator)
+    drop previous
+    key = key + 1
+  }
+  let mut index = usize.ZERO
+  let mut folded = u64.toU64(0)
+  while index < HashMap.bucketCount<Word, i32>(&map) {
+    if HashMap.occupiedAt<Word, i32>(&map, index) {
+      let held = HashMap.keyAt<Word, i32>(&map, index)
+      folded = u64.wrappingAdd(u64.wrappingMultiply(folded, 131), held.value)
+    }
+    index = index + usize.ONE
+  }
+  if u64.toI32(u64.remainder(folded, 1000000007)) != ${digest} { return 1 }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
+
+const ownedAllocationTrap = (
+  body: string,
+  layout = '[i32; 2]',
+): string => `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
+
+effect fn store() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let layout = Layout.of<${layout}>()
+  let allocation = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  unsafe {
+    let mut buffer = RawBuffer.from<i32>(move allocation, 2)
+${body}
+  }
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
+
+const integerParsingRanges = [
+  { spelling: 'i8', minimum: '-128', maximum: '127', below: '-129', above: '128' },
+  { spelling: 'i16', minimum: '-32768', maximum: '32767', below: '-32769', above: '32768' },
+  {
+    spelling: 'i32',
+    minimum: '-2147483648',
+    maximum: '2147483647',
+    below: '-2147483649',
+    above: '2147483648',
+  },
+  {
+    spelling: 'i64',
+    minimum: '-9223372036854775808',
+    maximum: '9223372036854775807',
+    below: '-9223372036854775809',
+    above: '9223372036854775808',
+  },
+  { spelling: 'u8', minimum: '0', maximum: '255', below: '-1', above: '256' },
+  { spelling: 'u16', minimum: '0', maximum: '65535', below: '-1', above: '65536' },
+  {
+    spelling: 'u32',
+    minimum: '0',
+    maximum: '4294967295',
+    below: '-1',
+    above: '4294967296',
+  },
+  {
+    spelling: 'u64',
+    minimum: '0',
+    maximum: '18446744073709551615',
+    below: '-1',
+    above: '18446744073709551616',
+  },
+] as const
+
+const numberParsingAcceptance = `${integerParsingRanges
+  .map(({ spelling }) => `import silk.${spelling} as ${spelling}`)
+  .join('\n')}
+import silk.format { NotANumber, OutOfRange, ParseError }
+import silk.result { Result }
+import silk.usize as usize
+
+fn parsed<T>(result: Result<T, ParseError>) -> bool {
+  return match move result {
+    Result<T, ParseError>.Success { value } => true
+    Result<T, ParseError>.Failure { error } => false
+  }
+}
+fn outOfRange<T>(result: Result<T, ParseError>) -> bool {
+  return match move result {
+    Result<T, ParseError>.Success { value } => false
+    Result<T, ParseError>.Failure { error } => match move error.reason {
+      NotANumber { offset } => false
+      OutOfRange nothing => true
+    }
+  }
+}
+fn notANumberAt<T>(result: Result<T, ParseError>, expected: usize) -> bool {
+  return match move result {
+    Result<T, ParseError>.Success { value } => false
+    Result<T, ParseError>.Failure { error } => match move error.reason {
+      NotANumber { offset } => offset == expected
+      OutOfRange nothing => false
+    }
+  }
+}
+pub fn main() -> i32 {
+${integerParsingRanges
+  .flatMap(({ spelling, minimum, maximum, below, above }, index) => [
+    `  if !parsed<${spelling}>(${spelling}.parse("${minimum}")) { return ${index * 4 + 1} }`,
+    `  if !parsed<${spelling}>(${spelling}.parse("${maximum}")) { return ${index * 4 + 2} }`,
+    `  if !outOfRange<${spelling}>(${spelling}.parse("${above}")) { return ${index * 4 + 3} }`,
+    spelling.startsWith('i')
+      ? `  if !outOfRange<${spelling}>(${spelling}.parse("${below}")) { return ${index * 4 + 4} }`
+      : `  if !notANumberAt<${spelling}>(${spelling}.parse("${below}"), usize.ZERO) { return ${index * 4 + 4} }`,
+  ])
+  .join('\n')}
+  if !notANumberAt<u8>(u8.parse(""), usize.ZERO) { return 40 }
+  if !notANumberAt<u8>(u8.parse("abc"), usize.ZERO) { return 41 }
+  if !notANumberAt<u8>(u8.parse("12x"), 2) { return 42 }
+  if !notANumberAt<u8>(u8.parse("1 2"), usize.ONE) { return 43 }
+  if !notANumberAt<i32>(i32.parse("+1"), usize.ZERO) { return 44 }
+  if !notANumberAt<i32>(i32.parse("-"), usize.ONE) { return 45 }
+  if !notANumberAt<i32>(i32.parse("-x"), usize.ONE) { return 46 }
+  if !parsed<u8>(u8.parse("007")) { return 47 }
+  if !parsed<i32>(i32.parse("-0")) { return 48 }
+  return 42
+}`
+
 export const corpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'literal',
@@ -1347,6 +1495,11 @@ pub fn main() -> i32 {
   {
     name: 'template-formatting',
     source: templateFormattingAcceptance,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'number-parsing',
+    source: numberParsingAcceptance,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -2163,6 +2316,50 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
+  {
+    name: 'string-utf8-validation',
+    source: `import silk.usize as usize
+import silk.string { InvalidUtf8, String }
+import silk.result { Result }
+fn inspect(bytes: &[u8]) -> i32 {
+  return match move String.fromUtf8(bytes) {
+    Result<string, InvalidUtf8>.Success { value } => usize.toI32(String.byteLength(value))
+    Result<string, InvalidUtf8>.Failure { error } => usize.toI32(error.offset) + 40
+  }
+}
+pub fn main() -> i32 { return inspect(b"ok") + inspect(b"a\\x80") - 1 }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'string-append-rollback',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+import silk.string { String }
+struct QuotaAllocator { remaining: i32 }
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  if self.remaining == 0 { fail OutOfMemoryError {} }
+  self.remaining = self.remaining - 1
+  let mut inner = Allocator.systemAllocatorProvider()
+  return run Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
+}
+impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
+effect fn ignore(error: OutOfMemoryError) -> () { return () }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = QuotaAllocator { remaining: 1 }
+  let mut value = run String.copy("ok") |> Effect.provideMut(&mut allocator)
+  let recovered = run Effect.catchAll(
+    String.append(&mut value, "\u{1f642}") |> Effect.provideMut(&mut allocator),
+    ignore,
+  )
+  if String.view(&value) != "ok" { return 1 }
+  if String.ownedByteLength(&value) != 2 { return 2 }
+  return 42
+}
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // folded from UnicodeNormalization.test.ts: the two normalized owners compared directly, which
   // native execution answers correctly while WebAssembly support remains incomplete.
   {
@@ -2185,6 +2382,37 @@ effect fn build() -> i32 ! OutOfMemoryError {
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'unicode-contract-metadata-and-failure',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+import silk.unicode { Unicode }
+
+struct EmptyAllocator {}
+effect fn allocate(self: &mut EmptyAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  fail OutOfMemoryError {}
+}
+impl Allocator for EmptyAllocator { allocate: EmptyAllocator.allocate }
+
+effect fn normalizeWithoutMemory() -> i32 ! OutOfMemoryError {
+  let mut allocator = EmptyAllocator {}
+  let normalized = run Unicode.normalizeNfc("e\u{301}")
+    |> Effect.provideMut(&mut allocator)
+  drop normalized
+  return 1
+}
+effect fn recovered(error: OutOfMemoryError) -> i32 { return 42 }
+
+pub fn main() -> i32 {
+  if "\u{e9}" == "e\u{301}" { return 1 }
+  if "\u{fb01}" == "fi" { return 2 }
+  if Unicode.dataVersion() != "17.0.0" { return 3 }
+  if Unicode.longestDecomposition() != 4 { return 4 }
+  return run Effect.catchAll(normalizeWithoutMemory(), recovered)
+}`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from CharacterLiteral.test.ts: every accepted escape, multi-byte scalars, and the six
@@ -2634,6 +2862,90 @@ pub fn main() -> i32 {
   },
   // folded from HashedCollections.test.ts: seeded map growth with checked reads.
   {
+    name: 'hashed-map-seeded-order-12345',
+    source: hashedMapOrder(12345, 971199974),
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'hashed-map-seeded-order-6789',
+    source: hashedMapOrder(6789, 434552010),
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'hashed-collection-operations',
+    source: `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
+import silk.effect { Effect }
+import silk.hash { Hash, Word }
+import silk.hash_map { HashMap }
+import silk.hash_set { HashSet }
+import silk.option { Option }
+import silk.u64 as u64
+
+struct Counter { value: i32 calls: i32 }
+impl Copy for Counter {}
+fn setFortyTwo(value: &mut Counter) -> () {
+  value.value = 42
+  value.calls = value.calls + 1
+  return ()
+}
+fn mustNotRun(value: &mut Counter) -> () {
+  let boom = 1 / 0
+  return ()
+}
+
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut map = HashMap.make<Word, i32>(Hash.seed(12345))
+  let first = run HashMap.insert<Word, i32>(&mut map, Hash.word(7), 20)
+    |> Effect.provideMut(&mut allocator)
+  let second = run HashMap.insert<Word, i32>(&mut map, Hash.word(9), 22)
+    |> Effect.provideMut(&mut allocator)
+  drop first
+  drop second
+  if HashMap.length<Word, i32>(&map) != 2 { return 1 }
+  if !HashMap.contains<Word, i32>(&map, Hash.word(7)) { return 2 }
+  let taken = HashMap.remove<Word, i32>(&mut map, Hash.word(7))
+  let removed = Option.unwrapOr<i32>(move taken, 0)
+  let held = Option.unwrapOr<i32>(HashMap.get<Word, i32>(&map, Hash.word(9)), 0)
+  if removed + held != 42 { return 3 }
+  if HashMap.contains<Word, i32>(&map, Hash.word(7)) { return 4 }
+
+  let mut counters = HashMap.make<Word, Counter>(Hash.seed(17))
+  let initial = Counter { value: 20, calls: 0 }
+  let inserted = run HashMap.insert<Word, Counter>(&mut counters, Hash.word(7), move initial)
+    |> Effect.provideMut(&mut allocator)
+  drop inserted
+  if HashMap.withMut(&mut counters, Hash.word(9), mustNotRun) { return 5 }
+  if !HashMap.withMut(&mut counters, Hash.word(7), setFortyTwo) { return 6 }
+  let fallback = Counter { value: 0, calls: 0 }
+  let changed = Option.unwrapOr<Counter>(
+    HashMap.get<Word, Counter>(&counters, Hash.word(7)),
+    move fallback,
+  )
+  if changed.value != 42 || changed.calls != 1 { return 7 }
+
+  let mut set = HashSet.make<Word>(Hash.seed(99))
+  let setFirst = run HashSet.insert<Word>(&mut set, Hash.word(7))
+    |> Effect.provideMut(&mut allocator)
+  let setAgain = run HashSet.insert<Word>(&mut set, Hash.word(7))
+    |> Effect.provideMut(&mut allocator)
+  if setFirst || !setAgain { return 8 }
+  if !HashSet.contains<Word>(&set, Hash.word(7)) { return 9 }
+  let setTaken = HashSet.remove<Word>(&mut set, Hash.word(7))
+  let gone = match move setTaken {
+    Option<Word>.Some { value } => u64.toI32(value.value)
+    Option<Word>.None => 0
+  }
+  if gone != 7 || HashSet.contains<Word>(&set, Hash.word(7)) { return 10 }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'hashed-map-growth',
     source: `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
@@ -2671,6 +2983,68 @@ effect fn build() -> i32 ! OutOfMemoryError {
 
 effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // A failed rehash is atomic: the original table and all six entries remain observable.
+  {
+    name: 'hashed-map-failed-growth',
+    source: `import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effect { Effect }
+import silk.hash { Hash, Word }
+import silk.hash_map { HashMap }
+import silk.i32 as i32
+import silk.layout { Layout }
+import silk.option { Option }
+import silk.usize as usize
+
+struct Budget { inner: SystemAllocator remaining: usize }
+
+effect fn allocate(self: &mut Budget, layout: Layout) -> Allocation ! OutOfMemoryError {
+  if self.remaining == usize.ZERO { fail OutOfMemoryError {} }
+  self.remaining = self.remaining - usize.ONE
+  return run Allocator.allocate(move layout) |> Effect.provideMut(&mut self.inner)
+}
+impl Allocator for Budget { allocate: Budget.allocate }
+
+effect fn grow(map: &mut HashMap<Word, i32>) -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let previous = run HashMap.insert<Word, i32>(move map, Hash.word(6), 106)
+  drop previous
+  return 0
+}
+effect fn noRoom(error: OutOfMemoryError) -> i32 { return 1 }
+
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Budget { inner: Allocator.systemAllocatorProvider(), remaining: 2 }
+  let mut map = HashMap.make<Word, i32>(Hash.seed(5))
+  let mut key = 0
+  while key < 6 {
+    let previous = run HashMap.insert<Word, i32>(&mut map, Hash.word(i32.toU64(key)), key + 100)
+      |> Effect.provideMut(&mut allocator)
+    drop previous
+    key = key + 1
+  }
+  if HashMap.length<Word, i32>(&map) != 6 { return 2 }
+  let refused = run Effect.catchAll(grow(&mut map), noRoom) |> Effect.provideMut(&mut allocator)
+  if refused != 1 { return 3 }
+  if HashMap.length<Word, i32>(&map) != 6 { return 4 }
+  if HashMap.bucketCount<Word, i32>(&map) != 8 { return 5 }
+  if HashMap.contains<Word, i32>(&map, Hash.word(6)) { return 6 }
+  let mut probe = 0
+  let mut total = 0
+  while probe < 6 {
+    let found = Option.unwrapOr<i32>(
+      HashMap.get<Word, i32>(&map, Hash.word(i32.toU64(probe))),
+      -1,
+    )
+    if found != probe + 100 { return 7 }
+    total = total + found
+    probe = probe + 1
+  }
+  if total != 615 { return 8 }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
@@ -3237,6 +3611,79 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   return run Effect.catchAll(build(4), recover)
 }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'owned-allocation-layout-mismatch-trap',
+    source: ownedAllocationTrap('    return 0', '[i32; 1]'),
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'owned-allocation-slot-bounds-trap',
+    source: ownedAllocationTrap('    return Slot.take(RawBuffer.slot(&mut buffer, 2))'),
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'owned-allocation-read-bounds-trap',
+    source: ownedAllocationTrap('    return RawBuffer.read<i32>(&buffer, 2)'),
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'owned-allocation-shared-copy-read',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
+effect fn store() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let allocation = run Allocator.allocate(Layout.of<[i32; 1]>())
+    |> Effect.provideMut(&mut allocator)
+  unsafe {
+    let mut buffer = RawBuffer.from<i32>(move allocation, 1)
+    let written = Slot.write(RawBuffer.slot(&mut buffer, 0), 21)
+    let first = RawBuffer.read<i32>(&buffer, 0)
+    let second = RawBuffer.read<i32>(&buffer, 0)
+    let taken = Slot.take(RawBuffer.slot(&mut buffer, 0))
+    drop buffer
+    return first + second + taken
+  }
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
+    expected: { _tag: 'Completes', result: 63 },
+  },
+  {
+    name: 'owned-allocation-shared-union-read',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
+struct Left { value: i32 }
+impl Copy for Left {}
+struct Right { value: i32 }
+impl Copy for Right {}
+fn left(value: i32) -> Left | Right { return Left { value: value } }
+effect fn store() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let allocation = run Allocator.allocate(Layout.of<[Left | Right; 1]>())
+    |> Effect.provideMut(&mut allocator)
+  unsafe {
+    let mut buffer = RawBuffer.from<Left | Right>(move allocation, 1)
+    let element = left(42)
+    let written = Slot.write<Left | Right>(RawBuffer.slot(&mut buffer, 0), move element)
+    let copied = RawBuffer.read<Left | Right>(&buffer, 0)
+    let taken = Slot.take(RawBuffer.slot(&mut buffer, 0))
+    drop taken
+    drop buffer
+    return match move copied { Left { value } => value Right { value } => value }
+  }
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from RuntimeSliceAcceptance.test.ts: exclusive slice writes reach the caller.

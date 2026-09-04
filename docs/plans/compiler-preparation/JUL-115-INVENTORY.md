@@ -34,8 +34,8 @@ and lockfile entries are absent.
 
 ## Surviving authoritative evidence
 
-- Compile-time execution: `packages/compiler/test/StaticEvaluation.test.ts` and focused static
-  reflection/constant suites.
+- Compile-time execution: `packages/compiler/test/StaticText.test.ts` exercises
+  `StaticEvaluation` directly, alongside focused static reflection and constant suites.
 - Target-neutral runtime behavior: `packages/compiler/test/support/corpus.ts`, whose independently
   pinned `expected` results are asserted by `DriverNativeAcceptance.test.ts`.
 - WebAssembly behavior: LLVM-to-Wasm compiler and driver suites.
@@ -59,11 +59,6 @@ context for still-surviving language work. Active specifications contain no such
 
 ## Completion gates
 
-- `pnpm typecheck`: passed (18/18 Turbo tasks).
-- `pnpm format:check`: passed (3,170 files checked).
-- `pnpm lint`: passed.
-- `pnpm test`: passed (22/22 Turbo tasks), including the complete shared native acceptance corpus
-  and the production documentation build.
-- `pnpm check`: passed (33/33 Turbo tasks and 17/17 repository script-policy tests).
-- `pnpm release:candidate`: passed (10/10 package archive, manifest, export, and consumer-install
-  validations).
+- `pnpm typecheck`: passed after the final migration changes (18/18 Turbo tasks).
+- `pnpm format:check`, `pnpm lint`, `pnpm test`, `pnpm check`, and
+  `pnpm release:candidate`: pending final recorded runs.

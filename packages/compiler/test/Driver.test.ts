@@ -309,7 +309,8 @@ it.effect(
     Effect.gen(function* () {
       const distribution = ToolchainIntegrity.make(
         ToolchainIntegrity.installed().components.filter(
-          (component) => component.id !== 'runtime/LLVM/Intrinsic.i32Add',
+          (component) =>
+            component.kind !== 'RuntimeSupport' || !component.id.endsWith('/Intrinsic.i32Add'),
         ),
       )
       let emissions = 0
