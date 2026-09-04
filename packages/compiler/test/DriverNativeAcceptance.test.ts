@@ -343,6 +343,8 @@ it.each(shardedCorpus)(
 
       if (program.expected._tag === 'Trap') {
         const run = yield* runCompiled(outcome.path, program.nativeEnvironment)
+        if (program.nativeStderr !== undefined)
+          assert.strictEqual(run.stderr, program.nativeStderr, program.name)
         assert.strictEqual(
           run.signal !== null || (run.status !== null && run.status !== 0),
           true,

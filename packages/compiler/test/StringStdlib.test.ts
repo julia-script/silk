@@ -1,7 +1,9 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as CleanupPlan from '../src/CleanupPlan.js'
 import * as Intrinsic from '../src/Intrinsic.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Stdlib from '../src/Stdlib.js'
 import * as Projections from './support/projections.js'
@@ -59,6 +61,36 @@ pub fn main() -> i32 { return 42 }`),
     assert.include(
       Analysis.diagnostics(forged).map((diagnostic) => diagnostic.code),
       'SEM0028',
+    )
+  }),
+)
+
+it.effect('plans allocation cleanup for owned String storage', () =>
+  Effect.gen(function* () {
+    const module = 'string-stdlib/owned-cleanup'
+    const snapshot = yield* Analysis.ofSourceRealized(
+      module,
+      ascii(`import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.string { String }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let value = run String.copy("silk") |> Effect.provideMut(&mut allocator)
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`),
+    )
+    assert.deepEqual(diagnosticSummary(snapshot), [])
+    const build = Analysis.loweredMir(snapshot).functions.find((fn) =>
+      fn.id.name.startsWith('build$effect$'),
+    )
+    assert.isDefined(build)
+    const cleanup = build === undefined ? [] : MirVerification.operations(build)
+    assert.isTrue(
+      cleanup.some(
+        (operation) => operation._tag === 'Drop' && CleanupPlan.reclaims(operation.cleanup),
+      ),
     )
   }),
 )

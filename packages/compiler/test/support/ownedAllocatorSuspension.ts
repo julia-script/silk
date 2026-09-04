@@ -123,10 +123,23 @@ import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.layout { Layout }
 import silk.effect { Effect }
+import silk.shared { Shared }
 service Counter {
   effect fn increment() -> i32 ? &mut Counter
 }
-struct Cell { value: i32 storage: Allocation }
+struct Drops { value: i32 }
+struct Cell { value: i32 storage: Allocation drops: Shared<Drops> }
+fn countDrop(drops: &mut Drops) -> i32 {
+  drops.value = drops.value + 1
+  return drops.value
+}
+fn readDrops(drops: &Drops) -> i32 { return drops.value }
+impl Drop for Cell {
+  fn drop(self: &mut Cell) -> () {
+    let changed = Shared.withMut<Drops, i32>(&self.drops, countDrop)
+    return ()
+  }
+}
 effect fn increment(self: &mut Cell) -> i32 {
   let value = self.value
   return run Effect.suspend(effect { return value + 1 })
@@ -135,18 +148,30 @@ impl Counter for Cell { increment: Cell.increment }
 effect fn read() -> i32 ? &mut Counter {
   return run Counter.increment()
 }
-effect fn program() -> i32 ! OutOfMemoryError ? &mut Allocator {
+effect fn program(drops: &Shared<Drops>) -> i32 ! OutOfMemoryError ? &mut Allocator {
   let layout = Layout.of<[i32; 2]>()
   let storage = run Allocator.allocate(move layout)
-  let cell = Cell { value: 41, storage: move storage }
+  let cell = Cell {
+    value: 41,
+    storage: move storage,
+    drops: Shared.clone<Drops>(drops),
+  }
   let bound = Intrinsic.bindRequirementOwned<Counter>(read(), move cell)
   return run move bound
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
+effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let drops = run Shared.make<Drops>(Drops { value: 0 })
+  let result = run program(&drops)
+  let count = Shared.with<Drops, i32>(&drops, readDrops)
+  drop drops
+  if result != 42 || count != 1 { return 1 }
+  return 42
+}
 pub fn main() -> i32 {
   let mut allocator = Allocator.systemAllocatorProvider()
   return run Effect.catchAll(
-    Effect.provideMut<Allocator>(program(), &mut allocator),
+    Effect.provideMut<Allocator>(build(), &mut allocator),
     recover,
   )
 }`
@@ -157,34 +182,63 @@ import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.layout { Layout }
 import silk.effect { Effect }
+import silk.shared { Shared }
 struct Problem { code: i32 }
+struct Drops { value: i32 }
 service Value {
   effect fn read() -> i32 ! Problem ? &mut Value
 }
-struct Provider { code: i32 storage: Allocation }
+struct Provider { code: i32 storage: Allocation drops: Shared<Drops> }
+fn countDrop(drops: &mut Drops) -> i32 {
+  drops.value = drops.value + 1
+  return drops.value
+}
+fn readDrops(drops: &Drops) -> i32 { return drops.value }
+impl Drop for Provider {
+  fn drop(self: &mut Provider) -> () {
+    let changed = Shared.withMut<Drops, i32>(&self.drops, countDrop)
+    return ()
+  }
+}
 effect fn read(self: &mut Provider) -> i32 ! Problem {
   let providerCode = self.code
   let code = run Effect.suspend(effect { return providerCode })
   fail Problem { code: code }
 }
 impl Value for Provider { read: Provider.read }
-effect fn open() -> Provider ! OutOfMemoryError {
+effect fn open(drops: &Shared<Drops>) -> Provider ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
   let storage = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
-  return Provider { code: 42, storage: move storage }
+  return Provider {
+    code: 42,
+    storage: move storage,
+    drops: Shared.clone<Drops>(drops),
+  }
 }
 effect fn use() -> i32 ! Problem ? &mut Value {
   return run Value.read()
 }
-effect fn program() -> i32 ! Problem | OutOfMemoryError ? &mut Allocator {
-  let provider = run open()
+effect fn program(drops: &Shared<Drops>) -> i32 ! Problem | OutOfMemoryError ? &mut Allocator {
+  let provider = run open(drops)
   return run Intrinsic.bindRequirementOwned<Value>(use(), move provider)
 }
 effect fn recover(error: Problem | OutOfMemoryError) -> i32 { return 7 }
+effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let drops = run Shared.make<Drops>(Drops { value: 0 })
+  let result = run Effect.catchAll(program(&drops), recover)
+  let count = Shared.with<Drops, i32>(&drops, readDrops)
+  drop drops
+  if result != 7 || count != 1 { return 1 }
+  return 7
+}
+effect fn recoverAllocation(error: OutOfMemoryError) -> i32 { return -1 }
 pub fn main() -> i32 {
   let mut allocator = Allocator.systemAllocatorProvider()
-  return run Effect.catchAll(Effect.provideMut(program(), &mut allocator), recover)
+  return run Effect.catchAll(
+    Effect.provideMut(build(), &mut allocator),
+    recoverAllocation,
+  )
 }`
 
 export const mixedServiceProviderSuspension = `import silk.effect { Effect }

@@ -1844,11 +1844,21 @@ import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
 import silk.layout { Layout }
+import silk.shared { Shared }
 struct First {}
 struct Second {}
-struct Guard { storage: Allocation }
+struct Counter { value: i32 }
+struct Guard { storage: Allocation counter: Shared<Counter> }
+fn increment(counter: &mut Counter) -> i32 {
+  counter.value = counter.value + 1
+  return counter.value
+}
+fn read(counter: &Counter) -> i32 { return counter.value }
 impl Drop for Guard {
-  fn drop(self: &mut Guard) -> () { return () }
+  fn drop(self: &mut Guard) -> () {
+    let changed = Shared.withMut<Counter, i32>(&self.counter, increment)
+    return ()
+  }
 }
 fn choose(input: First | Second, guard: Guard) -> once Effect<i32> {
   return match move input {
@@ -1861,8 +1871,16 @@ effect fn store() -> i32 ! OutOfMemoryError {
   let layout = Layout.of<i32>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let storage = run recipe
-  let selected = choose(Second {}, Guard { storage: move storage })
+  let counter = run Shared.make<Counter>(Counter { value: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let selected = choose(Second {}, Guard {
+    storage: move storage,
+    counter: Shared.clone<Counter>(&counter),
+  })
   drop selected
+  let count = Shared.with<Counter, i32>(&counter, read)
+  drop counter
+  if count != 1 { return 1 }
   return 42
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
@@ -3849,29 +3867,50 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     source: `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.order { Order }
+import silk.shared { Shared }
 import silk.usize as usize
 import silk.vector { Vector }
 
-struct Tracked { key: i32 payload: Vector<i32> }
+struct Counts { dropped: i32 }
+struct Tracked { key: i32 payload: Vector<i32> counts: Shared<Counts> }
 fn trackedLess(left: &Tracked, right: &Tracked) -> bool { return left.key < right.key }
 impl Order for Tracked { lessThan: Tracked.trackedLess }
-effect fn hold(key: i32) -> Tracked ! OutOfMemoryError ? &mut Allocator {
+fn countDrop(counts: &mut Counts) -> i32 {
+  counts.dropped = counts.dropped + 1
+  return counts.dropped
+}
+fn readDrops(counts: &Counts) -> i32 { return counts.dropped }
+impl Drop for Tracked {
+  fn drop(self: &mut Tracked) -> () {
+    let changed = Shared.withMut<Counts, i32>(&self.counts, countDrop)
+    return ()
+  }
+}
+effect fn hold(key: i32, counts: &Shared<Counts>) -> Tracked
+! OutOfMemoryError
+? &mut Allocator {
   let mut payload = Vector.make<i32>()
   let filled = run Vector.append<i32>(&mut payload, key)
-  return Tracked { key: key, payload: move payload }
+  return Tracked {
+    key: key,
+    payload: move payload,
+    counts: Shared.clone<Counts>(counts),
+  }
 }
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
+  let counts = run Shared.make<Counts>(Counts { dropped: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let mut items = Vector.make<Tracked>()
-  let first = run hold(3) |> Effect.provideMut(&mut allocator)
+  let first = run hold(3, &counts) |> Effect.provideMut(&mut allocator)
   let a = run Vector.append<Tracked>(&mut items, move first) |> Effect.provideMut(&mut allocator)
-  let second = run hold(1) |> Effect.provideMut(&mut allocator)
+  let second = run hold(1, &counts) |> Effect.provideMut(&mut allocator)
   let b = run Vector.append<Tracked>(&mut items, move second) |> Effect.provideMut(&mut allocator)
-  let third = run hold(2) |> Effect.provideMut(&mut allocator)
+  let third = run hold(2, &counts) |> Effect.provideMut(&mut allocator)
   let c = run Vector.append<Tracked>(&mut items, move third) |> Effect.provideMut(&mut allocator)
-  let fourth = run hold(5) |> Effect.provideMut(&mut allocator)
+  let fourth = run hold(5, &counts) |> Effect.provideMut(&mut allocator)
   let d = run Vector.append<Tracked>(&mut items, move fourth) |> Effect.provideMut(&mut allocator)
-  let fifth = run hold(4) |> Effect.provideMut(&mut allocator)
+  let fifth = run hold(4, &counts) |> Effect.provideMut(&mut allocator)
   let e = run Vector.append<Tracked>(&mut items, move fifth) |> Effect.provideMut(&mut allocator)
   let ordered = run Vector.sort<Tracked>(&mut items) |> Effect.provideMut(&mut allocator)
   let view = Vector.asSlice<Tracked>(&items)
@@ -3882,6 +3921,10 @@ effect fn build() -> i32 ! OutOfMemoryError {
     index = index + usize.ONE
   }
   if folded != 12345 { return 1 }
+  drop items
+  let dropped = Shared.with<Counts, i32>(&counts, readDrops)
+  drop counts
+  if dropped != 5 { return 2 }
   return 42
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
@@ -4441,24 +4484,48 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
   // folded from RuntimeSliceAcceptance.test.ts: exclusive slice writes reach the caller.
   {
     name: 'runtime-slice-exclusive',
-    source: `import silk.usize as usize
-struct Token {
-  value: i32
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+import silk.usize as usize
+struct Counter { value: i32 }
+struct Token { value: i32 counter: Shared<Counter> }
+fn increment(counter: &mut Counter) -> i32 {
+  counter.value = counter.value + 1
+  return counter.value
 }
-
-fn replace(values: &mut [Token], index: usize) -> i32 {
-  values[index] = Token {value: 42}
+fn read(counter: &Counter) -> i32 { return counter.value }
+impl Drop for Token {
+  fn drop(self: &mut Token) -> () {
+    let changed = Shared.withMut<Counter, i32>(&self.counter, increment)
+    return ()
+  }
+}
+fn replace(values: &mut [Token], index: usize, counter: &Shared<Counter>) -> i32 {
+  values[index] = Token { value: 42, counter: Shared.clone<Counter>(counter) }
   return usize.toI32(values.length)
 }
-
-pub fn main() -> i32 {
-  let mut values = [Token {value: 1}, Token {value: 2}]
-  let length = replace(&mut values, 0)
-  if length != 2 {
-    return 0
-  }
-  return values[0].value
-}`,
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let counter = run Shared.make<Counter>(Counter { value: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut values = [
+    Token { value: 1, counter: Shared.clone<Counter>(&counter) },
+    Token { value: 2, counter: Shared.clone<Counter>(&counter) },
+  ]
+  let length = replace(&mut values, 0, &counter)
+  if length != 2 { return 0 }
+  if values[0].value != 42 { return 1 }
+  let replacementCount = Shared.with<Counter, i32>(&counter, read)
+  if replacementCount != 1 { return 2 }
+  drop values
+  let finalCount = Shared.with<Counter, i32>(&counter, read)
+  drop counter
+  if finalCount != 3 { return 3 }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from EffectRuntime.test.ts: Effect.retry gives every attempt fresh locals while the
@@ -4567,6 +4634,241 @@ effect fn build() -> i32 ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'anonymous-capture-cleanup-count',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+struct Counter { value: i32 }
+struct Token { value: i32 counter: Shared<Counter> }
+fn increment(counter: &mut Counter) -> i32 {
+  counter.value = counter.value + 1
+  return counter.value
+}
+fn read(counter: &Counter) -> i32 { return counter.value }
+impl Drop for Token {
+  fn drop(self: &mut Token) -> () {
+    let changed = Shared.withMut<Counter, i32>(&self.counter, increment)
+    return ()
+  }
+}
+fn consume(token: Token) -> i32 { return token.value }
+fn add(value: i32, token: Token) -> i32 { return value + consume(move token) }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let counter = run Shared.make<Counter>(Counter { value: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let sectionToken = Token { value: 2, counter: Shared.clone<Counter>(&counter) }
+  let section = add(move sectionToken)
+  if section(40) != 42 { return 1 }
+  let effectToken = Token { value: 42, counter: Shared.clone<Counter>(&counter) }
+  let pending = effect { return consume(move effectToken) }
+  let effectResult = run pending
+  if effectResult != 42 { return 2 }
+  let count = Shared.with<Counter, i32>(&counter, read)
+  drop counter
+  if count != 2 { return 3 }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'generic-run-cleanup-counts',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+struct Problem { code: i32 }
+struct Counter { value: i32 }
+struct Owner { counter: Shared<Counter> }
+fn increment(counter: &mut Counter) -> i32 {
+  counter.value = counter.value + 1
+  return counter.value
+}
+fn read(counter: &Counter) -> i32 { return counter.value }
+impl Drop for Owner {
+  fn drop(self: &mut Owner) -> () {
+    let changed = Shared.withMut<Counter, i32>(&self.counter, increment)
+    return ()
+  }
+}
+fn owner(counter: &Shared<Counter>) -> Owner {
+  return Owner { counter: Shared.clone<Counter>(counter) }
+}
+effect fn acquiring<A, E>(self: once Effect<A ! E>, counter: &Shared<Counter>) -> A ! E {
+  let held = owner(counter)
+  let value = run move self
+  drop held
+  return move value
+}
+effect fn holding<A, E>(self: once Effect<A ! E>, held: Owner) -> A ! E {
+  let value = run move self
+  drop held
+  return move value
+}
+effect fn failing() -> i32 ! Problem { fail Problem { code: 7 } }
+effect fn succeeding() -> i32 ! Problem { return 7 }
+effect fn recover(error: Problem) -> i32 { return error.code }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let counter = run Shared.make<Counter>(Counter { value: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let a = run Effect.catchAll(acquiring(failing(), &counter), recover)
+  let b = run Effect.catchAll(acquiring(succeeding(), &counter), recover)
+  let c = run Effect.catchAll(holding(failing(), owner(&counter)), recover)
+  let d = run Effect.catchAll(holding(succeeding(), owner(&counter)), recover)
+  let retried = acquiring(failing(), &counter) |> Effect.retry(2)
+  let e = run Effect.catchAll(move retried, recover)
+  let count = Shared.with<Counter, i32>(&counter, read)
+  drop counter
+  if a + b + c + d + e != 35 { return 1 }
+  if count != 7 { return 2 }
+  return 42
+}
+effect fn recoverAllocation(error: OutOfMemoryError) -> i32 { return -1 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recoverAllocation) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'stored-effect-cleanup-counts',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+struct Problem { code: i32 }
+struct Counter { value: i32 sum: i32 }
+struct Guard { value: i32 counter: Shared<Counter> }
+struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> { operation: F }
+fn record(counter: &mut Counter, value: i32) -> i32 {
+  counter.value = counter.value + 1
+  counter.sum = counter.sum + value
+  return counter.value
+}
+fn read(counter: &Counter) -> i32 { return counter.value }
+fn readSum(counter: &Counter) -> i32 { return counter.sum }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let value = self.value
+    let changed = Shared.withMut<Counter, i32>(&self.counter, record(value))
+    return ()
+  }
+}
+fn guard(value: i32, counter: &Shared<Counter>) -> Guard {
+  return Guard { value: value, counter: Shared.clone<Counter>(counter) }
+}
+fn consume(held: Guard) -> i32 { return held.value }
+fn defer<A, E, ?R, F: once Effect<A ! E ? R>>(operation: F) -> Deferred<A, E, R, F> {
+  return Deferred<A, E, R> { operation: move operation }
+}
+effect fn failing(held: Guard) -> i32 ! Problem {
+  let code = held.value
+  fail Problem { code: code }
+}
+effect fn delayed(held: Guard) -> i32 {
+  let base = run Effect.suspend(effect { return 40 })
+  return base + held.value
+}
+effect fn recover(error: Problem) -> i32 { return error.code }
+effect fn runFailure(counter: &Shared<Counter>) -> i32 ! Problem {
+  let failed = defer(failing(guard(7, counter)))
+  return run failed.operation
+}
+effect fn runSuspended(counter: &Shared<Counter>) -> i32 {
+  let suspended = defer(delayed(guard(2, counter)))
+  return run suspended.operation
+}
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let counter = run Shared.make<Counter>(Counter { value: 0, sum: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let unrunGuard = guard(1, &counter)
+  let unrun = defer(effect { return consume(move unrunGuard) })
+  drop unrun
+  let failureResult = run Effect.catchAll(runFailure(&counter), recover)
+  let suspensionResult = run runSuspended(&counter)
+  let count = Shared.with<Counter, i32>(&counter, read)
+  let sum = Shared.with<Counter, i32>(&counter, readSum)
+  drop counter
+  if failureResult != 7 || suspensionResult != 42 { return 1 }
+  if sum != 10 { return 20 + sum }
+  if count != 3 { return count }
+  return 42
+}
+effect fn recoverAllocation(error: OutOfMemoryError) -> i32 { return -1 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recoverAllocation) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'drop-hook-structured-exits',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+struct Problem {}
+struct Counts { hooks: i32 fields: i32 open: i32 valid: bool }
+struct Field { counts: Shared<Counts> }
+struct Guard { counts: Shared<Counts> field: Field }
+fn hook(counts: &mut Counts) -> i32 {
+  counts.hooks = counts.hooks + 1
+  counts.open = counts.open + 1
+  return counts.hooks
+}
+fn field(counts: &mut Counts) -> i32 {
+  if counts.open != 1 { counts.valid = false }
+  counts.fields = counts.fields + 1
+  counts.open = counts.open - 1
+  return counts.fields
+}
+fn accepted(counts: &Counts) -> bool {
+  return counts.valid && counts.hooks == 6 && counts.fields == 6 && counts.open == 0
+}
+impl Drop for Field {
+  fn drop(self: &mut Field) -> () {
+    let changed = Shared.withMut<Counts, i32>(&self.counts, field)
+    return ()
+  }
+}
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let changed = Shared.withMut<Counts, i32>(&self.counts, hook)
+    return ()
+  }
+}
+fn guard(counts: &Shared<Counts>) -> Guard {
+  return Guard {
+    counts: Shared.clone<Counts>(counts),
+    field: Field { counts: Shared.clone<Counts>(counts) },
+  }
+}
+fn fallthrough(counts: &Shared<Counts>) -> () { let held = guard(counts) return () }
+fn early(counts: &Shared<Counts>) -> () { let held = guard(counts) drop held return () }
+fn recurse(counts: &Shared<Counts>, remaining: i32) -> () {
+  let held = guard(counts)
+  if remaining > 0 { return recurse(counts, remaining - 1) }
+  return ()
+}
+effect fn failing(counts: &Shared<Counts>) -> () ! Problem {
+  let held = guard(counts)
+  fail Problem {}
+}
+effect fn recover(error: Problem) -> () { return () }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let counts = run Shared.make<Counts>(Counts {
+    hooks: 0, fields: 0, open: 0, valid: true,
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  fallthrough(&counts)
+  early(&counts)
+  run Effect.catchAll(failing(&counts), recover)
+  recurse(&counts, 2)
+  let result = Shared.with<Counts, bool>(&counts, accepted)
+  drop counts
+  if !result { return 1 }
+  return 42
+}
+effect fn recoverAllocation(error: OutOfMemoryError) -> i32 { return -1 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recoverAllocation) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from DropHookExecution.test.ts: a guard live at a failing run releases through its hook
@@ -4693,6 +4995,70 @@ pub fn main() -> i32 {
   return run Effect.catchAll(move selected, recoverResidual)
 }`,
     expected: { _tag: 'Completes', result: 11 },
+  },
+  {
+    name: 'effect-selective-catch-cleanup-counts',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+struct Selected {}
+struct Counter { count: i32 sum: i32 }
+struct Guard { id: i32 counter: Shared<Counter> }
+struct Residual { guard: Guard }
+fn record(counter: &mut Counter, id: i32) -> i32 {
+  counter.count = counter.count + 1
+  counter.sum = counter.sum + id
+  return counter.count
+}
+fn readCount(counter: &Counter) -> i32 { return counter.count }
+fn readSum(counter: &Counter) -> i32 { return counter.sum }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let id = self.id
+    let changed = Shared.withMut<Counter, i32>(&self.counter, record(id))
+    return ()
+  }
+}
+fn guard(id: i32, counter: &Shared<Counter>) -> Guard {
+  return Guard { id: id, counter: Shared.clone<Counter>(counter) }
+}
+effect fn succeed() -> i32 ! Selected | Residual { return 10 }
+effect fn failResidual(counter: &Shared<Counter>) -> i32 ! Selected | Residual {
+  fail Residual { guard: guard(8, counter) }
+}
+effect fn recoverSelected(error: Selected, held: Guard) -> i32 { return held.id }
+effect fn recoverResidual(error: Residual) -> i32 { return 22 }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let counter = run Shared.make<Counter>(Counter { count: 0, sum: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+
+  let successHandler = guard(1, &counter)
+  let successCatch = Intrinsic.catchFailure<Selected>(
+    succeed(),
+    recoverSelected(move successHandler),
+  )
+  let first = run Effect.catchAll(move successCatch, recoverResidual)
+
+  let live = guard(2, &counter)
+  let residualHandler = guard(4, &counter)
+  let residualCatch = Intrinsic.catchFailure<Selected>(
+    failResidual(&counter),
+    recoverSelected(move residualHandler),
+  )
+  let second = run Effect.catchAll(move residualCatch, recoverResidual)
+  drop live
+
+  let count = Shared.with<Counter, i32>(&counter, readCount)
+  let sum = Shared.with<Counter, i32>(&counter, readSum)
+  drop counter
+  if first != 10 || second != 22 { return 1 }
+  if count != 4 || sum != 15 { return 2 }
+  return 42
+}
+effect fn recoverAllocation(error: OutOfMemoryError) -> i32 { return -1 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recoverAllocation) }`,
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'effect-heterogeneous-failure-payload',
@@ -5843,6 +6209,94 @@ int32_t silk_test_libm_order(double value) { return (int32_t)fmod(value, 43.0); 
     nativeImports: { recovered_writer: recoveredWriterModule },
     nativeStdout: 'Hello',
     expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'native-termination-active-union-member',
+    source: `pub struct NotFoundError {}
+pub struct OfflineError {}
+
+pub effect fn main() ! NotFoundError | OfflineError {
+  fail OfflineError {}
+}`,
+    nativeStderr:
+      'unhandled error: memory/driver.OfflineError\n  at memory/driver.main (memory/driver:4:54)\n',
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'native-termination-logical-path',
+    source: `pub struct NotFoundError {}
+
+effect fn load() -> i32 ! NotFoundError {
+  fail NotFoundError {}
+}
+
+effect fn middle() -> i32 ! NotFoundError {
+  let v = run load()
+  return v + 1
+}
+
+pub effect fn main() ! NotFoundError {
+  let v = run middle()
+  return ()
+}`,
+    nativeStderr:
+      'unhandled error: memory/driver.NotFoundError\n  at memory/driver.load (memory/driver:3:42)\n  at memory/driver.middle (memory/driver:8:10)\n  at memory/driver.main (memory/driver:13:10)\n',
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'native-termination-while-handling',
+    source: `import silk.effect { Effect }
+
+pub struct NotFoundError {}
+pub struct OfflineError {}
+
+effect fn load() -> i32 ! NotFoundError {
+  fail NotFoundError {}
+}
+
+effect fn recover(error: NotFoundError) -> i32 ! OfflineError {
+  fail OfflineError {}
+}
+
+pub effect fn main() ! OfflineError {
+  let v = run Effect.catch<NotFoundError>(load(), recover)
+  return ()
+}`,
+    nativeStderr:
+      'unhandled error: memory/driver.OfflineError\n  at memory/driver.recover (memory/driver:10:64)\n  at silk/effect.Effect.catch (silk/effect:406:15)\n  at memory/driver.main (memory/driver:15:43)\nwhile handling: memory/driver.NotFoundError\n  at memory/driver.load (memory/driver:6:42)\n',
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'native-termination-fatal-trap',
+    source: `fn calculate(a: i32, b: i32) -> i32 {
+  return a / b
+}
+
+pub effect fn main() {
+  let z = calculate(1, 0)
+  return ()
+}`,
+    nativeStderr:
+      'fatal trap: division by zero\n  at memory/driver.calculate (memory/driver:2:9)\n',
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'native-termination-cross-module-frame',
+    source: 'pub fn main() -> i32 { return 42 }',
+    nativeSource: `import errors.kinds { NotFoundError, load }
+pub effect fn main() ! NotFoundError {
+  let v = run load()
+  return ()
+}`,
+    nativeImports: {
+      'errors/kinds': `pub struct NotFoundError { id: i32 }
+pub effect fn load() -> i32 ! NotFoundError {
+  fail NotFoundError { id: 1 }
+}`,
+    },
+    nativeStderr:
+      'unhandled error: errors/kinds.NotFoundError\n  at errors/kinds.load (errors/kinds:2:46)\n  at memory/driver.main (memory/driver:3:10)\n',
+    expected: { _tag: 'Trap' },
   },
   {
     name: 'standard-stream-ordering',

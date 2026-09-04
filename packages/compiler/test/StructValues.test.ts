@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
+import * as MirLinearization from '../src/MirLinearization.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -388,5 +389,49 @@ pub fn main() -> i32 { return 0 }`),
     const conflict = Analysis.diagnostics(self).find((diagnostic) => diagnostic.code === 'SEM0100')
     assert.strictEqual(conflict?.reason._tag, 'TypeArgumentConflict')
     assert.strictEqual(conflict?.relatedSpans?.at(0)?.label, 'type argument first constrained here')
+  }),
+)
+
+it.effect('plans cleanup for omitted fields of the selected nominal-union variant', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-values/omitted-cleanup',
+      ascii(`struct Bomb {}
+impl Drop for Bomb { fn drop(self: &mut Bomb) -> () { return () } }
+union State { Empty, Ready { value: i32, bomb: Bomb } }
+fn consume(state: State) -> i32 {
+  return match move state {
+    State.Empty => 0
+    State.Ready { value, .. } => value
+  }
+}
+fn ignore(state: State) -> i32 { return match move state { _ => 42 } }
+pub fn main() -> i32 {
+  if ignore(State.Empty) != 42 { return 0 }
+  return consume(State.Ready { value: 42, bomb: Bomb {} })
+}`),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const consume = Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'consume')
+    const ignore = Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'ignore')
+    assert.isTrue(
+      consume !== undefined &&
+        MirLinearization.linearize(consume).some((block) =>
+          block.operations.some(
+            (operation) => operation._tag === 'Drop' && operation.cleanup._tag === 'HookCleanup',
+          ),
+        ),
+    )
+    assert.isTrue(
+      ignore !== undefined &&
+        MirLinearization.linearize(ignore).some((block) =>
+          block.operations.some(
+            (operation) =>
+              operation._tag === 'Drop' && operation.cleanup._tag === 'NominalUnionCleanup',
+          ),
+        ),
+    )
   }),
 )

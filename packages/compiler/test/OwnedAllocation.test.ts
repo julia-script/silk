@@ -1,9 +1,34 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as CleanupPlan from '../src/CleanupPlan.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const sharedReadSource = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
+effect fn store() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let allocation = run Allocator.allocate(Layout.of<[i32; 1]>())
+    |> Effect.provideMut(&mut allocator)
+  unsafe {
+    let mut buffer = RawBuffer.from<i32>(move allocation, 1)
+    let written = Slot.write(RawBuffer.slot(&mut buffer, 0), 21)
+    let first = RawBuffer.read<i32>(&buffer, 0)
+    let second = RawBuffer.read<i32>(&buffer, 0)
+    let taken = Slot.take(RawBuffer.slot(&mut buffer, 0))
+    drop buffer
+    return first + second + taken
+  }
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 const nonCopyReadSource = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
@@ -103,6 +128,29 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   return run Effect.catchAll(store(), recover)
 }`
+
+it.effect('plans reclaim after repeated shared Copy reads', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'owned-allocation/shared-read',
+      ascii(sharedReadSource),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const operations = mir.functions.flatMap(MirVerification.operations)
+    assert.strictEqual(
+      operations.filter((operation) => operation._tag === 'RawBufferRead').length,
+      1,
+    )
+    assert.isTrue(
+      operations.some(
+        (operation) => operation._tag === 'Drop' && CleanupPlan.reclaims(operation.cleanup),
+      ),
+    )
+  }),
+)
 
 it.effect('rejects shared RawBuffer reads of move-only nominal and union elements', () =>
   Effect.gen(function* () {
