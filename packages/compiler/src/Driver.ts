@@ -422,7 +422,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
     })
   const mode = request.profile === 'release' ? 'release' : 'debug'
   const emissionCache =
-    request.cache !== false && backend.id === 'llvm'
+    request.cache !== false
       ? (request.toolchain.artifactCache ??
         NativeToolchain.defaultArtifactCache(nativeCacheDirectory))
       : undefined

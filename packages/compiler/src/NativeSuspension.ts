@@ -855,6 +855,10 @@ export const joinOutcome = Effect.fnUntraced(function* (
     }
     nativeStorage.locals.set(field.local.ordinal, Object.freeze(values))
   }
+  // Synchronous completion and resumption both reach this block through memory-backed roots.
+  // Re-root the complete mutable cache here so later success/failure dispatch never retains an
+  // SSA value defined only by the synchronous completion arm.
+  yield* NativeStorage.reloadRoots(nativeStorage, `${name}_joined`)
   const joined: Array<Value.Input> = []
   for (const [ordinal, lane] of NativeType.lanesFor(types, operation.outcomeType).entries()) {
     const source = outcomeStorage.at(ordinal)

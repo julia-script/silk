@@ -34,7 +34,7 @@ struct NestedFiberSlot { phase: NoNestedFiber | StoredNestedFiber }
 struct NestedTimerLifetime { kind: i32 }
 
 fn nestedTimerActivated() -> () { return () }
-fn nestedTimerReleased() -> () { return () }
+fn nestedTimerReleased() -> () { let invalid = 1 / 0 return () }
 fn nestedFiberPublished() -> () { return () }
 fn nestedOuterTerminating() -> () { return () }
 fn nestedOuterReturned() -> () { return () }
@@ -149,7 +149,10 @@ effect fn scenario() -> i32
   nestedOuterReturned()
   let nestedFiber = requireNestedFiber(Shared.withMut(&slot, takeNestedFiber))
   drop slot
-  let cancelled = run LocalScheduler.execute(&mut scheduler, observeRoot(move nestedFiber))
+  let cancelled = run LocalScheduler.execute(
+    &mut scheduler,
+    observeRoot(move nestedFiber),
+  )
   if nested == 13 && cancelled { return 42 }
   return -42
 }

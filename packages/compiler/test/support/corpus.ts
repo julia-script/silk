@@ -1304,7 +1304,7 @@ const hashedMapOrder = (
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
-import silk.hash { Hash, Word }
+import silk.hash { Hash, HashKey, HashSeed, Word }
 import silk.hash_map { HashMap }
 import silk.i32 as i32
 import silk.u64 as u64
@@ -1869,9 +1869,30 @@ pub fn main() -> i32 { let value = 42 return identity(move value) }`,
   {
     name: 'generic-interface-runtime-contracts',
     source: `import silk.numeric { Numeric }
+import silk.order { Order }
 struct Box<T> { value: T }
 interface Marker { fn mark(value: &Self) -> i32 }
 impl<T> Marker for Box<T> { fn mark(value: &Self) -> i32 { return 42 } }
+fn throughMarker<T: Marker>(value: &T) -> i32 { return Marker.mark(value) }
+interface Blend {
+  operator + fn add(left: &Self, right: &Self) -> Self
+  operator < fn lessThan(left: &Self, right: &Self) -> bool
+}
+struct Cell { weight: i32 }
+fn cellAdd(left: &Cell, right: &Cell) -> Cell {
+  return Cell { weight: left.weight + right.weight }
+}
+fn cellLess(left: &Cell, right: &Cell) -> bool { return left.weight < right.weight }
+impl Blend for Cell { add: Cell.cellAdd lessThan: Cell.cellLess }
+impl Order for Cell { lessThan: Cell.cellLess }
+fn merged<T: Blend>(left: T, right: T) -> T {
+  if (&left) < (&right) { return (&left) + (&right) }
+  return (&right) + (&left)
+}
+interface Mixer { fn mix(left: Self, right: Self) -> Self }
+impl Mixer for i32 { mix: Intrinsic.i32WrappingAdd }
+impl Mixer for u8 { mix: Intrinsic.u8SaturatingAdd }
+fn blend<T: Mixer>(left: T, right: T) -> T { return Mixer.mix(move left, move right) }
 unsafe fn raw(value: i32) -> i32 { return value * 2 }
 fn safe(value: i32) -> i32 { return value * 3 }
 fn prefix<F: unsafe fn(i32) -> i32>(operation: F, value: i32) -> i32 {
@@ -1884,9 +1905,16 @@ fn block<F: unsafe fn(i32) -> i32>(operation: F, value: i32) -> i32 {
 pub fn main() -> i32 {
   let box = Box { value: true }
   if box.mark() != 42 { return 1 }
+  if throughMarker(&box) != 42 { return 5 }
   if Numeric.add<i32>(40, 2) != 42 { return 2 }
   if prefix(raw, 1) != 2 { return 3 }
   if block(safe, 1) != 3 { return 4 }
+  let combined = merged<Cell>(Cell { weight: 20 }, Cell { weight: 22 })
+  if combined.weight != 42 { return 6 }
+  if blend<u8>(200, 100) != 255 { return 7 }
+  if blend<i32>(40, 2) != 42 { return 8 }
+  if !Order.less<i32>(1, 2) { return 9 }
+  if !Order.less<Cell>(Cell { weight: 4 }, Cell { weight: 5 }) { return 10 }
   return 42
 }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -2882,6 +2910,8 @@ effect fn readAndFail() -> i32 ! Problem ? &Clock {
 }
 effect fn succeed() -> i32 ! Problem { return 42 }
 effect fn failAlways() -> i32 ! Problem { fail Problem { code: 2 } }
+effect fn recoverProblem(error: Problem) -> i32 { return error.code }
+fn addForty(value: i32) -> i32 { return value + 40 }
 fn observe(result: Result<i32, Problem>) -> i32 {
   return match move result {
     Result<i32, Problem>.Success { value } => value
@@ -2908,6 +2938,12 @@ pub fn main() -> i32 {
   let trackedResult = run Effect.result(move tracked) |> Effect.provideMut(&mut journal)
   if observe(move trackedResult) != 42 { return 6 }
   if journal.count != 3 { return 7 }
+  let recoveredMapped = run (
+    failAlways()
+      |> Effect.catchAll(recoverProblem)
+      |> Effect.map(addForty)
+  )
+  if recoveredMapped != 42 { return 8 }
   return 42
 }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -3024,7 +3060,7 @@ pub fn main() -> i32 {
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
-import silk.hash { Hash, Word }
+import silk.hash { Hash, HashKey, HashSeed, Word }
 import silk.hash_map { HashMap }
 import silk.hash_set { HashSet }
 import silk.option { Option }
@@ -3032,6 +3068,11 @@ import silk.u64 as u64
 
 struct Counter { value: i32 calls: i32 }
 impl Copy for Counter {}
+struct Key { value: i32 }
+impl Copy for Key {}
+fn keyEquals(left: &Key, right: &Key) -> bool { return left.value == right.value }
+fn keyHash(value: &Key, seed: &HashSeed) -> u64 { return 1 }
+impl HashKey for Key { equals: Key.keyEquals hash: Key.keyHash }
 fn setFortyTwo(value: &mut Counter) -> () {
   value.value = 42
   value.calls = value.calls + 1
@@ -3073,6 +3114,28 @@ effect fn build() -> i32 ! OutOfMemoryError {
   )
   if changed.value != 42 || changed.calls != 1 { return 7 }
 
+  let mut collisions = HashMap.make<Key, i32>(Hash.seed(1))
+  let keyOne = run HashMap.insert<Key, i32>(&mut collisions, Key { value: 1 }, 10)
+    |> Effect.provideMut(&mut allocator)
+  let keyTwo = run HashMap.insert<Key, i32>(&mut collisions, Key { value: 2 }, 20)
+    |> Effect.provideMut(&mut allocator)
+  let keyThree = run HashMap.insert<Key, i32>(&mut collisions, Key { value: 3 }, 30)
+    |> Effect.provideMut(&mut allocator)
+  drop keyOne
+  drop keyTwo
+  drop keyThree
+  let tombstone = HashMap.remove<Key, i32>(&mut collisions, Key { value: 2 })
+  drop tombstone
+  let beyondTombstone = Option.unwrapOr<i32>(
+    HashMap.get<Key, i32>(&collisions, Key { value: 3 }),
+    0,
+  )
+  if beyondTombstone != 30 { return 11 }
+  let replaced = run HashMap.insert<Key, i32>(&mut collisions, Key { value: 1 }, 41)
+    |> Effect.provideMut(&mut allocator)
+  if Option.unwrapOr<i32>(move replaced, 0) != 10 { return 12 }
+  if HashMap.length<Key, i32>(&collisions) != 2 { return 13 }
+
   let mut set = HashSet.make<Word>(Hash.seed(99))
   let setFirst = run HashSet.insert<Word>(&mut set, Hash.word(7))
     |> Effect.provideMut(&mut allocator)
@@ -3087,6 +3150,133 @@ effect fn build() -> i32 ! OutOfMemoryError {
   }
   if gone != 7 || HashSet.contains<Word>(&set, Hash.word(7)) { return 10 }
   return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'hashed-collection-owned-lifecycle',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.hash { Hash, HashKey, HashSeed }
+import silk.hash_map { HashMap }
+import silk.i32 as i32
+import silk.shared { Shared }
+
+struct Counts { keys: i32 values: i32 }
+fn countKey(counts: &mut Counts) -> i32 {
+  counts.keys = counts.keys + 1
+  return 0
+}
+fn countValue(counts: &mut Counts) -> i32 {
+  counts.values = counts.values + 1
+  return 0
+}
+fn accepted(counts: &Counts) -> bool {
+  return counts.keys == 15 && counts.values == 13
+}
+
+struct Key { id: i32 counts: Shared<Counts> }
+struct Held { id: i32 counts: Shared<Counts> }
+struct Empty {}
+struct Filled { payload: Held }
+struct Cell { slot: Empty | Filled }
+struct Capture { slot: Empty | Filled }
+fn keyEquals(left: &Key, right: &Key) -> bool { return left.id == right.id }
+fn keyHash(value: &Key, seed: &HashSeed) -> u64 { return i32.toU64(value.id) }
+impl HashKey for Key { equals: Key.keyEquals hash: Key.keyHash }
+impl Drop for Key {
+  fn drop(self: &mut Key) -> () {
+    let changed = Shared.withMut<Counts, i32>(&self.counts, countKey)
+    return ()
+  }
+}
+impl Drop for Held {
+  fn drop(self: &mut Held) -> () {
+    let changed = Shared.withMut<Counts, i32>(&self.counts, countValue)
+    return ()
+  }
+}
+fn key(id: i32, counts: &Shared<Counts>) -> Key {
+  return Key { id: id, counts: Shared.clone<Counts>(counts) }
+}
+fn held(id: i32, counts: &Shared<Counts>) -> Held {
+  return Held { id: id, counts: Shared.clone<Counts>(counts) }
+}
+fn extractInto(cell: &mut Cell, output: &mut Capture) -> () {
+  let previous = Intrinsic.replace(cell.slot, Empty {})
+  output.slot = move previous
+  return ()
+}
+fn heldTag(value: Held) -> i32 { return value.id }
+
+effect fn fillAndDrop(counts: Shared<Counts>) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  let mut map = HashMap.make<Key, Held>(Hash.seed(9))
+  let mut index = 0
+  while index < 10 {
+    let previous = run HashMap.insert<Key, Held>(
+      &mut map,
+      key(index, &counts),
+      held(index, &counts),
+    )
+    drop previous
+    index = index + 1
+  }
+  drop map
+  drop counts
+  return ()
+}
+
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let counts = run Shared.make<Counts>(Counts { keys: 0, values: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut map = HashMap.make<Key, Held>(Hash.seed(3))
+  let first = run HashMap.insert<Key, Held>(&mut map, key(7, &counts), held(11, &counts))
+    |> Effect.provideMut(&mut allocator)
+  drop first
+  let displaced = run HashMap.insert<Key, Held>(&mut map, key(7, &counts), held(31, &counts))
+    |> Effect.provideMut(&mut allocator)
+  drop displaced
+  if HashMap.length<Key, Held>(&map) != 1 { return 1 }
+  let removed = HashMap.remove<Key, Held>(&mut map, key(7, &counts))
+  drop removed
+  if HashMap.length<Key, Held>(&map) != 0 { return 2 }
+  drop map
+
+  let mut cells = HashMap.make<Key, Cell>(Hash.seed(6))
+  let insertedCell = run HashMap.insert<Key, Cell>(
+    &mut cells,
+    key(8, &counts),
+    Cell { slot: Filled { payload: held(42, &counts) } },
+  ) |> Effect.provideMut(&mut allocator)
+  drop insertedCell
+  let mut capture = Capture { slot: Empty {} }
+  let found = HashMap.withMut(
+    &mut cells,
+    key(8, &counts),
+    extractInto(&mut capture),
+  )
+  if !found { return 3 }
+  let extracted = match move capture {
+    Capture { slot } => match move slot {
+      Empty {} => 0
+      Filled { payload } => heldTag(move payload)
+    }
+  }
+  drop cells
+  if extracted != 42 { return 4 }
+
+  let fillingCounts = Shared.clone<Counts>(&counts)
+  let filled = run fillAndDrop(move fillingCounts) |> Effect.provideMut(&mut allocator)
+  drop filled
+  let result = Shared.with<Counts, bool>(&counts, accepted)
+  drop counts
+  if result { return 42 }
+  return 5
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
@@ -5329,7 +5519,7 @@ pub effect fn main() -> () ! WriterError {
     nativeSource: nativeSecureRandom,
     expected: { _tag: 'Completes', result: 42 },
   },
-  // These two canonical programs cover the public single-threaded Fiber story through the shared
+  // These canonical programs cover the public single-threaded Fiber story through the shared
   // native corpus: root/fork/join, FIFO siblings, repeated yield, nested forks,
   // completion-before-join, typed child failure, structured cancellation, and reuse of one
   // LocalScheduler value.
@@ -5342,6 +5532,11 @@ pub effect fn main() -> () ! WriterError {
     name: 'scheduler-fiber-shutdown',
     source: schedulerFiber('local-scheduler-shutdown'),
     expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'scheduler-fiber-nested-cancellation',
+    source: schedulerFiber('local-scheduler-nested-cancellation'),
+    expected: { _tag: 'Trap' },
   },
   {
     name: 'scheduler-fiber-timers',
