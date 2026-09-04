@@ -195,7 +195,7 @@ const sourceFor = (
   )
   const source = replaceExactlyOnce(
     withInput,
-    '  if value != 0 { let mismatch = 1 / 0 }',
+    '  if value != 184 { let mismatch = 1 / 0 }',
     `  if value != ${expected.fingerprint} { let mismatch = 1 / 0 }`,
   )
   return Object.freeze({ source, expected })

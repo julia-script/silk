@@ -314,7 +314,9 @@ it.each(shardedCorpus)(
       if (outcome._tag === 'BackendFailed') {
         compilationMessage = `${program.name}: ${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
       } else if (outcome._tag === 'Rejected') {
-        compilationMessage = `${program.name}: ${outcome.diagnostics.map((diagnostic) => diagnostic.code).join(',')}`
+        compilationMessage = `${program.name}: ${outcome.diagnostics
+          .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
+          .join('\n')}`
       }
       assert.strictEqual(outcome._tag, 'Compiled', compilationMessage)
       if (outcome._tag !== 'Compiled') return

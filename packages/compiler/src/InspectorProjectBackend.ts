@@ -1434,7 +1434,7 @@ export const arrayValueRows = (
  *
  * Every other view answers "what did this phase produce"; this one answers "how far did the
  * program get". It is the only view that is about the pipeline rather than about a phase, which
- * is why it survived the consolidation of the standalone labs.
+ * is why it remains part of the static project inspector.
  */
 export const pipelineRows = (
   phases: ReadonlyArray<{

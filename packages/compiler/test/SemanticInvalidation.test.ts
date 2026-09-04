@@ -490,7 +490,7 @@ it.effect('invalidates direct importers when a foreign symbol is renamed but not
     const renamed = yield* analyze(
       sources({
         'app/A': importer,
-        'app/B': 'pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "labs"',
+        'app/B': 'pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "renamed_abs"',
       }),
       ['app/A'],
       respelled,

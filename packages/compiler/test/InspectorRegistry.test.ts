@@ -293,7 +293,7 @@ pub fn main() -> i32 { return answer( }`,
 })
 
 describe('optimization profile', () => {
-  // The workbench derives codegen's debug-info mode from the profile instead of carrying a second
+  // Inspector clients derive codegen's debug-info mode from the profile instead of carrying a second
   // control. That only stays honest while `-g` profiles map to debug mode: if they diverged, the
   // backend pane would show stripped IR for a build the toolchain plans with debug info.
   it('keeps debug info whenever the profile asks clang for -g', () => {

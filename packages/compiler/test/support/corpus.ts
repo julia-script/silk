@@ -2224,6 +2224,8 @@ pub fn main() -> i32 {
   if eq('☃', snowman) {} else { return 17 }
   if lt('é', snowman) {} else { return 18 }
   if gt('😀', snowman) {} else { return 19 }
+  if gt('\u{10ffff}', '\u{10000}') {} else { return 26 }
+  if gt('\u{e000}', '\u{d7ff}') {} else { return 27 }
   if equals('a', 'a') {} else { return 20 }
   if notEquals('a', 'b') {} else { return 21 }
   if lessThan('a', 'b') {} else { return 22 }
@@ -2232,6 +2234,91 @@ pub fn main() -> i32 {
   if greaterOrEqual('b', 'a') {} else { return 25 }
   return 42
 }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'module-string-constants',
+    source: `import silk.usize as usize
+import silk.string { String }
+const escapedPattern: string = "\\\\d+\\\\.\\\\d+"
+const rawPattern: string = r"\\d+\\.\\d+"
+const windowsPath: string = r"C:\\Users\\build"
+fn sameText(left: string, right: string) -> bool {
+  if String.byteLength(left) != String.byteLength(right) { return false }
+  let leftBytes = String.utf8Bytes(left)
+  let rightBytes = String.utf8Bytes(right)
+  let mut index = usize.ZERO
+  while index < leftBytes.length {
+    if leftBytes[index] != rightBytes[index] { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+pub fn main() -> i32 {
+  if !sameText(escapedPattern, r"\\d+\\.\\d+") { return 1 }
+  if !sameText(rawPattern, "\\\\d+\\\\.\\\\d+") { return 2 }
+  if !sameText(rawPattern, escapedPattern) { return 3 }
+  if usize.toI32(String.byteLength(rawPattern)) != 8 { return 4 }
+  if usize.toI32(String.byteLength(windowsPath)) != 14 { return 5 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'whole-member-layout-extraction',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout, LayoutOverflow }
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
+fn trapLayout() -> Layout { let boom = 1 / 0 return trapLayout() }
+effect fn store() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let plan = Layout.repeat(Layout.of<i32>(), 3)
+  let layout = match move plan {
+    Layout value => move value
+    LayoutOverflow overflow => trapLayout()
+  }
+  let allocation = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  unsafe {
+    let mut buffer = RawBuffer.from<i32>(move allocation, 3)
+    let written = Slot.write(RawBuffer.slot(&mut buffer, 2), 42)
+    let taken = Slot.take(RawBuffer.slot(&mut buffer, 2))
+    drop buffer
+    return taken
+  }
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'whole-member-affine-extraction',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+struct Empty {}
+struct Full { storage: Allocation }
+fn wrap(cell: Full) -> Empty | Full { return move cell }
+fn takeStorage(full: Full) -> Allocation {
+  return match move full { Full { storage } => move storage }
+}
+effect fn fallback() -> Full ! OutOfMemoryError { fail OutOfMemoryError {} }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let allocation = run Allocator.allocate(Layout.of<[i32; 2]>())
+    |> Effect.provideMut(&mut allocator)
+  let widened = wrap(Full { storage: move allocation })
+  let restored = match move widened {
+    Empty empty => run fallback()
+    Full full => Full { storage: takeStorage(move full) }
+  }
+  drop restored
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from ShortCircuitOperatorAcceptance.test.ts: the counter proves the right operand of
@@ -2260,6 +2347,281 @@ pub fn main() -> i32 {
   if conjunction(true) == 1 {} else { return 2 }
   if disjunction(true) == 0 {} else { return 3 }
   if disjunction(false) == 1 {} else { return 4 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'bitwise-values-and-precedence',
+    source: `import silk.u32 as u32
+pub fn main() -> i32 {
+  let a: u32 = 12
+  let b: u32 = 10
+  if (a & b) != u32.bitAnd(a, b) { return 1 }
+  if (a | b) != u32.bitOr(a, b) { return 2 }
+  if (a ^ b) != u32.bitXor(a, b) { return 3 }
+  if ~a != u32.bitNot(a) { return 4 }
+  if u32.toI32(a & b) != 8 { return 5 }
+  if u32.toI32(a | b) != 14 { return 6 }
+  if u32.toI32(a ^ b) != 6 { return 7 }
+  if u32.toI32(1 | 2 ^ 3 & 1) != 3 { return 8 }
+  if (6 & 3) == 2 {} else { return 9 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'option-result-combinators',
+    source: `import silk.option { Option }
+import silk.result { Result }
+
+struct Wide { code: i32 }
+fn double(value: i32) -> i32 { return value * 2 }
+fn halve(value: i32) -> Option<i32> {
+  if value == 0 { return Option.none<i32>() }
+  return Option.some<i32>(value / 2)
+}
+fn addTwo(value: i32) -> i32 { return value + 2 }
+fn halfResult(value: i32) -> Result<i32, i32> {
+  if value == 0 { return Result.failResult<i32, i32>(9) }
+  return Result.succeed<i32, i32>(value / 2)
+}
+fn widen(error: i32) -> Wide { return Wide { code: error + 30 } }
+fn observeWide(self: Result<i32, Wide>) -> i32 {
+  return match move self {
+    Result<i32, Wide>.Success { value: success } => success
+    Result<i32, Wide>.Failure { error } => error.code
+  }
+}
+
+pub fn main() -> i32 {
+  let mappedSome = Option.map<i32, i32>(Option.some<i32>(20), double)
+  let mappedNone = Option.map<i32, i32>(Option.none<i32>(), double)
+  let chainedSome = Option.flatMap<i32, i32>(Option.some<i32>(80), halve)
+  let chainedNone = Option.flatMap<i32, i32>(Option.some<i32>(0), halve)
+  if Option.unwrapOr<i32>(move mappedSome, 0) != 40 { return 1 }
+  if Option.unwrapOr<i32>(move mappedNone, 2) != 2 { return 2 }
+  if Option.unwrapOr<i32>(move chainedSome, 0) != 40 { return 3 }
+  if Option.unwrapOr<i32>(move chainedNone, 2) != 2 { return 4 }
+
+  let mapped = Result.map<i32, i32, i32>(Result.succeed<i32, i32>(36), addTwo)
+  let chained = Result.flatMap<i32, i32, i32>(move mapped, halfResult)
+  if Result.unwrapOr<i32, i32>(move chained, 0) != 19 { return 5 }
+  let carriedFailure = Result.map<i32, i32, i32>(Result.failResult<i32, i32>(7), addTwo)
+  if Result.unwrapOr<i32, i32>(move carriedFailure, 23) != 23 { return 6 }
+  let changed = Result.mapError<i32, i32, Wide>(Result.failResult<i32, i32>(4), widen)
+  if observeWide(move changed) != 34 { return 7 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'effect-source-combinators',
+    source: `import silk.effect { Effect }
+import silk.result { Result }
+
+struct First { code: i32 }
+struct Second { code: i32 }
+effect fn succeed(value: i32) -> i32 ! First { return value }
+effect fn failFirst() -> i32 ! First { fail First { code: 2 } }
+fn addTwo(value: i32) -> i32 { return value + 2 }
+effect fn addTwoEffect(value: i32) -> i32 ! Second { return value + 2 }
+effect fn preserve(value: i32) -> i32 ! Second { return value }
+effect fn recover(error: First) -> i32 ! Second { return error.code + 40 }
+fn observeFirst(result: Result<i32, First>) -> i32 {
+  return match move result {
+    Result<i32, First>.Success { value } => value
+    Result<i32, First>.Failure { error } => error.code
+  }
+}
+fn observeBoth(result: Result<i32, First | Second>) -> i32 {
+  return match move result {
+    Result<i32, First | Second>.Success { value } => value
+    Result<i32, First | Second>.Failure { error } => match move error {
+      First { code: firstCode } => firstCode
+      Second { code: secondCode } => secondCode
+    }
+  }
+}
+fn observeSecond(result: Result<i32, Second>) -> i32 {
+  return match move result {
+    Result<i32, Second>.Success { value } => value
+    Result<i32, Second>.Failure { error } => error.code
+  }
+}
+effect fn inner(value: i32) -> i32 { return value * 2 }
+effect fn outer(value: i32) -> Effect<i32> { return inner(value) }
+
+pub fn main() -> i32 {
+  let mapped = run Effect.result(succeed(40) |> Effect.map(addTwo))
+  if observeFirst(move mapped) != 42 { return 1 }
+  let chained = run Effect.result(succeed(40) |> Effect.flatMap(addTwoEffect))
+  if observeBoth(move chained) != 42 { return 2 }
+  let tapped = run Effect.result(succeed(42) |> Effect.tap(preserve))
+  if observeBoth(move tapped) != 42 { return 3 }
+  let recovered = run Effect.result(failFirst() |> Effect.catchAll(recover))
+  if observeSecond(move recovered) != 42 { return 4 }
+  let nested = outer(21)
+  let flattened = Effect.flatten(move nested)
+  let flattenedValue = run flattened
+  if flattenedValue != 42 { return 5 }
+  let created = Effect.of(42)
+  let createdValue = run created
+  if createdValue != 42 { return 6 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'effect-retry-and-provide-effect',
+    source: `import silk.effect { Effect }
+import silk.result { Result }
+
+struct Problem { code: i32 }
+service Clock { effect fn value() -> i32 ? &Clock }
+struct FixedClock { value: i32 }
+effect fn clockValue(self: &FixedClock) -> i32 { return self.value }
+impl Clock for FixedClock { value: FixedClock.clockValue }
+service Journal { effect fn acquire() -> () ? &mut Journal }
+struct MemoryJournal { count: i32 }
+effect fn acquire(self: &mut MemoryJournal) -> () {
+  self.count = self.count + 1
+  return ()
+}
+impl Journal for MemoryJournal { acquire: MemoryJournal.acquire }
+effect fn read() -> i32 ? &Clock { return run Clock.value() }
+effect fn nestedRead(inner: &FixedClock) -> i32 ? &Clock {
+  let before = run read()
+  let inside = run read() |> Effect.provide(inner)
+  let after = run read()
+  return before + inside + after
+}
+effect fn makeClock() -> FixedClock { return FixedClock { value: 42 } }
+effect fn makeTrackedClock() -> FixedClock ? &mut Journal {
+  run Journal.acquire()
+  return FixedClock { value: 42 }
+}
+effect fn readAndFail() -> i32 ! Problem ? &Clock {
+  let value = run Clock.value()
+  fail Problem { code: value }
+}
+effect fn succeed() -> i32 ! Problem { return 42 }
+effect fn failAlways() -> i32 ! Problem { fail Problem { code: 2 } }
+fn observe(result: Result<i32, Problem>) -> i32 {
+  return match move result {
+    Result<i32, Problem>.Success { value } => value
+    Result<i32, Problem>.Failure { error } => error.code
+  }
+}
+
+pub fn main() -> i32 {
+  let success = run Effect.result(succeed() |> Effect.retry(3))
+  let failure = run Effect.result(failAlways() |> Effect.retry(2))
+  if observe(move success) != 42 { return 1 }
+  if observe(move failure) != 2 { return 2 }
+  let fixed = FixedClock { value: 42 }
+  let direct = run read() |> Effect.provide(&fixed)
+  if direct != 42 { return 3 }
+  let provided = run read() |> Effect.provideEffect(makeClock())
+  if provided != 42 { return 4 }
+  let outer = FixedClock { value: 20 }
+  let inner = FixedClock { value: 2 }
+  let nested = run nestedRead(&inner) |> Effect.provide(&outer)
+  if nested != 42 { return 5 }
+  let mut journal = MemoryJournal { count: 0 }
+  let tracked = readAndFail() |> Effect.provideEffect(makeTrackedClock()) |> Effect.retry(2)
+  let trackedResult = run Effect.result(move tracked) |> Effect.provideMut(&mut journal)
+  if observe(move trackedResult) != 42 { return 6 }
+  if journal.count != 3 { return 7 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'effect-ensuring-outcomes-and-order',
+    source: `import silk.effect { Effect }
+
+struct Problem { code: i32 }
+service Journal { effect fn mark(value: i32) -> () ? &mut Journal }
+struct MemoryJournal { value: i32 }
+effect fn mark(self: &mut MemoryJournal, value: i32) -> () {
+  self.value = self.value * 10 + value
+  return ()
+}
+impl Journal for MemoryJournal { mark: MemoryJournal.mark }
+effect fn succeed() -> i32 ? &mut Journal { run Journal.mark(1) return 5 }
+effect fn failWork() -> i32 ! Problem ? &mut Journal {
+  run Journal.mark(1)
+  fail Problem { code: 3 }
+}
+effect fn finalize() -> () ? &mut Journal { return run Journal.mark(2) }
+effect fn recover(error: Problem) -> i32 { return error.code }
+
+pub fn main() -> i32 {
+  let mut first = MemoryJournal { value: 0 }
+  let success = run Effect.ensuring(succeed(), finalize()) |> Effect.provideMut(&mut first)
+  if success != 5 { return 1 }
+  if first.value != 12 { return 2 }
+  let mut second = MemoryJournal { value: 0 }
+  let guarded = Effect.ensuring(failWork(), finalize()) |> Effect.catchAll(recover)
+  let failure = run guarded |> Effect.provideMut(&mut second)
+  if failure != 3 { return 3 }
+  if second.value != 12 { return 4 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'effect-zip-order-and-failures',
+    source: `import silk.effect { Effect }
+import silk.effect { Pair, Triple }
+
+struct Problem { code: i32 }
+service Journal { effect fn mark(value: i32) -> () ? &mut Journal }
+struct MemoryJournal { value: i32 }
+effect fn mark(self: &mut MemoryJournal, value: i32) -> () {
+  self.value = self.value * 10 + value
+  return ()
+}
+impl Journal for MemoryJournal { mark: MemoryJournal.mark }
+effect fn first() -> i32 ? &mut Journal { run Journal.mark(1) return 20 }
+effect fn second() -> i32 ? &mut Journal { run Journal.mark(2) return 22 }
+effect fn third() -> i32 ? &mut Journal { run Journal.mark(3) return 0 }
+effect fn failFirst() -> i32 ! Problem ? &mut Journal {
+  run Journal.mark(1)
+  fail Problem { code: 7 }
+}
+effect fn failSecond() -> i32 ! Problem ? &mut Journal {
+  run Journal.mark(2)
+  fail Problem { code: 8 }
+}
+fn pairValue(pair: Pair<i32, i32>) -> i32 { return pair.first + pair.second }
+fn tripleValue(triple: Triple<i32, i32, i32>) -> i32 {
+  return triple.first + triple.second + triple.third
+}
+effect fn recover(error: Problem) -> i32 { return error.code }
+
+pub fn main() -> i32 {
+  let mut successLog = MemoryJournal { value: 0 }
+  let success = run Effect.zip(first(), second()) |> Effect.map(pairValue)
+    |> Effect.provideMut(&mut successLog)
+  if success != 42 { return 1 }
+  if successLog.value != 12 { return 2 }
+  let mut tripleLog = MemoryJournal { value: 0 }
+  let triple = run Effect.zip3(first(), second(), third()) |> Effect.map(tripleValue)
+    |> Effect.provideMut(&mut tripleLog)
+  if triple != 42 { return 3 }
+  if tripleLog.value != 123 { return 4 }
+  let mut firstFailureLog = MemoryJournal { value: 0 }
+  let firstFailure = run Effect.zip(failFirst(), second()) |> Effect.map(pairValue)
+    |> Effect.catchAll(recover) |> Effect.provideMut(&mut firstFailureLog)
+  if firstFailure != 7 { return 5 }
+  if firstFailureLog.value != 1 { return 6 }
+  let mut secondFailureLog = MemoryJournal { value: 0 }
+  let secondFailure = run Effect.zip(first(), failSecond()) |> Effect.map(pairValue)
+    |> Effect.catchAll(recover) |> Effect.provideMut(&mut secondFailureLog)
+  if secondFailure != 8 { return 7 }
+  if secondFailureLog.value != 12 { return 8 }
   return 42
 }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -2347,6 +2709,214 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'vector-mutation-views-and-capacity',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.option { Option }
+import silk.usize as usize
+import silk.vector { Vector }
+
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut values = Vector.make<i32>()
+  let a = run Vector.append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
+  let b = run Vector.append<i32>(&mut values, 20) |> Effect.provideMut(&mut allocator)
+  let c = run Vector.append<i32>(&mut values, 30) |> Effect.provideMut(&mut allocator)
+  let d = run Vector.append<i32>(&mut values, 40) |> Effect.provideMut(&mut allocator)
+  let originalCapacity = Vector.capacity<i32>(&values)
+  let mutable = Vector.asMutSlice<i32>(&mut values)
+  mutable[usize.ONE] = 22
+  Vector.set<i32>(&mut values, usize.ONE + usize.ONE, 33)
+  let shared = Vector.asSlice<i32>(&values)
+  if shared[usize.ZERO] != 10 { return 1 }
+  if shared[usize.ONE] != 22 { return 2 }
+  if shared[usize.ONE + usize.ONE] != 33 { return 3 }
+  let removed = Vector.remove<i32>(&mut values, usize.ONE)
+  if removed != 22 { return 4 }
+  if Vector.get<i32>(&values, usize.ONE) != 33 { return 5 }
+  let popped = Vector.pop<i32>(&mut values)
+  let poppedValue = match move popped {
+    Option<i32>.Some { value } => value
+    Option<i32>.None => 0
+  }
+  if poppedValue != 40 { return 6 }
+  Vector.truncate<i32>(&mut values, usize.ONE)
+  if Vector.length<i32>(&values) != usize.ONE { return 7 }
+  Vector.clear<i32>(&mut values)
+  if Vector.length<i32>(&values) != usize.ZERO { return 8 }
+  if Vector.capacity<i32>(&values) != originalCapacity { return 9 }
+  let empty = Vector.pop<i32>(&mut values)
+  return match move empty {
+    Option<i32>.Some { value } => 10
+    Option<i32>.None => 42
+  }
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'vector-sort-search-stability',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.option { Option }
+import silk.order { Order }
+import silk.usize as usize
+import silk.vector { Vector }
+
+struct Item { key: i32 tag: i32 }
+fn itemLess(left: &Item, right: &Item) -> bool { return left.key < right.key }
+impl Order for Item { lessThan: Item.itemLess }
+
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut items = Vector.make<Item>()
+  let a = run Vector.append<Item>(&mut items, Item { key: 1, tag: 1 }) |> Effect.provideMut(&mut allocator)
+  let b = run Vector.append<Item>(&mut items, Item { key: 0, tag: 2 }) |> Effect.provideMut(&mut allocator)
+  let c = run Vector.append<Item>(&mut items, Item { key: 1, tag: 3 }) |> Effect.provideMut(&mut allocator)
+  let d = run Vector.append<Item>(&mut items, Item { key: 0, tag: 4 }) |> Effect.provideMut(&mut allocator)
+  let ordered = run Vector.sort<Item>(&mut items) |> Effect.provideMut(&mut allocator)
+  let view = Vector.asSlice<Item>(&items)
+  let folded = view[usize.ZERO].tag * 1000 + view[usize.ONE].tag * 100
+    + view[usize.ONE + usize.ONE].tag * 10 + view[usize.ONE + usize.ONE + usize.ONE].tag
+  if folded != 2413 { return 1 }
+
+  let mut numbers = Vector.make<i32>()
+  let n0 = run Vector.append<i32>(&mut numbers, 9) |> Effect.provideMut(&mut allocator)
+  let n1 = run Vector.append<i32>(&mut numbers, 2) |> Effect.provideMut(&mut allocator)
+  let n2 = run Vector.append<i32>(&mut numbers, 7) |> Effect.provideMut(&mut allocator)
+  let n3 = run Vector.append<i32>(&mut numbers, 2) |> Effect.provideMut(&mut allocator)
+  let n4 = run Vector.append<i32>(&mut numbers, 5) |> Effect.provideMut(&mut allocator)
+  let sorted = run Vector.sort<i32>(&mut numbers) |> Effect.provideMut(&mut allocator)
+  let hit = Vector.binarySearch<i32>(&numbers, 7)
+  let miss = Vector.binarySearch<i32>(&numbers, 4)
+  let duplicate = Vector.binarySearch<i32>(&numbers, 2)
+  let hitIndex = match move hit { Option<usize>.Some { value } => usize.toI32(value) _ => -1 }
+  let missIndex = match move miss { Option<usize>.Some { value } => usize.toI32(value) _ => -1 }
+  let duplicateIndex = match move duplicate { Option<usize>.Some { value } => usize.toI32(value) _ => -1 }
+  if hitIndex != 3 { return 2 }
+  if missIndex != -1 { return 3 }
+  if duplicateIndex != 0 { return 4 }
+  let empty = Vector.make<i32>()
+  let emptyMiss = Vector.binarySearch<i32>(&empty, 1)
+  return match move emptyMiss { Option<usize>.Some { value } => 5 _ => 42 }
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'vector-move-only-sort-and-cleanup',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.order { Order }
+import silk.usize as usize
+import silk.vector { Vector }
+
+struct Tracked { key: i32 payload: Vector<i32> }
+fn trackedLess(left: &Tracked, right: &Tracked) -> bool { return left.key < right.key }
+impl Order for Tracked { lessThan: Tracked.trackedLess }
+effect fn hold(key: i32) -> Tracked ! OutOfMemoryError ? &mut Allocator {
+  let mut payload = Vector.make<i32>()
+  let filled = run Vector.append<i32>(&mut payload, key)
+  return Tracked { key: key, payload: move payload }
+}
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut items = Vector.make<Tracked>()
+  let first = run hold(3) |> Effect.provideMut(&mut allocator)
+  let a = run Vector.append<Tracked>(&mut items, move first) |> Effect.provideMut(&mut allocator)
+  let second = run hold(1) |> Effect.provideMut(&mut allocator)
+  let b = run Vector.append<Tracked>(&mut items, move second) |> Effect.provideMut(&mut allocator)
+  let third = run hold(2) |> Effect.provideMut(&mut allocator)
+  let c = run Vector.append<Tracked>(&mut items, move third) |> Effect.provideMut(&mut allocator)
+  let ordered = run Vector.sort<Tracked>(&mut items) |> Effect.provideMut(&mut allocator)
+  let view = Vector.asSlice<Tracked>(&items)
+  let mut folded = 0
+  let mut index = usize.ZERO
+  while index < Vector.length<Tracked>(&items) {
+    folded = folded * 10 + view[index].key
+    index = index + usize.ONE
+  }
+  return folded
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 123 },
+  },
+  {
+    name: 'raw-buffer-copy-range',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
+effect fn store() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let sourceLayout = Layout.of<[i32; 4]>()
+  let sourceAllocation = run Allocator.allocate(move sourceLayout) |> Effect.provideMut(&mut allocator)
+  let targetLayout = Layout.of<[i32; 4]>()
+  let targetAllocation = run Allocator.allocate(move targetLayout) |> Effect.provideMut(&mut allocator)
+  unsafe {
+    let mut source = RawBuffer.from<i32>(move sourceAllocation, 4)
+    let mut target = RawBuffer.from<i32>(move targetAllocation, 4)
+    let first = Slot.write(RawBuffer.slot(&mut source, 0), 3)
+    let second = Slot.write(RawBuffer.slot(&mut source, 1), 5)
+    let third = Slot.write(RawBuffer.slot(&mut source, 2), 7)
+    let prefix = RawBuffer.view<i32>(&source, 1, 2)
+    let copied = RawBuffer.copy<i32>(&mut target, 2, prefix, 2)
+    let low = RawBuffer.read<i32>(&target, 2)
+    let high = RawBuffer.read<i32>(&target, 3)
+    let kept = RawBuffer.read<i32>(&source, 1)
+    let clearedFirst = Slot.take(RawBuffer.slot(&mut target, 2))
+    let clearedSecond = Slot.take(RawBuffer.slot(&mut target, 3))
+    let sourceFirst = Slot.take(RawBuffer.slot(&mut source, 0))
+    let sourceSecond = Slot.take(RawBuffer.slot(&mut source, 1))
+    let sourceThird = Slot.take(RawBuffer.slot(&mut source, 2))
+    drop source
+    drop target
+    return low * 10 + high * 3 + kept
+  }
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
+    expected: { _tag: 'Completes', result: 76 },
+  },
+  {
+    name: 'raw-buffer-fill-range',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
+import silk.u8 as u8
+effect fn store() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let layout = Layout.of<[u8; 4]>()
+  let allocation = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
+  unsafe {
+    let mut buffer = RawBuffer.from<u8>(move allocation, 4)
+    let cleared = RawBuffer.fill(&mut buffer, 0, 4, u8.toU8(9))
+    let refilled = RawBuffer.fill(&mut buffer, 1, 2, u8.toU8(3))
+    let first = RawBuffer.read<u8>(&buffer, 0)
+    let second = RawBuffer.read<u8>(&buffer, 1)
+    let third = RawBuffer.read<u8>(&buffer, 2)
+    let fourth = RawBuffer.read<u8>(&buffer, 3)
+    let takenFirst = Slot.take(RawBuffer.slot(&mut buffer, 0))
+    let takenSecond = Slot.take(RawBuffer.slot(&mut buffer, 1))
+    let takenThird = Slot.take(RawBuffer.slot(&mut buffer, 2))
+    let takenFourth = Slot.take(RawBuffer.slot(&mut buffer, 3))
+    drop buffer
+    return u8.toI32(first) * 8 + u8.toI32(second) * 4 + u8.toI32(third) * 2 + u8.toI32(fourth)
+  }
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
+    expected: { _tag: 'Completes', result: 99 },
   },
   // folded from OwnedAllocationDispatch.test.ts: quota refusal propagates typed OutOfMemoryError.
   {
@@ -3714,6 +4284,50 @@ const algorithmExamples: ReadonlyArray<CorpusProgram> = algorithmExampleIds.map(
   })
 })
 
+const algorithmicFixtureRoot = new URL('../fixtures/algorithmic-acceptance/', import.meta.url)
+const algorithmicCompilerFold: CorpusProgram = Object.freeze({
+  name: 'algorithmic-compiler-fold',
+  source: readFileSync(new URL('app/Main.silk', algorithmicFixtureRoot), 'utf8'),
+  nativeImports: Object.freeze({
+    'compiler/Coverage': readFileSync(
+      new URL('compiler/Coverage.silk', algorithmicFixtureRoot),
+      'utf8',
+    ),
+    'compiler/Member': readFileSync(
+      new URL('compiler/Member.silk', algorithmicFixtureRoot),
+      'utf8',
+    ),
+  }),
+  expected: Object.freeze({ _tag: 'Completes', result: 42 }),
+})
+
+const pressurePrograms: ReadonlyArray<CorpusProgram> = [
+  {
+    name: 'scanner-owned-token-vector',
+    source: readFileSync(
+      new URL('../fixtures/scanner-acceptance/Main.silk', import.meta.url),
+      'utf8',
+    ),
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'language-pressure-lexer',
+    source: readFileSync(
+      new URL('../../../../examples/language-pressure/lexer/main.silk', import.meta.url),
+      'utf8',
+    ),
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'language-pressure-stack-vm',
+    source: readFileSync(
+      new URL('../../../../examples/language-pressure/stack-vm/main.silk', import.meta.url),
+      'utf8',
+    ),
+    expected: { _tag: 'Completes', result: 0 },
+  },
+]
+
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'replace-cleanup',
@@ -3731,6 +4345,8 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   },
   ...corpus,
   ...algorithmExamples,
+  algorithmicCompilerFold,
+  ...pressurePrograms,
   {
     name: 'foreign-export-roundtrip',
     source: foreignExportRoundtripReference,

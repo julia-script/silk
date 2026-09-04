@@ -15,7 +15,10 @@ import * as CompilerHost from './CompilerHost.js'
 import * as Timeouts from './timeouts.js'
 
 declare const WebAssembly: {
-  readonly Module: new (bytes: Uint8Array) => object
+  readonly Module: {
+    new (bytes: Uint8Array): object
+    readonly imports: (module: object) => ReadonlyArray<unknown>
+  }
   readonly Instance: new (module: object) => {
     readonly exports: Readonly<Record<string, unknown>>
   }
@@ -290,6 +293,7 @@ it.effect(
         `${root}/build/llvm/wasm32-unknown-unknown/debug/hello.wasm`,
       )
       const wasmModule = new WebAssembly.Module(Uint8Array.from(wasmBytes))
+      assert.deepEqual(WebAssembly.Module.imports(wasmModule), [])
       const wasmInstance = new WebAssembly.Instance(wasmModule)
       const wasmMain = wasmInstance.exports['silk_main']
       assert.isTrue(isI32Main(wasmMain))
