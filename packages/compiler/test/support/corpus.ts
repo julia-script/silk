@@ -168,6 +168,7 @@ pub fn main() -> i32 {
 export const scalarDisplayAcceptance = `import silk.effect { Effect }
 import silk.format { Format }
 import silk.u8 as u8
+import silk.usize as usize
 import silk.writer { Writer, WriterError }
 
 struct Capture { index: usize valid: bool }

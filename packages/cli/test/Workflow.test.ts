@@ -4,6 +4,7 @@ import * as LlvmBackend from '@silklang/compiler/LlvmBackend'
 import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
 import * as Project from '@silklang/compiler/Project'
 import * as Config from 'effect/Config'
+import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
@@ -279,7 +280,15 @@ it.effect(
         `${root}/silk.toml`,
         '[package]\nname = "hello"\nversion = "0.1.0"\nroot = "src/Main.silk"\n\n[build]\nbackend = "llvm"\ntargets = ["host", "wasm32-unknown-unknown"]\n',
       )
-      assert.strictEqual(yield* Workflow.build({ ...options(root), clang: wasmClang }), 0)
+      const reports: Array<string> = []
+      const reportingConsole: Console.Console = Object.assign(Object.create(console), {
+        log: (...args: ReadonlyArray<unknown>) => reports.push(args.join(' ')),
+        error: (...args: ReadonlyArray<unknown>) => reports.push(args.join(' ')),
+      })
+      const status = yield* Workflow.build({ ...options(root), clang: wasmClang }).pipe(
+        Effect.provideService(Console.Console, reportingConsole),
+      )
+      assert.strictEqual(status, 0, reports.join('\n'))
       const host = yield* NativeToolchain.hostTarget()
       assert.strictEqual(
         yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/hello`),

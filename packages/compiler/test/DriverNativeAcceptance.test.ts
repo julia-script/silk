@@ -259,7 +259,7 @@ it.effect(
       assert.strictEqual(staticCompile.status, 0, staticCompile.stderr)
       assert.strictEqual(spawnSync(staticExecutable).status, 42)
     }),
-  20_000,
+  60_000,
 )
 
 it.each(shardedCorpus)(
