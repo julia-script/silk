@@ -6355,7 +6355,7 @@ fn read(counter: &Counter) -> i32 { return counter.value }
 struct Guard { left: i8 right: i8 storage: Allocation counter: Shared<Counter> }
 impl Drop for Guard {
   fn drop(self: &mut Guard) -> () {
-    if i8.toI32(self.left) + i8.toI32(self.right) != 42 { let boom = 1 / 0 }
+    if i8.toI32(self.left) != 19 || i8.toI32(self.right) != 23 { let boom = 1 / 0 }
     let changed = Shared.withMut<Counter, i32>(&self.counter, increment)
     return ()
   }
@@ -6518,29 +6518,43 @@ import silk.effect { Effect }
 import silk.i8 as i8
 import silk.layout { Layout }
 import silk.raw_buffer { RawBuffer }
+import silk.shared { Shared }
 import silk.slot { Slot }
-struct Guard { left: i8 right: i8 }
+struct Counter { value: i32 }
+fn increment(counter: &mut Counter) -> i32 {
+  counter.value = counter.value + 1
+  return counter.value
+}
+fn read(counter: &Counter) -> i32 { return counter.value }
+struct Guard { left: i8 right: i8 counter: Shared<Counter> }
 impl Drop for Guard {
   fn drop(self: &mut Guard) -> () {
-    let observed = i8.toI32(self.left) + i8.toI32(self.right)
-    if observed != 42 { let boom = 1 / 0 }
+    if i8.toI32(self.left) != 19 || i8.toI32(self.right) != 23 { let boom = 1 / 0 }
+    let changed = Shared.withMut<Counter, i32>(&self.counter, increment)
     return ()
   }
 }
 union Choice { Small { marker: i8, guard: Guard }, Wide { value: i64 } }
 effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
+  let counter = run Shared.make<Counter>(Counter { value: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let allocation = run Allocator.allocate(Layout.of<[Choice; 1]>())
     |> Effect.provideMut(&mut allocator)
   unsafe {
     let mut buffer = RawBuffer.from<Choice>(move allocation, 1)
     let value = Choice.Small {
       marker: i8.toI8(7),
-      guard: Guard { left: i8.toI8(19), right: i8.toI8(23) },
+      guard: Guard {
+        left: i8.toI8(19), right: i8.toI8(23), counter: Shared.clone<Counter>(&counter),
+      },
     }
     let written = Slot.write(RawBuffer.slot(&mut buffer, 0), move value)
     let cleared = Slot.dropValue(RawBuffer.slot(&mut buffer, 0))
     drop buffer
+    let count = Shared.with<Counter, i32>(&counter, read)
+    drop counter
+    if count != 1 { return 2 }
     return 42
   }
   return 0

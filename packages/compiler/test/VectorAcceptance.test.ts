@@ -82,3 +82,38 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`),
     assert.isAbove(storageDrop, elementDrop)
   }),
 )
+
+it.effect('releases sort scratch while returning the initialized element storage', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'vector-acceptance/sort-scratch-cleanup',
+      ascii(`import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.vector { Vector }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut values = Vector.make<i32>()
+  run Vector.append<i32>(&mut values, 2) |> Effect.provideMut(&mut allocator)
+  run Vector.append<i32>(&mut values, 1) |> Effect.provideMut(&mut allocator)
+  run Vector.sort<i32>(&mut values) |> Effect.provideMut(&mut allocator)
+  return Vector.get<i32>(&values, 0) + Vector.get<i32>(&values, 1)
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const releaseScratch = mir.functions.find(
+      (fn) => fn.id.module === 'silk/vector' && fn.id.name === 'releaseScratch',
+    )
+    if (releaseScratch === undefined) return assert.fail('expected Vector.releaseScratch MIR')
+
+    const releases = MirVerification.operations(releaseScratch).filter(
+      (operation) => operation._tag === 'Drop',
+    )
+    assert.strictEqual(releases.length, 1)
+    assert.strictEqual(releases[0]?.cleanup._tag, 'RawBufferCleanup')
+    assert.notStrictEqual(releaseScratch.result, releases[0]?.local)
+  }),
+)
