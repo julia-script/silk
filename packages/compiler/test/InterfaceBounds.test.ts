@@ -9,15 +9,8 @@ const encoder = new TextEncoder()
 const snapshot = (source: string) =>
   Analysis.ofSourceRealized('interface-bounds/main', encoder.encode(source))
 
-const evaluate = (source: string) =>
-  Effect.map(snapshot(source), (self) => ({ self, outcome: Analysis.evaluate(self) }))
-
 const messages = (self: Analysis.FrontendSnapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(self).map((diagnostic) => diagnostic.message)
-
-/** Evaluated scalars can be BigInt, which plain JSON serialization refuses. */
-const describe = (outcome: unknown): string =>
-  JSON.stringify(outcome, (_, value) => (typeof value === 'bigint' ? value.toString() : value), 2)
 
 /**
  * Two operations on one bound. `combine` calls both — `+` selects `add` and `-` selects
@@ -33,61 +26,6 @@ pub fn combine<T: Arith>(left: T, right: T, offset: T) -> T {
 }
 pub fn main() -> i32 { return combine(40, 44, 40) }`
 
-it.effect('calls every operation of a two-operation bound in one generic body', () =>
-  Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(twoOperations)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    // (40 + 44) - 40 selects `subtract`, not a second `add`.
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 44n)
-  }),
-)
-
-it.effect('specializes one two-operation bound per conforming provider', () =>
-  Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`pub interface Arith {
-  operator + fn add(left: Self, right: Self) -> Self
-  operator - fn subtract(left: Self, right: Self) -> Self
-}
-impl Arith for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
-impl Arith for u8 { add: Intrinsic.u8Add subtract: Intrinsic.u8Subtract }
-pub fn combine<T: Arith>(left: T, right: T, offset: T) -> T {
-  return (move left + move right) - move offset
-}
-pub fn main() -> i32 {
-  let narrow = combine<u8>(10, 20, 5)
-  return combine<i32>(40, 42, 40)
-}`)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
-  }),
-)
-
-/**
- * A bound whose operations do not all return the parameter. `lessThan` is declared over `T` but
- * results in `bool`, so the operator keeps the operation's own declared result.
- */
-const comparisonBound = `pub interface Ranked {
-  operator < fn lessThan(left: &Self, right: &Self) -> bool
-  operator - fn subtract(left: Self, right: Self) -> Self
-}
-impl Ranked for i32 { lessThan: Intrinsic.i32LessThan subtract: Intrinsic.i32Subtract }
-pub fn gap<T: Ranked>(left: T, right: T) -> T {
-  if (&left) < (&right) { return move right - move left }
-  return move left - move right
-}
-pub fn main() -> i32 { return gap(2, 44) }`
-
-it.effect('keeps a bound comparison at its declared result type', () =>
-  Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(comparisonBound)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
-  }),
-)
-
 it.effect('rejects a type argument whose witness omits one bound operation', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`pub interface Arith {
@@ -101,61 +39,6 @@ pub fn combine<T: Arith>(left: T, right: T, offset: T) -> T {
 pub fn main() -> i32 { return combine(40, 44, 40) }`)
     // The specialization names the operation the witness never supplied, not just the interface.
     assert.include(messages(self), 'Invalid conformance: i32 does not implement Arith.subtract')
-  }),
-)
-
-it.effect('checks a bound against a type argument an explicit prefix wrote', () =>
-  Effect.gen(function* () {
-    // A substitution seeded from a written prefix is still a substitution: what it binds faces the
-    // same conformance check an inferred binding does.
-    const declarations = `pub interface Arith {
-  operator + fn add(left: Self, right: Self) -> Self
-  operator - fn subtract(left: Self, right: Self) -> Self
-}
-impl Arith for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
-struct Plain { value: i32 }
-pub fn combine<T: Arith, U>(left: T, right: T, offset: T, other: U) -> T {
-  return (move left + move right) - move offset
-}
-`
-    const { self, outcome } = yield* evaluate(
-      `${declarations}pub fn main() -> i32 { return combine<i32>(40, 44, 40, true) }`,
-    )
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 44n)
-
-    const violated = yield* snapshot(
-      `${declarations}pub fn main() -> i32 { let held = combine<Plain>(Plain { value: 1 }, Plain { value: 2 }, Plain { value: 1 }, true) return 0 }`,
-    )
-    assert.include(
-      messages(violated),
-      'Invalid conformance: interface-bounds/main.Plain does not implement Arith',
-    )
-  }),
-)
-
-it.effect('accepts an interface another module declares as a bound', () =>
-  Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`import silk.numeric { Integer }
-pub fn sum<T: Integer>(left: T, right: T) -> T { return move left + move right }
-pub fn main() -> i32 { return sum(20, 22) }`)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
-  }),
-)
-
-it.effect('keeps the single-operation Integer bound working unchanged', () =>
-  Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`import silk.numeric { Numeric }
-pub fn main() -> i32 {
-  let narrow = Numeric.add<u8>(1, 2)
-  return Numeric.add<i32>(40, 2)
-}`)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -183,73 +66,6 @@ it.effect('reports a bound that names no reachable interface', () =>
 pub fn combine<T: Holder>(left: T, right: T) -> T { return left + right }
 pub fn main() -> i32 { return combine(40, 2) }`)
     assert.include(messages(self), 'Invalid conformance: unknown interface constraint Holder')
-  }),
-)
-
-/**
- * A bound operation no operator spells. `mix` is reachable only through the bound's own name, and
- * the two witnesses answer it with two unrelated instructions — wrapping for `i32`, saturating for
- * `u8` — so the call must read the witness the specialization selected rather than reuse an
- * operator's width-neutral lowering.
- */
-const nonOperatorOperation = `pub interface Mixer {
-  fn mix(left: Self, right: Self) -> Self
-}
-impl Mixer for i32 { mix: Intrinsic.i32WrappingAdd }
-impl Mixer for u8 { mix: Intrinsic.u8SaturatingAdd }
-pub fn blend<T: Mixer>(left: T, right: T) -> T { return Mixer.mix(move left, move right) }
-pub fn main() -> i32 { return blend(40, 2) }`
-
-it.effect('calls a bound operation no operator spells', () =>
-  Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(nonOperatorOperation)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
-  }),
-)
-
-it.effect('reaches a different witness for each specialized type argument', () =>
-  Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`pub interface Mixer {
-  fn mix(left: Self, right: Self) -> Self
-}
-impl Mixer for i32 { mix: Intrinsic.i32WrappingAdd }
-impl Mixer for u8 { mix: Intrinsic.u8SaturatingAdd }
-pub fn blend<T: Mixer>(left: T, right: T) -> T { return Mixer.mix(move left, move right) }
-pub fn main() -> i32 {
-  // u8 saturates at 255; i32 wraps from its maximum to its minimum. One shared body, two
-  // instructions, and neither is the other's width-neutral form.
-  let saturated = blend<u8>(200, 100)
-  let wrapped = blend<i32>(2147483647, 1)
-  if saturated != 255 { return 1 }
-  if wrapped != -2147483648 { return 2 }
-  return 42
-}`)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
-  }),
-)
-
-it.effect('keeps a bound operation at the result its interface declares', () =>
-  Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`pub interface Ranked {
-  fn ranksBelow(left: &Self, right: &Self) -> bool
-}
-impl Ranked for i32 { ranksBelow: Intrinsic.i32LessThan }
-pub fn ranks<T: Ranked>(left: &T, right: &T) -> bool {
-  return Ranked.ranksBelow(left, right)
-}
-pub fn main() -> i32 {
-  let left = 2
-  let right = 42
-  if ranks<i32>(&left, &right) { return right }
-  return left
-}`)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -304,107 +120,6 @@ pub fn main() -> i32 {
       ['SEM0129'],
     )
     assert.strictEqual(Analysis.mirOf(self)._tag, 'Unavailable')
-  }),
-)
-
-/**
- * `Integer.add` names the bound's operation while `Numeric.add` is the public function of
- * `silk/numeric`. Inside a body bounded by `Integer` the bound takes the spelling; the module
- * function stays reachable everywhere else through its owner `Numeric`.
- */
-it.effect('prefers the bound operation over a same-named module function', () =>
-  Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`import silk.numeric { Integer }
-pub fn sum<T: Integer>(left: T, right: T) -> T {
-  return Integer.add(move left, move right)
-}
-pub fn main() -> i32 { return sum(20, 22) }`)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
-  }),
-)
-
-it.effect('keeps the module function reachable where no bound claims the name', () =>
-  Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`import silk.numeric { Numeric }
-pub fn main() -> i32 { return Numeric.add(40, 2) }`)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
-  }),
-)
-
-it.effect('executes an inline conformance operation with Self bound to its provider', () =>
-  Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`interface Decoder {
-  fn decode(value: &Self) -> i32
-}
-struct Schema { value: i32 }
-impl Decoder for Schema {
-  fn decode(value: &Self) -> i32 { return value.value }
-}
-fn decode<T: Decoder>(value: &T) -> i32 { return Decoder.decode(value) }
-pub fn main() -> i32 {
-  let schema = Schema { value: 42 }
-  return decode(&schema)
-}`)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
-  }),
-)
-
-it.effect('combines inline and mapped operations in one complete conformance', () =>
-  Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`interface PairValue {
-  fn left(value: &Self) -> i32
-  fn right(value: &Self) -> i32
-}
-struct Pair { left: i32 right: i32 }
-fn pairRight(value: &Pair) -> i32 { return value.right }
-impl PairValue for Pair {
-  fn left(value: &Self) -> i32 { return value.left }
-  right: Pair.pairRight
-}
-fn sum<T: PairValue>(value: &T) -> i32 {
-  return PairValue.left(value) + PairValue.right(value)
-}
-pub fn main() -> i32 {
-  let pair = Pair { left: 20, right: 22 }
-  return sum(&pair)
-}`)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
-  }),
-)
-
-it.effect('requires and resolves every member of a bound conjunction', () =>
-  Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`interface LeftValue {
-  fn left(value: &Self) -> i32
-}
-interface RightValue {
-  fn right(value: &Self) -> i32
-}
-struct Pair { left: i32 right: i32 }
-impl LeftValue for Pair {
-  fn left(value: &Self) -> i32 { return value.left }
-}
-impl RightValue for Pair {
-  fn right(value: &Self) -> i32 { return value.right }
-}
-fn sum<T: LeftValue + RightValue>(value: &T) -> i32 {
-  return LeftValue.left(value) + RightValue.right(value)
-}
-pub fn main() -> i32 {
-  let pair = Pair { left: 20, right: 22 }
-  return sum(&pair)
-}`)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 

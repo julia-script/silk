@@ -4,6 +4,7 @@ import type * as Hir from './Hir.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Scalar from './Scalar.js'
 import * as SourceSpan from './SourceSpan.js'
+import * as Target from './Target.js'
 import * as Type from './Type.js'
 
 /** Stable identity of one compiler-provided actor with no source declaration. */
@@ -41,24 +42,23 @@ export type AdmissionCategory =
   | 'Platform'
   | 'Language'
 
-/** Closed execution surfaces against which intrinsic availability is validated. */
-export type ExecutionTarget = 'Evaluator' | 'LLVM' | 'Wasm'
-
 /** Whether an intrinsic executes during static evaluation or in the residual runtime program. */
 export type Phase = 'Runtime' | 'StaticOnly' | 'Mixed'
 
-/** Canonical deterministic order for intrinsic execution targets. */
-export const executionTargets: ReadonlyArray<ExecutionTarget> = Object.freeze([
-  'Evaluator',
-  'LLVM',
-  'Wasm',
-])
+/** Canonical deterministic order for residual runtime targets. */
+export const runtimeTargets: ReadonlyArray<Target.Id> = Object.freeze(
+  Target.all.map((target) => target.id),
+)
+
+const nativeTargets: ReadonlyArray<Target.Id> = Object.freeze(
+  Target.native.map((target) => target.id),
+)
 
 /** Normalizes an availability set to the compiler-owned target order. */
-export const normalizeExecutionTargets = (
-  targets: ReadonlyArray<ExecutionTarget>,
-): ReadonlyArray<ExecutionTarget> =>
-  Object.freeze(executionTargets.filter((target) => targets.includes(target)))
+export const normalizeRuntimeTargets = (
+  targets: ReadonlyArray<Target.Id>,
+): ReadonlyArray<Target.Id> =>
+  Object.freeze(runtimeTargets.filter((target) => targets.includes(target)))
 
 /** The elaboration rule selected by an intrinsic operation identity. */
 export type Rule =
@@ -104,7 +104,7 @@ export interface Operation {
   readonly phase: Phase
   readonly admission?: AdmissionCategory
   readonly consumer?: string
-  readonly targets: ReadonlyArray<ExecutionTarget>
+  readonly targets: ReadonlyArray<Target.Id>
   readonly invariant?: string
   readonly hostImport?: string
   readonly returnedBorrowParameter?: number
@@ -232,7 +232,7 @@ const builtin = (options: {
   readonly result: string
   readonly semanticResult: Type.Type
   readonly unsafe?: boolean
-  readonly targets?: ReadonlyArray<ExecutionTarget>
+  readonly targets?: ReadonlyArray<Target.Id>
   readonly returnedBorrowParameter?: number
 }): BuiltinOperation => {
   const spelling = intrinsicSpelling(options.actor, options.name)
@@ -272,7 +272,7 @@ const builtin = (options: {
     phase: 'Runtime',
     admission: admission(options.actor),
     consumer: consumer(options.actor, options.name),
-    targets: normalizeExecutionTargets(options.targets ?? executionTargets),
+    targets: normalizeRuntimeTargets(options.targets ?? runtimeTargets),
     ...(invariant === undefined ? {} : { invariant }),
     ...(options.actor === 'Host' && options.name === 'write'
       ? { hostImport: 'silk_standard_stream_write_v1' }
@@ -301,7 +301,7 @@ const contractEffect = (options: {
   readonly contract: CallableContract.CallableContract
   readonly post: Extract<Rule, { readonly _tag: 'ContractRule' }>['post']
   readonly providerMode?: Constraint.ProviderMode
-  readonly targets?: ReadonlyArray<ExecutionTarget>
+  readonly targets?: ReadonlyArray<Target.Id>
 }): Operation => {
   const spelling = intrinsicSpelling('Effect', options.name)
   return Object.freeze({
@@ -315,7 +315,7 @@ const contractEffect = (options: {
     phase: 'Runtime',
     admission: admission('Effect'),
     consumer: consumer('Effect', options.name),
-    targets: normalizeExecutionTargets(options.targets ?? executionTargets),
+    targets: normalizeRuntimeTargets(options.targets ?? runtimeTargets),
     rule: Object.freeze({
       _tag: 'ContractRule',
       contract: options.contract,
@@ -624,7 +624,6 @@ const catchContract = CallableContract.make({
     Constraint.failureSubset(catchSelectedRow, catchProtectedFailureRow),
   ]),
 })
-const nativeTargets = Object.freeze<ReadonlyArray<ExecutionTarget>>(['Evaluator', 'LLVM'])
 const byteSlice = Type.slice('Shared', 'u8')
 const mutableI32 = Type.reference('Exclusive', 'i32')
 const mutableI64 = Type.reference('Exclusive', 'i64')
@@ -1112,7 +1111,7 @@ const enumValueOperation: Operation = Object.freeze({
   phase: 'Runtime',
   admission: 'Representation',
   consumer: 'language:scalar-enum-value',
-  targets: executionTargets,
+  targets: runtimeTargets,
   rule: Object.freeze({ _tag: 'EnumValueRule' }),
 })
 
@@ -1127,7 +1126,7 @@ const replaceOperation: Operation = Object.freeze({
   phase: 'Runtime',
   admission: admission('Place'),
   consumer: consumer('Place', 'replace'),
-  targets: executionTargets,
+  targets: runtimeTargets,
   rule: Object.freeze({ _tag: 'PlaceRule', operation: 'Replace' }),
 })
 
@@ -1719,6 +1718,7 @@ const intrinsicOperations = Object.freeze([
         undefined,
         Object.freeze([]),
       ),
+      targets: nativeTargets,
     }),
   ]),
   ...Object.freeze([
@@ -2188,8 +2188,7 @@ export interface InventoryEntry {
   readonly consumer: string
   readonly hir?: string
   readonly mir?: string
-  readonly evaluator?: string
-  readonly targets: ReadonlyArray<ExecutionTarget>
+  readonly targets: ReadonlyArray<Target.Id>
   readonly hostImport?: string
 }
 
@@ -2217,7 +2216,7 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
       } else if (staticParameters.length !== 0) {
         throw new RangeError(`Whole-phase intrinsic ${operation.spelling} declares a static lane`)
       }
-      const normalizedTargets = normalizeExecutionTargets(operation.targets)
+      const normalizedTargets = normalizeRuntimeTargets(operation.targets)
       if (
         normalizedTargets.length !== operation.targets.length ||
         normalizedTargets.some((target, index) => operation.targets.at(index) !== target)
@@ -2250,7 +2249,7 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
         ...(operation.invariant === undefined ? {} : { invariant: operation.invariant }),
         admission: operation.admission,
         consumer: operation.consumer,
-        ...(identity === undefined ? {} : { hir: identity, mir: identity, evaluator: identity }),
+        ...(identity === undefined ? {} : { hir: identity, mir: identity }),
         targets: operation.targets,
         ...(operation.hostImport === undefined ? {} : { hostImport: operation.hostImport }),
       })

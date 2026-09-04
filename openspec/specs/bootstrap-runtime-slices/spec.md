@@ -172,7 +172,7 @@ captures, and other owned storage.
 
 An ordinary call-scoped value borrow MAY project through resolved nominal fields rooted in a stable
 local, pattern binding, or borrowed parameter. The borrow SHALL retain that field path rather than
-copying the projected value, and evaluator, native, and direct-Wasm execution MUST address the same
+copying the projected value, and native and LLVM-generated WebAssembly execution MUST address the same
 projected storage. Exclusive projection through a parameter SHALL require an exclusive reference.
 
 #### Scenario: Forward a shared field view

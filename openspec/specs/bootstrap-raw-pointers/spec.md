@@ -44,8 +44,8 @@ usize) -> *mut T` advancing by `count` elements of `T`, `read(pointer: *const T)
 be safe. `offset`, `offsetMut`, `read`, and `write` SHALL be unsafe and SHALL each state their
 caller invariant. The `Pointer` API SHALL bound `read` and `write` to a Copy pointee so a
 move-only pointee is rejected at the call, and MIR verification SHALL reject a read or write
-operation whose pointee is not Copy. Every primitive SHALL be available on the evaluator, LLVM,
-and Wasm.
+operation whose pointee is not Copy. Every primitive SHALL be available through LLVM for native
+and WebAssembly targets.
 
 #### Scenario: Form a pointer safely
 
@@ -95,27 +95,3 @@ cache the place's value across a foreign call.
 
 - **WHEN** Silk passes `Pointer.fromMutSlice(&mut bytes)` and `bytes.length` to a C function that fills the buffer, then reads `bytes[0]`
 - **THEN** the native executable observes the filled byte
-
-### Requirement: The evaluator models pointers as logical addresses
-
-The evaluator SHALL represent a raw pointer as null, as a logical address naming a frame, cell,
-place path, and element offset, or as an allocation ticket and element offset for pointers formed
-from a raw-buffer-backed view, and SHALL execute every pointer primitive with the same observable
-results as the native backends for programs that reach no foreign call. A `read`, `write`, or
-`offset` through null or through an address whose frame has ended SHALL stop execution as an
-unsafe-contract violation reported as data.
-
-#### Scenario: Evaluate a pointer round trip
-
-- **WHEN** the evaluator runs a program that forms a pointer from a mutable array slice, offsets it by two, writes, and reads `array[2]`
-- **THEN** the read observes the written value
-
-#### Scenario: Evaluate a pointer into a raw buffer
-
-- **WHEN** the evaluator forms `Pointer.fromSlice(RawBuffer.view(&buffer, 0, 3))`, offsets by one, and reads
-- **THEN** the read observes the buffer's second element
-
-#### Scenario: Detect a dangling dereference
-
-- **WHEN** the evaluator dereferences a pointer to a cell whose frame has returned
-- **THEN** execution stops with an unsafe-contract violation naming the primitive, not a host exception

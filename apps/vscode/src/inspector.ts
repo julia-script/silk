@@ -48,7 +48,6 @@ interface ViewDescriptor {
   readonly phase: string
   readonly tag: string
   readonly hasFilter?: boolean
-  readonly action?: { readonly label: string }
 }
 
 const viewRequest = 'silk/inspectorView'
@@ -75,8 +74,6 @@ export const registerInspector = (
     viewId: 'pipeline',
     filter: '',
     showTrivia: false,
-    // Evaluation is explicit and describes one program: cleared on every new commit.
-    evaluate: false,
     uri: undefined as string | undefined,
     moduleUris: {} as Readonly<Record<string, string>>,
   }
@@ -89,7 +86,6 @@ export const registerInspector = (
         view: state.viewId,
         filter: state.filter,
         showTrivia: state.showTrivia,
-        evaluate: state.evaluate,
       })
       state.moduleUris = result.moduleUris
       void panel.webview.postMessage({
@@ -97,7 +93,6 @@ export const registerInspector = (
         viewId: state.viewId,
         views,
         result,
-        evaluate: state.evaluate,
       })
     } catch (error) {
       void panel.webview.postMessage({
@@ -149,7 +144,6 @@ export const registerInspector = (
     const uri = editor.document.uri.toString()
     if (uri === state.uri) return
     state.uri = uri
-    state.evaluate = false
     void refresh()
   }
 
@@ -183,10 +177,6 @@ export const registerInspector = (
             state.showTrivia = !state.showTrivia
             void refresh()
             return
-          case 'evaluate':
-            state.evaluate = true
-            void refresh()
-            return
           case 'activateRow':
             void activateRow(message.span as Span)
             return
@@ -215,7 +205,6 @@ export const registerInspector = (
   // the panel refreshes on every invalidation rather than tracking project membership itself.
   context.subscriptions.push(
     session.onInvalidation(() => {
-      state.evaluate = false
       void refresh()
     }),
   )
@@ -334,14 +323,11 @@ const webviewHtml = (): string => {
       .join('')
   }
 
-  const renderControls = (view, evaluate) => {
+  const renderControls = (view) => {
     let html = ''
     if (view !== undefined && view.hasFilter === true) {
       html += \`<input id="filter" placeholder="filter…" aria-label="Filter rows">\`
       html += \`<button id="trivia" aria-pressed="false">trivia</button>\`
-    }
-    if (view !== undefined && view.action !== undefined) {
-      html += \`<button id="action">\${escapeHtml(view.action.label)}</button>\`
     }
     controls.innerHTML = html
     const filter = document.getElementById('filter')
@@ -354,8 +340,6 @@ const webviewHtml = (): string => {
     }
     const trivia = document.getElementById('trivia')
     if (trivia !== null) trivia.addEventListener('click', () => vscode.postMessage({ type: 'toggleTrivia' }))
-    const action = document.getElementById('action')
-    if (action !== null) action.addEventListener('click', () => vscode.postMessage({ type: 'evaluate' }))
   }
 
   const renderRows = () => {
@@ -397,7 +381,7 @@ const webviewHtml = (): string => {
     current.views = message.views
     renderPicker(message.views, message.viewId)
     const view = message.views.find((candidate) => candidate.id === message.viewId)
-    renderControls(view, message.evaluate === true)
+    renderControls(view)
     if (message.result === undefined) {
       current.rows = []
       renderRows()

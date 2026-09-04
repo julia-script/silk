@@ -81,7 +81,7 @@ return `T`. No numeric conversion SHALL be implicit.
 #### Scenario: Trap ordinary byte overflow
 
 - **WHEN** `u8.add(255, 1)` executes
-- **THEN** evaluation, native, and WebAssembly trap at the same operation
+- **THEN** native and WebAssembly execution trap at the same operation
 
 #### Scenario: Recover checked overflow
 
@@ -100,12 +100,12 @@ return `T`. No numeric conversion SHALL be implicit.
 
 ### Requirement: Every admitted integer operation has engine parity
 
-HIR, MIR, layout, evaluator, native LLVM, and direct WebAssembly SHALL support every integer type and operation accepted by analysis. Unsupported target behavior MUST be rejected before artifact commitment.
+HIR, MIR, layout, native LLVM and LLVM-generated WebAssembly SHALL support every integer type and operation accepted by analysis. Unsupported target behavior MUST be rejected before artifact commitment.
 
 #### Scenario: Compare integer engines
 
 - **WHEN** an accepted integer fixture completes, returns `Option`, or traps
-- **THEN** evaluator, native, and WebAssembly agree on its outcome and provenance
+- **THEN** native and WebAssembly agree on its outcome and provenance
 
 ### Requirement: Concrete integer primitives use the Intrinsic namespace
 
@@ -168,17 +168,17 @@ standard-library source backed by the smallest concrete Intrinsic primitives.
 
 ### Requirement: Signed remainder overflow semantics are identical across executors
 
-Signed integer `%` with operands `MIN` and `-1` SHALL trap on every executor (interpreter, wasm, native), consistent with the existing rule that ordinary arithmetic traps on invalid division/remainder. The checked remainder of `MIN` and `-1` SHALL return `None` on every executor, and no executor SHALL evaluate it through an operation whose result is undefined for those operands.
+Signed integer `%` with operands `MIN` and `-1` SHALL trap in LLVM-generated native and WebAssembly artifacts, consistent with the existing rule that ordinary arithmetic traps on invalid division/remainder. The checked remainder of `MIN` and `-1` SHALL return `None` on both targets, and neither target SHALL lower it through an operation whose result is undefined for those operands.
 
 #### Scenario: Ordinary remainder of MIN by -1 traps everywhere
 
 - **WHEN** a program evaluates `i32::MIN % -1` (or the equivalent for any signed width) on any executor
-- **THEN** execution traps, and the same program traps identically on the interpreter, the wasm backend, and the native backend
+- **THEN** execution traps identically in LLVM-generated native and WebAssembly artifacts
 
 #### Scenario: Checked remainder of MIN by -1 is None everywhere
 
 - **WHEN** a program evaluates the checked remainder of `i32::MIN` and `-1` on any executor
-- **THEN** the result is `None`, identically on the interpreter, the wasm backend, and the native backend
+- **THEN** the result is `None` in LLVM-generated native and WebAssembly artifacts
 
 ### Requirement: Rotate counts wrap modulo lane width on every executor
 
@@ -187,4 +187,4 @@ Rotate-left and rotate-right SHALL interpret the count modulo the operand's bit 
 #### Scenario: Rotate by a negative count wraps
 
 - **WHEN** a program evaluates `rotate_left(x, -1)` on an odd `i32` value on any executor
-- **THEN** the result equals `rotate_left(x, 31)` — the low bit wraps into bit 31 — identically on the interpreter, the wasm backend, and the native backend
+- **THEN** the result equals `rotate_left(x, 31)` — the low bit wraps into bit 31 — in LLVM-generated native and WebAssembly artifacts

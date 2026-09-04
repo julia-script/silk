@@ -8,12 +8,7 @@
   "expected": {
     "entryResult": 0,
     "algorithmResult": 8,
-    "summary": "The shortest path crosses eight grid edges after all 25 cells enter the queue.",
-    "allocation": {
-      "acquires": 4,
-      "releases": 4,
-      "peakLive": 2
-    }
+    "summary": "The shortest path crosses eight grid edges after all 25 cells enter the queue."
   },
   "capabilities": [
     "usize",
@@ -25,6 +20,6 @@
     "Silk-written Vector growth",
     "deterministic Drop cleanup"
   ],
-  "targets": ["evaluation", "native", "wasm"],
+  "targets": ["native"],
   "blockers": []
 }

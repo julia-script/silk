@@ -18,6 +18,7 @@ import * as Exit from 'effect/Exit'
 import * as Result from 'effect/Result'
 import type * as ArtifactKind from './ArtifactKind.js'
 import type * as Backend from './Backend.js'
+import * as LlvmWasmRuntime from './LlvmWasmRuntime.js'
 import * as NativeLinkInput from './NativeLinkInput.js'
 import * as Project from './Project.js'
 import * as Target from './Target.js'
@@ -1099,12 +1100,20 @@ export const finalizeWasm = Effect.fn('NativeToolchain.finalizeWasm')(function* 
   destination: string,
 ): Effect.fn.Return<FinalArtifact, ToolchainError> {
   const bitcode = yield* writeArtifact(scope, target, 'program.bc', artifact.bitcode)
+  const runtime = yield* compileCObject(
+    toolchain,
+    scope,
+    target,
+    'silk_wasm_runtime',
+    LlvmWasmRuntime.source,
+  )
   const outputPath = join(scope.root, 'program.wasm')
   const planned = ToolchainPlan.wasmCommand(
     toolchain.clang,
     target,
     profile,
     bitcode.path,
+    runtime.artifact.path,
     outputPath,
   )
   if (artifact.target.id !== target.id) {

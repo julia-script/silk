@@ -131,7 +131,7 @@ it.effect('rejects malformed TOML and invalid package names', () =>
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 
-it.effect('materializes explicit build configuration and wasm defaults', () =>
+it.effect('materializes explicit build configuration and WebAssembly selection', () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
     const root = yield* fileSystem.makeTempDirectoryScoped()
@@ -157,7 +157,7 @@ it.effect('materializes explicit build configuration and wasm defaults', () =>
 
     yield* writeFile(
       `${root}/silk.toml`,
-      '[package]\nname = "configured"\nversion = "1.2.3"\nroot = "src/Main.silk"\n\n[build]\nbackend = "wasm"\n',
+      '[package]\nname = "configured"\nversion = "1.2.3"\nroot = "src/Main.silk"\n\n[build]\nbackend = "llvm"\ntargets = ["wasm32-unknown-unknown"]\n',
     )
     const wasm = yield* Project.load({ workingDirectory: root })
     assert.deepStrictEqual(wasm.build.targets, ['wasm32-unknown-unknown'])

@@ -39,18 +39,16 @@ export interface ViewDescriptor {
   readonly tag: string
   readonly group: string
   readonly hasFilter?: boolean | undefined
-  readonly action?: { readonly label: string } | undefined
 }
 
 export const descriptors: ReadonlyArray<ViewDescriptor> = views.map(
-  ({ id, title, phase, tag, group, hasFilter, action }) => ({
+  ({ id, title, phase, tag, group, hasFilter }) => ({
     id,
     title,
     phase,
     tag,
     group,
     ...(hasFilter === undefined ? {} : { hasFilter }),
-    ...(action === undefined ? {} : { action }),
   }),
 )
 

@@ -94,7 +94,7 @@ export interface Application {
   readonly span: SourceSpan.SourceSpan
 }
 
-/** One source-level frame retained without a host stack or evaluator identity. */
+/** One source-level frame retained without a host stack or runtime identity. */
 export type TraceFrame =
   | ApplicationFrame
   | SelectedArmFrame
@@ -254,7 +254,7 @@ export const staticTextFrame = (
   return Object.freeze({ _tag: 'StaticTextFrame', literal, byteOffset })
 }
 
-/** Appends logical frames without exposing or mutating evaluator storage. */
+/** Appends logical frames without exposing or mutating evaluation storage. */
 export const appendTrace = (self: Trace, ...frames: ReadonlyArray<TraceFrame>): Trace =>
   Object.freeze([...self, ...frames])
 
@@ -353,7 +353,7 @@ const diagnosticTrace = (trace: Trace): ReadonlyArray<Diagnostic.StaticTraceFram
     }),
   )
 
-/** Converts one evaluator failure into its stable public semantic diagnostic. */
+/** Converts one static-evaluation failure into its stable public semantic diagnostic. */
 export const diagnostic = (failure: StaticFailure, target: string): Diagnostic.Diagnostic => {
   const trace = diagnosticTrace(failure.trace)
   if (failure._tag === 'CompileError')
@@ -1974,7 +1974,7 @@ export const evaluateStatements = (
     : complete(StaticValue.unit())
 }
 
-/** Immutable deterministic resource counters for one evaluator session. */
+/** Immutable deterministic resource counters for one static-evaluation session. */
 export interface Budget {
   readonly steps: number
   readonly callDepth: number
@@ -2042,7 +2042,7 @@ interface MutableState<A> {
 
 const stateSymbol: unique symbol = Symbol('StaticEvaluation.state')
 
-/** One target-scoped evaluator session with hidden cache and accounting state. */
+/** One target-scoped static-evaluation session with hidden cache and accounting state. */
 export interface Evaluation<A> {
   readonly _tag: 'StaticEvaluation'
   readonly environment: TargetEnvironment
@@ -2179,7 +2179,7 @@ export interface EvaluationContext<A> {
   ) => ApplicationResult<A>
 }
 
-/** The future syntax evaluator/residualizer plugs into this deterministic callback boundary. */
+/** Future syntax residualization plugs into this deterministic callback boundary. */
 export type EvaluationCallback<A> = (context: EvaluationContext<A>) => Outcome<A>
 
 export type ApplicationResult<A> =

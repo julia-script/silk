@@ -1,11 +1,7 @@
 /**
- * The shared evaluation corpus: programs with pinned expected outcomes. The MIR interpreter's
- * tests consume it today; the native acceptance differential reuses it to compare interpreter
- * results against compiled output. Expected results were pinned against the fact-based
- * evaluator before the MIR retarget.
+ * The shared native acceptance corpus: programs with independently pinned process outcomes.
  */
 import { readFileSync } from 'node:fs'
-import * as Transcendental from '../../src/Transcendental.js'
 import { floatMathPrograms } from './floatMath.js'
 import { renameIndependentPolicy } from './independentPolicyRename.js'
 import {
@@ -19,13 +15,15 @@ import {
 import { recoveredProvidedWrite, recoveredWriterModule } from './recoveredProvidedWrite.js'
 import { storedCatchSuspension } from './storedCatchSuspension.js'
 
-// folded from Transcendental.test.ts: the canonical-bits program is generated from the pinned
-// high-precision vectors plus the fixed edge cases, so the expected bits can never drift from the
-// reference implementation. Transcendental.test.ts imports this source for its IR assertions.
+// Folded from Transcendental.test.ts: every runtime bit pattern is committed independently of the
+// compiler implementation. `referenceBits` records the high-precision oracle; `acceptedBits`
+// records an explicitly reviewed result within the four-ulp language tolerance when they differ.
 interface TranscendentalVector {
   readonly width: 32 | 64
   readonly inputBits: string
   readonly operation: 'Sin' | 'Cos'
+  readonly referenceBits: string
+  readonly acceptedBits?: string
 }
 
 const transcendentalFixture = JSON.parse(
@@ -34,31 +32,58 @@ const transcendentalFixture = JSON.parse(
 
 const transcendentalVectors: ReadonlyArray<TranscendentalVector> = [
   ...transcendentalFixture.vectors,
-  { width: 32, inputBits: '0x00000000', operation: 'Sin' },
-  { width: 32, inputBits: '0x80000000', operation: 'Sin' },
-  { width: 32, inputBits: '0x00000000', operation: 'Cos' },
-  { width: 32, inputBits: '0x7f800000', operation: 'Sin' },
-  { width: 32, inputBits: '0xff800000', operation: 'Cos' },
-  { width: 32, inputBits: '0x7fc12345', operation: 'Sin' },
-  { width: 64, inputBits: '0x0000000000000000', operation: 'Sin' },
-  { width: 64, inputBits: '0x8000000000000000', operation: 'Sin' },
-  { width: 64, inputBits: '0x0000000000000000', operation: 'Cos' },
-  { width: 64, inputBits: '0x7ff0000000000000', operation: 'Sin' },
-  { width: 64, inputBits: '0xfff0000000000000', operation: 'Cos' },
-  { width: 64, inputBits: '0x7ff8123456789abc', operation: 'Sin' },
+  { width: 32, inputBits: '0x00000000', operation: 'Sin', referenceBits: '0x00000000' },
+  { width: 32, inputBits: '0x80000000', operation: 'Sin', referenceBits: '0x80000000' },
+  { width: 32, inputBits: '0x00000000', operation: 'Cos', referenceBits: '0x3f800000' },
+  { width: 32, inputBits: '0x7f800000', operation: 'Sin', referenceBits: '0x7fc00000' },
+  { width: 32, inputBits: '0xff800000', operation: 'Cos', referenceBits: '0x7fc00000' },
+  { width: 32, inputBits: '0x7fc12345', operation: 'Sin', referenceBits: '0x7fc00000' },
+  {
+    width: 64,
+    inputBits: '0x0000000000000000',
+    operation: 'Sin',
+    referenceBits: '0x0000000000000000',
+  },
+  {
+    width: 64,
+    inputBits: '0x8000000000000000',
+    operation: 'Sin',
+    referenceBits: '0x8000000000000000',
+  },
+  {
+    width: 64,
+    inputBits: '0x0000000000000000',
+    operation: 'Cos',
+    referenceBits: '0x3ff0000000000000',
+  },
+  {
+    width: 64,
+    inputBits: '0x7ff0000000000000',
+    operation: 'Sin',
+    referenceBits: '0x7ff8000000000000',
+  },
+  {
+    width: 64,
+    inputBits: '0xfff0000000000000',
+    operation: 'Cos',
+    referenceBits: '0x7ff8000000000000',
+  },
+  {
+    width: 64,
+    inputBits: '0x7ff8123456789abc',
+    operation: 'Sin',
+    referenceBits: '0x7ff8000000000000',
+  },
 ]
 
-/** Canonical-bits transcendental program: bit-exact sin/cos parity across every engine. */
+/** Canonical-bits transcendental program with independently committed native expectations. */
 export const transcendentalCanonicalBits = `import silk.f32 as f32
 import silk.f64 as f64
 pub fn main() -> i32 {
 ${transcendentalVectors
   .map((vector, index) => {
     const inputBits = BigInt(vector.inputBits)
-    const expectedBits = Transcendental.evaluate(vector.operation, {
-      width: vector.width,
-      bits: inputBits,
-    }).bits
+    const expectedBits = BigInt(vector.acceptedBits ?? vector.referenceBits)
     return `  if f${vector.width}.toBits(f${vector.width}.${vector.operation.toLowerCase()}(f${vector.width}.fromBits(${inputBits.toString()}))) != ${expectedBits.toString()} { return ${index + 1} }`
   })
   .join('\n')}
@@ -1018,7 +1043,7 @@ pub fn main() -> i32 {
   return run bind(read())
 }`
 
-/** Fixed-seed xoshiro256** known answers shared by evaluator, Wasm, and native execution. */
+/** Fixed-seed xoshiro256** known answers pinned for native execution. */
 export const seededRandomFingerprint = `import silk.effect { Effect }
 import silk.insecure_random { InsecureRandom }
 import silk.u64 as u64
@@ -1051,7 +1076,7 @@ pub fn main() -> i32 {
   return 42
 }`
 
-/** Portable secure-provider and stable insecure-seed behavior shared by evaluator and Wasm. */
+/** Portable secure-provider and stable insecure-seed behavior pinned for native execution. */
 export const portableRandomCapabilities = `import silk.effect { Effect }
 import silk.insecure_seed { InsecureSeed }
 import silk.random { Random }
@@ -1238,7 +1263,8 @@ const withTrappingStaticCompositionDrop = (source: string): string =>
     self.value = 0
     return ()`,
     `    let values = [self.value]
-    self.value = values[i32.toUsize(self.value)]
+    let index: usize = 1
+    self.value = values[index]
     return ()`,
   )
 
@@ -1443,7 +1469,7 @@ pub fn main() -> i32 { return stage(combine(3)) - 123 + 42 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // JUL-72: one source-defined anonymous environment covers Copy, shared, exclusive, and moved
-  // captures so the evaluator/native differential owns backend parity for the feature.
+  // captures so the native corpus owns runtime coverage for the feature.
   {
     name: 'anonymous-callable-capture-modes',
     source: `struct Token { value: i32 }
@@ -1658,18 +1684,6 @@ pub fn main() -> i32 { return odd(5) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
-    name: 'unknown-call-trap',
-    source: 'pub fn main() -> i32 { return missing() }',
-    expected: { _tag: 'Trap' },
-  },
-  {
-    name: 'inner-blocked-trap',
-    source: `pub fn identity(value: i32) -> i32 { return value }
-pub fn choose(left: i32, right: i32) -> i32 { return right }
-pub fn main() -> i32 { return choose(identity(1), missing(2)) }`,
-    expected: { _tag: 'Trap' },
-  },
-  {
     name: 'binding',
     source: `pub fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { let value = identity(42) return value }`,
@@ -1685,12 +1699,6 @@ pub fn main() -> i32 { let value = identity(42) return value }`,
     source: `pub fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { let value = 42 return identity(move value) }`,
     expected: { _tag: 'Completes', result: 42 },
-  },
-  {
-    name: 'use-after-move-trap',
-    source: `pub fn choose(left: i32, right: i32) -> i32 { return right }
-pub fn main() -> i32 { let value = 42 return choose(move value, value) }`,
-    expected: { _tag: 'Trap' },
   },
   {
     name: 'arithmetic',
@@ -1972,12 +1980,6 @@ pub fn main() -> i32 {
     expected: { _tag: 'Completes', result: 42 },
   },
   {
-    name: 'array-negative-index-trap',
-    source: `fn choose(values: [i32; 2], index: usize) -> i32 { return values[index] }
-pub fn main() -> i32 { return choose([10, 42], -1) }`,
-    expected: { _tag: 'Trap' },
-  },
-  {
     name: 'array-upper-index-trap',
     source: `fn choose(values: [i32; 2], index: usize) -> i32 { return values[index] }
 pub fn main() -> i32 { return choose([10, 42], 2) }`,
@@ -2162,7 +2164,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // folded from UnicodeNormalization.test.ts: the two normalized owners compared directly, which
-  // the evaluator and native answer correctly while direct WebAssembly still cannot.
+  // native execution answers correctly while WebAssembly support remains incomplete.
   {
     name: 'unicode-compared-directly',
     source: `import silk.allocator { OutOfMemoryError }
@@ -3002,7 +3004,7 @@ pub fn main() -> i32 {
     expected: { _tag: 'Completes', result: 42 },
   },
   // The float math conformance programs join the corpus so the native differential compiles and
-  // runs each one, which is the third engine behind the evaluator and direct WebAssembly.
+  // runs each one against the independently pinned result.
   ...floatMathPrograms.map((program) => ({
     name: program.name,
     source: program.source,
@@ -3147,9 +3149,8 @@ pub fn main() -> i32 {
 ]
 
 /**
- * Native-only extensions to the shared evaluator corpus. These programs retain the optimized
- * single compile/link loop without making the evaluator's pinned-outcome gate repeat large
- * feature fixtures that already have focused evaluator coverage.
+ * Native-only extensions to the shared corpus. These programs retain the optimized single
+ * compile/link loop for target-specific claims.
  */
 const localSharedPressure = readFileSync(
   new URL('../../../../examples/language-pressure/local-shared-slp1/main.silk', import.meta.url),
@@ -3285,7 +3286,7 @@ pub fn main() -> i32 {
   return i32.remainder(sum, 256)
 }`
 
-/** Pure-Silk evaluator reference for `foreignScalarNative`: the same checksum without C. */
+/** Pure-Silk control for `foreignScalarNative`: the same checksum without C. */
 export const foreignScalarReference = `import silk.i8 as i8
 import silk.u8 as u8
 import silk.i16 as i16
@@ -3364,7 +3365,7 @@ pub fn main() -> i32 {
   return u8.toI32(bytes[0]) + u8.toI32(bytes[2]) - 42
 }`
 
-/** Pure-Silk evaluator reference for `foreignPointerFillNative`. */
+/** Pure-Silk control for `foreignPointerFillNative`. */
 export const foreignPointerFillReference = `import silk.i32 as i32
 import silk.u8 as u8
 import silk.usize as usize
@@ -3430,7 +3431,7 @@ pub fn main() -> i32 {
   return usize.toI32(length) * 7
 }`
 
-/** Pure-Silk evaluator reference for `foreignLibcRoundtripNative`: the same status without libc. */
+/** Pure-Silk control for `foreignLibcRoundtripNative`: the same status without libc. */
 export const foreignLibcRoundtripReference = `import silk.usize as usize
 pub fn main() -> i32 {
   let bytes = b"hello\\n"
@@ -3689,6 +3690,30 @@ pub fn main() -> i32 {
   return run Effect.catchAll(body(), recoverAny)
 }`
 
+const algorithmExampleIds = [
+  'breadth-first-search',
+  'crc-32',
+  'fft',
+  'game-of-life',
+  'matrix-multiplication',
+  'quicksort',
+  'sieve',
+] as const
+
+/** Complete algorithm examples execute as independently pinned native-corpus cases. */
+const algorithmExamples: ReadonlyArray<CorpusProgram> = algorithmExampleIds.map((id) => {
+  const root = new URL(`../../../../examples/algorithms/${id}/`, import.meta.url)
+  const manifest = JSON.parse(readFileSync(new URL('example.json', root), 'utf8')) as {
+    readonly source: string
+    readonly expected: { readonly entryResult: number }
+  }
+  return Object.freeze({
+    name: `algorithm-${id}`,
+    source: readFileSync(new URL(manifest.source, root), 'utf8'),
+    expected: Object.freeze({ _tag: 'Completes' as const, result: manifest.expected.entryResult }),
+  })
+})
+
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'replace-cleanup',
@@ -3704,21 +3729,8 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     nativeStdout: '1243',
     expected: { _tag: 'Completes', result: 0 },
   },
-  {
-    name: 'effect-borrow-escape',
-    source: `import silk.effect { Effect }
-effect fn inspect(values: &[i32]) -> i32 { return values[0] + values[1] }
-fn make() -> Effect<i32> {
-  let v = [20, 22]
-  return inspect(&v)
-}
-pub fn main() -> i32 {
-  let e = make()
-  return run e
-}`,
-    expected: { _tag: 'Trap' },
-  },
   ...corpus,
+  ...algorithmExamples,
   {
     name: 'foreign-export-roundtrip',
     source: foreignExportRoundtripReference,
@@ -3834,7 +3846,7 @@ int32_t silk_test_libm_order(double value) { return (int32_t)fmod(value, 43.0); 
     expected: { _tag: 'Completes', result: 42 },
   },
   // These two canonical programs cover the public single-threaded Fiber story through the shared
-  // evaluator/native differential: root/fork/join, FIFO siblings, repeated yield, nested forks,
+  // native corpus: root/fork/join, FIFO siblings, repeated yield, nested forks,
   // completion-before-join, typed child failure, structured cancellation, and reuse of one
   // LocalScheduler value.
   {

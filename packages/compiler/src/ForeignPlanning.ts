@@ -2,10 +2,9 @@
  * Executable-wide planning checks for native exports (`export "C"`) over `Mir.Module`, run at the
  * same gates as `ForeignAvailability.select` before any backend is constructed: the closure-wide
  * symbol map over imports and exports, the non-native rejection, and the post-MIR suspension
- * restriction. The evaluator never calls it; exports are inert there.
+ * restriction.
  */
 import * as Diagnostic from './Diagnostic.js'
-import type * as Intrinsic from './Intrinsic.js'
 import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -18,12 +17,11 @@ import type * as Target from './Target.js'
  */
 export const check = (
   program: Mir.Module,
-  executionTarget: Intrinsic.ExecutionTarget,
   target: Target.Target,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   if (program.foreignExports.length === 0 && program.foreignStatics.length === 0)
     return Object.freeze([])
-  const surface = executionTarget === 'LLVM' ? target.id : executionTarget
+  const surface = target.id
   const claimed = new Map<string, SourceSpan.SourceSpan>(
     program.foreignCalls.map((call) => [call.symbol, call.declarationSpan]),
   )

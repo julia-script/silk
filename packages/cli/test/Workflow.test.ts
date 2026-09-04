@@ -14,7 +14,32 @@ import * as Workflow from '../src/Workflow.js'
 import * as CompilerHost from './CompilerHost.js'
 import * as Timeouts from './timeouts.js'
 
+declare const WebAssembly: {
+  readonly Module: new (bytes: Uint8Array) => object
+  readonly Instance: new (module: object) => {
+    readonly exports: Readonly<Record<string, unknown>>
+  }
+}
+
 const source = 'pub fn main() -> i32 { return 42 }'
+
+const llvmWasmRuntimeSource = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.vector { Vector }
+
+effect fn program() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut values = Vector.make<i32>()
+  let appended = run Vector.append<i32>(&mut values, 41)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let one = run Effect.suspend(effect { return 1 })
+  if !Intrinsic.stringEqualsExact("silk", "silk") { return 1 }
+  return Vector.get<i32>(&values, 0) + one
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return 2 }
+
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
 const defaultClang = (): string => {
   if (existsSync('/opt/homebrew/opt/llvm/bin/clang')) return '/opt/homebrew/opt/llvm/bin/clang'
@@ -24,6 +49,8 @@ const defaultClang = (): string => {
 const wasmClang = Effect.runSync(
   Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
 )
+
+const isI32Main = (value: unknown): value is () => number => typeof value === 'function'
 
 const writeFile = Effect.fnUntraced(function* (path: string, text: string) {
   const fileSystem = yield* FileSystem.FileSystem
@@ -244,7 +271,7 @@ it.effect(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const root = yield* fileSystem.makeTempDirectoryScoped()
-      yield* makeProject(root)
+      yield* makeProject(root, llvmWasmRuntimeSource)
       yield* fileSystem.writeFileString(
         `${root}/silk.toml`,
         '[package]\nname = "hello"\nversion = "0.1.0"\nroot = "src/Main.silk"\n\n[build]\nbackend = "llvm"\ntargets = ["host", "wasm32-unknown-unknown"]\n',
@@ -259,6 +286,14 @@ it.effect(
         yield* fileSystem.exists(`${root}/build/llvm/wasm32-unknown-unknown/debug/hello.wasm`),
         true,
       )
+      const wasmBytes = yield* fileSystem.readFile(
+        `${root}/build/llvm/wasm32-unknown-unknown/debug/hello.wasm`,
+      )
+      const wasmModule = new WebAssembly.Module(Uint8Array.from(wasmBytes))
+      const wasmInstance = new WebAssembly.Instance(wasmModule)
+      const wasmMain = wasmInstance.exports['silk_main']
+      assert.isTrue(isI32Main(wasmMain))
+      if (isI32Main(wasmMain)) assert.strictEqual(wasmMain(), 42)
       assert.strictEqual(
         yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/hello.h`),
         false,
@@ -332,7 +367,11 @@ it.effect('preflights incompatible batches before creating output', () =>
     const fileSystem = yield* FileSystem.FileSystem
     const root = yield* fileSystem.makeTempDirectoryScoped()
     yield* makeProject(root)
-    const status = yield* Workflow.build({ ...options(root), backend: 'wasm', targets: ['host'] })
+    const status = yield* Workflow.build({
+      ...options(root),
+      backend: 'not-a-backend',
+      targets: ['host'],
+    })
     assert.strictEqual(status, 2)
     assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
   }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
@@ -351,7 +390,7 @@ it.effect('checks every configured target without creating output and keeps run 
       0,
     )
     assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
-    assert.strictEqual(yield* Workflow.run({ ...options(root), backend: 'wasm' }), 2)
+    assert.strictEqual(yield* Workflow.run({ ...options(root), backend: 'not-a-backend' }), 2)
     assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
   }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )

@@ -405,7 +405,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
     () =>
       ToolchainIntegrity.validateTarget(
         distribution,
-        IntrinsicAvailability.backendTarget(backend.id),
+        target,
         program.intrinsics,
         closure.sources.keys(),
       ),

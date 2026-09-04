@@ -470,7 +470,7 @@ ownership diagnostics identify double cleanup, use after move, or an invalid imp
 When a typed failure reaches the generated entry boundary, its runtime report includes the failure
 identity and available logical Effect trace after cleanup has completed.
 
-**Implementation:** The evaluator returns an explicit causal history and source-level logical path
+**Implementation:** Runtime reporting retains an explicit causal history and source-level logical path
 on terminal outcomes. Generated entry cleanup still releases the owned payload exactly once before
 the failure becomes a host outcome. Physical entry adapters and coroutine-resume helpers are not
 logical source frames.
@@ -523,8 +523,7 @@ failure; stable diagnostic and process-status codes remain to be assigned.
 **Current compiler:** Aligned. Current Effect combinators and acceptance tests treat arithmetic
 traps as abnormal termination that bypasses typed handlers, finalizers, and Drop cleanup.
 
-**Evidence:** [trap boundary specification](../../../../openspec/specs/bootstrap-flow-functions/spec.md),
-[finalization acceptance tests](../../../../packages/compiler/test/EnsuringAcceptance.test.ts).
+**Evidence:** [trap boundary specification](../../../../openspec/specs/bootstrap-flow-functions/spec.md).
 
 Typed-failure values, propagation, recovery, cleanup, diagnostic context, and the trap boundary are
 now defined. Requirements and service provision remain a separate contract area.

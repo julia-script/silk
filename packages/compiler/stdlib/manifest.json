@@ -234,49 +234,77 @@
     "module": "silk/os_child_process",
     "path": "silk/os_child_process.silk",
     "layer": "target-provider",
-    "providerTargets": ["Evaluator", "LLVM"],
+    "providerTargets": [
+      "aarch64-apple-darwin",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-gnu"
+    ],
     "namespace": "OsChildProcess"
   },
   {
     "module": "silk/os_filesystem",
     "path": "silk/os_filesystem.silk",
     "layer": "target-provider",
-    "providerTargets": ["Evaluator", "LLVM"],
+    "providerTargets": [
+      "aarch64-apple-darwin",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-gnu"
+    ],
     "namespace": "OsFileSystem"
   },
   {
     "module": "silk/os_host_input",
     "path": "silk/os_host_input.silk",
     "layer": "target-provider",
-    "providerTargets": ["Evaluator", "LLVM"],
+    "providerTargets": [
+      "aarch64-apple-darwin",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-gnu"
+    ],
     "namespace": "OsHostInput"
   },
   {
     "module": "silk/os_monotonic_clock",
     "path": "silk/os_monotonic_clock.silk",
     "layer": "target-provider",
-    "providerTargets": ["Evaluator", "LLVM"],
+    "providerTargets": [
+      "aarch64-apple-darwin",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-gnu"
+    ],
     "namespace": "OsMonotonicClock"
   },
   {
     "module": "silk/os_random",
     "path": "silk/os_random.silk",
     "layer": "target-provider",
-    "providerTargets": ["Evaluator", "LLVM"],
+    "providerTargets": [
+      "aarch64-apple-darwin",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-gnu"
+    ],
     "namespace": "OsRandom"
   },
   {
     "module": "silk/os_standard_input",
     "path": "silk/os_standard_input.silk",
     "layer": "target-provider",
-    "providerTargets": ["Evaluator", "LLVM"],
+    "providerTargets": [
+      "aarch64-apple-darwin",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-gnu"
+    ],
     "namespace": "OsStandardInput"
   },
   {
     "module": "silk/os_system_clock",
     "path": "silk/os_system_clock.silk",
     "layer": "target-provider",
-    "providerTargets": ["Evaluator", "LLVM"],
+    "providerTargets": [
+      "aarch64-apple-darwin",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-gnu"
+    ],
     "namespace": "OsSystemClock"
   },
   {

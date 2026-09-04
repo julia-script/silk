@@ -14,8 +14,8 @@
     "allocator service",
     "typed allocation failure",
     "structured loops",
-    "cross-engine cleanup"
+    "target-neutral cleanup"
   ],
-  "targets": ["evaluation", "native", "wasm"],
+  "targets": ["native", "llvm-wasm"],
   "nonGoals": ["compiler replacement", "parser port", "continuous self-hosting"]
 }

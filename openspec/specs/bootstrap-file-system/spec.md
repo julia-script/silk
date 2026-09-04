@@ -216,13 +216,13 @@ MUST NOT add recursive creation, recursive removal, or parent-writing primitives
 
 Equivalent programs supplied with conforming providers SHALL preserve service call order, success
 values, portable failures, byte ownership, directory ordering, and provider mutations through MIR
-evaluation, native LLVM execution, and direct Wasm. A program that does not use `FileSystem`, and a
-direct-Wasm program supplied with a pure user-defined implementation, MUST NOT require OS filesystem
+structure, native LLVM execution, and LLVM-generated WebAssembly. A program that does not use `FileSystem`, and an
+LLVM-generated WebAssembly program supplied with a pure user-defined implementation, MUST NOT require OS filesystem
 imports or runtime support.
 
-#### Scenario: Run a pure provider on direct Wasm
+#### Scenario: Run a pure provider on LLVM-generated WebAssembly
 
-- **WHEN** a direct-Wasm program supplies its own ordinary `FileSystem` and reaches no target-specific intrinsic
+- **WHEN** a LLVM-generated WebAssembly program supplies its own ordinary `FileSystem` and reaches no target-specific intrinsic
 - **THEN** it executes the portable service with no OS filesystem imports
 
 #### Scenario: Emit a program with no filesystem use

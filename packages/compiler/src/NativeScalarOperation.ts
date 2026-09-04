@@ -33,7 +33,7 @@ type Operation = Extract<
 
 /**
  * Branches to the shared trap block when a float would truncate outside the integer range or is
- * NaN, matching the deterministic evaluator trap instead of LLVM's poison on `fptosi`/`fptoui`.
+ * NaN instead of accepting LLVM poison from `fptosi`/`fptoui`.
  */
 export const emitFloatToIntegerGuard = Effect.fnUntraced(function* (
   context: Context,
@@ -215,7 +215,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       }
       if (operation.operation === 'Sqrt') {
         // IEEE-754 mandates a correctly rounded square root, so `llvm.sqrt` is
-        // bit-exact on every conforming target and matches the evaluator exactly.
+        // bit-exact on every conforming target.
         const floatType = source.spelling === 'f32' ? f32 : f64
         const signature = Object.freeze({
           returnType: floatType,

@@ -153,7 +153,7 @@ identities merely because their public callable signatures match.
 
 - **WHEN** a non-effect `fn` declares a `once fn(i32) -> i32` parameter and calls it, and `main`
   passes a named function
-- **THEN** the call lowers and the evaluator, LLVM, and Wasm agree on its result
+- **THEN** the call lowers and the LLVM native and WebAssembly artifacts agree on its result
 
 #### Scenario: Call through a function-typed parameter of a generic function
 
@@ -298,12 +298,12 @@ invocation, and a moved affine receiver makes the callable take-once and is drop
 the callable is never invoked. Application SHALL order operands by parameter ordinal: captures at
 their declared ordinal, supplied arguments filling the remaining ordinals in order. Bound method
 values SHALL monomorphize, lower, and execute exactly as trailing sections of the same member do on
-the evaluator and on every compiled backend.
+every compiled LLVM target.
 
 #### Scenario: Apply a bound method
 
 - **WHEN** `let plusForty = counter.add` is applied as `plusForty(2)` with `fn add(self: &Self, adjustment: i32) -> i32`
-- **THEN** the invocation calls `Counter.add(&counter, 2)` on the evaluator, LLVM, and Wasm, with the supplied argument placed after the captured receiver
+- **THEN** the invocation calls `Counter.add(&counter, 2)` on the LLVM native and WebAssembly artifacts, with the supplied argument placed after the captured receiver
 
 #### Scenario: Bind a receiver-only method
 

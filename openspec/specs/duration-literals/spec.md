@@ -124,7 +124,7 @@ and exact value to importing modules.
 
 #### Scenario: Preserve engine parity without duration runtime support
 
-- **WHEN** a program returns or compares a duration literal under evaluation, WebAssembly, or native execution
+- **WHEN** a program returns or compares a duration literal under WebAssembly or native execution
 - **THEN** every engine observes the same ordinary `u64` value and behavior
 
 ### Requirement: Formatting preserves authored duration spelling

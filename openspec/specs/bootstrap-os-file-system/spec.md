@@ -22,7 +22,7 @@ close obligation to the caller.
 #### Scenario: Reject copying a handle
 
 - **WHEN** source attempts to copy or duplicate an `OsHandle`
-- **THEN** ownership rejects the operation before evaluation or emission
+- **THEN** ownership rejects the operation before emission
 
 ### Requirement: OS intrinsics report low-level outcomes without library values
 
@@ -126,24 +126,19 @@ destination partially changed; no transactional rollback or atomic replacement i
 - **WHEN** a write fails after the host has accepted an earlier chunk
 - **THEN** the provider reports `FileError` and callers make no assumption about the destination's resulting contents
 
-### Requirement: OS support is native-only and injected at the evaluator boundary
+### Requirement: OS support is native-only
 
-OS intrinsics SHALL be available to evaluation only when an OS host adapter is explicitly supplied
-and to supported native LLVM targets through reachable runtime support. They SHALL be unavailable to
-direct Wasm. Browser-capable compiler core modules MUST NOT import Node or other operating-system
+OS intrinsics SHALL be available to supported native LLVM targets through reachable runtime support.
+They SHALL be unavailable to LLVM-generated WebAssembly. Browser-capable compiler core modules MUST
+NOT import Node or other operating-system
 filesystem APIs merely because `OsFileSystem` source is packaged.
-
-#### Scenario: Evaluate with an injected OS host
-
-- **WHEN** evaluation reaches an OS intrinsic with a configured host adapter
-- **THEN** the adapter performs the requested low-level operation and returns the normalized protocol result
 
 #### Scenario: Keep portable Wasm clean
 
-- **WHEN** a direct-Wasm program either uses no filesystem or provides its own pure `FileSystem`
+- **WHEN** a LLVM-generated WebAssembly program either uses no filesystem or provides its own pure `FileSystem`
 - **THEN** the emitted module contains no OS filesystem imports and does not require `OsFileSystem`
 
-#### Scenario: Reject reachable OsFileSystem on direct Wasm
+#### Scenario: Reject reachable OsFileSystem on LLVM-generated WebAssembly
 
-- **WHEN** executable closure reaches an OS intrinsic through `OsFileSystem` for direct Wasm
+- **WHEN** executable closure reaches an OS intrinsic through `OsFileSystem` for LLVM-generated WebAssembly
 - **THEN** generic target-availability validation reports the intrinsic as unavailable before emission

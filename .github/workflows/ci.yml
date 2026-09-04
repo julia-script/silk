@@ -170,7 +170,7 @@ jobs:
       - run: >
           SILK_NATIVE_CORPUS_CASE=secure-random-provider
           pnpm --filter @silklang/compiler exec vitest run test/DriverNativeAcceptance.test.ts
-          -t 'keeps the interpreter and native execution in agreement across the corpus'
+          -t 'runs the native corpus case secure-random-provider'
           --maxWorkers=1
 
   webcontainer-browser:

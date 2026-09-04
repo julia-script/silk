@@ -202,11 +202,7 @@ function discoverAndLower(
   const foreignDiagnostics =
     backend === undefined || targetSelection._tag === 'Unavailable'
       ? Object.freeze([])
-      : ForeignAvailability.select(
-          instances.foreignCalls,
-          IntrinsicAvailability.backendTarget(backend.id),
-          targetSelection.target,
-        )
+      : ForeignAvailability.select(instances.foreignCalls, targetSelection.target)
   if (foreignDiagnostics.length > 0)
     return Object.freeze({
       _tag: 'Rejected',
@@ -261,10 +257,7 @@ function discoverAndLower(
               reason: { _tag: 'UnsupportedTarget', target: selection.target.id },
             }),
           })
-        const availability = IntrinsicAvailability.select(
-          instances.intrinsics,
-          IntrinsicAvailability.backendTarget(backend.id),
-        )
+        const availability = IntrinsicAvailability.select(instances.intrinsics, selection.target)
         if (availability._tag === 'Unavailable')
           return Object.freeze({
             _tag: 'IntrinsicUnavailable' as const,
@@ -380,11 +373,7 @@ function discoverAndLower(
   if (backend !== undefined) {
     if (targetLayout._tag !== 'Available' || program === undefined)
       throw new RangeError('Driver lowering reached an unavailable target after its gates')
-    const planning = ForeignPlanning.check(
-      program,
-      IntrinsicAvailability.backendTarget(backend.id),
-      targetLayout.target,
-    )
+    const planning = ForeignPlanning.check(program, targetLayout.target)
     if (planning.length > 0)
       return Object.freeze({
         _tag: 'Rejected',

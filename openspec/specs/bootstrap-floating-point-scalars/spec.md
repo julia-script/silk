@@ -36,19 +36,19 @@ Silk SHALL provide distinct lowercase `f32` and `f64` types. Decimal fractions a
 
 ### Requirement: Floating operations have engine parity
 
-HIR, MIR, layout, evaluator, LLVM, and direct WebAssembly SHALL support every admitted float operation. Exact bit parity SHALL apply where specified; NaN arithmetic SHALL compare specified classification/order behavior when payload is unspecified.
+HIR, MIR, layout, LLVM native and WebAssembly artifacts SHALL support every admitted float operation. Exact bit parity SHALL apply where specified; NaN arithmetic SHALL compare specified classification/order behavior when payload is unspecified.
 
 #### Scenario: Compare float engines
 
 - **WHEN** an admitted finite operation or representation round trip executes
-- **THEN** evaluator, native, and WebAssembly agree on the specified value or bits
+- **THEN** native and WebAssembly agree on the specified value or bits
 
 ### Requirement: Floating scalars provide deterministic sine and cosine
 
 `f32` and `f64` SHALL each provide width-preserving `sin` and `cos` operations backed by one
 canonical approximation contract rather than target host `libm` behavior. For finite inputs the
 result SHALL be within four units in the last place of the correctly rounded mathematical value,
-and evaluator, native, and WebAssembly execution SHALL return identical result bits.
+and native and WebAssembly execution SHALL return identical result bits.
 
 #### Scenario: Preserve trigonometric width
 
@@ -76,7 +76,7 @@ and evaluator, native, and WebAssembly execution SHALL return identical result b
 `trunc`, `min`, and `max` operations. Each SHALL be defined by sign-bit and exponent manipulation,
 or by comparison, over operations this specification already admits. Each is therefore exact by
 construction, needs no approximation contract, and SHALL NOT reach the platform `libm` or any LLVM
-math intrinsic. Evaluator, native, and WebAssembly execution SHALL return identical result bits.
+math intrinsic. Native and WebAssembly execution SHALL return identical result bits.
 
 `round` SHALL round a half away from zero, which is the reading the name carries in C and Rust; the
 ties-to-even form is a distinct operation this specification does not yet admit. Signed zero SHALL
@@ -120,14 +120,14 @@ than a signed NaN.
 ### Requirement: Floating scalars provide a correctly rounded square root
 
 `f32` and `f64` SHALL each provide a width-preserving `sqrt` operation returning the correctly
-rounded mathematical square root, with identical result bits on evaluator, native, and WebAssembly
+rounded mathematical square root, with identical result bits on native and WebAssembly
 execution.
 
 `sqrt` is the sole exception to the prohibition on lowering a floating operation to an LLVM math
 intrinsic, and the exception rests on the standard rather than on convenience. IEEE-754 mandates
 that a square root be correctly rounded, so for a given operand exactly one result is admissible
 and every conforming implementation must produce it: `llvm.sqrt`, the WebAssembly `f64.sqrt` and
-`f32.sqrt` opcodes, and the evaluator's exact integer root all agree because the standard requires
+native and WebAssembly `f32.sqrt` opcodes agree because the standard requires
 them to, not because the hosts happen to match. Engine parity is therefore preserved by
 construction. No comparable mandate covers `pow` or `log`, whose results are implementation-defined
 and which SHALL continue to reach neither an LLVM math intrinsic nor the platform `libm`.
@@ -182,11 +182,11 @@ changing their deterministic semantics or engine parity.
 #### Scenario: Preserve bit conversion
 
 - **WHEN** a source wrapper converts an `f32` to and from its bit representation
-- **THEN** evaluation, native LLVM, and direct WebAssembly preserve the same bits through the concrete intrinsics
+- **THEN** native LLVM and LLVM-generated WebAssembly execution preserve the same bits through the concrete intrinsics
 
 ### Requirement: Float remainder is exact IEEE fmod on every executor
 
-Floating-point `%` SHALL produce the exact IEEE-754 remainder (fmod semantics: the result of `x - n*y` where `n` is `x/y` truncated toward zero, computed without intermediate rounding or overflow) for both `f32` and `f64`, identically on the interpreter, the wasm backend, and the native backend.
+Floating-point `%` SHALL produce the exact IEEE-754 remainder (fmod semantics: the result of `x - n*y` where `n` is `x/y` truncated toward zero, computed without intermediate rounding or overflow) for both `f32` and `f64`, identically in LLVM-generated native and WebAssembly artifacts.
 
 #### Scenario: Extreme-magnitude operands do not overflow
 
@@ -195,5 +195,5 @@ Floating-point `%` SHALL produce the exact IEEE-754 remainder (fmod semantics: t
 
 #### Scenario: Ordinary operands agree bit-for-bit
 
-- **WHEN** the same float remainder expression is evaluated on the interpreter, the wasm backend, and the native backend
+- **WHEN** the same float remainder expression runs in LLVM-generated native and WebAssembly artifacts
 - **THEN** all three produce the identical bit pattern

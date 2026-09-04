@@ -129,8 +129,8 @@ non-empty. A move-only key or value SHALL be usable without being copied.
 
 ### Requirement: No engine contains a hash operation
 
-Hashing SHALL be ordinary Silk source. Semantic analysis, the HIR, the MIR, the evaluator, the
-native backend, and the WebAssembly backend MUST NOT contain any operation that computes a hash,
+Hashing SHALL be ordinary Silk source. Semantic analysis, the HIR, the MIR, and LLVM lowering MUST
+NOT contain any operation that computes a hash,
 recognize a hashed collection by spelling, or treat `HashKey` as anything other than an ordinary
 interface. Every hash a program computes SHALL be a function some witness declared in Silk.
 
@@ -148,10 +148,9 @@ interface. Every hash a program computes SHALL be a function some witness declar
 
 `HashMap` and `HashSet` SHALL be implemented in ordinary Silk over the allocator requirement and
 typed storage, using the same substrate `Vector` uses. They MUST NOT require a new compiler
-primitive, and their behavior SHALL be identical across the bootstrap evaluator, the native backend,
-and the WebAssembly backend.
+primitive, and their behavior SHALL be identical in LLVM-generated native and WebAssembly artifacts.
 
 #### Scenario: Identical behavior across engines
 
-- **WHEN** one program using hashed collections is run under the evaluator, the native backend, and the WebAssembly backend
-- **THEN** all three produce the same result and the same iteration order
+- **WHEN** one program using hashed collections runs in LLVM-generated native and WebAssembly artifacts
+- **THEN** both produce the same result and the same iteration order

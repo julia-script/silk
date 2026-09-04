@@ -9,7 +9,6 @@ import * as MirVerification from '../src/MirVerification.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
-import { frameRetainedExecutionCompletion } from './support/corpus.js'
 import * as Driver from './support/TestDriver.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -144,47 +143,5 @@ it.effect('propagates a failure after a resumed retry into its native handler', 
     const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
     assert.strictEqual(run.signal, null, run.stderr)
     assert.strictEqual(run.status, 7, run.stderr)
-  }),
-)
-
-it.effect('releases frame-retained executions through one out-of-line native helper', () =>
-  Effect.gen(function* () {
-    const analysis = yield* Analysis.ofSourceRealized(
-      'suspension-native/frame-retained-execution',
-      ascii(frameRetainedExecutionCompletion),
-      'aarch64-apple-darwin',
-    )
-    assert.deepEqual(Analysis.diagnostics(analysis), [])
-    assert.isTrue(
-      (Analysis.loweredMir(analysis).coroutineFrames?.entries ?? []).some((frame) =>
-        frame.states.some((state) =>
-          state.payload.some(
-            (field) =>
-              field.access._tag === 'AffineTransfer' &&
-              field.access.cleanup._tag === 'ExecutionCleanup',
-          ),
-        ),
-      ),
-      'the suspension frame must retain the Execution handle',
-    )
-    const evaluated = Analysis.evaluate(analysis)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag !== 'Completed') return
-    assert.deepEqual(evaluated.result, { _tag: 'IntegerValue', type: 'i32', value: 0n })
-    assert.lengthOf(
-      evaluated.trace.filter((event) => event._tag === 'AllocationAcquire'),
-      1,
-    )
-    assert.lengthOf(
-      evaluated.trace.filter((event) => event._tag === 'AllocationRelease'),
-      1,
-    )
-    // Emission is finite because every ExecutionCleanup calls the single helper; the helper's own
-    // frame cleanup reaches the nested Execution through a call to itself, not another expansion.
-    const artifact = yield* Analysis.codegen(analysis, { mode: 'release' })
-    const definitions = artifact.ir.split('define hidden void @silk_execution_release(ptr')
-    assert.lengthOf(definitions, 2)
-    const helperBody = (definitions.at(1) ?? '').split('\n}\n').at(0) ?? ''
-    assert.include(helperBody, 'call void @silk_execution_release(ptr')
   }),
 )

@@ -160,14 +160,12 @@ report their ordinary diagnostics at the ordinary spans.
 `Conformance` and the shipped `Bound` candidate converge immediately on one
 `finishInterfaceOperationCall`, producing the same `ResolvedInterfaceOperation` reference and the
 same `InterfaceOperationCall` node, and the receiver is adapted by the one existing
-`synthesizeReceiver`. No production line below resolution changes, so a backend cannot disagree with
-the evaluator for a reason this change introduced, and the existing applied-interface corpus entry
-already runs an effectful interface operation natively.
+`synthesizeReceiver`. No production line below resolution changes, and the existing
+applied-interface corpus entry already runs an effectful interface operation natively.
 
-The whole feature is therefore falsifiable at the analysis and evaluator tier, which is where its
-coverage lives. Adding a differential-corpus program would buy a native compile-link-execute per run
-for a claim the diff cannot break, against the repository rule that a native leg is for genuinely
-target-specific lowering.
+The whole feature is therefore falsifiable at the structured analysis tier, which is where its
+focused coverage lives. The existing shared native-corpus program remains independent runtime
+evidence without adding a per-feature compile-link-execute leg for a resolution-only change.
 
 ## Risks / Trade-offs
 

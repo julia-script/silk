@@ -17,6 +17,6 @@
     "mutable indexing",
     "nested while loops"
   ],
-  "targets": ["evaluation", "native", "wasm"],
+  "targets": ["native"],
   "blockers": []
 }

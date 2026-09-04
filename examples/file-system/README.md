@@ -10,8 +10,8 @@ confined `OsFileSystem`; a browser or Wasm application can provide a virtual fil
 changing the consumer operations. Importing `silk.filesystem` never selects a platform or an
 ambient current directory.
 
-This source is a standalone acceptance fixture rather than a manifest-based CLI project. Compile
-and execute its evaluator and direct-WebAssembly checks from the repository root with:
+This source is a standalone acceptance fixture rather than a manifest-based CLI project. Run its
+structured compiler checks from the repository root with:
 
 ```sh
 pnpm --filter @silklang/compiler exec vitest run test/FileSystemAcceptance.test.ts

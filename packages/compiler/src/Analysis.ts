@@ -1191,7 +1191,7 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
   }
   const availability = IntrinsicAvailability.select(
     self.instances.intrinsics,
-    IntrinsicAvailability.backendTarget(selected.id),
+    self.mir.value.layout.target,
   )
   if (availability._tag === 'Unavailable') {
     return yield* new CodegenUnavailable({
@@ -1205,7 +1205,6 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
     self.target._tag === 'Resolved'
       ? ForeignAvailability.select(
           self.instances.foreignCalls,
-          IntrinsicAvailability.backendTarget(selected.id),
           self.target.target,
           self.mir.value.foreignStatics,
           ForeignAvailability.callbackAddresses(self.mir.value),
@@ -1220,11 +1219,7 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
       resolutionFailures: self.closure.resolutionFailures,
     })
   }
-  const planning = ForeignPlanning.check(
-    self.mir.value,
-    IntrinsicAvailability.backendTarget(selected.id),
-    self.mir.value.layout.target,
-  )
+  const planning = ForeignPlanning.check(self.mir.value, self.mir.value.layout.target)
   if (planning.length > 0) {
     return yield* new CodegenUnavailable({
       operation: 'Analysis.codegen',

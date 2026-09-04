@@ -114,15 +114,6 @@ The external toolchain boundary SHALL finalize LLVM bitcode planned for `wasm32-
 - **WHEN** pinned Clang cannot finalize the Wasm module
 - **THEN** the outcome contains the exact structured invocation and retained failure output without a partial destination
 
-### Requirement: Direct WebAssembly finalization bypasses the external toolchain
-
-When the selected backend artifact already contains validated final WebAssembly bytes, durable finalization SHALL atomically write those bytes and MUST NOT invoke Clang or any linker.
-
-#### Scenario: Commit direct Wasm bytes
-
-- **WHEN** backend `wasm` returns a valid final module artifact
-- **THEN** those bytes are committed at the requested destination with zero external-tool invocations
-
 ### Requirement: Finalization preserves stream requirements
 
 Native finalization SHALL connect an explicit process-stream provider. WebAssembly finalization SHALL retain and expose the required host import in inspection data. Neither path SHALL add an implicit Logger or console dependency.

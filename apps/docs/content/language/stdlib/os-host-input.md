@@ -23,8 +23,8 @@ also requires an allocator.
 
 ## Gotchas
 
-Reachable OS host-input operations are native-only. Direct WebAssembly compilation rejects them
-instead of inventing process-global imports; evaluator execution requires an injected adapter.
+Reachable OS host-input operations are native-only. LLVM-to-WebAssembly compilation rejects them
+instead of inventing process-global imports.
 
 ## Examples
 

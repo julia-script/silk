@@ -1,25 +1,17 @@
 import { assert, it } from '@effect/vitest'
-import * as Effect from 'effect/Effect'
-import * as Analysis from '../src/Analysis.js'
 import type * as Elaboration from '../src/Elaboration.js'
 import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Match from '../src/Match.js'
-import * as MirEncoding from '../src/MirEncoding.js'
-import * as MirVerification from '../src/MirVerification.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
 import { elaborate, ownership } from './support/elaborate.js'
-import * as Projections from './support/projections.js'
 import { raise } from './support/raise.js'
 
 const analyze = (id: string, source: string): Elaboration.Result =>
   elaborate(Parser.parse(Lexer.lex(SourceFile.make(id, new TextEncoder().encode(source)))))
-
-const ascii = (value: string): Uint8Array =>
-  Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const returnedMatch = (
   result: Elaboration.Result,
@@ -434,54 +426,6 @@ pub fn inspect(value: Point | i32) -> i32 {
   assert.strictEqual(statement.taken[0]?._tag, 'ReturnStatement')
 })
 
-it.effect('lowers let destructuring and if-let through the shared match operation', () =>
-  Effect.gen(function* () {
-    const self = yield* Analysis.ofSourceRealized(
-      'statement-pattern-runtime',
-      ascii(`pub struct Point { x: i32 y: i32 }
-pub struct Pair { point: Point extra: i32 }
-fn inspect(value: Point | i32) -> i32 {
-  if let Point { x, .. } = move value { return x } else { return 7 }
-}
-fn nested() -> i32 {
-  let pair = Pair { point: Point { x: 1, y: 2 }, extra: 3 }
-  let Pair { point: Point { x, y }, extra } = move pair
-  return x + y + extra
-}
-fn shared(point: Point) -> i32 {
-  let Point { x, .. } = &point
-  return x + point.y
-}
-fn sharedIf(point: Point) -> i32 {
-  if let Point { x, .. } = &point { return x } else { return 0 }
-}
-pub fn main() -> i32 {
-  let point = Point { x: 20, y: 22 }
-  let Point { x, y } = move point
-  return x + y + inspect(1) + nested() + shared(Point { x: 1, y: 2 }) + sharedIf(Point { x: 2, y: 4 })
-}`),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    const hir = Projections.hirOf(self, 'statement-pattern-runtime')
-    assert.notStrictEqual(hir, undefined)
-    if (hir === undefined) return
-    assert.deepEqual(Hir.verify(hir), [], Hir.encode(hir))
-    const mir = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(mir), [], MirEncoding.encode(mir))
-    assert.include(MirEncoding.encode(mir), ' retain-bindings ')
-    const outcome = Analysis.evaluate(self)
-    assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 60n)
-    const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
-    const main = instance.exports.silk_main
-    if (typeof main !== 'function') throw new RangeError('pattern program lost silk_main')
-    assert.strictEqual(main(), 60)
-  }),
-)
-
 it('keeps statement-pattern loans scoped and move selection consumed on both outcomes', () => {
   const shared = analyze(
     'shared-pattern-loan',
@@ -523,30 +467,6 @@ pub fn inspect(value: Point | i32) -> i32 {
     'OWN0001',
   )
 })
-
-it.effect(
-  'renormalizes generic selectors at complete applications with source-order collapse',
-  () =>
-    Effect.gen(function* () {
-      const self = yield* Analysis.ofSourceRealized(
-        'generic-pattern-renormalization',
-        ascii(`fn choose<A, B>(value: A | B) -> i32 {
-  return match move value { A first => 1 B second => 2 }
-}
-pub fn main() -> i32 {
-  return choose<i32, i32>(1) + choose<i32, bool>(true)
-}`),
-        'wasm32-unknown-unknown',
-      )
-      assert.deepEqual(Analysis.diagnostics(self), [])
-      const mir = Analysis.loweredMir(self)
-      assert.deepEqual(MirVerification.verify(mir), [], MirEncoding.encode(mir))
-      const outcome = Analysis.evaluate(self)
-      assert.strictEqual(outcome._tag, 'Completed')
-      if (outcome._tag !== 'Completed') return
-      assert.strictEqual(outcome.result.value, 3n)
-    }),
-)
 
 it('keeps borrowed owners live, consumes move matches, and requires mutable exclusive roots', () => {
   const shared = analyze(

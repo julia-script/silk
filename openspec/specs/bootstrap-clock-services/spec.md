@@ -235,20 +235,18 @@ ABI requires a separate target-baseline change.
 Clock service declarations and pure source providers SHALL remain analyzable on every target. The
 monotonic provider's primitive calls SHALL be native-only, validated only after executable
 reachability, and linked only when reachable. A reachable system provider SHALL retain ordinary
-foreign calls: native artifacts link them from libc, evaluator execution requires exact foreign-host
-bindings, and direct WebAssembly emits imports from `silk:runtime/foreign@v1`. No target receives an
-ambient or compiler-invented system-clock implementation.
+foreign calls linked from libc by native artifacts. LLVM-generated WebAssembly SHALL reject both OS
+providers. No target receives an ambient or compiler-invented system-clock implementation.
 
-#### Scenario: Import an unused OS provider on direct Wasm
+#### Scenario: Import an unused OS provider on LLVM-generated WebAssembly
 
-- **WHEN** a direct-Wasm program imports an OS clock module but reaches no clock operation
+- **WHEN** a LLVM-generated WebAssembly program imports an OS clock module but reaches no clock operation
 - **THEN** compilation succeeds without a clock import or runtime symbol
 
-#### Scenario: Reach the system provider on direct Wasm
+#### Scenario: Reach the system provider on LLVM-generated WebAssembly
 
-- **WHEN** a direct-Wasm program reaches `OsSystemClock.now`
-- **THEN** emission records a `clock_gettime` import in `silk:runtime/foreign@v1`, and instantiation
-  requires the embedding host to provide that import
+- **WHEN** a LLVM-generated WebAssembly program reaches `OsSystemClock.now`
+- **THEN** target-availability validation rejects the native-only provider before emission
 
 #### Scenario: Link only a selected clock operation
 

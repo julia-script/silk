@@ -1,6 +1,5 @@
 import type * as Analysis from '../../src/Analysis.js'
 import type * as Backend from '../../src/Backend.js'
-import type * as BootstrapEvaluation from '../../src/BootstrapEvaluation.js'
 import type * as DeclarationFacts from '../../src/DeclarationFacts.js'
 import type * as Elaboration from '../../src/Elaboration.js'
 import * as Hir from '../../src/Hir.js'
@@ -229,42 +228,4 @@ export const controlEdgesOf = (self: Analysis.Snapshot): ReadonlyArray<ControlEd
         ),
       )
 
-export const traceOf = (outcome: BootstrapEvaluation.Outcome) => outcome.trace
 export const backendControlOf = (artifact: Backend.Artifact) => artifact.control
-
-export const arrayTraceEventsOf = (outcome: BootstrapEvaluation.Outcome) =>
-  Object.freeze(
-    outcome.trace.filter(
-      (
-        event,
-      ): event is
-        | BootstrapEvaluation.ArrayConstructTraceEvent
-        | BootstrapEvaluation.PlaceReadTraceEvent =>
-        event._tag === 'ArrayConstruct' || event._tag === 'PlaceRead',
-    ),
-  )
-
-export const allocationTraceEventsOf = (outcome: BootstrapEvaluation.Outcome) =>
-  Object.freeze(
-    outcome.trace.filter(
-      (event): event is BootstrapEvaluation.AllocationTraceEvent =>
-        event._tag === 'AllocationAcquire' ||
-        event._tag === 'RawBufferForm' ||
-        event._tag === 'SharedInitialize' ||
-        event._tag === 'SharedClone' ||
-        event._tag === 'SharedDecrement' ||
-        event._tag === 'SharedLastCleanup' ||
-        event._tag === 'SharedAccessBegin' ||
-        event._tag === 'SharedAccessConflict' ||
-        event._tag === 'SharedAccessEnd' ||
-        event._tag === 'SlotProject' ||
-        event._tag === 'SlotWrite' ||
-        event._tag === 'SlotTake' ||
-        event._tag === 'SlotCopy' ||
-        event._tag === 'RawBufferRead' ||
-        event._tag === 'RawBufferCopy' ||
-        event._tag === 'RawBufferFill' ||
-        event._tag === 'SlotDrop' ||
-        event._tag === 'AllocationRelease',
-    ),
-  )

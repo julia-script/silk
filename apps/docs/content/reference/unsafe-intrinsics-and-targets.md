@@ -696,12 +696,12 @@ do not produce secondary availability errors.
 
 **Diagnostics:** Each distinct unavailable intrinsic/target pair reports one deterministic error
 at its first reachable call, naming both. Additional reachable sites may appear as related notes.
-The error occurs before layout, MIR, evaluation, or backend emission; no internal backend failure
+The error occurs before layout, MIR, or LLVM emission; no internal backend failure
 may substitute for it.
 
 **Current compiler:** Aligned. Target selection consumes the concrete intrinsic calls retained by
 instance discovery, deduplicates unavailable diagnostics by canonical operation identity, and runs
-before evaluation or emission.
+before LLVM lowering or emission.
 
 **Evidence:** [intrinsic target availability specification](../../../../openspec/specs/bootstrap-intrinsic-target-availability/spec.md),
 [availability selection](../../../../packages/compiler/src/IntrinsicAvailability.ts),
@@ -758,7 +758,7 @@ target.
 suggest selecting a supported target or removing the reachable dependency. It does not suggest
 catching a failure, adding an unsafe block, or providing a service.
 
-**Current compiler:** Aligned for evaluator, LLVM, and Wasm availability classes. Finer target-triple
+**Current compiler:** Aligned for LLVM target availability classes. Finer target-triple
 availability, if needed, must refine the same compile-time rule rather than create runtime fallback.
 
 **Evidence:** [target diagnostic](../../../../packages/compiler/src/Diagnostic.ts),
@@ -1019,64 +1019,29 @@ and records the reachable symbols with their C signatures on the artifact.
 
 **Status:** Confirmed
 
-Foreign functions use one explicit binding model for each supported execution surface. Native
-artifacts retain direct external symbols for the linker. The evaluator resolves reachable calls
-through a host-function table supplied for that evaluation. The direct WebAssembly backend imports
-each reachable symbol from `silk:runtime/foreign@v1` under the symbol's own field name. LLVM
-emission for a WebAssembly target remains unavailable, under the same reachability rule as
+Native artifacts retain direct external symbols for the linker. Foreign calls are unavailable on
+the current LLVM-to-Wasm target, under the same reachability rule as
 [TARGET-001](#target-001--intrinsic-availability-is-checked-only-for-the-selected-executable-closure).
 
 Parsing, importing, indexing, or retaining an uncalled foreign declaration does not reject a
 portable program, and a call in an unselected `static if` arm does not enter the closure. A
-reachable foreign function contributes exactly one external declaration or Wasm import to its
-artifact; an unreachable one contributes nothing, as
+reachable foreign function contributes exactly one external declaration to a native artifact; an
+unreachable one contributes nothing, as
 [TARGET-002](#target-002--unreachable-target-specific-primitives-have-no-artifact-cost) requires.
 
-The evaluator table is immutable and local to one run. Every entry names the symbol, declares its
-canonical C-class signature, and returns either a value or a typed failure. Evaluation checks the
-complete reachable inventory before the entry runs, so a missing or mismatched binding has an empty
-trace and names the symbol plus expected signature. There is no implicit libc table.
-
-```ts
-const table = ForeignHost.make([
-  {
-    symbol: 'abs',
-    signature: ForeignHost.signature(['i32'], 'i32'),
-    invoke: ([value]) =>
-      value?._tag === 'IntegerValue' && value.type === 'i32'
-        ? ForeignHost.returned({ ...value, value: value.value < 0n ? -value.value : value.value })
-        : ForeignHost.failed('abs expected one i32'),
-  },
-])
-```
-
-For direct WebAssembly, the artifact's `hostImports` and `foreignImports` inventories describe the
-exact object an instantiating host must supply:
-
-```ts
-const imports = {
-  [ForeignHost.wasmModule]: {
-    abs: (value: number) => Math.abs(value),
-  },
-}
-```
-
-**Boundary:** The direct Wasm backend owns a concrete import model; this does not grant the LLVM
-backend an ambient Wasm linker or import convention. Foreign exports remain native-only.
+**Boundary:** This does not grant WebAssembly an ambient linker or import convention. Foreign
+imports and exports are native-only during the LLVM-first phase.
 
 **Diagnostics:** LLVM-wasm foreign calls and foreign exports on a non-native target report
 `SEM0193`, naming the symbol and requested target or surface, in the
 [TARGET-003](#target-003--target-unavailability-is-a-compile-time-compatibility-error) shape. It
-does not suggest catching a failure or adding an unsafe block. Evaluator binding absence,
-signature mismatch, and typed host failure are blocked execution reasons rather than semantic
-diagnostics.
+does not suggest catching a failure or adding an unsafe block.
 
 **Current compiler:** Aligned. The executable origin collects reachable foreign calls beside
-intrinsic calls. Evaluator admission validates `ForeignHost` bindings before execution, and direct
-Wasm emission declares typed imports and records their deterministic metadata.
+intrinsic calls. Native LLVM emission declares their C ABI symbols and records deterministic
+metadata; LLVM-to-Wasm rejects the reachable operation before emission.
 
 **Evidence:** [foreign function specification](../../../../openspec/specs/bootstrap-foreign-functions/spec.md),
-[foreign host contract](../../../../packages/compiler/src/ForeignHost.ts),
 [C ABI classification](../../../../packages/compiler/src/CAbi.ts).
 
 ### FFI-008 — `export "C"` publishes one C-callable symbol behind a generated thunk
@@ -1187,10 +1152,8 @@ driver, shim, and termination contract are unchanged.
 
 **Boundary:** Availability is a property of the target kind, as in
 [FFI-007](#ffi-007--foreign-functions-use-explicit-pay-for-use-bindings). On a WebAssembly target an
-`export "C"` declaration anywhere in the loaded closure is rejected under either backend, even
-when nothing calls it, because the declaration itself demands a native symbol. The evaluator runs
-the native discovery and inherits the roots harmlessly: it reports nothing for an export, exposes
-nothing through it, and runs from `main`.
+`export "C"` declaration anywhere in the loaded closure is rejected, even when nothing calls it,
+because the declaration itself demands a native symbol.
 
 **Diagnostics:** An export in the closure of a WebAssembly build reports `SEM0193`, naming the
 symbol and the target, in the
@@ -1279,8 +1242,8 @@ effect or suspending functions, and anonymous or capturing callables never acqui
 
 **Boundary:** Callback conversion is contextual; naming `compare` where a Silk callable is expected
 still produces its ordinary Silk callable value. Imported foreign functions remain callable-only.
-The evaluator and direct WebAssembly reject any reachable call whose signature contains a C
-function pointer before entry and do not invent host addresses.
+The LLVM-to-Wasm target rejects any reachable call whose signature contains a C function pointer
+before emission and does not invent host addresses.
 
 **Diagnostics:** A C function-pointer type containing any parameter or result outside the admitted
 C subset reports `SEM0187` at that type wherever it is declared. An ineligible value at a C
@@ -1313,8 +1276,8 @@ external global. An exported static requires one matching integer or floating-po
 becomes an externally visible constant global. Native artifacts record imported and exported data
 symbols, their C class, and direction in deterministic symbol order.
 
-**Boundary:** C statics are native-only. The evaluator and direct WebAssembly report a reachable
-read before entry and never synthesize ambient data. Unreferenced imports do not enter MIR or the
+**Boundary:** C statics are native-only. LLVM-to-Wasm reports a reachable read before emission and
+never synthesizes ambient data. Unreferenced imports do not enter MIR or the
 artifact; exports remain roots because an external C consumer can read them without Silk code doing
 so.
 
@@ -1384,17 +1347,16 @@ the existing `glibc >= 2.17` baseline and needs no `librt` link.
 
 The sealed intrinsic catalog has no system-clock operation, and the generated OS runtime owns no
 `silk_os_system_clock_*` symbol. A reachable native system clock therefore contributes ordinary
-foreign imports resolved by libc. Evaluation without exact `clock_gettime` or `clock_getres`
-bindings returns `ForeignHostUnavailable`; direct WebAssembly emits the same names from
-`silk:runtime/foreign@v1`. Neither execution surface reads ambient host time automatically.
+foreign imports resolved by libc. LLVM-to-Wasm rejects the native-only provider rather than reading
+ambient host time or inventing imports.
 
 **Boundary:** `OsMonotonicClock` remains on its three target-neutral intrinsics until its separate
 migration. Importing or constructing either provider remains inert; only reachable operations add
 their respective foreign or runtime dependencies.
 
 **Current compiler:** Aligned. The system-clock source owns the declarations and validation, the
-foreign inventory identifies the libc functions, and the old intrinsic operations, evaluator host
-option, reserved runtime names, and generated C functions have been deleted.
+foreign inventory identifies the libc functions, and the old intrinsic operations, reserved
+runtime names, and generated C functions have been deleted.
 
 **Evidence:** [clock-service specification](../../../../openspec/specs/bootstrap-clock-services/spec.md),
 [system-clock source](../../../../packages/compiler/stdlib/silk/os_system_clock.silk),

@@ -58,22 +58,15 @@ pub fn main() -> i32 { return identity(42) }`
     assert.include(mir.meta ?? '', 'fn')
     assert.isTrue(mir.rows.some((row) => row.label.includes('main')))
 
-    // Evaluation runs only when the request asks for it.
-    client.send({ id: 4, method: Inspection.viewRequest, params: { uri, view: 'evaluation' } })
-    const unevaluated = (await client.waitFor((message) => response(message, 4))) as ViewResult
-    assert.strictEqual(unevaluated.meta, 'not run')
-    client.send({
-      id: 5,
-      method: Inspection.viewRequest,
-      params: { uri, view: 'evaluation', evaluate: true },
-    })
-    const evaluated = (await client.waitFor((message) => response(message, 5))) as ViewResult
-    assert.include(evaluated.meta ?? '', 'steps')
-    assert.isTrue(evaluated.rows.some((row) => (row.detail ?? '').includes('42')))
+    // Inspection exposes static flow facts and never executes the program.
+    client.send({ id: 4, method: Inspection.viewRequest, params: { uri, view: 'flow' } })
+    const flow = (await client.waitFor((message) => response(message, 4))) as ViewResult
+    assert.isAbove(flow.rows.length, 0)
+    assert.isFalse(listed.views.some((view) => view.id === 'evaluation'))
 
     // An unknown view id is an explicit error, not a crash or an empty result.
-    client.send({ id: 6, method: Inspection.viewRequest, params: { uri, view: 'not-a-view' } })
-    const unknown = await client.waitFor((message) => failure(message, 6))
+    client.send({ id: 5, method: Inspection.viewRequest, params: { uri, view: 'not-a-view' } })
+    const unknown = await client.waitFor((message) => failure(message, 5))
     assert.include(unknown.message, 'not-a-view')
 
     // A commit announces itself, and a re-request answers the new revision.
@@ -91,17 +84,17 @@ pub fn main() -> i32 { return identity(42) }`
       return parameters.version === 2 ? parameters : undefined
     })
     assert.strictEqual(invalidated.uri, uri)
-    client.send({ id: 7, method: Inspection.viewRequest, params: { uri, view: 'tokens' } })
-    const refreshed = (await client.waitFor((message) => response(message, 7))) as ViewResult
+    client.send({ id: 6, method: Inspection.viewRequest, params: { uri, view: 'tokens' } })
+    const refreshed = (await client.waitFor((message) => response(message, 6))) as ViewResult
     assert.strictEqual(refreshed.version, 2)
 
     // A document outside any discovered project is an explicit error.
     client.send({
-      id: 8,
+      id: 7,
       method: Inspection.viewRequest,
       params: { uri: 'file:///silk-inspector-e2e/never-opened.silk', view: 'tokens' },
     })
-    const unopened = await client.waitFor((message) => failure(message, 8))
+    const unopened = await client.waitFor((message) => failure(message, 7))
     assert.include(unopened.message, 'never-opened')
   } finally {
     await client.close()

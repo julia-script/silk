@@ -217,9 +217,11 @@ genuinely needs isolation may scope a distinct layer within that test.
 The compiler suite is the critical path of `pnpm check`; every test pays for the compiler
 pipelines it runs. Prove each claim at the cheapest tier that can falsify it.
 
-- Prove language semantics with `Analysis.evaluate`. Add a wasm leg only when the claim is about
-  wasm codegen. Add a native leg only when lowering is genuinely target-specific: syscalls,
-  suspension frames, drop hooks, recursion stack bounds, or native allocation metrics.
+- Prove parser, resolution, typing, ownership, Effect, target-selection, and diagnostic claims with
+  structured analysis assertions. Prove compile-time execution only through `StaticEvaluation`.
+- Put target-neutral runtime behavior in the shared native acceptance corpus. Use LLVM IR, object,
+  symbol, relocation, disassembly, or separately compiled C fixtures for lowering and ABI claims,
+  and add an LLVM-to-Wasm leg only for intended WebAssembly behavior.
 - Never add a per-feature "the native binary agrees" test. That claim is proven differentially by
   `DriverNativeAcceptance` — add your program to `test/support/corpus.ts` instead of calling
   `Driver.compile` in a feature file.
@@ -232,8 +234,8 @@ pipelines it runs. Prove each claim at the cheapest tier that can falsify it.
   wording.
 - No timing assertions, byte counts, or instruction counts in the correctness suite. Structural
   claims assert structure; performance claims live in opt-in bench targets.
-- In failure-ordinal and stress sweeps, run the evaluator and wasm at every point; run native only
-  at boundary points (first failure, one mid-growth, completion).
+- In failure-ordinal and stress sweeps, prefer structural compiler assertions. When execution is
+  the only adequate oracle, consolidate the distinguishing boundary cases in the native corpus.
 - Prefer adding a case to an existing file over creating a new test file: each new file costs
   ~0.5s of worker startup and re-imports the compiler.
 - A test that cannot fail for a reason distinct from its neighbors is not a test; delete it rather

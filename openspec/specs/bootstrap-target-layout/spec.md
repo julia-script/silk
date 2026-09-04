@@ -193,7 +193,7 @@ For every reachable parameter and result type, target planning SHALL publish a d
 backend-neutral calling shape. In this bootstrap slice, a nominal struct SHALL recursively flatten
 to its Copy scalar leaf lanes in canonical declaration order; an empty struct SHALL have zero lanes.
 The shape SHALL retain each lane's canonical field path and scalar representation. Calls and returns
-MUST use that same selected shape in MIR evaluation and every backend.
+MUST use that same selected shape in MIR structure and every backend.
 
 #### Scenario: Plan a nested struct result
 
@@ -332,7 +332,7 @@ remain an internal layout scalar and MUST NOT resolve as a safe Silk type.
 ### Requirement: Slice calling shapes carry heterogeneous typed lanes
 
 The compiler-owned calling shape for a slice SHALL contain one typed address lane and one typed
-`i32` lane in deterministic order. Callers, callees, evaluators, and backends MUST consume that
+`i32` lane in deterministic order. Callers, callees, and LLVM lowering MUST consume that
 shape rather than flattening the source array or reconstructing a backend-private slice ABI.
 
 #### Scenario: Preserve one multi-length calling shape
@@ -358,7 +358,7 @@ The planner SHALL represent `usize` as unsigned 64-bit on required native target
 
 For every reachable flow contract, target planning SHALL publish a deterministic private outcome
 shape containing a discriminant and payload storage sufficient for the success value or any failure
-member. Canonical nominal identity SHALL determine failure tags. Evaluator and backends MUST consume
+member. Canonical nominal identity SHALL determine failure tags. LLVM lowering MUST consume
 that shape without independently choosing tags, lanes, or padding.
 
 #### Scenario: Plan mixed success and failure payloads
@@ -370,7 +370,7 @@ that shape without independently choosing tags, lanes, or padding.
 
 Target layout SHALL compute validated byte and repeated-element layouts, raw-buffer lanes, reclaim
 ticket shapes, concrete Vector layouts, Effect outcome shapes, and Drop calling shapes before MIR.
-Evaluator and backends SHALL consume those facts unchanged and MUST NOT derive stride, alignment,
+LLVM lowering SHALL consume those facts unchanged and MUST NOT derive stride, alignment,
 failure transport, or cleanup representation independently.
 
 Target layout SHALL separately plan each reachable hidden Effect capture environment. Borrowed
@@ -388,7 +388,7 @@ After concrete instance discovery, target layout SHALL plan validated `Layout` v
 repeated-element stride and total bytes, affine allocation handles, private reclaim tickets,
 `RawBuffer<T>`, lexical Slot addresses, Drop calling shapes, and typed allocation outcomes using the
 selected target's address and `usize` width. Zero-sized allocations SHALL retain distinct logical
-ownership without requiring nonzero physical bytes. Evaluator and backends SHALL consume these
+ownership without requiring nonzero physical bytes. LLVM lowering SHALL consume these
 facts unchanged and MUST NOT choose stride, alignment, ticket shape, failure transport, or cleanup
 representation independently.
 

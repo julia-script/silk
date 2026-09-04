@@ -110,8 +110,8 @@ it('rejects every target- or artifact-incompatible native input during batch pre
   }
 })
 
-it('rejects one incompatible pair before returning any plans', () => {
-  const batch = BuildBatch.make(project(), { backend: 'wasm', profile: 'debug' })
+it('rejects an unknown backend before returning any plans', () => {
+  const batch = BuildBatch.make(project(), { backend: 'not-a-backend', profile: 'debug' })
   assert.strictEqual(Result.isFailure(batch), true)
-  if (Result.isFailure(batch)) assert.strictEqual(batch.failure.reason._tag, 'Plan')
+  if (Result.isFailure(batch)) assert.strictEqual(batch.failure.reason._tag, 'Backend')
 })

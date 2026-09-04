@@ -3158,7 +3158,7 @@ export const plan = (
         localSharedDiagnostics.push(
           Diagnostic.intrinsicTargetUnavailable(
             'Intrinsic.sharedLayout',
-            self.target.kind === 'WebAssembly' ? 'Wasm' : 'LLVM',
+            self.target.id,
             expression.span,
           ),
         )
@@ -3334,7 +3334,7 @@ export const plan = (
         executionDiagnostics.push(
           Diagnostic.intrinsicTargetUnavailable(
             `Intrinsic.${expression.operation === 'ExecutionLayout' ? 'executionLayout' : 'executionFromAllocation'}`,
-            self.target.kind === 'WebAssembly' ? 'Wasm' : 'LLVM',
+            self.target.id,
             expression.span,
           ),
         )

@@ -65,14 +65,14 @@ Scoped captures MUST NOT escape through an enclosing nominal.
 
 ### Requirement: Callable storage has cross-engine static parity
 
-HIR, MIR, evaluator, native LLVM, and direct WebAssembly SHALL preserve the same aggregate field
-paths, concrete target, capture layout, access checks, result, and cleanup trace. Direct Wasm MUST
+HIR, MIR, native LLVM and LLVM-generated WebAssembly SHALL preserve the same aggregate field
+paths, concrete target, capture layout, access checks, result, and cleanup trace. LLVM-generated WebAssembly MUST
 NOT add a function table or `call_indirect` for this capability.
 
 #### Scenario: Execute one stored callable through every engine
 
 - **WHEN** the same stored-callable acceptance program is evaluated, compiled natively, and emitted
-  as direct WebAssembly
+  as LLVM-generated WebAssembly
 - **THEN** all engines agree and structural inspection finds only direct targets
 
 ### Requirement: Storage fences retire only for proven paths

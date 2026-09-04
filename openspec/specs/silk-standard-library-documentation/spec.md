@@ -191,4 +191,4 @@ explicit diagnostic expectation for an intentionally invalid call.
 #### Scenario: Document executable selective catch honestly
 
 - **WHEN** readers view selective `Effect.catch`
-- **THEN** the reference explains its singleton typing contract, executable evaluator/WebAssembly/native behavior, and use of `catchAll` for whole-row recovery
+- **THEN** the reference explains its singleton typing contract, executable native/WebAssembly behavior, and use of `catchAll` for whole-row recovery

@@ -25,11 +25,10 @@
 - [x] 4.2 Lower anonymous construction through the existing exact `MakeCallable` representation while preserving separate capture and authored-parameter ordinals, and verify structural HIR/MIR tests cover an order mismatch.
 - [x] 4.3 Admit hidden anonymous instances through ordinary MIR function lowering and `ApplyCallable` operand assembly, and verify the MIR verifier rejects target/signature/mode mismatches, duplicated transfer, and repeated `once fn` use.
 
-## 5. Execution and backend parity
+## 5. Runtime and target execution
 
-- [x] 5.1 Execute ordinary and effectful anonymous targets in the evaluator without JavaScript closure identity and verify an inline `Effect.catchAll` handler completes with `42`.
-- [x] 5.2 Add one environment-bearing Wasm case that exercises capture order, invocation, and cleanup, and verify it agrees with the shared semantic/evaluator result.
-- [x] 5.3 Add the representative program to the native acceptance corpus and verify native parity without a per-feature native compile or fresh-process determinism test.
+- [x] 5.1 Add the representative program to the native acceptance corpus with an independently pinned result and verify ordinary and effectful anonymous targets complete without a per-feature native compile or fresh-process determinism test.
+- [x] 5.2 Retain structural MIR evidence for environment capture order, invocation, and cleanup, and exercise the intended WebAssembly target through LLVM-to-Wasm.
 
 ## 6. Tooling and language reference
 
@@ -40,7 +39,7 @@
 
 ## 7. Review and repository verification
 
-- [x] 7.1 Run focused parser, formatter, analysis/HIR/ownership/MIR, evaluator, Wasm, native-corpus, hover, and completion tests and verify every JUL-72 acceptance path is covered at its cheapest tier.
+- [x] 7.1 Run focused parser, formatter, analysis/HIR/ownership/MIR, native-corpus, LLVM-to-Wasm, hover, and completion tests and verify every JUL-72 acceptance path is covered at its cheapest tier.
 - [x] 7.2 Run the mandatory independent test-economics review against the committed diff, resolve every in-scope finding, and record the final reviewer verdict. Verdict: `approve` for `22b73a9`; measured focused increment `+2.45s` wall / `+2.05s` test time, with approximately `3.1s` incremental default-suite work including the shared native corpus case.
 - [x] 7.3 Run `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, and `pnpm test` in order, fixing any change-caused failure.
 - [x] 7.4 Run `pnpm check` and verify the complete repository gate passes.

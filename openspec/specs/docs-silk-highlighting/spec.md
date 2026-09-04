@@ -2,34 +2,9 @@
 
 ## Purpose
 
-Silk source shown anywhere in the docs app is syntax-highlighted: the labs workbench edits Silk in
-a real code editor, and Markdown ` ```silk ` fences render highlighted.
+Silk source shown in Markdown ` ```silk ` fences is syntax-highlighted in the documentation app.
 
 ## Requirements
-
-### Requirement: Workbench source pane is a highlighting editor
-
-The labs workbench source pane SHALL edit Silk in a syntax-highlighting code editor while
-preserving the pane's existing observable behavior: edits update the active module's source, the
-source round-trips through the URL, and selecting a nonempty text range moves the shared span
-cursor to the selected byte range.
-
-#### Scenario: Editing highlighted source
-
-- **WHEN** the user types Silk source containing keywords into the workbench source pane
-- **THEN** keywords are visibly highlighted and downstream phase panes update from the edited
-  source exactly as they did with the previous editor
-
-#### Scenario: Selection drives the span cursor
-
-- **WHEN** the user selects a nonempty range of source text in the editor
-- **THEN** the shared span cursor moves to that range and downstream panes light up the
-  corresponding spans
-
-#### Scenario: Source survives the URL round trip
-
-- **WHEN** the user edits source and reloads the resulting workbench URL
-- **THEN** the editor shows the same source that was encoded in the URL
 
 ### Requirement: Silk code fences highlight in docs pages
 

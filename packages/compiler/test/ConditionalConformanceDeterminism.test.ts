@@ -46,12 +46,6 @@ const Report = Schema.Struct({
   reversedProofs: Schema.Array(ProofReport),
   instances: Schema.Array(InstanceReport),
   mir: Schema.String,
-  evaluation: Schema.Struct({
-    outcome: Schema.String,
-    result: Schema.optionalKey(Schema.Finite),
-    events: Schema.Array(Schema.String),
-  }),
-  wasm: Schema.String,
   native: Schema.String,
 })
 
@@ -177,13 +171,6 @@ it.effect(
       assert.include(encoded.mir, `mir-module ${module_}`)
       assert.include(encoded.mir, 'target wasm32-unknown-unknown')
 
-      assert.strictEqual(encoded.evaluation.outcome, 'Completed')
-      // 41 decoded, +1 through the mapped wrapper, +2 through the optional one, plus 7 +1.
-      assert.strictEqual(encoded.evaluation.result, 52)
-      assert.isAbove(encoded.evaluation.events.length, 0)
-
-      assert.strictEqual(encoded.wasm.length, 64)
       assert.strictEqual(encoded.native.length, 64)
-      assert.notStrictEqual(encoded.wasm, encoded.native)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )

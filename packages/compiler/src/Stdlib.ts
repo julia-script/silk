@@ -1,4 +1,5 @@
 import { modules } from './Stdlib.generated.js'
+import type * as Target from './Target.js'
 
 /** The reserved namespace prefix. User resolvers are never consulted for these identities. */
 export const namespacePrefix = 'silk/'
@@ -15,7 +16,7 @@ export interface Module {
   readonly digest: string
   readonly documentation: string
   readonly layer: 'portable' | 'target-provider'
-  readonly providerTargets?: ReadonlyArray<'Evaluator' | 'LLVM' | 'Wasm'>
+  readonly providerTargets?: ReadonlyArray<Target.Id>
   readonly staticInventory: ReadonlyArray<string>
   readonly runtimeInventory: ReadonlyArray<string>
   readonly namespace?: string

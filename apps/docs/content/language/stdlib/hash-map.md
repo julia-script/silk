@@ -18,7 +18,7 @@ table, moves every live entry, and discards those markers. Allocation completes 
 commits, so failed growth leaves existing entries, length, and bucket count unchanged.
 
 One [`HashSeed`](./hash.md#declaration-73696c6b2f686173683a3a4861736853656564) plus the same operation sequence fixes bucket presentation order across the
-evaluator, native code, and WebAssembly. Iterate deterministically by scanning
+native code and WebAssembly. Iterate deterministically by scanning
 `0..bucketCount`, testing [`occupiedAt`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e6f636375706965644174), then reading [`keyAt`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e6b65794174) and [`valueAt`](#declaration-73696c6b2f686173685f6d61703a3a486173684d61702e76616c75654174). This is bucket
 order, not insertion order.
 

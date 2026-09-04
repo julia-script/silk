@@ -119,6 +119,17 @@ const shardedCorpus =
     ? nativeCorpus
     : nativeCorpus.filter((_, index) => index % Number(shard[2]) === Number(shard[1]) - 1)
 
+it('assigns every native corpus case to exactly one CI shard', () => {
+  const assignments = Array.from({ length: 3 }, (_, shardIndex) =>
+    nativeCorpus.filter((_, index) => index % 3 === shardIndex),
+  ).flat()
+  assert.strictEqual(new Set(assignments.map((program) => program.name)).size, nativeCorpus.length)
+  assert.deepEqual(
+    assignments.map((program) => program.name).sort(),
+    nativeCorpus.map((program) => program.name).sort(),
+  )
+})
+
 const librarySource = `unsafe extern "C" fn abs(value: i32) -> i32
 fn helper(value: i32) -> i32 { return value + 1 }
 export "C" fn increment(value: i32) -> i32 { return unsafe abs(helper(value)) }
@@ -299,23 +310,13 @@ it.each(shardedCorpus)(
         return
       }
 
-      if (outcome._tag === 'Rejected') {
-        assert.strictEqual(
-          program.expected._tag,
-          'Trap',
-          `${program.name}: ${outcome.diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`).join('; ')}`,
-        )
-        assert.strictEqual(outcome.diagnostics.length > 0, true, program.name)
-        return
+      let compilationMessage = program.name
+      if (outcome._tag === 'BackendFailed') {
+        compilationMessage = `${program.name}: ${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
+      } else if (outcome._tag === 'Rejected') {
+        compilationMessage = `${program.name}: ${outcome.diagnostics.map((diagnostic) => diagnostic.code).join(',')}`
       }
-
-      assert.strictEqual(
-        outcome._tag,
-        'Compiled',
-        outcome._tag === 'BackendFailed'
-          ? `${program.name}: ${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
-          : program.name,
-      )
+      assert.strictEqual(outcome._tag, 'Compiled', compilationMessage)
       if (outcome._tag !== 'Compiled') return
 
       if (program.expected._tag === 'Completes') {

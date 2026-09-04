@@ -6,8 +6,8 @@ MIR lowering SHALL create a statically selected executable body and one finite c
 layout for each realized anonymous callable identity. Environment fields SHALL follow semantic
 capture order and retain their Copy, borrowed, exclusive, or owned representation and cleanup plan.
 Construction, invocation, ordinary result delivery, effect construction, dropped-uninvoked cleanup,
-and consuming cleanup SHALL preserve source evaluation and ownership order on the evaluator, Wasm,
-and native paths. Structural callable types MUST NOT gain a standalone layout, universal closure
+and consuming cleanup SHALL preserve source and ownership order through MIR and LLVM lowering.
+Structural callable types MUST NOT gain a standalone layout, universal closure
 ABI, runtime target table, or heap-allocation requirement from anonymous callables.
 
 #### Scenario: Lower an environment-bearing callable

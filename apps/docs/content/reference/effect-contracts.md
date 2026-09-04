@@ -387,5 +387,4 @@ branch specific to the names `Effect.result`, `Result`, `Success`, or `Failure`.
 completed-outcome primitive.
 
 **Evidence:** [ordinary source implementation](../../../../packages/compiler/stdlib/silk/effect.silk),
-[Result and alternate-carrier regressions](../../../../packages/compiler/test/ResultStdlib.test.ts),
 [minimal intrinsic boundary](../../../../openspec/changes/add-nominal-unions/specs/bootstrap-intrinsic-boundary/spec.md).

@@ -144,8 +144,7 @@ argument receives its own expression, ownership, failure, or requirement diagnos
 argument. A control transfer prevents execution of later arguments but does not suppress independent
 compile-time diagnostics in their source.
 
-**Evidence:** [evaluation trace specification](../../../../openspec/specs/bootstrap-evaluation/spec.md),
-[callable application specification](../../../../openspec/specs/bootstrap-callable-values/spec.md).
+**Evidence:** [callable application specification](../../../../openspec/specs/bootstrap-callable-values/spec.md).
 
 ### CALL-002 — Calls satisfy the declared positional parameter contract
 
@@ -739,8 +738,7 @@ field reports `SEM0047`; a binding conflict reports `SEM0048`. Unknown members o
 their specific match or field diagnostic while other supplied pattern facts remain available.
 
 **Evidence:** [exhaustive matching specification](../../../../openspec/specs/bootstrap-exhaustive-matching/spec.md),
-[matching tests](../../../../packages/compiler/test/ExhaustiveMatching.test.ts),
-[whole-member tests](../../../../packages/compiler/test/WholeMemberBinding.test.ts).
+[matching tests](../../../../packages/compiler/test/ExhaustiveMatching.test.ts).
 
 ### MATCH-003 — Match coverage is exhaustive and guards do not prove coverage
 

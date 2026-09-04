@@ -95,12 +95,6 @@ importers:
       cnfast:
         specifier: ^0.1.0
         version: 0.1.0
-      dockview:
-        specifier: ^7.0.4
-        version: 7.0.4
-      dockview-react:
-        specifier: ^7.0.4
-        version: 7.0.4(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       effect:
         specifier: 'catalog:'
         version: 4.0.0-rc.112
@@ -2716,18 +2710,6 @@ packages:
   dir-glob@3.0.1:
     resolution: {integrity: sha512-WkrWp9GR4KXfKGYzOLmTuGVi1UWFfws377n9cc55/tb6DuqyF6pcQ5AbiHEshaDpY9v6oaSr2XCDidGmMwdzIA==}
     engines: {node: '>=8'}
-
-  dockview-core@7.0.4:
-    resolution: {integrity: sha512-AiIzD6ov153L/VuhqVBg5KD5oSAgJGH7L1xvzV/X+ghIEOTFfEQYEBGNd/ys+ZjQfdGRogHSeQ0v9JF/L6JrPg==}
-
-  dockview-react@7.0.4:
-    resolution: {integrity: sha512-eUhR3J3prpuFcaPJwQ4rzcRAghO3p4JVXlj5zfdQTlb3Qwa8VUpy3KvyV6BCsIjNk1toTdd8/NyADcZXMvpmtA==}
-    peerDependencies:
-      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-      react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-
-  dockview@7.0.4:
-    resolution: {integrity: sha512-n6n9WpYZgp/WY8SgvP4hr9qh01ZXhSGIRmlhoJXxRU3f34bwxCbFyOhBArV4W8quolX8OQe1yPfAUwUUjdnZPA==}
 
   effect@4.0.0-rc.112:
     resolution: {integrity: sha512-wXxwuh1Ywnv4cPRM3Wfa0vDwuOHnZ1TsTgHJkG9XgzND6inhBH9n1vBxhg3iIXOia/OrpmvVmd3lrD4vq6bF3A==}
@@ -6193,18 +6175,6 @@ snapshots:
   dir-glob@3.0.1:
     dependencies:
       path-type: 4.0.0
-
-  dockview-core@7.0.4: {}
-
-  dockview-react@7.0.4(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
-    dependencies:
-      dockview: 7.0.4
-      react: 19.2.8
-      react-dom: 19.2.8(react@19.2.8)
-
-  dockview@7.0.4:
-    dependencies:
-      dockview-core: 7.0.4
 
   effect@4.0.0-rc.112:
     dependencies:

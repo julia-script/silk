@@ -42,8 +42,6 @@ describe('projectDataFlow', () => {
       'produces',
       'is returned by',
     ])
-    expect(flow.groups.every((item) => item.evaluation === undefined)).toBe(true)
-    expect(flow.nodes.every((item) => item.evaluation === undefined)).toBe(true)
   })
 
   it('groups nested calls and connects the inner result to the outer argument', () => {
@@ -59,17 +57,12 @@ describe('projectDataFlow', () => {
   })
 
   it('keeps repeated sibling call sites distinct and source ordered', () => {
-    const snapshot = snap('memory/flow-siblings', siblingSource)
-    const analysis = Analysis.rootAnalysis(snapshot)
-    const outcome = Analysis.evaluate(snapshot)
-    const flow = projectDataFlow(analysis, outcome)
+    const flow = projectDataFlow(analyze('memory/flow-siblings', siblingSource))
     const children = flow.groups.filter((group) => group.depth === 1)
 
     expect(children.map((group) => group.ordinal)).toEqual([0, 1])
     expect(new Set(children.map((group) => group.id)).size).toBe(2)
-    expect(children.map((group) => group.evaluation?.order)).toEqual([3, 8])
-    expect(flow.mode).toBe('Evaluated')
-    expect(flow.nodes.some((item) => item.evaluation?.value === 2n)).toBe(true)
+    expect(flow.mode).toBe('Semantic')
   })
 
   it('terminates an unavailable inner type contract without inventing an enclosing result', () => {
@@ -103,58 +96,6 @@ pub fn main() -> i32 { return identity(identity()) }`,
       true,
     )
     expect(flow.nodes.some((item) => item.kind === 'FunctionReturn')).toBe(false)
-  })
-
-  it('overlays only the completed prefix when a later sibling blocks', () => {
-    const snapshot = snap(
-      'memory/flow-blocked',
-      `pub fn identity(value: i32) -> i32 { return value }
-pub fn choose(left: i32, right: i32) -> i32 { return right }
-pub fn main() -> i32 { return choose(identity(1), missing(2)) }`,
-    )
-    const analysis = Analysis.rootAnalysis(snapshot)
-    const outcome = Analysis.evaluate(snapshot)
-    const flow = projectDataFlow(analysis, outcome)
-    const outer = flow.groups.find((group) => group.depth === 0)
-
-    expect(outcome._tag).toBe('Trap')
-    expect(
-      flow.nodes.some((item) => item.evaluation !== undefined && item.layer !== 'Evaluated'),
-    ).toBe(false)
-    expect(flow.nodes.some((item) => item.label === 'Evaluation stops: fatal trap')).toBe(true)
-    expect(
-      flow.edges.some(
-        (item) =>
-          item.groupId === outer?.id &&
-          item.label === 'binds positionally to' &&
-          item.evaluation !== undefined,
-      ),
-    ).toBe(false)
-    expect(
-      flow.nodes.some((item) => item.kind === 'FunctionReturn' && item.evaluation !== undefined),
-    ).toBe(false)
-  })
-
-  it('renders a call-depth limit as one finite trace-backed terminal', () => {
-    const snapshot = snap(
-      'memory/flow-cycle',
-      `pub fn identity(value: i32) -> i32 { return value }
-pub fn main() -> i32 { return identity(main()) }`,
-    )
-    const analysis = Analysis.rootAnalysis(snapshot)
-    const outcome = Analysis.evaluate(snapshot, { maxCallDepth: 4 })
-    const flow = projectDataFlow(analysis, outcome)
-    const terminals = flow.nodes.filter(
-      (item) => item.layer === 'Evaluated' && item.kind === 'Terminal',
-    )
-
-    expect(outcome._tag).toBe('Blocked')
-    expect(terminals).toHaveLength(1)
-    expect(terminals.at(0)?.detail).toContain('EvaluationLimit(CallDepth): 4/4')
-    expect(terminals.at(0)?.detail).toContain('f3:d4 main')
-    expect(
-      flow.nodes.some((item) => item.kind === 'FunctionReturn' && item.evaluation !== undefined),
-    ).toBe(false)
   })
 
   it('recomputes deterministically from equivalent disposable analysis state', () => {

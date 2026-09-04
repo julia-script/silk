@@ -106,9 +106,9 @@ not-found reason SHALL become ordinary absence through the nominal `Option` decl
 - **WHEN** a value is longer than the buffer the provider first offered
 - **THEN** the provider learns its complete length and returns the complete value
 
-#### Scenario: Reject the native lookups on direct WebAssembly
+#### Scenario: Reject the native lookups on LLVM-generated WebAssembly
 
-- **WHEN** a reachable native host-input lookup is compiled for a direct WebAssembly target
+- **WHEN** a reachable native host-input lookup is compiled for a LLVM-generated WebAssembly target
 - **THEN** target availability rejects it rather than inventing a process-input import
 
 #### Scenario: Link only the reachable runtime symbols

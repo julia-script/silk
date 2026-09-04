@@ -21,8 +21,8 @@ Constructing the provider performs no read. Portable code reads after the applic
 
 ## Gotchas
 
-Reachable OS standard-input operations are native-only. Direct WebAssembly compilation rejects
-them instead of inventing a descriptor import. Evaluator execution requires an injected adapter.
+Reachable OS standard-input operations are native-only. LLVM-to-WebAssembly compilation rejects
+them instead of inventing a descriptor import.
 The caller must use a non-empty buffer. A zero-capacity host read also transfers zero bytes.
 
 ## Examples

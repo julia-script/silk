@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as Instances from '../src/Instances.js'
@@ -896,45 +895,6 @@ it.effect('lowers branch diamonds identically across runs', () =>
     assert.deepEqual(MirVerification.verify(first), [])
     assert.strictEqual(MirEncoding.encode(first), golden('branch-program.mir.txt'))
     assert.strictEqual(MirEncoding.encode(first), MirEncoding.encode(second))
-  }),
-)
-
-it.effect('discovers one generic Effect factory and generates its hidden runner', () =>
-  Effect.gen(function* () {
-    const result = yield* snapshot(`effect fn delayed<T>(value: T) -> T { return move value }
-pub fn main() -> i32 {
-  let recipe = delayed<i32>(42)
-  return run recipe
-}`)
-
-    assert.deepEqual(Analysis.diagnostics(result), [])
-    const instances = Analysis.instancesOf(result).instances
-    assert.deepEqual(
-      instances.map((instance) => ({
-        name: instance.key.declaration.name,
-        arguments: instance.key.typeArguments.map(Type.encodeGenericArgument),
-      })),
-      [
-        { name: 'main', arguments: [] },
-        { name: 'delayed', arguments: ['i32'] },
-      ],
-    )
-    const lowered = Analysis.loweredMir(result)
-    const delayed = lowered.functions.find((fn) => fn.id.name === 'delayed')
-    const runner = lowered.functions.find((fn) => fn.id.name.includes('delayed$effect$'))
-    assert.strictEqual(delayed?.result._tag, 'EffectValue')
-    assert.strictEqual(runner?.result._tag, 'EffectOutcome')
-    const outcome = Analysis.evaluate(result)
-    assert.strictEqual(
-      outcome._tag,
-      'Completed',
-      Json.stringify(
-        outcome,
-        (_, value) => (typeof value === 'bigint' ? value.toString() : value),
-        2,
-      ),
-    )
-    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 42n)
   }),
 )
 

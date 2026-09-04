@@ -181,7 +181,7 @@ export type RejectionReason =
   | 'InvalidStaticSequence'
   | 'CyclicValue'
 
-/** A closed admission result; rejected candidates never become evaluator values. */
+/** A closed admission result; rejected candidates never become static values. */
 export type Admission =
   | { readonly _tag: 'Admitted'; readonly value: Value }
   | {
@@ -720,7 +720,7 @@ const admissionAt = (
  * Rebuilds arbitrary candidate data as one canonical value, rejecting resources and identity.
  *
  * Runtime `Copy`, ownership, and cleanup are deliberately not consulted: admission describes only
- * the evaluator's closed value domain.
+ * the static evaluator's closed value domain.
  */
 export const admit = (input: unknown, options: AdmissionOptions): Admission =>
   admissionAt(input, options, Object.freeze([]), new WeakSet())
@@ -920,5 +920,5 @@ export const presentation = (self: Value): string => {
 
 const textEncoder = new TextEncoder()
 
-/** Counts retained canonical bytes for deterministic evaluator budgeting. */
+/** Counts retained canonical bytes for deterministic static-evaluation budgeting. */
 export const retainedSize = (self: Value): number => textEncoder.encode(encode(self)).byteLength

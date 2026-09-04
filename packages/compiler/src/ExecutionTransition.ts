@@ -8,7 +8,7 @@ export interface Identity {
   readonly root: number
 }
 
-/** Complete logical state from which every evaluator and backend transition is derived. */
+/** Complete logical state from which every backend transition is derived. */
 export interface State {
   readonly _tag: 'ExecutionTransitionState'
   readonly identity: Identity
@@ -372,7 +372,7 @@ export const encodeAuthority = (self: Authority): ReadonlyArray<string> =>
     ),
   )
 
-/** Compact private tag selected by native and Wasm only after MIR validation. */
+/** Compact private tag selected by LLVM lowering only after MIR validation. */
 export const tagOf = (execution: State['execution']): number => {
   switch (execution) {
     case 'Initial':

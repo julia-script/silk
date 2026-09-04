@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Use familiar readable algorithms as honest end-to-end probes of Silk's practical expressiveness, diagnostics, ergonomics, and evaluator/native/WebAssembly parity.
+Use familiar readable algorithms as honest end-to-end probes of Silk's practical expressiveness, diagnostics, ergonomics, native runtime semantics, and LLVM-to-WebAssembly behavior.
 
 ## Requirements
 
@@ -26,8 +26,8 @@ An example SHALL be `executable` only when it passes analysis and its declared t
 
 ### Requirement: The suite has an executable baseline
 
-Game of Life, Sieve, matrix multiplication, quicksort, and CRC-32 SHALL execute through evaluation
-and every supported backend whose host requirements they declare. Results or output SHALL match
+Game of Life, Sieve, matrix multiplication, quicksort, and CRC-32 SHALL execute through the native
+acceptance corpus and LLVM-generated WebAssembly where their host requirements permit. Results or output SHALL match
 exactly. FFT MAY remain frontier only with precise current blockers.
 
 #### Scenario: Run Game of Life
@@ -61,7 +61,7 @@ them as execution errors.
 #### Scenario: Traverse the complete grid
 
 - **WHEN** breadth-first search runs from the first cell to the opposite corner
-- **THEN** evaluation, native execution, and direct WebAssembly verify the same shortest distance
+- **THEN** native and LLVM-generated WebAssembly execution verify the same shortest distance
   before completing the effectful entry point successfully
 
 ### Requirement: Allocation-sensitive examples retain resource evidence
@@ -84,12 +84,12 @@ values MUST NOT satisfy this example contract.
 #### Scenario: Checksum a static literal
 
 - **WHEN** CRC-32 processes the committed bytes `99 13 1d 00`
-- **THEN** evaluation, native execution, and direct WebAssembly return the committed checksum with no allocation
+- **THEN** native and LLVM-generated WebAssembly execution return the committed checksum with no allocation
 
 ### Requirement: Quicksort is an executable recursive algorithm
 
 The in-place quicksort example SHALL recursively partition and sort its committed signed integers
-through evaluation, native LLVM, and direct WebAssembly. It MUST NOT be rewritten as an iterative
+through native LLVM and LLVM-generated WebAssembly execution. It MUST NOT be rewritten as an iterative
 fixture or granted an algorithm-specific recursion exception.
 
 #### Scenario: Sort through recursive partitions
@@ -106,7 +106,7 @@ component MUST NOT satisfy the example contract.
 #### Scenario: Execute the strengthened FFT
 
 - **WHEN** the committed eight-sample signal is transformed through all three butterfly stages
-- **THEN** evaluation, native execution, and direct WebAssembly return the same committed fingerprint
+- **THEN** native and LLVM-generated WebAssembly execution return the same committed fingerprint
 
 #### Scenario: Detect a broken transcendental operation
 

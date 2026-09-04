@@ -181,7 +181,7 @@ encodings.
 #### Scenario: Preserve arithmetic traps across execution paths
 
 - **WHEN** an operator-authored program overflows or divides by zero
-- **THEN** interpreter, native, and WebAssembly execution all trap at the operator expression's provenance
+- **THEN** native and LLVM-generated WebAssembly execution both trap at the operator expression's provenance
 
 #### Scenario: Keep MIR backend-neutral
 

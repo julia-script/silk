@@ -38,22 +38,15 @@ than the stack, and there is no version of that which only the deep call sites p
 
 So the machine stack stays the machine stack, and depth stays the program's problem to structure.
 
-## 2. The same limit has three faces
+## 2. The same limit has two target-specific faces
 
 A deep recursion does not fail the same way twice, and a reader who has only seen one of these will
 not recognise the others. They are one boundary:
 
-| Engine                  | What you see                                                                                                                                         | Recoverable?                     |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| **Bootstrap evaluator** | A `Blocked` outcome whose reason is `EvaluationLimit` with kind `CallDepth`, naming the recursive function, the span, and the whole active call path | Yes — it is a value, not a crash |
-| **Native**              | The process dies on a signal: `SIGSEGV` (the stack guard page), no exit status, no diagnostic, no unwinding, no partial output                       | No                               |
-| **WebAssembly**         | The host throws out of the exported call — under V8, `RangeError: Maximum call stack size exceeded`                                                  | No, but the host survives        |
-
-The evaluator is deliberately the odd one out. Its depth limit is a deterministic budget rather than
-a real stack, so the same program blocks at the same place on every machine instead of crashing on
-some of them. That is why evaluating a program successfully does not prove the compiled program has
-the stack for it, and why a `CallDepth` block is worth reading as "this recursion is deep", not as
-"the evaluator is small".
+| Target          | What you see                                                                                        | Recoverable?              |
+| --------------- | --------------------------------------------------------------------------------------------------- | ------------------------- |
+| **Native**      | The process dies on a signal: `SIGSEGV`, with no status, diagnostic, unwinding, or partial output   | No                        |
+| **WebAssembly** | The host throws out of the exported call — under V8, `RangeError: Maximum call stack size exceeded` | No, but the host survives |
 
 On WebAssembly the specific trap is **platform-sensitive**: a band of depths just below the host
 limit may trap `unreachable` (`WebAssembly.RuntimeError`) rather than raise the host's `RangeError`.
@@ -68,15 +61,13 @@ compiler promises them**. They are here so the numbers feel concrete, not so you
 Recorded on x86_64 Linux, Node 22.22, clang 18, release profile, walking a chain of boxed nodes one
 level per recursive call:
 
-| Engine                | Deepest chain that survived | Shallowest that failed                   |
-| --------------------- | --------------------------- | ---------------------------------------- |
-| Bootstrap evaluator   | 500                         | 510 (the 1,024-frame `CallDepth` budget) |
-| WebAssembly (Node/V8) | 950                         | 1,000                                    |
-| Native (release)      | 100,000                     | 128,000                                  |
+| Engine                | Deepest chain that survived | Shallowest that failed |
+| --------------------- | --------------------------- | ---------------------- |
+| WebAssembly (Node/V8) | 950                         | 1,000                  |
+| Native (release)      | 100,000                     | 128,000                |
 
-The three differ by more than two orders of magnitude, which is the practical point: a depth that is
-comfortable natively is fatal in a browser, and a depth the evaluator accepts proves nothing about
-either.
+The two differ by more than two orders of magnitude, which is the practical point: a depth that is
+comfortable natively can still be fatal in a browser.
 
 ## 4. The iterative pattern
 
@@ -271,8 +262,7 @@ does not cover a cycle that can avoid it.
 Suspension preserves the child's success, typed failure, and requirement channels. It is not
 asynchronous execution: it does not park, yield to another task, or install a scheduler. The
 compiler-owned execution stack is still finite, and exhausting it is a fatal trap rather than an
-`OutOfMemoryError`. The evaluator also retains its deterministic logical `CallDepth` budget even
-when the physical machine stack stays bounded.
+`OutOfMemoryError`.
 
 ## 6. Cleanup has the same limit and fewer ways out
 
@@ -317,11 +307,10 @@ This works today. It is also, honestly, incomplete, and it is worth knowing wher
 
 Same machine and profile as §3, dropping a chain built iteratively:
 
-| Engine                | Deepest chain released | Shallowest that failed                   |
-| --------------------- | ---------------------- | ---------------------------------------- |
-| Bootstrap evaluator   | 300                    | 340 (the 1,024-frame `CallDepth` budget) |
-| WebAssembly (Node/V8) | 5,000                  | 6,000                                    |
-| Native (release)      | 200,000                | 1,000,000                                |
+| Engine                | Deepest chain released | Shallowest that failed |
+| --------------------- | ---------------------- | ---------------------- |
+| WebAssembly (Node/V8) | 5,000                  | 6,000                  |
+| Native (release)      | 200,000                | 1,000,000              |
 
 Cleanup frames are narrower than the walk's, so the numbers are larger than §3's — and that is the
 trap. The two limits differ by roughly a factor of five, so neither calibrates the other: a chain

@@ -4,7 +4,7 @@
 
 A shared library of compiler-phase view projections: the registry of inspector views and the
 per-phase row builders that turn an analysis snapshot into serializable row models, consumed by
-both the docs workbench and the language server.
+the language server and editor clients.
 
 ## Requirements
 
@@ -52,15 +52,4 @@ out of the docs app.
 #### Scenario: Facade-only imports
 
 - **WHEN** the package's imports are checked
-- **THEN** no projection value-imports a phase module (lexer, parser, closure loading, elaboration, evaluation)
-
-### Requirement: The docs workbench consumes the shared projections
-
-The docs `/labs` workbench SHALL consume the shared package for its view registry and row
-projections, keeping its observable behavior (views offered, rows rendered, meta, facts,
-cursor behavior, saved layouts and URLs) unchanged.
-
-#### Scenario: Workbench behavior preserved
-
-- **WHEN** the workbench renders any view after the extraction
-- **THEN** the rows, meta, facts, and span-cursor behavior match what the in-app projections produced before
+- **THEN** no projection value-imports a phase module (lexer, parser, closure loading, elaboration, or lowering)

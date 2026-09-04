@@ -90,7 +90,7 @@ Lowering SHALL evaluate each valid expression statement exactly once, preserve i
 failure behavior, and continue with the next statement only after successful completion. Unit
 results SHALL require no value cleanup. A `run` expression that propagates a declared failure from
 an enclosing effect function SHALL use the same propagation and ownership cleanup path as the same
-`run` expression in a binding or return. Evaluation, native execution, and direct WebAssembly
+`run` expression in a binding or return. Native execution and LLVM-generated WebAssembly
 execution SHALL agree on outcomes and observable traces.
 
 #### Scenario: Execute two unit effects in order

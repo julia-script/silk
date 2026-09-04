@@ -15,8 +15,7 @@ import { unreachable } from './support/raise.js'
  * and the shared runtime realization resolves it. Recording nothing — which is what a represented
  * field used to contribute — would silently drop every owned capture the stored callable holds.
  *
- * These plan-level proofs are paired with executed evaluator, LLVM, and Wasm traces in
- * `StoredCallableRuntime.test.ts`.
+ * These plan-level proofs are paired with the LLVM lowering assertions and native corpus cases.
  */
 
 const ascii = (value: string): Uint8Array =>

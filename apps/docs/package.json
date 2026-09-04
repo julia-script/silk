@@ -28,8 +28,6 @@
     "ai": "^7.0.83",
     "class-variance-authority": "^0.7.1",
     "cnfast": "^0.1.0",
-    "dockview": "^7.0.4",
-    "dockview-react": "^7.0.4",
     "effect": "catalog:",
     "flexsearch": "^0.8.212",
     "fumadocs-core": "^16.15.4",

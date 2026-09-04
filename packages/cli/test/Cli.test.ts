@@ -47,24 +47,6 @@ it.effect(
       assert.strictEqual(Result.isSuccess(loaded), true)
       const built = yield* execute(['build', '--manifest-path', `${projectRoot}/silk.toml`])
       assert.strictEqual(Result.isSuccess(built), true)
-      const directWasm = yield* execute([
-        'build',
-        '--manifest-path',
-        `${projectRoot}/silk.toml`,
-        '--backend',
-        'wasm',
-        '--target',
-        'wasm32-unknown-unknown',
-        '--target',
-        'wasm32-unknown-unknown',
-      ])
-      assert.strictEqual(Result.isSuccess(directWasm), true)
-      assert.strictEqual(
-        yield* fileSystem.exists(
-          `${projectRoot}/build/wasm/wasm32-unknown-unknown/debug/hello.wasm`,
-        ),
-        true,
-      )
       const ran = yield* execute(['run', '--manifest-path', `${projectRoot}/silk.toml`])
       assert.strictEqual(Result.isSuccess(ran), true)
     }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),

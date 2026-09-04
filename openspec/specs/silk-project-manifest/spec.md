@@ -68,10 +68,10 @@ including resolution of `host`, and required parent directories SHALL be created
 - **WHEN** package `hello` is built as shared and static libraries for an Apple host
 - **THEN** their filenames are `libhello.dylib` and `libhello.a` beneath their backend, target, and profile directory
 
-#### Scenario: Keep two Wasm backends distinct
+#### Scenario: Build WebAssembly through LLVM
 
-- **WHEN** package `hello` is built for `wasm32-unknown-unknown` through both `llvm` and `wasm`
-- **THEN** the artifacts are `<project>/build/llvm/wasm32-unknown-unknown/debug/hello.wasm` and `<project>/build/wasm/wasm32-unknown-unknown/debug/hello.wasm`
+- **WHEN** package `hello` is built for `wasm32-unknown-unknown`
+- **THEN** the artifact is `<project>/build/llvm/wasm32-unknown-unknown/debug/hello.wasm`
 
 #### Scenario: Replan the same build
 
@@ -100,9 +100,9 @@ loading with a typed project error; WebAssembly planning SHALL reject non-empty 
 - **WHEN** `[build]` declares `backend = "llvm"` and `targets = ["host", "wasm32-unknown-unknown"]`
 - **THEN** target selectors retain their declared order and `host` resolves to the canonical current-host triple before planning
 
-#### Scenario: Reject an incompatible batch
+#### Scenario: Reject an unknown backend
 
-- **WHEN** `[build]` selects backend `wasm` with a native target
+- **WHEN** `[build]` selects any backend other than `llvm`
 - **THEN** project planning fails before creating or replacing any artifact
 
 #### Scenario: Deduplicate target selectors

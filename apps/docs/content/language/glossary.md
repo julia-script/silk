@@ -56,11 +56,6 @@ runs code; modules cannot be declared independently of their locations, assemble
 files, or hold implicit runtime initialization.
 _Avoid_: partial module, declared module name
 
-**Direct WebAssembly backend**:
-A compiler backend that emits WebAssembly without passing through LLVM. It is a stretch path for
-reducing Silk Effect's long-term dependence on LLVM, not a prerequisite for the bootstrap language.
-_Avoid_: custom Wasm backend, LLVM-free compiler
-
 **Self-hosting compiler**:
 A compiler written in Silk Effect that can compile its own source into a working native compiler
 without Node.js or TypeScript at runtime. The first self-hosting compiler may emit LLVM IR and use

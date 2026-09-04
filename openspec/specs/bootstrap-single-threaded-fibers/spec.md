@@ -249,8 +249,8 @@ collection contracts. The sealed Execution substrate SHALL expose an exactly-onc
 `notifyInitial` operation which changes a stored `Initial` Execution to `InitialReady` and
 synchronously invokes its fixed non-parking readiness endpoint without activating its body. It
 MUST NOT choose scheduler policy, allocate, or expose scheduler storage. No source declaration
-SHALL receive semantic or lowering privilege from its name or module identity, and evaluator,
-native LLVM, and direct Wasm SHALL agree on results, typed failures, cancellation, wake ordering,
+SHALL receive semantic or lowering privilege from its name or module identity. Native LLVM and
+LLVM-generated WebAssembly SHALL agree on results, typed failures, cancellation, wake ordering,
 and cleanup.
 
 #### Scenario: Notify only after publication
@@ -271,7 +271,7 @@ and cleanup.
 #### Scenario: Run the vertical root-fork-join program
 
 - **WHEN** `execute` creates a root, the root forks a child, the root parks in `join`, the child completes, and the root resumes
-- **THEN** evaluator, native, and direct Wasm produce the same root result and terminal cleanup state
+- **THEN** native and LLVM-generated WebAssembly produce the same root result and terminal cleanup state
 
 #### Scenario: Keep trivial programs scheduler-free
 

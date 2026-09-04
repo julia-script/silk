@@ -47,7 +47,7 @@ interface State {
   readonly results: ReadonlyMap<string, Elaboration.Result>
   readonly resolution: NameResolution.Resolution
   readonly index: DeclarationIndex.Index
-  readonly evaluator: StaticEvaluation.Evaluation<StaticValue.Value>
+  readonly evaluation: StaticEvaluation.Evaluation<StaticValue.Value>
   readonly residuals: StaticEvaluation.Evaluation<ResidualBody>
   readonly staticResultOrigins: Map<string, StaticEvaluation.TextOrigin>
 }
@@ -75,7 +75,7 @@ export const make = (
       results,
       resolution,
       index,
-      evaluator: StaticEvaluation.make<StaticValue.Value>(target, limits),
+      evaluation: StaticEvaluation.make<StaticValue.Value>(target, limits),
       residuals: StaticEvaluation.make<ResidualBody>(target, limits),
       staticResultOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
     },
@@ -389,7 +389,7 @@ const evaluateStaticFunction = (
   })
   const originScope = StaticEvaluation.applicationKey(self[stateSymbol].environment, application)
   const result = StaticEvaluation.evaluateApplicationFrom(
-    self[stateSymbol].evaluator,
+    self[stateSymbol].evaluation,
     application,
     parentTrace,
     (evaluation) => {
@@ -563,7 +563,7 @@ function evaluateConstantValue(
     span,
   })
   const result = StaticEvaluation.evaluateApplicationFrom(
-    self[stateSymbol].evaluator,
+    self[stateSymbol].evaluation,
     application,
     parentTrace,
     (evaluation) => {

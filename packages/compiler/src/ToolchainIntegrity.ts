@@ -1,6 +1,7 @@
 import type * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Stdlib from './Stdlib.js'
+import type * as Target from './Target.js'
 import { compilerDigest } from './ToolchainIntegrity.generated.js'
 
 /** The stable schema of a matched bootstrap toolchain identity graph. */
@@ -71,7 +72,7 @@ export type TargetValidation =
     }
   | {
       readonly _tag: 'UnsupportedTarget'
-      readonly target: Intrinsic.ExecutionTarget
+      readonly target: Target.Id
       readonly operations: ReadonlyArray<string>
     }
   | { readonly _tag: 'Invalid'; readonly failures: ReadonlyArray<IntegrityFailure> }
@@ -220,8 +221,7 @@ const inventoryDigest = (): string => contentDigest(JSON.stringify(Intrinsic.inv
 
 const sourceId = (module: string): string => `source/${module}`
 const providerId = (module: string): string => `provider/${module}`
-const runtimeId = (target: Intrinsic.ExecutionTarget, operation: string): string =>
-  `runtime/${target}/${operation}`
+const runtimeId = (target: Target.Id, operation: string): string => `runtime/${target}/${operation}`
 
 const installedComponents = (): ReadonlyArray<Component> => {
   const compiler: Component = Object.freeze({
@@ -284,7 +284,6 @@ const installedComponents = (): ReadonlyArray<Component> => {
                 compiler: compilerDigest,
                 target,
                 operation: entry.operation,
-                evaluator: entry.evaluator,
                 hir: entry.hir,
                 mir: entry.mir,
                 ...(entry.hostImport === undefined ? {} : { hostImport: entry.hostImport }),
@@ -470,7 +469,7 @@ export const validateFrontend = (
 /** Validates only providers and runtime implementations reached by one prepared program. */
 export const validateTarget = (
   candidate: Graph,
-  target: Intrinsic.ExecutionTarget,
+  target: Target.Target,
   calls: ReadonlyArray<Instances.IntrinsicCall>,
   loadedModules: Iterable<string>,
 ): TargetValidation => {
@@ -479,29 +478,38 @@ export const validateTarget = (
       calls.flatMap((call) => {
         const operation = Intrinsic.findOperationById(call.operation)
         return operation === undefined ||
-          (operation.phase === 'Runtime' && operation.targets.includes(target))
+          (operation.phase === 'Runtime' && operation.targets.includes(target.id))
           ? []
           : [Intrinsic.operationText(call.operation)]
       }),
     ),
   ].sort()
+  const reachableOperations = new Set(
+    calls.map((call) => Intrinsic.operationText(call.operation).replace(/^Intrinsic\./, '')),
+  )
   const providerModules = [...new Set(loadedModules)]
-    .filter((module) => Stdlib.find(module)?.layer === 'target-provider')
+    .filter((module) => {
+      const entry = Stdlib.find(module)
+      return (
+        entry?.layer === 'target-provider' &&
+        entry.runtimeInventory.some((operation) => reachableOperations.has(operation))
+      )
+    })
     .sort()
   for (const module of providerModules) {
     const entry = Stdlib.find(module)
-    if (entry !== undefined && !entry.providerTargets?.includes(target)) unsupported.push(module)
+    if (entry !== undefined && !entry.providerTargets?.includes(target.id)) unsupported.push(module)
   }
   if (unsupported.length > 0)
     return Object.freeze({
       _tag: 'UnsupportedTarget',
-      target,
+      target: target.id,
       operations: Object.freeze([...new Set(unsupported)].sort()),
     })
 
   const selectedIds = new Set([
     ...providerModules.map(providerId),
-    ...calls.map((call) => runtimeId(target, Intrinsic.operationText(call.operation))),
+    ...calls.map((call) => runtimeId(target.id, Intrinsic.operationText(call.operation))),
   ])
   const expected = new Map(
     installedGraph.components

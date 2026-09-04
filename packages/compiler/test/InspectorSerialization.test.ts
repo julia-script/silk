@@ -17,14 +17,12 @@ pub fn main() -> i32 { let pair = make() return pair.right }`
   const snapshot = Effect.runSync(
     Analysis.ofSourceRealized(sourceId, new TextEncoder().encode(source), 'wasm32-unknown-unknown'),
   )
-  const evaluation = Analysis.evaluate(snapshot)
   const context: ViewContext = {
     snapshot,
     modules: { [sourceId]: source },
     root: sourceId,
     mode: 'release',
     profile: 'release',
-    evaluation,
     filter: '',
     showTrivia: false,
   }

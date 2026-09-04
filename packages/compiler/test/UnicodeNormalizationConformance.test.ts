@@ -136,10 +136,8 @@ fn same(left: &[u8], right: &[u8]) -> bool {
 
 /// Normalizes one input both ways and checks it against the expected forms.
 ///
-/// Comparison is on bytes rather than on a second borrowed \`string\` because the wasm backend
-/// invalidates a heap-backed \`string\` once another one is derived before the first is read; see
-/// the note on this test in the pull request. Exact \`string\` equality itself is checked in
-/// \`UnicodeNormalization.test.ts\`, on values that do not go through this corpus reader.
+/// Comparison is on bytes so the conformance fixture checks the exact encoded normalization forms.
+/// Exact \`string\` equality itself is checked in \`UnicodeNormalization.test.ts\`.
 effect fn checkFrom(
   text: string,
   nfc: &[u8],
@@ -217,12 +215,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 /**
  * Compiles the whole corpus into one native binary and returns its failure count.
  *
- * Native is the engine this runs on, and the choice is forced. The bootstrap evaluator is the
- * reference implementation but blocks on its own step limit somewhere above fifty cases in a single
- * program. WebAssembly miscounts here for a reason that is not the normalizer: a value built from
- * heap-backed storage reads stale once another is built, which is #172, and the same normalizer
- * passes the literal-driven parity suite on wasm. So the corpus runs natively in full, and a small
- * slice of it runs on the evaluator below to show the reference engine agrees.
+ * The corpus runs as one native program so every case shares a single compile/link operation.
  */
 const failuresIn = (name: string, cases: ReadonlyArray<Case>) =>
   Effect.gen(function* () {
@@ -285,34 +278,4 @@ it.effect(
       )
     }),
   1_800_000,
-)
-
-/**
- * The same corpus, on the reference engine, for as much of it as one program can hold.
- *
- * The bootstrap evaluator blocks on its step limit between twelve and twenty of these cases in one
- * program, so this is a slice rather than the whole file. It exists to show the engine the language
- * is defined by agrees with the binary the assertion above trusts.
- */
-it.effect(
-  'agrees with the bootstrap evaluator on the leading conformance cases',
-  () =>
-    Effect.gen(function* () {
-      const cases = parse().slice(0, 12)
-      const snapshot = yield* Analysis.ofSourceRealized(
-        'unicode-conformance/evaluated',
-        ascii(program(cases)),
-      )
-      assert.deepEqual(
-        Analysis.diagnostics(snapshot).map(
-          (diagnostic) => `${diagnostic.code} ${diagnostic.message}`,
-        ),
-        [],
-      )
-      const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(evaluated._tag, 'Completed', 'the evaluator ran the slice')
-      if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 0n)
-    }),
-  600_000,
 )

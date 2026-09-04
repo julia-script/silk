@@ -397,36 +397,3 @@ pub fn main() -> i32 {
     assertRealizedEffect(snapshot)
   }),
 )
-
-it.effect('realizes a represented capturing section stored in a nominal field', () =>
-  Effect.gen(function* () {
-    const source = `import silk.i32 as i32
-struct Adder<F: fn(i32) -> i32> { step: F }
-pub fn main() -> i32 {
-  let adder = Adder { step: i32.add(1) }
-  return adder.step(2)
-}`
-    const snapshot = yield* realized('representation-fence/callable-section', source)
-    assertRealizedCallable(snapshot)
-    const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed')
-    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 3n)
-  }),
-)
-
-it.effect('realizes a represented take-once callable field stored in a nominal', () =>
-  Effect.gen(function* () {
-    const source = `struct Once<F: once fn(i32) -> i32> { step: F }
-fn decode(value: i32) -> i32 { return value }
-pub fn main() -> i32 {
-  let taken = Once { step: decode }
-  return taken.step(1)
-}`
-    const snapshot = yield* realized('representation-fence/callable-once', source)
-
-    assertRealizedCallable(snapshot)
-    const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed')
-    assert.strictEqual(outcome._tag === 'Completed' ? outcome.result.value : undefined, 1n)
-  }),
-)

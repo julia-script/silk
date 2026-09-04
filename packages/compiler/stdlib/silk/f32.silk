@@ -13,7 +13,7 @@
 //!
 //! [`toBits`] and [`fromBits`] expose the exact binary32 representation, including signed zero and
 //! NaN payloads. The source-defined rounding, extrema, sign, and square-root helpers canonicalize
-//! NaN results so evaluator, native, and WebAssembly execution agree on their bits.
+//! NaN results so native and WebAssembly execution agree on their bits.
 //!
 //! # Gotchas
 //! Converting to an integer discards the fractional part and traps for NaN, infinity, or a value
@@ -210,7 +210,7 @@ fn canonicalNaN() -> f32 {
 /// # Details
 ///
 /// IEEE requires square root to be correctly rounded, so its native and WebAssembly instructions
-/// have one admissible numeric result and the evaluator reproduces the same bits.
+/// have one admissible numeric result.
 ///
 /// # Gotchas
 ///

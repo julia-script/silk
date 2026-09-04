@@ -827,7 +827,7 @@ fn replaceSlot<T>(buffer: RawBuffer<T>, index: usize, value: T) -> RawBuffer<T> 
 // Ordering. A bottom-up merge sort over a permutation of the element indices, so it is stable, and
 // deterministic because every comparison and every exchange is decided by the run boundaries alone
 // and never by an address, a capacity, or an engine detail. The same input therefore produces the
-// same output on the evaluator, on LLVM, and on Wasm.
+// same output for every LLVM target.
 //
 // Merging cannot happen in place, so the sort allocates and carries `! OutOfMemoryError ? &mut Allocator`.
 // An insertion sort would need no allocation and no requirement, but it costs O(n^2), and the two
@@ -891,4 +891,3 @@ fn releaseScratch<T>(buffer: RawBuffer<T>, leftover: RawBuffer<T>) -> RawBuffer<
   }
   return move buffer
 }
-

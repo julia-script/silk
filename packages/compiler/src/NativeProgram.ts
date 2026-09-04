@@ -51,7 +51,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   request: CodegenRequest,
 ): Effect.fn.Return<
   {
-    /** Static host-report tables for the standalone adapter; empty for direct Wasm. */
+    /** Static host-report tables for the standalone adapter; empty for freestanding targets. */
     readonly report: Termination.Report
     readonly symbols: ReadonlyArray<SymbolEntry>
     readonly nativeRuntimeSymbols: ReadonlyArray<string>

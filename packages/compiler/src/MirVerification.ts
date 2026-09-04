@@ -3856,7 +3856,6 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             })
           if (
             catalog?.unsafe !== true ||
-            catalog.targets.includes('Wasm') ||
             destination === undefined ||
             valid?._tag !== 'bool' ||
             handle?._tag !== 'Nominal' ||
@@ -4030,7 +4029,6 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             })
           if (
             catalog?.unsafe !== true ||
-            catalog.targets.includes('Wasm') ||
             expectedResult === undefined ||
             destination === undefined ||
             !SilkType.equals(semanticType(destination), expectedResult) ||

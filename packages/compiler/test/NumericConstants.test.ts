@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,10 +6,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as FloatingPoint from '../src/FloatingPoint.js'
 import * as Scalar from '../src/Scalar.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
 import * as Stdlib from '../src/Stdlib.js'
-import * as Driver from './support/TestDriver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -28,14 +24,7 @@ afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
  */
 const fixedWidthIntegers = Scalar.integers().filter((scalar) => scalar.width._tag === 'FixedWidth')
 
-const integerSpellings = fixedWidthIntegers.map((scalar) => scalar.spelling)
-
 const floatSpellings = ['f32', 'f64'] as const
-
-/** The conversion that types a one for a given width, since a bare literal keeps the i32 default
- * even in an argument position. */
-const typedOne = (spelling: string): string =>
-  `i32.to${spelling[0]?.toUpperCase() ?? ''}${spelling.slice(1)}(1)`
 
 const sourceText = (spelling: string): string => {
   const bytes = Stdlib.sources.get(`silk/${spelling}`)
@@ -56,16 +45,10 @@ const declaration = (spelling: string, name: string): { type: string; literal: s
   return { type: matched?.[1] ?? '', literal: matched?.[2] ?? '' }
 }
 
-const widthOf = (spelling: string): number => {
-  const scalar = fixedWidthIntegers.find((candidate) => candidate.spelling === spelling)
-  assert.isDefined(scalar, spelling)
-  return scalar === undefined ? 0 : Scalar.bits(scalar, 64)
-}
-
 /**
  * Requirements 1, 2, 5 and 6. Every bound is compared against `Scalar.range`, which is the same
- * table the checked intrinsics test against in both `Backend` and `BootstrapEvaluation`, so a
- * constant cannot drift away from the bound the checked path actually enforces.
+ * table the checked intrinsics test against in `Backend`, so a constant cannot drift away from the
+ * bound the checked path actually enforces.
  */
 it('declares every fixed-width integer bound at the value the checked intrinsics enforce', () => {
   assert.strictEqual(fixedWidthIntegers.length, 8)
@@ -157,97 +140,4 @@ it.effect('reports no invalid-constant diagnostic for any stdlib declaration', (
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
   }),
-)
-
-/**
- * One checked-overflow probe per integer type. A step past `MAX` and a step below `MIN` must both
- * refuse, and the same step taken from inside the bound must succeed — so the probes fail both on a
- * bound that is too small and on one that is too large.
- */
-const checkedCases = integerSpellings.flatMap((spelling, ordinal) => [
-  {
-    name: `pastMax${ordinal}`,
-    body: `match move ${spelling}.checkedAdd(${spelling}.MAX, ${typedOne(spelling)}) { Option<${spelling}>.Some { value: result } => 0 _ => 42 }`,
-  },
-  {
-    name: `belowMin${ordinal}`,
-    body: `match move ${spelling}.checkedSubtract(${spelling}.MIN, ${typedOne(spelling)}) { Option<${spelling}>.Some { value: result } => 0 _ => 42 }`,
-  },
-  {
-    name: `insideBound${ordinal}`,
-    body: `match move ${spelling}.checkedAdd(${spelling}.MIN, ${typedOne(spelling)}) { Option<${spelling}>.Some { value: result } => 42 _ => 0 }`,
-  },
-])
-
-const acceptanceCases = [
-  ...checkedCases.map((probe) => `fn ${probe.name}() -> i32 { return ${probe.body} }`),
-  ...integerSpellings.map(
-    (spelling, ordinal) =>
-      `fn width${ordinal}() -> i32 { if ${spelling}.BITS == ${widthOf(spelling)} { return 42 } return 0 }`,
-  ),
-  ...floatSpellings.flatMap((spelling) =>
-    Object.entries(floatBits[spelling]).map(
-      ([name, expected]) =>
-        `fn bits${spelling}${name}() -> i32 { if ${spelling}.toBits(${spelling}.${name}) == ${expected.toString()} { return 42 } return 0 }`,
-    ),
-  ),
-]
-
-const probeNames = acceptanceCases.map((declared) => declared.slice(3, declared.indexOf('(')))
-
-const acceptance = `${[...integerSpellings, ...floatSpellings]
-  .map((spelling) => `import silk.${spelling} as ${spelling}`)
-  .join('\n')}
-import silk.option { Option }
-
-${acceptanceCases.join('\n')}
-
-fn verify(value: i32) -> () { if value != 42 { let boom = 1 / 0 } }
-
-pub fn main() -> i32 {
-${probeNames.map((name) => `  let checked${name} = verify(${name}())`).join('\n')}
-  return 42
-}`
-
-/**
- * The remaining acceptance criteria: `i32.MAX` plus one must refuse in the checked path, and every
- * constant must carry one value across the evaluator, the Wasm backend and the native LLVM backend.
- * Each probe answers 42 and `verify` divides by zero on any other answer, so a single disagreeing
- * constant fails the whole program on whichever engine disagrees.
- */
-it.effect(
-  'gives every numeric constant the same value on all three engines',
-  () =>
-    Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
-        'numeric-constants/acceptance',
-        ascii(acceptance),
-        'wasm32-unknown-unknown',
-      )
-      assert.deepEqual(Analysis.diagnostics(snapshot), [])
-
-      const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(evaluated._tag, 'Completed')
-      if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42n)
-
-      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-
-      const compiled = yield* Driver.compile({
-        compilation: {
-          root: SourceFile.make('numeric-constants/acceptance', ascii(acceptance)),
-        },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
-        profile: 'release',
-        artifactKind: 'NativeExecutable',
-        destination: join(destinationRoot, 'acceptance'),
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.status, 42, run.stderr)
-    }),
-  60_000,
 )

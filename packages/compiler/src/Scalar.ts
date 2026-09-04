@@ -125,12 +125,6 @@ export interface Operation {
   readonly parameters?: ReadonlyArray<Spelling>
 }
 
-/** The backend lane selected from a scalar's logical width. */
-export interface BackendLanes {
-  readonly llvm: 'LogicalWidth'
-  readonly wasm: 'I32' | 'I64' | 'F32' | 'F64' | 'Pointer'
-}
-
 /** One immutable integer entry in the authoritative scalar catalog. */
 export interface IntegerScalar {
   readonly spelling: IntegerSpelling
@@ -138,7 +132,6 @@ export interface IntegerScalar {
   readonly width: Width
   readonly signedness: 'Signed' | 'Unsigned'
   readonly layout: Layout
-  readonly lanes: BackendLanes
   readonly operations: ReadonlyArray<Operation>
 }
 
@@ -154,7 +147,6 @@ export interface BooleanScalar {
   readonly width: Extract<Width, { readonly _tag: 'FixedWidth' }>
   readonly signedness: undefined
   readonly layout: Extract<Layout, { readonly _tag: 'FixedLayout' }>
-  readonly lanes: BackendLanes
   readonly operations: ReadonlyArray<Operation>
 }
 
@@ -164,7 +156,6 @@ export interface FloatScalar {
   readonly width: Extract<Width, { readonly _tag: 'FixedWidth' }>
   readonly signedness: undefined
   readonly layout: Extract<Layout, { readonly _tag: 'FixedLayout' }>
-  readonly lanes: BackendLanes
   readonly operations: ReadonlyArray<Operation>
 }
 
@@ -182,7 +173,6 @@ export interface CharacterScalar {
   readonly width: Extract<Width, { readonly _tag: 'FixedWidth' }>
   readonly signedness: undefined
   readonly layout: Extract<Layout, { readonly _tag: 'FixedLayout' }>
-  readonly lanes: BackendLanes
   readonly operations: ReadonlyArray<Operation>
 }
 
@@ -322,7 +312,6 @@ const integer = <const S extends IntegerSpelling>(
   signedness: IntegerScalar['signedness'],
   width: Width,
   layout: Layout,
-  wasm: BackendLanes['wasm'],
 ): IntegerScalar & { readonly spelling: S } =>
   Object.freeze({
     spelling,
@@ -330,7 +319,6 @@ const integer = <const S extends IntegerSpelling>(
     width,
     signedness,
     layout,
-    lanes: Object.freeze({ llvm: 'LogicalWidth', wasm }),
     operations:
       signedness === 'Signed'
         ? Object.freeze([
@@ -348,22 +336,22 @@ const integer = <const S extends IntegerSpelling>(
           ]),
   })
 
-const u8 = integer('u8', 'Unsigned', fixedWidth(8), fixedLayout(1), 'I32')
-const u16 = integer('u16', 'Unsigned', fixedWidth(16), fixedLayout(2), 'I32')
-const u32 = integer('u32', 'Unsigned', fixedWidth(32), fixedLayout(4), 'I32')
-const u64 = integer('u64', 'Unsigned', fixedWidth(64), fixedLayout(8), 'I64')
+const u8 = integer('u8', 'Unsigned', fixedWidth(8), fixedLayout(1))
+const u16 = integer('u16', 'Unsigned', fixedWidth(16), fixedLayout(2))
+const u32 = integer('u32', 'Unsigned', fixedWidth(32), fixedLayout(4))
+const u64 = integer('u64', 'Unsigned', fixedWidth(64), fixedLayout(8))
 
 /** The target-sized unsigned integer used by addresses and allocation contracts. */
-export const pointerInteger = integer('usize', 'Unsigned', pointerWidth, pointerLayout, 'Pointer')
+export const pointerInteger = integer('usize', 'Unsigned', pointerWidth, pointerLayout)
 
-const i8 = integer('i8', 'Signed', fixedWidth(8), fixedLayout(1), 'I32')
-const i16 = integer('i16', 'Signed', fixedWidth(16), fixedLayout(2), 'I32')
+const i8 = integer('i8', 'Signed', fixedWidth(8), fixedLayout(1))
+const i16 = integer('i16', 'Signed', fixedWidth(16), fixedLayout(2))
 
 /** The default integer selected for an unconstrained integer expression. */
-export const defaultInteger = integer('i32', 'Signed', fixedWidth(32), fixedLayout(4), 'I32')
+export const defaultInteger = integer('i32', 'Signed', fixedWidth(32), fixedLayout(4))
 
-const i64 = integer('i64', 'Signed', fixedWidth(64), fixedLayout(8), 'I64')
-const isize = integer('isize', 'Signed', pointerWidth, pointerLayout, 'Pointer')
+const i64 = integer('i64', 'Signed', fixedWidth(64), fixedLayout(8))
+const isize = integer('isize', 'Signed', pointerWidth, pointerLayout)
 
 const enumRepresentationCatalog: ReadonlyArray<EnumRepresentation> = Object.freeze([
   u8,
@@ -425,7 +413,6 @@ const floatOperations = (self: FloatSpelling, bitsType: 'u32' | 'u64') =>
 const floating = <const S extends FloatSpelling>(
   spelling: S,
   bits: 32 | 64,
-  wasm: 'F32' | 'F64',
   bitsType: 'u32' | 'u64',
 ): FloatScalar & { readonly spelling: S } =>
   Object.freeze({
@@ -434,13 +421,12 @@ const floating = <const S extends FloatSpelling>(
     width: fixedWidth(bits),
     signedness: undefined,
     layout: fixedLayout(bits === 32 ? 4 : 8),
-    lanes: Object.freeze({ llvm: 'LogicalWidth', wasm }),
     operations: floatOperations(spelling, bitsType),
   })
 
-export const f32 = floating('f32', 32, 'F32', 'u32')
+export const f32 = floating('f32', 32, 'u32')
 /** The default float selected for an unconstrained floating expression. */
-export const defaultFloat = floating('f64', 64, 'F64', 'u64')
+export const defaultFloat = floating('f64', 64, 'u64')
 
 /** The canonical Boolean scalar. */
 export const boolean: BooleanScalar = Object.freeze({
@@ -449,7 +435,6 @@ export const boolean: BooleanScalar = Object.freeze({
   width: fixedWidth(32),
   signedness: undefined,
   layout: fixedLayout(4),
-  lanes: Object.freeze({ llvm: 'LogicalWidth', wasm: 'I32' }),
   operations: Object.freeze([...equalityOperations, operation('not', 'Not', 1, 'Self')]),
 })
 
@@ -471,7 +456,6 @@ export const character: CharacterScalar = Object.freeze({
   width: fixedWidth(32),
   signedness: undefined,
   layout: fixedLayout(4),
-  lanes: Object.freeze({ llvm: 'LogicalWidth', wasm: 'I32' }),
   operations: Object.freeze([
     operation('fromU32', 'CheckedConvertToChar', 1, 'OptionTarget', Object.freeze(['u32'])),
     operation('toU32', 'ConvertToU32', 1, 'u32'),

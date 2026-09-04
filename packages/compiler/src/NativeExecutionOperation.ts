@@ -1086,7 +1086,7 @@ const releaseHelperSymbol = 'silk_execution_release'
 
 /**
  * Declares the module's single out-of-line Execution release when the module constructs any
- * Execution package. It mirrors the WebAssembly `silk_execution_release` helper. The synthetic
+ * Execution package. The synthetic
  * `DeclaredFunction` only feeds the cleanup contexts: its MIR has one Execution parameter and no
  * roots, and its identity is distinct from every real function so no instance lookup can alias it.
  */

@@ -469,8 +469,8 @@ The selected target is fixed before any demanded specialization executes. The re
 selection is ordinary residual source; no target-profile parameter or runtime probe remains.
 
 **Boundary:** `silk.target` is ordinary source and receives no compiler-known name privilege. The
-sealed `Intrinsic.targetProfile() -> u8` operation is static-only and has no evaluator, LLVM, or
-WebAssembly runtime target. Target data cannot be changed by source, inferred from the host when an
+sealed `Intrinsic.targetProfile() -> u8` operation is static-only and has no LLVM or WebAssembly
+runtime lowering. Target data cannot be changed by source, inferred from the host when an
 explicit target was selected, or queried dynamically at runtime. A selected cleanup-free target
 value may appear in residual code only as an embedded ordinary value.
 

@@ -508,7 +508,11 @@ it('admits the Pointer actor with one invariant per unsafe primitive', () => {
     ],
   )
   assert.isTrue(pointer.every((entry) => entry.admission === 'Ownership'))
-  assert.isTrue(pointer.every((entry) => entry.targets.length === 3))
+  assert.isTrue(
+    pointer.every(
+      (entry) => JSON.stringify(entry.targets) === JSON.stringify(Intrinsic.runtimeTargets),
+    ),
+  )
   assert.strictEqual(
     pointer.find((entry) => entry.operation === 'Intrinsic.pointerFromMutSlice')?.signature,
     'fn Intrinsic.pointerFromMutSlice<T>(values: &mut [T]) -> *mut T',
@@ -583,7 +587,7 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
     ...(entry.invariant === undefined ? {} : { invariant: entry.invariant }),
     ...(entry.hostImport === undefined ? {} : { hostImport: entry.hostImport }),
   }))
-  assert.deepEqual(fixture, { targets: ['Evaluator', 'LLVM', 'Wasm'], entries })
+  assert.deepEqual(fixture, { targets: Intrinsic.runtimeTargets, entries })
   assert.deepEqual(
     Intrinsic.all().map((actor) => actor.spelling),
     ['string', 'Intrinsic'],
@@ -614,7 +618,7 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
         operation: 'Intrinsic.suspendEffect',
         signature:
           'fn Intrinsic.suspendEffect<A, E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E ? R>',
-        targets: ['Evaluator', 'LLVM', 'Wasm'],
+        targets: Intrinsic.runtimeTargets,
       },
     ],
   )
@@ -633,13 +637,13 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
         operation: 'Intrinsic.wake',
         signature: 'fn Intrinsic.wake(wake: Wake) -> ()',
         unsafe: false,
-        targets: ['Evaluator', 'LLVM', 'Wasm'],
+        targets: Intrinsic.runtimeTargets,
       },
       {
         operation: 'Intrinsic.park',
         signature: 'fn Intrinsic.park<G, F>(register: F) -> Effect<()>',
         unsafe: false,
-        targets: ['Evaluator', 'LLVM', 'Wasm'],
+        targets: Intrinsic.runtimeTargets,
       },
     ],
   )
@@ -788,30 +792,4 @@ it.effect(
         assert.strictEqual(occurrence.resolution.identity._tag, 'DeclarationIdentity')
       assert.strictEqual(occurrence?.declaration?.module, 'silk/i32')
     }),
-)
-
-it.effect('keeps same-spelled local-shared operations entirely ordinary outside Intrinsic', () =>
-  Effect.gen(function* () {
-    const source = `fn sharedLayout() -> i32 { return 20 }
-fn sharedFromAllocation(value: i32) -> i32 { return value + 21 }
-fn sharedClone(value: i32) -> i32 { return value + 1 }
-fn sharedWithMut(value: i32, use: i32, onConflict: i32) -> i32 {
-  return value + use + onConflict
-}
-pub fn main() -> i32 {
-  return sharedWithMut(sharedClone(sharedFromAllocation(sharedLayout())), 0, 0)
-}`
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'intrinsic/local-shared-same-spelling',
-      encoder.encode(source),
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(
-      operationKeys(snapshot).filter((operation) => operation.includes('shared')),
-      [],
-    )
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
-  }),
 )

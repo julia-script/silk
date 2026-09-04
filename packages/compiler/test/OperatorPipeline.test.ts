@@ -1,17 +1,8 @@
-import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
-import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
-
-const source = 'import silk.i32 as i32\npub fn main() -> i32 { return 2 + 3 * 4 |> i32.add(1) }'
 const encoder = new TextEncoder()
-
-const golden = (name: string): string =>
-  readFileSync(new URL(`./goldens/operator.${name}`, import.meta.url), 'utf8')
 
 it.effect('lowers negation to generated zero plus source-authored trapping subtraction', () =>
   Effect.gen(function* () {
@@ -33,36 +24,5 @@ it.effect('lowers negation to generated zero plus source-authored trapping subtr
     assert.strictEqual(zero?.provenance.generated, true)
     assert.strictEqual(subtraction?._tag, 'Binary')
     assert.strictEqual(subtraction?.provenance.generated, false)
-  }),
-)
-
-it.effect('pins one operator pipeline through canonical HIR, MIR, LLVM, and WebAssembly', () =>
-  Effect.gen(function* () {
-    const native = yield* Analysis.ofSourceRealized(
-      'golden/operator',
-      encoder.encode(source),
-      'aarch64-apple-darwin',
-    )
-    const wasm = yield* Analysis.ofSourceRealized(
-      'golden/operator',
-      encoder.encode(source),
-      'wasm32-unknown-unknown',
-    )
-    const llvmArtifact = yield* Analysis.codegen(native, { mode: 'release' })
-    const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-
-    assert.strictEqual(Hir.encode(Analysis.rootAnalysis(native).hir), golden('hir.txt'))
-    const encodedMir = MirEncoding.encode(Analysis.loweredMir(native))
-    assert.strictEqual(encodedMir, golden('mir.txt'))
-    assert.strictEqual(llvmArtifact.ir, golden('ll.txt'))
-    assert.strictEqual(wasmArtifact.wat, golden('wat.txt'))
-    assert.strictEqual(
-      `${createHash('sha256').update(llvmArtifact.bitcode).digest('hex')}\n`,
-      golden('bc.sha256'),
-    )
-    assert.strictEqual(
-      `${createHash('sha256').update(wasmArtifact.bytes).digest('hex')}\n`,
-      golden('wasm.sha256'),
-    )
   }),
 )

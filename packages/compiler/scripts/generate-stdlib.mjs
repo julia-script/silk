@@ -11,7 +11,12 @@ const outputPath = join(packageRoot, 'src', 'Stdlib.generated.ts')
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
 const canonicalModule = /^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/
 const layers = new Set(['portable', 'target-provider'])
-const executionTargets = ['Evaluator', 'LLVM', 'Wasm']
+const executionTargets = [
+  'aarch64-apple-darwin',
+  'aarch64-unknown-linux-gnu',
+  'wasm32-unknown-unknown',
+  'x86_64-unknown-linux-gnu',
+]
 const staticIntrinsics = new Set(['targetProfile'])
 const modules = []
 

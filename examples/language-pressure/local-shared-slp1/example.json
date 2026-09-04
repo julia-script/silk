@@ -14,7 +14,7 @@
     "spelling-independent MIR",
     "same-snapshot determinism"
   ],
-  "targets": ["evaluation", "native", "wasm"],
+  "targets": ["native", "llvm-wasm"],
   "nonGoals": [
     "canonical deferred-result API",
     "execution transfer",

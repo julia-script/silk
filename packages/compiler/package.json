@@ -138,22 +138,6 @@
       "types": "./dist/SuspensionMode.d.ts",
       "import": "./dist/SuspensionMode.js"
     },
-    "./ChildProcess": {
-      "types": "./dist/ChildProcess.d.ts",
-      "import": "./dist/ChildProcess.js"
-    },
-    "./HostInput": {
-      "types": "./dist/HostInput.d.ts",
-      "import": "./dist/HostInput.js"
-    },
-    "./MonotonicClock": {
-      "types": "./dist/MonotonicClock.d.ts",
-      "import": "./dist/MonotonicClock.js"
-    },
-    "./RandomHost": {
-      "types": "./dist/RandomHost.d.ts",
-      "import": "./dist/RandomHost.js"
-    },
     "./HeapObservation": {
       "types": "./dist/HeapObservation.d.ts",
       "import": "./dist/HeapObservation.js"
@@ -161,14 +145,6 @@
     "./NodeHeapObservation": {
       "types": "./dist/NodeHeapObservation.d.ts",
       "import": "./dist/NodeHeapObservation.js"
-    },
-    "./StandardInput": {
-      "types": "./dist/StandardInput.d.ts",
-      "import": "./dist/StandardInput.js"
-    },
-    "./StandardStreams": {
-      "types": "./dist/StandardStreams.d.ts",
-      "import": "./dist/StandardStreams.js"
     },
     "./SourceSpan": {
       "types": "./dist/SourceSpan.d.ts",
@@ -237,10 +213,6 @@
     "./ImportPath": {
       "types": "./dist/ImportPath.d.ts",
       "import": "./dist/ImportPath.js"
-    },
-    "./OsFileSystemHost": {
-      "types": "./dist/OsFileSystemHost.d.ts",
-      "import": "./dist/OsFileSystemHost.js"
     },
     "./Layout": {
       "types": "./dist/Layout.d.ts",
@@ -481,7 +453,6 @@
   },
   "scripts": {
     "build": "pnpm unicode:generate && pnpm stdlib:generate && pnpm toolchain:generate && pnpm clean && tsc -p tsconfig.json",
-    "bench:static-composition": "vitest run test/StaticCompositionCharacterization.bench.ts --maxWorkers=1",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "lexer:bench": "pnpm build && node scripts/lexer-benchmark.mjs",

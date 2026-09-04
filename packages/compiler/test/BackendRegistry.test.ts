@@ -6,34 +6,20 @@ import * as Target from '../src/Target.js'
 
 it('resolves stable backend ids independently from targets', () => {
   const llvm = BackendRegistry.resolve('llvm')
-  const wasm = BackendRegistry.resolve('wasm')
   assert.strictEqual(Result.isSuccess(llvm), true)
-  assert.strictEqual(Result.isSuccess(wasm), true)
   if (Result.isSuccess(llvm)) assert.strictEqual(llvm.success, LlvmBackend.LlvmBackend)
-  if (Result.isSuccess(wasm)) assert.strictEqual(wasm.success.id, 'wasm')
 })
 
-it('rejects unknown ids and incompatible pairs as typed data', () => {
-  const unknown = BackendRegistry.resolve('native')
+it('rejects unknown ids as typed data', () => {
+  const unknown = BackendRegistry.resolve('not-a-backend')
   assert.strictEqual(Result.isFailure(unknown), true)
   if (Result.isFailure(unknown)) assert.strictEqual(unknown.failure.reason._tag, 'UnknownBackend')
-
-  const wasm = BackendRegistry.resolve('wasm')
-  assert.strictEqual(Result.isSuccess(wasm), true)
-  if (Result.isFailure(wasm)) return
-  const incompatible = BackendRegistry.requireTarget(wasm.success, Target.aarch64AppleDarwin)
-  assert.strictEqual(Result.isFailure(incompatible), true)
-  if (Result.isFailure(incompatible)) {
-    assert.strictEqual(incompatible.failure.reason._tag, 'IncompatibleTarget')
-  }
 })
 
-it('supports both LLVM and direct Wasm for the canonical WebAssembly target', () => {
-  for (const id of ['llvm', 'wasm'] as const) {
-    const resolved = BackendRegistry.resolve(id)
-    assert.strictEqual(Result.isSuccess(resolved), true)
-    if (Result.isFailure(resolved)) continue
-    const compatible = BackendRegistry.requireTarget(resolved.success, Target.wasm32UnknownUnknown)
-    assert.strictEqual(Result.isSuccess(compatible), true)
-  }
+it('uses LLVM for the canonical WebAssembly target', () => {
+  const resolved = BackendRegistry.resolve('llvm')
+  assert.strictEqual(Result.isSuccess(resolved), true)
+  if (Result.isFailure(resolved)) return
+  const compatible = BackendRegistry.requireTarget(resolved.success, Target.wasm32UnknownUnknown)
+  assert.strictEqual(Result.isSuccess(compatible), true)
 })

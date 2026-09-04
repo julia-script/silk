@@ -29,22 +29,21 @@ The implemented language includes:
   metrics, Effects, and Fibers.
 
 The compiler checks source with one semantic model, lowers it to target-aware intermediate forms,
-and exercises it through a logical evaluator and executable backends. Backend implementation
-details do not change the source language contract.
+and emits executable artifacts through LLVM. Compile-time static evaluation constructs selected
+target facts during analysis; it does not execute the runtime program.
 
 ## Supported targets
 
 The bootstrap compiler recognizes this closed target set:
 
-| Target                      | Kind                          | Pointer width | Artifact paths                    |
-| --------------------------- | ----------------------------- | ------------: | --------------------------------- |
-| `aarch64-apple-darwin`      | native macOS on Apple silicon |        64-bit | LLVM-backed native executable     |
-| `x86_64-unknown-linux-gnu`  | native Linux on x64           |        64-bit | LLVM-backed native executable     |
-| `aarch64-unknown-linux-gnu` | native Linux on ARM64         |        64-bit | LLVM-backed native executable     |
-| `wasm32-unknown-unknown`    | standalone WebAssembly        |        32-bit | LLVM-backed or direct WebAssembly |
+| Target                      | Kind                          | Pointer width | Artifact paths                |
+| --------------------------- | ----------------------------- | ------------: | ----------------------------- |
+| `aarch64-apple-darwin`      | native macOS on Apple silicon |        64-bit | LLVM-backed native executable |
+| `x86_64-unknown-linux-gnu`  | native Linux on x64           |        64-bit | LLVM-backed native executable |
+| `aarch64-unknown-linux-gnu` | native Linux on ARM64         |        64-bit | LLVM-backed native executable |
+| `wasm32-unknown-unknown`    | standalone WebAssembly        |        32-bit | LLVM-backed WebAssembly       |
 
-The direct `wasm` backend accepts only `wasm32-unknown-unknown`. The `llvm` backend accepts every
-target above. Native linking and LLVM-backed WebAssembly finalization require a suitable Clang
+The `llvm` backend accepts every target above. Native linking and WebAssembly finalization require a suitable Clang
 toolchain; cross-compiling may additionally require a compatible sysroot and linker environment.
 
 The portable selector `host` resolves only on macOS ARM64 and Linux x64 or ARM64. Windows and Intel
@@ -54,15 +53,10 @@ every target. Reachable target-specific intrinsics are checked before artifact e
 
 ## Execution paths
 
-Silk currently uses three paths to keep semantics honest:
-
-- the logical MIR evaluator, used for deterministic semantic execution and tests;
-- native executables and WebAssembly emitted through the compiler's LLVM backend; and
-- a direct WebAssembly backend that does not depend on LLVM for code generation.
-
-These are compiler implementation and validation paths, not three language editions. User code
-should depend on documented source semantics and explicit target capabilities rather than emitted
-LLVM or WebAssembly details.
+LLVM is the current runtime implementation family: it emits native executables and WebAssembly.
+The shared native acceptance corpus pins target-neutral runtime behavior, and focused
+LLVM-to-Wasm tests cover WebAssembly contracts. Compile-time `StaticEvaluation` is a separate
+analysis phase and never serves as a runtime execution path.
 
 ## Important alpha boundaries
 

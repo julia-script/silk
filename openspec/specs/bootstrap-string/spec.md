@@ -32,7 +32,7 @@ and no implicit truncation or locale behavior SHALL occur.
 #### Scenario: Traverse non-ASCII text
 
 - **WHEN** source traverses a string containing a multi-byte Unicode scalar
-- **THEN** evaluation, LLVM, and Wasm produce the same `char` and next byte position
+- **THEN** LLVM-generated native and WebAssembly artifacts produce the same `char` and next byte position
 
 ### Requirement: Lowercase string is a distinct text value
 
@@ -140,7 +140,7 @@ string.
 ### Requirement: Owned String remains ordinary standard-library source
 
 The shipped standard library SHALL define nominal `String` as an owner of valid UTF-8 storage using
-ordinary Silk allocation and collection facilities. The compiler, evaluator, and backends MUST NOT
+ordinary Silk allocation and collection facilities. The compiler and backend MUST NOT
 recognize that owner by module or type spelling, choose its capacity or growth policy, or give it a
 special ABI. The stdlib SHALL provide an effectful copy from `string` and an allocation-free
 lexical `string` view of a shared owner.

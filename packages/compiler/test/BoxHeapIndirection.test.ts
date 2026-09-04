@@ -2,7 +2,6 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import type * as CleanupPlan from '../src/CleanupPlan.js'
-import * as MirVerification from '../src/MirVerification.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -12,14 +11,6 @@ import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-
-const counts = (
-  events: ReadonlyArray<{ readonly _tag: string }>,
-): { readonly acquires: number; readonly releases: number } =>
-  Object.freeze({
-    acquires: events.filter((event) => event._tag === 'AllocationAcquire').length,
-    releases: events.filter((event) => event._tag === 'AllocationRelease').length,
-  })
 
 /**
  * A binary tree three levels deep: seven nodes, six of them held behind a box. This is the shape
@@ -105,97 +96,6 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
 pub fn main() -> i32 { return run Effect.catchAll(sum(), recover) }`
 
 /**
- * The pinned leak test, and the reason this lands with the feature rather than after it. Deleting
- * `impl<T> Drop for Box<T>` from byte-identical source produces no diagnostic, the same answer of
- * 127, and the same 42 out of Wasm — while tracing six acquires against two releases. Nothing but
- * the trace catches it, so the trace is the assertion.
- */
-it.effect(
-  'releases every level of a three-level box tree exactly once on the evaluator and Wasm',
-  () =>
-    Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
-        'box-heap-indirection/tree',
-        ascii(tree),
-        'wasm32-unknown-unknown',
-      )
-      assert.deepEqual(Analysis.diagnostics(snapshot), [])
-
-      const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(evaluated._tag, 'Completed')
-      if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 127n)
-
-      // Six boxes, six acquires, six releases. An unhooked box traces six against two here.
-      const traced = counts(Projections.allocationTraceEventsOf(evaluated))
-      assert.deepEqual(traced, { acquires: 6, releases: 6 })
-
-      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-      assert.strictEqual((instance.exports.silk_main as () => number)(), 127)
-    }),
-  120_000,
-)
-
-it.effect('releases only the active nominal union variant payload', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'box-heap-indirection/nominal-union',
-      ascii(`import silk.allocator { OutOfMemoryError, Allocator, SystemAllocator }
-import silk.effect { Effect }
-import silk.box { Box }
-
-union Owner { Empty, Full { boxed: Box<i32> } }
-
-effect fn useOwner() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let boxed = run Box.make<i32>(42) |> Effect.provideMut(&mut allocator)
-  let owner = Owner.Full { boxed: move boxed }
-  drop owner
-  return 42
-}
-
-effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catchAll(useOwner(), recover) }`),
-      'wasm32-unknown-unknown',
-    )
-
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
-    assert.deepEqual(counts(Projections.allocationTraceEventsOf(evaluated)), {
-      acquires: 1,
-      releases: 1,
-    })
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-  }),
-)
-
-/**
- * The trace above only means something if the count it asserts is the count the boxed values
- * actually cost. The same tree with the boxes counted by hand: seven nodes, six of them boxed.
- * Wasm agrees on the answer, which is the part an unhooked box would also get right.
- */
-it.effect('carries the same release count through the Wasm backend under both profiles', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'box-heap-indirection/tree-debug',
-      ascii(tree),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const debug = yield* Analysis.codegenWasm(snapshot, { mode: 'debug' })
-    const debugInstance = new WebAssembly.Instance(new WebAssembly.Module(debug.bytes.slice()), {})
-    assert.strictEqual((debugInstance.exports.silk_main as () => number)(), 127)
-  }),
-)
-
-/**
  * The value a box holds is reachable three ways without unsafe code at the call site: shared
  * borrow, exclusive borrow, and a consuming move. `into` empties the box before handing the value
  * out, so the hook that still runs on the emptied box drops nothing and the storage releases once.
@@ -227,152 +127,6 @@ effect fn build() -> i32 ! OutOfMemoryError {
 effect fn recover(error: OutOfMemoryError) -> i32 { return 3 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
-
-it.effect('borrows, mutates, and consumes a boxed value without unsafe code', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'box-heap-indirection/accessors',
-      ascii(accessors),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
-
-    // One box, one acquire, one release. Consuming the box still releases its storage exactly once.
-    assert.deepEqual(counts(Projections.allocationTraceEventsOf(evaluated)), {
-      acquires: 1,
-      releases: 1,
-    })
-
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-  }),
-)
-
-/**
- * A box holding something that itself owns an allocation has to release both, in order: the held
- * value's own hook first, then the box's storage. This is the case `RawBufferCleanup` would
- * abandon if the box did not drop its element.
- */
-const nested = `import silk.allocator { OutOfMemoryError }
-import silk.allocator { Allocator }
-import silk.allocator { SystemAllocator }
-import silk.effect { Effect }
-import silk.box { Box }
-import silk.vector { Vector }
-
-effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let mut values = Vector.make<i32>()
-  let first = run Vector.append<i32>(&mut values, 21) |> Effect.provideMut(&mut allocator)
-  let boxed = run Box.make<Vector<i32>>(move values) |> Effect.provideMut(&mut allocator)
-  let recovered = Box.into<Vector<i32>>(move boxed)
-  let answer = Vector.length<i32>(&recovered)
-  drop recovered
-  return 42
-}
-
-effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
-
-pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
-
-it.effect('releases an owning value held inside a box', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'box-heap-indirection/nested',
-      ascii(nested),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
-
-    // Two allocations, the vector's buffer and the box's storage, and both come back.
-    const traced = counts(Projections.allocationTraceEventsOf(evaluated))
-    assert.strictEqual(traced.acquires, 2)
-    assert.strictEqual(traced.releases, traced.acquires)
-
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-  }),
-)
-
-/**
- * Depth is consumed by the runtime call stack rather than by the cleanup plan, so a long chain
- * releases every link. The plan itself stays one hook call wide however long the chain is.
- */
-const chain = `import silk.allocator { Allocator }
-import silk.allocator { OutOfMemoryError }
-import silk.allocator { Allocator }
-import silk.allocator { SystemAllocator }
-import silk.effect { Effect }
-import silk.box { Box }
-
-pub struct End {}
-
-pub struct Link {
-  next: Box<Chain>
-}
-
-pub struct Chain {
-  step: End | Link
-}
-
-effect fn extend(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
-  if depth == 0 {
-    return Chain { step: End {} }
-  }
-  let inner = run extend(depth - 1)
-  let boxed = run Box.make<Chain>(move inner)
-  return Chain { step: Link { next: move boxed } }
-}
-
-effect fn build(depth: i32) -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let built = run extend(depth) |> Effect.provideMut(&mut allocator)
-  drop built
-  return 42
-}
-
-effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
-
-pub fn main() -> i32 { return run Effect.catchAll(build(64), recover) }`
-
-it.effect('releases every link of a deep box chain', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'box-heap-indirection/chain',
-      ascii(chain),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
-
-    // Sixty-four links, sixty-four allocations, and none of them abandoned by the drop that
-    // unwinds them one call frame at a time.
-    assert.deepEqual(counts(Projections.allocationTraceEventsOf(evaluated)), {
-      acquires: 64,
-      releases: 64,
-    })
-
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-  }),
-)
 
 /**
  * The plan that releases the tree is finite because the box contributes one hook call, not the
@@ -506,30 +260,6 @@ pub fn main() -> i32 { return 0 }`
         .map((struct) => struct.dependency._tag),
       ['Available', 'Available'],
     )
-  }),
-)
-
-/**
- * Depth is spent by the call stack, so a chain deeper than the stack allows stops at the stack
- * rather than diverging or quietly returning a wrong answer. Under the evaluator that limit is
- * reported: a `CallDepth` evaluation limit, with the plan never having unrolled a single level of
- * the chain into itself.
- */
-it.effect('stops a box chain at the call stack rather than in the cleanup plan', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'box-heap-indirection/exhausted',
-      ascii(chain.replace('build(64)', 'build(4096)')),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Blocked')
-    if (evaluated._tag !== 'Blocked') return
-    assert.strictEqual(evaluated.reason._tag, 'EvaluationLimit')
-    if (evaluated.reason._tag !== 'EvaluationLimit') return
-    assert.strictEqual(evaluated.reason.kind, 'CallDepth')
   }),
 )
 

@@ -87,7 +87,7 @@ initialization bitmap.
 #### Scenario: Reject a shared read of a move-only element
 
 - **WHEN** unsafe code requests a shared raw-buffer read for a move-only nominal or structural-union element type
-- **THEN** compiler verification rejects the intrinsic instance before evaluation or backend emission
+- **THEN** compiler verification rejects the intrinsic instance before backend emission
 
 ### Requirement: Drop is synchronous infallible and deterministic
 
@@ -128,14 +128,14 @@ buffer; the compiler and backends MUST NOT contain collection-shaped allocation 
 ### Requirement: Allocator implementations receive no compiler privilege
 
 The compiler SHALL dispatch allocation only through the general nominal capability, role, and
-conformance model. Bootstrap SHALL provide `SystemAllocator`, but semantic, HIR, MIR, evaluator, and
+conformance model. Bootstrap SHALL provide `SystemAllocator`, but semantic, HIR, MIR, and
 backend behavior MUST NOT branch on its nominal implementation type. A future arena or other policy
 may participate only by satisfying the same public contract without compiler-known lifetime rules;
 provider-dependent escaping allocation remains unavailable.
 
 #### Scenario: Reject allocator-kind branching
 
-- **WHEN** semantic, MIR, evaluator, or backend artifacts are inspected for a system allocation
+- **WHEN** semantic, MIR, or backend artifacts are inspected for a system allocation
 - **THEN** they describe capability dispatch and reclaim authority without an allocator-kind tag or Arena-specific rule
 
 #### Scenario: Select allocator roles ordinarily

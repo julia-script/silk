@@ -9,20 +9,20 @@ programs pay only for the platform primitives they actually execute.
 
 ### Requirement: Every intrinsic declares an enforced supported-target set
 
-Each sealed intrinsic operation SHALL declare the evaluator and backend targets on which it is
-available. Availability metadata SHALL be part of the intrinsic catalog contract and MUST be
-validated consistently before evaluation or artifact emission. An intrinsic with no restriction
+Each sealed intrinsic operation SHALL declare the LLVM targets on which it is available.
+Availability metadata SHALL be part of the intrinsic catalog contract and MUST be validated
+consistently before artifact emission. An intrinsic with no restriction
 SHALL retain its existing all-target behavior.
 
 #### Scenario: Admit an all-target intrinsic
 
-- **WHEN** a reachable operation supports the requested evaluator or emission target
+- **WHEN** a reachable operation supports the requested LLVM target
 - **THEN** executable planning accepts the operation and continues normally
 
 #### Scenario: Diagnose an unsupported reachable intrinsic
 
 - **WHEN** a target-restricted operation is reachable for a target outside its supported set
-- **THEN** planning emits one stable diagnostic naming the intrinsic and requested target before execution or emission
+- **THEN** planning emits one stable diagnostic naming the intrinsic and requested target before emission
 
 ### Requirement: Availability is checked after executable reachability
 
@@ -36,16 +36,16 @@ backend inventory.
 #### Scenario: Ignore an unreachable target-specific declaration
 
 - **WHEN** the loaded module graph contains a function calling a native-only intrinsic but the function is absent from the executable closure
-- **THEN** a direct-WebAssembly request succeeds without a target-unavailable diagnostic
+- **THEN** an LLVM-generated WebAssembly request succeeds without a target-unavailable diagnostic
 
 #### Scenario: Ignore an inactive target-specific arm
 
-- **WHEN** a reachable function places a native-only intrinsic in the arm not selected for direct WebAssembly
+- **WHEN** a reachable function places a native-only intrinsic in the arm not selected for LLVM-generated WebAssembly
 - **THEN** specialization omits that call and target validation succeeds without retaining native support
 
 #### Scenario: Reject the same declaration when reachable
 
-- **WHEN** the selected static arm and executable closure retain a native-only intrinsic for direct WebAssembly
+- **WHEN** the selected static arm and executable closure retain a native-only intrinsic for LLVM-generated WebAssembly
 - **THEN** target validation rejects the concrete residual specialization with the stable intrinsic-availability diagnostic
 
 #### Scenario: Keep residual availability deterministic
@@ -61,7 +61,7 @@ deterministic availability results and artifact inventories.
 
 #### Scenario: Emit portable Wasm without native imports
 
-- **WHEN** a direct-Wasm program reaches no native-only intrinsic although canonical source contains such declarations
+- **WHEN** a LLVM-generated WebAssembly program reaches no native-only intrinsic although canonical source contains such declarations
 - **THEN** its module contains no imports or symbols for those operations
 
 #### Scenario: Repeat target validation
@@ -72,7 +72,7 @@ deterministic availability results and artifact inventories.
 ### Requirement: Selective catch is executable on every supported target
 
 `Intrinsic.catchFailure` SHALL belong to the ordinary executable intrinsic inventory for the
-evaluator, WebAssembly, and native targets. A valid direct or wrapped selective-catch dependency
+WebAssembly and native targets. A valid direct or wrapped selective-catch dependency
 SHALL pass target availability and reach the same specialized MIR semantics on every supported
 target. No catch-specific `AnalysisOnly` state or `SEM0098` availability diagnostic SHALL remain.
 
@@ -83,7 +83,7 @@ prevent invalid calls from reaching target selection or lowering.
 #### Scenario: Admit a reachable wrapper on every target
 
 - **WHEN** a reachable ordinary `Effect.catch` wrapper expands to `Intrinsic.catchFailure`
-- **THEN** evaluator, WebAssembly, and native target selection all admit the dependency
+- **THEN** WebAssembly and native target selection all admit the dependency
 
 #### Scenario: Admit the direct intrinsic on every target
 

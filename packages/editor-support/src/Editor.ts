@@ -1,11 +1,11 @@
 /**
  * The framework-free snippet editor: CodeMirror with lexer-driven Silk highlighting and opt-in
- * language-server semantics, extracted from the docs labs workbench editor.
+ * language-server semantics for any editor host.
  *
  * The compiler's spans are byte-addressed while CodeMirror's are UTF-16, so every range is
  * translated at this boundary. Semantic features read one immutable session — the language-server
  * document paired with the exact analysis snapshot of its bytes — and go quiet whenever the
- * visible document has moved ahead of analysis, exactly as the labs editor behaved.
+ * visible document has moved ahead of analysis.
  */
 
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
@@ -374,7 +374,7 @@ export const mount = (options: Options): Handle => {
 
   const editable = options.editable === true
   // The stable-class field only, not `extension()`: its default-highlight-style fallback is
-  // light-only, and the host (element shadow styles, or the labs stylesheet) owns token colors so
+  // light-only, and the host's styles own token colors so
   // one palette can serve both color schemes.
   const extensions: Array<Extension> = [SilkCodeMirror.field, spanCursorField, theme]
   if (editable) {

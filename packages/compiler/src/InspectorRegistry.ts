@@ -106,14 +106,6 @@ export interface ViewDefinition {
   /** Panes in the same group offer each other as one-click sibling tabs. */
   readonly group: string
   readonly hasFilter?: boolean
-  /**
-   * Views that need an explicit action advertise it here; the consumer renders the control and
-   * performs the action itself (rows are data, so the registry cannot carry a callback).
-   *
-   * Evaluation is the only one: the semantic phases state what the program *means* and are safe
-   * to recompute on every keystroke, but only an actual run may claim what it *does*.
-   */
-  readonly action?: { readonly label: string }
   readonly project: (context: ViewContext) => ViewResult
 }
 
@@ -234,8 +226,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
     group: 'semantics',
     /**
      * Value flow is the one view about *relationships* rather than about a tree: which argument
-     * binds to which parameter, and what a run actually computed for each. The evaluated overlay
-     * is layered on when a run has happened, so the same rows read as semantics-only until then.
+     * binds to which parameter and how values move through the statically selected operations.
      */
     project: ({ snapshot }) => {
       const flow = projectDataFlow(Analysis.rootAnalysis(snapshot))
