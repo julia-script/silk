@@ -170,7 +170,7 @@ effect fn scenario() -> i32
   drop audit
   if nested != 13 { return 1 }
   if !cancelled { return 2 }
-  if releaseCount != 1 { return 10 + releaseCount }
+  if releaseCount != 1 { return 3 }
   return 42
 }
 

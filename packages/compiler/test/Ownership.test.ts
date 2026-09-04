@@ -146,6 +146,33 @@ it('releases live let bindings in reverse binding order at the return exit', () 
   )
 })
 
+it('releases unused owned parameters in reverse declaration order', () => {
+  const facts = check(
+    'ownership://owned-parameter-order.silk',
+    `struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+effect fn hold(first: Token, middle: Token, last: Token) -> () {
+  drop middle
+  return ()
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+  const hold = facts.functions.at(0)
+  const returned = hold?.exits.find((exit) => exit.kind === 'Return')
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.deepEqual(
+    returned?.releases.map((release) => ({
+      name: release.binding.name,
+      site: release.binding.site._tag,
+    })),
+    [
+      { name: 'last', site: 'Parameter' },
+      { name: 'first', site: 'Parameter' },
+    ],
+  )
+})
+
 it('ends liveness at a consuming move and skips the moved binding at the exit', () => {
   const facts = check(
     'golden://moved.silk',

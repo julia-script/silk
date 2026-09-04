@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -39,5 +40,45 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
       'SEM0083',
     )
+  }),
+)
+
+it.effect('lowers element cleanup before vector backing-storage cleanup', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'vector-acceptance/drop-order',
+      ascii(`import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.vector { Vector }
+struct Entry { value: i32 }
+impl Drop for Entry { fn drop(self: &mut Entry) -> () { return () } }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut values = Vector.make<Entry>()
+  run Vector.append<Entry>(&mut values, Entry { value: 42 })
+    |> Effect.provideMut(&mut allocator)
+  drop values
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const releaseBuffer = Analysis.loweredMir(snapshot).functions.find(
+      (fn) => fn.id.module === 'silk/vector' && fn.id.name === 'releaseBuffer',
+    )
+    if (releaseBuffer === undefined) return assert.fail('expected Vector.releaseBuffer MIR')
+    const operations = MirVerification.operations(releaseBuffer)
+    const elementDrop = operations.findIndex(
+      (operation) =>
+        operation._tag === 'Call' &&
+        operation.target.module === 'silk/slot' &&
+        operation.target.name === 'Slot.dropValue',
+    )
+    const storageDrop = operations.findIndex(
+      (operation) => operation._tag === 'Drop' && operation.cleanup._tag === 'RawBufferCleanup',
+    )
+    assert.isAtLeast(elementDrop, 0)
+    assert.isAbove(storageDrop, elementDrop)
   }),
 )

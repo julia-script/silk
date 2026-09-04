@@ -6240,9 +6240,14 @@ fn peek(self: &Packed) -> i32 {
 }
 pub fn main() -> i32 {
   let packed = Packed { first: 7, second: -5, third: 200, fourth: -9 }
-  return 50 + peek(&packed)
+  if u8.toI32(packed.first) != 7 { return 1 }
+  if i8.toI32(packed.second) != -5 { return 2 }
+  if u16.toI32(packed.third) != 200 { return 3 }
+  if i16.toI32(packed.fourth) != -9 { return 4 }
+  if peek(&packed) != 193 { return 5 }
+  return 42
 }`,
-    expected: { _tag: 'Completes', result: 243 },
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'else-if-chain',
@@ -6370,7 +6375,7 @@ effect fn measure() -> i32 ! OutOfMemoryError {
   drop built
   let released = Shared.with<Counter, i32>(&counter, read)
   drop counter
-  if released != 7 { return released }
+  if released != 7 { return 2 }
   return 42
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
@@ -6492,11 +6497,238 @@ effect fn measure() -> i32 ! OutOfMemoryError {
   drop built
   let released = Shared.with<Counter, i32>(&counter, read)
   drop counter
-  if released != 64 { return released }
+  if released != 64 { return 2 }
   return 42
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(measure(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'captured-exclusive-reference-parameters',
+    source: `struct Counter { value: i32 }
+fn structWork(counter: &mut Counter) -> i32 {
+  let mut step = fn() -> i32 {
+    counter.value = counter.value + 1
+    return counter.value
+  }
+  let first = step()
+  let second = step()
+  return first * 10 + second
+}
+fn scalarWork(counter: &mut i32) -> i32 {
+  let mut step = fn() -> i32 { counter.* = counter.* + 1 return counter.* }
+  let first = step()
+  let second = step()
+  return first * 10 + second
+}
+pub fn main() -> i32 {
+  let mut record = Counter { value: 0 }
+  if structWork(&mut record) != 12 || record.value != 2 { return 1 }
+  let mut scalar = 0
+  if scalarWork(&mut scalar) != 12 || scalar != 2 { return 2 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'fallible-weaker-witness-reborrow',
+    source: `import silk.effect { Effect }
+import silk.result { Result }
+struct Problem { code: i32 }
+interface Decoder { effect fn decode(value: &mut Self) -> i32 ! Problem }
+struct Cell { code: i32 }
+effect fn decodeCell(value: &Cell) -> i32 ! Problem { fail Problem { code: 1 } }
+impl Decoder for Cell { decode: Cell.decodeCell }
+fn pending<T: Decoder>(value: &mut T) -> Effect<i32 ! Problem> { return Decoder.decode(value) }
+fn observe(result: Result<i32, Problem>) -> i32 {
+  return match move result {
+    Result<i32, Problem>.Success { value } => value
+    Result<i32, Problem>.Failure { error } => error.code
+  }
+}
+pub fn main() -> i32 {
+  let mut cell = Cell { code: 40 }
+  let failure = observe(run Effect.result(pending<Cell>(&mut cell)))
+  cell.code = cell.code + 1
+  if failure != 1 || cell.code != 41 { return 1 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'runtime-slice-temporary-and-lexical-borrows',
+    source: `fn sum(values: &[i32]) -> i32 { return values[0] + values[1] }
+pub fn main() -> i32 {
+  if sum(&[40, 2]) != 42 { return 1 }
+  let values = [40, 2]
+  let view = &values
+  if view[0] != 40 || view[1] != 2 { return 2 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'place-replace-scalar-and-affine-union',
+    source: `struct Counter { value: i32 }
+fn bump(counter: &mut Counter) -> i32 { return Intrinsic.replace(counter.value, 42) }
+struct Empty {}
+struct Full { value: i32 }
+struct Cell { state: Empty | Full }
+fn take(cell: &mut Cell) -> i32 {
+  let old = Intrinsic.replace(cell.state, Empty {})
+  return match move old { Empty {} => 0 Full { value } => value }
+}
+pub fn main() -> i32 {
+  let mut counter = Counter { value: 41 }
+  if bump(&mut counter) != 41 || counter.value != 42 { return 1 }
+  let mut cell = Cell { state: Full { value: 42 } }
+  if take(&mut cell) != 42 { return 2 }
+  if take(&mut cell) != 0 { return 3 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'box-accessors-and-consuming-release',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.box { Box }
+import silk.effect { Effect }
+import silk.usize as usize
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut boxed = run Box.make<i32>(20) |> Effect.provideMut(&mut allocator)
+  let borrowed = Box.get<i32>(&boxed)
+  if borrowed[usize.ZERO] != 20 { return 1 }
+  let mut exclusive = Box.getMut<i32>(&mut boxed)
+  exclusive[usize.ZERO] = 22
+  if Box.get<i32>(&boxed)[usize.ZERO] != 22 { return 2 }
+  let taken = Box.into<i32>(move boxed)
+  if taken != 22 { return 3 }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'affine-checked-callback-cleanup',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+import silk.u8 as u8
+union Checked<T> { Present { value: T }, Absent }
+struct Audit { selected: i32 dropped: i32 sum: i32 }
+fn selected(audit: &mut Audit, marker: i32) -> i32 {
+  audit.selected = audit.selected + 1
+  return marker
+}
+fn dropped(audit: &mut Audit, marker: i32) -> i32 {
+  audit.dropped = audit.dropped + 1
+  audit.sum = audit.sum + marker
+  return audit.dropped
+}
+fn readSelected(audit: &Audit) -> i32 { return audit.selected }
+fn readDropped(audit: &Audit) -> i32 { return audit.dropped }
+fn readSum(audit: &Audit) -> i32 { return audit.sum }
+struct Token { marker: i32 audit: Shared<Audit> }
+impl Drop for Token {
+  fn drop(self: &mut Token) -> () {
+    let marker = self.marker
+    let count = Shared.withMut<Audit, i32>(&self.audit, dropped(marker))
+    return ()
+  }
+}
+fn present(value: u8, token: Token) -> Checked<u8> {
+  let marker = token.marker
+  let observed = Shared.withMut<Audit, i32>(&token.audit, selected(marker))
+  return Checked<u8>.Present { value: value }
+}
+fn absent() -> Checked<u8> { return Checked<u8>.Absent }
+fn presentWith(token: Token) -> some<F: once fn(u8) -> Checked<u8>> F {
+  return present(move token)
+}
+fn value(checked: Checked<u8>) -> i32 {
+  return match move checked {
+    Checked<u8>.Present { value } => u8.toI32(value)
+    Checked<u8>.Absent => 0
+  }
+}
+effect fn measure() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let audit = run Shared.make<Audit>(Audit { selected: 0, dropped: 0, sum: 0 })
+    |> Effect.provideMut(&mut allocator)
+  let succeeded = Intrinsic.u8CheckedAdd<Checked<u8>>(
+    40, 2, presentWith(Token { marker: 1, audit: Shared.clone(&audit) }), absent,
+  )
+  let failed = Intrinsic.u8CheckedAdd<Checked<u8>>(
+    255, 1, presentWith(Token { marker: 2, audit: Shared.clone(&audit) }), absent,
+  )
+  if value(move succeeded) != 42 || value(move failed) != 0 { return 1 }
+  let selectedCount = Shared.with<Audit, i32>(&audit, readSelected)
+  let dropCount = Shared.with<Audit, i32>(&audit, readDropped)
+  let dropSum = Shared.with<Audit, i32>(&audit, readSum)
+  drop audit
+  if selectedCount != 1 || dropCount != 2 || dropSum != 3 { return 2 }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(measure(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'stored-callable-terminal-cleanup',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.result { Result }
+import silk.shared { Shared }
+struct Problem {}
+struct Audit { count: i32 trace: i32 }
+fn record(audit: &mut Audit, marker: i32) -> i32 {
+  audit.count = audit.count + 1
+  audit.trace = audit.trace * 10 + marker
+  return audit.trace
+}
+fn count(audit: &Audit) -> i32 { return audit.count }
+fn trace(audit: &Audit) -> i32 { return audit.trace }
+struct Token { marker: i32 audit: Shared<Audit> }
+impl Drop for Token {
+  fn drop(self: &mut Token) -> () {
+    let marker = self.marker
+    let changed = Shared.withMut<Audit, i32>(&self.audit, record(marker))
+    return ()
+  }
+}
+fn consume(value: i32, token: Token) -> i32 { return value + token.marker }
+struct Holder<F: once fn(i32) -> i32> { step: F }
+effect fn failWith(audit: &Shared<Audit>) -> () ! Problem {
+  let callback = consume(Token { marker: 4, audit: Shared.clone(audit) })
+  fail Problem {}
+}
+effect fn measure() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let audit = run Shared.make<Audit>(Audit { count: 0, trace: 0 })
+    |> Effect.provideMut(&mut allocator)
+  let uncalled = consume(Token { marker: 1, audit: Shared.clone(&audit) })
+  drop uncalled
+  if Shared.with<Audit, i32>(&audit, trace) != 1 { return 1 }
+  let called = consume(Token { marker: 2, audit: Shared.clone(&audit) })
+  if called(40) != 42 { return 2 }
+  if Shared.with<Audit, i32>(&audit, trace) != 12 { return 3 }
+  let moved = consume(Token { marker: 3, audit: Shared.clone(&audit) })
+  let holder = Holder { step: move moved }
+  drop holder
+  if Shared.with<Audit, i32>(&audit, trace) != 123 { return 4 }
+  let failure = run Effect.result(failWith(&audit))
+  drop failure
+  let finalTrace = Shared.with<Audit, i32>(&audit, trace)
+  let finalCount = Shared.with<Audit, i32>(&audit, count)
+  drop audit
+  if finalTrace != 1234 || finalCount != 4 { return 5 }
+  return 42
+}
+effect fn recoverAllocation(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
