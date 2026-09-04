@@ -193,7 +193,7 @@ For every reachable parameter and result type, target planning SHALL publish a d
 backend-neutral calling shape. In this bootstrap slice, a nominal struct SHALL recursively flatten
 to its Copy scalar leaf lanes in canonical declaration order; an empty struct SHALL have zero lanes.
 The shape SHALL retain each lane's canonical field path and scalar representation. Calls and returns
-MUST use that same selected shape in MIR evaluation and every backend.
+MUST use that same selected shape in MIR structure and every backend.
 
 #### Scenario: Plan a nested struct result
 
@@ -210,17 +210,17 @@ MUST use that same selected shape in MIR evaluation and every backend.
 - **WHEN** identical declarations, discovery, and target inputs are planned in fresh processes
 - **THEN** aggregate parameter and result shapes, lane paths, and encodings are byte-identical
 
-### Requirement: Backends cannot choose aggregate ABI independently
+### Requirement: LLVM lowering cannot choose aggregate ABI independently
 
 The runtime plan SHALL express aggregate call and return shapes without LLVM types, WebAssembly
-value types, registers, instructions, or handles. A backend SHALL either realize the selected shape
-exactly or reject the plan as target-incompatible; it MUST NOT choose a different flattening,
+value types, registers, instructions, or handles. LLVM lowering SHALL either realize the selected
+shape exactly or reject the plan as target-incompatible; it MUST NOT choose a different flattening,
 field order, padding rule, or indirect convention.
 
 #### Scenario: Compare native and WebAssembly planning authority
 
-- **WHEN** native and WebAssembly backends receive plans for the same logical aggregate program
-- **THEN** each consumes its compiler-selected target plan and neither derives aggregate calling shape from its own type system
+- **WHEN** native and LLVM-to-Wasm lowering receive plans for the same logical aggregate program
+- **THEN** each consumes its compiler-selected target plan and neither derives aggregate calling shape from LLVM types
 
 ### Requirement: Fixed arrays have compiler-owned repeated-element layout
 
@@ -299,7 +299,7 @@ or code generation rather than allowing backend-specific fallback.
 The target layout catalog and runtime plan SHALL compute physical facts for each reachable concrete
 application of a generic nominal type from its normalized substituted fields. Open generic types
 MUST NOT receive speculative physical layouts, and equivalent concrete applications SHALL reuse one
-canonical layout entry before MIR and backend selection.
+canonical layout entry before MIR and LLVM lowering.
 
 #### Scenario: Plan two concrete boxes
 
@@ -332,7 +332,7 @@ remain an internal layout scalar and MUST NOT resolve as a safe Silk type.
 ### Requirement: Slice calling shapes carry heterogeneous typed lanes
 
 The compiler-owned calling shape for a slice SHALL contain one typed address lane and one typed
-`i32` lane in deterministic order. Callers, callees, evaluators, and backends MUST consume that
+`i32` lane in deterministic order. Callers, callees, and LLVM lowering MUST consume that
 shape rather than flattening the source array or reconstructing a backend-private slice ABI.
 
 #### Scenario: Preserve one multi-length calling shape
@@ -358,7 +358,7 @@ The planner SHALL represent `usize` as unsigned 64-bit on required native target
 
 For every reachable flow contract, target planning SHALL publish a deterministic private outcome
 shape containing a discriminant and payload storage sufficient for the success value or any failure
-member. Canonical nominal identity SHALL determine failure tags. Evaluator and backends MUST consume
+member. Canonical nominal identity SHALL determine failure tags. LLVM lowering MUST consume
 that shape without independently choosing tags, lanes, or padding.
 
 #### Scenario: Plan mixed success and failure payloads
@@ -370,7 +370,7 @@ that shape without independently choosing tags, lanes, or padding.
 
 Target layout SHALL compute validated byte and repeated-element layouts, raw-buffer lanes, reclaim
 ticket shapes, concrete Vector layouts, Effect outcome shapes, and Drop calling shapes before MIR.
-Evaluator and backends SHALL consume those facts unchanged and MUST NOT derive stride, alignment,
+LLVM lowering SHALL consume those facts unchanged and MUST NOT derive stride, alignment,
 failure transport, or cleanup representation independently.
 
 Target layout SHALL separately plan each reachable hidden Effect capture environment. Borrowed
@@ -388,7 +388,7 @@ After concrete instance discovery, target layout SHALL plan validated `Layout` v
 repeated-element stride and total bytes, affine allocation handles, private reclaim tickets,
 `RawBuffer<T>`, lexical Slot addresses, Drop calling shapes, and typed allocation outcomes using the
 selected target's address and `usize` width. Zero-sized allocations SHALL retain distinct logical
-ownership without requiring nonzero physical bytes. Evaluator and backends SHALL consume these
+ownership without requiring nonzero physical bytes. LLVM lowering SHALL consume these
 facts unchanged and MUST NOT choose stride, alignment, ticket shape, failure transport, or cleanup
 representation independently.
 

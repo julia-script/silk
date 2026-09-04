@@ -115,9 +115,9 @@ WebAssembly SHALL remain valid when no reachable function calls the native intri
 - **WHEN** an application provides a source-defined `Random` implementation
 - **THEN** portable secure derived operations use it without loading `silk/os_random`
 
-#### Scenario: Load portable random source on direct Wasm
+#### Scenario: Load portable random source on LLVM-generated WebAssembly
 
-- **WHEN** a direct-WebAssembly program imports only portable random modules
+- **WHEN** an LLVM-generated WebAssembly program imports only portable random modules
 - **THEN** module closure contains no operating-system random import or native symbol
 
 ### Requirement: Standard-library code has no compiler privilege
@@ -258,7 +258,7 @@ ordinary Silk source over `Vector<u8>`. Its manifest dependencies SHALL use the 
 
 #### Scenario: Load Bytes without platform facilities
 
-- **WHEN** a portable program imports and uses `Bytes` on direct Wasm
+- **WHEN** a portable program imports and uses `Bytes` on LLVM-generated WebAssembly
 - **THEN** module closure includes only its ordinary storage and allocation dependencies and no operating-system imports
 
 #### Scenario: Keep text and I/O out of Bytes
@@ -296,9 +296,9 @@ Portable filesystem actors and helpers MUST NOT import an OS provider, native pa
 host target selector, hosted-Wasm ABI, or built-in virtual provider. Applications SHALL select and
 provide implementations at their outer boundary.
 
-#### Scenario: Load portable source on direct Wasm
+#### Scenario: Load portable source on LLVM-generated WebAssembly
 
-- **WHEN** a direct-Wasm application imports portable Path and FileSystem declarations
+- **WHEN** a LLVM-generated WebAssembly application imports portable Path and FileSystem declarations
 - **THEN** module closure requires no operating-system filesystem implementation or host import
 
 #### Scenario: Supply an application-specific provider
@@ -519,7 +519,7 @@ an alias.
 Canonical standard-library module `silk/shared` SHALL define and export `Shared<T>` as an explicitly cloned,
 non-thread-transferable strong handle containing exactly one private `Intrinsic.SharedCore<T>`.
 No compiler phase SHALL know `Shared` by name: it MUST NOT gain an intrinsic nominal entry, layout
-branch, cleanup-plan node, semantic special case, MIR operation, evaluator case, or backend case from
+branch, cleanup-plan node, semantic special case, MIR operation, or backend case from
 the public spelling.
 
 `Shared.make<T>(value)` SHALL return an Effect with only ordinary `OutOfMemoryError` failure and
@@ -634,9 +634,9 @@ advance a timeline or record calls while preserving lexical replacement and dete
 - **THEN** go-to-definition opens canonical shipped Silk source rather than a generated signature
   or compiler catalog entry
 
-#### Scenario: Use a pure clock provider on direct Wasm
+#### Scenario: Use a pure clock provider on LLVM-generated WebAssembly
 
-- **WHEN** a direct-Wasm application implements and provides both clock services in ordinary source
+- **WHEN** a LLVM-generated WebAssembly application implements and provides both clock services in ordinary source
 - **THEN** it uses the complete portable API without importing either OS-provider module or a host
   clock ABI
 
@@ -670,7 +670,7 @@ All four clock modules SHALL participate in generated standard-library embedding
 generation, documentation policy checks, and doctest verification. Documentation SHALL teach the
 units, epoch or unspecified origin, canonical negative-time representation, non-decreasing rather
 than strictly increasing behavior, same-provider mark limitation, blocking wait semantics, fatal
-host boundary, explicit provision, and direct-Wasm exclusion where each applies.
+host boundary, explicit provision, and LLVM-generated WebAssembly exclusion where each applies.
 
 #### Scenario: Generate clock reference pages
 
@@ -857,7 +857,7 @@ separately documented presentation adds styling.
 Every integer actor SHALL continue to parse complete canonical decimal text without allocation and
 return either the exact in-range value or the existing typed not-a-number or out-of-range reason.
 Removing owned-String rendering MUST NOT change accepted text, rejection offsets, range checks, or
-engine parity.
+supported-target behavior.
 
 #### Scenario: Parse a displayed integer
 
@@ -962,7 +962,7 @@ edited by hand.
 Canonical standard-library source SHALL define `Box<T>`, one owned heap indirection holding exactly
 one value of `T`, as ordinary Silk with no compiler privilege. No compiler phase SHALL know `Box` by
 name: it MUST NOT appear in the intrinsic nominal registry, gain a layout branch, gain a cleanup
-plan node, or be recognized by spelling in semantic analysis, HIR, MIR, evaluation, or a backend. It
+plan node, or be recognized by spelling in semantic analysis, HIR, MIR, static evaluation, or LLVM. It
 SHALL be built from the existing typed raw storage and slot primitives, mirroring how `Vector<T>` is
 built.
 
@@ -1012,13 +1012,13 @@ otherwise, SHALL emit no grouping separator, and SHALL emit no leading zero beyo
 that spells zero itself. The text of a value SHALL NOT depend on the type it was rendered from: the
 same number rendered from a narrow type and from a wide one SHALL be the same bytes.
 
-The text SHALL be identical on the evaluator, the Wasm backend, and the native backend, for every
+The text SHALL be identical in LLVM-generated WebAssembly and native artifacts, for every
 value including each type's own bounds.
 
 #### Scenario: Render a bound
 
 - **WHEN** a program renders the largest or the smallest value of an integer type
-- **THEN** the text spells that bound exactly, on every engine
+- **THEN** the text spells that bound exactly on every supported target
 
 #### Scenario: Round trip a value
 

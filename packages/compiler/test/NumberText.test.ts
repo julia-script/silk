@@ -7,11 +7,10 @@ import * as MirEncoding from '../src/MirEncoding.js'
 import * as Scalar from '../src/Scalar.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
-import * as StandardStreams from '../src/StandardStreams.js'
 import * as StaticValue from '../src/StaticValue.js'
+import { templateFormattingAcceptance } from './support/corpus.js'
 
 const encoder = new TextEncoder()
-const decoder = new TextDecoder()
 const ascii = (value: string): Uint8Array => encoder.encode(value)
 const fixedWidthIntegers = Scalar.integers().filter((scalar) => scalar.width._tag === 'FixedWidth')
 const integerSpellings = [...fixedWidthIntegers.map((scalar) => scalar.spelling), 'usize', 'isize']
@@ -19,346 +18,6 @@ const integerSpellings = [...fixedWidthIntegers.map((scalar) => scalar.spelling)
 const sourceText = (spelling: string): string => {
   return readFileSync(new URL(`../stdlib/silk/${spelling}.silk`, import.meta.url), 'utf8')
 }
-
-const rangeOf = (spelling: string): { minimum: bigint; maximum: bigint } => {
-  const scalar = fixedWidthIntegers.find((candidate) => candidate.spelling === spelling)
-  assert.isDefined(scalar, spelling)
-  return scalar === undefined ? { minimum: 0n, maximum: 0n } : Scalar.range(scalar, 64)
-}
-
-const isSigned = (spelling: string): boolean => spelling.startsWith('i')
-
-const defaultCases = [
-  ...fixedWidthIntegers.flatMap((scalar) => {
-    const range = rangeOf(scalar.spelling)
-    return [
-      {
-        spelling: scalar.spelling,
-        expression: `${scalar.spelling}.MIN`,
-        expected: `${range.minimum}`,
-      },
-      {
-        spelling: scalar.spelling,
-        expression: `${scalar.spelling}.MAX`,
-        expected: `${range.maximum}`,
-      },
-    ]
-  }),
-  { spelling: 'usize', expression: 'i32.toUsize(40960)', expected: '40960' },
-  { spelling: 'isize', expression: 'i32.toIsize(0 - 40960)', expected: '-40960' },
-]
-
-const imports = Scalar.integers()
-  .map((scalar) => `import silk.${scalar.spelling} as ${scalar.spelling}`)
-  .join('\n')
-
-const defaultRenderingProgram = `${imports}
-import silk.effect { Effect }
-import silk.format { Format }
-import silk.writer { Writer, WriterError, StdoutWriter }
-import silk.writer { Writer, WriterError }
-
-effect fn render() -> () ! WriterError ? &mut Writer {
-${defaultCases
-  .map(
-    (entry, index) => `  let value${index} = ${entry.expression}
-  run Format.display(&value${index})
-  run Writer.writeAll(b"|")`,
-  )
-  .join('\n')}
-  return ()
-}
-
-effect fn build() -> i32 ! WriterError {
-  let mut writer = Writer.stdoutWriterProvider()
-  run render() |> Effect.provideMut<Writer>(&mut writer)
-  return 42
-}
-effect fn recover(error: WriterError) -> i32 { return 1 }
-pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
-
-const outputBytes = (memory: ReturnType<typeof StandardStreams.memory>): ReadonlyArray<number> =>
-  memory.events().flatMap((event) => event.bytes)
-
-it.effect('streams every integer bound through Display without allocating', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'number-text/defaults',
-      ascii(defaultRenderingProgram),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const memory = StandardStreams.memory()
-    const evaluated = Analysis.evaluate(snapshot, { standardStreams: memory.provider })
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
-    assert.strictEqual(
-      decoder.decode(Uint8Array.from(outputBytes(memory))),
-      `${defaultCases.map((entry) => entry.expected).join('|')}|`,
-    )
-    assert.deepEqual(
-      evaluated.trace.filter((event) => event._tag === 'AllocationAcquire'),
-      [],
-    )
-
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const wasmMemory = StandardStreams.memory()
-    let instance: WebAssembly.Instance | undefined
-    instance = new WebAssembly.Instance(
-      new WebAssembly.Module(wasm.bytes.slice()),
-      StandardStreams.wasmImports(wasmMemory.provider, () => {
-        const exported = instance?.exports[StandardStreams.wasmMemoryExport]
-        return exported instanceof WebAssembly.Memory ? exported : undefined
-      }),
-    )
-    const main = instance.exports.silk_main
-    if (typeof main !== 'function') throw new Error('integer Display Wasm lost silk_main')
-    assert.strictEqual(main(), 42)
-    assert.strictEqual(
-      decoder.decode(Uint8Array.from(outputBytes(wasmMemory))),
-      `${defaultCases.map((entry) => entry.expected).join('|')}|`,
-    )
-  }),
-)
-
-const stringRenderingProgram = `import silk.effect { Effect }
-import silk.format { Format }
-import silk.writer { Writer, WriterError, StdoutWriter }
-import silk.writer { Writer, WriterError }
-
-effect fn render() -> () ! WriterError ? &mut Writer {
-  run Writer.writeAll(b"prefix:")
-  let value = "Júlia"
-  return run Format.display(&value)
-}
-
-pub effect fn main() -> () ! WriterError {
-  let mut writer = Writer.stdoutWriterProvider()
-  return run render() |> Effect.provideMut<Writer>(&mut writer)
-}`
-
-it.effect('streams borrowed strings through Display and preserves the accepted Writer prefix', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'number-text/string-display',
-      ascii(stringRenderingProgram),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-
-    const memory = StandardStreams.memory()
-    const evaluated = Analysis.evaluate(snapshot, { standardStreams: memory.provider })
-    assert.strictEqual(
-      evaluated._tag,
-      'Completed',
-      evaluated._tag === 'Blocked' && evaluated.reason._tag === 'InvalidMir'
-        ? evaluated.reason.violations.map((violation) => violation.detail).join('\n')
-        : evaluated._tag,
-    )
-    assert.strictEqual(decoder.decode(Uint8Array.from(outputBytes(memory))), 'prefix:Júlia')
-    assert.deepEqual(
-      evaluated.trace.filter((event) => event._tag === 'AllocationAcquire'),
-      [],
-    )
-
-    const failing = StandardStreams.memory({ failAt: 1 })
-    const failed = Analysis.evaluate(snapshot, { standardStreams: failing.provider })
-    assert.strictEqual(failed._tag, 'UnhandledFailure')
-    if (failed._tag === 'UnhandledFailure') assert.include(failed.identity, 'WriterError')
-    assert.strictEqual(decoder.decode(Uint8Array.from(outputBytes(failing))), 'prefix:')
-    const failedWrite = failed.trace.find(
-      (event) => event._tag === 'HostWrite' && event.outcome === 'WriteFailure',
-    )
-    assert.isDefined(failedWrite)
-    if (failedWrite?._tag === 'HostWrite') {
-      assert.strictEqual(decoder.decode(Uint8Array.from(failedWrite.bytes)), 'Júlia')
-    }
-  }),
-)
-
-const templateFormattingProgram = `import silk.effect { Effect }
-import silk.format { Format }
-import silk.writer { Writer, WriterError, StdoutWriter }
-import silk.writer { Writer, WriterError }
-
-struct Person { pub name: string pub age: i32 }
-
-effect fn render() -> () ! WriterError ? &mut Writer {
-  run Format.format("My name is {}, I'm {}|", &("Julia", 31))
-  let args = .{ name: "Júlia", age: 32 }
-  run Format.format(
-    "Hello, {name}; age={age}; again={name}|",
-    &args
-  )
-  run Format.format(
-    "Hello, {name}; age={age}; again={name}|",
-    &args
-  )
-  run Format.format("{{name}}|", &.{ name: "unused" })
-  let person = Person { name: "Maria", age: 28 }
-  return run Format.format("{name}:{age}", &person)
-}
-
-pub effect fn main() -> () ! WriterError {
-  let mut writer = Writer.stdoutWriterProvider()
-  return run render() |> Effect.provideMut<Writer>(&mut writer)
-}`
-
-it.effect('classifies static template bytes inside a static helper', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'number-text/template-byte',
-      ascii(`import silk.static_text as StaticText
-import silk.static_sequence as StaticSequence
-import silk.usize as usize
-static fn startsOpen(value: string) -> bool {
-  let parts = StaticSequence.empty<i32>()
-  let length = StaticText.byteLength(value)
-  let mut index = usize.ZERO
-  while index < length {
-    let byte = StaticText.byteAt(value, index)
-    if byte == 123 { return true }
-    index = index + usize.ONE
-  }
-  return false
-}
-pub fn main() -> i32 {
-  static if startsOpen("name") { return 0 } else { return 42 }
-}`),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
-  }),
-)
-
-it.effect('formats borrowed positional and named aggregate packs without runtime allocation', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'number-text/templates',
-      encoder.encode(templateFormattingProgram),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const memory = StandardStreams.memory()
-    const evaluated = Analysis.evaluate(snapshot, { standardStreams: memory.provider })
-    assert.strictEqual(
-      evaluated._tag,
-      'Completed',
-      evaluated._tag === 'Blocked' && evaluated.reason._tag === 'InvalidMir'
-        ? evaluated.reason.violations.map((violation) => violation.detail).join('\n')
-        : evaluated._tag,
-    )
-    assert.strictEqual(
-      decoder.decode(Uint8Array.from(outputBytes(memory))),
-      "My name is Julia, I'm 31|Hello, Júlia; age=32; again=Júlia|Hello, Júlia; age=32; again=Júlia|{name}|Maria:28",
-    )
-    assert.deepEqual(
-      evaluated.trace.filter((event) => event._tag === 'AllocationAcquire'),
-      [],
-    )
-
-    const formatInstances = Analysis.instancesOf(snapshot).instances.filter(
-      (instance) =>
-        instance.key.declaration.module === 'silk/format' &&
-        instance.key.declaration.name === 'Format.format',
-    )
-    assert.strictEqual(formatInstances.length, 4)
-    assert.strictEqual(
-      new Set(
-        formatInstances.map((instance) =>
-          instance.key.staticArguments.map(StaticValue.presentation).join('|'),
-        ),
-      ).size,
-      4,
-    )
-    assert.isTrue(
-      formatInstances.every(
-        (instance) =>
-          instance.function.contract._tag === 'Contract' &&
-          instance.function.contract.parameters.length === 1 &&
-          instance.key.staticArguments.length === 1,
-      ),
-    )
-    const projectedLoans = formatInstances.flatMap((instance) =>
-      instance.ownership.loans.filter((loan) => loan.root._tag === 'Parameter'),
-    )
-    assert.isAbove(projectedLoans.length, 0)
-    assert.isTrue(projectedLoans.every((loan) => loan.access === 'Shared'))
-    assert.isTrue(
-      formatInstances
-        .flatMap((instance) => instance.ownership.loans)
-        .every((loan) => loan.access !== 'Exclusive' || loan.root._tag === 'Let'),
-    )
-
-    const residualHir = Hir.encode(
-      Object.freeze({
-        _tag: 'HirModule',
-        module: 'silk/format',
-        functions: Object.freeze(formatInstances.map((instance) => instance.function)),
-      }),
-    )
-    assert.include(residualHir, 'borrow-value')
-    assert.include(residualHir, 'shared p1.#0')
-    assert.include(residualHir, 'shared p1.#1')
-    for (const spelling of [
-      'static-for',
-      'Intrinsic.Field',
-      'Intrinsic.Fields',
-      'Intrinsic.StaticSequence',
-      'borrowField',
-      'silk/reflect',
-      'silk/static_sequence',
-      'parseTemplate',
-      'validatedTemplate',
-    ]) {
-      assert.isFalse(residualHir.includes(spelling), `${spelling} reached residual HIR`)
-    }
-
-    const encodedMir = MirEncoding.encode(Analysis.loweredMir(snapshot))
-    assert.include(encodedMir, 'begin-loan')
-    assert.include(encodedMir, ' shared ')
-    for (const spelling of [
-      'Intrinsic.Field',
-      'Intrinsic.Fields',
-      'Intrinsic.StaticSequence',
-      'borrowField',
-      'silk/reflect',
-      'silk/static_sequence',
-      'parseTemplate',
-      'validatedTemplate',
-    ]) {
-      assert.isFalse(encodedMir.includes(spelling), `${spelling} reached MIR`)
-    }
-
-    const failing = StandardStreams.memory({ failAt: 1 })
-    const failed = Analysis.evaluate(snapshot, { standardStreams: failing.provider })
-    assert.strictEqual(failed._tag, 'UnhandledFailure')
-    if (failed._tag === 'UnhandledFailure') assert.include(failed.identity, 'WriterError')
-    assert.strictEqual(decoder.decode(Uint8Array.from(outputBytes(failing))), 'My name is ')
-
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const wasmMemory = StandardStreams.memory()
-    let instance: WebAssembly.Instance | undefined
-    instance = new WebAssembly.Instance(
-      new WebAssembly.Module(wasm.bytes.slice()),
-      StandardStreams.wasmImports(wasmMemory.provider, () => {
-        const exported = instance?.exports[StandardStreams.wasmMemoryExport]
-        return exported instanceof WebAssembly.Memory ? exported : undefined
-      }),
-    )
-    const main = instance.exports.silk_main
-    if (typeof main !== 'function') throw new Error('template formatting Wasm lost silk_main')
-    main()
-    assert.strictEqual(
-      decoder.decode(Uint8Array.from(outputBytes(wasmMemory))),
-      "My name is Julia, I'm 31|Hello, Júlia; age=32; again=Júlia|Hello, Júlia; age=32; again=Júlia|{name}|Maria:28",
-    )
-  }),
-)
 
 const formattingFailureProgram = (body: string): string => `import silk.effect { Effect }
 import silk.format { Format }
@@ -480,6 +139,81 @@ pub fn main() -> i32 { return 42 }`),
   }),
 )
 
+it.effect('classifies static template bytes and residualizes only the selected arm', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'number-text/template-byte',
+      ascii(`import silk.static_text as StaticText
+import silk.static_sequence as StaticSequence
+import silk.usize as usize
+static fn startsOpen(value: string) -> bool {
+  let parts = StaticSequence.empty<i32>()
+  let length = StaticText.byteLength(value)
+  let mut index = usize.ZERO
+  while index < length {
+    let byte = StaticText.byteAt(value, index)
+    if byte == 123 { return true }
+    index = index + usize.ONE
+  }
+  return false
+}
+pub fn main() -> i32 {
+  static if startsOpen("name") { return 0 } else { return 42 }
+}`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const encoded = MirEncoding.encode(Analysis.loweredMir(snapshot))
+    assert.include(encoded, 'literal 42 : i32')
+    assert.notInclude(encoded, 'literal 0 : i32')
+    assert.notInclude(encoded, 'StaticText.byteAt')
+  }),
+)
+
+it.effect('residualizes borrowed aggregate formatting without allocator machinery', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'number-text/templates-structure',
+      ascii(templateFormattingAcceptance),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const formatInstances = Analysis.instancesOf(snapshot).instances.filter(
+      (instance) =>
+        instance.key.declaration.module === 'silk/format' &&
+        instance.key.declaration.name === 'Format.format',
+    )
+    assert.strictEqual(formatInstances.length, 4)
+    assert.strictEqual(
+      new Set(
+        formatInstances.map((instance) =>
+          instance.key.staticArguments.map(StaticValue.presentation).join('|'),
+        ),
+      ).size,
+      4,
+    )
+    const projectedLoans = formatInstances.flatMap((instance) =>
+      instance.ownership.loans.filter((loan) => loan.root._tag === 'Parameter'),
+    )
+    assert.isAbove(projectedLoans.length, 0)
+    assert.isTrue(projectedLoans.every((loan) => loan.access === 'Shared'))
+    const residualHir = Hir.encode(
+      Object.freeze({
+        _tag: 'HirModule',
+        module: 'silk/format',
+        functions: Object.freeze(formatInstances.map((instance) => instance.function)),
+      }),
+    )
+    const mir = MirEncoding.encode(Analysis.loweredMir(snapshot))
+    assert.include(residualHir, 'borrow-value')
+    assert.include(mir, 'begin-loan')
+    for (const spelling of ['silk/allocator', 'Intrinsic.Fields', 'silk/static_sequence']) {
+      assert.notInclude(residualHir, spelling)
+      assert.notInclude(mir, spelling)
+    }
+  }),
+)
+
 it.effect('does not expose private fields as named formatting candidates', () =>
   Effect.gen(function* () {
     const module = 'number-text/template-private-field'
@@ -528,169 +262,6 @@ pub fn make() -> Person { return Person { name: "Julia", token: 42 } }`),
     )
     assert.include(diagnostics.at(0)?.message ?? '', 'available visible fields: name')
     assert.isTrue(diagnostics.every((diagnostic) => !diagnostic.message.includes('token')))
-  }),
-)
-
-const optionRenderingProgram = `import silk.effect { Effect }
-import silk.format { Format }
-import silk.format { Alignment, FormatOptions, Sign }
-import silk.option { Option }
-import silk.usize as usize
-import silk.writer { Writer, WriterError, StdoutWriter }
-import silk.writer { Writer, WriterError }
-
-fn options(width: usize, alignment: Alignment, fill: char, sign: Sign, zeroPad: bool, precision: Option<usize>) -> FormatOptions {
-  return FormatOptions {
-    width: Option.some<usize>(width), alignment: alignment, fill: fill, sign: sign,
-    alternate: true, zeroPad: zeroPad, precision: move precision, color: true,
-  }
-}
-
-fn accessorsHold() -> bool {
-  let defaults = Format.makeDefault()
-  if Format.hasWidth(&defaults) { return false }
-  if Format.width(&defaults) != usize.ZERO { return false }
-  if Format.alignment(&defaults) != Alignment.Default { return false }
-  if Format.fill(&defaults) != ' ' { return false }
-  if Format.sign(&defaults) != Sign.NegativeOnly { return false }
-  if Format.alternate(&defaults) { return false }
-  if Format.zeroPad(&defaults) { return false }
-  if Format.hasPrecision(&defaults) { return false }
-  if Format.precision(&defaults) != usize.ZERO { return false }
-  if Format.color(&defaults) { return false }
-  let explicit = Format.make(options(12, Alignment.Left, '*', Sign.Space, true, Option.some<usize>(9)))
-  if !Format.hasWidth(&explicit) { return false }
-  if Format.width(&explicit) != 12 { return false }
-  if Format.alignment(&explicit) != Alignment.Left { return false }
-  if Format.fill(&explicit) != '*' { return false }
-  if Format.sign(&explicit) != Sign.Space { return false }
-  if !Format.alternate(&explicit) { return false }
-  if !Format.zeroPad(&explicit) { return false }
-  if !Format.hasPrecision(&explicit) { return false }
-  if Format.precision(&explicit) != 9 { return false }
-  return Format.color(&explicit)
-}
-
-effect fn render() -> () ! WriterError ? &mut Writer {
-  let negative = 0 - 42
-  run Format.displayWith(&negative, options(8, Alignment.Right, '*', Sign.NegativeOnly, false, Option.some<usize>(4)))
-  run Writer.writeAll(b"|")
-  let positive = 42
-  run Format.displayWith(&positive, options(6, Alignment.Left, '.', Sign.Always, false, Option.none<usize>()))
-  run Writer.writeAll(b"|")
-  let zero = 0
-  run Format.displayWith(&zero, options(7, Alignment.Center, '\u{e9}', Sign.NegativeOnly, false, Option.some<usize>(3)))
-  run Writer.writeAll(b"|")
-  run Format.displayWith(&negative, options(7, Alignment.Default, ' ', Sign.NegativeOnly, true, Option.none<usize>()))
-  run Writer.writeAll(b"|")
-  let seven = 0 - 7
-  run Format.displayWith(&seven, options(5, Alignment.Center, '\u{b7}', Sign.NegativeOnly, false, Option.none<usize>()))
-  run Writer.writeAll(b"|")
-  run Format.displayWith(&positive, options(35, Alignment.Right, '_', Sign.NegativeOnly, false, Option.none<usize>()))
-  return ()
-}
-
-effect fn build() -> i32 ! WriterError {
-  if !accessorsHold() { return 2 }
-  let mut writer = Writer.stdoutWriterProvider()
-  run render() |> Effect.provideMut<Writer>(&mut writer)
-  return 42
-}
-effect fn recover(error: WriterError) -> i32 { return 1 }
-pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
-
-it.effect('honors width, alignment, multibyte fill, sign, zero padding, and precision', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'number-text/options',
-      ascii(optionRenderingProgram),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const memory = StandardStreams.memory()
-    const evaluated = Analysis.evaluate(snapshot, { standardStreams: memory.provider })
-    assert.strictEqual(evaluated._tag, 'Completed')
-    assert.strictEqual(
-      decoder.decode(Uint8Array.from(outputBytes(memory))),
-      `***-0042|+42...|éé000éé|-000042|·-7··|${'_'.repeat(33)}42`,
-    )
-  }),
-)
-
-const parsingProgram = `${imports}
-import silk.format { NotANumber, OutOfRange, ParseError }
-import silk.result { Result }
-
-fn parsed<T>(result: Result<T, ParseError>) -> bool {
-  return match move result {
-    Result<T, ParseError>.Success { value } => true
-    Result<T, ParseError>.Failure { error } => false
-  }
-}
-fn outOfRange<T>(result: Result<T, ParseError>) -> bool {
-  return match move result {
-    Result<T, ParseError>.Success { value } => false
-    Result<T, ParseError>.Failure { error } => match move error.reason {
-      NotANumber { offset } => false
-      OutOfRange nothing => true
-    }
-  }
-}
-fn notANumberAt<T>(result: Result<T, ParseError>, expected: usize) -> bool {
-  return match move result {
-    Result<T, ParseError>.Success { value } => false
-    Result<T, ParseError>.Failure { error } => match move error.reason {
-      NotANumber { offset } => offset == expected
-      OutOfRange nothing => false
-    }
-  }
-}
-pub fn main() -> i32 {
-${defaultCases
-  .map(
-    (entry, index) =>
-      `  if !parsed<${entry.spelling}>(${entry.spelling}.parse("${entry.expected}")) { return ${index + 1} }`,
-  )
-  .join('\n')}
-${fixedWidthIntegers
-  .flatMap((scalar, index) => {
-    const range = rangeOf(scalar.spelling)
-    return [
-      `  if !outOfRange<${scalar.spelling}>(${scalar.spelling}.parse("${range.maximum + 1n}")) { return ${40 + index * 2} }`,
-      isSigned(scalar.spelling)
-        ? `  if !outOfRange<${scalar.spelling}>(${scalar.spelling}.parse("${range.minimum - 1n}")) { return ${41 + index * 2} }`
-        : `  if !notANumberAt<${scalar.spelling}>(${scalar.spelling}.parse("-1"), usize.ZERO) { return ${41 + index * 2} }`,
-    ]
-  })
-  .join('\n')}
-  if !notANumberAt<u8>(u8.parse(""), usize.ZERO) { return 70 }
-  if !notANumberAt<u8>(u8.parse("abc"), usize.ZERO) { return 71 }
-  if !notANumberAt<u8>(u8.parse("12x"), 2) { return 72 }
-  if !notANumberAt<u8>(u8.parse("1 2"), usize.ONE) { return 73 }
-  if !notANumberAt<i32>(i32.parse("+1"), usize.ZERO) { return 74 }
-  if !notANumberAt<i32>(i32.parse("-"), usize.ONE) { return 75 }
-  if !notANumberAt<i32>(i32.parse("-x"), usize.ONE) { return 76 }
-  if !outOfRange<u8>(u8.parse("18446744073709551616")) { return 77 }
-  if !outOfRange<i32>(i32.parse("-99999999999999999999999")) { return 78 }
-  if !parsed<u8>(u8.parse("007")) { return 79 }
-  if !parsed<i32>(i32.parse("-0")) { return 80 }
-  return 42
-}`
-
-it.effect('preserves complete decimal parsing and range failures', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'number-text/parsing',
-      ascii(parsingProgram),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
   }),
 )
 

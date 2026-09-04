@@ -9,7 +9,6 @@ import type * as Diagnostic from './Diagnostic.js'
 import * as Frontend from './Frontend.js'
 import * as HeapObservation from './HeapObservation.js'
 import type * as Instances from './Instances.js'
-import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as LlvmBackend from './LlvmBackend.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as NativeLinkInput from './NativeLinkInput.js'
@@ -160,7 +159,6 @@ export interface CompileRequest {
   /** Validated project package name used for durable artifact identities. */
   readonly packageName: string
   readonly destination: string
-  readonly backend?: Backend.Backend
   /** Ordered, structured native inputs passed after compiler-generated objects. */
   readonly nativeLinkInputs?: ReadonlyArray<NativeLinkInput.NativeLinkInput>
   readonly scopeName?: string
@@ -333,7 +331,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
       report: Object.freeze([...report]),
     })
   }
-  const backend = request.backend ?? LlvmBackend.LlvmBackend
+  const backend = LlvmBackend.LlvmBackend
   const hostSelection =
     request.compilation.target === undefined ? NativeToolchain.hostSelection() : undefined
   if (hostSelection?._tag === 'Unavailable')
@@ -357,7 +355,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
       diagnostics: frontend.diagnostics,
       report: Object.freeze([...report]),
     })
-  const preparation = Realization.prepare(frontend, backend, targetId, {
+  const preparation = Realization.prepare(frontend, targetId, {
     heapBytes,
     artifactKind: request.artifactKind,
   })
@@ -390,13 +388,6 @@ export const compile = Effect.fn('Driver.compile')(function* (
       diagnostics: preparation.diagnostics,
       report: Object.freeze([...report]),
     })
-  if (preparation._tag === 'BackendFailed')
-    return Object.freeze({
-      _tag: 'BackendFailed',
-      error: preparation.error,
-      diagnostics: preparation.diagnostics,
-      report: Object.freeze([...report]),
-    })
   const { diagnostics, program, target } = preparation
   const targetIntegrity = PhaseReport.measureInto(
     report,
@@ -405,7 +396,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
     () =>
       ToolchainIntegrity.validateTarget(
         distribution,
-        IntrinsicAvailability.backendTarget(backend.id),
+        target,
         program.intrinsics,
         closure.sources.keys(),
       ),
@@ -431,7 +422,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
     })
   const mode = request.profile === 'release' ? 'release' : 'debug'
   const emissionCache =
-    request.cache !== false && backend.id === 'llvm'
+    request.cache !== false
       ? (request.toolchain.artifactCache ??
         NativeToolchain.defaultArtifactCache(nativeCacheDirectory))
       : undefined
@@ -532,14 +523,11 @@ export const compile = Effect.fn('Driver.compile')(function* (
       ? (request.toolchain.artifactCache ??
         NativeToolchain.defaultArtifactCache(nativeCacheDirectory))
       : undefined
-  let runtimeSource = ''
-  if (cacheKind === 'NativeExecutable')
-    runtimeSource = ToolchainPlan.executableSource(
-      artifact.termination,
-      artifact.nativeRuntimeSymbols,
-    )
-  else if (ArtifactKind.isLibrary(cacheKind))
-    runtimeSource = ToolchainPlan.runtimeSource(artifact.nativeRuntimeSymbols)
+  const runtimeSource = NativeToolchain.artifactRuntimeSource(
+    cacheKind,
+    artifact.termination,
+    artifact.nativeRuntimeSymbols,
+  )
   const cacheKey =
     artifactCache !== undefined && artifact._tag === 'LlvmBitcodeArtifact'
       ? yield* NativeToolchain.artifactCacheKey(
@@ -605,33 +593,6 @@ export const compile = Effect.fn('Driver.compile')(function* (
     scopeName,
     (scope) =>
       Effect.gen(function* () {
-        if (artifact._tag === 'WebAssemblyModuleArtifact') {
-          const committed = yield* PhaseReport.measureEffectInto(
-            report,
-            'artifact-commit',
-            1,
-            NativeToolchain.commitWasm(artifact, request.destination),
-            () => 1,
-            () => 0,
-            { heapBytes },
-          )
-          return Object.freeze({
-            _tag: 'Compiled',
-            backend: artifact.backend,
-            artifactKind: committed.kind,
-            path: committed.path,
-            target: committed.target,
-            symbols: artifact.symbols,
-            foreignImports: artifact.foreignImports,
-            foreignExports: artifact.foreignExports,
-            foreignStatics: artifact.foreignStatics,
-            termination: artifact.termination,
-            diagnostics,
-            report: Object.freeze([...report]),
-            toolchainIdentity: distribution.digest,
-          })
-        }
-
         if (!Target.isNative(target)) {
           const finalized = yield* PhaseReport.measureEffectInto(
             report,

@@ -39,18 +39,16 @@ export interface ViewDescriptor {
   readonly tag: string
   readonly group: string
   readonly hasFilter?: boolean | undefined
-  readonly action?: { readonly label: string } | undefined
 }
 
 export const descriptors: ReadonlyArray<ViewDescriptor> = views.map(
-  ({ id, title, phase, tag, group, hasFilter, action }) => ({
+  ({ id, title, phase, tag, group, hasFilter }) => ({
     id,
     title,
     phase,
     tag,
     group,
     ...(hasFilter === undefined ? {} : { hasFilter }),
-    ...(action === undefined ? {} : { action }),
   }),
 )
 
@@ -62,8 +60,6 @@ export interface ViewParameters {
   readonly view: string
   readonly filter?: string | undefined
   readonly showTrivia?: boolean | undefined
-  /** Evaluation is explicit: the projection runs the program only when this is set. */
-  readonly evaluate?: boolean | undefined
 }
 
 export interface ViewResponse {
@@ -135,18 +131,12 @@ export const project = (
       ([name, file]) => [name, decoder.decode(Uint8Array.from(file.bytes))] as const,
     ),
   )
-  const evaluation =
-    parameters.evaluate === true && Analysis.mirOf(snapshot)._tag === 'Available'
-      ? Analysis.evaluate(snapshot)
-      : undefined
-
   const result = definition.project({
     snapshot,
     modules,
     root: session.document.module,
     mode: 'release',
     profile: 'release',
-    evaluation,
     filter: parameters.filter ?? '',
     showTrivia: parameters.showTrivia ?? false,
   })

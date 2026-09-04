@@ -18,6 +18,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as CoroutineRuntime from '../src/CoroutineRuntime.js'
 import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
+import * as LlvmWasmRuntime from '../src/LlvmWasmRuntime.js'
 import * as Target from '../src/Target.js'
 import * as Termination from '../src/Termination.js'
 import * as ToolchainPlan from '../src/ToolchainPlan.js'
@@ -418,6 +419,35 @@ it.effect('includes the selected native clock runtime in the artifact cache iden
     }
     assert.strictEqual(new Set(keys).size, selected.length)
   }),
+)
+
+it.effect(
+  'includes the selected LLVM-Wasm freestanding runtime in the artifact cache identity',
+  () =>
+    Effect.gen(function* () {
+      const bitcode = Uint8Array.from([0, 1, 2, 3])
+      const runtimeSource = NativeToolchain.artifactRuntimeSource(
+        'WebAssemblyModule',
+        termination(),
+        [],
+      )
+      assert.strictEqual(runtimeSource, LlvmWasmRuntime.source)
+      const keyFor = (runtimeSource: string) =>
+        NativeToolchain.artifactCacheKey(
+          toolchain,
+          'WebAssemblyModule',
+          Target.wasm32UnknownUnknown,
+          'release',
+          bitcode,
+          runtimeSource,
+          join(testRoot, 'runtime.wasm'),
+        )
+      const original = yield* keyFor(runtimeSource)
+      const changed = yield* keyFor(`${runtimeSource}\n/* cache identity mutation */`)
+      assert.notStrictEqual(original, changed)
+      assert.match(original, /\.wasm$/)
+      assert.match(changed, /\.wasm$/)
+    }),
 )
 
 it.effect('separates every final artifact kind in cache identity and extension', () =>

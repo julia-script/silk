@@ -1,4 +1,3 @@
-import type * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import type * as Elaboration from './Elaboration.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -41,7 +40,6 @@ const typeText = (type: Type.Type): string => {
 }
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
-export type FlowLayer = 'Semantic' | 'Evaluated'
 
 export type FlowNodeKind =
   | 'Argument'
@@ -51,11 +49,6 @@ export type FlowNodeKind =
   | 'CallResult'
   | 'FunctionReturn'
   | 'Terminal'
-
-export interface FlowEvidence {
-  readonly order: number
-  readonly value?: number | bigint
-}
 
 export interface FlowGroup {
   readonly _tag: 'FlowGroup'
@@ -69,7 +62,6 @@ export interface FlowGroup {
   readonly span: SourceSpan.SourceSpan
   readonly nodeIds: ReadonlyArray<string>
   readonly edgeIds: ReadonlyArray<string>
-  readonly evaluation?: FlowEvidence | undefined
 }
 
 export interface FlowNode {
@@ -81,10 +73,8 @@ export interface FlowNode {
   readonly detail: string
   readonly depth: number
   readonly ordinal: number | undefined
-  readonly layer: FlowLayer
   readonly state: FlowItemState
   readonly span: SourceSpan.SourceSpan
-  readonly evaluation?: FlowEvidence | undefined
 }
 
 export interface FlowEdge {
@@ -95,15 +85,12 @@ export interface FlowEdge {
   readonly to: string
   readonly label: string
   readonly depth: number
-  readonly layer: FlowLayer
   readonly state: FlowItemState
   readonly span: SourceSpan.SourceSpan
-  readonly evaluation?: FlowEvidence | undefined
 }
 
 export interface FlowModel {
   readonly _tag: 'FlowModel'
-  readonly mode: 'Semantic' | 'Evaluated'
   readonly status: 'Complete' | 'Incomplete' | 'Empty'
   readonly summary: string
   readonly groups: ReadonlyArray<FlowGroup>
@@ -205,9 +192,6 @@ const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
 
 const callId = (call: CallFact): string => `call-${call.syntax.span.start}-${call.syntax.span.end}`
 
-const sameSpan = (left: SourceSpan.SourceSpan, right: SourceSpan.SourceSpan): boolean =>
-  left.sourceId === right.sourceId && left.start === right.start && left.end === right.end
-
 const sameDeclaration = (
   left: Elaboration.DeclarationFact,
   right: Elaboration.DeclarationFact,
@@ -253,7 +237,6 @@ const semanticNode = (
     detail,
     depth: group.depth,
     ordinal,
-    layer: 'Semantic',
     state,
     span,
   })
@@ -275,7 +258,6 @@ const semanticEdge = (
     to,
     label,
     depth: group.depth,
-    layer: 'Semantic',
     state,
     span,
   })
@@ -668,154 +650,9 @@ const projectCall = (
   return Object.freeze({ groupId: id, resultId, complete: true })
 }
 
-const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
-  switch (reason._tag) {
-    case 'InvalidMir':
-      return `InvalidMir: ${reason.violations.length} violations`
-    case 'EvaluationLimit':
-      return `EvaluationLimit(${reason.kind}): ${reason.count}/${reason.limit} in ${reason.function.name}; active ${reason.activeFrames.map((frame) => `f${frame.frame}:d${frame.depth} ${frame.function.name}`).join(' → ')}`
-    case 'Trap':
-      return `Trap: ${reason.reason}`
-    case 'UnavailableEntry':
-      return `UnavailableEntry: ${reason.reason}`
-    case 'MissingFunction':
-      return `MissingFunction: ${reason.target.name}`
-    case 'InvalidCallableReuse':
-      return `InvalidCallableReuse: callable #${reason.ticket} is ${reason.state.toLowerCase()}`
-    case 'ExecutionRelinquished':
-      return `ExecutionRelinquished: package #${reason.ticket}`
-    case 'MissingStandardStreams':
-      return 'MissingStandardStreams: no host provider was supplied'
-    case 'MissingStandardInput':
-      return 'MissingStandardInput: no host provider was supplied'
-    case 'MissingChildProcess':
-      return 'MissingChildProcess: no host provider was supplied'
-    case 'MissingHostInput':
-      return 'MissingHostInput: no host provider was supplied'
-    case 'MissingOsFileSystemHost':
-      return 'MissingOsFileSystemHost: no OS filesystem host provider was supplied'
-    case 'MissingMonotonicClock':
-      return 'MissingMonotonicClock: no monotonic-clock host provider was supplied'
-    case 'MissingRandomHost':
-      return 'MissingRandomHost: no random host provider was supplied'
-    case 'IntrinsicTargetUnavailable':
-      return `IntrinsicTargetUnavailable: ${reason.diagnostics.map((diagnostic) => diagnostic.message).join('; ')}`
-    case 'ForeignPlanningUnavailable':
-      return `ForeignPlanningUnavailable: ${reason.diagnostics.map((diagnostic) => diagnostic.message).join('; ')}`
-    case 'ForeignHostUnavailable':
-      return `ForeignHostUnavailable(${reason.symbol}): expected ${reason.expected}${reason.provided === undefined ? '' : `; provided ${reason.provided}`}`
-    case 'ForeignHostCallFailed':
-      return `ForeignHostCallFailed(${reason.symbol}): ${reason.message}`
-  }
-}
-
-const blockedSpan = (
-  reason: BootstrapEvaluation.BlockedReason,
-): SourceSpan.SourceSpan | undefined => {
-  switch (reason._tag) {
-    case 'InvalidMir':
-      return undefined
-    case 'UnavailableEntry':
-      return undefined
-    case 'Trap':
-      return reason.span
-    case 'MissingFunction':
-      return reason.span
-    case 'InvalidCallableReuse':
-      return reason.span
-    case 'ExecutionRelinquished':
-      return undefined
-    case 'MissingStandardStreams':
-      return undefined
-    case 'MissingStandardInput':
-      return undefined
-    case 'MissingChildProcess':
-      return undefined
-    case 'MissingHostInput':
-      return undefined
-    case 'MissingOsFileSystemHost':
-      return undefined
-    case 'MissingMonotonicClock':
-      return undefined
-    case 'MissingRandomHost':
-      return undefined
-    case 'EvaluationLimit':
-      return reason.span
-    case 'IntrinsicTargetUnavailable':
-      return reason.diagnostics.at(0)?.span
-    case 'ForeignPlanningUnavailable':
-      return reason.diagnostics.at(0)?.span
-    case 'ForeignHostUnavailable':
-    case 'ForeignHostCallFailed':
-      return reason.span
-  }
-}
-
-interface Overlay {
-  readonly groups: Map<string, FlowEvidence>
-  readonly items: Map<string, FlowEvidence>
-}
-
-const traceOverlay = (draft: ProjectionDraft, outcome: BootstrapEvaluation.Outcome): Overlay => {
-  const groups = new Map<string, FlowEvidence>()
-  const items = new Map<string, FlowEvidence>()
-  const stack: Array<GroupDraft> = []
-
-  const targetMatches = (
-    target: Elaboration.DeclarationFact,
-    id: { readonly module: string; readonly name: string },
-  ): boolean =>
-    target.canonical._tag === 'Canonical' &&
-    target.canonical.id.module === id.module &&
-    target.canonical.id.name === id.name
-
-  for (const [index, event] of outcome.trace.entries()) {
-    const eventValue = event._tag === 'Binding' || event._tag === 'Return' ? event.value : undefined
-    const evidence = Object.freeze({
-      order: index + 1,
-      ...(eventValue?._tag === 'IntegerValue' ? { value: eventValue.value } : {}),
-    })
-    if (event._tag === 'Call') {
-      const group = draft.groups.find((candidate) => sameSpan(candidate.span, event.span))
-      if (group !== undefined) {
-        groups.set(group.id, evidence)
-        stack.push(group)
-      }
-      continue
-    }
-    if (event._tag === 'Binding') {
-      const group = draft.groups.find((candidate) => sameSpan(candidate.span, event.callSpan))
-      if (group !== undefined) {
-        items.set(`${group.id}-argument-${event.argumentOrdinal}`, evidence)
-        items.set(`${group.id}-parameter-${event.parameterOrdinal}`, evidence)
-        items.set(`${group.id}-mapping-${event.argumentOrdinal}`, evidence)
-        if (event.fromCall) {
-          items.set(`${group.id}-nested-result-${event.argumentOrdinal}`, evidence)
-        }
-      }
-      continue
-    }
-    if (event._tag === 'Return') {
-      const group = stack.at(-1)
-      if (
-        group !== undefined &&
-        group.target !== undefined &&
-        targetMatches(group.target, event.function)
-      ) {
-        items.set(`${group.id}-target-returned`, evidence)
-        items.set(`${group.id}-result`, evidence)
-        items.set(`${group.id}-returned-result`, evidence)
-        stack.pop()
-      }
-    }
-  }
-  return Object.freeze({ groups, items })
-}
-
-const emptyModel = (evaluated: boolean): FlowModel =>
+const emptyModel = (): FlowModel =>
   Object.freeze({
     _tag: 'FlowModel',
-    mode: evaluated ? 'Evaluated' : 'Semantic',
     status: 'Empty',
     summary: 'No call expression is available for data-flow projection.',
     groups: Object.freeze([]),
@@ -823,14 +660,11 @@ const emptyModel = (evaluated: boolean): FlowModel =>
     edges: Object.freeze([]),
   })
 
-/** Projects semantic relationships and an optional trace-backed evaluation overlay for the inspector. */
-export const projectDataFlow = (
-  analysis: Elaboration.Result,
-  outcome?: BootstrapEvaluation.Outcome,
-): FlowModel => {
+/** Projects semantic relationships for the inspector. */
+export const projectDataFlow = (analysis: Elaboration.Result): FlowModel => {
   const caller = analysis.functions.find((fact) => fact.returnedExpression._tag === 'Call')
   if (caller === undefined || caller.returnedExpression._tag !== 'Call') {
-    return emptyModel(outcome !== undefined)
+    return emptyModel()
   }
 
   const draft: ProjectionDraft = { groups: [], nodes: [], edges: [] }
@@ -876,46 +710,6 @@ export const projectDataFlow = (
     }
   }
 
-  const overlay = outcome === undefined ? undefined : traceOverlay(draft, outcome)
-  if (outcome?._tag === 'Completed') {
-    const order = outcome.trace.length
-    const evidence = Object.freeze({ order, value: outcome.result.value })
-    overlay?.items.set(`${root.groupId}-caller-return`, evidence)
-    overlay?.items.set(`${root.groupId}-result-return`, evidence)
-  }
-
-  if (outcome?._tag === 'Blocked' || outcome?._tag === 'Trap') {
-    const span = outcome._tag === 'Trap' ? outcome.provenance : blockedSpan(outcome.reason)
-    const group =
-      (span === undefined
-        ? undefined
-        : draft.groups.find((candidate) => sameSpan(candidate.span, span))) ?? draft.groups.at(0)
-    if (group !== undefined) {
-      const terminalId = `${group.id}-evaluated-stop`
-      const evidence = Object.freeze({ order: outcome.trace.length + 1 })
-      draft.nodes.push(
-        Object.freeze({
-          _tag: 'FlowNode',
-          id: terminalId,
-          groupId: group.id,
-          kind: 'Terminal',
-          label:
-            outcome._tag === 'Trap'
-              ? 'Evaluation stops: fatal trap'
-              : `Evaluation stops: ${outcome.reason._tag}`,
-          detail: outcome._tag === 'Trap' ? outcome.reason : blockedLabel(outcome.reason),
-          depth: group.depth,
-          ordinal: undefined,
-          layer: 'Evaluated',
-          state: 'Stopped',
-          span: span ?? group.span,
-          evaluation: evidence,
-        }),
-      )
-      group.nodeIds.push(terminalId)
-    }
-  }
-
   const groups = draft.groups.map((group): FlowGroup =>
     Object.freeze({
       _tag: 'FlowGroup',
@@ -929,41 +723,14 @@ export const projectDataFlow = (
       span: group.span,
       nodeIds: Object.freeze([...group.nodeIds]),
       edgeIds: Object.freeze([...group.edgeIds]),
-      ...(overlay?.groups.get(group.id) === undefined
-        ? {}
-        : { evaluation: overlay.groups.get(group.id) }),
     }),
   )
-  const nodes = draft.nodes.map((item): FlowNode => {
-    const evaluation = item.evaluation ?? overlay?.items.get(item.id)
-    return Object.freeze({ ...item, ...(evaluation === undefined ? {} : { evaluation }) })
-  })
-  const edges = draft.edges.map((item): FlowEdge => {
-    const evaluation = item.evaluation ?? overlay?.items.get(item.id)
-    return Object.freeze({ ...item, ...(evaluation === undefined ? {} : { evaluation }) })
-  })
+  const nodes = draft.nodes.map((item): FlowNode => Object.freeze(item))
+  const edges = draft.edges.map((item): FlowEdge => Object.freeze(item))
   const nestedCount = Math.max(0, groups.length - 1)
-  let modeSummary =
-    'Semantic relationships only; evaluate explicitly to add reachable order and exact values.'
-  if (outcome !== undefined) {
-    switch (outcome._tag) {
-      case 'Completed':
-        modeSummary = `Evaluation completed with ${outcome.result.value}; trace-backed order and values are overlaid.`
-        break
-      case 'UnhandledFailure':
-        modeSummary = `Evaluation terminated with ${outcome.identity} (tag ${outcome.tag}); its completed trace is overlaid.`
-        break
-      case 'Trap':
-        modeSummary = `Evaluation trapped at ${outcome.reason}; only its completed trace prefix is overlaid.`
-        break
-      case 'Blocked':
-        modeSummary = `Evaluation stopped at ${outcome.reason._tag}; only its completed trace prefix is overlaid.`
-        break
-    }
-  }
+  const modeSummary = 'Semantic relationships only.'
   return Object.freeze({
     _tag: 'FlowModel',
-    mode: outcome === undefined ? 'Semantic' : 'Evaluated',
     status: root.complete ? 'Complete' : 'Incomplete',
     summary: `${nestedCount === 0 ? 'One call site' : `${nestedCount + 1} nested call sites`} projected. ${modeSummary}`,
     groups: Object.freeze(groups),

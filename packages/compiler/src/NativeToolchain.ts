@@ -16,8 +16,9 @@ import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Result from 'effect/Result'
-import type * as ArtifactKind from './ArtifactKind.js'
+import * as ArtifactKind from './ArtifactKind.js'
 import type * as Backend from './Backend.js'
+import * as LlvmWasmRuntime from './LlvmWasmRuntime.js'
 import * as NativeLinkInput from './NativeLinkInput.js'
 import * as Project from './Project.js'
 import * as Target from './Target.js'
@@ -67,6 +68,19 @@ export const makeRuntimeObjectCache = (): RuntimeObjectCache => {
 
 export const runtimeObjectCacheStats = (self: RuntimeObjectCache): RuntimeObjectCacheStats =>
   self.stats()
+
+/** Returns the exact runtime source participating in one final artifact and its cache identity. */
+export const artifactRuntimeSource = (
+  kind: FinalArtifact['kind'],
+  termination: Backend.Termination,
+  nativeRuntimeSymbols: ReadonlyArray<string>,
+): string => {
+  if (kind === 'NativeExecutable')
+    return ToolchainPlan.executableSource(termination, nativeRuntimeSymbols)
+  if (kind === 'WebAssemblyModule') return LlvmWasmRuntime.source
+  if (ArtifactKind.isLibrary(kind)) return ToolchainPlan.runtimeSource(nativeRuntimeSymbols)
+  return ''
+}
 
 export type Stage =
   | 'host-target'
@@ -1099,12 +1113,20 @@ export const finalizeWasm = Effect.fn('NativeToolchain.finalizeWasm')(function* 
   destination: string,
 ): Effect.fn.Return<FinalArtifact, ToolchainError> {
   const bitcode = yield* writeArtifact(scope, target, 'program.bc', artifact.bitcode)
+  const runtime = yield* compileCObject(
+    toolchain,
+    scope,
+    target,
+    'silk_wasm_runtime',
+    LlvmWasmRuntime.source,
+  )
   const outputPath = join(scope.root, 'program.wasm')
   const planned = ToolchainPlan.wasmCommand(
     toolchain.clang,
     target,
     profile,
     bitcode.path,
+    runtime.artifact.path,
     outputPath,
   )
   if (artifact.target.id !== target.id) {
@@ -1140,29 +1162,6 @@ export const finalizeWasm = Effect.fn('NativeToolchain.finalizeWasm')(function* 
     bytes,
     target,
     planned,
-  })
-})
-
-export const commitWasm = Effect.fn('NativeToolchain.commitWasm')(function* (
-  artifact: Backend.WebAssemblyModuleArtifact,
-  destination: string,
-): Effect.fn.Return<FinalArtifact, ToolchainError> {
-  if (!hasWasmHeader(artifact.bytes)) {
-    return yield* storageError(
-      'NativeToolchain.commitWasm',
-      'artifact-commit',
-      destination,
-      new TypeError('backend bytes are not a WebAssembly module'),
-    )
-  }
-  const bytes = Uint8Array.from(artifact.bytes)
-  const path = yield* atomicCommit(destination, bytes)
-  return Object.freeze({
-    _tag: 'FinalArtifact',
-    kind: 'WebAssemblyModule',
-    path,
-    bytes,
-    target: artifact.target,
   })
 })
 

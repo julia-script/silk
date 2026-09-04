@@ -167,7 +167,7 @@ per-field cleanup is planned for the arm.
 #### Scenario: Extract an affine member
 
 - **WHEN** an arm binds `Full full` on a moved union scrutinee and the arm result moves the binding onward
-- **THEN** the payload transfers exactly once, all three engines agree on the result, and no field of the member is separately released
+- **THEN** the payload transfers exactly once, native plus LLVM-generated WebAssembly artifacts agree on the result, and no field of the member is separately released
 
 #### Scenario: Extract an intrinsic result member
 

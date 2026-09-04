@@ -1,14 +1,11 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as LayoutEncode from '../src/LayoutEncode.js'
-import * as MirEncoding from '../src/MirEncoding.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import * as ProjectAnalysis from '../src/ProjectAnalysis.js'
 import * as SemanticInvalidation from '../src/SemanticInvalidation.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
-import * as Type from '../src/Type.js'
 import { raise } from './support/raise.js'
 
 const encoder = new TextEncoder()
@@ -27,17 +24,6 @@ const analyze = Effect.fnUntraced(function* (
   const effect =
     previous === undefined ? ProjectAnalysis.make(roots) : ProjectAnalysis.revise(previous, roots)
   return yield* effect.pipe(Effect.provide(SourceResolver.memory(currentSources)))
-})
-
-const realize = Effect.fnUntraced(function* (
-  currentSources: ReadonlyMap<string, Uint8Array>,
-  rootModule: string,
-) {
-  const root = currentSources.get(rootModule) ?? raise(`missing source ${rootModule}`)
-  return yield* Analysis.makeRealized({
-    root: SourceFile.make(rootModule, root),
-    target: 'wasm32-unknown-unknown',
-  }).pipe(Effect.provide(SourceResolver.memory(currentSources)))
 })
 
 const observation = (project: ProjectAnalysis.ProjectAnalysis, module: string) =>
@@ -482,205 +468,6 @@ pub fn make<F: Effect<i32>>(pending: F) -> some<G: Effect<i32>> G {
   }),
 )
 
-it.effect('isolates opaque bound edits as public identity and artifact invalidation', () =>
-  Effect.gen(function* () {
-    const importer =
-      'import opaque.Bound { make } pub fn main() -> i32 { let parser = make() drop parser return 0 }'
-    const beforeSources = sources({
-      'opaque/BoundImporter': importer,
-      'opaque/Bound': `fn identity(value: i32) -> i32 { return value }
-pub fn make() -> some<F: fn(i32) -> i32> F { return identity }`,
-    })
-    const afterSources = sources({
-      'opaque/BoundImporter': importer,
-      'opaque/Bound': `fn identity(value: i64) -> i64 { return value }
-pub fn make() -> some<F: fn(i64) -> i64> F { return identity }`,
-    })
-    const before = yield* analyze(beforeSources, ['opaque/BoundImporter'])
-    const changed = yield* analyze(afterSources, ['opaque/BoundImporter'], before)
-    const importerObservation = observation(changed, 'opaque/BoundImporter')
-    assert.strictEqual(importerObservation._tag, 'Recomputed')
-    if (importerObservation._tag === 'Recomputed')
-      assert.include(importerObservation.reasons, 'DependencySurfaceChange')
-    const beforeDefinition = [...OpaqueRealization.catalogOf(before).definitions.values()].at(0)
-    const afterDefinition = [...OpaqueRealization.catalogOf(changed).definitions.values()].at(0)
-    assert.strictEqual(
-      beforeDefinition === undefined ? undefined : OpaqueRealization.key(beforeDefinition),
-      afterDefinition === undefined ? undefined : OpaqueRealization.key(afterDefinition),
-    )
-    assert.notStrictEqual(beforeDefinition?.targetFingerprint, afterDefinition?.targetFingerprint)
-    assert.strictEqual(beforeDefinition?.layoutFingerprint, afterDefinition?.layoutFingerprint)
-    assert.notStrictEqual(
-      before.surfaces.get('opaque/Bound')?.canonical,
-      changed.surfaces.get('opaque/Bound')?.canonical,
-    )
-
-    const beforeRuntime = yield* realize(beforeSources, 'opaque/BoundImporter')
-    const afterRuntime = yield* realize(afterSources, 'opaque/BoundImporter')
-    assert.strictEqual(beforeRuntime.layout._tag, 'Available')
-    assert.strictEqual(afterRuntime.layout._tag, 'Available')
-    assert.strictEqual(beforeRuntime.mir._tag, 'Available')
-    assert.strictEqual(afterRuntime.mir._tag, 'Available')
-    if (
-      beforeRuntime.layout._tag !== 'Available' ||
-      afterRuntime.layout._tag !== 'Available' ||
-      beforeRuntime.mir._tag !== 'Available' ||
-      afterRuntime.mir._tag !== 'Available'
-    )
-      return
-    assert.notStrictEqual(
-      LayoutEncode.encode(beforeRuntime.layout.value),
-      LayoutEncode.encode(afterRuntime.layout.value),
-    )
-    assert.notStrictEqual(
-      MirEncoding.encode(beforeRuntime.mir.value),
-      MirEncoding.encode(afterRuntime.mir.value),
-    )
-    const beforeArtifact = yield* Analysis.codegenWasm(beforeRuntime, { mode: 'release' })
-    const afterArtifact = yield* Analysis.codegenWasm(afterRuntime, { mode: 'release' })
-    assert.notStrictEqual(beforeArtifact.wat, afterArtifact.wat)
-  }),
-)
-
-it.effect(
-  'isolates an enclosing binder addition while preserving the realized target and layout',
-  () =>
-    Effect.gen(function* () {
-      const importer =
-        'import opaque.Binder { make } pub fn main() -> i32 { let parser = make(0) return parser(42) }'
-      const beforeSources = sources({
-        'opaque/BinderImporter': importer,
-        'opaque/Binder': `fn identity(value: i32) -> i32 { return value }
-pub fn make(value: i32) -> some<F: fn(i32) -> i32> F { return identity }`,
-      })
-      const afterSources = sources({
-        'opaque/BinderImporter': importer,
-        'opaque/Binder': `fn identity(value: i32) -> i32 { return value }
-pub fn make<T>(value: T) -> some<F: fn(i32) -> i32> F { drop value return identity }`,
-      })
-      const before = yield* analyze(beforeSources, ['opaque/BinderImporter'])
-      const changed = yield* analyze(afterSources, ['opaque/BinderImporter'], before)
-      const importerObservation = observation(changed, 'opaque/BinderImporter')
-      assert.strictEqual(importerObservation._tag, 'Recomputed')
-      if (importerObservation._tag === 'Recomputed')
-        assert.include(importerObservation.reasons, 'DependencySurfaceChange')
-      const beforeDefinition = [...OpaqueRealization.catalogOf(before).definitions.values()].at(0)
-      const afterDefinition = [...OpaqueRealization.catalogOf(changed).definitions.values()].at(0)
-      assert.strictEqual(
-        beforeDefinition === undefined ? undefined : OpaqueRealization.key(beforeDefinition),
-        afterDefinition === undefined ? undefined : OpaqueRealization.key(afterDefinition),
-      )
-      assert.notStrictEqual(
-        beforeDefinition === undefined
-          ? undefined
-          : Type.genericArgumentKey(beforeDefinition.instance),
-        afterDefinition === undefined
-          ? undefined
-          : Type.genericArgumentKey(afterDefinition.instance),
-      )
-      assert.strictEqual(beforeDefinition?.targetFingerprint, afterDefinition?.targetFingerprint)
-      assert.strictEqual(beforeDefinition?.layoutFingerprint, afterDefinition?.layoutFingerprint)
-      assert.notStrictEqual(
-        before.surfaces.get('opaque/Binder')?.canonical,
-        changed.surfaces.get('opaque/Binder')?.canonical,
-      )
-
-      const beforeRuntime = yield* realize(beforeSources, 'opaque/BinderImporter')
-      const afterRuntime = yield* realize(afterSources, 'opaque/BinderImporter')
-      assert.strictEqual(beforeRuntime.layout._tag, 'Available')
-      assert.strictEqual(afterRuntime.layout._tag, 'Available')
-      assert.strictEqual(beforeRuntime.mir._tag, 'Available')
-      assert.strictEqual(afterRuntime.mir._tag, 'Available')
-      if (
-        beforeRuntime.layout._tag !== 'Available' ||
-        afterRuntime.layout._tag !== 'Available' ||
-        beforeRuntime.mir._tag !== 'Available' ||
-        afterRuntime.mir._tag !== 'Available'
-      )
-        return
-      assert.strictEqual(
-        LayoutEncode.encode(beforeRuntime.layout.value),
-        LayoutEncode.encode(afterRuntime.layout.value),
-      )
-      assert.notStrictEqual(
-        MirEncoding.encode(beforeRuntime.mir.value),
-        MirEncoding.encode(afterRuntime.mir.value),
-      )
-      const beforeArtifact = yield* Analysis.codegenWasm(beforeRuntime, { mode: 'release' })
-      const afterArtifact = yield* Analysis.codegenWasm(afterRuntime, { mode: 'release' })
-      assert.notStrictEqual(beforeArtifact.wat, afterArtifact.wat)
-    }),
-)
-
-it.effect('isolates a same-kind enclosing binder reorder from concrete runtime artifacts', () =>
-  Effect.gen(function* () {
-    const importer = `import opaque.BinderOrder { make }
-pub fn main() -> i32 { let select = make<i32, i32>(42) return select(0) }`
-    const beforeSources = sources({
-      'opaque/BinderOrderImporter': importer,
-      'opaque/BinderOrder': `fn select<T>(captured: T, value: T) -> T { drop value return move captured }
-pub fn make<A, B>(captured: A) -> some<F: once fn(A) -> A> F { return select<A>(move captured) }`,
-    })
-    const afterSources = sources({
-      'opaque/BinderOrderImporter': importer,
-      'opaque/BinderOrder': `fn select<T>(captured: T, value: T) -> T { drop value return move captured }
-pub fn make<B, A>(captured: A) -> some<F: once fn(A) -> A> F { return select<A>(move captured) }`,
-    })
-    const before = yield* analyze(beforeSources, ['opaque/BinderOrderImporter'])
-    const changed = yield* analyze(afterSources, ['opaque/BinderOrderImporter'], before)
-    assert.deepEqual(ProjectAnalysis.view(before, 'opaque/BinderOrderImporter')?.diagnostics, [])
-    assert.deepEqual(ProjectAnalysis.view(changed, 'opaque/BinderOrderImporter')?.diagnostics, [])
-    const importerObservation = observation(changed, 'opaque/BinderOrderImporter')
-    assert.strictEqual(importerObservation._tag, 'Recomputed')
-    if (importerObservation._tag === 'Recomputed')
-      assert.include(importerObservation.reasons, 'DependencySurfaceChange')
-
-    const beforeDefinition = [...OpaqueRealization.catalogOf(before).definitions.values()].at(0)
-    const afterDefinition = [...OpaqueRealization.catalogOf(changed).definitions.values()].at(0)
-    assert.strictEqual(
-      beforeDefinition === undefined ? undefined : OpaqueRealization.key(beforeDefinition),
-      afterDefinition === undefined ? undefined : OpaqueRealization.key(afterDefinition),
-    )
-    assert.notStrictEqual(
-      beforeDefinition === undefined
-        ? undefined
-        : Type.genericArgumentKey(beforeDefinition.instance),
-      afterDefinition === undefined ? undefined : Type.genericArgumentKey(afterDefinition.instance),
-    )
-    assert.notStrictEqual(beforeDefinition?.targetFingerprint, afterDefinition?.targetFingerprint)
-    assert.notStrictEqual(beforeDefinition?.layoutFingerprint, afterDefinition?.layoutFingerprint)
-    assert.notStrictEqual(
-      before.surfaces.get('opaque/BinderOrder')?.canonical,
-      changed.surfaces.get('opaque/BinderOrder')?.canonical,
-    )
-
-    const beforeRuntime = yield* realize(beforeSources, 'opaque/BinderOrderImporter')
-    const afterRuntime = yield* realize(afterSources, 'opaque/BinderOrderImporter')
-    assert.strictEqual(beforeRuntime.layout._tag, 'Available')
-    assert.strictEqual(afterRuntime.layout._tag, 'Available')
-    assert.strictEqual(beforeRuntime.mir._tag, 'Available')
-    assert.strictEqual(afterRuntime.mir._tag, 'Available')
-    if (
-      beforeRuntime.layout._tag !== 'Available' ||
-      afterRuntime.layout._tag !== 'Available' ||
-      beforeRuntime.mir._tag !== 'Available' ||
-      afterRuntime.mir._tag !== 'Available'
-    )
-      return
-    assert.strictEqual(
-      LayoutEncode.encode(beforeRuntime.layout.value),
-      LayoutEncode.encode(afterRuntime.layout.value),
-    )
-    assert.strictEqual(
-      MirEncoding.encode(beforeRuntime.mir.value),
-      MirEncoding.encode(afterRuntime.mir.value),
-    )
-    const beforeArtifact = yield* Analysis.codegenWasm(beforeRuntime, { mode: 'release' })
-    const afterArtifact = yield* Analysis.codegenWasm(afterRuntime, { mode: 'release' })
-    assert.strictEqual(beforeArtifact.wat, afterArtifact.wat)
-  }),
-)
-
 it.effect('invalidates direct importers when a foreign symbol is renamed but not respelled', () =>
   Effect.gen(function* () {
     const importer =
@@ -703,7 +490,7 @@ it.effect('invalidates direct importers when a foreign symbol is renamed but not
     const renamed = yield* analyze(
       sources({
         'app/A': importer,
-        'app/B': 'pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "labs"',
+        'app/B': 'pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "renamed_abs"',
       }),
       ['app/A'],
       respelled,

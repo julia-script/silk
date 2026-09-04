@@ -2,9 +2,9 @@
 
 ## Purpose
 
-Define how complete, recognizable Silk programs pressure the language with differential,
-cross-engine evidence without being mistaken for a commitment to self-hosting or replacement of a
-canonical implementation.
+Define how complete, recognizable Silk programs pressure the language with differential reference
+checks, structural compiler evidence, and pinned native outcomes without being mistaken for a
+commitment to self-hosting or replacement of a canonical implementation.
 
 ## Requirements
 
@@ -22,7 +22,7 @@ lexer-specific or token-specific operations, layouts, or branches.
 
 #### Scenario: Pressure program remains ordinary Silk
 
-- **WHEN** its published source, MIR, evaluation trace, or backend artifact is inspected
+- **WHEN** its published source, MIR, native corpus outcome, or backend artifact is inspected
 - **THEN** only general language, allocation, collection, control-flow, and cleanup mechanisms are present
 
 ### Requirement: The Silk lexer is checked against the canonical lexer
@@ -49,29 +49,29 @@ end-of-file, and unsupported byte runs.
 - **WHEN** the differential corpus exercises escaped `"""` and `b"""` literals containing quotes, LF, CRLF, indentation, code-like content, and pipeline punctuation
 - **THEN** both lexers agree on literal category, complete token boundaries, exact source spans, and following tokens
 
-### Requirement: Execution and ownership evidence is cross-engine and deterministic
+### Requirement: Execution and ownership evidence is independently pinned and deterministic
 
-Representative valid and invalid lexer cases SHALL agree across evaluation, native LLVM, and
-direct WebAssembly execution. Allocation failure at every exercised growth ordinal SHALL preserve
-typed `OutOfMemoryError`, release every acquired allocation exactly once, and leave subsequent runs
-deterministic; the evaluator and WebAssembly SHALL carry every exercised ordinal, and native
-execution SHALL carry representative boundary ordinals including at least the first failing
-ordinal, one mid-growth ordinal, and unrestricted completion.
+Representative valid and invalid lexer cases SHALL retain structural compiler assertions and pinned
+native corpus outcomes, with LLVM-generated WebAssembly coverage for intended target behavior.
+Allocation failure at every exercised growth ordinal SHALL preserve typed `OutOfMemoryError`,
+release every acquired allocation exactly once, and leave subsequent runs deterministic. Structural
+MIR evidence SHALL cover every ordinal; native execution SHALL cover only distinguishing boundary
+cases including the first failure, one mid-growth ordinal, and unrestricted completion.
 
-#### Scenario: Engines agree on a representative valid case
+#### Scenario: Execute a representative valid case
 
-- **WHEN** the valid acceptance case is evaluated, compiled and run natively, and instantiated as WebAssembly
-- **THEN** every engine reports the same deterministic lexer fingerprint and successful cleanup
+- **WHEN** the valid acceptance case runs from the pinned native corpus and its intended WebAssembly behavior is checked through LLVM
+- **THEN** the artifacts report the specified deterministic lexer fingerprint and successful cleanup
 
-#### Scenario: Engines agree on a representative invalid case
+#### Scenario: Execute a representative invalid case
 
-- **WHEN** the invalid acceptance case runs on all three engines
-- **THEN** every engine reports the same deterministic token-and-diagnostic fingerprint and successful cleanup
+- **WHEN** the invalid acceptance case runs from the pinned native corpus
+- **THEN** it reports the specified deterministic token-and-diagnostic fingerprint and successful cleanup
 
 #### Scenario: Allocation failure rolls back cleanly
 
 - **WHEN** allocation is rejected at any token or diagnostic vector growth ordinal exercised by the acceptance cases
-- **THEN** the typed failure is preserved and every earlier acquisition is released exactly once without double-dropping initialized records, with the evaluator and WebAssembly checking every ordinal and native execution checking the boundary ordinals
+- **THEN** structural MIR proves the rollback at every ordinal and the native corpus pins the distinguishing boundary outcomes
 
 ### Requirement: A bounded stack VM exercises execution and owned observations
 
@@ -90,7 +90,7 @@ specific operations, layouts, or branches.
 
 #### Scenario: Pressure VM remains ordinary Silk
 
-- **WHEN** its published source, MIR, evaluation trace, or backend artifact is inspected
+- **WHEN** its published source, MIR, native corpus outcome, or backend artifact is inspected
 - **THEN** only general language, allocation, collection, control-flow, failure, union-copy, and cleanup mechanisms are present
 
 ### Requirement: Pressure programs use shared sequence observation
@@ -134,24 +134,25 @@ result, ordered executed steps, and ordered diagnostics.
 - **WHEN** bytecode contains unsupported opcodes or invalid operands
 - **THEN** both implementations emit the same ordered diagnostics and make the same continue-or-stop decision
 
-### Requirement: Stack VM resource behavior is cross-engine and deterministic
+### Requirement: Stack VM resource behavior is independently pinned and deterministic
 
-Representative valid and malformed VM programs SHALL agree across evaluation, native LLVM, and
-direct WebAssembly execution. Allocation failure at every exercised trace or diagnostic growth
-ordinal SHALL preserve typed `OutOfMemoryError`, release every acquired allocation exactly once, and
-leave subsequent executions deterministic; the evaluator and WebAssembly SHALL carry every
-exercised ordinal, and native execution SHALL carry representative boundary ordinals including at
-least the first failing ordinal, one mid-growth ordinal, and unrestricted completion.
+Representative valid and malformed VM programs SHALL retain structural compiler assertions and
+pinned native corpus outcomes, with LLVM-generated WebAssembly coverage for intended target
+behavior. Allocation failure at every exercised trace or diagnostic growth ordinal SHALL preserve
+typed `OutOfMemoryError`, release every acquired allocation exactly once, and leave subsequent
+executions deterministic. Structural MIR evidence SHALL cover every ordinal; native execution SHALL
+cover only distinguishing boundary cases including the first failure, one mid-growth ordinal, and
+unrestricted completion.
 
-#### Scenario: Engines agree on VM fingerprints
+#### Scenario: Execute VM fingerprints
 
-- **WHEN** representative valid and malformed programs run on all three engines
-- **THEN** every engine reports the same deterministic result, trace-and-diagnostic fingerprint, and cleanup outcome
+- **WHEN** representative valid and malformed programs run from the pinned native corpus
+- **THEN** each reports its specified deterministic result, trace-and-diagnostic fingerprint, and cleanup outcome
 
 #### Scenario: VM observation allocation rolls back cleanly
 
 - **WHEN** allocation is rejected at any trace or diagnostic vector growth ordinal exercised by the acceptance programs
-- **THEN** the typed failure is preserved and every earlier acquisition is released exactly once without exposing a partial result, with the evaluator and WebAssembly checking every ordinal and native execution checking the boundary ordinals
+- **THEN** structural MIR proves the rollback at every ordinal and the native corpus pins the distinguishing boundary outcomes
 
 ### Requirement: Pressure findings determine follow-up work
 
@@ -183,13 +184,14 @@ infrastructure, or begin continuous self-hosting.
 The repository SHALL maintain a complete ordinary-Silk pressure program that composes inspectable
 nominal data with statically represented callable and Effect behavior, conditional compile-time
 interfaces, and complete operation contracts. The program SHALL normalize different leaf results
-before convergence and SHALL run equivalently through evaluation, native LLVM, and direct
-WebAssembly without compiler-known library actor names.
+before convergence, retain structural MIR evidence, and have independently pinned native outcomes
+without compiler-known library actor names.
 
 #### Scenario: Pressure the complete capability set
 
-- **WHEN** the static-composition program is compiled and executed through every engine
-- **THEN** it exercises each enabling language capability in one connected source flow with equal results and cleanup
+- **WHEN** the static-composition program is analyzed and run through the shared native corpus
+- **THEN** it exercises each enabling language capability in one connected source flow, with MIR
+  proving cleanup and the native case producing its pinned result
 
 #### Scenario: Keep the CLI shape non-normative
 
@@ -213,10 +215,10 @@ readiness callbacks out before invoking them, and leave the published value sour
 state for shared observation by every waiter handle. Repeated-publication result policy SHALL remain
 outside this evidence slice and MUST NOT be promoted into a public Deferred contract.
 
-The witness SHALL agree across evaluation, native LLVM, and direct WebAssembly on enqueue order,
-one-time publication, dormant callback cleanup, unpublished affine value cleanup, strong-count
-transitions, and final allocation release. Its findings report SHALL distinguish the removed
-shared-state wall from the execution-transfer and parking work that remains owned by SLP-0001.
+The witness SHALL retain structural MIR evidence for callback and allocation cleanup, plus pinned
+native outcomes for enqueue order, one-time publication, and strong-count transitions. Its findings
+report SHALL distinguish the removed shared-state wall from the execution-transfer and parking work
+that remains owned by SLP-0001.
 
 #### Scenario: Enqueue from two dormant callbacks
 
@@ -243,20 +245,22 @@ shared-state wall from the execution-transfer and parking work that remains owne
 - **WHEN** a dormant callback holding an inbox clone is dropped before it runs
 - **THEN** its handle decrements without releasing the inbox while another handle remains, and final cleanup still balances one acquisition and release
 
-#### Scenario: Agree across engines
+#### Scenario: Pin the observable outcome
 
-- **WHEN** the ready-inbox and Deferred-style acceptance cases run through evaluation, native LLVM, and direct Wasm
-- **THEN** every engine reports identical logical results, callback order, payload cleanup, count transitions, and allocation release order
+- **WHEN** the ready-inbox and Deferred-style acceptance cases run through the shared native corpus
+- **THEN** the independently pinned results cover logical values, callback order, and count
+  transitions while MIR assertions cover payload and allocation cleanup
 
 #### Scenario: Roll back every construction failure
 
 - **WHEN** construction fails at each exercised `Shared.make` allocation ordinal
-- **THEN** evaluation and Wasm preserve typed `OutOfMemoryError`, publish no partial witness actor, clean every still-owned constructor input, balance every prior acquisition and release, and permit a deterministic later success, while native covers the designated boundary ordinals
+- **THEN** structural MIR preserves typed `OutOfMemoryError`, publishes no partial witness actor, cleans every still-owned constructor input, and balances every prior acquisition and release, while the native corpus pins designated boundary outcomes
 
 #### Scenario: Rename every witness actor
 
 - **WHEN** the source-level inbox, Deferred-style state, and wrappers are renamed without changing their ordinary operations
-- **THEN** semantic facts, verified MIR, and engine behavior remain equivalent with no actor-specific compiler branch
+- **THEN** semantic facts, verified MIR, and the pinned native result remain equivalent with no
+  actor-specific compiler branch
 
 #### Scenario: Record the remaining SLP-0001 boundary
 
@@ -274,28 +278,34 @@ The pressure corpus SHALL contain readable connected source programs for source-
 waiting, deferred first activation, same-thread timer readiness, cancellation before readiness, and
 alternate Coroutine-shaped ownership. Each program SHALL expose its ordinary Allocator and failure
 rows at source construction points, close every detachable execution environment with owned values,
-and use the same general Execution/Wake substrate. Cross-engine assertions SHALL cover observable
-values, activation and readiness order, cleanup/release order, and declared boundary diagnostics.
+and use the same general Execution/Wake substrate. Structured analysis and MIR assertions SHALL
+cover lifecycle and cleanup facts, while independently pinned native cases cover observable values,
+activation and readiness order, and declared runtime boundaries.
 
 #### Scenario: Run the Scheduler-shaped connected witness
 
 - **WHEN** the corpus drives a waiter and producer through ordinary task storage and a ready inbox
-- **THEN** evaluation, native, and Wasm agree on deferred activation, waiter park, producer publication, task-specific readiness, waiter resume, and final value
+- **THEN** the pinned native result covers deferred activation, waiter park, producer publication,
+  task-specific readiness, waiter resume, and the final value
 
 #### Scenario: Run the timer-shaped connected witness
 
 - **WHEN** the corpus drives an explicitly owned joining parent and same-thread reactor
-- **THEN** all engines agree on sibling progress, timer notification, outer eligibility, result data, and cancellation cleanup
+- **THEN** the pinned native result covers sibling progress, timer notification, outer eligibility,
+  and result data while MIR proves cancellation cleanup
 
 #### Scenario: Run the alternate-owner witness
 
 - **WHEN** the corpus drives one Coroutine-shaped source wrapper through two yielded payloads and completion
-- **THEN** all engines agree on payload order and reuse the same intrinsic transitions without Scheduler facts
+- **THEN** the pinned native result covers payload order and structural assertions prove reuse of
+  the same intrinsic transitions without Scheduler facts
 
 #### Scenario: Drop the alternate owner while yielded
 
 - **WHEN** the Coroutine-shaped fixture drops its Execution while a yielded payload and Wake remain in the source port
-- **THEN** all engines agree on cancellation, exact port/frame/endpoint cleanup, late Wake no-op behavior, and final package release without Scheduler-specific lowering
+- **THEN** the pinned native result covers late-Wake behavior while MIR assertions prove
+  cancellation and exact port, frame, endpoint, and package cleanup without Scheduler-specific
+  lowering
 
 #### Scenario: Diagnose the unowned root boundary
 
@@ -305,4 +315,4 @@ values, activation and readiness order, cleanup/release order, and declared boun
 #### Scenario: Share analysis work cheaply
 
 - **WHEN** several assertions or engines consume one pressure source program
-- **THEN** tests build one realized Analysis snapshot, use evaluation for semantics, use Wasm where codegen matters, and route native coverage through the designated differential corpus
+- **THEN** tests build one realized Analysis snapshot, use structured assertions for compiler semantics, use LLVM-to-Wasm where target behavior matters, and route runtime coverage through the shared native corpus

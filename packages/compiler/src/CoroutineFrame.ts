@@ -145,8 +145,8 @@ export const stateLayout = (
   program: Mir.Module,
   point: Mir.SuspensionPointId,
 ): Mir.CoroutineFrameTargetStateLayout | undefined =>
-  // The full instance key — contractRow included — selects the entry, matching pointKey and the
-  // wasm backend's Backend.suspensionPointKey; specializations can differ only in contractRow.
+  // The full instance key — contractRow included — selects the entry; specializations can differ
+  // only in contractRow.
   program.coroutineFrames?.entries
     .find((entry) => Instances.keyText(entry.function) === Instances.keyText(point.owner))
     ?.states.find((state) => pointKey(state.point) === pointKey(point))

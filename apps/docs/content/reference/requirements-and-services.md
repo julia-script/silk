@@ -655,4 +655,4 @@ type does not conform to `K` reports the ordinary conformance mismatch at the ac
 selector `K`. No compatibility alias is retained in this green-field codebase.
 
 **Evidence:** [current Effect standard library](../../../../packages/compiler/stdlib/silk/effect.silk),
-[acquired-provider acceptance tests](../../../../packages/compiler/test/ProvideEffectAcceptance.test.ts).
+[provider elaboration tests](../../../../packages/compiler/test/Elaboration.test.ts).

@@ -56,11 +56,6 @@ runs code; modules cannot be declared independently of their locations, assemble
 files, or hold implicit runtime initialization.
 _Avoid_: partial module, declared module name
 
-**Direct WebAssembly backend**:
-A compiler backend that emits WebAssembly without passing through LLVM. It is a stretch path for
-reducing Silk Effect's long-term dependence on LLVM, not a prerequisite for the bootstrap language.
-_Avoid_: custom Wasm backend, LLVM-free compiler
-
 **Self-hosting compiler**:
 A compiler written in Silk Effect that can compile its own source into a working native compiler
 without Node.js or TypeScript at runtime. The first self-hosting compiler may emit LLVM IR and use
@@ -307,13 +302,11 @@ traps, and runtime operations explicit while retaining logical Silk types and so
 physical target layout and backend instructions remain outside it.
 _Avoid_: LLVM wrapper, source-module object model, WebAssembly stack IR
 
-**Backend service**:
-A nominal compiler capability that converts backend-neutral MIR plus an explicit target and codegen
-request into a relocatable object artifact. The selected implementation is provided lexically and
-owns its backend-specific lowering and object-emission path; callers do not inspect its identity or
-receive its private IR. Bootstrap provides an LLVM implementation, while native linking remains a
-separate compiler-driver responsibility.
-_Avoid_: LLVM switch, backend registry, codegen plugin lookup
+**LLVM lowering**:
+The compiler stage that converts backend-neutral MIR plus an explicit target and codegen request
+into LLVM bitcode. It owns target-specific lowering and object or WebAssembly emission; native
+linking remains a separate compiler-driver responsibility.
+_Avoid_: backend registry, codegen plugin lookup
 
 **Native linker service**:
 A nominal compiler capability that combines compatible relocatable object artifacts, the selected

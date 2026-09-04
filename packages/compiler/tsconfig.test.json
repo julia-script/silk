@@ -2,8 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    // `WebAssembly` is declared in the DOM lib. The WASM backend's tests execute the modules they
-    // emit, but the sources themselves stay host-neutral, so this widening is test-only.
+    // `WebAssembly` is declared in the DOM lib. The LLVM-to-Wasm tests execute compiled modules,
+    // but the sources themselves stay host-neutral, so this widening is test-only.
     "lib": ["ES2023", "DOM"],
     "types": ["node"]
   },

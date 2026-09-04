@@ -66,8 +66,7 @@ later child even when runtime control may skip it.
 **Diagnostics:** Evaluation order itself needs no diagnostic. Each invalid child receives the
 ordinary diagnostic for its own type, ownership, failure, requirement, or place boundary.
 
-**Evidence:** [bootstrap evaluation specification](../../../../openspec/specs/bootstrap-evaluation/spec.md),
-[call evaluation](functions-callables-and-control-flow.md#call-001--a-call-evaluates-each-argument-once-from-left-to-right),
+**Evidence:** [call evaluation](functions-callables-and-control-flow.md#call-001--a-call-evaluates-each-argument-once-from-left-to-right),
 [aggregate HIR evaluation order](../../../../packages/compiler/src/Hir.ts).
 
 ### EVAL-002 — Conditional and deferred forms state which children do not evaluate eagerly
@@ -534,7 +533,7 @@ functions do not inherit the ordinary operator's trap policy.
 
 **Diagnostics:** Valid operator types receive no compile-time diagnostic merely because a runtime
 value may trap. A runtime arithmetic trap identifies the source operation and retains its
-provenance consistently across the evaluator and supported backends.
+provenance consistently across supported targets.
 
 **Evidence:** [integer operation specification](../../../../openspec/specs/bootstrap-integer-scalars/spec.md),
 [trapping MIR contract](../../../../openspec/specs/bootstrap-mir/spec.md),
@@ -559,7 +558,7 @@ Floating `%` uses exact IEEE `fmod` semantics: for operands `x` and `y`, the mat
 `x - n*y`, where `n` is `x/y` truncated toward zero, without exposing an intermediate rounding or
 overflow. The result has the dividend's sign, including negative zero. A finite dividend modulo an
 infinite divisor returns the dividend; an infinite dividend, zero divisor, or NaN operand produces
-NaN. Evaluator, native, and WebAssembly execution produce identical finite result bits.
+NaN. Native and LLVM-generated WebAssembly execution produce identical finite result bits.
 
 ```silk
 fn unordered(value: f64) -> bool {
@@ -580,7 +579,7 @@ rounded finite results are values, not diagnostics or traps.
 **Evidence:** [floating scalar specification](../../../../openspec/specs/bootstrap-floating-point-scalars/spec.md),
 [floating actor modules](../../../../packages/compiler/stdlib/silk/f32.silk),
 [floating-point tests](../../../../packages/compiler/test/FloatingPointScalars.test.ts),
-[cross-engine arithmetic corpus](../../../../packages/compiler/test/support/corpus.ts).
+[pinned native arithmetic corpus](../../../../packages/compiler/test/support/corpus.ts).
 
 ### OP-006 — Concrete comparison availability is explicit and narrow
 

@@ -75,7 +75,7 @@ it('carries no Unicode policy anywhere in the compiler’s own sources', () => {
 it('provides no Unicode operation to any engine', () => {
   // Every intrinsic the compiler declares, by the spelling a program would write. An engine cannot
   // implement an operation the catalogue does not name, so this one assertion covers semantic
-  // analysis, the HIR, the MIR, the evaluator, and both backends at once.
+  // analysis, HIR, MIR, and LLVM lowering at once.
   const spellings = Intrinsic.all().flatMap((actor) =>
     actor.operations.map((operation) => `${actor.spelling}.${operation.spelling}`),
   )
@@ -116,35 +116,6 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
-it.effect('lowers a normalizing program to a MIR that names no Unicode operation', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'unicode-privilege/normalize',
-      ascii(normalizing),
-    )
-    assert.deepEqual(messages(snapshot), [])
-
-    // The program really runs, so the MIR examined below is the MIR of working normalization rather
-    // than of something that happened to lower.
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
-
-    const mir = Analysis.mirOf(snapshot)
-    assert.strictEqual(mir._tag, 'Available')
-    if (mir._tag !== 'Available') return
-
-    const operations = operationsOf(mir.value)
-    assert.isAbove(operations.length, 0, 'the program lowered to something')
-    const kinds = [...new Set(operations.map((operation) => operation._tag))].sort()
-    assert.deepEqual(
-      kinds.filter((kind) => unicodeShaped.test(kind)),
-      [],
-      `MIR operations used: ${kinds.join(', ')}`,
-    )
-  }),
-)
-
 it.effect('normalizes through ordinary Silk functions reached by ordinary calls', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -182,76 +153,6 @@ it.effect('normalizes through ordinary Silk functions reached by ordinary calls'
     assert.include(calls, 'silk/unicode_tables.UnicodeTables.canonicalDecomposition')
     assert.include(calls, 'silk/unicode_tables.UnicodeTables.canonicalComposition')
     assert.include(calls, 'silk/unicode.composePair')
-  }),
-)
-
-/**
- * The tables are treated as ordinary data rather than by their spelling.
- *
- * This program encodes a slice of the same combining-class table in the same packed format, under a
- * module-less name nothing in the compiler could recognize, and searches it with the same binary
- * search. If any phase special-cased `silk/unicode_tables` or the name `combiningClass`, the two
- * answers would not agree.
- */
-const ownTable = `import silk.u32 as u32
-import silk.u8 as u8
-import silk.usize as usize
-import silk.unicode { Unicode }
-
-fn read3(data: &[u8], at: usize) -> u32 {
-  return u8.toU32(data[at]) * 65536
-    + u8.toU32(data[at + usize.ONE]) * 256
-    + u8.toU32(data[at + 2])
-}
-
-/// The runs covering U+0300..U+0304, U+0323 and U+05B0, packed exactly as the generator packs them.
-fn mine(scalar: u32) -> u32 {
-  let data = b"\\x00\\x03\\x00\\x04\\xe6\\x00\\x03\\x23\\x00\\xdc\\x00\\x05\\xb0\\x00\\x0a"
-  let mut low = usize.ZERO
-  let mut high = usize.add(0, 3)
-  while low < high {
-    let middle = low + (high - low) / 2
-    let at = middle * 5
-    let start = read3(data, at)
-    if scalar < start {
-      high = middle
-    } else {
-      let count = u8.toU32(data[at + 3]) + 1
-      if scalar < start + count { return u8.toU32(data[at + 4]) }
-      low = middle + usize.ONE
-    }
-  }
-  return 0
-}
-
-fn agrees(scalar: u32) -> bool {
-  return mine(scalar) == Unicode.canonicalCombiningClass(scalar)
-}
-
-pub fn main() -> i32 {
-  if agrees(u32.toU32(768)) {} else { return 1 }
-  if agrees(u32.toU32(772)) {} else { return 2 }
-  if agrees(u32.toU32(803)) {} else { return 3 }
-  if agrees(u32.toU32(1456)) {} else { return 4 }
-  // A starter, which neither table lists.
-  if agrees(u32.toU32(101)) {} else { return 5 }
-  // And the values are the real ones, not zero on both sides.
-  if Unicode.canonicalCombiningClass(u32.toU32(768)) == 230 {} else { return 6 }
-  if Unicode.canonicalCombiningClass(u32.toU32(803)) == 220 {} else { return 7 }
-  if Unicode.canonicalCombiningClass(u32.toU32(101)) == 0 {} else { return 8 }
-  return 42
-}`
-
-it.effect('treats a Unicode table as ordinary data rather than by its spelling', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'unicode-privilege/own-table',
-      ascii(ownTable),
-    )
-    assert.deepEqual(messages(snapshot), [])
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
   }),
 )
 

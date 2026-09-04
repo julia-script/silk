@@ -5,10 +5,10 @@ import type { ViewContext, ViewResult } from '../src/InspectorRegistry.js'
 import { siblingsOf, viewById, views } from '../src/InspectorRegistry.js'
 import * as ToolchainPlan from '../src/ToolchainPlan.js'
 
-const project = (viewId: string, source: string): ViewResult => {
+const project = (viewId: string, source: string, target = 'aarch64-apple-darwin'): ViewResult => {
   const sourceId = 'memory/docs/unified-layout'
   const snapshot = Effect.runSync(
-    Analysis.ofSourceRealized(sourceId, new TextEncoder().encode(source), 'aarch64-apple-darwin'),
+    Analysis.ofSourceRealized(sourceId, new TextEncoder().encode(source), target),
   )
   const root = snapshot.closure.rootModule
   const context: ViewContext = {
@@ -17,7 +17,6 @@ const project = (viewId: string, source: string): ViewResult => {
     root,
     mode: 'release',
     profile: 'release',
-    evaluation: undefined,
     filter: '',
     showTrivia: false,
   }
@@ -31,54 +30,6 @@ const project = (viewId: string, source: string): ViewResult => {
 const text = (result: ViewResult): string =>
   result.rows.map((row) => `${row.label} ${row.detail ?? ''}`).join('\n')
 
-/**
- * The struct-values view wants the whole pipeline: an evaluated wasm run, so the aggregate
- * Construct/Project events are in the trace alongside the elaboration facts.
- */
-const projectStructValues = (source: string): ViewResult => {
-  const sourceId = 'memory/docs/unified-struct-values'
-  const snapshot = Effect.runSync(
-    Analysis.ofSourceRealized(sourceId, new TextEncoder().encode(source), 'wasm32-unknown-unknown'),
-  )
-  const evaluation = Analysis.evaluate(snapshot)
-  expect(evaluation._tag).toBe('Completed')
-  const view = viewById('struct-values')
-  expect(view).toBeDefined()
-  if (view === undefined) throw new Error('missing struct-values view')
-  return view.project({
-    snapshot,
-    modules: { [sourceId]: source },
-    root: sourceId,
-    mode: 'release',
-    profile: 'release',
-    evaluation,
-    filter: '',
-    showTrivia: false,
-  })
-}
-
-const projectArrayValues = (source: string): ViewResult => {
-  const sourceId = 'memory/docs/unified-array-values'
-  const snapshot = Effect.runSync(
-    Analysis.ofSourceRealized(sourceId, new TextEncoder().encode(source), 'wasm32-unknown-unknown'),
-  )
-  const evaluation = Analysis.evaluate(snapshot)
-  expect(evaluation._tag).toBe('Completed')
-  const view = viewById('array-values')
-  expect(view).toBeDefined()
-  if (view === undefined) throw new Error('missing array-values view')
-  return view.project({
-    snapshot,
-    modules: { [sourceId]: source },
-    root: sourceId,
-    mode: 'release',
-    profile: 'release',
-    evaluation,
-    filter: '',
-    showTrivia: false,
-  })
-}
-
 describe('view registry', () => {
   it('resolves every view by its own id', () => {
     for (const view of views) {
@@ -86,24 +37,21 @@ describe('view registry', () => {
     }
   })
 
-  it('has one backend view rather than one per backend', () => {
-    // The target picks the backend, so a pane per backend would be a choice the user cannot get
-    // right — picking the one the target does not serve just yields a rejection.
+  it('has one target-aware LLVM emission view', () => {
     expect(views.filter((view) => view.phase === 'backend').map((view) => view.id)).toEqual([
       'backend',
     ])
   })
 
-  it('reports unknown and retired ids as missing', () => {
+  it('reports unknown ids as missing', () => {
     expect(viewById('llvm')).toBeUndefined()
-    expect(viewById('wasm')).toBeUndefined()
     expect(viewById('not-a-view')).toBeUndefined()
   })
 
   // The syntax inspector was two panels, and the consolidation first ported only the left one.
   // These are the panels that made it a *syntax* lab rather than a token list.
   it('carries every panel the syntax inspector shipped', () => {
-    for (const id of ['tokens', 'tree', 'flow', 'evaluation', 'hir', 'diagnostics']) {
+    for (const id of ['tokens', 'tree', 'flow', 'hir', 'diagnostics']) {
       expect(viewById(id)?.id, id).toBe(id)
     }
   })
@@ -119,10 +67,13 @@ describe('view registry', () => {
 })
 
 describe('struct values view', () => {
-  it('reports struct facts, ABI lanes, and aggregate evaluation events', () => {
-    const result = projectStructValues(`struct Pair { left: i32 right: i32 }
+  it('reports struct facts, ABI lanes, and aggregate lowering events', () => {
+    const result = project(
+      'struct-values',
+      `struct Pair { left: i32 right: i32 }
 fn make() -> Pair { return Pair { right: 2, left: 1 } }
-pub fn main() -> i32 { let pair = make() return pair.right }`)
+pub fn main() -> i32 { let pair = make() return pair.right }`,
+    )
 
     const rendered = text(result)
     expect(rendered).toContain('struct construction')
@@ -139,20 +90,21 @@ pub fn main() -> i32 { let pair = make() return pair.right }`)
 })
 
 describe('array values view', () => {
-  it('links canonical literals, checks, layouts, lanes, and evaluation events', () => {
-    const result = projectArrayValues(`struct Pair { left: i32 right: i32 }
+  it('links canonical literals, checks, layouts, and lanes', () => {
+    const result = project(
+      'array-values',
+      `struct Pair { left: i32 right: i32 }
 fn choose(values: [Pair; 2], index: usize) -> i32 { return values[index].left }
-pub fn main() -> i32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`)
+pub fn main() -> i32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`,
+    )
 
     const rendered = text(result)
     expect(rendered).toContain('canonical array types')
-    expect(rendered).toContain('Array<memory/docs/unified-array-values.Pair, 2>')
+    expect(rendered).toContain('Array<memory/docs/unified-layout.Pair, 2>')
     expect(rendered).toContain('literal elements')
     expect(rendered).toContain('runtime check < 2')
     expect(rendered).toContain('stride 8')
     expect(rendered).toContain('[1].#0')
-    expect(rendered).toContain('construct Array<')
-    expect(rendered).toContain('read Array<')
     expect(result.rows.some((row) => row.span !== undefined)).toBe(true)
   })
 })
@@ -273,7 +225,6 @@ describe('downstream panes state why they are empty', () => {
       root: snapshot.closure.rootModule,
       mode: 'release',
       profile: 'release',
-      evaluation: undefined,
       filter: '',
       showTrivia: false,
     })
@@ -330,7 +281,6 @@ pub fn main() -> i32 { return answer( }`,
       root: snapshot.closure.rootModule,
       mode: 'release' as const,
       profile: 'release' as const,
-      evaluation: undefined,
       filter: '',
     }
 
@@ -341,12 +291,22 @@ pub fn main() -> i32 { return answer( }`,
 })
 
 describe('optimization profile', () => {
-  // The workbench derives codegen's debug-info mode from the profile instead of carrying a second
+  // Inspector clients derive codegen's debug-info mode from the profile instead of carrying a second
   // control. That only stays honest while `-g` profiles map to debug mode: if they diverged, the
   // backend pane would show stripped IR for a build the toolchain plans with debug info.
   it('keeps debug info whenever the profile asks clang for -g', () => {
     expect(ToolchainPlan.codegenModeFor('debug')).toBe('debug')
     expect(ToolchainPlan.codegenModeFor('release-with-debug')).toBe('debug')
     expect(ToolchainPlan.codegenModeFor('release')).toBe('release')
+  })
+})
+
+describe('toolchain projection', () => {
+  it('plans LLVM-to-Wasm finalization for the WebAssembly target', () => {
+    const rendered = text(
+      project('toolchain', 'pub fn main() -> i32 { return 42 }', 'wasm32-unknown-unknown'),
+    )
+    expect(rendered).toContain('--target=wasm32-unknown-unknown')
+    expect(rendered).toContain('--export=silk_main')
   })
 })

@@ -1,6 +1,5 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -290,54 +289,6 @@ pub fn main() -> i32 { let parser = outer<i32>(true) return parser(1) }`
     assert.strictEqual(realized.mir._tag, 'Available')
     if (realized.mir._tag === 'Available')
       assert.notInclude(MirEncoding.encode(realized.mir.value), 'unavailable contract type')
-  }),
-)
-
-it.effect('executes a generic opaque realization forwarded through a cross-module wrapper', () =>
-  Effect.gen(function* () {
-    const root = 'opaque/App'
-    const source =
-      'import opaque.Outer { outer } pub fn main() -> i32 { let parser = outer<i32>(42) return parser(0) }'
-    const self = yield* Analysis.makeRealized({
-      root: SourceFile.make(root, encoder.encode(source)),
-      target: 'wasm32-unknown-unknown',
-    }).pipe(
-      Effect.provide(
-        SourceResolver.memory(
-          new Map([
-            [
-              'opaque/Outer',
-              encoder.encode(`import opaque.Inner { inner }
-pub fn outer<T>(value: T) -> some<G: once fn(i32) -> T> G { return inner<T>(move value) }`),
-            ],
-            [
-              'opaque/Inner',
-              encoder.encode(`fn keep<T>(ignored: i32, value: T) -> T { return move value }
-pub fn inner<T>(value: T) -> some<F: once fn(i32) -> T> F { return keep<T>(move value) }`),
-            ],
-          ]),
-        ),
-      ),
-    )
-    assert.deepEqual(
-      self.diagnostics.map((diagnostic) => diagnostic.code),
-      [],
-    )
-    const open = opaqueArgument(self, 'opaque/Outer', 'outer')
-    const definition = OpaqueRealization.definitionOf(
-      OpaqueRealization.catalogOf(self),
-      Type.opaqueRepresentationArgument(open.family, open.contract, ['i32']),
-    )
-    assert.strictEqual(definition?.construction.producer.module, 'opaque/Inner')
-    assert.strictEqual(definition?.construction.producer.name, 'inner')
-    assert.deepEqual(definition?.construction.arguments, ['i32'])
-    const outcome = Analysis.evaluate(self)
-    assert.strictEqual(
-      outcome._tag,
-      'Completed',
-      outcome._tag === 'Blocked' ? Json.stringify(outcome.reason) : outcome._tag,
-    )
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 

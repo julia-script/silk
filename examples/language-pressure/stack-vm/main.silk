@@ -298,7 +298,7 @@ fn fingerprint(executed: Executed) -> i32 {
 
 fn verify(value: i32) -> () {
   // PRESSURE_EXPECTED: the harness replaces this literal only.
-  if value != 0 { let mismatch = 1 / 0 }
+  if value != 184 { let mismatch = 1 / 0 }
   return ()
 }
 

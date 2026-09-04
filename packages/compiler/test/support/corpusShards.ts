@@ -29,55 +29,11 @@ const corpusShard = (shard: number, of: number): typeof corpus =>
 /** How many shard files each sweep registers; the shard files pass their own 1-based index. */
 export const corpusShardCount = 4
 
-/** Registers the evaluator-outcome sweep for one corpus shard. */
-export const corpusOutcomeShard = (shard: number): void => {
-  describe(`pinned corpus outcomes (shard ${shard}/${corpusShardCount})`, () => {
-    it.each(corpusShard(shard, corpusShardCount))(
-      'reproduces the pinned outcome of $name',
-      async (program) => {
-        await Effect.gen(function* () {
-          const snapshot = yield* Analysis.ofSourceRealized(
-            'memory/evaluation',
-            ascii(program.source),
-          )
-          const outcome = Analysis.evaluate(snapshot)
-          switch (program.expected._tag) {
-            case 'Completes':
-              assert.strictEqual(outcome._tag, 'Completed', program.name)
-              if (outcome._tag === 'Completed') {
-                assert.strictEqual(
-                  outcome.result.value,
-                  BigInt(program.expected.result),
-                  program.name,
-                )
-              }
-              break
-            case 'Trap':
-              assert.strictEqual(outcome._tag, 'Trap', program.name)
-              if (outcome._tag === 'Trap') assert.strictEqual(outcome.classification, 'Trap')
-              break
-            case 'UnavailableEntry':
-              assert.strictEqual(outcome._tag, 'Blocked', program.name)
-              if (outcome._tag === 'Blocked' && outcome.reason._tag === 'UnavailableEntry') {
-                assert.strictEqual(outcome.reason.reason, program.expected.reason, program.name)
-              } else {
-                assert.fail(`${program.name} expected an unavailable entry`)
-              }
-              break
-          }
-        }).pipe(Effect.runPromise)
-      },
-      // Individual programs are fast; the ceiling is headroom for full-gate contention.
-      120_000,
-    )
-  })
-}
-
 /**
  * Registers the `opt -passes=verify` cross-check for one corpus shard.
  *
- * Both backends verify every module they emit, so every existing backend test is already a
- * verifier test. What is pinned here is that the in-process LLVM verifier agrees with the tool it
+ * LLVM verifies every module it emits for native and WebAssembly targets. What is pinned here is
+ * that the in-process LLVM verifier agrees with the tool it
  * stands in for: `opt -passes=verify`, the command that found #130. A verifier nobody has checked
  * against the real one is only a claim.
  */

@@ -11,9 +11,9 @@ through its state handle under a shared borrow, and the inbox records determinis
 
 The program also drops an unrun publication Effect, an unrun observation Effect, an uncalled stored
 callable, an unpublished affine payload, and the final state and inbox owners. The focused tests
-sweep allocation ordinals 0, 1, and completion; run evaluation and Wasm at every ordinal; compare
-normalized semantic and MIR structure against an actor-renamed fixture; and register success,
-renamed, and boundary cases in the native differential corpus. A successful result of `42` is
+sweep allocation ordinals 0, 1, and completion through structural compiler evidence, compare
+normalized semantic and MIR structure against an actor-renamed fixture, and register success,
+renamed, and boundary cases in the independently pinned native corpus. A successful result of `42` is
 returned only after order, publication, payload/callback cleanup, and final-state lifecycle checks;
 quota recovery returns the distinct value `142`.
 

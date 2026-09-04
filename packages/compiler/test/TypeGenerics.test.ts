@@ -2,21 +2,19 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
-import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
 import * as Instances from '../src/Instances.js'
 import * as TypeInference from '../src/internal/TypeInference.js'
-import * as Layout from '../src/Layout.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as ModuleSurface from '../src/ModuleSurface.js'
-import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Parser from '../src/Parser.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
+import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as SourceSpan from '../src/SourceSpan.js'
@@ -573,69 +571,6 @@ it.effect('formats channel-kinded generic binders idempotently', () =>
   }),
 )
 
-it.effect('infers and explicitly selects finite concrete instances before MIR', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.makeRealized({ root: file }).pipe(
-      Effect.provide(SourceResolver.memory(new Map())),
-    )
-
-    assert.deepEqual(snapshot.diagnostics, [])
-    assert.deepEqual(
-      snapshot.instances.instances.map((instance) => ({
-        name: instance.key.declaration.name,
-        arguments: instance.key.typeArguments.map(Type.encodeGenericArgument),
-      })),
-      [
-        { name: 'main', arguments: [] },
-        { name: 'identity', arguments: ['bool'] },
-        { name: 'identity', arguments: ['i32'] },
-      ],
-    )
-    assert.strictEqual(snapshot.mir._tag, 'Available')
-    if (snapshot.mir._tag !== 'Available') return
-    assert.strictEqual(snapshot.mir.value.functions.length, 3)
-    assert.notInclude(MirEncoding.encode(snapshot.mir.value), 'TypeParameter')
-    const outcome = BootstrapEvaluation.evaluate(snapshot.instances, snapshot.mir.value)
-    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome))
-    if (outcome._tag === 'Completed') {
-      assert.strictEqual(outcome.result.value, 42n)
-      assert.deepEqual(
-        outcome.trace.flatMap((event) =>
-          event._tag === 'Call' && event.target.name === 'identity'
-            ? [event.targetInstance.typeArguments.map(Type.encodeGenericArgument)]
-            : [],
-        ),
-        [['bool'], ['i32']],
-      )
-    }
-  }),
-)
-
-it.effect('infers the parameters an explicit type-argument prefix leaves open', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'generics/PartialExplicit',
-      new TextEncoder().encode(`fn pair<A, B>(left: A, right: B) -> A { return move left }
-pub fn main() -> i32 { return pair<i32>(42, true) }`),
-    )
-
-    assert.deepEqual(snapshot.diagnostics, [])
-    assert.deepEqual(
-      snapshot.instances.instances.map((instance) => ({
-        name: instance.key.declaration.name,
-        arguments: instance.key.typeArguments.map(Type.encodeGenericArgument),
-      })),
-      [
-        { name: 'main', arguments: [] },
-        { name: 'pair', arguments: ['i32', 'bool'] },
-      ],
-    )
-    const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
-  }),
-)
-
 it.effect('accepts failure-row and requirement-row arguments in an explicit prefix', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -679,23 +614,6 @@ pub fn main() -> i32 { return 0 }`),
   }),
 )
 
-it.effect('uses an explicit prefix as value-argument context for the arguments it binds', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'generics/PartialExplicitContext',
-      new TextEncoder().encode(`struct Left { value: i32 }
-struct Right { value: i32 }
-fn accept<T, U>(value: T, other: U) -> i32 { return 42 }
-pub fn main() -> i32 { return accept<Left | Right>(Left { value: 0 }, true) }`),
-    )
-
-    assert.deepEqual(snapshot.diagnostics, [])
-    const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome))
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
-  }),
-)
-
 it.effect('names the parameter an explicit prefix leaves undetermined', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -731,25 +649,6 @@ pub fn main() -> i32 { return pair<bool>(1, true) }`
     // The span covers the written type argument itself, not the call and not the argument that
     // disagrees with it.
     assert.strictEqual(text.slice(diagnostic?.span.start, diagnostic?.span.end), 'bool')
-  }),
-)
-
-it.effect('uses complete explicit arguments as value-argument context', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'generics/ExplicitContext',
-      new TextEncoder().encode(`struct Left { value: i32 }
-struct Right { value: i32 }
-fn accept<T>(value: T) -> i32 { return 42 }
-pub fn main() -> i32 {
-  let empty = accept<[i32; 0]>([])
-  return accept<Left | Right>(Left { value: empty })
-}`),
-    )
-    assert.deepEqual(snapshot.diagnostics, [])
-    const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -807,65 +706,6 @@ pub fn main() -> i32 { return discard<Payload>(Payload {}) }`),
     assert.strictEqual(snapshot.mir._tag, 'Available')
     if (snapshot.mir._tag !== 'Available') return
     assert.notInclude(MirEncoding.encode(snapshot.mir.value), 'TypeParameter')
-    const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed')
-  }),
-)
-
-it.effect('lays out and evaluates only the reached applied struct', () =>
-  Effect.gen(function* () {
-    const structFile = SourceFile.make(
-      'generics/Box',
-      new TextEncoder().encode(`struct Box<T> { value: T }
-pub fn main() -> i32 {
-  let box = Box<i32> { value: 42 }
-  return box.value
-}`),
-    )
-    const snapshot = yield* Analysis.makeRealized({ root: structFile }).pipe(
-      Effect.provide(SourceResolver.memory(new Map())),
-    )
-
-    assert.deepEqual(snapshot.diagnostics, [])
-    assert.strictEqual(snapshot.layout._tag, 'Available')
-    if (snapshot.layout._tag !== 'Available' || snapshot.mir._tag !== 'Available') return
-    assert.deepEqual(
-      snapshot.layout.value.entries.map((entry) => Type.encode(entry.type)),
-      ['i32', 'generics/Box.Box<i32>'],
-    )
-    const outcome = BootstrapEvaluation.evaluate(snapshot.instances, snapshot.mir.value)
-    assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
-  }),
-)
-
-it.effect('resolves inferred and explicit generic calls across module namespaces', () =>
-  Effect.gen(function* () {
-    const root = SourceFile.make(
-      'app/Main',
-      new TextEncoder().encode(`import library.Generic
-pub fn main() -> i32 { return Generic.identity<i32>(Generic.identity(42)) }`),
-    )
-    const snapshot = yield* Analysis.makeRealized({ root }).pipe(
-      Effect.provide(
-        SourceResolver.memory(
-          new Map([
-            [
-              'library/Generic',
-              new TextEncoder().encode('pub fn identity<T>(value: T) -> T { return move value }'),
-            ],
-          ]),
-        ),
-      ),
-    )
-
-    assert.deepEqual(snapshot.diagnostics, [])
-    assert.strictEqual(snapshot.instances.instances.length, 2)
-    assert.strictEqual(snapshot.mir._tag, 'Available')
-    if (snapshot.mir._tag !== 'Available') return
-    const outcome = BootstrapEvaluation.evaluate(snapshot.instances, snapshot.mir.value)
-    assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -894,29 +734,6 @@ pub fn main() -> i32 { return expand<i32>(1) }`),
     )
     assert.strictEqual(snapshot.layout._tag, 'Unavailable')
     assert.strictEqual(snapshot.mir._tag, 'Unavailable')
-  }),
-)
-
-it.effect('keeps same-argument generic recursion finite and omits unused declarations', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'generics/SameRecursion',
-      new TextEncoder().encode(`fn recurse<T>(value: T) -> i32 {
-  if false { return recurse<T>(move value) }
-  return 42
-}
-fn unused<T>(value: T) -> T { return move value }
-pub fn main() -> i32 { return recurse<i32>(1) }`),
-    )
-    assert.deepEqual(snapshot.diagnostics, [])
-    assert.deepEqual(
-      snapshot.instances.instances.map((instance) => instance.key.declaration.name),
-      ['main', 'recurse'],
-    )
-    assert.deepEqual(snapshot.instances.violations, [])
-    const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 
@@ -1038,64 +855,6 @@ for (const [name, text, code] of invalidCases) {
   )
 }
 
-it.effect(
-  'substitutes generic nominal pattern fields without rechecking the declaration body',
-  () =>
-    Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
-        'generics/Pattern',
-        new TextEncoder().encode(`struct Box<T> { value: T }
-fn take<T>(input: Box<T>) -> T {
-  return match move input { Box<T> { value } => move value }
-}
-pub fn main() -> i32 { return take(Box<i32> { value: 42 }) }`),
-      )
-      assert.deepEqual(snapshot.diagnostics, [])
-      const outcome = Analysis.evaluate(snapshot)
-      assert.strictEqual(outcome._tag, 'Completed', Json.stringify(outcome))
-      if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
-    }),
-)
-
-it.effect('substitutes cleanup through applied pattern paths and omitted fields', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'generics/PatternCleanup',
-      new TextEncoder().encode(`struct Token { value: i32 }
-struct Pair<A, B> { first: A second: B }
-fn take<T>(pair: Pair<i32, T>) -> i32 {
-  return match move pair { Pair<i32, T> { first, .. } => first }
-}
-pub fn main() -> i32 {
-  return take<Token>(Pair<i32, Token> { first: 42, second: Token { value: 0 } })
-}`),
-    )
-    assert.deepEqual(snapshot.diagnostics, [])
-    assert.strictEqual(snapshot.mir._tag, 'Available')
-    if (snapshot.mir._tag !== 'Available') return
-    const cleanup = snapshot.mir.value.functions
-      .flatMap((fn) => fn.regions)
-      .flatMap((region) => (region._tag === 'OperationRegion' ? region.operations : []))
-      .flatMap(Mir.operationTree)
-      .flatMap((operation) =>
-        operation._tag === 'Match'
-          ? operation.arms.flatMap((arm) => arm.selected.cleanup.map((entry) => entry.cleanup))
-          : [],
-      )
-    assert.include(
-      cleanup.map((entry) => entry._tag),
-      'StructCleanup',
-    )
-    assert.include(
-      cleanup.map((entry) => Type.encode(entry.type)),
-      'generics/PatternCleanup.Token',
-    )
-    const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
-  }),
-)
-
 it.effect('classifies generic writes after substituting the concrete element type', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -1207,70 +966,6 @@ it.effect('rejects residual open MIR and keeps specialization symbols injective'
   }),
 )
 
-it.effect('emits the same concrete specialization set through LLVM and WebAssembly', () =>
-  Effect.gen(function* () {
-    const text = `struct Pair { left: i32 right: i32 }
-struct Box<T> { value: T }
-fn identity<T>(value: T) -> T { return move value }
-pub fn main() -> i32 {
-  let scalar = Box<i32> { value: identity(0) }
-  let pair = Box<Pair> { value: identity<Pair>(Pair { left: 40, right: 2 }) }
-  return scalar.value + pair.value.left + pair.value.right
-}`
-    const native = yield* Analysis.ofSourceRealized(
-      'generics/Backend',
-      new TextEncoder().encode(text),
-      'aarch64-apple-darwin',
-    )
-    const wasm = yield* Analysis.ofSourceRealized(
-      'generics/Backend',
-      new TextEncoder().encode(text),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(native.diagnostics, [])
-    assert.deepEqual(wasm.diagnostics, [])
-    const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
-    const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-    assert.deepEqual(
-      nativeArtifact.symbols.map((entry) => entry.symbol),
-      wasmArtifact.symbols.map((entry) => entry.symbol),
-    )
-    assert.deepEqual(
-      wasmArtifact.symbols.map((entry) =>
-        entry.instance.typeArguments.map(Type.encodeGenericArgument),
-      ),
-      [[], ['i32'], ['generics/Backend.Pair']],
-    )
-    assert.deepEqual(
-      native.layout._tag === 'Available'
-        ? native.layout.value.entries
-            .map((entry) => Type.encode(entry.type))
-            .filter((type) => type.includes('Box<'))
-        : [],
-      ['generics/Backend.Box<i32>', 'generics/Backend.Box<generics/Backend.Pair>'],
-    )
-    if (native.layout._tag === 'Available') {
-      const plan = native.layout.value
-      const boxes = plan.entries.filter(
-        (entry) => Type.isNominal(entry.type) && entry.type.name === 'Box',
-      )
-      assert.deepEqual(
-        boxes.map((entry) => entry.size),
-        [4, 8],
-      )
-      assert.deepEqual(
-        boxes.map((entry) => Layout.callingShape(plan, entry.type)?.laneCount),
-        [1, 2],
-      )
-    }
-    const instance = new WebAssembly.Instance(
-      new WebAssembly.Module(wasmArtifact.bytes.slice()),
-      {},
-    )
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-  }),
-)
-
 it.effect('infers T from pointer arguments and widens *mut to *const only at a boundary', () =>
   Effect.gen(function* () {
     const program = (body: string) =>
@@ -1298,5 +993,37 @@ pub fn main() -> i32 { return 0 }`),
     )
     assert.deepEqual(codes(yield* program('return writable(shared)')), ['SEM0012'])
     assert.deepEqual(codes(yield* program('return nested(deep)')), ['SEM0012'])
+  }),
+)
+
+it.effect('keeps specialization identities stable across native and LLVM-Wasm targets', () =>
+  Effect.gen(function* () {
+    const bytes = new TextEncoder().encode(`fn identity<T>(value: T) -> T { return move value }
+pub fn main() -> i32 { let flag = identity(true) if flag { return identity<i32>(42) } return 0 }`)
+    const native = yield* Analysis.ofSourceRealized(
+      'generics/cross-target-identities',
+      bytes,
+      'aarch64-apple-darwin',
+    )
+    const wasm = yield* Analysis.ofSourceRealized(
+      'generics/cross-target-identities',
+      bytes,
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(native), [])
+    assert.deepEqual(Analysis.diagnostics(wasm), [])
+    const identities = (snapshot: Analysis.Snapshot) =>
+      Analysis.instancesOf(snapshot).instances.map((instance) => ({
+        declaration: instance.key.declaration,
+        typeArguments: instance.key.typeArguments.map(Type.encodeGenericArgument),
+      }))
+    assert.deepEqual(identities(native), identities(wasm))
+
+    const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
+    const wasmArtifact = yield* Analysis.codegen(wasm, { mode: 'release' })
+    assert.deepEqual(
+      nativeArtifact.symbols.map(({ symbol, declaration }) => ({ symbol, declaration })),
+      wasmArtifact.symbols.map(({ symbol, declaration }) => ({ symbol, declaration })),
+    )
   }),
 )

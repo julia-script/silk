@@ -29,14 +29,10 @@ Define the smallest explicit process-output service needed to observe real Silk 
 - **WHEN** a program writes one byte view
 - **THEN** the provider receives all bytes in order or the operation returns its typed failure
 
-### Requirement: Native and WebAssembly hosts are explicit
+### Requirement: Native process destinations are explicit
 
-Native execution SHALL connect an explicit provider to process destinations. WebAssembly SHALL use a declared private versioned host import and MUST NOT claim output without a supplied host. Both paths SHALL preserve bytes, ordering, destinations, and typed failures.
-
-#### Scenario: Host WebAssembly output
-
-- **WHEN** a Wasm program is instantiated with a compatible provider
-- **THEN** its writes cross the declared boundary and match evaluation
+Native execution SHALL connect an explicit provider to process destinations and preserve bytes,
+ordering, destinations, and typed failures.
 
 ### Requirement: Logging remains separate
 

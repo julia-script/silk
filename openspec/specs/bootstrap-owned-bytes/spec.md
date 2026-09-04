@@ -48,14 +48,14 @@ occur. The API MUST NOT claim that its contents are UTF-8 or another text encodi
 ### Requirement: Bytes behavior is target-neutral and observable
 
 Equivalent accepted `Bytes` programs SHALL produce the same length, byte order, mutations,
-allocation failures, ownership diagnostics, and cleanup behavior in MIR evaluation, native LLVM
-execution, and direct Wasm execution. Tooling SHALL resolve the nominal type and its operations to
+allocation failures, ownership diagnostics, and cleanup behavior in MIR structure, native LLVM
+execution, and LLVM-generated WebAssembly execution. Tooling SHALL resolve the nominal type and its operations to
 canonical Silk source.
 
 #### Scenario: Compare byte behavior across engines
 
 - **WHEN** one program copies, appends, mutates through a borrowed view, and reads a byte sequence
-- **THEN** evaluation, native execution, and direct Wasm return the same bytes and length
+- **THEN** native and LLVM-generated WebAssembly execution return the same bytes and length
 
 #### Scenario: Navigate Bytes source
 

@@ -313,31 +313,3 @@ pub fn main() -> i32 {
     )
   }),
 )
-
-it.effect('terminates a synchronous recursive provider-forwarding worklist', () =>
-  Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect { Effect }
-service Value {
-  effect fn read() -> i32 ? &Value
-}
-struct Fixed { value: i32 }
-effect fn read(self: &Fixed) -> i32 { return self.value }
-impl Value for Fixed { read: Fixed.read }
-effect fn leaf() -> i32 ? &Value { return run Value.read() }
-effect fn recurse(remaining: i32) -> i32 ? &Value {
-  if remaining == 0 { return run leaf() }
-  return run recurse(remaining - 1)
-}
-pub fn main() -> i32 {
-  let provider = Fixed { value: 42 }
-  return run Effect.provide(recurse(4), &provider)
-}`)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    const provisional = available(self)
-    assert.deepEqual(ProvisionalMir.verify(provisional), [])
-    assert.deepEqual(outcomes(provisional), [])
-    const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
-  }),
-)

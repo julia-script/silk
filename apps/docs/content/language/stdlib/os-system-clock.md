@@ -19,8 +19,7 @@ unrepresentable resolution is a fatal trap because the public service has no fai
 
 The clock may move backwards when the operating system adjusts its external reference. Reachable
 operations support the current Unix-family native targets. Linux requires `glibc` 2.17 or later
-and needs no `librt` link. Evaluation and direct WebAssembly require explicit foreign bindings;
-neither target reads ambient time by default.
+and needs no `librt` link. LLVM-to-WebAssembly rejects the native clock boundary.
 
 Import as `OsSystemClock` with `import silk.os_system_clock { OsSystemClock }`.
 
@@ -39,7 +38,7 @@ A failed, invalid, or unrepresentable clock result traps.
 
 ### Details
 
-Direct WebAssembly emits explicit foreign imports and requires the embedding host to bind them.
+LLVM-to-WebAssembly rejects this native-only provider.
 
 <a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a4f7353797374656d436c6f636b2e6d616b65"></a>
 

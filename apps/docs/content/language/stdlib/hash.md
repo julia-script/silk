@@ -13,7 +13,7 @@ equality. [`Word`](#declaration-73696c6b2f686173683a3a576f7264) is the ready-mad
 ## Details
 
 A [`HashSeed`](#declaration-73696c6b2f686173683a3a4861736853656564) belongs to a collection, not to each key. The same seed, keys, and operations
-produce the same bucket presentation order on every engine, independent of addresses or ambient
+produce the same bucket presentation order on every supported target, independent of addresses or ambient
 state. Interface witnesses are selected during specialization and add no runtime dispatch.
 
 ## Gotchas
@@ -89,7 +89,7 @@ Use this function to start a hash for an integer key or the first integer field 
 
 #### Details
 
-The same seed and value return the same result on all Silk engines. Use [`combine`](#declaration-73696c6b2f686173683a3a486173682e636f6d62696e65) for each
+The same seed and value return the same result on all supported targets. Use [`combine`](#declaration-73696c6b2f686173683a3a486173682e636f6d62696e65) for each
 additional field that participates in equality.
 
 <a id="declaration-73696c6b2f686173683a3a486173682e636f6d62696e65"></a>
@@ -128,7 +128,7 @@ A collection-wide value that changes deterministic hash and bucket results.
 
 ### Details
 
-The same seed, keys, and operation sequence produce the same bucket order on all Silk engines.
+The same seed, keys, and operation sequence produce the same bucket order on all supported targets.
 A seed does not use allocation addresses, clocks, or ambient entropy.
 
 <a id="declaration-73696c6b2f686173683a3a48617368536565643a3a6669656c643a30"></a>

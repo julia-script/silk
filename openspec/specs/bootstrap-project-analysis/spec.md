@@ -43,7 +43,7 @@ or querying one view SHALL NOT mutate another view or execute compiler phases ag
 ### Requirement: Project analysis remains frontend-only
 
 Project frontend analysis and root-view derivation SHALL NOT execute instance discovery, target
-selection, layout planning, MIR lowering, evaluation, or code generation.
+selection, layout planning, MIR lowering, runtime execution, or code generation.
 
 #### Scenario: Observe a completed project revision
 

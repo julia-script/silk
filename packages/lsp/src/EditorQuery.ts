@@ -138,13 +138,15 @@ const callHierarchyItem = (value: unknown): value is CallHierarchyItem =>
   Range.is(value.range) &&
   Range.is(value.selectionRange)
 
+const inspectionKeys = new Set(['uri', 'view', 'filter', 'showTrivia'])
+
 const inspection = (value: unknown): value is Inspection.ViewParameters =>
   record(value) &&
+  Object.keys(value).every((key) => inspectionKeys.has(key)) &&
   typeof value.uri === 'string' &&
   typeof value.view === 'string' &&
   (value.filter === undefined || typeof value.filter === 'string') &&
-  (value.showTrivia === undefined || typeof value.showTrivia === 'boolean') &&
-  (value.evaluate === undefined || typeof value.evaluate === 'boolean')
+  (value.showTrivia === undefined || typeof value.showTrivia === 'boolean')
 
 const invalid = (): EffectResult.Result<never, InvalidEditorQuery> =>
   EffectResult.fail(new InvalidEditorQuery({ message: 'Malformed editor query' }))

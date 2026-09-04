@@ -56,49 +56,6 @@ const bannedLibm = Object.freeze([
   '@fmax(',
 ])
 
-const runWebAssembly = async (bytes: Uint8Array): Promise<number> => {
-  const module = await WebAssembly.instantiate(bytes as BufferSource, {})
-  const exports = module.instance.exports
-  const entry = Object.keys(exports).find((name) => name.startsWith('silk_main'))
-  assert.isDefined(entry, 'the WebAssembly module exports no entry point')
-  const main = exports[entry as string]
-  assert.isFunction(main)
-  return (main as () => number)()
-}
-
-for (const program of floatMathPrograms) {
-  it.effect(
-    `agrees on ${program.name} between the evaluator and direct WebAssembly`,
-    () =>
-      Effect.gen(function* () {
-        const native = yield* Analysis.ofSourceRealized(
-          `float-math/${program.name}`,
-          encode(program.source),
-          'aarch64-apple-darwin',
-        )
-        assert.deepEqual(Analysis.diagnostics(native), [], program.name)
-        const evaluated = Analysis.evaluate(native)
-        assert.strictEqual(evaluated._tag, 'Completed', program.name)
-        // A non-42 result names the first assertion that failed inside the program.
-        if (evaluated._tag === 'Completed')
-          assert.strictEqual(evaluated.result.value, 42n, `${program.name} on the evaluator`)
-
-        const wasm = yield* Analysis.ofSourceRealized(
-          `float-math/${program.name}-wasm`,
-          encode(program.source),
-          'wasm32-unknown-unknown',
-        )
-        assert.deepEqual(Analysis.diagnostics(wasm), [], program.name)
-        const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-        // No import means nothing was deferred to a host libm.
-        assert.notInclude(artifact.wat, '(import', program.name)
-        const executed = yield* Effect.promise(() => runWebAssembly(artifact.bytes))
-        assert.strictEqual(executed, 42, `${program.name} on direct WebAssembly`)
-      }),
-    120_000,
-  )
-}
-
 it.effect(
   'keeps every float math function off the platform libm and off every math intrinsic but sqrt',
   () =>
@@ -121,45 +78,32 @@ it.effect(
   120_000,
 )
 
-it.effect(
-  'lowers sqrt to the native square root on both backends',
-  () =>
-    Effect.gen(function* () {
-      const source = `import silk.f32 as f32
+it.effect('lowers both square-root widths to the exact LLVM intrinsic', () =>
+  Effect.gen(function* () {
+    const source = `import silk.f32 as f32
 import silk.f64 as f64
 pub fn main() -> i32 {
   if f64.sqrt(1764.0) != 42.0 { return 1 }
   if f32.sqrt(1764.0) != 42.0 { return 2 }
   return 42
 }`
-      const native = yield* Analysis.ofSourceRealized(
-        'float-math/sqrt-lowering',
-        encode(source),
-        'aarch64-apple-darwin',
-      )
-      assert.deepEqual(Analysis.diagnostics(native), [])
-      const llvm = yield* Analysis.codegen(native, { mode: 'release' })
-      assert.include(llvm.ir, 'llvm.sqrt.f64')
-      assert.include(llvm.ir, 'llvm.sqrt.f32')
-
-      const wasm = yield* Analysis.ofSourceRealized(
-        'float-math/sqrt-lowering-wasm',
-        encode(source),
-        'wasm32-unknown-unknown',
-      )
-      assert.deepEqual(Analysis.diagnostics(wasm), [])
-      const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-      assert.include(artifact.wat, 'f64.sqrt')
-      assert.include(artifact.wat, 'f32.sqrt')
-    }),
-  120_000,
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'float-math/sqrt-lowering',
+      encode(source),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const llvm = yield* Analysis.codegen(snapshot, { mode: 'release' })
+    assert.include(llvm.ir, 'llvm.sqrt.f64')
+    assert.include(llvm.ir, 'llvm.sqrt.f32')
+  }),
 )
 
 /**
- * The evaluator's square root must reproduce the hardware bit for bit. These expectations were
+ * The floating-point model's square root must reproduce hardware bit patterns. Expectations were
  * taken from a host square root, which IEEE-754 requires be correctly rounded.
  */
-it('rounds the evaluator square root exactly at both widths', () => {
+it('rounds square root exactly at both widths', () => {
   const roots64: ReadonlyArray<readonly [bigint, bigint, string]> = [
     [4611686018427387904n, 4609047870845172685n, 'sqrt(2)'],
     [4613937818241073152n, 4610479282544200874n, 'sqrt(3)'],
@@ -187,7 +131,7 @@ it('rounds the evaluator square root exactly at both widths', () => {
     assert.strictEqual(FloatingPoint.squareRoot({ width: 32, bits: input }).bits, expected, label)
 })
 
-it('gives the evaluator square root its IEEE special cases', () => {
+it('gives square root its IEEE special cases', () => {
   const root = (bits: bigint, width: 32 | 64 = 64): bigint =>
     FloatingPoint.squareRoot({ width, bits }).bits
   // Both zeros keep their sign.

@@ -8,7 +8,6 @@ export { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import type { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import * as AutoImport from './AutoImport.js'
 import * as Backend from './Backend.js'
-import * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import * as Completion from './Completion.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as Diagnostic from './Diagnostic.js'
@@ -47,7 +46,6 @@ import * as Target from './Target.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
 import * as TypeHint from './TypeHint.js'
-import * as WasmBackend from './WasmBackend.js'
 import type * as WorkspaceInventory from './WorkspaceInventory.js'
 
 /**
@@ -1153,21 +1151,12 @@ export const diagnostics = (self: FrontendSnapshot): ReadonlyArray<Diagnostic.Di
 export const phases = (self: FrontendSnapshot): ReadonlyArray<PhaseReport.PhaseReport> =>
   self.report
 
-/** Emits the snapshot's lowered program through the nominal backend service. */
-/**
- * Emits the snapshot's lowered program.
- *
- * LLVM is the default backend independently of the snapshot target. Passing a backend explicitly
- * preserves that selection and compatibility is validated at the backend boundary.
- */
-export const codegen = Effect.fn('Analysis.codegen')(function* <
-  A extends Backend.Artifact = Backend.LlvmBitcodeArtifact,
->(
+/** Emits the snapshot's lowered program through LLVM. */
+export const codegen = Effect.fn('Analysis.codegen')(function* (
   self: Snapshot,
   request: Backend.CodegenRequest,
-  backend?: Backend.Backend<A>,
 ): Effect.fn.Return<
-  A,
+  Backend.LlvmBitcodeArtifact,
   Backend.BackendError | Target.TargetError | AnalysisUnavailable | CodegenUnavailable
 > {
   if (Diagnostic.hasErrors(self.diagnostics) || self.closure.resolutionFailures.length > 0) {
@@ -1178,9 +1167,7 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
       resolutionFailures: self.closure.resolutionFailures,
     })
   }
-  // The cast closes the generic default/override variance gap: omitted selection is LLVM, while
-  // an explicit backend determines A at the call site.
-  const selected = backend ?? (LlvmBackend.LlvmBackend as Backend.Backend<A>)
+  const selected = LlvmBackend.LlvmBackend
   if (self.mir._tag === 'Unavailable') return yield* self.mir.error
   const violations = MirVerification.verify(self.mir.value)
   if (violations.length > 0) {
@@ -1193,7 +1180,7 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
   }
   const availability = IntrinsicAvailability.select(
     self.instances.intrinsics,
-    IntrinsicAvailability.backendTarget(selected.id),
+    self.mir.value.layout.target,
   )
   if (availability._tag === 'Unavailable') {
     return yield* new CodegenUnavailable({
@@ -1207,7 +1194,6 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
     self.target._tag === 'Resolved'
       ? ForeignAvailability.select(
           self.instances.foreignCalls,
-          IntrinsicAvailability.backendTarget(selected.id),
           self.target.target,
           self.mir.value.foreignStatics,
           ForeignAvailability.callbackAddresses(self.mir.value),
@@ -1222,11 +1208,7 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
       resolutionFailures: self.closure.resolutionFailures,
     })
   }
-  const planning = ForeignPlanning.check(
-    self.mir.value,
-    IntrinsicAvailability.backendTarget(selected.id),
-    self.mir.value.layout.target,
-  )
+  const planning = ForeignPlanning.check(self.mir.value, self.mir.value.layout.target)
   if (planning.length > 0) {
     return yield* new CodegenUnavailable({
       operation: 'Analysis.codegen',
@@ -1247,32 +1229,3 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
       ),
   })
 })
-
-/**
- * Emits the snapshot through the direct WebAssembly backend. The final-module artifact's `wat`
- * carries inspection text and `bytes` carries the instantiable module. A native-target snapshot
- * is rejected by compatibility validation.
- */
-export const codegenWasm = Effect.fn('Analysis.codegenWasm')(function* (
-  self: Snapshot,
-  request: Backend.CodegenRequest,
-): Effect.fn.Return<
-  Backend.WebAssemblyModuleArtifact,
-  Backend.BackendError | Target.TargetError | AnalysisUnavailable | CodegenUnavailable
-> {
-  const artifact = yield* codegen(self, request, WasmBackend.WasmBackend)
-  if (artifact._tag === 'WebAssemblyModuleArtifact') return artifact
-  return yield* new Backend.BackendError({
-    operation: 'Backend.emit',
-    backend: WasmBackend.WasmBackend.name,
-    message: 'WebAssembly backend returned a non-WebAssembly artifact',
-    reason: { _tag: 'UnsupportedMir', detail: 'backend artifact kind mismatch' },
-  })
-})
-
-/** Executes the snapshot's lowered MIR program through the closed bootstrap interpreter. */
-export const evaluate = (
-  self: Snapshot,
-  options: BootstrapEvaluation.Options = {},
-): BootstrapEvaluation.Outcome =>
-  BootstrapEvaluation.evaluate(self.instances, loweredMir(self), options)

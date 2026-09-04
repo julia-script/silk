@@ -150,7 +150,7 @@ reference outlive its owner.
 ### Requirement: Static reflection leaves no runtime reflection system
 
 Successful specialization SHALL erase type descriptors, field descriptors, static sequences,
-static iterators, and static loop bindings before runtime ownership, MIR, evaluation, or backend
+static iterators, and static loop bindings before runtime ownership, MIR, or LLVM
 lowering. Only the generated ordinary constants, projections, calls, control flow, and source
 provenance SHALL remain. Equal source, target, type arguments, evidence, static arguments, and
 reflection inputs SHALL produce byte-identical iteration order, residual operations, diagnostics,
@@ -158,5 +158,5 @@ and specialization identities.
 
 #### Scenario: Inspect a reflection-generated specialization
 
-- **WHEN** semantic inspection and every execution engine consume a function generated from static field iteration
+- **WHEN** semantic inspection and emitted artifacts consume a function generated from static field iteration
 - **THEN** they observe the same ordinary residual field projections and calls and no runtime descriptor, reflection table, iterator, or template metadata

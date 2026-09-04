@@ -17,6 +17,6 @@
     "mutable indexing",
     "recursion"
   ],
-  "targets": ["evaluation", "native", "wasm"],
+  "targets": ["native"],
   "blockers": []
 }

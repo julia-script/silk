@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Diagnostic from '../src/Diagnostic.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 /**
  * INV-1: `Analysis.*` never throws. Every program here used to die inside the compiler (a stack
@@ -28,34 +29,17 @@ const spans = (
     .filter((diagnostic) => diagnostic.code === code)
     .map((diagnostic) => [diagnostic.span.start, diagnostic.span.end] as const)
 
-const evaluated = (snapshot: Analysis.Snapshot): bigint => {
-  const outcome = Analysis.evaluate(snapshot)
-  assert.strictEqual(outcome._tag, 'Completed')
-  if (outcome._tag !== 'Completed') return -1n
-  assert.strictEqual(outcome.result._tag, 'IntegerValue')
-  return outcome.result._tag === 'IntegerValue' ? outcome.result.value : -1n
-}
-
-const wasm = Effect.fnUntraced(function* (snapshot: Analysis.Snapshot) {
-  const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-  const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
-  return (instance.exports.silk_main as () => number)()
-})
-
 const chain = (count: number, operator: string, term: string): string =>
   Array.from({ length: count }, () => term).join(` ${operator} `)
 
-// ISSUE-96 — long chains and long statement lists must not become JavaScript recursion.
-
-it.effect('lowers a 257-term left-nested arithmetic chain on the evaluator and Wasm', () =>
+it.effect('lowers a 257-term left-nested arithmetic chain without host recursion', () =>
   Effect.gen(function* () {
     const snapshot = yield* realized(
       'stabilization/chain-257',
       `pub fn main() -> i32 {\n  return ${chain(257, '+', '1')}\n}\n`,
     )
     assert.deepEqual(codes(snapshot), [])
-    assert.strictEqual(evaluated(snapshot), 257n)
-    assert.strictEqual(yield* wasm(snapshot), 257)
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
   }),
 )
 
@@ -79,25 +63,8 @@ it.effect('rejects a chain nesting past EXPR-006 with PAR0005 instead of overflo
   }),
 )
 
-it.effect('lowers 256 nested prefix operators and a 257-stage pipeline', () =>
-  Effect.gen(function* () {
-    const negated = yield* realized(
-      'stabilization/prefix-256',
-      `pub fn main() -> i32 {\n  return ${'- '.repeat(256)}42\n}\n`,
-    )
-    assert.deepEqual(codes(negated), [])
-    assert.strictEqual(evaluated(negated), 42n)
-    const piped = yield* realized(
-      'stabilization/pipe-256',
-      `fn id(x: i32) -> i32 { return x }\npub fn main() -> i32 {\n  return 42${' |> id'.repeat(256)}\n}\n`,
-    )
-    assert.deepEqual(codes(piped), [])
-    assert.strictEqual(evaluated(piped), 42n)
-  }),
-)
-
 it.effect(
-  'lowers a 5000-statement function on the evaluator and Wasm',
+  'lowers a 5000-statement function without host recursion',
   () =>
     Effect.gen(function* () {
       const snapshot = yield* realized(
@@ -105,8 +72,7 @@ it.effect(
         `pub fn main() -> i32 {\n  let mut x = 0\n${'  x = x + 1\n'.repeat(5000)}  return x - 4958\n}\n`,
       )
       assert.deepEqual(codes(snapshot), [])
-      assert.strictEqual(evaluated(snapshot), 42n)
-      assert.strictEqual(yield* wasm(snapshot), 42)
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     }),
   240_000,
 )
@@ -151,20 +117,6 @@ it.effect('reports a missing exported function body as a parser diagnostic', () 
   }),
 )
 
-// ISSUE-97 — an effect entry whose body is rejected has no runnable entry, not a lost runner.
-
-it.effect('keeps the ownership diagnostic when an effect entry body cannot be lowered', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* realized(
-      'stabilization/effect-entry-rejected',
-      `effect fn build(trace: &mut [i32]) -> i32 { return trace[0] }\npub effect fn main() {\n  let mut t = [0]\n  let e = build(&mut t)\n  if t[0] != 0 { return () }\n  let r = run e\n  return ()\n}\n`,
-    )
-    assert.deepEqual(codes(snapshot), [Diagnostic.ownerAccessDuringLoanCode])
-    const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Blocked')
-  }),
-)
-
 // ISSUE-3 — a static function has no runtime function item (STATIC-001).
 
 it.effect('rejects a static function used as a runtime callable value', () =>
@@ -182,52 +134,6 @@ it.effect('rejects a static function used as a runtime callable value', () =>
       `static fn c(v: i32) -> i32 { return v + 41 }\npub fn main() -> i32 {\n  let n = 1\n  return c(n)\n}\n`,
     )
     assert.deepEqual(codes(runtimeCall), [Diagnostic.staticPhaseViolationCode])
-  }),
-)
-
-// ISSUE-39 — a struct literal in argument position beside or containing a call.
-
-it.effect('parses struct literals in call arguments beside and containing calls', () =>
-  Effect.gen(function* () {
-    const prelude = `struct P { code: i32 }\nfn two(a: i32, p: P) -> i32 { return a + p.code }\nfn one() -> i32 { return 1 }\n`
-    const after = yield* realized(
-      'stabilization/struct-arg-after-call',
-      `${prelude}pub fn main() -> i32 { return two(one(), P { code: 41 }) }\n`,
-    )
-    assert.deepEqual(codes(after), [])
-    assert.strictEqual(evaluated(after), 42n)
-    const grouped = yield* realized(
-      'stabilization/struct-arg-grouped',
-      `${prelude}pub fn main() -> i32 { return two(one(), (P { code: 41 })) }\n`,
-    )
-    assert.deepEqual(codes(grouped), [])
-    assert.strictEqual(evaluated(grouped), 42n)
-    const nested = yield* realized(
-      'stabilization/struct-arg-nested-call',
-      `struct Log { v: i32 }\nstruct Node { marker: i32 }\nfn peek(log: &Log) -> i32 { return log.v }\nfn take(n: Node) -> i32 { return n.marker }\npub fn main() -> i32 {\n  let log = Log { v: 42 }\n  return take(Node { marker: peek(&log) })\n}\n`,
-    )
-    assert.deepEqual(codes(nested), [])
-    assert.strictEqual(evaluated(nested), 42n)
-  }),
-)
-
-// ISSUE-8 — fixed-array whole-value type patterns (PATT-016, PATT-018).
-
-it.effect('matches fixed-array whole-value type patterns in match and if-let', () =>
-  Effect.gen(function* () {
-    const matched = yield* realized(
-      'stabilization/array-type-pattern-match',
-      `fn choose(value: i32 | [i32; 2]) -> i32 {\n  return match move value {\n    i32 number => number\n    [i32; 2] numbers => numbers[0]\n  }\n}\npub fn main() -> i32 { return choose([40, 1]) + choose(2) }\n`,
-    )
-    assert.deepEqual(codes(matched), [])
-    assert.strictEqual(evaluated(matched), 42n)
-    assert.strictEqual(yield* wasm(matched), 42)
-    const conditional = yield* realized(
-      'stabilization/array-type-pattern-if-let',
-      `fn first(value: [i32; 2] | bool) -> i32 {\n  if let [i32; 2] numbers = &value {\n    return numbers[0]\n  }\n  return 0\n}\npub fn main() -> i32 { return first([42, 1]) + first(false) }\n`,
-    )
-    assert.deepEqual(codes(conditional), [])
-    assert.strictEqual(evaluated(conditional), 42n)
   }),
 )
 

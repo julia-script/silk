@@ -2,6 +2,7 @@ import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as ExecutionPackage from './ExecutionPackage.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -214,6 +215,48 @@ const withLocalSharedDropPlans = (
       }),
     ),
   )
+
+/**
+ * Resolves the hidden package cleanup at the last point where exact MIR executable identities are
+ * still available. A represented Effect's semantic type deliberately erases its captured owners;
+ * the initializer operation does not. Package release therefore consumes the operation's concrete
+ * cleanup proof rather than the symbolic layout placeholder.
+ */
+const withExecutionPackageCleanups = (
+  layout: Layout.Plan,
+  functions: ReadonlyArray<Mir.MirFunction>,
+): Layout.Plan => {
+  const cleanupBySpecialization = new Map<string, ExecutionPackage.CleanupMetadata>()
+  for (const fn of functions) {
+    for (const operation of MirVerification.operations(fn)) {
+      if (operation._tag !== 'ExecutionFromAllocation') continue
+      const key = ExecutionPackage.specializationKey(operation.plan.specialization)
+      cleanupBySpecialization.set(
+        key,
+        Object.freeze({
+          body: operation.bodyCleanup,
+          endpoint: operation.endpointCleanup,
+          callback: operation.callbackCleanup,
+        }),
+      )
+    }
+  }
+  if (cleanupBySpecialization.size === 0) return layout
+  return Object.freeze({
+    ...layout,
+    executionPackages: Object.freeze({
+      ...layout.executionPackages,
+      plans: Object.freeze(
+        layout.executionPackages.plans.map((plan) => {
+          const cleanup = cleanupBySpecialization.get(
+            ExecutionPackage.specializationKey(plan.specialization),
+          )
+          return cleanup === undefined ? plan : Object.freeze({ ...plan, cleanup })
+        }),
+      ),
+    }),
+  })
+}
 
 import { generated } from './CleanupEmission.js'
 import {
@@ -509,6 +552,7 @@ export const lowerProgram = (
       return retainedRunners.has(runnerKey(spec.id, spec.owner.key.typeArguments)) ? [runner] : []
     }),
   )
+  const finalizedLayout = withExecutionPackageCleanups(layout, functions)
   const foreignStaticUses = new Set(
     functions.flatMap((fn) =>
       Mir.topologicalRegions(fn).flatMap((region) =>
@@ -547,10 +591,10 @@ export const lowerProgram = (
       foreignExports: discovery.foreignExports,
       foreignStatics,
       entry: Object.freeze({ _tag: 'UnavailableEntry', reason }),
-      layout,
+      layout: finalizedLayout,
       staticData,
       executionTransitions: Object.freeze(
-        layout.executionPackages.plans.map((plan, ordinal) =>
+        finalizedLayout.executionPackages.plans.map((plan, ordinal) =>
           ExecutionTransition.authority(ordinal, ordinal + 1, plan.readinessStorage),
         ),
       ),
@@ -566,10 +610,10 @@ export const lowerProgram = (
         foreignExports: discovery.foreignExports,
         foreignStatics,
         entry: Object.freeze({ _tag: 'LibraryEntry' }),
-        layout,
+        layout: finalizedLayout,
         staticData,
         executionTransitions: Object.freeze(
-          layout.executionPackages.plans.map((plan, ordinal) =>
+          finalizedLayout.executionPackages.plans.map((plan, ordinal) =>
             ExecutionTransition.authority(ordinal, ordinal + 1, plan.readinessStorage),
           ),
         ),
@@ -776,10 +820,10 @@ export const lowerProgram = (
     foreignExports: discovery.foreignExports,
     foreignStatics,
     entry,
-    layout,
+    layout: finalizedLayout,
     staticData,
     executionTransitions: Object.freeze(
-      layout.executionPackages.plans.map((plan, ordinal) =>
+      finalizedLayout.executionPackages.plans.map((plan, ordinal) =>
         ExecutionTransition.authority(ordinal, ordinal + 1, plan.readinessStorage),
       ),
     ),

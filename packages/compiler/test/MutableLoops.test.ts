@@ -1,8 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as MirEncoding from '../src/MirEncoding.js'
-import * as MirVerification from '../src/MirVerification.js'
 import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -10,117 +8,6 @@ const ascii = (value: string): Uint8Array =>
 
 const snapshot = (source: string, target = 'wasm32-unknown-unknown') =>
   Analysis.ofSourceRealized('mutable-loops/main', ascii(source), target)
-
-const runWasm = Effect.fnUntraced(function* (source: string) {
-  const self = yield* snapshot(source)
-  const bytes = (yield* Analysis.codegenWasm(self, { mode: 'release' })).bytes.slice()
-  const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes), {})
-  const main = instance.exports.silk_main
-  if (typeof main !== 'function') throw new Error('wasm program lost silk_main')
-  return main()
-})
-
-it.effect('mutates a scalar through a structured loop DAG', () =>
-  Effect.gen(function* () {
-    const self = yield* snapshot(`pub fn main() -> i32 {
-  let mut count = 0
-  while count < 3 { count = count + 1 }
-  return count
-}`)
-
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    const mir = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(mir), [])
-    assert.strictEqual(
-      mir.functions.at(0)?.regions.some((region) => region._tag === 'LoopRegion'),
-      true,
-    )
-    const outcome = Analysis.evaluate(self)
-    assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 3n)
-    assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Iteration').length, 3)
-  }),
-)
-
-it.effect('updates checked array elements and returns the replacement', () =>
-  Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.usize as usize
-pub fn main() -> i32 {
-  let mut values = [1, 2, 3]
-  let mut index = usize.add(0, 0)
-  while index < 3 {
-    values[index] = values[index] + 1
-    index = index + 1
-  }
-  return values[1]
-}`)
-
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    const outcome = Analysis.evaluate(self)
-    assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 3n)
-    assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Replacement').length, 6)
-  }),
-)
-
-it.effect('emits scalar and checked-array loops directly as structured WebAssembly', () =>
-  Effect.gen(function* () {
-    const scalar = `pub fn main() -> i32 {
-  let mut count = 0
-  while count < 3 { count = count + 1 }
-  return count
-}`
-    const array = `import silk.usize as usize
-pub fn main() -> i32 {
-  let mut values = [1, 2, 3]
-  let mut index = usize.add(0, 0)
-  while index < 3 {
-    values[index] = values[index] + 1
-    index = index + 1
-  }
-  return values[1]
-}`
-    assert.strictEqual(yield* runWasm(scalar), 3)
-    assert.strictEqual(yield* runWasm(array), 3)
-    const artifact = yield* Analysis.codegenWasm(yield* snapshot(scalar), { mode: 'release' })
-    assert.include(artifact.wat, 'block')
-    assert.include(artifact.wat, 'loop')
-    assert.notInclude(artifact.wat, 'br_table')
-    assert.strictEqual(
-      artifact.control.some((entry) => entry.construct === 'WasmLoop'),
-      true,
-    )
-    assert.strictEqual(
-      artifact.control.some((entry) => entry.construct === 'WasmBr' && entry.loop?.ordinal === 0),
-      true,
-    )
-  }),
-)
-
-it.effect('resolves continue and break to the innermost loop', () =>
-  Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.usize as usize
-pub fn main() -> i32 {
-  let mut index = usize.add(0, 0)
-  while index < 10 {
-    index = index + 1
-    if index == 2 { continue }
-    if index == 4 { break }
-  }
-  return usize.toI32(index)
-}`)
-
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    const outcome = Analysis.evaluate(self)
-    assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag !== 'Completed') return
-    assert.strictEqual(outcome.result.value, 4n)
-    assert.isAbove(outcome.trace.filter((event) => event._tag === 'Repeat').length, 0)
-    assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Exit').length, 1)
-  }),
-)
 
 it.effect('diagnoses immutable writes and transfers outside loops', () =>
   Effect.gen(function* () {
@@ -193,38 +80,6 @@ it.effect('publishes immutable facade facts for writes, loops, transfers, and DA
   }),
 )
 
-it.effect('restores a moved owner with a complete replacement before continue', () =>
-  Effect.gen(function* () {
-    const self = yield* snapshot(`struct Token { value: i32 }
-pub fn main() -> i32 {
-  let mut token = Token { value: 1 }
-  let mut iteration = 0
-  while iteration < 1 {
-    let old = move token
-    token = Token { value: 42 }
-    iteration = iteration + 1
-    continue
-  }
-  return token.value
-}`)
-
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(
-      Projections.ownershipFixedPointsOf(self, 'mutable-loops/main').at(0)?.compatible,
-      true,
-    )
-    const result = Analysis.evaluate(self)
-    assert.strictEqual(result._tag, 'Completed')
-    if (result._tag === 'Completed') {
-      assert.strictEqual(result.result.value, 42n)
-      assert.strictEqual(
-        result.trace.filter((event) => event._tag === 'ReplacementCleanup').length,
-        1,
-      )
-    }
-  }),
-)
-
 it.effect('rejects incompatible repeating owner states and overlapping replacement', () =>
   Effect.gen(function* () {
     const incompatible = yield* snapshot(`struct Token { value: i32 }
@@ -251,30 +106,6 @@ pub fn main() -> i32 {
     assert.include(
       Analysis.diagnostics(overlapping).map((diagnostic) => diagnostic.code),
       'OWN0004',
-    )
-  }),
-)
-
-it.effect('checks an indexed destination before evaluating its right-hand call', () =>
-  Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.usize as usize
-fn replacement() -> i32 { return 42 }
-pub fn main() -> i32 {
-  let mut values = [1, 2]
-  let index = usize.add(2, 0)
-  values[index] = replacement()
-  return 0
-}`)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    const outcome = Analysis.evaluate(self)
-    assert.strictEqual(outcome._tag, 'Trap')
-    assert.strictEqual(
-      outcome.trace.some((event) => event._tag === 'Call' && event.target.name === 'replacement'),
-      false,
-    )
-    assert.strictEqual(
-      outcome.trace.some((event) => event._tag === 'Replacement'),
-      false,
     )
   }),
 )
@@ -308,41 +139,6 @@ pub fn main() -> i32 {
     assert.strictEqual(
       transfers.some((exit) => exit.releases.some((release) => release.binding.name === 'outer')),
       false,
-    )
-  }),
-)
-
-it.effect('repeats loop DAG encodings, facade facts, traces, and wasm bytes exactly', () =>
-  Effect.gen(function* () {
-    const source = `pub fn main() -> i32 {
-  let mut outer = 0
-  let mut total = 0
-  while outer < 2 {
-    let mut inner = 0
-    while inner < 3 { total = total + 7 inner = inner + 1 }
-    outer = outer + 1
-  }
-  return total
-}`
-    const first = yield* snapshot(source)
-    const second = yield* snapshot(source)
-    assert.strictEqual(
-      MirEncoding.encode(Analysis.loweredMir(first)),
-      MirEncoding.encode(Analysis.loweredMir(second)),
-    )
-    assert.deepEqual(Projections.controlEdgesOf(first), Projections.controlEdgesOf(second))
-    assert.deepEqual(
-      Projections.ownershipFixedPointsOf(first, 'mutable-loops/main'),
-      Projections.ownershipFixedPointsOf(second, 'mutable-loops/main'),
-    )
-    assert.deepEqual(Analysis.evaluate(first), Analysis.evaluate(second))
-    const firstArtifact = yield* Analysis.codegenWasm(first, { mode: 'release' })
-    const secondArtifact = yield* Analysis.codegenWasm(second, { mode: 'release' })
-    assert.strictEqual(firstArtifact.wat, secondArtifact.wat)
-    assert.deepEqual(firstArtifact.bytes, secondArtifact.bytes)
-    assert.deepEqual(
-      Projections.backendControlOf(firstArtifact),
-      Projections.backendControlOf(secondArtifact),
     )
   }),
 )

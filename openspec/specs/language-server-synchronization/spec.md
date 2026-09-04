@@ -293,7 +293,7 @@ reanalyze only projects that can be affected by the changed path.
 The language server SHALL produce each ordinary synchronized-document result from an immutable
 frontend analysis snapshot. Diagnostics, hover, completion, navigation, symbols, inlay hints, and
 formatting SHALL NOT require instance discovery, target selection, layout planning, MIR lowering,
-evaluation, or code generation. This computation choice SHALL NOT weaken version matching, atomic
+runtime execution, or code generation. This computation choice SHALL NOT weaken version matching, atomic
 project revision commit, recovery, or compiler ownership of semantic facts.
 
 #### Scenario: Serve editor features from frontend analysis

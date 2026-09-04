@@ -1,7 +1,5 @@
 import { join } from 'node:path'
 import * as ArtifactKind from '@silklang/compiler/ArtifactKind'
-import type * as Backend from '@silklang/compiler/Backend'
-import * as BackendRegistry from '@silklang/compiler/BackendRegistry'
 import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
 import type * as NativeLinkInput from '@silklang/compiler/NativeLinkInput'
 import * as Project from '@silklang/compiler/Project'
@@ -15,7 +13,6 @@ export type Purpose = 'build' | 'run'
 export interface BuildPlan {
   readonly _tag: 'BuildPlan'
   readonly project: Project.Project
-  readonly backend: Backend.Backend
   readonly target: Target.Target
   readonly artifactKind: ArtifactKind.ArtifactKind
   readonly profile: ToolchainPlan.OptimizationProfile
@@ -27,11 +24,6 @@ export interface BuildPlan {
 
 export type BuildPlanErrorReason =
   | { readonly _tag: 'InvalidPackageName'; readonly name: string }
-  | {
-      readonly _tag: 'IncompatibleBackendTarget'
-      readonly error: BackendRegistry.BackendRegistryError
-    }
-  | { readonly _tag: 'NonNativeRunBackend'; readonly backend: Backend.Id }
   | { readonly _tag: 'NonExecutableRunArtifact'; readonly artifactKind: ArtifactKind.ArtifactKind }
   | {
       readonly _tag: 'IncompatibleArtifactTarget'
@@ -46,7 +38,7 @@ export type BuildPlanErrorReason =
   | { readonly _tag: 'ForeignRunTarget'; readonly target: Target.Id; readonly host: Target.Id }
   | { readonly _tag: 'HostUnavailable'; readonly error: Target.TargetError }
 
-/** Project backend/target/profile selection cannot produce the requested workflow. */
+/** Project target/profile selection cannot produce the requested workflow. */
 export class BuildPlanError extends Data.TaggedError('BuildPlanError')<{
   readonly operation: 'BuildPlan.make'
   readonly message: string
@@ -54,7 +46,6 @@ export class BuildPlanError extends Data.TaggedError('BuildPlanError')<{
 }> {}
 
 export interface Options {
-  readonly backend: Backend.Backend
   readonly target: Target.Target
   readonly profile: ToolchainPlan.OptimizationProfile
   readonly purpose?: Purpose
@@ -62,7 +53,7 @@ export interface Options {
   readonly llvmAr?: string
 }
 
-/** Creates one immutable, already-resolved build plan with a backend-qualified destination. */
+/** Creates one immutable, already-resolved LLVM build plan. */
 export const make = (
   project: Project.Project,
   options: Options,
@@ -76,16 +67,6 @@ export const make = (
       }),
     )
   }
-  const compatible = BackendRegistry.requireTarget(options.backend, options.target)
-  if (Result.isFailure(compatible)) {
-    return Result.fail(
-      new BuildPlanError({
-        operation: 'BuildPlan.make',
-        message: compatible.failure.message,
-        reason: { _tag: 'IncompatibleBackendTarget', error: compatible.failure },
-      }),
-    )
-  }
   if (options.purpose === 'run') {
     if (project.build.artifact !== 'NativeExecutable') {
       return Result.fail(
@@ -96,15 +77,6 @@ export const make = (
             _tag: 'NonExecutableRunArtifact',
             artifactKind: project.build.artifact,
           },
-        }),
-      )
-    }
-    if (options.backend.id !== 'llvm' || !Target.isNative(options.target)) {
-      return Result.fail(
-        new BuildPlanError({
-          operation: 'BuildPlan.make',
-          message: `Backend ${options.backend.id} cannot produce a host executable`,
-          reason: { _tag: 'NonNativeRunBackend', backend: options.backend.id },
         }),
       )
     }
@@ -160,7 +132,7 @@ export const make = (
   }
   const destination = join(
     project.build.outputDirectory,
-    options.backend.id,
+    'llvm',
     options.target.id,
     options.profile,
     ArtifactKind.fileName(artifactKind, project.name, options.target),
@@ -193,7 +165,6 @@ export const make = (
     Object.freeze({
       _tag: 'BuildPlan' as const,
       project,
-      backend: options.backend,
       target: options.target,
       artifactKind,
       profile: options.profile,

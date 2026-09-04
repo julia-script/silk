@@ -334,7 +334,7 @@ contract, access, ownership, lifetime, or finite-representation boundary that fa
 [callable-value specification](../../../../openspec/specs/bootstrap-callable-values/spec.md),
 [nominal Effect storage specification](../../../../openspec/specs/bootstrap-nominal-effect-storage/spec.md),
 [finite-join elaboration test](../../../../packages/compiler/test/Elaboration.test.ts),
-[cross-engine join tests](../../../../packages/compiler/test/EffectJoin.test.ts).
+[finite-join structural tests](../../../../packages/compiler/test/EffectJoin.test.ts).
 
 Typed-failure compatibility, requirement membership, and Effect execution access intentionally
 remain for their own reference areas.
@@ -387,5 +387,4 @@ branch specific to the names `Effect.result`, `Result`, `Success`, or `Failure`.
 completed-outcome primitive.
 
 **Evidence:** [ordinary source implementation](../../../../packages/compiler/stdlib/silk/effect.silk),
-[Result and alternate-carrier regressions](../../../../packages/compiler/test/ResultStdlib.test.ts),
 [minimal intrinsic boundary](../../../../openspec/changes/add-nominal-unions/specs/bootstrap-intrinsic-boundary/spec.md).

@@ -11,14 +11,14 @@ standard library, services, and portable application APIs without hidden name-ba
 
 Every source-callable operation selected by compiler identity SHALL be a qualified member of the
 compiler-sealed `Intrinsic` namespace. No service, interface, standard-library actor, or ordinary
-source declaration name outside that namespace MAY select special elaboration, HIR, MIR,
-evaluation, or backend behavior. Language syntax and primitive type identities are not callable
+source declaration name outside that namespace MAY select special elaboration, HIR, MIR, static
+evaluation, or LLVM lowering behavior. Language syntax and primitive type identities are not callable
 intrinsics merely because the compiler implements them.
 
 #### Scenario: Recognize one explicit intrinsic
 
 - **WHEN** source calls a declared member of `Intrinsic`
-- **THEN** analysis records its canonical intrinsic identity and every execution engine applies the same primitive contract
+- **THEN** analysis records its canonical intrinsic identity and LLVM lowering applies the same primitive contract for each supported target
 
 #### Scenario: Reject hidden name privilege
 
@@ -64,7 +64,7 @@ SHALL remain callable from safe code even when it can return a typed failure or 
 
 The compiler SHALL publish one deterministic catalog of every intrinsic operation, signature,
 safety classification, semantic operation, and supported target. Completion, hover, analysis,
-evaluation, HIR, MIR, LLVM, and direct WebAssembly MUST consume that catalog or verified derived
+static evaluation, HIR, MIR, LLVM, and LLVM-generated WebAssembly MUST consume that catalog or verified derived
 data. Private host imports SHALL be traceable to catalog operations but SHALL NOT become additional
 public intrinsic spellings.
 
@@ -73,10 +73,10 @@ public intrinsic spellings.
 - **WHEN** verification scans compiler operation identities, lowering branches, and host imports
 - **THEN** every callable compiler primitive maps to one catalog member and no unregistered public operation remains
 
-#### Scenario: Preserve engine parity
+#### Scenario: Preserve supported-target behavior
 
 - **WHEN** an accepted intrinsic program succeeds, fails, or traps
-- **THEN** logical evaluation, native LLVM, and direct WebAssembly agree on its observable outcome
+- **THEN** logical native LLVM and LLVM-generated WebAssembly execution agree on its observable outcome
 
 ### Requirement: Raw buffers expose only minimal unsafe initialized views
 
@@ -182,7 +182,7 @@ before target layout and MIR lowering.
 
 - **WHEN** tooling enumerates the deterministic intrinsic catalog after this change
 - **THEN** it finds the narrow string view operations with exact signatures, unsafe classification,
-  normalized evaluator/native/Wasm availability, and no owning-String operation
+  normalized native/LLVM-to-Wasm availability, and no owning-String operation
 
 #### Scenario: Use safe string inspection
 
@@ -278,7 +278,7 @@ ownership and MUST NOT be counted or substituted as a nested-transfer operation.
 #### Scenario: Audit the suspension seam
 
 - **WHEN** the deterministic intrinsic catalog and its consumers are inspected
-- **THEN** exactly one nested-transfer suspension operation is present with evaluator, LLVM, and Wasm availability, exact channel preservation, and no public continuation-management or allocation operations, while external parking remains a distinct explicit-Execution operation
+- **THEN** exactly one nested-transfer suspension operation is present with LLVM native and WebAssembly artifacts availability, exact channel preservation, and no public continuation-management or allocation operations, while external parking remains a distinct explicit-Execution operation
 
 #### Scenario: Give a same-named function no privilege
 
@@ -339,8 +339,8 @@ ownership. `sharedLayout` SHALL be pure, allocation-free, target-aware, and spec
 `T`. `sharedFromAllocation` SHALL consume both arguments, accept only the exact planned layout, and
 publish one initialized core without a failure or requirement channel.
 
-Both operations SHALL declare normalized availability for evaluation, every supported native target,
-and direct WebAssembly. A `sharedLayout<T>` specialization whose complete control block cannot be
+Both operations SHALL declare normalized availability for every supported native target and
+LLVM-generated WebAssembly. A `sharedLayout<T>` specialization whose complete control block cannot be
 represented by the selected target SHALL remain unavailable before MIR and execution, retaining a
 stable diagnostic at the intrinsic call; it MUST NOT return a partial `Layout`, runtime validation
 member, allocation failure, or trap.
@@ -418,7 +418,7 @@ compiler-known conflict value, and no ordinary declaration may gain these contra
 
 #### Scenario: Share one target-selected count boundary
 
-- **WHEN** evaluation and one backend execute clone for the same selected target at and below its planned count maximum
+- **WHEN** native execution and LLVM-to-Wasm tests exercise clone at and below the planned count maximum
 - **THEN** both consume the same maximum, agree on success below it, and trap before mutation at it
 
 #### Scenario: Audit the lifecycle inventory
@@ -440,7 +440,7 @@ general callable erasure, or implicit program-entry owner.
 
 #### Scenario: Audit exact packaging signatures
 
-- **WHEN** the intrinsic inventory is compared with semantic, HIR, MIR, evaluator, and backend dispatch
+- **WHEN** the intrinsic inventory is compared with semantic, HIR, MIR, and backend dispatch
 - **THEN** all phases agree on exactly the layout, initializer, and drive powers and their safety and static-property metadata
 
 #### Scenario: Admit affine outcome callbacks
@@ -475,7 +475,7 @@ metadata.
 
 #### Scenario: Audit the wake and park inventory
 
-- **WHEN** intrinsic declarations are compared with semantic, HIR, MIR, evaluator, and backend branches
+- **WHEN** intrinsic declarations are compared with semantic, HIR, MIR, and backend branches
 - **THEN** all phases expose exactly Wake, wake, and park with matching contracts and no actor-shaped primitive
 
 #### Scenario: Admit an affine registration callback
@@ -562,8 +562,7 @@ Monotonic clock-read primitives SHALL report whether their scalar outputs were i
 successfully; failed reads MUST NOT expose partial output. Resolution SHALL report success only for
 a positive whole-nanosecond value representable as `u64`. Native absolute wait SHALL accept only
 canonical non-negative monotonic deadlines and SHALL report success only after that clock reaches
-the deadline. An evaluator host SHALL accept any canonical signed-`i64` deadline so a virtual
-provider can use the complete shared `Instant` domain. The ordinary-source OS provider SHALL
+the deadline. The ordinary-source OS provider SHALL
 convert any false result or impossible conversion into a fatal trap because the public service
 declares no typed failure channel.
 
@@ -571,7 +570,7 @@ declares no typed failure channel.
 
 - **WHEN** a direct unsafe intrinsic call supplies a negative fraction or at least one billion
   nanoseconds to the absolute-wait primitive
-- **THEN** the native or evaluator boundary reports false without sleeping, while safe ordinary
+- **THEN** the native boundary reports false without sleeping, while safe ordinary
   source cannot construct that malformed `Instant`
 
 #### Scenario: Preserve atomic monotonic output
@@ -579,13 +578,6 @@ declares no typed failure channel.
 - **WHEN** the platform monotonic-clock read fails
 - **THEN** the primitive reports false and the source provider traps without constructing an
   `Instant` from partially initialized outputs
-
-#### Scenario: Preserve a signed virtual monotonic timeline
-
-- **WHEN** an evaluator host supplies a canonical negative monotonic mark and the source provider
-  waits for that mark or a later canonical negative deadline
-- **THEN** the evaluator forwards the exact deadline to that host rather than applying the native
-  POSIX non-negative precondition
 
 #### Scenario: Complete an absolute wait after its deadline
 
@@ -615,14 +607,14 @@ spelling.
 #### Scenario: Audit target availability
 
 - **WHEN** tooling enumerates the intrinsic catalog
-- **THEN** it finds one random-fill identity available to evaluation and current native targets but unavailable to direct WebAssembly
+- **THEN** it finds one random-fill identity available to current native targets but unavailable to LLVM-generated WebAssembly
 
 ### Requirement: Recoverable primitives are carrier-neutral
 
 No intrinsic contract SHALL name, construct, match, or recognize source-defined `Option`, `Result`,
 or their variants. Existing checked scalar primitives SHALL receive ordinary present and absent
-carrier inputs and return their shared result type. The inventory, semantic analysis, HIR, MIR,
-evaluation, and every backend SHALL treat those carriers through their ordinary exact callable and
+carrier inputs and return their shared result type. The inventory, semantic analysis, HIR, MIR, and
+LLVM lowering SHALL treat those carriers through their ordinary exact callable and
 value contracts. Completed Effect outcomes SHALL be handled by ordinary Effect composition rather
 than an intrinsic. This change SHALL replace the abstraction-shaped existing signatures, SHALL remove
 `Intrinsic.effectResult` and all of its compiler support, and SHALL add no replacement source-callable
@@ -636,7 +628,7 @@ operation.
 #### Scenario: Keep completed Effect reification out of Intrinsic
 
 - **WHEN** ordinary `Effect.result` maps success and catches the complete typed failure in library code
-- **THEN** the intrinsic inventory contains no completed-outcome operation and the compiler contains no dedicated HIR, MIR, evaluator, or backend path for it
+- **THEN** the intrinsic inventory contains no completed-outcome operation and the compiler contains no dedicated HIR, MIR, or backend path for it
 
 #### Scenario: Audit the closed inventory
 
@@ -648,8 +640,8 @@ operation.
 The sealed `Intrinsic` namespace SHALL expose only the irreducible operations required to obtain a
 concrete static type's aggregate metadata, construct and inspect immutable static sequences, and
 residualize an authorized static field descriptor as an ordinary shared field projection. Metadata
-and sequence operations SHALL be unavailable at runtime and SHALL have no evaluator, WebAssembly,
-or LLVM runtime target. The projection bridge MUST consume its descriptor during specialization and
+and sequence operations SHALL be unavailable at runtime and SHALL have no LLVM runtime lowering.
+The projection bridge MUST consume its descriptor during specialization and
 MUST NOT survive as a runtime intrinsic call.
 
 The projection bridge SHALL use an explicit mixed intrinsic contract: its shared owner-reference
@@ -696,7 +688,7 @@ randomness.
 The sealed `Intrinsic` namespace SHALL expose one safe, zero-argument, static-only target-profile
 operation returning a closed primitive profile code for the four canonical bootstrap targets. The
 operation SHALL read the compilation target selected by the compiler, SHALL be available to static
-evaluation only, and MUST NOT lower to HIR runtime operations, MIR, evaluator instructions, host
+evaluation only, and MUST NOT lower to HIR runtime operations, MIR instructions, host
 imports, native symbols, or WebAssembly instructions. Its profile codes SHALL be deterministic and
 documented so ordinary standard-library source can map them to nominal target enums and derive all
 public target facts.

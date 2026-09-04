@@ -28,8 +28,8 @@ for the `&mut FileSystem` requirement.
 
 ## Gotchas
 
-Reachable OS filesystem operations are native-only. Direct WebAssembly compilation rejects them
-rather than inventing filesystem imports; evaluator execution requires an injected adapter.
+Reachable OS filesystem operations are native-only. LLVM-to-WebAssembly compilation rejects
+them rather than inventing filesystem imports.
 
 ## Examples
 

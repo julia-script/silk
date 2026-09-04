@@ -2,7 +2,7 @@
 
 `@silklang/compiler` is the Effect-native stage-0 compiler for Silk. It accepts arbitrary source
 bytes, preserves lossless syntax and recovery facts, resolves a complete module closure, and
-realizes valid programs through HIR, ownership, specialization, target layout, MIR, evaluation, and
+realizes valid programs through HIR, ownership, specialization, target layout, MIR, and LLVM
 backend emission.
 
 The package deliberately exposes one supported compilation surface: `Analysis`. Individual phase
@@ -38,7 +38,8 @@ pub fn main() -> i32 { return identity(42) }`),
   const snapshot = Analysis.realize(frontend)
 
   console.log(Analysis.diagnostics(snapshot)) // []
-  console.log(Analysis.evaluate(snapshot)._tag) // Completed
+  const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+  console.log(artifact._tag) // LlvmBitcodeArtifact
 })
 ```
 
@@ -52,17 +53,16 @@ A realized analysis snapshot makes these deterministic artifacts available:
 4. ownership, borrow, move, and cleanup facts;
 5. reachable generic/callable instances and target-aware layouts;
 6. backend-neutral structured MIR;
-7. logical evaluation traces; and
-8. LLVM or direct WebAssembly output.
+7. LLVM bitcode for native or WebAssembly targets.
 
 `Analysis.make` and `Analysis.ofSource` stop after the resilient frontend. Missing or damaged source
 becomes queryable diagnostics while unrelated facts remain available. `Analysis.realize` derives a
-new immutable runtime snapshot. Evaluation and code generation reject snapshots with source errors
-before invoking a backend or toolchain.
+new immutable runtime snapshot. Code generation rejects snapshots with source errors before
+invoking the LLVM backend or toolchain.
 
-The MIR evaluator is the semantic oracle used by differential tests. It is not the production
-runtime: native builds use deterministic LLVM bitcode and a pinned Clang toolchain, while the direct
-WebAssembly backend emits instantiable modules without external tools.
+Native acceptance tests compare real process outcomes with independently pinned expectations.
+Native builds and WebAssembly builds both use deterministic LLVM bitcode and the pinned LLVM
+toolchain; compile-time execution remains isolated in `StaticEvaluation`.
 
 `Driver.compile` owns artifact-producing builds. Before it resolves project imports, it validates
 the compiler, generated catalog, every packaged standard-library source, and the sealed intrinsic
@@ -103,9 +103,8 @@ Owned `Bytes`, normalized provider-absolute `Path`, allocation-free `FileError`,
 operation mutable `FileSystem` service are also ordinary source. No platform provider is selected by
 an import; native, browser, test, and Wasm applications explicitly provide their implementation.
 Native applications may construct the ordinary `silk.os_filesystem.OsFileSystem` provider with an
-owned absolute `string` root. Its compiler boundary is limited to unsafe native-only handle intrinsics;
-evaluator hosts opt in through the exported `OsFileSystemHost.Provider`, and direct WebAssembly
-receives no implicit imports or filesystem ABI.
+owned absolute `string` root. Its compiler boundary is limited to unsafe native-only handle
+intrinsics. LLVM-to-WebAssembly receives no implicit imports or filesystem ABI.
 
 See the [standard-library string reference](stdlib/README.md#string-and-string) for the distinction
 between borrowed `string`, owned `String`, and byte views.

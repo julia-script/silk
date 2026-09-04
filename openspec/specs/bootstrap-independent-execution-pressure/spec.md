@@ -20,7 +20,7 @@ or Coroutine APIs.
 #### Scenario: Choose first activation in homogeneous owner storage
 
 - **WHEN** a source owner erases two distinct exact Effect body representations into the same `Execution<TaskOutput>` type, stores both in one homogeneous task owner, publishes them Initial, and selects the second first
-- **THEN** the first body remains unrun and every engine observes the owner-selected activation order through one homogeneous storage contract
+- **THEN** the first body remains unrun and every supported target observes the owner-selected activation order through one homogeneous storage contract
 
 #### Scenario: Await a source-owned result
 
@@ -122,7 +122,7 @@ reachable. Importing or naming source policy actors MUST select no tier.
 #### Scenario: Inspect a direct program
 
 - **WHEN** a program uses ordinary `run` and reaches no suspension
-- **THEN** its evaluator/native/Wasm artifacts contain no suspension runner, Execution package, Wake cell, scheduler, or atomic support
+- **THEN** its native/LLVM-to-Wasm artifacts contain no suspension runner, Execution package, Wake cell, scheduler, or atomic support
 
 #### Scenario: Inspect a nested-only program
 
@@ -132,7 +132,7 @@ reachable. Importing or naming source policy actors MUST select no tier.
 #### Scenario: Keep local Shared affinity separate from direct execution machinery
 
 - **WHEN** an ordinary direct program captures a local Shared handle and reaches no suspension
-- **THEN** semantic inspection reports `LocalExecution` while evaluator/native/Wasm artifacts omit the independent Execution owner, package, Wake, and external-parking runtime and retain only any separately required local-Shared slice
+- **THEN** semantic inspection reports `LocalExecution` while native/LLVM-to-Wasm artifacts omit the independent Execution owner, package, Wake, and external-parking runtime and retain only any separately required local-Shared slice
 
 #### Scenario: Keep local Shared affinity separate from nested execution machinery
 
@@ -147,7 +147,7 @@ reachable. Importing or naming source policy actors MUST select no tier.
 #### Scenario: Inspect an explicit nested-only execution
 
 - **WHEN** an explicitly packaged body reaches nested `Effect.suspend` but cannot reach park
-- **THEN** evaluation completes it through one owner drive using internal LIFO transfers, native and Wasm retain the package plus nested frames, and every artifact omits Wake, notification, dormant-owner, and atomic support
+- **THEN** native and LLVM-generated WebAssembly complete it through one owner drive using internal LIFO transfers, retain the package plus nested frames, and omit Wake, notification, dormant-owner, and atomic support
 
 #### Scenario: Inspect an external-park execution
 
@@ -156,7 +156,7 @@ reachable. Importing or naming source policy actors MUST select no tier.
 
 ### Requirement: Compiler privilege remains actor neutral
 
-Semantic, HIR, MIR, evaluation, native, and Wasm inventories SHALL contain no branch keyed by the
+Semantic, HIR, MIR, and LLVM inventories SHALL contain no branch keyed by the
 spelling of Execution safe wrappers, Allocator, OutOfMemoryError, Scheduler, Fiber, Deferred, Timer,
 Coroutine, ready inbox, task store, reactor, or result actor. Renaming every pressure actor SHALL
 preserve intrinsic facts and behavior. The checked-in findings SHALL distinguish substrate evidence

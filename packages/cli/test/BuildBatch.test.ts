@@ -25,7 +25,6 @@ const project = (
       bytes: SourceFile.toUint8Array(SourceFile.make('main', new Uint8Array())),
     }),
     build: Object.freeze({
-      backend: 'llvm',
       targets: ['host', 'wasm32-unknown-unknown'] as const,
       outputDirectory: '/workspace/build',
       artifact,
@@ -108,10 +107,4 @@ it('rejects every target- or artifact-incompatible native input during batch pre
     assert.strictEqual(batch.failure.reason.error.reason.plan.reason, example.reason)
     assert.strictEqual(batch.failure.reason.error.reason.plan.target.id, example.target)
   }
-})
-
-it('rejects one incompatible pair before returning any plans', () => {
-  const batch = BuildBatch.make(project(), { backend: 'wasm', profile: 'debug' })
-  assert.strictEqual(Result.isFailure(batch), true)
-  if (Result.isFailure(batch)) assert.strictEqual(batch.failure.reason._tag, 'Plan')
 })

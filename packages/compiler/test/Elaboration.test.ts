@@ -66,7 +66,6 @@ import {
 import { elaborate } from './support/elaborate.js'
 import { ordinaryStorageSource } from './support/ordinaryStorageSource.js'
 import { raise } from './support/raise.js'
-import * as WasmMain from './support/WasmMain.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(ordinaryStorageSource(value), (character) => character.charCodeAt(0))
@@ -535,87 +534,6 @@ pub fn main() -> i32 {
       'SEM0123',
     )
     assert.strictEqual(Analysis.mirOf(snapshot)._tag, 'Unavailable')
-  }),
-)
-
-it.effect('type-checks provideMut for a custom service', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'effect/provide-mut-custom-capability',
-      new TextEncoder().encode(`import silk.effect { Effect }
-service Clock {}
-struct FixedClock {}
-impl Clock for FixedClock {}
-effect fn read() -> i32 ? &mut Clock { return 42 }
-pub fn main() -> i32 {
-  let mut clock = FixedClock {}
-  let recipe = Effect.provideMut(read(), &mut clock)
-  return run recipe
-}`),
-    )
-
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
-  }),
-)
-
-it.effect('executes an owned Copy provider binding', () =>
-  Effect.gen(function* () {
-    const source = `service Clock { effect fn value() -> i32 ? &mut Clock }
-struct FixedClock { tick: i32 }
-effect fn clockValue(self: &mut FixedClock) -> i32 { return self.tick }
-impl Clock for FixedClock { value: FixedClock.clockValue }
-effect fn read() -> i32 ? &mut Clock { return 42 }
-pub fn main() -> i32 {
-  let clock = FixedClock { tick: 0 }
-  return run Intrinsic.bindRequirementOwned(read(), move clock)
-}`
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'effect/bind-owned-copy',
-      new TextEncoder().encode(source),
-      'wasm32-unknown-unknown',
-    )
-
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
-    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    assert.strictEqual(
-      yield* WasmMain.invoke(artifact.bytes, 'Elaboration.invokeOwnedCopyProviderWasm'),
-      42,
-    )
-  }),
-)
-
-it.effect('executes an owned affine provider binding once', () =>
-  Effect.gen(function* () {
-    const source = `service Clock { effect fn value() -> i32 ? &mut Clock }
-struct FixedClock { label: string }
-effect fn clockValue(self: &mut FixedClock) -> i32 { return 0 }
-impl Clock for FixedClock { value: FixedClock.clockValue }
-effect fn read() -> i32 ? &mut Clock { return 42 }
-pub fn main() -> i32 {
-  let clock = FixedClock { label: "owned" }
-  return run Intrinsic.bindRequirementOwned(read(), move clock)
-}`
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'effect/bind-owned-affine',
-      new TextEncoder().encode(source),
-      'wasm32-unknown-unknown',
-    )
-
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
-    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    assert.strictEqual(
-      yield* WasmMain.invoke(artifact.bytes, 'Elaboration.invokeOwnedAffineProviderWasm'),
-      42,
-    )
   }),
 )
 

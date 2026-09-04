@@ -20,8 +20,8 @@ and [`write`](#declaration-73696c6b2f706f696e7465723a3a506f696e7465722e777269746
 ## Gotchas
 
 Dereferencing a null pointer, a misaligned pointer, or a pointer whose storage has ended is an
-unsafe-contract violation, not a diagnostic. The evaluator may stop such a program; native code
-cannot. Ownership records no conflict when the root is moved or dropped after a pointer to it
+unsafe-contract violation, not a diagnostic. Ownership records no conflict when the root is
+moved or dropped after a pointer to it
 is formed, so the caller must prove the address is still live at every dereference.
 
 ## Examples

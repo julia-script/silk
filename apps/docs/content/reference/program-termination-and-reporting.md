@@ -27,7 +27,7 @@ pub fn main() -> i32 {
 
 **Boundary:** The result annotation is required. `pub fn main() {}` remains invalid until Silk
 adopts a general return-omission rule. A native host may expose only a target-defined subset of the
-`i32`; a direct Wasm caller observes the exact machine-entry result.
+`i32`; an embedded WebAssembly host observes the exact machine-entry result.
 
 **Diagnostics:** Any other ordinary result reports an invalid entry shape naming `()` and `i32` as
 the permitted results. A missing annotation receives the ordinary missing-result diagnostic.
@@ -81,8 +81,8 @@ status. Application-specific statuses require handling the error explicitly befo
 outcome is an unhandled error, not a source diagnostic.
 
 **Implementation:** Internal entry tags still select the active failure identity, but standalone
-adapters normalize every recognized failure tag to public status `1`; evaluator outcomes expose
-that same public status independently of member order.
+adapters normalize every recognized failure tag to public status `1`, independently of member
+order.
 
 **Evidence:** [entry failure rule](program-entry.md#entry-003--unhandled-effect-entry-failures-become-process-failures),
 [current backend contract](../../../../openspec/specs/bootstrap-backend/spec.md).
@@ -227,7 +227,7 @@ with an unresolved service remains an ordinary open-requirement error.
 **Status:** Confirmed
 
 A standalone executable writes its automatic report to the host diagnostic stream, conventionally
-standard error. A target without such a stream, including import-free direct Wasm, receives
+standard error. A target without such a stream, including an import-free WebAssembly module, receives
 structured termination data through its runner or embedding boundary and chooses how to present it.
 
 **Boundary:** Silk does not invent a console or hidden import for embedded targets. Exact embedding
@@ -238,7 +238,7 @@ and logical path rather than identical output bytes.
 target-compatibility failure, not a source error in `main`.
 
 **Evidence:** [runtime layers](runtime-and-standard-library.md#runtime-001--language-public-source-target-providers-and-toolchain-runtime-support-are-distinct-layers),
-[direct Wasm entry contract](../../../../openspec/specs/bootstrap-backend/spec.md).
+[program entry](program-entry.md).
 
 ## TERM-011 — Typed-failure reporting follows completed cleanup
 

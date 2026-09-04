@@ -22,9 +22,8 @@ Constructing the provider performs no process operation. Portable code invokes
 
 ## Gotchas
 
-Reachable OS process operations are native-only. Direct WebAssembly compilation rejects them
-instead of inventing a process host import; evaluator execution requires an injected host
-adapter.
+Reachable OS process operations are native-only. LLVM-to-WebAssembly compilation rejects them
+instead of inventing a process host import.
 
 ## Examples
 

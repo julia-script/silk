@@ -7,7 +7,7 @@ import { views } from '../src/InspectorRegistry.js'
 /**
  * Every view's result must survive structured serialization unchanged: the language server
  * answers projections over JSON-RPC, so a row that smuggles a function, a bigint, or a host
- * object would render in the docs workbench and silently break in the extension.
+ * object would render in one static inspector client and silently break in another.
  */
 describe('view results are serializable', () => {
   const source = `struct Pair { left: i32 right: i32 }
@@ -17,14 +17,12 @@ pub fn main() -> i32 { let pair = make() return pair.right }`
   const snapshot = Effect.runSync(
     Analysis.ofSourceRealized(sourceId, new TextEncoder().encode(source), 'wasm32-unknown-unknown'),
   )
-  const evaluation = Analysis.evaluate(snapshot)
   const context: ViewContext = {
     snapshot,
     modules: { [sourceId]: source },
     root: sourceId,
     mode: 'release',
     profile: 'release',
-    evaluation,
     filter: '',
     showTrivia: false,
   }

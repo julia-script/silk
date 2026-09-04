@@ -222,6 +222,58 @@ interface PackageReadContext {
   readonly types: Context['types']
 }
 
+const packageValuePlacements = (
+  context: PackageReadContext,
+  type: SilkType.Type,
+): ReadonlyArray<{ readonly lane: Layout.CallingLane; readonly offset: number }> => {
+  const argument = SilkType.isRepresented(type) ? type.representation.argument : undefined
+  const identity =
+    argument !== undefined && SilkType.isExactRepresentationArgument(argument)
+      ? argument.identity
+      : undefined
+  let placements: ReadonlyArray<Layout.EnvironmentLanePlacement>
+  if (identity !== undefined && SilkType.isEffectIdentityArgument(identity)) {
+    const environment = Layout.effectEnvironmentByIdentity(
+      context.program.layout.effectEnvironments,
+      identity,
+    )
+    if (environment === undefined)
+      throw new RangeError('LLVM execution package lost its represented Effect environment')
+    placements = Layout.effectEnvironmentLanePlacements(context.program.layout, environment)
+  } else if (identity !== undefined && SilkType.isCallableIdentityArgument(identity)) {
+    if (identity.environment === undefined) return Object.freeze([])
+    const environment = Layout.callableEnvironmentByIdentity(
+      context.program.layout,
+      identity.environment,
+    )
+    if (environment === undefined)
+      throw new RangeError('LLVM execution package lost its represented callable environment')
+    placements = Layout.callableEnvironmentLanePlacements(context.program.layout, environment)
+  } else {
+    return Object.freeze(
+      (Layout.callingShape(context.program.layout, type)?.lanes ?? []).map((lane) => {
+        const offset = LayoutVerify.laneOffset(context.program.layout, type, lane.path)
+        if (offset === undefined) throw new RangeError('LLVM execution package lost a value lane')
+        return Object.freeze({ lane, offset })
+      }),
+    )
+  }
+  return Object.freeze(
+    placements.map((placement) => {
+      const laneOffset =
+        placement.root === undefined
+          ? 0
+          : LayoutVerify.laneOffset(context.program.layout, placement.root, placement.lane.path)
+      if (laneOffset === undefined)
+        throw new RangeError('LLVM execution package lost an environment lane')
+      return Object.freeze({
+        lane: placement.lane,
+        offset: placement.byteOffset + laneOffset,
+      })
+    }),
+  )
+}
+
 const loadPackageValue = Effect.fnUntraced(function* (
   context: PackageReadContext,
   base: Value.Input,
@@ -230,20 +282,17 @@ const loadPackageValue = Effect.fnUntraced(function* (
   tag: string,
 ) {
   const values: Array<Value.Input> = []
-  for (const [ordinal, lane] of (
-    Layout.callingShape(context.program.layout, type)?.lanes ?? []
-  ).entries()) {
-    const offset = LayoutVerify.laneOffset(context.program.layout, type, lane.path)
-    if (offset === undefined) throw new RangeError('LLVM execution package lost a value lane')
+  const placements = packageValuePlacements(context, type)
+  for (const [ordinal, placement] of placements.entries()) {
     values.push(
       yield* FunctionBody.load(
         context.body,
-        NativeType.laneType(context.types, lane),
+        NativeType.laneType(context.types, placement.lane),
         yield* NativeLanePointer.lanePointer(
           context.lanePointers,
           context.body,
           base,
-          byteOffset + offset,
+          byteOffset + placement.offset,
           `${tag}_${ordinal}_ptr`,
         ),
         `${tag}_${ordinal}`,
@@ -1086,7 +1135,7 @@ const releaseHelperSymbol = 'silk_execution_release'
 
 /**
  * Declares the module's single out-of-line Execution release when the module constructs any
- * Execution package. It mirrors the WebAssembly `silk_execution_release` helper. The synthetic
+ * Execution package. The synthetic
  * `DeclaredFunction` only feeds the cleanup contexts: its MIR has one Execution parameter and no
  * roots, and its identity is distinct from every real function so no instance lookup can alias it.
  */

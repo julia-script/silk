@@ -32,23 +32,6 @@ it.effect('surfaces disagreeing effect-block return types instead of last-return
   }),
 )
 
-it.effect('joins compatible effect-block returns across branches without diagnostics', () =>
-  Effect.gen(function* () {
-    const self = yield* analyze(`pub fn main() -> i32 {
-  let flag = false
-  let deferred = effect {
-    if flag { return 1 }
-    return 42
-  }
-  return run deferred
-}`)
-    assert.deepEqual(codes(self), [])
-    const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
-  }),
-)
-
 it.effect('keeps a failure raised inside an unsafe block in the effect failure row', () =>
   Effect.gen(function* () {
     // Pre-fix, terminals under `unsafe { }` were invisible to effect-block typing, so this run
@@ -63,19 +46,6 @@ pub fn main() -> i32 {
   return run deferred
 }`)
     assert.include(codes(self), 'SEM0066')
-  }),
-)
-
-it.effect('collects the success type from a return nested inside an unsafe block', () =>
-  Effect.gen(function* () {
-    const self = yield* analyze(`pub fn main() -> i32 {
-  let deferred = effect { unsafe { return 42 } }
-  return run deferred
-}`)
-    assert.deepEqual(codes(self), [])
-    const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
   }),
 )
 

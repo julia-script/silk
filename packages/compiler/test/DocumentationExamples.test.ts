@@ -65,11 +65,6 @@ const blocks = documents
   .filter((entry) => !generated.has(entry))
   .flatMap((file) => blocksOf(documentationRoot, file))
 
-const featureExamples = [
-  ...blocksOf(languageReferenceRoot, 'local-shared-ownership.md'),
-  ...blocksOf(languageReferenceRoot, 'single-threaded-fibers.md'),
-]
-
 const diagnosticText = readFileSync(diagnosticSource, 'utf8')
 
 interface Declaration {
@@ -172,30 +167,6 @@ for (const block of blocks) {
         [],
         `${block.file}:${block.line}\n${block.source}`,
       )
-    }),
-  )
-}
-
-for (const block of featureExamples) {
-  it.effect(`compiles and runs apps/docs/content/reference/${block.file}:${block.line}`, () =>
-    Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
-        `documentation/language-${block.file.replace(/[^A-Za-z0-9_-]/g, '-')}/${block.line}`,
-        ascii(block.source),
-        'wasm32-unknown-unknown',
-      )
-      const diagnostics = Analysis.diagnostics(snapshot)
-      assert.deepEqual(
-        diagnostics.map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`),
-        [],
-        `apps/docs/content/reference/${block.file}:${block.line}\n${block.source}`,
-      )
-      const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(evaluated._tag, 'Completed')
-      if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result._tag, 'IntegerValue')
-      if (evaluated.result._tag !== 'IntegerValue') return
-      assert.strictEqual(evaluated.result.value, 42n)
     }),
   )
 }

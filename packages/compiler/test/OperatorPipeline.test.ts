@@ -6,9 +6,10 @@ import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
-
-const source = 'import silk.i32 as i32\npub fn main() -> i32 { return 2 + 3 * 4 |> i32.add(1) }'
 const encoder = new TextEncoder()
+
+const pipelineSource =
+  'import silk.i32 as i32\npub fn main() -> i32 { return 2 + 3 * 4 |> i32.add(1) }'
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/operator.${name}`, import.meta.url), 'utf8')
@@ -36,33 +37,21 @@ it.effect('lowers negation to generated zero plus source-authored trapping subtr
   }),
 )
 
-it.effect('pins one operator pipeline through canonical HIR, MIR, LLVM, and WebAssembly', () =>
+it.effect('pins one operator pipeline through canonical HIR, MIR, and LLVM', () =>
   Effect.gen(function* () {
-    const native = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* Analysis.ofSourceRealized(
       'golden/operator',
-      encoder.encode(source),
+      encoder.encode(pipelineSource),
       'aarch64-apple-darwin',
     )
-    const wasm = yield* Analysis.ofSourceRealized(
-      'golden/operator',
-      encoder.encode(source),
-      'wasm32-unknown-unknown',
-    )
-    const llvmArtifact = yield* Analysis.codegen(native, { mode: 'release' })
-    const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
+    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
 
-    assert.strictEqual(Hir.encode(Analysis.rootAnalysis(native).hir), golden('hir.txt'))
-    const encodedMir = MirEncoding.encode(Analysis.loweredMir(native))
-    assert.strictEqual(encodedMir, golden('mir.txt'))
-    assert.strictEqual(llvmArtifact.ir, golden('ll.txt'))
-    assert.strictEqual(wasmArtifact.wat, golden('wat.txt'))
+    assert.strictEqual(Hir.encode(Analysis.rootAnalysis(snapshot).hir), golden('hir.txt'))
+    assert.strictEqual(MirEncoding.encode(Analysis.loweredMir(snapshot)), golden('mir.txt'))
+    assert.strictEqual(artifact.ir, golden('ll.txt'))
     assert.strictEqual(
-      `${createHash('sha256').update(llvmArtifact.bitcode).digest('hex')}\n`,
+      `${createHash('sha256').update(artifact.bitcode).digest('hex')}\n`,
       golden('bc.sha256'),
-    )
-    assert.strictEqual(
-      `${createHash('sha256').update(wasmArtifact.bytes).digest('hex')}\n`,
-      golden('wasm.sha256'),
     )
   }),
 )

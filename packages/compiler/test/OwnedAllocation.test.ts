@@ -1,53 +1,21 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as CleanupPlan from '../src/CleanupPlan.js'
 import * as MirVerification from '../src/MirVerification.js'
-import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const source = `import silk.allocator { Allocator }
-import silk.allocator { OutOfMemoryError }
-import silk.allocator { Allocator }
-import silk.allocator { SystemAllocator }
+const sharedReadSource = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.layout { Layout }
 import silk.raw_buffer { RawBuffer }
 import silk.slot { Slot }
 effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let layout = Layout.of<[i32; 2]>()
-  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
-  let allocation = run recipe
-  unsafe {
-    let mut buffer = RawBuffer.from<i32>(move allocation, 2)
-    let written = Slot.write(RawBuffer.slot(&mut buffer, 0), 41)
-    let result = Slot.take(RawBuffer.slot(&mut buffer, 0))
-    drop buffer
-    return result
-  }
-  return 0
-}
-effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
-pub fn main() -> i32 {
-  let recipe = Effect.catchAll(store(), recover)
-  return run recipe
-}`
-
-const sharedReadSource = `import silk.allocator { Allocator }
-import silk.allocator { OutOfMemoryError }
-import silk.allocator { Allocator }
-import silk.allocator { SystemAllocator }
-import silk.effect { Effect }
-import silk.layout { Layout }
-import silk.raw_buffer { RawBuffer }
-import silk.slot { Slot }
-effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let layout = Layout.of<[i32; 1]>()
-  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
-  let allocation = run recipe
+  let allocation = run Allocator.allocate(Layout.of<[i32; 1]>())
+    |> Effect.provideMut(&mut allocator)
   unsafe {
     let mut buffer = RawBuffer.from<i32>(move allocation, 1)
     let written = Slot.write(RawBuffer.slot(&mut buffer, 0), 21)
@@ -89,39 +57,6 @@ effect fn store() -> i32 ! OutOfMemoryError {
     drop taken
     drop buffer
     return 42
-  }
-  return 0
-}
-effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
-
-const unionReadSource = `import silk.allocator { Allocator }
-import silk.allocator { OutOfMemoryError }
-import silk.allocator { Allocator }
-import silk.allocator { SystemAllocator }
-import silk.effect { Effect }
-import silk.layout { Layout }
-import silk.raw_buffer { RawBuffer }
-import silk.slot { Slot }
-struct Left { value: i32 }
-impl Copy for Left {}
-struct Right { value: i32 }
-impl Copy for Right {}
-fn left(value: i32) -> Left | Right { return Left { value: value } }
-effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let layout = Layout.of<[Left | Right; 1]>()
-  let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
-  let allocation = run recipe
-  unsafe {
-    let mut buffer = RawBuffer.from<Left | Right>(move allocation, 1)
-    let element = left(42)
-    let written = Slot.write<Left | Right>(RawBuffer.slot(&mut buffer, 0), move element)
-    let copied = RawBuffer.read<Left | Right>(&buffer, 0)
-    let taken = Slot.take(RawBuffer.slot(&mut buffer, 0))
-    drop taken
-    drop buffer
-    return match move copied { Left { value } => value Right { value } => value }
   }
   return 0
 }
@@ -194,74 +129,7 @@ pub fn main() -> i32 {
   return run Effect.catchAll(store(), recover)
 }`
 
-const expectTrap = Effect.fnUntraced(function* (name: string, source: string, reason: string) {
-  const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
-  assert.deepEqual(Analysis.diagnostics(snapshot), [])
-  const evaluated = Analysis.evaluate(snapshot)
-  assert.strictEqual(evaluated._tag, 'Trap')
-  if (evaluated._tag !== 'Trap') return
-  assert.strictEqual(evaluated.reason, reason)
-})
-
-it.effect('moves one allocation through RawBuffer and lexical Slot operations', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'owned-allocation/raw-buffer',
-      ascii(source),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const mir = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(mir), [])
-    const operations = mir.functions.flatMap(MirVerification.operations)
-    assert.include(
-      operations.map((operation) => operation._tag),
-      'RawBufferFrom',
-    )
-    assert.include(
-      operations.map((operation) => operation._tag),
-      'RawBufferSlot',
-    )
-    assert.include(
-      operations.map((operation) => operation._tag),
-      'SlotWrite',
-    )
-    assert.include(
-      operations.map((operation) => operation._tag),
-      'SlotTake',
-    )
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 41n)
-    assert.deepEqual(
-      Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag),
-      [
-        'AllocationAcquire',
-        'RawBufferForm',
-        'SlotProject',
-        'SlotWrite',
-        'SlotProject',
-        'SlotTake',
-        'AllocationRelease',
-      ],
-    )
-    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
-    const main = instance.exports.silk_main as () => number
-    assert.strictEqual(main(), 41)
-    const nativeSnapshot = yield* Analysis.ofSourceRealized(
-      'owned-allocation/raw-buffer-native',
-      ascii(source),
-      'aarch64-apple-darwin',
-    )
-    assert.deepEqual(Analysis.diagnostics(nativeSnapshot), [])
-    const native = yield* Analysis.codegen(nativeSnapshot, { mode: 'release' })
-    assert.include(native.ir, '@malloc')
-    assert.include(native.ir, '@free')
-  }),
-)
-
-it.effect('reads initialized Copy storage repeatedly through shared RawBuffer borrows', () =>
+it.effect('plans reclaim after repeated shared Copy reads', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'owned-allocation/shared-read',
@@ -276,53 +144,11 @@ it.effect('reads initialized Copy storage repeatedly through shared RawBuffer bo
       operations.filter((operation) => operation._tag === 'RawBufferRead').length,
       1,
     )
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 63n)
-    assert.deepEqual(
-      Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag),
-      [
-        'AllocationAcquire',
-        'RawBufferForm',
-        'SlotProject',
-        'SlotWrite',
-        'RawBufferRead',
-        'RawBufferRead',
-        'SlotProject',
-        'SlotTake',
-        'AllocationRelease',
-      ],
+    assert.isTrue(
+      operations.some(
+        (operation) => operation._tag === 'Drop' && CleanupPlan.reclaims(operation.cleanup),
+      ),
     )
-    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 63)
-    const nativeSnapshot = yield* Analysis.ofSourceRealized(
-      'owned-allocation/shared-read-native',
-      ascii(sharedReadSource),
-      'aarch64-apple-darwin',
-    )
-    assert.deepEqual(Analysis.diagnostics(nativeSnapshot), [])
-    const native = yield* Analysis.codegen(nativeSnapshot, { mode: 'release' })
-    assert.include(native.ir, 'raw_read')
-  }),
-)
-
-it.effect('reads an all-Copy structural union through a shared RawBuffer borrow', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'owned-allocation/read-structural-union',
-      ascii(unionReadSource),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
-    assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'RawBufferRead').length, 1)
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
   }),
 )
 
@@ -355,46 +181,4 @@ it.effect('requires shared rather than exclusive access for RawBuffer.read', () 
       'SEM0056',
     )
   }),
-)
-
-it.effect('traps when RawBuffer provenance does not match its allocation layout', () =>
-  expectTrap(
-    'owned-allocation/layout-mismatch',
-    unsafeProgram('    return 0', '[i32; 1]'),
-    'RawBuffer allocation layout does not match its element type and count',
-  ),
-)
-
-it.effect('traps on an out-of-bounds Slot projection', () =>
-  expectTrap(
-    'owned-allocation/out-of-bounds',
-    unsafeProgram('    return Slot.take(RawBuffer.slot(&mut buffer, 2))'),
-    'RawBuffer slot index is out of bounds',
-  ),
-)
-
-it.effect('traps on an out-of-bounds shared RawBuffer read', () =>
-  expectTrap(
-    'owned-allocation/read-out-of-bounds',
-    unsafeProgram('    return RawBuffer.read<i32>(&buffer, 2)'),
-    'RawBuffer read index is out of bounds',
-  ),
-)
-
-it.effect('traps when Slot.take observes storage that was never initialized', () =>
-  expectTrap(
-    'owned-allocation/take-uninitialized',
-    unsafeProgram('    return Slot.take(RawBuffer.slot(&mut buffer, 0))'),
-    'Slot.take requires live initialized storage',
-  ),
-)
-
-it.effect('traps when Slot.write overwrites initialized storage', () =>
-  expectTrap(
-    'owned-allocation/duplicate-write',
-    unsafeProgram(
-      '    let first = Slot.write(RawBuffer.slot(&mut buffer, 0), 41)\n    let second = Slot.write(RawBuffer.slot(&mut buffer, 0), 42)\n    return 0',
-    ),
-    'Slot.write requires live uninitialized storage',
-  ),
 )

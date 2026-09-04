@@ -2,7 +2,6 @@
 import * as CAbi from './CAbi.js'
 import * as Diagnostic from './Diagnostic.js'
 import type * as Instances from './Instances.js'
-import type * as Intrinsic from './Intrinsic.js'
 import type * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -47,11 +46,9 @@ export const staticLoads = (program: Mir.Module): ReadonlyArray<StaticLoad> =>
 /**
  * Rejects LLVM emission of a non-native target (one diagnostic per symbol at its first call) and
  * every pair of reachable declarations of one symbol whose classified C signatures differ.
- * Evaluator binding admission and direct WebAssembly imports are owned by those consumers.
  */
 export const select = (
   calls: ReadonlyArray<Instances.ForeignCall>,
-  executionTarget: Intrinsic.ExecutionTarget,
   target: Target.Target,
   statics: Mir.Module['foreignStatics'] = Object.freeze([]),
   callbacks: ReadonlyArray<CallbackAddress> = Object.freeze([]),
@@ -59,14 +56,11 @@ export const select = (
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   if (calls.length === 0 && statics.length === 0 && callbacks.length === 0 && loads.length === 0)
     return Object.freeze([])
-  const native = executionTarget === 'LLVM' && target.kind === 'Native'
-  const surface = executionTarget === 'LLVM' ? target.id : executionTarget
+  const native = target.kind === 'Native'
+  const surface = target.id
   const unavailable = new Map<string, Diagnostic.Diagnostic>()
   for (const call of calls) {
-    const hasFunctionPointer = [...call.signature.parameters, call.signature.result].some(
-      (type) => type._tag === 'FunctionPointer',
-    )
-    if ((!native && executionTarget === 'LLVM') || (!native && hasFunctionPointer))
+    if (!native)
       if (!unavailable.has(call.symbol))
         unavailable.set(
           call.symbol,
@@ -85,7 +79,6 @@ export const select = (
   }
   if (!native) {
     for (const record of statics) {
-      if (executionTarget === 'Evaluator' && record.direction === 'Export') continue
       if (!unavailable.has(record.symbol)) {
         unavailable.set(
           record.symbol,

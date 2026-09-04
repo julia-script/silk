@@ -1,7 +1,6 @@
 /**
  * The float math conformance programs, shared by three consumers so that one source text is what
- * every engine runs: the evaluator and direct WebAssembly execution in `FloatMath.test.ts`, and
- * native compilation through the corpus differential in `DriverNativeAcceptance.test.ts`.
+ * the structural float tests and native corpus run from one source definition.
  *
  * Each program returns 42 only when every one of its assertions holds, and a distinct small code
  * otherwise, so a single exit status both proves the whole set and names the first failure.

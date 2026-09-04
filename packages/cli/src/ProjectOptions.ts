@@ -6,15 +6,9 @@ import { Flag } from 'effect/unstable/cli'
 
 export const profiles = ['debug', 'release', 'release-with-debug'] as const
 const targetIds = ['host', ...Target.all.map((candidate) => candidate.id)]
-const backendIds = ['llvm', 'wasm'] as const
 
 export const manifestPath = Flag.string('manifest-path').pipe(
   Flag.withDescription('Path to a Silk project manifest. Disables upward discovery.'),
-  Flag.optional,
-)
-
-export const backend = Flag.choice('backend', backendIds).pipe(
-  Flag.withDescription('Backend id. Replaces the project manifest backend when supplied.'),
   Flag.optional,
 )
 
@@ -40,7 +34,6 @@ export const watch = Flag.boolean('watch').pipe(
 
 export interface Input {
   readonly manifestPath?: string
-  readonly backend?: string
   readonly targets?: ReadonlyArray<string>
   readonly profile?: ToolchainPlan.OptimizationProfile
   readonly release: boolean
@@ -48,7 +41,6 @@ export interface Input {
 
 export interface ProjectOptions {
   readonly manifestPath?: string
-  readonly backend?: string
   readonly targets?: ReadonlyArray<string>
   readonly profile: ToolchainPlan.OptimizationProfile
 }
@@ -74,7 +66,6 @@ export const resolve = (input: Input): Result.Result<ProjectOptions, ProjectOpti
   return Result.succeed(
     Object.freeze({
       ...(input.manifestPath === undefined ? {} : { manifestPath: input.manifestPath }),
-      ...(input.backend === undefined ? {} : { backend: input.backend }),
       ...(input.targets === undefined || input.targets.length === 0
         ? {}
         : { targets: input.targets }),

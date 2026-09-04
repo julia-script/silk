@@ -236,6 +236,36 @@ it('computes browser-safe SHA-256 identities over exact UTF-8 bytes', () => {
     )
 })
 
+it.effect('keeps allocation metrics outside an unmetered program closure and MIR', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'stdlib/unmetered-allocation',
+      ascii(`import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let block = run Allocator.allocate(Layout.of<[i32; 2]>()) |> Effect.provideMut(&mut allocator)
+  drop block
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.notInclude(
+      Analysis.modules(snapshot).map((module) => module.name),
+      'silk/metrics',
+    )
+    assert.deepEqual(
+      Analysis.loweredMir(snapshot)
+        .functions.filter((fn) => fn.id.module === 'silk/metrics')
+        .map((fn) => fn.id.name),
+      [],
+    )
+  }),
+)
+
 it('declares one discoverable namespace for every standard-library module', () => {
   // Catalog namespaces drive tooling discovery only; they never enter source scope implicitly.
   assert.deepEqual(
@@ -313,35 +343,6 @@ it.effect('resolves the complete InsecureRandom surface to canonical portable Si
       ],
     )
     assert.isTrue(canonicals.every((canonical) => canonical.module === 'silk/insecure_random'))
-  }),
-)
-
-it.effect('keeps a renamed copy of the InsecureRandom implementation ordinary and executable', () =>
-  Effect.gen(function* () {
-    const source = Stdlib.sources.get('silk/insecure_random')
-    assert.isDefined(source)
-    if (source === undefined) return
-    const renamed = new TextDecoder()
-      .decode(source)
-      .replaceAll('Xoshiro256StarStar', 'Sequence256')
-      .replaceAll('InsecureRandom', 'Entropy')
-    const root = `import app.entropy { Entropy }
-import silk.effect { Effect }
-
-pub fn main() -> i32 {
-  let mut provider = Entropy.seeded(0)
-  let word = run Entropy.nextU64()
-    |> Effect.provideMut<Entropy>(&mut provider)
-  if word != 0x99ec5f36cb75f2b4 { return 1 }
-  return 42
-}`
-    const snapshot = yield* Analysis.makeRealized({
-      root: SourceFile.make('app/main', ascii(root)),
-    }).pipe(Effect.provide(SourceResolver.memory(new Map([['app/entropy', ascii(renamed)]]))))
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 

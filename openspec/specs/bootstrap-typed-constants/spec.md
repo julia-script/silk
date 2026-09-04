@@ -18,7 +18,7 @@ service requirement, borrow, unsafe operation, or observable allocation. A `stri
 accept an escaped or raw text literal in either delimiter width and SHALL reject a byte-string
 literal. Type inference and aggregate constants SHALL remain unavailable.
 
-Constant initialization SHALL use the ordinary static evaluator. Target-dependent constant values
+Constant initialization SHALL use `StaticEvaluation`. Target-dependent constant values
 SHALL resolve through an imported ordinary standard-library target declaration over the sealed
 static target-profile intrinsic; the compiler MUST NOT recognize `Target` or any member spelling as
 a special initializer form. A failed static evaluation, wrong result type, or selected-target range
@@ -48,7 +48,7 @@ semantic inspection. No runtime backend SHALL select or replace the value again.
 #### Scenario: Derive a target-width constant through ordinary source
 
 - **WHEN** the standard library initializes a `usize` constant from its ordinary imported target fact on a 32-bit and a 64-bit compilation
-- **THEN** each compilation records its selected value through the static evaluator and no syntax-only target selector or backend-specific selection remains
+- **THEN** each compilation records its selected value through `StaticEvaluation` and no syntax-only target selector or backend-specific selection remains
 
 #### Scenario: Keep declaration surfaces target neutral
 
@@ -93,14 +93,14 @@ callables.
 
 HIR and MIR SHALL represent an accepted constant use as the declaration's typed immediate value; a
 `string` constant use SHALL be the same static text datum its literal produces, shared by identity
-with every other use of those bytes. Evaluation, native LLVM, and direct WebAssembly SHALL observe
+with every other use of those bytes. Native LLVM and LLVM-generated WebAssembly SHALL observe
 the same value as the equivalent literal source without a global address beyond that static datum,
 and without an initialization routine, allocation, cleanup obligation, or runtime load.
 
 #### Scenario: Compare constants with direct literals
 
 - **WHEN** equivalent programs use named constants or their direct scalar literals
-- **THEN** all three engines return the same scalar observations and perform the same allocations and cleanup
+- **THEN** native and LLVM-generated WebAssembly artifacts return the same scalar observations and perform the specified allocations and cleanup
 
 #### Scenario: Preserve target-aware usize checking
 
@@ -109,8 +109,8 @@ and without an initialization routine, allocation, cleanup obligation, or runtim
 
 ### Requirement: Constant artifacts and tools remain deterministic
 
-Semantic facts, occurrences, hover, navigation, formatting, HIR, MIR, evaluation, symbols, and
-backend artifacts SHALL present constants deterministically and preserve exact declaration/use
+Semantic facts, occurrences, hover, navigation, formatting, HIR, MIR, symbols, and LLVM artifacts
+SHALL present constants deterministically and preserve exact declaration/use
 provenance across fresh processes.
 
 #### Scenario: Navigate and reproduce a public constant
@@ -122,7 +122,7 @@ provenance across fresh processes.
 
 The lexer and stack VM pressure programs SHALL replace representative repeated byte classes,
 opcodes, status values, or fixed bounds with typed constants while preserving their oracle results,
-allocation evidence, cleanup, engine parity, and determinism.
+allocation evidence, cleanup, artifact parity, and determinism.
 
 #### Scenario: Run the constant-backed pressure corpus
 
@@ -173,8 +173,8 @@ cannot differ from the bound the checked path applies.
 ### Requirement: A target fact resolves to one value at the selected target
 
 A constant that names a target fact SHALL resolve to exactly one value once a target is selected,
-and every execution engine SHALL observe that same value. The selection SHALL happen in lowering, so
-that evaluation, direct WebAssembly, and native LLVM read one already-selected value rather than
+and every emitted artifact SHALL observe that same value. The selection SHALL happen in lowering, so
+that LLVM-generated WebAssembly and native LLVM read one already-selected value rather than
 each applying the pointer-width rule themselves. No value belonging to a pointer width other than
 the selected target's SHALL appear in the lowered program.
 
@@ -185,10 +185,10 @@ program under analysis mentions it.
 Presentation of a target fact SHALL name the fact rather than a value, because the module surface
 and the HIR text are target-independent artifacts.
 
-#### Scenario: Select the same bound on every engine
+#### Scenario: Select the same bound on every supported target
 
-- **WHEN** a program comparing `usize.MAX`, `usize.BITS`, `isize.MAX`, and `isize.MIN` against the identities that define them runs on evaluation, WebAssembly, and native LLVM
-- **THEN** every engine agrees, and the observed pointer width is the selected target's
+- **WHEN** a program comparing `usize.MAX`, `usize.BITS`, `isize.MAX`, and `isize.MIN` against the identities that define them runs on WebAssembly and native LLVM
+- **THEN** the supported targets agree, and the observed pointer width is the selected target's
 
 #### Scenario: Observe a different bound on a different width
 

@@ -1,40 +1,11 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as MirVerification from '../src/MirVerification.js'
 
 const encoder = new TextEncoder()
 
 const snapshot = (source: string) =>
   Analysis.ofSourceRealized('numeric-interface/main', encoder.encode(source))
-
-it.effect('specializes generic integer addition to one concrete primitive', () =>
-  Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.numeric { Numeric }
-pub fn main() -> i32 {
-  return Numeric.add(20, 22)
-}`)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    const outcome = Analysis.evaluate(self)
-    assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') {
-      assert.strictEqual(outcome.result._tag, 'IntegerValue')
-      if (outcome.result._tag === 'IntegerValue') assert.strictEqual(outcome.result.value, 42n)
-    }
-
-    const operations = Analysis.loweredMir(self).functions.flatMap(MirVerification.operations)
-    const binary = operations.filter(
-      (operation) => operation._tag === 'Binary' && operation.operator === 'Add',
-    )
-    assert.strictEqual(binary.length, 1)
-    if (binary[0]?._tag === 'Binary') assert.deepEqual(binary[0].type, { _tag: 'i32' })
-    assert.isFalse(
-      operations.some((operation) =>
-        ['Switch', 'Provide', 'ServiceCall', 'ServiceEffectConstruct'].includes(operation._tag),
-      ),
-    )
-  }),
-)
 
 it.effect('rejects a type without the static Integer conformance', () =>
   Effect.gen(function* () {

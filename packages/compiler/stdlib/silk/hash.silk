@@ -7,7 +7,7 @@
 //!
 //! # Details
 //! A [`HashSeed`] belongs to a collection, not to each key. The same seed, keys, and operations
-//! produce the same bucket presentation order on every engine, independent of addresses or ambient
+//! produce the same bucket presentation order on every supported target, independent of addresses or ambient
 //! state. Interface witnesses are selected during specialization and add no runtime dispatch.
 //!
 //! # Gotchas
@@ -70,7 +70,7 @@ impl Hash {
   ///
   /// # Details
   ///
-  /// The same seed and value return the same result on all Silk engines. Use [`combine`] for each
+  /// The same seed and value return the same result on all supported targets. Use [`combine`] for each
   /// additional field that participates in equality.
   pub fn mix(seed: &HashSeed, value: u64) -> u64 {
     let salted = u64.wrappingAdd(value, seed.value)
@@ -103,7 +103,7 @@ impl Hash {
 ///
 /// # Details
 ///
-/// The same seed, keys, and operation sequence produce the same bucket order on all Silk engines.
+/// The same seed, keys, and operation sequence produce the same bucket order on all supported targets.
 /// A seed does not use allocation addresses, clocks, or ambient entropy.
 pub struct HashSeed {
   /// The seed value handed to every hash the collection computes.

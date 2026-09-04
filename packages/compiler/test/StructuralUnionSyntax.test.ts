@@ -103,20 +103,6 @@ pub fn main() -> i32 { return 0 }`),
   }),
 )
 
-it.effect('renormalizes generic union members after specialization', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'union-syntax/generic',
-      ascii(`fn select<L, R>(value: L | R) -> i32 { return 42 }
-pub fn main() -> i32 { return select<i32, i32>(42) }`),
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed')
-    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
-  }),
-)
-
 it.effect('requires executable union members to name a finite representation', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(

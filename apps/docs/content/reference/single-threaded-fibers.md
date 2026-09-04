@@ -100,7 +100,7 @@ Application code inside `program` uses Fiber operations. It does not call a publ
 A different provider may expose its own explicit entry operation while implementing the same
 ordinary `Scheduler` preparation service.
 
-This reference example uses a deterministic parent clock so it also runs in the evaluator. A
+This reference example uses a deterministic parent clock so its outcome is independently testable. A
 native application can instead provide `OsMonotonicClock` at this outer boundary.
 
 ### FIBER-001 — Applications select scheduler entry explicitly

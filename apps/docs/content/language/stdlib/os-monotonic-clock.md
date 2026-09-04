@@ -20,8 +20,8 @@ split-field deadline arithmetic. It then uses the same absolute-wait operation a
 Marks and deadlines are meaningful only on this provider's monotonic timeline. Native waits
 block the calling host thread; they do not park one Fiber. Failure, malformed host output, or
 deadline overflow is a fatal trap. Linux requires `glibc` 2.17 or later and excludes system
-suspend time from this clock. macOS includes system suspend time. Direct WebAssembly has no
-ambient implementation.
+suspend time from this clock. macOS includes system suspend time. LLVM-to-WebAssembly rejects
+this native-only provider.
 
 Import as `OsMonotonicClock` with `import silk.os_monotonic_clock { OsMonotonicClock }`.
 
@@ -39,7 +39,7 @@ A stateless Unix-family native provider of monotonic marks and blocking deadline
 
 ### Gotchas
 
-A failed, invalid, or unrepresentable clock result traps. Direct WebAssembly does not support a
+A failed, invalid, or unrepresentable clock result traps. LLVM-to-WebAssembly rejects a
 reachable operation on this provider.
 
 <a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a4f734d6f6e6f746f6e6963436c6f636b2e6d616b65"></a>

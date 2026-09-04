@@ -135,11 +135,11 @@ MUST expose equivalent event values and order.
 ### Requirement: Logging agrees across execution engines
 
 Equivalent provided logging programs SHALL preserve success, `LogError`, invocation order,
-severity, and message content through logical evaluation, native LLVM execution, and direct
-WebAssembly. Direct WebAssembly MUST NOT require a Unix stream model; a host or Silk provider SHALL
+severity, and message content through pinned native LLVM execution and LLVM-generated WebAssembly.
+WebAssembly MUST NOT require a Unix stream model; a host or Silk provider SHALL
 satisfy Logger through the same service contract.
 
 #### Scenario: Run logging under WebAssembly
 
-- **WHEN** direct WebAssembly executes a program with a compatible Logger provider
-- **THEN** its complete invocation observations match logical evaluation without exposing byte-at-a-time logging to the caller
+- **WHEN** LLVM-generated WebAssembly executes a program with a compatible Logger provider
+- **THEN** its complete invocation observations match the pinned native expectation without exposing byte-at-a-time logging to the caller

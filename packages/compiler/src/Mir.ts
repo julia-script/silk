@@ -1564,7 +1564,7 @@ export interface Module {
   readonly layout: Layout.Plan
   readonly staticData?: ReadonlyArray<StaticText.Data>
   readonly functions: ReadonlyArray<MirFunction>
-  /** Complete logical lifecycle authority verified before evaluator or backend lowering. */
+  /** Complete logical lifecycle authority verified before backend lowering. */
   readonly executionTransitions: ReadonlyArray<ExecutionTransition.Authority>
   readonly normalization?: ReadonlyArray<NormalizationVerdict>
   readonly coroutineFrames?: CoroutineFramePlan

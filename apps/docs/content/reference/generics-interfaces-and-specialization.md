@@ -649,8 +649,7 @@ layout.
 generic arguments, verifies every reachable return, and rejects realization and inline-layout
 cycles.
 
-**Evidence:** [opaque realization tests](../../../../packages/compiler/test/OpaqueRealization.test.ts),
-[opaque engine parity tests](../../../../packages/compiler/test/OpaqueRepresentationEngines.test.ts).
+**Evidence:** [opaque realization tests](../../../../packages/compiler/test/OpaqueRealization.test.ts).
 
 ### REP-006 — `typeof(item)` names a deliberately exposed exact representation
 
@@ -1494,7 +1493,7 @@ Box<Box<User>>: Display
 ```
 
 Every branch of that chain must resolve to one coherent conformance. Normalized bound order,
-declaration order, module loading order, evaluator choice, and compilation target do not change the
+declaration order, module loading order, and compilation target do not change the
 proof or selected implementation.
 
 **Boundary:** A missing, invalid, ambiguous, or unavailable requirement never creates a provisional
@@ -1566,7 +1565,7 @@ does not give any one of those areas a second interface model.
 | Ownership                  | A proof is compile-time evidence and does not move, borrow, copy, or drop a value. The selected operation still applies its declared owned, shared, or exclusive operands literally.                                                                                            |
 | Operators                  | Operator syntax may invoke only an operation explicitly marked for that operator. Bounds and conformances select its static implementation; operation names and provider types receive no hidden numeric privilege.                                                             |
 | Modules                    | Only the provider's defining module declares conformances. Imports make declarations nameable but never activate, replace, prioritize, or hide an `impl`; endpoint visibility determines whether a goal can be named.                                                           |
-| Specialization and targets | Every admitted concrete proof selects the same static operation target before evaluator, native, or Wasm lowering. No target performs interface lookup, receives a witness dictionary, or chooses a different conformance.                                                      |
+| Specialization and targets | Every admitted concrete proof selects the same static operation target before LLVM lowering. No target performs interface lookup, receives a witness dictionary, or chooses a different conformance.                                                                            |
 | Static values              | A generic helper such as `Schema.of<User>()` may select `User: SchemaOf` statically, but that fact alone does not execute the call at compile time. Const evaluation and global static composition are not defined by these rules.                                              |
 
 Consequently, an interface or service declaration can be reused in an ordinary generic bound

@@ -1,11 +1,12 @@
 import * as Diagnostic from './Diagnostic.js'
 import type * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
+import type * as Target from './Target.js'
 
 /** A validated, deterministic intrinsic inventory for one execution surface. */
 export interface Inventory {
   readonly _tag: 'ValidatedIntrinsicInventory'
-  readonly target: Intrinsic.ExecutionTarget
+  readonly target: Target.Id
   readonly operations: ReadonlyArray<Intrinsic.OperationId>
   readonly calls: ReadonlyArray<Instances.IntrinsicCall>
 }
@@ -24,17 +25,13 @@ const operations = (): ReadonlyArray<Intrinsic.Operation> =>
 
 const operationKey = (id: Intrinsic.OperationId): string => Intrinsic.operationText(id)
 
-/** Maps the explicit backend choice to the matching intrinsic execution surface. */
-export const backendTarget = (backend: 'llvm' | 'wasm'): Intrinsic.ExecutionTarget =>
-  backend === 'llvm' ? 'LLVM' : 'Wasm'
-
 /**
  * Validates only calls retained by executable closure. The optional catalog exists for focused
  * compiler tests; production callers always use the sealed default catalog.
  */
 export const select = (
   calls: ReadonlyArray<Instances.IntrinsicCall>,
-  target: Intrinsic.ExecutionTarget,
+  target: Target.Target,
   catalog: ReadonlyArray<Intrinsic.Operation> = operations(),
 ): Selection => {
   const byIdentity = new Map(catalog.map((operation) => [operationKey(operation.id), operation]))
@@ -47,10 +44,10 @@ export const select = (
       throw new RangeError(`Executable closure retained unknown intrinsic ${key}`)
     retained.set(key, operation.id)
     if (
-      (operation.phase !== 'Runtime' || !operation.targets.includes(target)) &&
+      (operation.phase !== 'Runtime' || !operation.targets.includes(target.id)) &&
       !unavailable.has(key)
     )
-      unavailable.set(key, Diagnostic.intrinsicTargetUnavailable(key, target, call.span))
+      unavailable.set(key, Diagnostic.intrinsicTargetUnavailable(key, target.id, call.span))
   }
   if (unavailable.size > 0)
     return Object.freeze({
@@ -62,7 +59,7 @@ export const select = (
     _tag: 'Available',
     inventory: Object.freeze({
       _tag: 'ValidatedIntrinsicInventory',
-      target,
+      target: target.id,
       operations: Object.freeze(
         [...retained.entries()]
           .sort(([left], [right]) => left.localeCompare(right))

@@ -5,8 +5,8 @@ directory contains readable Silk source, a short explanation, and an `example.js
 its deterministic input, expected result, capability inventory, declared execution targets, and
 checked status.
 
-- `executable` means analysis, evaluation, native execution, and direct WebAssembly execution must
-  continue to agree.
+- `executable` means structured analysis, independently pinned native execution, and intended
+  LLVM-to-Wasm behavior remain covered at their authoritative test tiers.
 - `frontier` means the complete program is retained alongside exact, machine-checked blocker
   evidence. The harness never changes an example's status automatically.
 

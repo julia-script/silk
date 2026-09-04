@@ -60,7 +60,7 @@ export interface ModuleContext {
   readonly builder: Builder.Builder
   readonly program: Mir.Module
   readonly i32: LlvmType.Type
-  /** Native standalone targets own a host report; direct Wasm keeps the bare trap. */
+  /** Native standalone targets own a host report; freestanding targets keep the bare trap. */
   readonly enabled: boolean
   readonly frames: ReadonlyArray<{
     readonly fn: Mir.MirFunction

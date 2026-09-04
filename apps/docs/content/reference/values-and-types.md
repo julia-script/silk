@@ -429,7 +429,7 @@ exposes no usable constant value.
 
 **Diagnostics:** A declaration outside the primitive constant contract reports `SEM0086` at the
 declaration. An operation unavailable during static initialization reports `SEM0176`; selected
-compile errors, cycles, and evaluator limits retain their static diagnostic and trace.
+compile errors, cycles, and static-evaluation limits retain their diagnostic and trace.
 
 **Evidence:** [typed constant requirements](../../../../openspec/changes/add-static-evaluation-core/specs/bootstrap-typed-constants/spec.md),
 [static evaluation](static-evaluation.md),
@@ -1283,7 +1283,7 @@ fn seventh() -> i32 {
 The `Pointer` source API bounds `read` and `write` to a Copy pointee, so `Pointer.read` on a
 `*const Vector<i32>` is rejected at the bound, exactly as `RawBuffer.read` is. MIR verification
 applies the same Copy rule to every pointer read and write operation as the backstop for direct
-intrinsic use. Every primitive is available on the evaluator, LLVM, and Wasm.
+intrinsic use. Every primitive is available through LLVM on native and WebAssembly targets.
 
 **Boundary:** A pointer cannot move a value through raw memory; a slot protocol over pointers is a
 later change. Null is a value, not a failure: reading through it is an unsafe-contract violation,
@@ -1341,55 +1341,13 @@ after a pointer is formed from it.
 
 **Current compiler:** Aligned. Ownership treats formation as a read of the borrow. The native
 backend already materializes every borrowed root in memory and reloads every address root after
-each synchronous and foreign call; the direct WebAssembly backend's reload reachability includes
-pointer lanes so a Silk callee writing through a `*mut` parameter is observed by its caller.
+each synchronous and foreign call, so a Silk callee writing through a `*mut` parameter is observed
+by its caller.
 
 **Evidence:** [raw pointer specification](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-raw-pointers/spec.md),
 [pointer ownership](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-ownership/spec.md),
 [backend reload rule](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-backend/spec.md),
 [borrow rules](ownership-and-borrowing.md#borrow-003--a-borrow-preserves-the-original-owner).
-
-### PTR-004 — The evaluator models pointers as logical addresses
-
-**Status:** Confirmed
-
-The evaluator represents a raw pointer as null, as a logical address naming a frame, cell, place
-path, and element offset, or as an allocation ticket and element offset for a pointer formed from a
-raw-buffer-backed view. It executes every pointer primitive with the same observable results as
-the native backends for programs that reach no foreign call.
-
-```silk
-import silk.pointer as Pointer
-
-fn third() -> i32 {
-  let mut values = [1, 2, 3]
-  let pointer = Pointer.fromMutSlice(&mut values)
-  unsafe {
-    Pointer.write(Pointer.offsetMut(pointer, 2), 9)
-  }
-  return values[2]
-}
-```
-
-A `read`, `write`, or `offset` through null or through an address whose frame has ended stops
-execution as an unsafe-contract violation reported as data, naming the primitive.
-
-**Boundary:** Dangling detection is permitted evaluator behavior, not a language guarantee. Native
-code cannot detect it, and parity between surfaces is required only for well-defined programs.
-Evaluator foreign calls operate on logical values supplied by the per-evaluation host table, so
-they cannot mutate evaluator storage through a native pointer. Native calls may write through the
-borrowed pointer, while direct WebAssembly calls exchange the target's scalar pointer value.
-
-**Diagnostics:** None at compile time. The evaluator's stop is an as-data trap, not a host
-exception or a typed failure.
-
-**Current compiler:** Aligned. `PointerValue` copies the reference or slice base at formation,
-offsets add elements, and reads and writes resolve the cell through the stored-place path or the
-allocation ticket.
-
-**Evidence:** [raw pointer specification](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-raw-pointers/spec.md),
-[pointer parity scenarios](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-backend/spec.md),
-[foreign availability](unsafe-intrinsics-and-targets.md#ffi-007--foreign-functions-use-explicit-pay-for-use-bindings).
 
 ## Structural unions and inference
 
@@ -1455,9 +1413,9 @@ diagnostic. A borrow or bare executable contract reports `SEM0039` because it ha
 storage plan. A valid non-nominal or represented executable member produces no diagnostic.
 
 **Current compiler:** Aligned. Normalization, compatibility, target layout, ownership, cleanup,
-HIR/MIR mappings, evaluation, LLVM, and Wasm consume canonical ordinary member identities. Exact and
-opaque executable representations remain compiler-private while their public contract spelling is
-preserved.
+HIR/MIR mappings and LLVM lowering for native and WebAssembly targets consume canonical ordinary
+member identities. Exact and opaque executable representations remain compiler-private while their
+public contract spelling is preserved.
 
 **Evidence:** [union normalization](../../../../packages/compiler/src/Type.ts),
 [ordinary failure values](typed-failures.md#fail-001--any-concrete-detached-value-may-be-a-typed-failure).

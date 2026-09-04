@@ -63,17 +63,18 @@ Scoped captures MUST NOT escape through an enclosing nominal.
 - **WHEN** a move-only nominal containing an uncalled owned-capture section leaves scope
 - **THEN** every live capture is cleaned exactly once
 
-### Requirement: Callable storage has cross-engine static parity
+### Requirement: Callable storage has structural and artifact parity
 
-HIR, MIR, evaluator, native LLVM, and direct WebAssembly SHALL preserve the same aggregate field
-paths, concrete target, capture layout, access checks, result, and cleanup trace. Direct Wasm MUST
-NOT add a function table or `call_indirect` for this capability.
+HIR, MIR, native LLVM and LLVM-generated WebAssembly SHALL preserve the same aggregate field
+paths, concrete target, capture layout, access checks, and result. Cleanup SHALL be proved by MIR
+structure and pinned native acceptance. LLVM-generated WebAssembly MUST NOT add a function table or
+`call_indirect` for this capability.
 
-#### Scenario: Execute one stored callable through every engine
+#### Scenario: Execute one stored callable through real artifacts
 
-- **WHEN** the same stored-callable acceptance program is evaluated, compiled natively, and emitted
-  as direct WebAssembly
-- **THEN** all engines agree and structural inspection finds only direct targets
+- **WHEN** the same stored-callable acceptance program is compiled natively and emitted as
+  LLVM-generated WebAssembly
+- **THEN** both artifacts produce the pinned result and structural inspection finds only direct targets
 
 ### Requirement: Storage fences retire only for proven paths
 

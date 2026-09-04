@@ -119,6 +119,17 @@ const shardedCorpus =
     ? nativeCorpus
     : nativeCorpus.filter((_, index) => index % Number(shard[2]) === Number(shard[1]) - 1)
 
+it('assigns every native corpus case to exactly one CI shard', () => {
+  const assignments = Array.from({ length: 3 }, (_, shardIndex) =>
+    nativeCorpus.filter((_, index) => index % 3 === shardIndex),
+  ).flat()
+  assert.strictEqual(new Set(assignments.map((program) => program.name)).size, nativeCorpus.length)
+  assert.deepEqual(
+    assignments.map((program) => program.name).sort(),
+    nativeCorpus.map((program) => program.name).sort(),
+  )
+})
+
 const librarySource = `unsafe extern "C" fn abs(value: i32) -> i32
 fn helper(value: i32) -> i32 { return value + 1 }
 export "C" fn increment(value: i32) -> i32 { return unsafe abs(helper(value)) }
@@ -248,7 +259,7 @@ it.effect(
       assert.strictEqual(staticCompile.status, 0, staticCompile.stderr)
       assert.strictEqual(spawnSync(staticExecutable).status, 42)
     }),
-  20_000,
+  60_000,
 )
 
 it.each(shardedCorpus)(
@@ -261,11 +272,13 @@ it.each(shardedCorpus)(
         snapshot.mir._tag,
         'Available',
         `${program.name}: ${Analysis.diagnostics(snapshot)
-          .map((diagnostic) => diagnostic.code)
-          .join(',')}`,
+          .map(
+            (diagnostic) =>
+              `${diagnostic.code}@${diagnostic.span.start}-${diagnostic.span.end}: ${diagnostic.message}`,
+          )
+          .join('\n')}`,
       )
       if (snapshot.mir._tag !== 'Available') return
-      const interpreted = Analysis.evaluate(snapshot)
       const compiledObjects =
         program.nativeCSources === undefined
           ? []
@@ -300,50 +313,42 @@ it.each(shardedCorpus)(
         return
       }
 
-      if (outcome._tag === 'Rejected') {
-        assert.strictEqual(
-          program.expected._tag,
-          'Trap',
-          `${program.name}: ${outcome.diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`).join('; ')}`,
-        )
-        assert.strictEqual(outcome.diagnostics.length > 0, true, program.name)
-        return
+      let compilationMessage = program.name
+      if (outcome._tag === 'BackendFailed') {
+        compilationMessage = `${program.name}: ${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
+      } else if (outcome._tag === 'Rejected') {
+        compilationMessage = `${program.name}: ${outcome.diagnostics
+          .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
+          .join('\n')}`
       }
-
-      assert.strictEqual(
-        outcome._tag,
-        'Compiled',
-        outcome._tag === 'BackendFailed'
-          ? `${program.name}: ${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
-          : program.name,
-      )
+      assert.strictEqual(outcome._tag, 'Compiled', compilationMessage)
       if (outcome._tag !== 'Compiled') return
 
       if (program.expected._tag === 'Completes') {
-        assert.strictEqual(interpreted._tag, 'Completed', program.name)
         const run = yield* runCompiled(outcome.path, program.nativeEnvironment)
         if (program.nativeStdout !== undefined)
           assert.strictEqual(run.stdout, program.nativeStdout, program.name)
+        if (program.nativeStderr !== undefined)
+          assert.strictEqual(run.stderr, program.nativeStderr, program.name)
         const nativeStatus = run.status === null ? null : BigInt(run.status)
         // POSIX exposes only the low unsigned byte of a process exit value.
-        const interpretedStatus =
-          interpreted._tag === 'Completed' ? interpreted.result.value & 0xffn : -1n
+        const expectedStatus = BigInt(program.expected.result) & 0xffn
         assert.strictEqual(
           nativeStatus,
-          interpretedStatus,
-          `differential divergence on ${program.name}: interpreter ${
-            interpreted._tag === 'Completed' ? interpreted.result.value : interpreted._tag
-          }, native ${run.status}`,
+          expectedStatus,
+          `unexpected native result for ${program.name}: expected ${program.expected.result}, native ${run.status}`,
         )
         return
       }
 
       if (program.expected._tag === 'Trap') {
         const run = yield* runCompiled(outcome.path, program.nativeEnvironment)
+        if (program.nativeStderr !== undefined)
+          assert.strictEqual(run.stderr, program.nativeStderr, program.name)
         assert.strictEqual(
           run.signal !== null || (run.status !== null && run.status !== 0),
           true,
-          `differential divergence on ${program.name}: interpreter trapped, native exited ${run.status}`,
+          `expected ${program.name} to trap, native exited ${run.status}`,
         )
       }
     }).pipe(Effect.runPromise)

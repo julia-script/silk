@@ -13,8 +13,7 @@ a deterministic static target and a finite ownership-aware environment.
 - Discover lexical captures implicitly in deterministic first-use order and derive the strongest
   valid `fn`, `mut fn`, or `once fn` invocation mode from how those captures are accessed.
 - Give each anonymous body a deterministic source-occurrence target and lower it through the
-  existing exact callable-environment representation, ownership, cleanup, evaluator, Wasm, and
-  native paths.
+  existing exact callable-environment representation, ownership, cleanup, MIR, and LLVM paths.
 - Extend formatting and language-server facts so anonymous bodies round-trip canonically, resolve
   names in lexical scope, and present their callable contract and captures without inventing an
   importable declaration name.
@@ -42,15 +41,13 @@ None.
 - `bootstrap-hir`: represent anonymous targets, bodies, captures, types, and source identities in
   deterministic typed HIR.
 - `bootstrap-mir`: lower finite anonymous callable environments and bodies without a universal
-  closure ABI while preserving evaluation and cleanup order.
-- `bootstrap-evaluation`: execute ordinary and effectful anonymous callable values with the same
-  invocation-mode and cleanup semantics as other exact callable environments.
+  closure ABI while preserving source and cleanup order.
 - `bootstrap-flow-functions`: preserve the two delayed boundaries of effectful anonymous callables:
   callable construction, then Effect construction, then body execution at `run`.
 - `bootstrap-type-generics`: allow explicit anonymous contracts to reference enclosing binders and
   contribute supplied-argument evidence without expected-result back-inference.
-- `bootstrap-backend`: require Wasm and native execution to consume the same verified exact target
-  and finite environment rather than introducing a backend-specific closure ABI.
+- `bootstrap-backend`: require LLVM-native and LLVM-to-Wasm execution to consume the same verified
+  exact target and finite environment rather than introducing a target-specific closure ABI.
 - `silk-source-formatting`: format complete anonymous callable expressions canonically and
   idempotently.
 - `language-server-hover`: present an anonymous callable's contract and captures without a synthetic
@@ -61,6 +58,6 @@ None.
 ## Impact
 
 The change spans compiler syntax, semantic analysis, HIR, executable discovery, ownership, layout,
-MIR, evaluation, Wasm/native execution, formatter and LSP presentation, plus the callable and
+MIR, LLVM-native and LLVM-to-Wasm execution, formatter and LSP presentation, plus the callable and
 ownership reference documentation. It adds no external dependency, compiler-known standard-library
 actor, dynamic callable erasure, or heap-only closure ABI.

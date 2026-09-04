@@ -9,8 +9,8 @@ runtime objects.
 
 The syntax tree is lossless and recovery-oriented; semantic analysis owns lexical identity and
 ownership facts; HIR is the first typed executable representation; MIR must be finite and
-monomorphic. The evaluator, Wasm backend, and native backend consume verified MIR rather than
-rediscovering syntax. Tooling reads shared semantic facts and must not fabricate declaration names.
+monomorphic. LLVM lowering consumes verified MIR rather than rediscovering syntax. Tooling reads
+shared semantic facts and must not fabricate declaration names or execute user code.
 
 ## Goals / Non-Goals
 
@@ -110,7 +110,7 @@ environment, mode, ownership transfers, and signature from those facts.
 
 Section-specific ownership, layout, dependency-discovery, and executable-origin helpers will be
 generalized to operate on any environment-bearing callable. The exact environment layout remains
-finite and target-specific. The evaluator and both backends therefore reuse existing callable
+finite and target-specific. LLVM-native and LLVM-to-Wasm lowering therefore reuse existing callable
 execution and cleanup rather than adding a universal dispatch table or a new closure object.
 
 A backend-specific closure lowering and a universal boxed callable representation were rejected
@@ -144,10 +144,10 @@ otherwise produce facts that disagree with analysis.
 ### Verify each claim at its cheapest falsification tier
 
 Parser and formatter cases live in their existing suites. One shared analyzed source proves the
-semantic, HIR, ownership, MIR, and evaluator claims where practical. Wasm gets one representative
-environment-bearing case. Native parity is added to the shared acceptance corpus rather than a new
-per-feature compilation test. Hover and completion receive focused cases in existing files. Global
-determinism tests remain the only fresh-process determinism checks.
+semantic, HIR, ownership, and MIR claims where practical. Runtime semantics use an independently
+pinned shared native-acceptance case, while intended WebAssembly behavior is checked through
+LLVM-to-Wasm. Hover and completion receive focused cases in existing files. Global determinism
+tests remain the only fresh-process determinism checks.
 
 ## Risks / Trade-offs
 
@@ -175,7 +175,7 @@ determinism tests remain the only fresh-process determinism checks.
    silently ignore the new expression.
 3. Generalize executable lookup and exact callable-environment consumers so hidden anonymous
    functions pass through existing discovery, residualization, ownership, and MIR application.
-4. Add evaluator, Wasm/native, formatter, LSP, and prescriptive-reference support in the same
+4. Add LLVM-native/LLVM-to-Wasm, formatter, LSP, and prescriptive-reference support in the same
    change; regenerate committed artifacts where required.
 5. Run repository verification in the mandated order and publish a draft PR.
 

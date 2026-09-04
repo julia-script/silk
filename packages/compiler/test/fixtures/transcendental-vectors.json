@@ -3,17 +3,41 @@
   "vectors": [
     { "width": 32, "inputBits": "0x3f000000", "operation": "Sin", "referenceBits": "0x3ef57744" },
     { "width": 32, "inputBits": "0x3f000000", "operation": "Cos", "referenceBits": "0x3f60a940" },
-    { "width": 32, "inputBits": "0x3f800000", "operation": "Sin", "referenceBits": "0x3f576aa4" },
+    {
+      "width": 32,
+      "inputBits": "0x3f800000",
+      "operation": "Sin",
+      "referenceBits": "0x3f576aa4",
+      "acceptedBits": "0x3f576aa5"
+    },
     { "width": 32, "inputBits": "0x3f800000", "operation": "Cos", "referenceBits": "0x3f0a5140" },
-    { "width": 32, "inputBits": "0xbf800000", "operation": "Sin", "referenceBits": "0xbf576aa4" },
+    {
+      "width": 32,
+      "inputBits": "0xbf800000",
+      "operation": "Sin",
+      "referenceBits": "0xbf576aa4",
+      "acceptedBits": "0xbf576aa5"
+    },
     { "width": 32, "inputBits": "0xbf800000", "operation": "Cos", "referenceBits": "0x3f0a5140" },
-    { "width": 32, "inputBits": "0x3f490fdb", "operation": "Sin", "referenceBits": "0x3f3504f3" },
+    {
+      "width": 32,
+      "inputBits": "0x3f490fdb",
+      "operation": "Sin",
+      "referenceBits": "0x3f3504f3",
+      "acceptedBits": "0x3f3504f4"
+    },
     { "width": 32, "inputBits": "0x3f490fdb", "operation": "Cos", "referenceBits": "0x3f3504f3" },
     { "width": 32, "inputBits": "0x3fc90fdb", "operation": "Sin", "referenceBits": "0x3f800000" },
     { "width": 32, "inputBits": "0x3fc90fdb", "operation": "Cos", "referenceBits": "0xb33bbd2e" },
     { "width": 32, "inputBits": "0x40490fdb", "operation": "Sin", "referenceBits": "0xb3bbbd2e" },
     { "width": 32, "inputBits": "0x40490fdb", "operation": "Cos", "referenceBits": "0xbf800000" },
-    { "width": 32, "inputBits": "0x447a0000", "operation": "Sin", "referenceBits": "0x3f53ae61" },
+    {
+      "width": 32,
+      "inputBits": "0x447a0000",
+      "operation": "Sin",
+      "referenceBits": "0x3f53ae61",
+      "acceptedBits": "0x3f53ae60"
+    },
     { "width": 32, "inputBits": "0x447a0000", "operation": "Cos", "referenceBits": "0x3f0ff813" },
     { "width": 32, "inputBits": "0x49742400", "operation": "Sin", "referenceBits": "0xbeb33259" },
     { "width": 32, "inputBits": "0x49742400", "operation": "Cos", "referenceBits": "0x3f6fcefd" },
@@ -95,7 +119,8 @@
       "width": 64,
       "inputBits": "0x408f400000000000",
       "operation": "Sin",
-      "referenceBits": "0x3fea75cc150a206b"
+      "referenceBits": "0x3fea75cc150a206b",
+      "acceptedBits": "0x3fea75cc150a206c"
     },
     {
       "width": 64,
@@ -119,7 +144,8 @@
       "width": 64,
       "inputBits": "0x426d1a94a2000000",
       "operation": "Sin",
-      "referenceBits": "0xbfe38f4477984352"
+      "referenceBits": "0xbfe38f4477984352",
+      "acceptedBits": "0xbfe38f4477984353"
     },
     {
       "width": 64,

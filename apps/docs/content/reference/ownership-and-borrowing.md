@@ -736,7 +736,7 @@ index traps rather than entering the typed failure channel. Borrow and ownership
 reported statically before bounds behavior is relevant.
 
 **Evidence:** [runtime-slice specification](../../../../openspec/specs/bootstrap-runtime-slices/spec.md),
-[slice evaluation tests](../../../../packages/compiler/test/RuntimeSliceEvaluation.test.ts).
+[slice semantic tests](../../../../packages/compiler/test/RuntimeSliceSemantics.test.ts).
 
 ## Batch 3 — Boundaries and control flow
 
@@ -1708,8 +1708,7 @@ language-level `defer`, `errdefer`, asynchronous exit hook, or dynamic finalizer
 produce the ordinary Effect boundary diagnostics. Automatic Drop cannot replace an in-flight typed
 failure.
 
-**Evidence:** [typed-failure cleanup](typed-failures.md#fail-006--typed-failure-applies-ordinary-cleanup-and-preserves-diagnostic-context),
-[finalization tests](../../../../packages/compiler/test/EnsuringAcceptance.test.ts).
+**Evidence:** [typed-failure cleanup](typed-failures.md#fail-006--typed-failure-applies-ordinary-cleanup-and-preserves-diagnostic-context).
 
 ### ALLOC-001 — An allocation is a self-contained affine owner
 
@@ -1808,8 +1807,7 @@ A runtime trap terminates abnormally and must be distinguished from an unhandled
 Stable process-status and presentation rules remain to be assigned.
 
 **Evidence:** [typed trap rule](typed-failures.md#fail-007--a-trap-is-fatal-and-remains-outside-effect-outcomes),
-[trap specification](../../../../openspec/specs/bootstrap-flow-functions/spec.md),
-[finalization tests](../../../../packages/compiler/test/EnsuringAcceptance.test.ts).
+[trap specification](../../../../openspec/specs/bootstrap-flow-functions/spec.md).
 
 ## Batch 6 — Returned views
 

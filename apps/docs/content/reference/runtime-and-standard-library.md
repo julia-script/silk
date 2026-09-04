@@ -439,7 +439,7 @@ pub fn main() -> i32 {
 }
 ```
 
-A direct-Wasm build remains valid and contains no process import or support when no provider
+A WebAssembly build remains valid and contains no process import or support when no provider
 operation enters the executable closure.
 
 **Boundary:** Runtime control flow is executable behavior. A target-specific call in a branch whose
@@ -463,7 +463,7 @@ closure, while executable support follows reachable specialized operations.
 **Status:** Confirmed
 
 Each execution target implements the language entry contract and every reachable intrinsic contract
-through target instructions, compiler-emitted helpers, a linked support object, or an evaluator.
+through target instructions, compiler-emitted helpers, or a linked support object.
 Those contracts are the supported boundary. The raw symbols, calling conventions, layouts, and
 helper structure beneath them may be compiler-versioned and may change whenever lowering, intrinsic
 contracts, or target support changes.
@@ -490,8 +490,8 @@ matched distribution is a toolchain-integrity error before execution. A develope
 unsupported linkage instead follows that low-level facility's own link and ABI diagnostics; the
 toolchain does not imply compatibility merely because a symbol existed in another release.
 
-**Current compiler:** Aligned in direction. Native support is compiler-versioned and direct Wasm
-uses its own lowering model; neither is presented as a user-facing runtime library.
+**Current compiler:** Aligned in direction. Native and WebAssembly support are emitted through LLVM
+and are not presented as a user-facing runtime library.
 
 **Evidence:** [sealed intrinsic contracts](unsafe-intrinsics-and-targets.md#sealed-intrinsic-boundary),
 [current native runtime support](../../../../packages/compiler/src/OsRuntime.ts).
@@ -537,7 +537,7 @@ unprovided service receives a requirement diagnostic. The compiler must not sile
 runtime facility to make either program succeed.
 
 **Current compiler:** Aligned for the current inventory. Entry and intrinsic reachability retain
-only explicitly selected facilities, while direct-Wasm and pressure tests keep trivial programs
+only explicitly selected facilities, while artifact and pressure tests keep trivial programs
 free of host imports, Scheduler, Fiber, LocalScheduler, Execution, and Wake machinery.
 
 **Evidence:** [explicit requirements](requirements-and-services.md),
@@ -569,7 +569,7 @@ parameters, or expose native ABI values to `main`. Process arguments, environmen
 directory, and streams remain available only through explicitly selected ordinary services.
 
 **Boundary:** Target implementations may use different private machine signatures—for example a
-native process entry versus an exported direct-Wasm function—while preserving the same applicable
+native process entry versus an exported WebAssembly function—while preserving the same applicable
 Silk entry semantics. Exact external embedding ABIs and custom entry points are separate future
 contracts.
 
@@ -578,8 +578,8 @@ through the program-entry diagnostics. Missing private adapter support is a brok
 Unhandled typed failures and fatal traps retain their distinct runtime behavior rather than being
 reported as source validation errors.
 
-**Implementation:** Entry discovery, generated MIR, evaluator outcomes, and backend termination
-contracts share the same entry inventory. The private native adapter is derived from that inventory;
+**Implementation:** Entry discovery, generated MIR, and backend termination contracts share the
+same entry inventory. The private native adapter is derived from that inventory;
 a trivial closed entry links no stream, command-line, scheduler, allocator, or provider machinery.
 
 **Evidence:** [program entry](program-entry.md),

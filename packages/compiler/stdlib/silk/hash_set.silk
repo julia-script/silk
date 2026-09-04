@@ -389,7 +389,7 @@ fn emptySlice<T>(anchor: &[Member<T>]) -> &[Member<T>] {
 }
 
 /// Reduces a hash to a bucket index in u64 arithmetic, so the index does not depend on the width of
-/// `usize` and one seed therefore fixes one order in every engine.
+/// `usize` and one seed therefore fixes one order on every supported target.
 fn bucketOf(hashed: u64, width: usize) -> usize {
   return u64.toUsize(u64.remainder(hashed, usize.toU64(width)))
 }

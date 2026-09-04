@@ -283,7 +283,7 @@ effect fn program() -> i32 ! OutOfMemoryError {
   let success = run successfulTimer()
   let cancelled = run cancelledTimer()
   let preparation = run Effect.catchAll(failedPreparation(), preparationFailed)
-  if cancelled != 0 { return cancelled }
+  if cancelled != 0 { return -20 }
   if preparation != 7 { return -30 }
   return success
 }

@@ -53,7 +53,7 @@ rejected before element storage is read.
 #### Scenario: Out-of-bounds read is rejected
 
 - **WHEN** a program reads an index at or beyond the current length
-- **THEN** the checked-access contract rejects it identically in the evaluator, LLVM, and Wasm engines before element storage is read
+- **THEN** the checked-access contract rejects it identically in LLVM-native and LLVM-generated WebAssembly artifacts before element storage is read
 
 #### Scenario: Shared read has no ownership side effects
 
@@ -63,7 +63,7 @@ rejected before element storage is read.
 #### Scenario: Reject a move-only element type
 
 - **WHEN** `Vector.get` is instantiated for a move-only nominal or structural-union element type
-- **THEN** compiler verification rejects the read before evaluation or backend emission without changing the vector
+- **THEN** compiler verification rejects the read before backend emission without changing the vector
 
 ### Requirement: Vector ownership and release are deterministic
 
@@ -94,8 +94,8 @@ witness, whether that witness selects a compiler-known comparison or one of the 
 functions. The order SHALL be total and stable: two elements that compare equal SHALL keep their
 input order relative to one another, and this SHALL hold for an element type whose equal elements
 stay distinguishable, so stability is observable rather than merely asserted. The order SHALL be
-deterministic — the same input SHALL always produce the same output, and the evaluator, LLVM, and
-Wasm SHALL agree on that output — because every comparison and every exchange is decided by run
+deterministic — the same input SHALL always produce the same output in LLVM-generated native and
+WebAssembly artifacts — because every comparison and every exchange is decided by run
 boundaries alone and never by an address, a capacity, or an engine detail. Ordering SHALL move each
 element at most once per exchange, so no element is duplicated, leaked, or dropped twice, and SHALL
 NOT require the element type to be `Copy` to move an element; comparing two elements SHALL NOT
@@ -132,10 +132,10 @@ vector answer identically.
 - **WHEN** a program orders a vector holding no element or exactly one element
 - **THEN** the vector is unchanged and no comparison is required
 
-#### Scenario: Three engines agree on one order
+#### Scenario: Runtime targets agree on one order
 
-- **WHEN** the same program orders the same input on the evaluator, on LLVM, and on Wasm
-- **THEN** the three engines observe the same element at every index
+- **WHEN** the same program orders the same input in LLVM-generated native and WebAssembly artifacts
+- **THEN** both targets observe the same element at every index
 
 #### Scenario: Ordering releases every allocation it acquires
 
@@ -150,11 +150,11 @@ vector answer identically.
 ### Requirement: Vector is ordinary library code
 
 `Vector<T>` SHALL be implemented entirely in Silk standard-library source over `Allocator`,
-`Allocation`, unsafe typed storage, and restricted `Drop`. Compiler phases, MIR, the evaluator, and
-the backends MUST NOT contain vector-specific operations, layouts, or branches, and no iterable or
+`Allocation`, unsafe typed storage, and restricted `Drop`. Compiler phases, MIR, and the backend
+MUST NOT contain vector-specific operations, layouts, or branches, and no iterable or
 iterator abstraction is required.
 
 #### Scenario: No collection primitive in published artifacts
 
-- **WHEN** MIR, evaluator traces, or backend output for a vector-using program are inspected
+- **WHEN** MIR or backend output for a vector-using program is inspected
 - **THEN** they contain only the existing allocation, storage, call, and cleanup forms with no vector-shaped operation

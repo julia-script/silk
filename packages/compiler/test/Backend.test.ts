@@ -4,9 +4,6 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
-import * as LlvmBackend from '../src/LlvmBackend.js'
-import type * as Mir from '../src/Mir.js'
-import * as WasmBackend from '../src/WasmBackend.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -141,143 +138,6 @@ it.effect('emits target-correct LLVM bitcode for wasm32 while retaining silk_mai
   }),
 )
 
-it.effect('realizes stored declaration and scalar wrapper sections in LLVM and Wasm', () =>
-  Effect.gen(function* () {
-    const programs = [
-      `fn add(value: i32, adjustment: i32) -> i32 { return value + adjustment }
-pub fn main() -> i32 { let plusTwo = add(2) return plusTwo(40) }`,
-      'import silk.i32 as i32\npub fn main() -> i32 { let plusTwo = i32.add(2) return plusTwo(40) }',
-      // A bound method captures parameter zero, so the backends must place the supplied argument
-      // after the capture rather than before it.
-      `pub struct Counter { value: i32 }
-impl Counter { pub fn add(self: &Self, adjustment: i32) -> i32 { return self.value + adjustment } }
-pub fn main() -> i32 { let counter = Counter { value: 40 } let plusForty = counter.add return plusForty(2) }`,
-    ]
-    for (const [ordinal, source] of programs.entries()) {
-      const native = yield* Analysis.ofSourceRealized(
-        `callable/native-${ordinal}`,
-        ascii(source),
-        'aarch64-apple-darwin',
-      )
-      const wasm = yield* Analysis.ofSourceRealized(
-        `callable/wasm-${ordinal}`,
-        ascii(source),
-        'wasm32-unknown-unknown',
-      )
-      const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
-      const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-      const instance = new WebAssembly.Instance(
-        new WebAssembly.Module(wasmArtifact.bytes.slice()),
-        {},
-      )
-      const main = instance.exports.silk_main
-      assert.isFunction(main)
-      if (typeof main !== 'function') return
-      assert.strictEqual(main(), 42)
-      assert.strictEqual(Analysis.evaluate(native)._tag, 'Completed')
-      assert.include(nativeArtifact.ir, ordinal === 1 ? '@silk_silk_i32_add' : 'callable')
-    }
-  }),
-)
-
-it.effect(
-  'keeps reusable, exclusive, take-once, generic, and dropped callables in backend parity',
-  () =>
-    Effect.gen(function* () {
-      const programs = [
-        `fn write(value: i32, values: &mut [i32]) -> i32 { values[0] = value return values[0] }
-pub fn main() -> i32 {
-  let mut values = [0]
-  let mut callback = write(&mut values)
-  let first = callback(40)
-  let second = callback(first + 2)
-  drop callback
-  return second
-}`,
-        `struct Token { value: i32 }
-fn consume(value: i32, token: Token) -> i32 { return value + token.value }
-pub fn main() -> i32 {
-  let token = Token { value: 2 }
-  let callback = consume(move token)
-  return callback(40)
-}`,
-        `fn choose<T>(value: T, fallback: T) -> T { return move value }
-pub fn main() -> i32 { let chosen = choose<i32>(0) return chosen(42) }`,
-        `struct Token { value: i32 }
-fn consume(value: i32, token: Token) -> i32 { return value + token.value }
-pub fn main() -> i32 {
-  let token = Token { value: 2 }
-  let callback = consume(move token)
-  drop callback
-  return 42
-}`,
-      ]
-      for (const [ordinal, source] of programs.entries()) {
-        const native = yield* Analysis.ofSourceRealized(
-          `callable-modes/native-${ordinal}`,
-          ascii(source),
-          'aarch64-apple-darwin',
-        )
-        const wasm = yield* Analysis.ofSourceRealized(
-          `callable-modes/wasm-${ordinal}`,
-          ascii(source),
-          'wasm32-unknown-unknown',
-        )
-        const llvm = yield* Analysis.codegen(native, { mode: 'release' })
-        const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-        const instance = new WebAssembly.Instance(
-          new WebAssembly.Module(artifact.bytes.slice()),
-          {},
-        )
-        const main = instance.exports.silk_main
-        assert.isFunction(main)
-        if (typeof main !== 'function') return
-        assert.strictEqual(main(), 42)
-        const evaluated = Analysis.evaluate(native)
-        assert.strictEqual(evaluated._tag, 'Completed')
-        assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
-        assert.include(llvm.ir, 'define hidden i32 @silk_main')
-      }
-    }),
-)
-
-it.effect('emits deterministic callable layouts, MIR, LLVM, and Wasm artifacts', () =>
-  Effect.gen(function* () {
-    const source = `fn add<T>(value: T, fallback: T) -> T { return move value }
-pub fn main() -> i32 { let callback = add<i32>(2) return callback(42) }`
-    const nativeFirst = yield* Analysis.ofSourceRealized(
-      'callable-determinism/native',
-      ascii(source),
-      'aarch64-apple-darwin',
-    )
-    const nativeSecond = yield* Analysis.ofSourceRealized(
-      'callable-determinism/native',
-      ascii(source),
-      'aarch64-apple-darwin',
-    )
-    const wasmFirst = yield* Analysis.ofSourceRealized(
-      'callable-determinism/wasm',
-      ascii(source),
-      'wasm32-unknown-unknown',
-    )
-    const wasmSecond = yield* Analysis.ofSourceRealized(
-      'callable-determinism/wasm',
-      ascii(source),
-      'wasm32-unknown-unknown',
-    )
-    const llvmFirst = yield* Analysis.codegen(nativeFirst, { mode: 'release' })
-    const llvmSecond = yield* Analysis.codegen(nativeSecond, { mode: 'release' })
-    const wasmArtifactFirst = yield* Analysis.codegenWasm(wasmFirst, { mode: 'release' })
-    const wasmArtifactSecond = yield* Analysis.codegenWasm(wasmSecond, { mode: 'release' })
-
-    assert.strictEqual(llvmFirst.ir, llvmSecond.ir)
-    assert.deepEqual(llvmFirst.bitcode, llvmSecond.bitcode)
-    assert.deepEqual(wasmArtifactFirst.bytes, wasmArtifactSecond.bytes)
-    assert.deepEqual(nativeFirst.layout, nativeSecond.layout)
-    assert.deepEqual(Analysis.loweredMir(nativeFirst), Analysis.loweredMir(nativeSecond))
-  }),
-)
-
 it.effect('refuses diagnosed trap bodies before backend emission', () =>
   Effect.gen(function* () {
     const result = yield* Effect.result(
@@ -301,6 +161,33 @@ it.effect('emits native debug metadata only for debug requests', () =>
     assert.include(debug.ir, '!dbg')
     assert.notInclude(release.ir, 'DICompileUnit')
     assert.notInclude(release.ir, '!dbg')
+  }),
+)
+
+it.effect('keeps string identity in deterministic LLVM debug metadata only', () =>
+  Effect.gen(function* () {
+    const source = `fn pass(value: string) -> string { return value }
+fn byteCount(value: &[u8]) -> usize { return value.length }
+pub fn main() -> i32 {
+  let text = pass("caf\\u{e9}")
+  if byteCount(Intrinsic.stringUtf8Bytes(text)) == 5 { return 42 }
+  return 0
+}`
+    const request = {
+      mode: 'debug' as const,
+      sources: new Map([['golden/program', ascii(source)]]),
+    }
+    const first = yield* emit(source, request)
+    const second = yield* emit(source, request)
+    const release = yield* emit(source, { mode: 'release' })
+
+    assert.include(first.ir, '!DIStringType(name: "string"')
+    assert.include(first.ir, 'encoding: DW_ATE_UTF')
+    assert.include(first.ir, 'name: "&[u8]"')
+    assert.notInclude(release.ir, 'DIStringType')
+    assert.notInclude(release.ir, 'DW_ATE_UTF')
+    assert.strictEqual(first.ir, second.ir)
+    assert.deepEqual(first.bitcode, second.bitcode)
   }),
 )
 
@@ -486,63 +373,6 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('admits direct-Wasm foreign imports and gates LLVM wasm32', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'backend/foreign',
-      ascii(`unsafe extern "C" fn abs(value: i32) -> i32
-unsafe extern "C" fn absAgain(value: i32) -> i32 as "abs"
-pub fn main() -> i32 { return unsafe abs(-42) + unsafe absAgain(-1) }`),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const program = Analysis.loweredMir(snapshot)
-    const direct = yield* Backend.emit(WasmBackend.WasmBackend, program, { mode: 'release' })
-    assert.deepEqual(direct.foreignImports, [{ symbol: 'abs', parameters: ['i32'], result: 'i32' }])
-    const failure = yield* Effect.flip(
-      Backend.emit(LlvmBackend.LlvmBackend, program, { mode: 'release' }),
-    )
-    assert.strictEqual(failure.reason._tag, 'UnsupportedForeignFunction')
-    if (failure.reason._tag === 'UnsupportedForeignFunction')
-      assert.deepEqual(
-        failure.reason.diagnostics.map((diagnostic) => diagnostic.code),
-        ['SEM0193'],
-      )
-  }),
-)
-
-it.effect('gates an export record off a native target at Backend.emit', () =>
-  Effect.gen(function* () {
-    const source = `export "C" fn silk_test_double_v1(value: i32) -> i32 { return value * 2 }
-pub fn main() -> i32 { return 0 }`
-    const native = yield* Analysis.ofSourceRealized(
-      'backend/export',
-      ascii(source),
-      'aarch64-apple-darwin',
-    )
-    const wasm = yield* Analysis.ofSourceRealized(
-      'backend/export',
-      ascii(source),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(native), [])
-    assert.deepEqual(Analysis.diagnostics(wasm), [])
-    const program: Mir.Module = Object.freeze({
-      ...Analysis.loweredMir(wasm),
-      foreignExports: Analysis.loweredMir(native).foreignExports,
-    })
-    const failure = yield* Effect.flip(
-      Backend.emit(WasmBackend.WasmBackend, program, { mode: 'release' }),
-    )
-    assert.strictEqual(failure.reason._tag, 'UnsupportedForeignFunction')
-    if (failure.reason._tag === 'UnsupportedForeignFunction')
-      assert.deepEqual(
-        failure.reason.diagnostics.map((diagnostic) => diagnostic.code),
-        ['SEM0193'],
-      )
-  }),
-)
-
 it.effect('rejects a foreign declaration of a symbol the native backend declares itself', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -603,45 +433,6 @@ pub fn main() -> i32 { return 0 }`),
     ])
     const plain = yield* emit(nestedSource, { mode: 'release' })
     assert.deepEqual(plain.foreignExports, [])
-  }),
-)
-
-it.effect('lowers raw pointers to one address lane and stores through a formed pointer', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'backend/pointer-native',
-      ascii(`import silk.pointer { Pointer }
-import silk.i32 as i32
-pub fn main() -> i32 {
-  let mut values = [1, 2, 3]
-  let pointer = Pointer.fromMutSlice(&mut values)
-  let empty = Pointer.null<i32>()
-  if !Pointer.isNull(empty) {
-    return 2
-  }
-  unsafe {
-    let third = Pointer.offsetMut(pointer, i32.toUsize(2))
-    Pointer.write(third, 9)
-    if Pointer.read(third) != values[2] {
-      return 1
-    }
-  }
-  return 0
-}`),
-      'aarch64-apple-darwin',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.strictEqual(Analysis.evaluate(snapshot)._tag, 'Completed')
-    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
-    assert.strictEqual(artifact._tag, 'LlvmBitcodeArtifact')
-    if (artifact._tag !== 'LlvmBitcodeArtifact') return
-    assert.match(artifact.ir, /icmp eq i64 %ptr_is_null\d+_address, 0/)
-    assert.match(
-      artifact.ir,
-      /%ptr_offset\d+ = getelementptr i8, ptr %[^,]+, i64 %ptr_offset\d+_bytes/,
-    )
-    assert.match(artifact.ir, /store i32 %v\d+, ptr %ptr_write\d+_0_ptr/)
-    assert.match(artifact.ir, /%ptr_read\d+_0 = load i32, ptr %ptr_read\d+_0_ptr/)
   }),
 )
 

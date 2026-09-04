@@ -2,9 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
-import type * as Instances from '../src/Instances.js'
 import * as Intrinsic from '../src/Intrinsic.js'
-import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
 import * as Type from '../src/Type.js'
 import * as Projections from './support/projections.js'
 
@@ -44,25 +42,25 @@ it('publishes the minimal portable string intrinsic catalog with exact signature
       {
         signature: 'unsafe fn Intrinsic.stringFromUtf8Unchecked(bytes: &[u8]) -> string',
         unsafe: true,
-        targets: ['Evaluator', 'LLVM', 'Wasm'],
+        targets: Intrinsic.runtimeTargets,
         returnedBorrowParameter: 0,
       },
       {
         signature: 'fn Intrinsic.stringUtf8Bytes(value: string) -> &[u8]',
         unsafe: false,
-        targets: ['Evaluator', 'LLVM', 'Wasm'],
+        targets: Intrinsic.runtimeTargets,
         returnedBorrowParameter: 0,
       },
       {
         signature: 'fn Intrinsic.stringByteLength(value: string) -> usize',
         unsafe: false,
-        targets: ['Evaluator', 'LLVM', 'Wasm'],
+        targets: Intrinsic.runtimeTargets,
         returnedBorrowParameter: undefined,
       },
       {
         signature: 'fn Intrinsic.stringEqualsExact(left: string, right: string) -> bool',
         unsafe: false,
-        targets: ['Evaluator', 'LLVM', 'Wasm'],
+        targets: Intrinsic.runtimeTargets,
         returnedBorrowParameter: undefined,
       },
     ],
@@ -121,40 +119,6 @@ it.effect('retains runtime string identity and provenance in HIR', () =>
     )
     assert.include(Hir.encode(hir), 'runtime-string-view loans=none : string')
     assert.deepEqual(Hir.verify(hir), [])
-
-    const formation = Intrinsic.findOperation('Intrinsic', 'stringFromUtf8Unchecked')
-    if (formation === undefined || runtimeView === undefined) {
-      throw new Error('expected runtime string formation metadata')
-    }
-    const call: Instances.IntrinsicCall = Object.freeze({
-      _tag: 'ReachableIntrinsicCall',
-      operation: formation.id,
-      span: runtimeView.span,
-    })
-    assert.strictEqual(IntrinsicAvailability.select([call], 'Wasm')._tag, 'Available')
-    const restrictedTargets: ReadonlyArray<Intrinsic.ExecutionTarget> = Object.freeze([
-      'Evaluator',
-      'LLVM',
-    ])
-    const restricted: Intrinsic.Operation = Object.freeze({
-      ...formation,
-      targets: restrictedTargets,
-    })
-    const catalog = Intrinsic.all()
-      .flatMap((actor) => actor.operations)
-      .map((operation) =>
-        Intrinsic.operationText(operation.id) === Intrinsic.operationText(formation.id)
-          ? restricted
-          : operation,
-      )
-    const unavailable = IntrinsicAvailability.select([call], 'Wasm', catalog)
-    assert.strictEqual(unavailable._tag, 'Unavailable')
-    if (unavailable._tag === 'Unavailable') {
-      assert.deepEqual(
-        unavailable.diagnostics.map((diagnostic) => diagnostic.code),
-        ['SEM0093'],
-      )
-    }
   }),
 )
 

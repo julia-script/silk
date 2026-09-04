@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Use familiar readable algorithms as honest end-to-end probes of Silk's practical expressiveness, diagnostics, ergonomics, and evaluator/native/WebAssembly parity.
+Use familiar readable algorithms as honest end-to-end probes of Silk's practical expressiveness,
+diagnostics, ergonomics, and native runtime semantics.
 
 ## Requirements
 
@@ -26,19 +27,19 @@ An example SHALL be `executable` only when it passes analysis and its declared t
 
 ### Requirement: The suite has an executable baseline
 
-Game of Life, Sieve, matrix multiplication, quicksort, and CRC-32 SHALL execute through evaluation
-and every supported backend whose host requirements they declare. Results or output SHALL match
-exactly. FFT MAY remain frontier only with precise current blockers.
+Game of Life, Sieve, matrix multiplication, quicksort, and CRC-32 SHALL execute through the native
+acceptance corpus with independently pinned results or output. FFT MAY remain frontier only with
+precise current blockers.
 
 #### Scenario: Run Game of Life
 
 - **WHEN** the fixed initial board advances its declared generations
-- **THEN** all supported paths produce the same final board
+- **THEN** native execution produces the committed final board
 
 #### Scenario: Run CRC-32
 
 - **WHEN** committed bytes are processed
-- **THEN** `u8`/`u32` operations produce the committed checksum across engines
+- **THEN** native execution produces the committed checksum through `u8`/`u32` operations
 
 ### Requirement: Walls remain durable evidence
 
@@ -61,19 +62,8 @@ them as execution errors.
 #### Scenario: Traverse the complete grid
 
 - **WHEN** breadth-first search runs from the first cell to the opposite corner
-- **THEN** evaluation, native execution, and direct WebAssembly verify the same shortest distance
-  before completing the effectful entry point successfully
-
-### Requirement: Allocation-sensitive examples retain resource evidence
-
-An algorithm manifest MAY declare exact evaluation allocation evidence. When present, the harness
-SHALL verify successful acquisitions, matching releases, and peak simultaneously live allocations
-in addition to the ordinary result and target checks.
-
-#### Scenario: Observe vector growth and cleanup
-
-- **WHEN** the breadth-first-search queue grows through capacities 4, 8, 16, and 32 and then leaves scope
-- **THEN** evaluation records four acquisitions, four releases, and a peak of two live allocations
+- **THEN** native execution verifies the committed shortest distance before completing the
+  effectful entry point successfully
 
 ### Requirement: CRC-32 consumes committed static bytes
 
@@ -84,18 +74,18 @@ values MUST NOT satisfy this example contract.
 #### Scenario: Checksum a static literal
 
 - **WHEN** CRC-32 processes the committed bytes `99 13 1d 00`
-- **THEN** evaluation, native execution, and direct WebAssembly return the committed checksum with no allocation
+- **THEN** native execution returns the committed checksum
 
 ### Requirement: Quicksort is an executable recursive algorithm
 
 The in-place quicksort example SHALL recursively partition and sort its committed signed integers
-through evaluation, native LLVM, and direct WebAssembly. It MUST NOT be rewritten as an iterative
-fixture or granted an algorithm-specific recursion exception.
+through native LLVM execution. It MUST NOT be rewritten as an iterative fixture or granted an
+algorithm-specific recursion exception.
 
 #### Scenario: Sort through recursive partitions
 
 - **WHEN** quicksort processes `[9, -3, 5, 1, 0, -8, 7, 2]`
-- **THEN** all three engines return the fingerprint for `[-8, -3, 0, 1, 2, 5, 7, 9]`
+- **THEN** the native artifact returns the fingerprint for `[-8, -3, 0, 1, 2, 5, 7, 9]`
 
 ### Requirement: FFT meaningfully exercises trigonometry
 
@@ -106,7 +96,7 @@ component MUST NOT satisfy the example contract.
 #### Scenario: Execute the strengthened FFT
 
 - **WHEN** the committed eight-sample signal is transformed through all three butterfly stages
-- **THEN** evaluation, native execution, and direct WebAssembly return the same committed fingerprint
+- **THEN** native execution returns the committed fingerprint
 
 #### Scenario: Detect a broken transcendental operation
 

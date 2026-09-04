@@ -217,7 +217,7 @@ SHALL leave the surface equal.
 
 #### Scenario: Symbol rename invalidates dependents
 
-- **WHEN** module `a` changes `pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"` to `as "labs"`
+- **WHEN** module `a` changes `pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"` to `as "renamed_abs"`
 - **THEN** the surface of `a` differs and every direct importer of `cAbs` is invalidated
 
 #### Scenario: Whitespace change leaves the surface equal

@@ -1,5 +1,6 @@
 import type * as ProviderSelection from './ProviderSelection.js'
 import * as SourceSpan from './SourceSpan.js'
+import type * as Target from './Target.js'
 import * as Token from './Token.js'
 
 /** The compiler phase that originated a diagnostic. */
@@ -900,7 +901,7 @@ export type Reason =
   | {
       readonly _tag: 'IntrinsicTargetUnavailable'
       readonly operation: string
-      readonly target: 'Evaluator' | 'LLVM' | 'Wasm'
+      readonly target: Target.Id
     }
   | { readonly _tag: 'InvalidDropHook'; readonly detail: string }
   | { readonly _tag: 'InvalidStaticLiteral'; readonly detail: string }
@@ -4715,7 +4716,7 @@ export const invalidReturnedBorrowOrigin = (span: SourceSpan.SourceSpan): Diagno
 /** Diagnoses a reachable sealed operation before its unsupported execution surface is entered. */
 export const intrinsicTargetUnavailable = (
   operation: string,
-  target: 'Evaluator' | 'LLVM' | 'Wasm',
+  target: Target.Id,
   span: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({

@@ -93,7 +93,7 @@ A hashed collection SHALL be constructed with a `HashSeed`, and the order in whi
 entries SHALL be a function of that seed and the sequence of operations performed on it alone. It
 MUST NOT depend on allocation addresses, on wall-clock or monotonic time, or on any ambient source
 of entropy. Two runs of one program constructing one collection with one seed and performing one
-sequence of operations SHALL observe one order, in every engine.
+sequence of operations SHALL observe one order on every supported target.
 
 #### Scenario: Two runs over one seed agree
 
@@ -129,8 +129,8 @@ non-empty. A move-only key or value SHALL be usable without being copied.
 
 ### Requirement: No engine contains a hash operation
 
-Hashing SHALL be ordinary Silk source. Semantic analysis, the HIR, the MIR, the evaluator, the
-native backend, and the WebAssembly backend MUST NOT contain any operation that computes a hash,
+Hashing SHALL be ordinary Silk source. Semantic analysis, the HIR, the MIR, and LLVM lowering MUST
+NOT contain any operation that computes a hash,
 recognize a hashed collection by spelling, or treat `HashKey` as anything other than an ordinary
 interface. Every hash a program computes SHALL be a function some witness declared in Silk.
 
@@ -148,10 +148,9 @@ interface. Every hash a program computes SHALL be a function some witness declar
 
 `HashMap` and `HashSet` SHALL be implemented in ordinary Silk over the allocator requirement and
 typed storage, using the same substrate `Vector` uses. They MUST NOT require a new compiler
-primitive, and their behavior SHALL be identical across the bootstrap evaluator, the native backend,
-and the WebAssembly backend.
+primitive, and their behavior SHALL be identical in LLVM-generated native and WebAssembly artifacts.
 
 #### Scenario: Identical behavior across engines
 
-- **WHEN** one program using hashed collections is run under the evaluator, the native backend, and the WebAssembly backend
-- **THEN** all three produce the same result and the same iteration order
+- **WHEN** one program using hashed collections runs in LLVM-generated native and WebAssembly artifacts
+- **THEN** both produce the same result and the same iteration order

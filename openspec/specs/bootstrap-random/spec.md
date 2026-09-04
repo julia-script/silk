@@ -86,7 +86,7 @@ hash-flood protection.
 #### Scenario: Preserve a seeded sequence under the insecure name
 
 - **WHEN** two `InsecureRandom.seeded` providers receive the same `u64` seed and are advanced identically
-- **THEN** they produce the same existing xoshiro256** sequence on evaluator, native, and direct WebAssembly execution
+- **THEN** they produce the same existing xoshiro256** sequence on native and LLVM-generated WebAssembly execution
 
 #### Scenario: Remove the misleading old identity
 
@@ -95,7 +95,7 @@ hash-flood protection.
 
 #### Scenario: Use insecure random portably
 
-- **WHEN** a direct-WebAssembly program uses only `silk/insecure_random` with an ordinary provider
+- **WHEN** an LLVM-generated WebAssembly program uses only `silk/insecure_random` with an ordinary provider
 - **THEN** it requires no OS random intrinsic or host import
 
 ### Requirement: InsecureSeed is one provider-stable copyable 128-bit value
@@ -129,11 +129,11 @@ secure `u64` values from an active `Random` provider and stores them in one immu
 
 ### Requirement: Official OS random support is native, non-waiting, and pay-for-use
 
-The official `OsRandom` provider SHALL support the current GNU/Linux and macOS native targets and
-an explicitly injected evaluator host. It MUST use an initialized OS CSPRNG without waiting for
+The official `OsRandom` provider SHALL support the current GNU/Linux and macOS native targets. It
+MUST use an initialized OS CSPRNG without waiting for
 external entropy; an unready or failing source SHALL cause immediate fatal failure rather than
 blocking for entropy or returning weak data. A reachable OS-provider operation SHALL be rejected
-for direct WebAssembly. Merely importing, type-checking, or retaining an unreachable OS provider
+for LLVM-generated WebAssembly. Merely importing, type-checking, or retaining an unreachable OS provider
 SHALL add no native random symbol or reject a portable artifact. This version SHALL NOT provide
 Windows, WASI, browser, or ambient default integration.
 
@@ -152,7 +152,7 @@ Windows, WASI, browser, or ambient default integration.
 - **WHEN** an executable reaches only `InsecureRandom` or a fixed `InsecureSeed` provider
 - **THEN** it includes no OS-random runtime symbol
 
-#### Scenario: Reject reachable direct-Wasm OS random
+#### Scenario: Reject reachable LLVM-generated WebAssembly OS random
 
-- **WHEN** a direct-WebAssembly entry reaches the official `OsRandom` provider
+- **WHEN** an LLVM-generated WebAssembly entry reaches the official `OsRandom` provider
 - **THEN** planning reports the stable intrinsic target-unavailable diagnostic before emission

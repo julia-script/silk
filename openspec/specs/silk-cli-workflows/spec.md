@@ -8,7 +8,7 @@ Defines the user-visible Silk language-tool commands for project checking, build
 
 ### Requirement: Project-oriented command surface
 
-The root `silk` command SHALL expose `init`, `build`, `check`, `clean`, `format`, `run`, and `build-exe`. `init` SHALL accept an optional path and package-name override. Project compilation commands SHALL accept a shared optional `--manifest-path`, one `--backend`, repeatable `--target`, and profile selection. Repeated command-line targets SHALL replace rather than append to manifest targets. `--release` SHALL select the release profile and SHALL conflict with an explicitly different `--profile`.
+The root `silk` command SHALL expose `init`, `build`, `check`, `clean`, `format`, `run`, and `build-exe`. `init` SHALL accept an optional path and package-name override. Project compilation commands SHALL accept a shared optional `--manifest-path`, repeatable `--target`, and profile selection. Repeated command-line targets SHALL replace rather than append to manifest targets. `--release` SHALL select the release profile and SHALL conflict with an explicitly different `--profile`.
 
 #### Scenario: Display root help
 
@@ -51,7 +51,7 @@ The root `silk` command SHALL expose `init`, `build`, `check`, `clean`, `format`
 
 ### Requirement: Project build
 
-`silk build` SHALL validate the complete backend, target, artifact-kind, and structured native-link
+`silk build` SHALL validate the complete target, artifact-kind, and structured native-link
 batch before compilation, then compile sequentially in first-seen canonical target order. It SHALL
 honor the manifest's executable, shared-library, or static-library selection and deterministic
 target filename. Each target SHALL commit independently; every valid target SHALL be attempted and
@@ -72,7 +72,7 @@ require source-root, exact output, Clang, archive-tool, temporary-artifact, or t
 #### Scenario: Build multiple valid targets
 
 - **WHEN** an executable LLVM project selects `host` and `wasm32-unknown-unknown`
-- **THEN** both targets are built in declared order to distinct backend-qualified destinations without C-library companions
+- **THEN** both targets are built in declared order to distinct LLVM/target/profile destinations without C-library companions
 
 #### Scenario: Retain an independent success
 
@@ -81,24 +81,24 @@ require source-root, exact output, Clang, archive-tool, temporary-artifact, or t
 
 #### Scenario: Reject the batch during preflight
 
-- **WHEN** any backend, target, artifact kind, or native link input combination is incompatible
+- **WHEN** any target, artifact kind, or native link input combination is incompatible
 - **THEN** the command exits two before compiling any target or creating any new destination
 
 ### Requirement: Project run
 
 `silk run` SHALL require executable artifact kind, select exactly the resolved host target, build it
-through a backend capable of producing a native executable, then execute the result with inherited
+through LLVM, then execute the result with inherited
 standard input, output, and error and all arguments after `--`. A manifest library kind SHALL fail
 preflight rather than being overridden or executed.
 
 #### Scenario: Run an executable project
 
-- **WHEN** a project configures executable artifact kind and the selected backend can build the host
+- **WHEN** a project configures executable artifact kind and selects the host
 - **THEN** `silk run` builds and executes only the canonical host artifact
 
 #### Scenario: Run with a multi-target manifest
 
-- **WHEN** an executable project configures `host` and `wasm32-unknown-unknown` and the selected backend can build the host
+- **WHEN** an executable project configures `host` and `wasm32-unknown-unknown`
 - **THEN** `silk run` builds and executes only the canonical host artifact
 
 #### Scenario: Refuse a library project
@@ -110,11 +110,6 @@ preflight rather than being overridden or executed.
 
 - **WHEN** the built host executable exits with a non-zero status
 - **THEN** `silk run` exits with that same status rather than treating it as a compiler failure
-
-#### Scenario: Refuse a non-runnable backend
-
-- **WHEN** the selected backend cannot produce a host executable
-- **THEN** `silk run` fails before compilation with a clear backend compatibility error
 
 ### Requirement: Project clean
 

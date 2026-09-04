@@ -50,6 +50,6 @@ None.
 
 The change is confined to receiver-call resolution and the tooling that reads its facts. It reuses
 the existing conformance proof, interface application, operation contract, receiver adaptation, and
-`InterfaceOperationCall` lowering unchanged, so HIR, MIR, ownership, evaluation, and both backends
-need no new representation. It adds no runtime dispatch, dictionary, dereference, receiver coercion,
+`InterfaceOperationCall` lowering unchanged, so HIR, MIR, ownership, and LLVM lowering need no new
+representation. It adds no runtime dispatch, dictionary, dereference, receiver coercion,
 compiler-known standard-library actor, or external dependency.

@@ -396,7 +396,7 @@ identifier.
 #### Scenario: Preserve the value of a separated literal
 
 - **WHEN** a compiled program compares `1_000` with `1000` and `1.000_5` with `1.0005`
-- **THEN** each pair is equal on every execution engine
+- **THEN** each pair is equal in native and LLVM-generated WebAssembly artifacts
 
 #### Scenario: Reject a misplaced separator
 

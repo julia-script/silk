@@ -49,24 +49,20 @@ root = "src/app/Main.silk"
 source-root = "src"
 
 [build]
-backend = "llvm"
 targets = ["host", "wasm32-unknown-unknown"]
 artifact = "executable"
 output-dir = "build"
 ```
 
-`[build]` is optional. The materialized defaults are backend `llvm`, targets `["host"]`, and output
-directory `build`, with an `executable` artifact and no native link inputs. If only
-`backend = "wasm"` is supplied, its target default is
-`["wasm32-unknown-unknown"]`. `host` resolves to the current canonical native triple; duplicate
-resolved targets are built once in first-seen order.
+`[build]` is optional. The materialized defaults are targets `["host"]` and output directory
+`build`, with an `executable` artifact and no native link inputs. `host` resolves to the current
+canonical native triple; duplicate resolved targets are built once in first-seen order.
 
 Native LLVM projects may select `shared-library` or `static-library`. Link inputs are structured
 inline tables, kept in declaration order; there is no raw linker-flag form:
 
 ```toml
 [build]
-backend = "llvm"
 targets = ["host"]
 artifact = "shared-library"
 native-link-inputs = [
@@ -91,28 +87,25 @@ exact manifest instead.
 silk check
 silk build
 silk build --release
-silk build --backend llvm --target host --target wasm32-unknown-unknown
-silk build --backend wasm --target wasm32-unknown-unknown
+silk build --target host --target wasm32-unknown-unknown
 silk run -- --literal-program-argument
 ```
 
-`--backend` replaces the manifest backend. One or more `--target` flags replace the complete
-manifest target array; they do not append to it. LLVM supports native targets and
-`wasm32-unknown-unknown`. The direct `wasm` backend supports only `wasm32-unknown-unknown`.
+One or more `--target` flags replace the complete manifest target array; they do not append to it.
+LLVM supports native targets and `wasm32-unknown-unknown`.
 
-Build preflights the entire backend/target batch, then processes it sequentially. Every target is
+Build preflights the entire target batch, then processes it sequentially. Every target is
 attempted after a valid preflight, successful sibling artifacts remain committed, and the command
-prints target outcomes followed by success/failure totals. Artifacts use backend-qualified paths:
+prints target outcomes followed by success/failure totals. Artifacts use LLVM-qualified paths:
 
 ```text
-build/<backend>/<canonical-target>/<profile>/<artifact-file>
+build/llvm/<canonical-target>/<profile>/<artifact-file>
 ```
 
-For example, the two WebAssembly implementations do not collide:
+For example:
 
 ```text
 build/llvm/wasm32-unknown-unknown/debug/hello.wasm
-build/wasm/wasm32-unknown-unknown/debug/hello.wasm
 build/llvm/aarch64-apple-darwin/release/libhello.dylib
 build/llvm/x86_64-unknown-linux-gnu/release/libhello.so
 build/llvm/aarch64-apple-darwin/release/libhello.a
@@ -127,16 +120,14 @@ arrays whose entries distinguish functions from data. Both files are regenerated
 verified backend inventory on cache hits, so cached and uncached builds produce identical bytes.
 Executables and WebAssembly modules do not produce either companion.
 
-`silk check` analyzes every resolved target in order without backend, Clang, linker, or artifact
+`silk check` analyzes every resolved target in order without Clang, linker, or artifact
 work. Diagnostics and summaries are target-qualified. `silk run` always builds exactly the host
-target and requires a backend that can produce a native executable; manifest foreign/Wasm targets
-are ignored for run. A library project is rejected rather than overridden. After a successful
-build, run returns the program's exact exit status.
+target; manifest foreign/Wasm targets are ignored for run. A library project is rejected rather
+than overridden. After a successful build, run returns the program's exact exit status.
 
 Shared options are:
 
 - `--manifest-path <path>` — select an exact manifest.
-- `--backend <llvm|wasm>` — replace the manifest backend.
 - `--target <host|canonical-target>` — repeatable; replace the manifest targets.
 - `--profile <debug|release|release-with-debug>` — select a fixed profile.
 - `--release` — shorthand for `--profile release`; conflicts with a different explicit profile.
@@ -145,7 +136,7 @@ Shared options are:
 
 `silk format` formats every exact `.silk` file beneath the project source root. Positional files and
 directories restrict the selection; `--check` reports drift without writing. Formatting does not
-accept backend, target, or profile options.
+accept target or profile options.
 
 ```bash
 silk format

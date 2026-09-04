@@ -5,9 +5,9 @@
 // searches. Nothing in the compiler knows this module exists, and a Unicode version bump is a
 // re-run of `unicode:vendor` followed by a re-run of this script.
 //
-// Byte-string literals become wasm data segments, and the wasm backend lays static data below the
-// heap table at 64 KiB, so every byte spent here is a byte a user program cannot spend on its own
-// literals. That is why the encodings below are packed rather than convenient.
+// Byte-string literals become target data, so compact encodings reduce the generated artifact and
+// the program's static memory footprint. That is why the encodings below are packed rather than
+// convenient.
 //
 // Usage:
 //   node scripts/generate-unicode-tables.mjs            # write the module

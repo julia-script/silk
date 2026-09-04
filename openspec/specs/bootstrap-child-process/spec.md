@@ -119,9 +119,9 @@ phase MAY recognize the `ChildProcess`, `OsChildProcess`, `ProcessRequest`, `Pro
 - **WHEN** a provided native implementation receives one request
 - **THEN** its source operation invokes the primitive execution boundary and preserves the service's outcome and typed failure
 
-#### Scenario: Reject the native execution on direct WebAssembly
+#### Scenario: Reject the native execution on LLVM-generated WebAssembly
 
-- **WHEN** a reachable native execution is compiled for a direct WebAssembly target
+- **WHEN** a reachable native execution is compiled for a LLVM-generated WebAssembly target
 - **THEN** target availability rejects it rather than inventing a process host import
 
 #### Scenario: Link only the reachable runtime symbols

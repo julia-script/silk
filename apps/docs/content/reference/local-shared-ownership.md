@@ -145,7 +145,7 @@ reader state. Separate control blocks may be accessed independently.
 recoverable busy result. No post-trap cleanup is promised.
 
 **Evidence:** [shared implementation](../../../../packages/compiler/stdlib/silk/shared.silk),
-[engine parity specification](../../../../openspec/changes/archive/2026-08-23-add-local-shared-engine-parity/specs/bootstrap-backend/spec.md).
+[native lifecycle coverage](../../../../packages/compiler/test/SharedStdlib.test.ts).
 
 ### SHARED-005 — Strong cycles remain allocated
 

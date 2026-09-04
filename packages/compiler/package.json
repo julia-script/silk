@@ -50,17 +50,9 @@
       "types": "./dist/Backend.d.ts",
       "import": "./dist/Backend.js"
     },
-    "./BackendRegistry": {
-      "types": "./dist/BackendRegistry.d.ts",
-      "import": "./dist/BackendRegistry.js"
-    },
     "./LlvmBackend": {
       "types": "./dist/LlvmBackend.d.ts",
       "import": "./dist/LlvmBackend.js"
-    },
-    "./BootstrapEvaluation": {
-      "types": "./dist/BootstrapEvaluation.d.ts",
-      "import": "./dist/BootstrapEvaluation.js"
     },
     "./FieldRealization": {
       "types": "./dist/FieldRealization.d.ts",
@@ -142,22 +134,6 @@
       "types": "./dist/SuspensionMode.d.ts",
       "import": "./dist/SuspensionMode.js"
     },
-    "./ChildProcess": {
-      "types": "./dist/ChildProcess.d.ts",
-      "import": "./dist/ChildProcess.js"
-    },
-    "./HostInput": {
-      "types": "./dist/HostInput.d.ts",
-      "import": "./dist/HostInput.js"
-    },
-    "./MonotonicClock": {
-      "types": "./dist/MonotonicClock.d.ts",
-      "import": "./dist/MonotonicClock.js"
-    },
-    "./RandomHost": {
-      "types": "./dist/RandomHost.d.ts",
-      "import": "./dist/RandomHost.js"
-    },
     "./HeapObservation": {
       "types": "./dist/HeapObservation.d.ts",
       "import": "./dist/HeapObservation.js"
@@ -165,14 +141,6 @@
     "./NodeHeapObservation": {
       "types": "./dist/NodeHeapObservation.d.ts",
       "import": "./dist/NodeHeapObservation.js"
-    },
-    "./StandardInput": {
-      "types": "./dist/StandardInput.d.ts",
-      "import": "./dist/StandardInput.js"
-    },
-    "./StandardStreams": {
-      "types": "./dist/StandardStreams.d.ts",
-      "import": "./dist/StandardStreams.js"
     },
     "./SourceSpan": {
       "types": "./dist/SourceSpan.d.ts",
@@ -241,10 +209,6 @@
     "./ImportPath": {
       "types": "./dist/ImportPath.d.ts",
       "import": "./dist/ImportPath.js"
-    },
-    "./OsFileSystemHost": {
-      "types": "./dist/OsFileSystemHost.d.ts",
-      "import": "./dist/OsFileSystemHost.js"
     },
     "./Layout": {
       "types": "./dist/Layout.d.ts",
@@ -390,10 +354,6 @@
       "types": "./dist/FloatingPoint.d.ts",
       "import": "./dist/FloatingPoint.js"
     },
-    "./ForeignHost": {
-      "types": "./dist/ForeignHost.d.ts",
-      "import": "./dist/ForeignHost.js"
-    },
     "./Transcendental": {
       "types": "./dist/Transcendental.d.ts",
       "import": "./dist/Transcendental.js"
@@ -437,10 +397,6 @@
     "./StaticValue": {
       "types": "./dist/StaticValue.d.ts",
       "import": "./dist/StaticValue.js"
-    },
-    "./WasmBackend": {
-      "types": "./dist/WasmBackend.d.ts",
-      "import": "./dist/WasmBackend.js"
     },
     "./FileSourceResolver": {
       "types": "./dist/FileSourceResolver.d.ts",
@@ -493,7 +449,6 @@
   },
   "scripts": {
     "build": "pnpm unicode:generate && pnpm stdlib:generate && pnpm toolchain:generate && pnpm clean && tsc -p tsconfig.json",
-    "bench:static-composition": "vitest run test/StaticCompositionCharacterization.bench.ts --maxWorkers=1",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "lexer:bench": "pnpm build && node scripts/lexer-benchmark.mjs",
@@ -517,7 +472,6 @@
   },
   "dependencies": {
     "@silklang/llvm": "workspace:*",
-    "@silklang/wasm": "workspace:*",
     "effect": "catalog:",
     "smol-toml": "^1.7.1"
   },

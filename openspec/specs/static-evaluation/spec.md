@@ -53,7 +53,7 @@ runtime reachability, or backend operations. A `static if` without an `else` SHA
 operation when its condition is false.
 
 The selected arm MAY contain ordinary runtime operations and runtime values. Such operations SHALL
-be retained rather than executed by the static evaluator. Static selection SHALL be controlled only
+be retained rather than executed by `StaticEvaluation`. Static selection SHALL be controlled only
 by explicitly static constructs; an ordinary runtime `return`, branch, or loop MUST NOT decide
 which later source is statically elaborated. `static if` SHALL be permitted only in executable
 statement or expression positions and MUST NOT conditionally introduce declarations.
@@ -162,7 +162,7 @@ Merely loading or indexing an uncalled declaration MUST NOT execute its static b
 target, generic arguments, evidence, and static argument values SHALL produce the same static result,
 diagnostics, residual program, and specialization identity across fresh processes.
 
-The evaluator SHALL enforce deterministic recursion, work, retained-value, and residual-growth
+`StaticEvaluation` SHALL enforce deterministic recursion, work, retained-value, and residual-growth
 limits. Exceeding a limit SHALL report a dedicated evaluation-limit diagnostic distinct from
 `compileError`, name the exhausted resource, and produce no partial static value or residual
 program.

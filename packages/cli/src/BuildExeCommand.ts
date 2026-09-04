@@ -1,5 +1,4 @@
 import type * as HeapObservation from '@silklang/compiler/HeapObservation'
-import * as LlvmBackend from '@silklang/compiler/LlvmBackend'
 import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
 import * as SourceEntry from '@silklang/compiler/SourceEntry'
 import * as Target from '@silklang/compiler/Target'
@@ -93,7 +92,6 @@ export const run = Effect.fn('BuildExeCommand.run')(function* (
   }
   const attempted = yield* Workflow.compile({
     entry: loaded.success,
-    backend: LlvmBackend.LlvmBackend,
     ...(options.target === undefined ? {} : { target: options.target }),
     profile: options.profile,
     artifactKind: 'NativeExecutable',

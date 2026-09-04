@@ -2,7 +2,7 @@
 //!
 //! # When to use
 //! Require [`InsecureRandom`] when a reproducible pseudorandom stream is needed. Use
-//! [`Xoshiro256StarStar`] with [`seeded`] for one stable cross-engine sequence.
+//! [`Xoshiro256StarStar`] with [`seeded`] for one stable supported-target sequence.
 //!
 //! # Details
 //! `InsecureRandom.nextU64` obtains one word from the active provider. [`nextBool`], [`below`], and [`fillBytes`]
@@ -160,4 +160,3 @@ effect fn xoshiroNext(self: &mut Xoshiro256StarStar) -> u64 {
 impl InsecureRandom for Xoshiro256StarStar {
   nextU64: Xoshiro256StarStar.xoshiroNext
 }
-

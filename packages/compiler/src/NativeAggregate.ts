@@ -317,12 +317,14 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
     case 'EffectCleanup':
       for (const slot of plan.slots) {
         if (!CleanupPlan.hasEffect(slot.cleanup)) continue
-        yield* dropThroughPlan(
-          context,
-          slot.cleanup,
-          Object.freeze(values.slice(slot.laneOffset, slot.laneOffset + slot.laneCount)),
-          `${tag}_effect${slot.ordinal}`,
+        const selected = Object.freeze(
+          values.slice(slot.laneOffset, slot.laneOffset + slot.laneCount),
         )
+        if (selected.length !== slot.laneCount)
+          throw new RangeError(
+            `LLVM Effect cleanup ${tag} lost slot ${slot.ordinal} lanes ${slot.laneOffset}+${slot.laneCount} from ${values.length} value(s)`,
+          )
+        yield* dropThroughPlan(context, slot.cleanup, selected, `${tag}_effect${slot.ordinal}`)
       }
       return
     case 'EffectCompositeCleanup': {
@@ -485,7 +487,9 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
         const offset = LayoutVerify.laneOffset(program.layout, plan.type, lane.path)
         const stored = values.at(ordinal)
         if (offset === undefined || stored === undefined)
-          throw new RangeError('LLVM hook cleanup lost a lane')
+          throw new RangeError(
+            `LLVM hook cleanup ${tag} lost lane ${ordinal}/${lanes.length} for ${SilkType.encode(plan.type)} from ${values.length} value(s)`,
+          )
         yield* FunctionBody.store(
           body,
           stored,

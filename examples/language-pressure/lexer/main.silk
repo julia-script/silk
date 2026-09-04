@@ -745,7 +745,7 @@ effect fn renderDiagnostics(
 }
 
 // The selected Writer folds each accepted byte, so a wrong line number remains a wrong answer on
-// every engine without materializing the rendered message.
+// every supported target without materializing the rendered message.
 effect fn digestVectors(
   source: &[u8],
   tokens: &Vector<Token>,

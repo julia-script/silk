@@ -3,7 +3,7 @@
 ## Purpose
 
 MIR: the monomorphic, backend-neutral basic-block control-flow graph over logical Silk types that
-every backend and the interpreter consume — its data model, structural invariants and verifier,
+the LLVM backend consumes — its data model, structural invariants and verifier,
 the compiler-owned target/layout plan, and the deterministic textual encoder, stabilized against
 hand-built samples before lowering exists.
 
@@ -15,8 +15,8 @@ A MIR module SHALL retain an explicit entry descriptor independent of function o
 entry descriptor SHALL identify the selected `i32` function. An effectful entry descriptor SHALL
 identify the selected `()` Effect runner, its normalized failures, canonical report identities,
 payload cleanup plans, and generated closing adapter. The verifier SHALL reject a missing,
-ambiguous, signature-incompatible, open, or internally inconsistent descriptor before evaluation
-or backend emission.
+ambiguous, signature-incompatible, open, or internally inconsistent descriptor before backend
+emission.
 
 #### Scenario: Encode an ordinary entry explicitly
 
@@ -50,7 +50,7 @@ MIR SHALL carry canonical integer logical types, exact constants, conversions, a
 #### Scenario: Reject a malformed conversion
 
 - **WHEN** a conversion operand disagrees with its declared source type
-- **THEN** verification reports the mismatch before evaluation or emission
+- **THEN** verification reports the mismatch before emission
 
 ### Requirement: MIR represents unit and bottom without payloads
 
@@ -88,7 +88,7 @@ structure from flattened control flow.
 #### Scenario: Reject an arbitrary cycle
 
 - **WHEN** a hand-built MIR region directly or indirectly lists itself as a child or continuation
-- **THEN** verification reports the cycle deterministically before evaluation or emission
+- **THEN** verification reports the cycle deterministically before emission
 
 ### Requirement: Every operation carries provenance
 
@@ -286,7 +286,7 @@ ordered deterministic data.
 #### Scenario: Reject a mismatched construction field
 
 - **WHEN** a construction operand names a field from another nominal type
-- **THEN** verification reports the canonical field/type mismatch before evaluation or emission
+- **THEN** verification reports the canonical field/type mismatch before emission
 
 #### Scenario: Reject a missing aggregate ABI shape
 
@@ -339,7 +339,7 @@ provenance in stable order.
 #### Scenario: Reject a malformed construction
 
 - **WHEN** an `Array<i32, 3>` construction carries two operands
-- **THEN** verification reports the exact completeness violation before evaluation or emission
+- **THEN** verification reports the exact completeness violation before emission
 
 ### Requirement: MIR writes replace typed places explicitly
 
@@ -419,7 +419,7 @@ conversions that would narrow.
 #### Scenario: Reject an incomplete widening map
 
 - **WHEN** malformed MIR omits or duplicates one source member mapping
-- **THEN** verification rejects the conversion before evaluation or backend emission
+- **THEN** verification rejects the conversion before backend emission
 
 ### Requirement: Union MIR encoding is deterministic
 
@@ -457,7 +457,7 @@ layout, whose member cases are invalid or non-exhaustive, whose source decision 
 the semantic coverage facts, whose pattern field or binding types disagree, whose guard is not
 `bool`, whose access mode violates ownership metadata, or whose arm result and cleanup outcomes do
 not reach the declared join consistently. Violations SHALL be deterministic data produced before
-evaluation or backend emission.
+backend emission.
 
 #### Scenario: Reject a missing member case
 
@@ -496,7 +496,7 @@ reject open type parameters or missing concrete layout entries.
 #### Scenario: Reject open generic MIR
 
 - **WHEN** a malformed MIR function still contains type parameter `T`
-- **THEN** verification rejects it before evaluation or backend emission
+- **THEN** verification rejects it before backend emission
 
 ### Requirement: MIR represents Effect and owned allocation in the structured DAG
 
@@ -529,7 +529,7 @@ compiler representation SHALL remain a DAG.
 #### Scenario: Reject a forged failure tag
 
 - **WHEN** malformed MIR associates a payload with another nominal member's tag
-- **THEN** verification rejects it before evaluator or backend execution
+- **THEN** verification rejects it before backend emission
 
 ### Requirement: MIR represents slice loans in the structured control DAG
 
@@ -578,7 +578,7 @@ commit only after displaced-value cleanup.
 #### Scenario: Reject mismatched slice bounds
 
 - **WHEN** malformed MIR attempts to check against one slice but address through another slice or a fixed constant
-- **THEN** MIR verification reports the inconsistency before evaluation or backend emission
+- **THEN** MIR verification reports the inconsistency before backend emission
 
 ### Requirement: MIR verifies loan conflicts and cleanup order
 
@@ -602,7 +602,7 @@ trap behavior. The structured control representation SHALL remain a DAG.
 #### Scenario: Reject a mismatched word lane
 
 - **WHEN** malformed native MIR assigns a 32-bit lane to `usize`
-- **THEN** verification rejects it before evaluation or backend emission
+- **THEN** verification rejects it before backend emission
 
 ### Requirement: MIR represents callable environments in the structured DAG
 
@@ -622,7 +622,7 @@ store captures in construction order and invoke targets in parameter order.
 #### Scenario: Verify a consuming environment
 
 - **WHEN** malformed MIR invokes a take-once environment twice
-- **THEN** verification rejects the second application before evaluation or backend emission
+- **THEN** verification rejects the second application before backend emission
 
 #### Scenario: Lower staged positional captures
 
@@ -667,7 +667,7 @@ inside an unsafe buffer remains an unsafe program invariant rather than a verifi
 #### Scenario: Reject forged reclaim authority
 
 - **WHEN** malformed MIR attaches a release operation to a different allocation identity or inactive ticket
-- **THEN** verification rejects the program before evaluation or backend emission
+- **THEN** verification rejects the program before backend emission
 
 #### Scenario: Preserve a shared structural-union read
 
@@ -677,7 +677,7 @@ inside an unsafe buffer remains an unsafe program invariant rather than a verifi
 #### Scenario: Reject a structural-union read with a move-only member
 
 - **WHEN** malformed MIR requests a Slot or shared raw-buffer copy for a union containing one non-Copy member
-- **THEN** verification rejects the operation before evaluation or backend emission
+- **THEN** verification rejects the operation before backend emission
 
 ### Requirement: MIR represents floating values and operations
 
@@ -721,7 +721,7 @@ a static byte view.
 #### Scenario: Reject an incompatible selector root
 
 - **WHEN** malformed MIR applies a static-byte selector to a scalar or aggregate root
-- **THEN** verification rejects the module before evaluation or backend emission
+- **THEN** verification rejects the module before backend emission
 
 ### Requirement: MIR represents floating transcendental operations
 
@@ -738,7 +738,7 @@ operation and width.
 #### Scenario: Reject a mismatched cosine
 
 - **WHEN** malformed MIR assigns an `f32` cosine result to an `f64` destination
-- **THEN** verification rejects the function before evaluation or backend emission
+- **THEN** verification rejects the function before backend emission
 
 ### Requirement: MIR lowers composed Effect recipes completely
 
@@ -813,15 +813,15 @@ compiler facts rather than pipe syntax, declaration names, module identity, or s
 
 ### Requirement: Static Effect normalization is deterministic and verifiable
 
-The normalization SHALL run once on shared target-aware MIR before evaluation or either backend.
+The normalization SHALL run once on shared target-aware MIR before LLVM lowering.
 MIR SHALL record deterministic accepted and rejected verdicts with source provenance. The verifier
 MUST reject dangling verdict identities, inconsistent direct-run capture facts, and an accepted
 candidate whose synchronous premise is not proven. Repeating normalization MUST make no edits.
 
 #### Scenario: Normalize once for all consumers
 
-- **WHEN** one target-aware MIR program is evaluated or emitted by LLVM or direct Wasm
-- **THEN** every consumer observes the same normalized operations and verdicts
+- **WHEN** one target-aware MIR program is emitted by LLVM for native or WebAssembly targets
+- **THEN** each artifact observes the same normalized operations and verdicts
 
 #### Scenario: Repeat normalization
 
@@ -862,7 +862,7 @@ unsafe obligation.
 #### Scenario: Reject a forged safe string
 
 - **WHEN** MIR attempts to construct `string` from a byte view without the accepted checked or unsafe formation path
-- **THEN** verification rejects the program before evaluation or backend emission
+- **THEN** verification rejects the program before backend emission
 
 #### Scenario: End an owned-string view loan
 
@@ -890,7 +890,7 @@ control. Its Complete paths SHALL enter no resume state. Its Transfer path SHALL
 incoming child, origin, and typed-outcome identity and SHALL transition the current invocation into
 the exact resume state needed after the child. Repeated transfers by one invocation SHALL reuse its
 frame rather than creating separately owned continuation records. Reachable provisional control
-MUST be finalized before evaluation or backend emission.
+MUST be finalized before backend emission.
 
 #### Scenario: Retain state after a suspended child
 
@@ -933,7 +933,7 @@ any suspension path that introduces source allocator access or typed storage fai
 #### Scenario: Reject a missing live owner
 
 - **WHEN** hand-built MIR suspends while an affine local remains needed after resumption but omits that local from its frame state
-- **THEN** verification reports the missing ownership before evaluation or backend emission
+- **THEN** verification reports the missing ownership before backend emission
 
 #### Scenario: Reject suspension machinery without suspension
 
@@ -943,12 +943,12 @@ any suspension path that introduces source allocator access or typed storage fai
 #### Scenario: Reject an ordinary run that originates transfer
 
 - **WHEN** hand-built MIR gives `RunSuspendableEffect` a fresh deferred child or transfer identity instead of relaying one produced by `SuspendEffect`
-- **THEN** verification rejects the invalid origin before evaluation or backend emission
+- **THEN** verification rejects the invalid origin before backend emission
 
 #### Scenario: Reject storage channels in suspension MIR
 
 - **WHEN** hand-built suspension MIR adds an allocator requirement or an `OutOfMemoryError` outcome solely for coroutine-frame storage
-- **THEN** verification rejects the contract before evaluation or backend emission
+- **THEN** verification rejects the contract before backend emission
 
 ### Requirement: MIR receives only concrete row-contract instances
 
@@ -1033,7 +1033,7 @@ member tests, locals, access, coverage, or retained-borrow state.
 MIR lowering SHALL resolve marked operator evidence to the same sealed intrinsic or source witness
 used by ordinary interface specialization. Short-circuit lowering SHALL evaluate the left operand
 first, enter the right region only when required, and join one Boolean result with path-correct
-cleanup and typed Effect behavior. Evaluation, LLVM, and Wasm SHALL consume that same verified
+cleanup and typed Effect behavior. LLVM lowering SHALL consume that same verified
 structure.
 
 #### Scenario: Lower a source operator witness
@@ -1044,14 +1044,14 @@ structure.
 #### Scenario: Skip an effectful right region
 
 - **WHEN** the left Boolean decides a short-circuit expression
-- **THEN** MIR execution skips every operation and cleanup local to the right region while producing the decided Boolean
+- **THEN** MIR control flow bypasses every operation and cleanup local to the right region while producing the decided Boolean
 
-#### Scenario: Emit engines consistently
+#### Scenario: Emit real artifacts consistently
 
-- **WHEN** a valid operator and short-circuit corpus is evaluated and emitted for native and Wasm targets
-- **THEN** every engine agrees on results, skipped work, traps, and cleanup order
+- **WHEN** a valid operator and short-circuit corpus is emitted for native and LLVM-to-Wasm targets
+- **THEN** structural MIR and pinned artifact outcomes agree on results, skipped work, traps, and cleanup order
 
-### Requirement: Local shared MIR is verified before every execution engine
+### Requirement: Local shared MIR is verified before LLVM emission
 
 Target-neutral MIR SHALL represent local-shared layout planning, initialization, clone, callback
 access, and opaque-core drop with the canonical core and element types, selected-target layout
@@ -1062,7 +1062,7 @@ names, raw addresses, backend field offsets, allocator implementations, or confl
 MIR verification SHALL reject mismatched layout provenance, reused or unconsumed initialization
 inputs, unavailable core or element types, malformed callback modes or result types, and any access
 result or executable state that retains the callback-scoped loan. Each rejection SHALL retain a
-stable diagnostic identity and the causative source provenance. No evaluator or backend SHALL enter
+stable diagnostic identity and the causative source provenance. No backend SHALL enter
 and no partial executable artifact SHALL exist when verification rejects the program.
 
 #### Scenario: Verify a complete lifecycle program
@@ -1078,7 +1078,7 @@ and no partial executable artifact SHALL exist when verification rejects the pro
 #### Scenario: Reject malformed callback access
 
 - **WHEN** callback modes or result types are incompatible or a result or executable state retains the restricted access loan
-- **THEN** verification reports the stable diagnostic with access provenance before evaluation or backend lowering
+- **THEN** verification reports the stable diagnostic with access provenance before backend lowering
 
 #### Scenario: Inspect target-neutral local shared MIR
 
@@ -1101,7 +1101,7 @@ match operations SHALL remain target-neutral.
 #### Scenario: Reject an undeclared MIR discriminant
 
 - **WHEN** malformed MIR associates an enum constant with a backing value no member declares
-- **THEN** MIR verification rejects the program before evaluation or backend lowering
+- **THEN** MIR verification rejects the program before backend lowering
 
 ### Requirement: MIR verifies monomorphic nominal union operations
 

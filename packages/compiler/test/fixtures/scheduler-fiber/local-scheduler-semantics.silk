@@ -4,6 +4,7 @@ import silk.fiber { Fiber, Cancelled, Failure, Outcome, Success }
 import silk.local_scheduler { LocalScheduler, StalledError }
 import silk.monotonic_clock { MonotonicClock }
 import silk.scheduler { Scheduler, TaskIdExhaustedError }
+import silk.shared { Shared }
 import silk.system_clock { SystemClock }
 import silk.system_clock { Instant }
 
@@ -29,118 +30,162 @@ impl MonotonicClock for ParentClock {
 
 struct ChildProblem { code: i32 }
 
-fn firstForkReturned() -> () { return () }
-fn firstSiblingActivated() -> () { return () }
-fn secondForkReturned() -> () { return () }
-fn secondSiblingActivated() -> () { return () }
-fn thirdForkReturned() -> () { return () }
-fn thirdSiblingActivated() -> () { return () }
-fn fifoRootTerminating() -> () { return () }
+struct Trace { next: i32 valid: bool }
 
-fn rootBeforeYield() -> () { return () }
-fn yieldingChildStarted() -> () { return () }
-fn rootBetweenYields() -> () { return () }
-fn yieldingChildResumedOnce() -> () { return () }
-fn rootAfterYields() -> () { return () }
-fn yieldingChildResumedTwice() -> () { return () }
-fn yieldingChildJoined() -> () { return () }
+fn record(trace: &mut Trace, expected: i32) -> i32 {
+  if trace.next != expected { trace.valid = false }
+  trace.next = trace.next + 1
+  return 0
+}
 
-fn completedChildStarted() -> () { return () }
-fn beforeCompletedJoin() -> () { return () }
-fn afterCompletedJoin() -> () { return () }
+fn mark(trace: &Shared<Trace>, expected: i32) -> () {
+  let changed = Shared.withMut<Trace, i32>(trace, record(expected))
+  return ()
+}
 
-fn nestedStarted() -> () { return () }
-fn nestedForkReturned() -> () { return () }
-fn nestedLeafStarted() -> () { return () }
-fn nestedLeafJoined() -> () { return () }
-fn nestedFailureObserved() -> () { return () }
-fn cancelledChildActivated() -> () { return () }
-fn cancelledOutcomeObserved() -> () { return () }
+fn firstForkReturned(trace: &Shared<Trace>) -> () { return mark(trace, 1) }
+fn firstSiblingActivated(trace: &Shared<Trace>) -> () { return mark(trace, 2) }
+fn secondForkReturned(trace: &Shared<Trace>) -> () { return mark(trace, 3) }
+fn secondSiblingActivated(trace: &Shared<Trace>) -> () { return mark(trace, 4) }
+fn thirdForkReturned(trace: &Shared<Trace>) -> () { return mark(trace, 5) }
+fn thirdSiblingActivated(trace: &Shared<Trace>) -> () { return mark(trace, 6) }
+fn fifoRootTerminating(trace: &Shared<Trace>) -> () { return mark(trace, 7) }
 
-effect fn firstSibling() -> i32 {
-  firstSiblingActivated()
+fn rootBeforeYield(trace: &Shared<Trace>) -> () { return mark(trace, 8) }
+fn yieldingChildStarted(trace: &Shared<Trace>) -> () { return mark(trace, 9) }
+fn rootBetweenYields(trace: &Shared<Trace>) -> () { return mark(trace, 10) }
+fn yieldingChildResumedOnce(trace: &Shared<Trace>) -> () { return mark(trace, 11) }
+fn rootAfterYields(trace: &Shared<Trace>) -> () { return mark(trace, 12) }
+fn yieldingChildResumedTwice(trace: &Shared<Trace>) -> () { return mark(trace, 13) }
+fn yieldingChildJoined(trace: &Shared<Trace>) -> () { return mark(trace, 14) }
+
+fn completedChildStarted(trace: &Shared<Trace>) -> () { return mark(trace, 15) }
+fn beforeCompletedJoin(trace: &Shared<Trace>) -> () { return mark(trace, 16) }
+fn afterCompletedJoin(trace: &Shared<Trace>) -> () { return mark(trace, 17) }
+
+fn nestedStarted(trace: &Shared<Trace>) -> () { return mark(trace, 18) }
+fn nestedForkReturned(trace: &Shared<Trace>) -> () { return mark(trace, 19) }
+fn nestedLeafStarted(trace: &Shared<Trace>) -> () { return mark(trace, 20) }
+fn nestedLeafJoined(trace: &Shared<Trace>) -> () { return mark(trace, 21) }
+fn nestedFailureObserved(trace: &Shared<Trace>) -> () { return mark(trace, 22) }
+fn cancelledChildActivated(trace: &Shared<Trace>) -> () {
+  traceFailure(trace)
+  return ()
+}
+fn cancelledOutcomeObserved(trace: &Shared<Trace>) -> () { return mark(trace, 23) }
+
+fn traceFailure(trace: &Shared<Trace>) -> () {
+  let changed = Shared.withMut<Trace, i32>(trace, invalidate)
+  return ()
+}
+
+fn invalidate(trace: &mut Trace) -> i32 {
+  trace.valid = false
+  return 0
+}
+
+fn traceAccepted(trace: &Trace) -> bool { return trace.valid && trace.next == 24 }
+
+effect fn firstSibling(trace: Shared<Trace>) -> i32 {
+  firstSiblingActivated(&trace)
+  drop trace
   return 1
 }
 
-effect fn secondSibling() -> i32 {
-  secondSiblingActivated()
+effect fn secondSibling(trace: Shared<Trace>) -> i32 {
+  secondSiblingActivated(&trace)
+  drop trace
   return 2
 }
 
-effect fn thirdSibling() -> i32 {
-  thirdSiblingActivated()
+effect fn thirdSibling(trace: Shared<Trace>) -> i32 {
+  thirdSiblingActivated(&trace)
+  drop trace
   return 3
 }
 
-effect fn fifoRoot() -> i32
+effect fn fifoRoot(trace: Shared<Trace>) -> i32
 ! OutOfMemoryError | TaskIdExhaustedError
 ? &mut Scheduler | &mut MonotonicClock {
-  let first = run Fiber.forkChild<i32, never>(firstSibling())
+  let firstTrace = Shared.clone<Trace>(&trace)
+  let first = run Fiber.forkChild<i32, never>(firstSibling(move firstTrace))
   drop first
-  firstForkReturned()
-  let second = run Fiber.forkChild<i32, never>(secondSibling())
+  firstForkReturned(&trace)
+  let secondTrace = Shared.clone<Trace>(&trace)
+  let second = run Fiber.forkChild<i32, never>(secondSibling(move secondTrace))
   drop second
-  secondForkReturned()
-  let third = run Fiber.forkChild<i32, never>(thirdSibling())
+  secondForkReturned(&trace)
+  let thirdTrace = Shared.clone<Trace>(&trace)
+  let third = run Fiber.forkChild<i32, never>(thirdSibling(move thirdTrace))
   drop third
-  thirdForkReturned()
+  thirdForkReturned(&trace)
   run Fiber.yieldNow()
-  fifoRootTerminating()
+  fifoRootTerminating(&trace)
+  drop trace
   return 6
 }
 
-effect fn yieldingChild() -> i32 {
-  yieldingChildStarted()
+effect fn yieldingChild(trace: Shared<Trace>) -> i32 {
+  yieldingChildStarted(&trace)
   run Fiber.yieldNow()
-  yieldingChildResumedOnce()
+  yieldingChildResumedOnce(&trace)
   run Fiber.yieldNow()
-  yieldingChildResumedTwice()
+  yieldingChildResumedTwice(&trace)
+  drop trace
   return 20
 }
 
-effect fn yieldingRoot() -> i32
+effect fn yieldingRoot(trace: Shared<Trace>) -> i32
 ! OutOfMemoryError | TaskIdExhaustedError | Cancelled
 ? &mut Scheduler | &mut MonotonicClock {
-  let child = run Fiber.forkChild<i32, never>(yieldingChild())
-  rootBeforeYield()
+  let childTrace = Shared.clone<Trace>(&trace)
+  let child = run Fiber.forkChild<i32, never>(yieldingChild(move childTrace))
+  rootBeforeYield(&trace)
   run Fiber.yieldNow()
-  rootBetweenYields()
+  rootBetweenYields(&trace)
   run Fiber.yieldNow()
-  rootAfterYields()
+  rootAfterYields(&trace)
   let value = run Fiber.join<i32, never>(move child)
-  yieldingChildJoined()
+  yieldingChildJoined(&trace)
+  drop trace
   return value
 }
 
-effect fn completedChild() -> i32 {
-  completedChildStarted()
+effect fn completedChild(trace: Shared<Trace>) -> i32 {
+  completedChildStarted(&trace)
+  drop trace
   return 9
 }
 
-effect fn completionBeforeJoinRoot() -> i32
+effect fn completionBeforeJoinRoot(trace: Shared<Trace>) -> i32
 ! OutOfMemoryError | TaskIdExhaustedError | Cancelled
 ? &mut Scheduler | &mut MonotonicClock {
-  let child = run Fiber.forkChild<i32, never>(completedChild())
+  let childTrace = Shared.clone<Trace>(&trace)
+  let child = run Fiber.forkChild<i32, never>(completedChild(move childTrace))
   run Fiber.yieldNow()
-  beforeCompletedJoin()
+  beforeCompletedJoin(&trace)
   let value = run Fiber.join<i32, never>(move child)
-  afterCompletedJoin()
+  afterCompletedJoin(&trace)
+  drop trace
   return value
 }
 
-effect fn nestedLeaf() -> i32 {
-  nestedLeafStarted()
+effect fn nestedLeaf(trace: Shared<Trace>) -> i32 {
+  nestedLeafStarted(&trace)
+  drop trace
   return 7
 }
 
-effect fn nestedFailure() -> i32
+effect fn nestedFailure(trace: Shared<Trace>) -> i32
 ! ChildProblem | OutOfMemoryError | TaskIdExhaustedError | Cancelled
 ? &mut Scheduler | &mut MonotonicClock {
-  nestedStarted()
-  let child = run Fiber.forkChild<i32, never>(nestedLeaf())
-  nestedForkReturned()
+  nestedStarted(&trace)
+  let childTrace = Shared.clone<Trace>(&trace)
+  let child = run Fiber.forkChild<i32, never>(nestedLeaf(move childTrace))
+  nestedForkReturned(&trace)
   let value = run Fiber.join<i32, never>(move child)
-  nestedLeafJoined()
+  nestedLeafJoined(&trace)
+  drop trace
   fail ChildProblem { code: value }
 }
 
@@ -149,30 +194,35 @@ effect fn recoverNestedFailure(
     | OutOfMemoryError
     | TaskIdExhaustedError
     | Cancelled,
+  trace: Shared<Trace>,
 ) -> i32 {
   return match move error {
-    ChildProblem { code } => observeNestedFailure(code)
-    OutOfMemoryError {} => -1
-    TaskIdExhaustedError {} => -2
-    Cancelled {} => -3
+    ChildProblem { code } => observeNestedFailure(code, move trace)
+    OutOfMemoryError {} => dropTraceAndReturn(move trace, -1)
+    TaskIdExhaustedError {} => dropTraceAndReturn(move trace, -2)
+    Cancelled {} => dropTraceAndReturn(move trace, -3)
   }
 }
 
-fn observeNestedFailure(code: i32) -> i32 {
-  nestedFailureObserved()
+fn dropTraceAndReturn(trace: Shared<Trace>, value: i32) -> i32 { drop trace return value }
+
+fn observeNestedFailure(code: i32, trace: Shared<Trace>) -> i32 {
+  nestedFailureObserved(&trace)
+  drop trace
   return code
 }
 
-effect fn nestedRoot() -> i32
+effect fn nestedRoot(trace: Shared<Trace>) -> i32
 ! OutOfMemoryError | TaskIdExhaustedError
 ? &mut Scheduler | &mut MonotonicClock {
+  let failureTrace = Shared.clone<Trace>(&trace)
   let child = run Fiber.forkChild<
     i32,
     ChildProblem
       | OutOfMemoryError
       | TaskIdExhaustedError
       | Cancelled,
-  >(nestedFailure())
+  >(nestedFailure(move failureTrace))
   return run Effect.catchAll(
     Fiber.join<
       i32,
@@ -181,51 +231,80 @@ effect fn nestedRoot() -> i32
         | TaskIdExhaustedError
         | Cancelled,
     >(move child),
-    recoverNestedFailure,
+    recoverNestedFailure(move trace),
   )
 }
 
-effect fn cancelledChild() -> i32 {
-  cancelledChildActivated()
+effect fn cancelledChild(trace: Shared<Trace>) -> i32 {
+  cancelledChildActivated(&trace)
+  drop trace
   return 5
 }
 
-effect fn escapeCancelledChild() -> Fiber<i32, never>
+effect fn escapeCancelledChild(trace: Shared<Trace>) -> Fiber<i32, never>
 ! OutOfMemoryError | TaskIdExhaustedError
 ? &mut Scheduler | &mut MonotonicClock {
-  return run Fiber.forkChild<i32, never>(cancelledChild())
+  return run Fiber.forkChild<i32, never>(cancelledChild(move trace))
 }
 
-fn isCancelled(outcome: Outcome<i32, never>) -> bool {
+fn isCancelled(outcome: Outcome<i32, never>, trace: Shared<Trace>) -> bool {
   let Outcome<i32, never> { value } = move outcome
   return match move value {
-    Success<i32> { value: success } => false
+    Success<i32> { value: success } => dropTraceAndFalse(move trace)
     Failure<never> { error } => move error
-    Cancelled {} => recordCancellation()
+    Cancelled {} => recordCancellation(move trace)
   }
 }
 
-fn recordCancellation() -> bool {
-  cancelledOutcomeObserved()
+fn dropTraceAndFalse(trace: Shared<Trace>) -> bool { drop trace return false }
+
+fn recordCancellation(trace: Shared<Trace>) -> bool {
+  cancelledOutcomeObserved(&trace)
+  drop trace
   return true
 }
 
-effect fn observeCancelled(fiber: Fiber<i32, never>) -> bool
+effect fn observeCancelled(fiber: Fiber<i32, never>, trace: Shared<Trace>) -> bool
 ? &mut Scheduler | &mut MonotonicClock {
-  return isCancelled(run Fiber.await<i32, never>(move fiber))
+  return isCancelled(run Fiber.await<i32, never>(move fiber), move trace)
 }
 
 effect fn scenario() -> i32
 ! OutOfMemoryError | TaskIdExhaustedError | Cancelled | StalledError
 ? &mut MonotonicClock {
   let mut scheduler = LocalScheduler.make()
-  let fifo = run LocalScheduler.execute(&mut scheduler, fifoRoot())
-  let yielded = run LocalScheduler.execute(&mut scheduler, yieldingRoot())
-  let completed = run LocalScheduler.execute(&mut scheduler, completionBeforeJoinRoot())
-  let nested = run LocalScheduler.execute(&mut scheduler, nestedRoot())
-  let escaped = run LocalScheduler.execute(&mut scheduler, escapeCancelledChild())
-  let cancelled = run LocalScheduler.execute(&mut scheduler, observeCancelled(move escaped))
-  if fifo == 6 && yielded == 20 && completed == 9 && nested == 7 && cancelled { return 42 }
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let trace = run Shared.make<Trace>(Trace { next: 1, valid: true })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let fifoTrace = Shared.clone<Trace>(&trace)
+  let fifo = run LocalScheduler.execute(&mut scheduler, fifoRoot(move fifoTrace))
+  let yieldingTrace = Shared.clone<Trace>(&trace)
+  let yielded = run LocalScheduler.execute(&mut scheduler, yieldingRoot(move yieldingTrace))
+  let completedTrace = Shared.clone<Trace>(&trace)
+  let completed = run LocalScheduler.execute(
+    &mut scheduler,
+    completionBeforeJoinRoot(move completedTrace),
+  )
+  let nestedTrace = Shared.clone<Trace>(&trace)
+  let nested = run LocalScheduler.execute(&mut scheduler, nestedRoot(move nestedTrace))
+  let cancelledTrace = Shared.clone<Trace>(&trace)
+  let escaped = run LocalScheduler.execute(
+    &mut scheduler,
+    escapeCancelledChild(move cancelledTrace),
+  )
+  let observedTrace = Shared.clone<Trace>(&trace)
+  let cancelled = run LocalScheduler.execute(
+    &mut scheduler,
+    observeCancelled(move escaped, move observedTrace),
+  )
+  let accepted = Shared.with<Trace, bool>(&trace, traceAccepted)
+  drop trace
+  if fifo == 6
+    && yielded == 20
+    && completed == 9
+    && nested == 7
+    && cancelled
+    && accepted { return 42 }
   return -42
 }
 

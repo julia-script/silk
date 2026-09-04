@@ -1,6 +1,5 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import type * as Mir from '../src/Mir.js'
@@ -14,8 +13,8 @@ import type * as Mir from '../src/Mir.js'
  * catalogue of operations the compiler provides, and in the MIR of a program that really uses a map.
  *
  * The catalogue check is the wider of the two. An engine can only gain a primitive by an intrinsic
- * being declared, and semantic analysis, the HIR, the MIR, the evaluator, the native backend and the
- * WebAssembly backend all draw from that one catalogue — so a catalogue with no hash in it is six
+ * being declared, and semantic analysis, HIR, MIR, and LLVM lowering all draw from that one
+ * catalogue — so a catalogue with no hash in it is several
  * statements at once, and it would fail on the first commit that added one anywhere.
  */
 
@@ -74,38 +73,6 @@ const operationsOf = (module: Mir.Module): ReadonlyArray<Mir.Operation> =>
 /** A name that would betray a hash operation whatever it was called. */
 const hashing = /hash|digest|fnv|murmur|siphash|checksum|crc/i
 
-it.effect('lowers a HashMap program to a MIR that names no hash operation', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* analyzed('hashed-privilege/map', usingAMap)
-    assert.deepEqual(messages(snapshot), [])
-
-    // The program really runs, so the MIR examined below is the MIR of a working map rather than of
-    // something that happened to lower.
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(
-      evaluated._tag,
-      'Completed',
-      Json.stringify(evaluated, (_, value) =>
-        typeof value === 'bigint' ? value.toString() : value,
-      ),
-    )
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
-
-    const mir = Analysis.mirOf(snapshot)
-    assert.strictEqual(mir._tag, 'Available')
-    if (mir._tag !== 'Available') return
-
-    const operations = operationsOf(mir.value)
-    assert.isAbove(operations.length, 0, 'the map lowered to something')
-    const kinds = [...new Set(operations.map((operation) => operation._tag))].sort()
-    assert.deepEqual(
-      kinds.filter((kind) => hashing.test(kind)),
-      [],
-      `MIR operations used: ${kinds.join(', ')}`,
-    )
-  }),
-)
-
 it.effect('computes every hash as an ordinary call to a witness’s own Silk function', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyzed('hashed-privilege/map', usingAMap)
@@ -138,7 +105,7 @@ it.effect('computes every hash as an ordinary call to a witness’s own Silk fun
 it('provides no hash operation to any engine', () => {
   // Every intrinsic the compiler declares, by the spelling a program would write. An engine cannot
   // implement an operation the catalogue does not name, so this one assertion covers analysis, the
-  // HIR, the MIR, the evaluator, and both backends.
+  // HIR, MIR, and LLVM lowering.
   const spellings = Intrinsic.all().flatMap((actor) =>
     actor.operations.map((operation) => `${actor.spelling}.${operation.spelling}`),
   )
@@ -148,45 +115,3 @@ it('provides no hash operation to any engine', () => {
     [],
   )
 })
-
-it.effect('treats HashKey as an ordinary interface rather than by its spelling', () =>
-  Effect.gen(function* () {
-    // An interface of the same two operations, declared by a program under a name nothing could
-    // recognize, behaves exactly as the standard library's does. If any phase special-cased the
-    // spelling `HashKey`, this program and the one above would not agree.
-    const snapshot = yield* analyzed(
-      'hashed-privilege/renamed',
-      `import silk.hash { Hash }
-import silk.hash { HashKey }
-import silk.u64 as u64
-import silk.hash { Hash }
-import silk.hash { HashSeed }
-
-interface Whatever {
-  fn equals(left: &Self, right: &Self) -> bool
-  fn hash(value: &Self, seed: &HashSeed) -> u64
-}
-
-struct Tag { value: u64 }
-
-fn tagEquals(left: &Tag, right: &Tag) -> bool { return left.value == right.value }
-fn tagHash(value: &Tag, seed: &HashSeed) -> u64 { return Hash.mix(seed, value.value) }
-
-impl Whatever for Tag { equals: Tag.tagEquals hash: Tag.tagHash }
-
-fn hashOf<T: Whatever>(value: T, seed: HashSeed) -> u64 { return Whatever.hash(&value, &seed) }
-
-pub fn main() -> i32 {
-  let seed = Hash.seed(12345)
-  let mine = hashOf<Tag>(Tag { value: 20 }, Hash.seed(12345))
-  let stock = Hash.mix(&seed, u64.toU64(20))
-  if mine != stock { return 1 }
-  return 42
-}`,
-    )
-    assert.deepEqual(messages(snapshot), [])
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
-  }),
-)

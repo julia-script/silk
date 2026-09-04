@@ -24,9 +24,8 @@ analysis, and shares a span cursor with the editor: selecting source tints the r
 and clicking a row reveals its span (opening the owning module's file when it differs).
 
 All projection happens in the language server (`silk/inspectorView`); the panel renders rows and
-nothing else. Evaluation is explicit — the run button on the evaluation view — and is cleared by
-the next edit. Views that need a runtime realization (layout, MIR, backend, toolchain) are rooted
-at the active file.
+nothing else. Inspection is static and never executes the active program. Views that need target
+realization (layout, MIR, backend, toolchain) are rooted at the active file.
 
 ## Which workflow?
 

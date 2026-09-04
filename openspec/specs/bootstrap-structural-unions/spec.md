@@ -136,7 +136,7 @@ as union members, and cleanup SHALL act on exactly the active payload once.
 #### Scenario: Clean the active ordinary member
 
 - **WHEN** a union holding a droppable non-nominal member leaves scope
-- **THEN** every engine cleans exactly that active payload once
+- **THEN** every supported target cleans exactly that active payload once
 
 ### Requirement: Pattern selection uses exact normalized union members
 

@@ -10,7 +10,6 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
  */
 
 import type * as Backend from './Backend.js'
-import type * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import type * as CleanupPlan from './CleanupPlan.js'
 import type * as Elaboration from './Elaboration.js'
 import type { RowModel, Span } from './InspectorRow.js'
@@ -1175,416 +1174,7 @@ export const symbolRows = (
   }))
 
 /**
- * A traced value is no longer always a scalar: constructing a struct binds an aggregate. An
- * aggregate renders as its type plus lane values, recursively, so `Pair { 1, 2 }` stays legible
- * in one trace cell.
- */
-const valueText = (value: BootstrapEvaluation.Value): string => {
-  switch (value._tag) {
-    case 'IntegerValue':
-      return `${value.value.toString()}${value.type}`
-    case 'CharacterValue':
-      return `U+${value.value.toString(16).toUpperCase().padStart(4, '0')}`
-    case 'FloatValue':
-      return `${value.type}(bits=0x${value.bits.toString(16)})`
-    case 'ArrayValue':
-      return `${typeText(value.type)} [${value.elements.map(valueText).join(', ')}]`
-    case 'SliceValue':
-      return `slice cell f${value.frame}.c${value.cell} [${value.base}..${value.base + value.length})`
-    case 'StaticViewValue':
-      return `static ${value.data} · ${value.length} bytes`
-    case 'StringValue':
-      return `${JSON.stringify(new TextDecoder().decode(Uint8Array.from(value.bytes)))} · ${value.byteLength} UTF-8 bytes · ${value.storage._tag}`
-    case 'UnionValue':
-      return `${typeText(value.type)} <${typeText(value.member)} ${valueText(value.payload)}>`
-    case 'EffectOutcomeValue':
-      return `${typeText(value.type)} tag=${value.tag} payload=${valueText(value.payload)}`
-    case 'EnvironmentBorrowValue':
-      return `${value.access.toLowerCase()} borrow f${value.frame}.c${value.cell}`
-    case 'EffectValue':
-      return `${typeText(value.type)} recipe ${value.runner.name}`
-    case 'EffectCompositeValue':
-      return `effect choice #${value.alternative} ${valueText(value.effect)}`
-    case 'CallableValue':
-      return `${typeText(value.type)} callable #${value.ticket} · ${value.captures.length} capture${value.captures.length === 1 ? '' : 's'}`
-    case 'AllocationValue':
-      return `${typeText(value.type)} ticket=${value.ticket} · ${value.bytes.toString()} bytes · align ${value.alignment.toString()}`
-    case 'RawBufferValue':
-      return `${typeText(value.type)} ticket=${value.ticket} · ${value.count.toString()} × ${typeText(value.element)} · stride ${value.stride}`
-    case 'SlotValue':
-      return `${typeText(value.type)} ticket=${value.ticket}[${value.index.toString()}] · ${typeText(value.element)}`
-    case 'SharedCoreValue':
-      return `${typeText(value.type)} ticket=${value.ticket} · ${typeText(value.element)}`
-    case 'ExecutionValue':
-      return `${typeText(value.type)} package #${value.ticket}`
-    case 'WakeValue':
-      return `${typeText(value.type)} package #${value.ticket} generation ${value.generation}`
-    case 'ReferenceValue':
-      return `borrow f${value.frame}.c${value.cell}`
-    case 'PointerValue': {
-      const address = value.address
-      if (address === null) return 'null pointer'
-      if (address._tag === 'Ticket') return `pointer ticket=${address.ticket}[${address.offset}]`
-      return `pointer f${address.frame}.c${address.cell}[${address.offset}]`
-    }
-    case 'EnumValue':
-      return `${value.enum.module}.${value.enum.name}.${value.member.name} = ${value.discriminant}`
-    case 'AggregateValue':
-      return `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
-    case 'NominalUnionValue':
-      return `${typeText(value.type)}.${value.variant.name} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
-  }
-}
-
-const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
-  switch (event._tag) {
-    case 'Entry':
-      return `enter ${event.function.module}.${event.function.name} · frame ${event.frame} · depth ${event.depth}`
-    case 'Call':
-      return `call ${event.target.module}.${event.target.name} · frame ${event.frame} · depth ${event.depth}`
-    case 'Binding':
-      return `bind p${event.parameterOrdinal} = ${valueText(event.value)} · frame ${event.frame} · depth ${event.depth}`
-    case 'Return':
-      return `return ${valueText(event.value)} · frame ${event.frame} · depth ${event.depth}`
-    case 'Construct':
-      return `construct ${typeText(event.type)} · ${event.fieldCount} field${
-        event.fieldCount === 1 ? '' : 's'
-      }`
-    case 'ArrayConstruct':
-      return `construct ${typeText(event.type)} · ${event.elementCount} element${
-        event.elementCount === 1 ? '' : 's'
-      }`
-    case 'UnionConversion':
-      return `${event.conversion.toLowerCase()} ${typeText(event.member)} → ${typeText(event.target)}`
-    case 'Project':
-      return `project ${typeText(event.type)}.#${event.field.ordinal}`
-    case 'PlaceRead':
-      return `read ${event.selectors
-        .map((selector) => {
-          switch (selector._tag) {
-            case 'Field':
-              return `#${selector.field.ordinal}`
-            case 'StaticElement':
-              return `${selector.data}[${selector.index}] ${selector.bounds.toLowerCase()}`
-            case 'RawBufferElement':
-              return `allocation #${selector.ticket}[${selector.index}] ${selector.bounds.toLowerCase()}`
-            case 'Element':
-              return `${typeText(selector.array)}[${selector.index}] ${selector.bounds.toLowerCase()}`
-            default:
-              return ''
-          }
-        })
-        .join(' → ')} = ${valueText(event.value)}`
-    case 'Cleanup':
-      return `cleanup _${event.local}${event.members === undefined ? '' : ` · active ${event.members.map(typeText).join(', ')}`} · frame ${event.frame} · depth ${event.depth}`
-    case 'MatchDispatch':
-      return `match ${event.access.toLowerCase()} · active ${typeText(event.member)}`
-    case 'MatchCandidate': {
-      if (event.binding === undefined) return `candidate arm #${event.arm ?? '?'}`
-      const value = event.value === undefined ? '?' : valueText(event.value)
-      return `bind pattern #${event.binding} = ${value}`
-    }
-    case 'MatchSelected':
-      return `select arm #${event.arm ?? '?'}`
-    case 'MatchCleanup':
-      return `cleanup arm #${event.arm ?? '?'} · ${event.path?.map((field) => `#${field.ordinal}`).join('.') || 'payload'}`
-    case 'MatchBorrowEnd':
-      return `end ${event.access.toLowerCase()} arm view`
-    case 'RegionEntry':
-      return `enter r${event.region}`
-    case 'Condition':
-      return `condition r${event.region}${event.loop === undefined ? '' : ` · loop${event.loop}`}`
-    case 'Iteration':
-      return `iterate loop${event.loop ?? '?'} · body r${event.region}`
-    case 'WriteCheck':
-      return `check write in r${event.region}`
-    case 'ReplacementCleanup':
-      return `cleanup replaced owner in r${event.region}${event.members === undefined ? '' : ` · active ${event.members.map(typeText).join(', ')}`}`
-    case 'Replacement':
-      return `commit replacement in r${event.region}`
-    case 'Repeat':
-      return `repeat loop${event.loop ?? '?'}`
-    case 'Exit':
-      return `exit loop${event.loop ?? '?'}`
-    case 'Transfer':
-      return `transfer in r${event.region}${event.loop === undefined ? '' : ` · loop${event.loop}`}`
-    case 'EffectSuccess':
-      return `effect success · tag ${event.tag}`
-    case 'EffectFailure':
-      return `effect failure · tag ${event.tag}`
-    case 'CallableConstruct':
-      return `construct callable #${event.ticket} · ${event.mode.toLowerCase()}`
-    case 'CallableApply':
-      return `apply callable #${event.ticket} · ${event.mode.toLowerCase()}`
-    case 'CallableCleanup':
-      return `cleanup callable #${event.ticket}`
-    case 'CallableRejected':
-      return `reject callable #${event.ticket} · ${event.mode.toLowerCase()}`
-    case 'AllocationAcquire':
-      return `acquire allocation #${event.ticket}`
-    case 'SharedInitialize':
-      return `initialize shared core #${event.ticket} · strong ${event.strong?.toString() ?? '?'} · ${event.access?.toLowerCase() ?? '?'}`
-    case 'SharedClone':
-      return `clone shared core #${event.ticket} · strong ${event.strong?.toString() ?? '?'}`
-    case 'SharedAccessBegin':
-      return `begin shared access #${event.ticket} · ${event.access?.toLowerCase() ?? '?'}`
-    case 'SharedAccessConflict':
-      return `conflict shared access #${event.ticket} · ${event.access?.toLowerCase() ?? '?'}`
-    case 'SharedAccessEnd':
-      return `end shared access #${event.ticket} · ${event.access?.toLowerCase() ?? '?'}`
-    case 'SharedDecrement':
-      return `decrement shared core #${event.ticket} · strong ${event.strong?.toString() ?? '?'}`
-    case 'SharedLastCleanup':
-      return `clean last shared core #${event.ticket}`
-    case 'RawBufferForm':
-      return `form raw buffer #${event.ticket} × ${event.count?.toString() ?? '?'}`
-    case 'SlotProject':
-      return `project slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
-    case 'SlotWrite':
-      return `write slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
-    case 'SlotTake':
-      return `take slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
-    case 'SlotCopy':
-      return `copy slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
-    case 'RawBufferRead':
-      return `read raw buffer #${event.ticket}[${event.index?.toString() ?? '?'}]`
-    case 'RawBufferCopy':
-      return `copy ${event.count?.toString() ?? '?'} into raw buffer #${event.ticket}[${event.index?.toString() ?? '?'}]`
-    case 'RawBufferFill':
-      return `fill raw buffer #${event.ticket}[${event.index?.toString() ?? '?'}] × ${event.count?.toString() ?? '?'}`
-    case 'SlotDrop':
-      return `drop slot #${event.ticket}[${event.index?.toString() ?? '?'}]`
-    case 'AllocationRelease':
-      return `release allocation #${event.ticket}`
-    case 'SuspensionOrigin':
-      return `originate suspension ${event.point.ordinal}`
-    case 'CoroutineFramePush':
-      return `push coroutine frame #${event.ticket ?? '?'} · state ${event.point.ordinal}`
-    case 'CoroutineFrameStateTransition':
-      return `transition coroutine frame #${event.ticket ?? '?'} · state ${event.point.ordinal}`
-    case 'CoroutineFrameResume':
-      return `resume coroutine frame #${event.ticket ?? '?'} · ${event.outcome?.toLowerCase() ?? '?'}`
-    case 'CoroutineFrameComplete':
-      return `complete coroutine frame #${event.ticket ?? '?'}`
-    case 'ExecutionTransition':
-      return `${event.event.toLowerCase()} execution package #${event.package} · root ${event.root} · generation ${event.generation} · ${event.state}`
-    case 'SuspensionChildStart':
-      return `start suspended child · point ${event.point.ordinal}`
-    case 'SuspensionChildComplete':
-      return `complete suspended child · ${event.outcome?.toLowerCase() ?? '?'}`
-    case 'HostWrite':
-      return `${event.destination.toLowerCase()} write ${event.bytes.length} bytes · ${event.outcome.toLowerCase()}`
-    case 'OsCall':
-      return `${event.operation.actor}.${event.operation.name} · ${event.outcome.toLowerCase()}${event.byteLength === undefined ? '' : ` · ${event.byteLength} bytes`}${event.randomFailure === undefined ? '' : ` · ${event.randomFailure}`}`
-    case 'StringStatic':
-      return `string ${event.storage ?? 'static'} · ${event.byteLength ?? 0} UTF-8 bytes`
-    case 'StringRuntime':
-      return `string ${event.storage ?? 'runtime'} · ${event.byteLength ?? 0} UTF-8 bytes`
-    case 'StringBytes':
-      return `view string UTF-8 bytes · ${event.byteLength ?? 0} bytes`
-    case 'StringByteLength':
-      return `read string byte length · ${event.byteLength ?? 0}`
-    case 'StringEqualsExact':
-      return `compare exact strings · ${event.result === true ? 'equal' : 'different'}`
-    case 'StringLoanEnd':
-      return `end string backing loan ${event.loan ?? '?'}`
-  }
-}
-
-const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
-  switch (event._tag) {
-    case 'Entry':
-      return event.depth - 1
-    case 'Call':
-      return event.depth
-    case 'Binding':
-      return event.depth
-    case 'Return':
-      return event.depth - 1
-    case 'Cleanup':
-      return event.depth
-    case 'Construct':
-    case 'ArrayConstruct':
-    case 'UnionConversion':
-    case 'Project':
-    case 'PlaceRead':
-    case 'MatchDispatch':
-    case 'MatchCandidate':
-    case 'MatchSelected':
-    case 'MatchCleanup':
-    case 'MatchBorrowEnd':
-    case 'RegionEntry':
-    case 'Condition':
-    case 'Iteration':
-    case 'WriteCheck':
-    case 'ReplacementCleanup':
-    case 'Replacement':
-    case 'Repeat':
-    case 'Exit':
-    case 'Transfer':
-    case 'EffectSuccess':
-    case 'EffectFailure':
-    case 'CallableConstruct':
-    case 'CallableApply':
-    case 'CallableCleanup':
-    case 'CallableRejected':
-    case 'AllocationAcquire':
-    case 'SharedInitialize':
-    case 'SharedClone':
-    case 'SharedAccessBegin':
-    case 'SharedAccessConflict':
-    case 'SharedAccessEnd':
-    case 'SharedDecrement':
-    case 'SharedLastCleanup':
-    case 'RawBufferForm':
-    case 'SlotProject':
-    case 'SlotWrite':
-    case 'SlotTake':
-    case 'SlotCopy':
-    case 'RawBufferRead':
-    case 'RawBufferCopy':
-    case 'RawBufferFill':
-    case 'SlotDrop':
-    case 'AllocationRelease':
-    case 'SuspensionOrigin':
-    case 'CoroutineFramePush':
-    case 'CoroutineFrameStateTransition':
-    case 'CoroutineFrameResume':
-    case 'CoroutineFrameComplete':
-    case 'ExecutionTransition':
-    case 'SuspensionChildStart':
-    case 'SuspensionChildComplete':
-    case 'HostWrite':
-    case 'OsCall':
-    case 'StringStatic':
-    case 'StringRuntime':
-    case 'StringBytes':
-    case 'StringByteLength':
-    case 'StringEqualsExact':
-    case 'StringLoanEnd':
-      return 2
-  }
-}
-
-const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string => {
-  switch (reason._tag) {
-    case 'InvalidMir':
-      return `invalid MIR · ${reason.violations.length} violation${
-        reason.violations.length === 1 ? '' : 's'
-      }`
-    case 'UnavailableEntry':
-      return `unavailable entry · ${reason.reason}`
-    case 'Trap':
-      return `trap · ${reason.reason}`
-    case 'MissingFunction':
-      return `missing function · ${reason.target.module}.${reason.target.name}`
-    case 'EvaluationLimit':
-      return `${reason.kind === 'Steps' ? 'step' : 'call-depth'} limit · ${reason.count}/${reason.limit} · stopped in ${reason.function.module}.${reason.function.name} · active ${reason.activeFrames.map((frame) => `f${frame.frame}:d${frame.depth} ${frame.function.name}`).join(' → ')}`
-    case 'InvalidCallableReuse':
-      return `invalid callable reuse · #${reason.ticket} is ${reason.state.toLowerCase()}`
-    case 'ExecutionRelinquished':
-      return `execution relinquished · package #${reason.ticket}`
-    case 'MissingStandardStreams':
-      return 'missing StandardStreams host provider'
-    case 'MissingStandardInput':
-      return 'missing StandardInput host provider'
-    case 'MissingChildProcess':
-      return 'missing ChildProcess host provider'
-    case 'MissingHostInput':
-      return 'missing HostInput host provider'
-    case 'MissingOsFileSystemHost':
-      return 'missing OS filesystem host provider'
-    case 'MissingMonotonicClock':
-      return 'missing MonotonicClock host provider'
-    case 'MissingRandomHost':
-      return 'missing RandomHost provider'
-    case 'IntrinsicTargetUnavailable':
-      return reason.diagnostics.map((diagnostic) => diagnostic.message).join(' · ')
-    case 'ForeignPlanningUnavailable':
-      return reason.diagnostics.map((diagnostic) => diagnostic.message).join(' · ')
-    case 'ForeignHostUnavailable':
-      return `missing foreign host binding · ${reason.symbol} · expected ${reason.expected}${reason.provided === undefined ? '' : ` · provided ${reason.provided}`}`
-    case 'ForeignHostCallFailed':
-      return `foreign host call failed · ${reason.symbol} · ${reason.message}`
-  }
-}
-
-export const evaluationRows = (
-  outcome: BootstrapEvaluation.Outcome | undefined,
-): ReadonlyArray<RowModel> => {
-  if (outcome === undefined) {
-    return [
-      {
-        key: 'not-run',
-        label: 'not evaluated',
-        detail: 'evaluation is an explicit action — run it to see the trace',
-      },
-    ]
-  }
-
-  const rows: Array<RowModel> = outcome.trace.map((event, index) => {
-    const span = asSpan(event.span)
-    return {
-      key: `trace-${index}`,
-      lead: index + 1,
-      depth: traceDepth(event),
-      label: traceLabel(event),
-      detail: event._tag.toLowerCase(),
-      span,
-    }
-  })
-
-  let outcomeRow: RowModel
-  switch (outcome._tag) {
-    case 'Completed':
-      outcomeRow = {
-        key: 'outcome',
-        dot: 'ok',
-        label: 'Completed',
-        detail: `${outcome.entry.module}.${outcome.entry.name}() → ${outcome.result.value}`,
-        head: true,
-        tone: 'ok',
-      }
-      break
-    case 'UnhandledFailure':
-      outcomeRow = {
-        key: 'outcome',
-        dot: 'warning',
-        label: 'Unhandled failure',
-        detail: `${outcome.identity} · tag ${outcome.tag}`,
-        head: true,
-        tone: 'warning',
-      }
-      break
-    case 'Trap':
-      outcomeRow = {
-        key: 'outcome',
-        dot: 'warning',
-        label: 'Fatal trap',
-        detail: outcome.reason,
-        head: true,
-        tone: 'warning',
-      }
-      break
-    case 'Blocked':
-      outcomeRow = {
-        key: 'outcome',
-        dot: 'warning',
-        label: 'Blocked',
-        detail: blockedReasonText(outcome.reason),
-        head: true,
-        tone: 'warning',
-      }
-      break
-  }
-  rows.push(outcomeRow)
-
-  return rows
-}
-
-/**
- * Canonical struct-value facts: literals, projections, calling shapes, and — after a run —
- * the aggregate evaluation events.
+ * Canonical struct-value facts: literals, projections, calling shapes.
  *
  * The literal's two orders are the point: the source wrote `{ right: 2, left: 1 }` but the
  * canonical struct order is `left, right`, and the compiler owns that reordering. Showing both
@@ -1594,7 +1184,6 @@ export const structValueRows = (
   literals: ReadonlyArray<Elaboration.StructLiteralExpressionFact>,
   projections: ReadonlyArray<Elaboration.FieldProjectionExpressionFact>,
   shapes: ReadonlyArray<Layout.CallingShape>,
-  evaluation: BootstrapEvaluation.Outcome | undefined,
 ): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
@@ -1688,43 +1277,6 @@ export const structValueRows = (
     })
   }
 
-  const aggregateEvents =
-    evaluation?.trace.filter(
-      (event) => event._tag === 'Construct' || event._tag === 'Project' || event._tag === 'Cleanup',
-    ) ?? []
-  rows.push({
-    key: 'events',
-    label: 'evaluation events',
-    detail:
-      evaluation === undefined
-        ? 'run evaluation to inspect construction, projection, and cleanup'
-        : `${aggregateEvents.length}`,
-    head: true,
-  })
-  for (const [index, event] of aggregateEvents.entries()) {
-    const span = asSpan(event.span)
-    let detail = ''
-    switch (event._tag) {
-      case 'Construct':
-        detail = `${typeText(event.type)} · ${event.fieldCount} field${event.fieldCount === 1 ? '' : 's'}`
-        break
-      case 'Project':
-        detail = `${typeText(event.type)}.#${event.field.ordinal}`
-        break
-      case 'Cleanup':
-        detail = `local _${event.local}`
-        break
-    }
-    rows.push({
-      key: `event-${index}`,
-      depth: 1,
-      dot: 'ok',
-      label: event._tag.toLowerCase(),
-      detail,
-      span,
-    })
-  }
-
   return rows
 }
 
@@ -1752,14 +1304,13 @@ const selectorPathText = (path: ReadonlyArray<Layout.Selector>): string =>
     })
     .join('.')
 
-/** Canonical array facts from syntax through evaluation and backend-neutral ABI paths. */
+/** Canonical array facts from syntax through backend-neutral ABI paths. */
 export const arrayValueRows = (
   types: ReadonlyArray<Type.FixedArray>,
   literals: ReadonlyArray<Elaboration.ArrayLiteralExpressionFact>,
   projections: ReadonlyArray<Elaboration.IndexProjectionExpressionFact>,
   layouts: ReadonlyArray<Layout.Entry>,
   shapes: ReadonlyArray<Layout.CallingShape>,
-  evaluation: BootstrapEvaluation.Outcome | undefined,
 ): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = [
     {
@@ -1875,29 +1426,6 @@ export const arrayValueRows = (
     })
   }
 
-  const events =
-    evaluation?.trace.filter(
-      (event) => event._tag === 'ArrayConstruct' || event._tag === 'PlaceRead',
-    ) ?? []
-  rows.push({
-    key: 'array-events',
-    label: 'evaluation events',
-    detail:
-      evaluation === undefined ? 'run evaluation to inspect values and checks' : `${events.length}`,
-    head: true,
-  })
-  for (const [ordinal, event] of events.entries()) {
-    const span = asSpan(event.span)
-    rows.push({
-      key: `array-event-${ordinal}`,
-      depth: 1,
-      dot: 'ok',
-      label: traceLabel(event),
-      detail: event._tag,
-      span,
-    })
-  }
-
   return rows
 }
 
@@ -1906,7 +1434,7 @@ export const arrayValueRows = (
  *
  * Every other view answers "what did this phase produce"; this one answers "how far did the
  * program get". It is the only view that is about the pipeline rather than about a phase, which
- * is why it survived the consolidation of the standalone labs.
+ * is why it remains part of the static project inspector.
  */
 export const pipelineRows = (
   phases: ReadonlyArray<{

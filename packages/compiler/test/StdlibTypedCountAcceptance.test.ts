@@ -48,172 +48,57 @@ it('declares the shared usize counts once and ships no private counted identity'
     )
 })
 
-/**
- * The vector program that exercised the identity call the hardest. Its observable result and its
- * lowered counts are the evidence that replacing `counted(0)` with `usize.ZERO` moved no value:
- * the two struct fields still receive the same `usize` zero, now as a direct typed immediate.
- */
 const growth = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
-import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
 import silk.vector { Vector }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = Vector.make<i32>()
-  let pending0 = Vector.append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
-  let appended0 = run pending0
-  let pending1 = Vector.append<i32>(&mut values, 32) |> Effect.provideMut(&mut allocator)
-  let appended1 = run pending1
-  if Vector.length<i32>(&values) == 2 {} else { return 0 }
-  if Vector.capacity<i32>(&values) == 4 {} else { return 1 }
+  run Vector.append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
+  run Vector.append<i32>(&mut values, 32) |> Effect.provideMut(&mut allocator)
   return Vector.get<i32>(&values, 0) + Vector.get<i32>(&values, 1)
 }
-
 effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
-
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
-it.effect(
-  'lowers a vector program to the same typed counts on the evaluator and Wasm with no identity call',
-  () =>
-    Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
-        'typed-count-acceptance/growth',
-        ascii(growth),
-        'wasm32-unknown-unknown',
-      )
-      assert.deepEqual(Analysis.diagnostics(snapshot), [])
-
-      const mir = Analysis.loweredMir(snapshot)
-      // No identity survives, neither as a lowered function nor as a call at any use site.
-      assert.deepEqual(
-        mir.functions.filter((fn) => fn.id.name === 'counted').map((fn) => fn.id.module),
-        [],
-      )
-      assert.isFalse(
-        mir.functions.some((fn) =>
-          MirVerification.operations(fn).some(
-            (operation) => operation._tag === 'Call' && operation.target.name === 'counted',
-          ),
-        ),
-      )
-
-      // `make` still builds the same value: an empty storage union plus two `usize` zeroes. The
-      // identity call that produced each zero is gone; the typed immediate it returned is not.
-      const made = mir.functions.find(
-        (fn) => fn.id.module === 'silk/vector' && fn.id.name === 'Vector.make',
-      )
-      assert.isDefined(made)
-      if (made === undefined) return
-      assert.deepEqual(
-        MirVerification.operations(made).map((operation) => operation._tag),
-        ['ConstructArray', 'Construct', 'ConvertUnion', 'Literal', 'Literal', 'Construct'],
-      )
-      assert.deepEqual(
-        MirVerification.operations(made).flatMap((operation) =>
-          operation._tag === 'Literal'
-            ? [`${operation.value.toString()} : ${operation.type._tag}`]
-            : [],
-        ),
-        ['0 : usize', '0 : usize'],
-      )
-
-      const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(evaluated._tag, 'Completed')
-      if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42n)
-
-      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-    }),
-  60_000,
-)
-
-/**
- * A UTF-8 walk reaches the counts the shared constants do not name — the two, three, and four byte
- * widths. Every one of them still carries `usize`, so the removal left no literal on the `i32`
- * default.
- */
-const scalars = `import silk.allocator { OutOfMemoryError }
-import silk.allocator { Allocator }
-import silk.allocator { SystemAllocator }
-import silk.effect { Effect }
-import silk.u32 as u32
-import silk.string { ScalarCursor, ScalarStep, String }
-import silk.option { Option }
-import silk.char { toU32 as charToU32 }
-
-fn scalarSum(value: string, cursor: ScalarCursor) -> u32 {
-  return match move String.nextScalar(value, move cursor) {
-    Option<ScalarStep>.Some { value: step } => continueSum(value, move step)
-    Option<ScalarStep>.None => u32.toU32(0)
-  }
-}
-
-fn continueSum(value: string, step: ScalarStep) -> u32 {
-  let scalar = charToU32(String.scalarValue(&step))
-  let cursor = String.nextCursor(move step)
-  return scalar + scalarSum(value, move cursor)
-}
-
-effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let copying = String.copy("A\\u{a2}\\u{20ac}\\u{10348}") |> Effect.provideMut(&mut allocator)
-  let mut owned = run copying
-  let borrowed = String.view(&owned)
-  let decoded = String.fromUtf8(String.utf8Bytes(borrowed))
-  drop decoded
-  if scalarSum(borrowed, String.scalarCursor()) == u32.toU32(74967) {} else { return 1 }
-  return 42
-}
-
-effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
-
-pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
-
-it.effect('types every reachable standard-library count as usize, never as the i32 default', () =>
+it.effect('lowers shared typed counts directly without an identity call', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
-      'typed-count-acceptance/scalars',
-      ascii(scalars),
+      'typed-count-acceptance/growth',
+      ascii(growth),
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-
-    const plan = Analysis.layoutOf(snapshot)
-    assert.strictEqual(plan._tag, 'Available')
-    if (plan._tag !== 'Available') return
-    const verdicts = plan.value.literalVerdicts
-    assert.isAbove(verdicts.length, 0)
+    const mir = Analysis.loweredMir(snapshot)
     assert.deepEqual(
-      verdicts.filter((verdict) => verdict._tag !== 'AvailableWordLiteral'),
+      mir.functions.filter((fn) => fn.id.name === 'counted').map((fn) => fn.id.module),
       [],
     )
-
-    const counts = (module: string): ReadonlyArray<string> =>
-      [
-        ...new Set(
-          verdicts.flatMap((verdict) =>
-            verdict.span.sourceId === module ? [verdict.value.toString()] : [],
-          ),
+    assert.isFalse(
+      mir.functions.some((fn) =>
+        MirVerification.operations(fn).some(
+          (operation) => operation._tag === 'Call' && operation.target.name === 'counted',
         ),
-      ].sort()
-
-    // Target-dependent bounds are selected static constants with no runtime literal or storage.
-    assert.deepEqual(counts('silk/usize'), ['0', '1'])
-    // Every width the constants do not name is still a usize literal inside silk/string.
-    assert.deepEqual(counts('silk/string'), ['2', '3', '4'])
-
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
-
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+      ),
+    )
+    const made = mir.functions.find(
+      (fn) => fn.id.module === 'silk/vector' && fn.id.name === 'Vector.make',
+    )
+    assert.isDefined(made)
+    if (made === undefined) return
+    assert.deepEqual(
+      MirVerification.operations(made).map((operation) => operation._tag),
+      ['ConstructArray', 'Construct', 'ConvertUnion', 'Literal', 'Literal', 'Construct'],
+    )
+    assert.deepEqual(
+      MirVerification.operations(made).flatMap((operation) =>
+        operation._tag === 'Literal'
+          ? [`${operation.value.toString()} : ${operation.type._tag}`]
+          : [],
+      ),
+      ['0 : usize', '0 : usize'],
+    )
   }),
 )

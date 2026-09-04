@@ -16,34 +16,34 @@ it('keeps scanner phases, stdlib imports, and artifacts byte-identical across fr
     readonly native: {
       readonly diagnostics: ReadonlyArray<unknown>
       readonly modules: ReadonlyArray<string>
-      readonly result: number | string
-      readonly allocations: ReadonlyArray<string>
+      readonly hir: string
+      readonly ownership: string
+      readonly instances: string
+      readonly layout: string
+      readonly mir: string
     }
     readonly wasm: {
       readonly diagnostics: ReadonlyArray<unknown>
       readonly modules: ReadonlyArray<string>
-      readonly result: number | string
-      readonly allocations: ReadonlyArray<string>
+      readonly hir: string
+      readonly ownership: string
+      readonly instances: string
+      readonly layout: string
+      readonly mir: string
     }
     readonly nativeBytes: string
-    readonly wasmBytes: string
   }
   assert.strictEqual(encoded.toolchainIdentity.length, 64)
   assert.deepEqual(encoded.native.diagnostics, [])
   assert.deepEqual(encoded.wasm.diagnostics, [])
   assert.include(encoded.native.modules, 'silk/vector')
   assert.include(encoded.wasm.modules, 'silk/vector')
-  assert.strictEqual(encoded.native.result, '42')
-  assert.strictEqual(encoded.wasm.result, '42')
-  assert.deepEqual(encoded.native.allocations, [
-    'AllocationAcquire',
-    'AllocationAcquire',
-    'AllocationRelease',
-    'AllocationAcquire',
-    'AllocationRelease',
-    'AllocationRelease',
-  ])
-  assert.deepEqual(encoded.wasm.allocations, encoded.native.allocations)
+  for (const snapshot of [encoded.native, encoded.wasm]) {
+    assert.strictEqual(snapshot.hir.length, 64)
+    assert.strictEqual(snapshot.ownership.length, 64)
+    assert.strictEqual(snapshot.instances.length, 64)
+    assert.strictEqual(snapshot.layout.length, 64)
+    assert.strictEqual(snapshot.mir.length, 64)
+  }
   assert.strictEqual(encoded.nativeBytes.length, 64)
-  assert.strictEqual(encoded.wasmBytes.length, 64)
 }, 120_000)

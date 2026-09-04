@@ -7,89 +7,9 @@ import * as Intrinsic from '../src/Intrinsic.js'
 import * as LocalSharedOwnership from '../src/LocalSharedOwnership.js'
 import * as Type from '../src/Type.js'
 import { ordinaryStorageSource } from './support/ordinaryStorageSource.js'
-import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(ordinaryStorageSource(value), (character) => character.charCodeAt(0))
-
-const ordinaryUse = `import silk.allocator { Allocator }
-import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect { Effect }
-import silk.shared { Shared }
-struct Counter { value: i32 }
-fn increment(value: &mut Counter) -> i32 { value.value = value.value + 1 return value.value }
-fn read(value: &Counter) -> i32 { return value.value }
-effect fn useCell() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let creating = Shared.make<Counter>(Counter { value: 41 })
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let first = run creating
-  let second = Shared.clone<Counter>(&first)
-  let updated = Shared.withMut<Counter, i32>(&second, increment)
-  let answer = Shared.with<Counter, i32>(&first, read)
-  drop second
-  drop first
-  return answer
-}
-effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catchAll(useCell(), recover) }`
-
-const affineMovement = `import silk.allocator { Allocator }
-import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect { Effect }
-import silk.layout { Layout }
-import silk.shared { Shared }
-struct Empty {}
-struct Token { storage: Allocation }
-struct Mailbox { state: Empty | Token }
-fn take(self: &mut Mailbox) -> Empty | Token {
-  return Intrinsic.replace(self.state, Empty {})
-}
-fn consume(value: Empty | Token) -> i32 {
-  return match move value {
-    Empty {} => 0
-    Token { storage } => release(move storage)
-  }
-}
-fn release(storage: Allocation) -> i32 { drop storage return 42 }
-effect fn useCell() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let storage = run (Allocator.allocate(Layout.of<i32>())
-    |> Effect.provideMut<Allocator>(&mut allocator))
-  let mailbox = run (Shared.make<Mailbox>(Mailbox {
-    state: Token { storage: move storage }
-  }) |> Effect.provideMut<Allocator>(&mut allocator))
-  let token = Shared.withMut<Mailbox, Empty | Token>(&mailbox, take)
-  drop mailbox
-  return consume(move token)
-}
-effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catchAll(useCell(), recover) }`
-
-const exhaustedConstruction = `import silk.allocator { Allocator }
-import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect { Effect }
-import silk.layout { Layout }
-import silk.shared { Shared }
-struct Token { storage: Allocation }
-struct Exhausted {}
-effect fn reject(self: &mut Exhausted, layout: Layout) -> Allocation ! OutOfMemoryError {
-  fail OutOfMemoryError {}
-}
-impl Allocator for Exhausted { allocate: Exhausted.reject }
-effect fn construct() -> i32 ! OutOfMemoryError {
-  let mut system = Allocator.systemAllocatorProvider()
-  let payload = run (Allocator.allocate(Layout.of<i32>())
-    |> Effect.provideMut<Allocator>(&mut system))
-  let token = Token { storage: move payload }
-  let mut exhausted = Exhausted {}
-  let shared = run (Shared.make<Token>(move token)
-    |> Effect.provideMut<Allocator>(&mut exhausted))
-  drop shared
-  return 0
-}
-effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
-pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`
 
 const mixedAllocatorConstruction = `import silk.allocator { Allocator }
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
@@ -156,72 +76,6 @@ fn probe(self: &Other<Box>) -> Effect<i32> {
   return access(self, ignored, escaping)
 }
 pub fn main() -> i32 { return 0 }`
-
-const renamedWrapper = `import silk.allocator { Allocator }
-import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect { Effect }
-struct Other<T> { core: Intrinsic.SharedCore<T> }
-struct Counter { value: i32 }
-fn absurd<T>() -> T { let boom = 1 / 0 return absurd<T>() }
-fn conflict() -> never { let boom = 1 / 0 return conflict() }
-effect fn create<T>(value: T) -> Other<T> ! OutOfMemoryError ? &mut Allocator {
-  let allocation = run Allocator.allocate(Intrinsic.sharedLayout<T>())
-  unsafe {
-    let core = Intrinsic.sharedFromAllocation<T>(move allocation, move value)
-    return Other<T> { core: move core }
-  }
-  return absurd<Other<T>>()
-}
-fn retain<T>(self: &Other<T>) -> Other<T> {
-  let core = Intrinsic.sharedClone<T>(&self.core)
-  return Other<T> { core: move core }
-}
-fn access<T, A>(self: &Other<T>, use: once fn(&mut T) -> A) -> A {
-  return Intrinsic.sharedWithMut<T, A>(&self.core, move use, conflict)
-}
-fn increment(value: &mut Counter) -> i32 {
-  value.value = value.value + 1
-  return value.value
-}
-effect fn runOther() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let first = run (create<Counter>(Counter { value: 41 })
-    |> Effect.provideMut<Allocator>(&mut allocator))
-  let second = retain<Counter>(&first)
-  let answer = access<Counter, i32>(&second, increment)
-  drop second
-  drop first
-  return answer
-}
-effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catchAll(runOther(), recover) }`
-
-const nestedAccess = (outer: 'with' | 'withMut', inner: 'with' | 'withMut'): string => {
-  const outerReference = outer === 'with' ? '&Counter' : '&mut Counter'
-  const innerCallback = inner === 'with' ? 'read' : 'increment'
-  return `import silk.allocator { Allocator }
-import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect { Effect }
-import silk.shared { Shared }
-struct Counter { value: i32 }
-fn read(value: &Counter) -> i32 { return value.value }
-fn increment(value: &mut Counter) -> i32 {
-  value.value = value.value + 1
-  return value.value
-}
-fn nested(value: ${outerReference}, alias: Shared<Counter>) -> i32 {
-  return Shared.${inner}<Counter, i32>(&alias, ${innerCallback})
-}
-effect fn conflictCase() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let first = run (Shared.make<Counter>(Counter { value: 41 })
-    |> Effect.provideMut<Allocator>(&mut allocator))
-  let alias = Shared.clone<Counter>(&first)
-  return Shared.${outer}<Counter, i32>(&first, nested(move alias))
-}
-effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
-pub fn main() -> i32 { return run Effect.catchAll(conflictCase(), recover) }`
-}
 
 const publicEscapeMatrix = `import silk.result { Result }
 import silk.shared { Shared }
@@ -299,36 +153,6 @@ fn mutSuspension(self: &Shared<Pair>) -> i32 {
 }
 pub fn main() -> i32 { return 0 }`
 
-it.effect('imports the canonical Shared actor and executes allocation-free clone and access', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'shared-stdlib/ordinary',
-      ascii(ordinaryUse),
-      'aarch64-apple-darwin',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
-    assert.deepEqual(
-      Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag),
-      [
-        'AllocationAcquire',
-        'SharedInitialize',
-        'SharedClone',
-        'SharedAccessBegin',
-        'SharedAccessEnd',
-        'SharedAccessBegin',
-        'SharedAccessEnd',
-        'SharedDecrement',
-        'SharedLastCleanup',
-        'AllocationRelease',
-      ],
-    )
-  }),
-)
-
 it.effect('derives affine local ownership through the ordinary Shared wrapper', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -362,53 +186,6 @@ pub fn main() -> i32 { return 42 }`),
       LocalSharedOwnership.count(pending?.localSharedObligations ?? LocalSharedOwnership.none),
       1,
     )
-  }),
-)
-
-it.effect('moves an affine payload through public Shared access on evaluation and Wasm', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'shared-stdlib/affine-movement',
-      ascii(affineMovement),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
-    const events = Projections.allocationTraceEventsOf(evaluated)
-    assert.strictEqual(events.filter((event) => event._tag === 'AllocationAcquire').length, 2)
-    assert.strictEqual(events.filter((event) => event._tag === 'AllocationRelease').length, 2)
-    assert.deepEqual(
-      events.filter((event) => event._tag.startsWith('SharedAccess')).map((event) => event._tag),
-      ['SharedAccessBegin', 'SharedAccessEnd'],
-    )
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-  }),
-)
-
-it.effect('cleans the source payload once when the selected allocator rejects make', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'shared-stdlib/exhausted',
-      ascii(exhaustedConstruction),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
-    assert.deepEqual(
-      Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag),
-      ['AllocationAcquire', 'AllocationRelease'],
-    )
-    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
   }),
 )
 
@@ -456,59 +233,6 @@ it.effect('propagates the sealed access edge through a renamed multi-callback wr
       diagnostics.at(0)?.relatedSpans?.at(0)?.span.sourceId,
       'shared-stdlib/renamed-multi-callback',
     )
-  }),
-)
-
-it.effect('gives a renamed ordinary wrapper the same lifecycle and access behavior', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'shared-stdlib/renamed',
-      ascii(renamedWrapper),
-      'aarch64-apple-darwin',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
-    assert.deepEqual(
-      Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag),
-      [
-        'AllocationAcquire',
-        'SharedInitialize',
-        'SharedClone',
-        'SharedAccessBegin',
-        'SharedAccessEnd',
-        'SharedDecrement',
-        'SharedLastCleanup',
-        'AllocationRelease',
-      ],
-    )
-  }),
-)
-
-it.effect('traps all four nested public access combinations before the nested callback', () =>
-  Effect.gen(function* () {
-    for (const outer of ['with', 'withMut'] as const) {
-      for (const inner of ['with', 'withMut'] as const) {
-        const snapshot = yield* Analysis.ofSourceRealized(
-          `shared-stdlib/conflict-${outer}-${inner}`,
-          ascii(nestedAccess(outer, inner)),
-          'wasm32-unknown-unknown',
-        )
-        assert.deepEqual(Analysis.diagnostics(snapshot), [])
-        const evaluated = Analysis.evaluate(snapshot)
-        assert.strictEqual(evaluated._tag, 'Trap', `${outer} -> ${inner}`)
-        if (evaluated._tag !== 'Trap') continue
-        const access = Projections.allocationTraceEventsOf(evaluated)
-          .filter((event) => event._tag.startsWith('SharedAccess'))
-          .map((event) => event._tag)
-        assert.deepEqual(access, ['SharedAccessBegin', 'SharedAccessConflict'])
-        const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-        const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-        assert.throws(() => (instance.exports.silk_main as () => number)())
-      }
-    }
   }),
 )
 

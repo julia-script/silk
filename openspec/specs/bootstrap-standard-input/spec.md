@@ -81,9 +81,9 @@ behavior.
 - **WHEN** a provided native implementation receives one exclusive buffer
 - **THEN** its source operation invokes one primitive read boundary and preserves the service's outcome and typed failure
 
-#### Scenario: Reject the native read on direct WebAssembly
+#### Scenario: Reject the native read on LLVM-generated WebAssembly
 
-- **WHEN** a reachable native read is compiled for a direct WebAssembly target
+- **WHEN** a reachable native read is compiled for a LLVM-generated WebAssembly target
 - **THEN** target availability rejects it rather than inventing an input host import
 
 #### Scenario: Link only the reachable runtime symbol

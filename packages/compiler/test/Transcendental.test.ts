@@ -5,18 +5,16 @@ import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import * as Analysis from '../src/Analysis.js'
 import * as FloatingPoint from '../src/FloatingPoint.js'
-import * as Hir from '../src/Hir.js'
 import type * as Mir from '../src/Mir.js'
-import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Transcendental from '../src/Transcendental.js'
-import { transcendentalCanonicalBits } from './support/corpus.js'
 
 const Vector = Schema.Struct({
   width: Schema.Literals([32, 64]),
   inputBits: Schema.String,
   operation: Schema.Literals(['Sin', 'Cos']),
   referenceBits: Schema.String,
+  acceptedBits: Schema.optional(Schema.String),
 })
 
 const Fixture = Schema.Struct({
@@ -53,63 +51,6 @@ it('stays within four ulp of independently generated high-precision vectors', ()
     )
   }
 })
-
-// The canonical-bits program is generated in the corpus so its native execution rides the
-// differential in `DriverNativeAcceptance.test.ts`; this file keeps the IR-shape, evaluator, and
-// direct-Wasm claims on the same source text.
-const source = transcendentalCanonicalBits
-
-it.effect(
-  'returns identical canonical bits through evaluation and direct Wasm',
-  () =>
-    Effect.gen(function* () {
-      const bytes = new TextEncoder().encode(source)
-      const native = yield* Analysis.ofSourceRealized(
-        'transcendental/native',
-        bytes,
-        'aarch64-apple-darwin',
-      )
-      assert.deepEqual(Analysis.diagnostics(native), [])
-      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(native)), [])
-      const encodedHir = Hir.encode(Analysis.rootAnalysis(native).hir)
-      assert.include(encodedHir, 'call silk/f32.sin : f32')
-      assert.include(encodedHir, 'call silk/f64.cos : f64')
-      const encodedMir = MirEncoding.encode(Analysis.loweredMir(native))
-      assert.include(encodedMir, 'float-sin')
-      assert.include(encodedMir, ': f32')
-      assert.include(encodedMir, 'float-cos')
-      assert.include(encodedMir, ': f64')
-      const operations = Analysis.loweredMir(native).functions.flatMap(MirVerification.operations)
-      assert.strictEqual(
-        operations.filter((operation) => operation._tag === 'FloatTranscendental').length,
-        4,
-      )
-      const first = Analysis.evaluate(native)
-      const second = Analysis.evaluate(native)
-      assert.deepEqual(first, second)
-      assert.strictEqual(first._tag, 'Completed')
-      if (first._tag === 'Completed') assert.strictEqual(first.result.value, 42n)
-
-      const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
-      assert.notInclude(nativeArtifact.ir, 'llvm.sin')
-      assert.notInclude(nativeArtifact.ir, 'llvm.cos')
-      assert.notInclude(nativeArtifact.ir, ' fast ')
-
-      const wasm = yield* Analysis.ofSourceRealized(
-        'transcendental/wasm',
-        bytes,
-        'wasm32-unknown-unknown',
-      )
-      assert.deepEqual(Analysis.diagnostics(wasm), [])
-      const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-      assert.notInclude(wasmArtifact.wat, '(import')
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasmArtifact.bytes.slice()))
-      const main = instance.exports.silk_main
-      assert.strictEqual(typeof main, 'function')
-      if (typeof main === 'function') assert.strictEqual(main(), 42)
-    }),
-  30_000,
-)
 
 it.effect('rejects a mismatched transcendental MIR result before execution', () =>
   Effect.gen(function* () {

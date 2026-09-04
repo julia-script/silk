@@ -125,9 +125,9 @@ failure types and payloads receive the ordinary typed-failure diagnostics at the
 process-report rules are defined in
 [program termination and reporting](program-termination-and-reporting.md).
 
-**Implementation:** Analysis, entry discovery, evaluation, and backend planning accept the example
-without marker conformance. The retained failure metadata contains its canonical type identity and
-ordinary cleanup plan.
+**Implementation:** Analysis, entry discovery, and LLVM planning accept the example without marker
+conformance. The retained failure metadata contains its canonical type identity and ordinary cleanup
+plan.
 
 **Evidence:** [entry-instance requirements](../../../../openspec/specs/bootstrap-instances/spec.md),
 [effect-entry runtime tests](../../../../packages/compiler/test/EffectEntry.test.ts).

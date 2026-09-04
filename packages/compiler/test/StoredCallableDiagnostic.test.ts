@@ -37,9 +37,27 @@ const diagnosticView = (snapshot: Analysis.FrontendSnapshot) =>
 const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message)
 
-/** Evaluated scalars can be BigInt, which plain JSON serialization refuses. */
-const describe = (outcome: unknown): string =>
-  JSON.stringify(outcome, (_, value) => (typeof value === 'bigint' ? value.toString() : value))
+const accepted = `import silk.i32 as i32
+struct Parser { decode: fn(i32) -> i32 }
+struct Nested { parser: Parser }
+fn size(self: &Parser) -> i32 { return 1 }
+fn unreachableConstruction() -> i32 {
+  let parser = Parser { decode: i32.add(1) }
+  return parser.decode(41)
+}
+pub fn main() -> i32 { return 42 }`
+
+it.effect('keeps declaration-only and unreachable callable fields out of realization', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyzed('stored-callable/accepted', accepted)
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.isFalse(
+      Analysis.instancesOf(snapshot).instances.some(
+        (instance) => instance.key.declaration.name === 'unreachableConstruction',
+      ),
+    )
+  }),
+)
 
 /** The minimal reproducer from #184, repaired so declaration and semantic analysis accept it. */
 const reproducer = `import silk.i32 as i32
@@ -234,55 +252,6 @@ pub fn main() -> i32 {
       diagnostic?.relatedSpans?.map((related) => [related.label, related.span.sourceId]),
       [['constructed here', 'silk/option']],
     )
-  }),
-)
-
-/**
- * Callable-bearing declarations that never reach a live construction keep compiling, and the
- * asserted value — not compilation success — is the evidence on the evaluator and Wasm.
- */
-const accepted = `import silk.i32 as i32
-struct Parser { decode: fn(i32) -> i32 }
-struct Nested { parser: Parser }
-
-fn size(self: &Parser) -> i32 { return 1 }
-
-fn unreachableConstruction() -> i32 {
-  let parser = Parser { decode: i32.add(1) }
-  return parser.decode(41)
-}
-
-pub fn main() -> i32 { return 42 }`
-
-it.effect(
-  'keeps declaration-only and unreachable callable fields compiling on the evaluator and Wasm',
-  () =>
-    Effect.gen(function* () {
-      const snapshot = yield* analyzed('stored-callable/accepted', accepted)
-      assert.deepEqual(messages(snapshot), [])
-
-      const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
-      if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 42n, 'evaluator')
-
-      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
-      assert.strictEqual((instance.exports.silk_main as () => number)(), 42, 'wasm')
-    }),
-)
-
-it.effect('leaves direct callable parameters and calls unchanged', () =>
-  Effect.gen(function* () {
-    const source = `import silk.i32 as i32
-fn apply(transform: once fn(i32) -> i32, value: i32) -> i32 { return transform(value) }
-pub fn main() -> i32 { return apply(i32.add(40), 2) }`
-    const snapshot = yield* analyzed('stored-callable/direct-call', source)
-    assert.deepEqual(messages(snapshot), [])
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
   }),
 )
 

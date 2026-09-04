@@ -197,6 +197,7 @@ export const wasmCommand = (
   target: Target.Target,
   profile: OptimizationProfile,
   bitcodePath: string,
+  runtimeObjectPath: string,
   destination: string,
 ): PlannedCommand =>
   Object.freeze({
@@ -209,6 +210,9 @@ export const wasmCommand = (
       '-x',
       'ir',
       bitcodePath,
+      '-x',
+      'none',
+      runtimeObjectPath,
       ...profileArguments(profile),
       '-Wl,--no-entry',
       '-Wl,--export=silk_main',

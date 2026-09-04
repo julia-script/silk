@@ -76,7 +76,6 @@ const analyze = (target) => Effect.runPromise(Analysis.ofSourceRealized(module_,
 // machine that ran the fixture rather than the compiler that produced them.
 const wasm = await analyze('wasm32-unknown-unknown')
 const native = await analyze('aarch64-apple-darwin')
-const wasmArtifact = await Effect.runPromise(Analysis.codegenWasm(wasm, { mode: 'release' }))
 const nativeArtifact = await Effect.runPromise(Analysis.codegen(native, { mode: 'release' }))
 
 const index = Analysis.declarationIndex(wasm)
@@ -207,23 +206,6 @@ const declaredHeads = index.modules
   .flatMap((module) => module.conformances)
   .flatMap((conformance) => (conformance.head === undefined ? [] : [conformance.head]))
 
-/**
- * The evaluation reduced to the ordered shape of what ran.
- *
- * The result is the load-bearing half: each wrapper adds a different constant, so only a run that
- * reached the mapped witness through the optional one and both through their base witnesses can
- * produce it. The event sequence keeps the ordering-sensitive part without carrying spans that
- * would only restate the source text.
- */
-const outcome = Analysis.evaluate(wasm)
-const evaluation = {
-  outcome: outcome._tag,
-  result: outcome._tag === 'Completed' ? Number(outcome.result.value) : undefined,
-  events: outcome.trace.map(
-    (event) => `${event._tag} ${'function' in event ? event.function.name : ''}`,
-  ),
-}
-
 process.stdout.write(
   JSON.stringify(
     {
@@ -266,8 +248,6 @@ process.stdout.write(
         contractRow: instance.key.contractRow,
       })),
       mir: MirEncoding.encode(Analysis.loweredMir(wasm)),
-      evaluation,
-      wasm: hash(wasmArtifact.bytes),
       native: hash(nativeArtifact.bitcode),
     },
     (_, value) => (typeof value === 'bigint' ? value.toString() : value),

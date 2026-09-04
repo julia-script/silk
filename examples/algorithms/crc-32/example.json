@@ -20,6 +20,6 @@
     "nested while loops",
     "indexed static byte views"
   ],
-  "targets": ["evaluation", "native", "wasm"],
+  "targets": ["native"],
   "blockers": []
 }

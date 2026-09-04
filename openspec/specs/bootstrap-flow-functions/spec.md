@@ -27,7 +27,7 @@ one Effect layer. Ordinary `fn` statements outside an explicit effect block SHAL
 
 Every `effect {}` construction site SHALL produce one compiler-only nominal Effect instance with a
 target-planned capture environment and generated runner. The public structural Effect contract MUST
-NOT expose that identity, and the implementation MUST NOT use a universal runtime interpreter or
+NOT expose that identity, and the implementation MUST NOT use a universal runtime execution loop or
 erase different construction sites merely because their public contracts match.
 
 #### Scenario: Return a delayed computation across a function boundary
@@ -94,7 +94,7 @@ alternative of nonempty `S` to belong to `E` before lowering.
 The whole-row `Effect.catch` alias SHALL be removed; whole-row recovery SHALL use
 `Effect.catchAll`. Singleton `Effect.catch` SHALL be an ordinary wrapper over sealed
 `Intrinsic.catchFailure`, whose callable contract carries the same checked membership and
-`Without` result and which is executable on the evaluator, WebAssembly, and native targets.
+`Without` result and which is executable on the WebAssembly and native targets.
 Neither standard-library name recognition nor a separate intrinsic typing rule MAY determine the
 residual.
 
@@ -102,7 +102,7 @@ A valid direct or wrapped singleton-catch application SHALL lower and execute on
 target. The protected Effect and handler operands SHALL be formed in ordinary call-evaluation order,
 the protected Effect SHALL run exactly once, success SHALL bypass the handler, a selected failure
 SHALL invoke the handler with its payload, and a nonselected failure SHALL propagate in the residual
-row unchanged. Evaluator, WebAssembly, and native execution SHALL agree on results, failure tags,
+row unchanged. WebAssembly and native execution SHALL agree on results, failure tags,
 and cleanup order. A syntax, kind, inference, or membership failure SHALL take precedence and prevent
 MIR construction. This change adds no runtime type dictionary.
 
@@ -154,7 +154,7 @@ MIR construction. This change adds no runtime type dictionary.
 #### Scenario: Execute a selected failure on every target
 
 - **WHEN** an executable `Effect.catch<Problem>` protects an Effect that fails with `Problem`
-- **THEN** the evaluator, WebAssembly, and native targets invoke the handler once with the selected payload and produce the same result
+- **THEN** the WebAssembly and native targets invoke the handler once with the selected payload and produce the same result
 
 #### Scenario: Bypass the handler on success
 
@@ -928,14 +928,14 @@ erase the concrete alternatives.
 
 ### Requirement: Composite Effect realization is finite and deterministic
 
-HIR and MIR SHALL represent the admitted alternatives as a closed finite composite whose evaluator,
-LLVM, and Wasm realizations select one alternative without heap allocation. A join with no finite
+HIR and MIR SHALL represent the admitted alternatives as a closed finite composite whose LLVM
+native and LLVM-to-Wasm realizations select one alternative without heap allocation. A join with no finite
 compatible representation SHALL retain a source diagnostic.
 
-#### Scenario: Compare all engines
+#### Scenario: Compare real artifacts
 
-- **WHEN** equivalent joined Effects are evaluated and compiled repeatedly
-- **THEN** all engines produce the same typed outcome, ownership cleanup, and deterministic artifact identity
+- **WHEN** equivalent joined Effects are compiled repeatedly for native and WebAssembly targets
+- **THEN** structural MIR and pinned artifact outcomes preserve the same typed outcome, ownership cleanup, and deterministic identity
 
 ### Requirement: Effect-block result typing accounts for every terminal
 
@@ -1066,8 +1066,8 @@ constraint on the declaration, not one a qualified call spelling could avoid.
 
 #### Scenario: Agree across engines
 
-- **WHEN** a program selecting either branch is run on the evaluator, on Wasm, and through the native toolchain
-- **THEN** the three engines produce the same result
+- **WHEN** a program selecting either branch runs in LLVM-generated native and WebAssembly artifacts
+- **THEN** both targets produce the same result
 
 ### Requirement: A finalizer runs on every Effect outcome without replacing it
 

@@ -35,21 +35,20 @@ implicit erasure, heterogeneous executable collections, or runtime interface dis
 - **WHEN** distinct leaf decoders produce different domain actions
 - **THEN** each branch maps to the shared application union before the following pipeline node
 
-### Requirement: Every engine agrees on static composition
+### Requirement: Runtime targets agree on static composition
 
-Evaluator, native LLVM, and direct WebAssembly SHALL produce equal observable results and typed
-failure outcomes. The evaluator SHALL expose handler, failure, suspension, selected-target, and
-cleanup trace counts. Native LLVM execution SHALL participate through the shared differential corpus
-with trapping cleanup witnesses; direct WebAssembly artifacts SHALL prove the selected direct target
-and cleanup path for the corresponding execution. WebAssembly output MUST contain no function table
-or `call_indirect` introduced by this capability.
+Structural MIR assertions SHALL retain handler, failure, suspension, selected-target, and cleanup
+evidence. Native LLVM execution SHALL participate through the shared acceptance corpus with
+independently pinned results. LLVM-generated WebAssembly artifacts SHALL prove target-specific
+lowering only where the specification makes a WebAssembly claim. WebAssembly output MUST contain no
+function table or `call_indirect` introduced by this capability.
 
 #### Scenario: Run the acceptance matrix
 
 - **WHEN** success, help, selection failure, decode failure, uncalled cleanup, and called cleanup
-  cases run through all engines
-- **THEN** their results agree, evaluator traces satisfy the exact contract, and backend artifacts
-  retain the corresponding static targets and cleanup witnesses
+  cases are analyzed and run through the shared native corpus
+- **THEN** pinned results agree with the structural MIR contract, and target-specific artifact tests
+  retain their corresponding static targets and cleanup witnesses
 
 ### Requirement: Static-tree growth is characterized deterministically
 

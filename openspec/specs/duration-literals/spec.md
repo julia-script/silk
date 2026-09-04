@@ -122,10 +122,10 @@ and exact value to importing modules.
 - **WHEN** a public constant declared as `const timeout: u64 = 3s` is imported by another module
 - **THEN** the importer observes an ordinary `u64` constant with exact value `3_000_000_000`
 
-#### Scenario: Preserve engine parity without duration runtime support
+#### Scenario: Preserve target consistency without duration runtime support
 
-- **WHEN** a program returns or compares a duration literal under evaluation, WebAssembly, or native execution
-- **THEN** every engine observes the same ordinary `u64` value and behavior
+- **WHEN** a program returns or compares a duration literal under WebAssembly or native execution
+- **THEN** every supported target observes the same ordinary `u64` value and behavior
 
 ### Requirement: Formatting preserves authored duration spelling
 

@@ -64,7 +64,7 @@ output.
 #### Scenario: Preserve a failure trace through suspension
 
 - **WHEN** an unhandled typed failure crosses suspended logical invocations in an optimized build
-- **THEN** evaluator, native, and Wasm termination metadata retain the stable logical path rather than compiler driver or coroutine frames
+- **THEN** native and LLVM-generated WebAssembly termination metadata retain the stable logical path rather than compiler driver or coroutine frames
 
 #### Scenario: Keep traps outside typed recovery
 
@@ -76,7 +76,7 @@ output.
 The compiler SHALL derive each private target adapter and runtime linkage from the reachable entry,
 failure, host-input, stream, and suspension inventory. A native standalone adapter SHALL normalize
 every recognized unhandled typed failure to status one and render its canonical identity to the
-diagnostic stream; a failed complete render SHALL use operational status two. Direct WebAssembly
+diagnostic stream; a failed complete render SHALL use operational status two. LLVM-generated WebAssembly
 SHALL remain import-free and return the private normalized tag paired with the artifact's structured
 termination metadata. Process arguments SHALL be captured only when reachable host-input operations
 request them. No source-visible console, scheduler, allocator, dependency container, or provider
@@ -97,7 +97,7 @@ SHALL become ambient through entry adaptation.
 - **WHEN** the native adapter cannot complete the failure report write
 - **THEN** it exits with operational status two without changing the original typed-failure data
 
-#### Scenario: Keep direct WebAssembly import-free
+#### Scenario: Keep LLVM-generated WebAssembly import-free
 
 - **WHEN** a closed effect entry is emitted directly to WebAssembly
 - **THEN** `silk_main` returns its private closed tag, the artifact retains matching structured termination metadata, and no standard-error import is added

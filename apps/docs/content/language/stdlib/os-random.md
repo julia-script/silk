@@ -18,8 +18,8 @@ nonblocking `getrandom`; macOS uses `arc4random_buf`.
 ## Gotchas
 
 Host failure is a fatal trap because continuing with weak or partial bytes would violate the
-service contract. GNU/Linux requires glibc 2.25 and Linux 3.17 or later. Direct WebAssembly and
-Windows do not provide this implementation.
+service contract. GNU/Linux requires glibc 2.25 and Linux 3.17 or later. WebAssembly and Windows
+do not provide this implementation.
 
 Import as `OsRandom` with `import silk.os_random { OsRandom }`.
 

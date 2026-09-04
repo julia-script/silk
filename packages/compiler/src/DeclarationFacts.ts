@@ -162,7 +162,7 @@ export const sameFieldId = (left: FieldId, right: FieldId): boolean => {
   return false
 }
 
-/** Encodes one field identity as a stable key for maps, diagnostics, and backend selectors. */
+/** Encodes one field identity as a stable key for maps, diagnostics, and LLVM lowering. */
 export const fieldIdKey = (self: FieldId): string => {
   if (self.owner._tag === 'StructFieldOwnerId') {
     const declaration = self.owner.declaration

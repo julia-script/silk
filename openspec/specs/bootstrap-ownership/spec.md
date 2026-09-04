@@ -15,7 +15,7 @@ After private residual and cleanup-call candidate closure is complete, the owner
 once for each residual runtime HIR specialization and SHALL publish
 one immutable ownership fact for that specialization: its runtime bindings with their ownership
 category and live range over source spans, and a closed verdict. Static parameters, static local
-bindings, static-function locals, inactive static arms, and static evaluator storage MUST NOT appear
+bindings, static-function locals, inactive static arms, and `StaticEvaluation` storage MUST NOT appear
 as owned bindings or cleanup obligations. Runtime parameters and residual `let` statements SHALL
 retain their ordinary liveness and move behavior.
 
@@ -59,7 +59,7 @@ executable reachability before the residual graph is closed.
 The phase SHALL produce one cleanup plan per successful residual runtime specialization: every
 structured residual exit path with its ordered releases in last-acquired, first-released order. A
 release SHALL record the end of one runtime binding's ownership at that exit; bindings already
-consumed by a move before the exit MUST NOT be released again. Static values and evaluator storage
+consumed by a move before the exit MUST NOT be released again. Static values and `StaticEvaluation` storage
 MUST NOT produce releases. The plan SHALL remain target-neutral, SHALL record runtime releases
 uniformly whether or not the released type carries cleanup behavior, and SHALL expose a
 deterministic textual encoding gated by committed golden files.
@@ -1080,7 +1080,7 @@ MUST preserve that single active obligation. Fatal traps SHALL retain the existi
 #### Scenario: Clean one selected payload
 
 - **WHEN** a union holding a droppable field in one variant leaves scope
-- **THEN** every engine runs the union-level and active-field cleanup prescribed by ordinary struct ordering without touching inactive variant storage
+- **THEN** every supported target runs the union-level and active-field cleanup prescribed by ordinary struct ordering without touching inactive variant storage
 
 #### Scenario: Consume one field variant through matching
 
@@ -1212,5 +1212,5 @@ owner in such a cycle may be planned as having no cleanup.
 
 #### Scenario: Preserve identical release counts across engines
 
-- **WHEN** the same recursive owner is released under the evaluator, the Wasm backend, and the native backend
+- **WHEN** the same recursive owner is released by LLVM-generated WebAssembly and native artifacts
 - **THEN** all three report the same number of releases

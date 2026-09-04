@@ -29,26 +29,17 @@ export interface SymbolEntry {
 
 export interface ControlProvenance {
   readonly _tag: 'BackendControlProvenance'
-  readonly backend: 'LLVM' | 'WebAssembly'
+  readonly backend: 'LLVM'
   readonly function: DeclarationFacts.CanonicalId
   readonly instance: Mir.MirFunction['instance']
   readonly region: Mir.RegionId
-  readonly construct:
-    | 'LlvmJump'
-    | 'LlvmBranch'
-    | 'LlvmReturn'
-    | 'LlvmTrap'
-    | 'WasmIf'
-    | 'WasmLoop'
-    | 'WasmBr'
-    | 'WasmReturn'
-    | 'WasmTrap'
+  readonly construct: 'LlvmJump' | 'LlvmBranch' | 'LlvmReturn' | 'LlvmTrap'
   readonly targets: ReadonlyArray<Mir.RegionId>
   readonly loop?: Mir.LoopId
   readonly span: SourceSpan.SourceSpan
 }
 
-export type Id = 'llvm' | 'wasm'
+export type Id = 'llvm'
 export type Termination = TerminationModel.Contract
 
 /** Canonical target-runtime capabilities that the backend actually emitted. */
@@ -108,15 +99,7 @@ export interface LlvmBitcodeArtifact extends ArtifactBase {
   readonly ir: string
 }
 
-export interface WebAssemblyModuleArtifact extends ArtifactBase {
-  readonly _tag: 'WebAssemblyModuleArtifact'
-  readonly backend: 'wasm'
-  readonly bytes: Uint8Array
-  readonly wat: string
-  readonly hostImports: ReadonlyArray<{ readonly module: string; readonly name: string }>
-}
-
-export type Artifact = LlvmBitcodeArtifact | WebAssemblyModuleArtifact
+export type Artifact = LlvmBitcodeArtifact
 
 export interface ModuleViolation {
   readonly function: string
@@ -181,10 +164,7 @@ export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
       reason: { _tag: 'InvalidMir', violations },
     })
   }
-  const availability = IntrinsicAvailability.select(
-    program.intrinsics,
-    IntrinsicAvailability.backendTarget(self.id),
-  )
+  const availability = IntrinsicAvailability.select(program.intrinsics, program.layout.target)
   if (availability._tag === 'Unavailable') {
     return yield* new BackendError({
       operation: 'Backend.emit',
@@ -195,17 +175,12 @@ export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
   }
   const foreign = ForeignAvailability.select(
     program.foreignCalls,
-    IntrinsicAvailability.backendTarget(self.id),
     program.layout.target,
     program.foreignStatics,
     ForeignAvailability.callbackAddresses(program),
     ForeignAvailability.staticLoads(program),
   )
-  const planning = ForeignPlanning.check(
-    program,
-    IntrinsicAvailability.backendTarget(self.id),
-    program.layout.target,
-  )
+  const planning = ForeignPlanning.check(program, program.layout.target)
   if (foreign.length > 0 || planning.length > 0) {
     return yield* new BackendError({
       operation: 'Backend.emit',

@@ -1,6 +1,5 @@
 import * as Analysis from '@silklang/compiler/Analysis'
 import type * as ArtifactKind from '@silklang/compiler/ArtifactKind'
-import type * as Backend from '@silklang/compiler/Backend'
 import * as Diagnostic from '@silklang/compiler/Diagnostic'
 import * as Driver from '@silklang/compiler/Driver'
 import * as FileSourceResolver from '@silklang/compiler/FileSourceResolver'
@@ -52,7 +51,6 @@ export interface ProjectSelection extends ProjectOptions.ProjectOptions {
 
 export interface CompileOptions {
   readonly entry: SourceEntry.SourceEntry
-  readonly backend: Backend.Backend
   readonly target?: string
   readonly profile: ToolchainPlan.OptimizationProfile
   readonly artifactKind: ArtifactKind.ArtifactKind
@@ -80,7 +78,6 @@ const planBatch = (
   purpose: BuildPlan.Purpose = 'build',
 ) =>
   BuildBatch.make(project, {
-    ...(options.backend === undefined ? {} : { backend: options.backend }),
     ...(options.targets === undefined ? {} : { targets: options.targets }),
     profile: options.profile,
     purpose,
@@ -138,7 +135,6 @@ export const compile = Effect.fn('Workflow.compile')(function* (
         root: SourceFile.make(options.entry.module, options.entry.bytes),
         ...(options.target === undefined ? {} : { target: options.target }),
       },
-      backend: options.backend,
       toolchain: options.toolchain,
       artifactKind: options.artifactKind,
       packageName: options.packageName,
@@ -281,7 +277,6 @@ export const buildProject = Effect.fn('Workflow.buildProject')(function* (
     (plan) =>
       compile({
         entry: plan.project.entry,
-        backend: plan.backend,
         target: plan.target.id,
         profile: plan.profile,
         artifactKind: plan.artifactKind,
@@ -289,7 +284,7 @@ export const buildProject = Effect.fn('Workflow.buildProject')(function* (
         destination: plan.destination,
         toolchain: plan.toolchain,
         nativeLinkInputs: plan.nativeLinkInputs,
-        scopeName: `${plan.project.name}-${plan.backend.id}-${plan.target.id}`,
+        scopeName: `${plan.project.name}-llvm-${plan.target.id}`,
       }),
     { concurrency: 1 },
   )
@@ -298,8 +293,8 @@ export const buildProject = Effect.fn('Workflow.buildProject')(function* (
     if (plan === undefined) continue
     yield* Console.log(
       attempt._tag === 'Built'
-        ? `build ${plan.backend.id}/${plan.target.id}: ok ${attempt.artifact}`
-        : `build ${plan.backend.id}/${plan.target.id}: failed (exit ${attempt.status})`,
+        ? `build llvm/${plan.target.id}: ok ${attempt.artifact}`
+        : `build llvm/${plan.target.id}: failed (exit ${attempt.status})`,
     )
   }
   const succeeded = attempts.filter((attempt) => attempt.status === 0).length
@@ -553,7 +548,7 @@ export const clean = Effect.fn('Workflow.clean')(function* (
   return 0
 })
 
-/** Builds exactly the host target through a runnable backend and preserves program exit status. */
+/** Builds exactly the host target and preserves program exit status. */
 export const run = Effect.fn('Workflow.run')(function* (
   options: ProjectSelection,
   arguments_: ReadonlyArray<string> = [],
@@ -568,7 +563,6 @@ export const run = Effect.fn('Workflow.run')(function* (
   const loaded = yield* Effect.result(loadProject(options))
   if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)
   const planned = BuildBatch.make(loaded.success, {
-    ...(options.backend === undefined ? {} : { backend: options.backend }),
     targets: ['host'],
     profile: options.profile,
     purpose: 'run',
@@ -577,7 +571,6 @@ export const run = Effect.fn('Workflow.run')(function* (
   const plan = planned.success.plans[0]
   const attempted = yield* compile({
     entry: plan.project.entry,
-    backend: plan.backend,
     target: plan.target.id,
     profile: plan.profile,
     artifactKind: plan.artifactKind,
@@ -589,7 +582,7 @@ export const run = Effect.fn('Workflow.run')(function* (
   })
   if (attempted._tag === 'NotBuilt') return attempted.status
   if (attempted.artifactKind !== 'NativeExecutable') {
-    yield* Console.error(`Backend ${plan.backend.id} did not produce a runnable executable`)
+    yield* Console.error('The compiler did not produce a runnable executable')
     return 2
   }
   const executed = yield* Effect.result(Program.run(attempted.artifact, arguments_))

@@ -31,7 +31,13 @@ impl MonotonicClock for ParentClock {
 struct NoNestedFiber {}
 struct StoredNestedFiber { fiber: Fiber<i32, never> }
 struct NestedFiberSlot { phase: NoNestedFiber | StoredNestedFiber }
-struct NestedTimerLifetime { kind: i32 }
+struct Audit { released: i32 }
+fn release(audit: &mut Audit) -> i32 {
+  audit.released = audit.released + 1
+  return audit.released
+}
+fn released(audit: &Audit) -> i32 { return audit.released }
+struct NestedTimerLifetime { kind: i32 audit: Shared<Audit> }
 
 fn nestedTimerActivated() -> () { return () }
 fn nestedTimerReleased() -> () { return () }
@@ -43,7 +49,10 @@ fn resumedUnexpectedly() -> () { return () }
 
 impl Drop for NestedTimerLifetime {
   fn drop(self: &mut NestedTimerLifetime) -> () {
-    if self.kind == 1 { nestedTimerReleased() }
+    if self.kind == 1 {
+      let count = Shared.withMut<Audit, i32>(&self.audit, release)
+      nestedTimerReleased()
+    }
     return ()
   }
 }
@@ -74,9 +83,9 @@ fn missingNestedFiber() -> Fiber<i32, never> {
   return missingNestedFiber()
 }
 
-effect fn nestedTimer() -> i32
+effect fn nestedTimer(audit: Shared<Audit>) -> i32
 ? &mut Scheduler | &mut MonotonicClock {
-  let lifetime = NestedTimerLifetime { kind: 1 }
+  let lifetime = NestedTimerLifetime { kind: 1, audit: move audit }
   nestedTimerActivated()
   run MonotonicClock.waitFor(1000000000000)
   drop lifetime
@@ -84,31 +93,30 @@ effect fn nestedTimer() -> i32
   return -1
 }
 
-effect fn innerRoot(slot: Shared<NestedFiberSlot>) -> i32
+effect fn innerRoot(slot: Shared<NestedFiberSlot>, audit: Shared<Audit>) -> i32
 ! OutOfMemoryError | TaskIdExhaustedError
 ? &mut Scheduler | &mut MonotonicClock {
-  let timer = run Fiber.forkChild<i32, never>(nestedTimer())
+  let timer = run Fiber.forkChild<i32, never>(nestedTimer(move audit))
   let published = Shared.withMut(&slot, installNestedFiber(move timer))
+  run Fiber.yieldNow()
   drop slot
-  run MonotonicClock.waitFor(1000000000000)
-  resumedUnexpectedly()
-  return -2
+  return 0
 }
 
-effect fn nestedSchedulerTask(slot: Shared<NestedFiberSlot>) -> i32
+effect fn nestedSchedulerTask(slot: Shared<NestedFiberSlot>, audit: Shared<Audit>) -> i32
 ! OutOfMemoryError | TaskIdExhaustedError | StalledError
 ? &mut MonotonicClock {
   let mut inner = LocalScheduler.make()
-  return run LocalScheduler.execute(&mut inner, innerRoot(move slot))
+  return run LocalScheduler.execute(&mut inner, innerRoot(move slot, move audit))
 }
 
-effect fn outerRoot(slot: Shared<NestedFiberSlot>) -> i32
+effect fn outerRoot(slot: Shared<NestedFiberSlot>, audit: Shared<Audit>) -> i32
 ! OutOfMemoryError | TaskIdExhaustedError | StalledError
 ? &mut Scheduler | &mut MonotonicClock {
   let inner = run Fiber.forkChild<
     i32,
     OutOfMemoryError | TaskIdExhaustedError | StalledError,
-  >(nestedSchedulerTask(move slot))
+  >(nestedSchedulerTask(move slot, move audit))
   drop inner
   run Fiber.yieldNow()
   nestedOuterTerminating()
@@ -142,23 +150,38 @@ effect fn scenario() -> i32
   let slot = run Shared.make<NestedFiberSlot>(NestedFiberSlot {
     phase: NoNestedFiber {},
   }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let audit = run Shared.make<Audit>(Audit { released: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let nested = run LocalScheduler.execute(
     &mut scheduler,
-    outerRoot(Shared.clone<NestedFiberSlot>(&slot)),
+    outerRoot(
+      Shared.clone<NestedFiberSlot>(&slot),
+      Shared.clone<Audit>(&audit),
+    ),
   )
   nestedOuterReturned()
   let nestedFiber = requireNestedFiber(Shared.withMut(&slot, takeNestedFiber))
   drop slot
-  let cancelled = run LocalScheduler.execute(&mut scheduler, observeRoot(move nestedFiber))
-  if nested == 13 && cancelled { return 42 }
-  return -42
+  let cancelled = run LocalScheduler.execute(
+    &mut scheduler,
+    observeRoot(move nestedFiber),
+  )
+  let releaseCount = Shared.with<Audit, i32>(&audit, released)
+  drop audit
+  if nested != 13 { return 1 }
+  if !cancelled { return 2 }
+  if releaseCount != 1 { return 3 }
+  return 42
 }
 
 effect fn recover(
   error: OutOfMemoryError | TaskIdExhaustedError | StalledError,
 ) -> i32 {
-  drop error
-  return -99
+  return match move error {
+    OutOfMemoryError {} => -91
+    TaskIdExhaustedError {} => -92
+    StalledError {} => -93
+  }
 }
 
 pub fn main() -> i32 {

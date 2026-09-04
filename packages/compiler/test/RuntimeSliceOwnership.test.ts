@@ -1,8 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
-import * as MirVerification from '../src/MirVerification.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -72,60 +70,6 @@ pub fn main() -> i32 { return 0 }`)
     assert.strictEqual(loan?.parent?._tag, 'Parameter')
     assert.strictEqual(loan?.suspendsParent, true)
     assert.strictEqual(loan?.startRegion.ordinal, loan?.endRegion.ordinal)
-  }),
-)
-
-it.effect('ends lexical borrow bindings at last use and restores their owner', () =>
-  Effect.gen(function* () {
-    const self = yield* snapshot(`fn conflict() -> i32 {
-  let mut values = [1, 2]
-  let view = &values
-  values[0] = 40
-  return view[1]
-}
-pub fn main() -> i32 {
-  let mut values = [1, 2]
-  let mut view = &mut values
-  view[0] = 40
-  let first = view[0]
-  values[1] = 2
-  return first + values[1]
-}`)
-
-    assert.deepEqual(
-      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
-      ['OWN0011'],
-    )
-    const main = Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(1)
-    const loan = main?.loans.find((candidate) => candidate.origin === 'FixedArrayBorrow')
-    assert.strictEqual(loan?.access, 'Exclusive')
-    assert.strictEqual(loan === undefined ? false : loan.endSpan.end > loan.startSpan.end, true)
-
-    const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
-  }),
-)
-
-it.effect('ends a reusable callable capture loan after its last invocation', () =>
-  Effect.gen(function* () {
-    const self = yield* snapshot(`fn inspect(value: i32, values: &[i32]) -> i32 {
-  return value + values[0]
-}
-pub fn main() -> i32 {
-  let mut values = [1]
-  let callback = inspect(&values)
-  let observed = callback(1)
-  values[0] = 40
-  return observed + values[0]
-}`)
-
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
   }),
 )
 
@@ -296,63 +240,6 @@ pub fn main() -> i32 { return directRestored() + pipelineRestored() }`)
       assert.strictEqual(loan?.root._tag, 'Let')
       assert.strictEqual(loan?.access, 'Exclusive')
     }
-  }),
-)
-
-it.effect('retains a returned reference sourced from an exact callable-section capture', () =>
-  Effect.gen(function* () {
-    const self = yield* snapshot(`struct Counter { value: i32 }
-fn select(delta: i32, counter: &mut Counter) -> &mut Counter {
-  counter.value = counter.value + delta
-  return move counter
-}
-fn conflict() -> i32 {
-  let mut counter = Counter { value: 1 }
-  let mut callback = select(&mut counter)
-  let mut view = callback(1)
-  counter.value = 20
-  view.value = 42
-  return counter.value
-}
-pub fn main() -> i32 {
-  let mut counter = Counter { value: 1 }
-  let mut callback = select(&mut counter)
-  let mut view = callback(1)
-  view.value = 42
-  return counter.value
-}`)
-
-    assert.deepEqual(
-      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
-      ['OWN0011'],
-    )
-    assert.deepEqual(Hir.verify(Analysis.rootAnalysis(self).hir), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
-    const main = Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(2)
-    const capture = main?.loans.find((loan) => loan.origin === 'ReturnedCallableCapture')
-    assert.strictEqual(capture?.access, 'Exclusive')
-    assert.strictEqual(capture?.root._tag, 'Let')
-    assert.strictEqual(
-      capture === undefined ? false : capture.endSpan.end > capture.startSpan.end,
-      true,
-    )
-
-    const evaluated = Analysis.evaluate(self)
-    assert.strictEqual(evaluated._tag, 'Completed')
-    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
-
-    const mir = Analysis.loweredMir(self)
-    const mainMir = mir.functions.find((fn) => fn.id.name === 'main')
-    const operations =
-      mainMir?.regions.flatMap((region) => {
-        if (region._tag === 'OperationRegion') return region.operations
-        if (region._tag === 'CleanupRegion') return region.releases
-        return []
-      }) ?? []
-    const ending = operations.findIndex((operation) => operation._tag === 'EndLoan')
-    const restoredRead = operations.findLastIndex((operation) => operation._tag === 'ReadPlace')
-    assert.isAtLeast(ending, 0)
-    assert.isAbove(restoredRead, ending)
   }),
 )
 

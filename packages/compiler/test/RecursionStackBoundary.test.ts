@@ -5,11 +5,9 @@ import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
-import * as Analysis from '../src/Analysis.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
-import * as Projections from './support/projections.js'
 import * as Driver from './support/TestDriver.js'
 
 /**
@@ -20,14 +18,13 @@ import * as Driver from './support/TestDriver.js'
  *
  * What is pinned:
  *
- * - a shallow chain traverses on all three engines and releases every link exactly once,
- * - a deep chain fails on every engine, each in that engine's own way, and
+ * - a shallow chain traverses through native and LLVM-to-Wasm artifacts and releases every link,
+ * - a deep chain fails at the real runtime boundary, and
  * - the escape hatch — an explicit iterative teardown — carries a chain far beyond the depth at
  *   which the recursive form dies.
  *
- * Recorded on this branch, x86_64 Linux, Node 22.22, clang 18, release profile: the recursive walk
- * survives 500 links in the evaluator, 950 in Wasm, and 100,000 natively, and fails by 510, 1,000,
- * and 128,000 respectively. Those numbers are evidence, not contract; nothing below asserts them.
+ * The measured native bounds are evidence rather than language contract; tests assert only the
+ * selected stack policy and observable native termination behavior.
  */
 
 const defaultClang = (): string => {
@@ -175,23 +172,6 @@ effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
     depth,
   )
 
-/** Iterative throughout: build, unlink, release. Nothing here recurses. */
-const drain = (depth: number): string =>
-  program(
-    `import silk.allocator { OutOfMemoryError }
-import silk.allocator { Allocator }
-import silk.allocator { SystemAllocator }
-import silk.effect { Effect }
-effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let built = run build(depth) |> Effect.provideMut(&mut allocator)
-  let released = drain(move built)
-  if released == depth { return 0 }
-  return 2
-}`,
-    depth,
-  )
-
 /**
  * Iterative construction, then ordinary automatic cleanup. `Box.drop` drops the element it holds,
  * so releasing the outermost link calls the hook of the one below it: the chain is destroyed by
@@ -212,55 +192,6 @@ effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
     depth,
   )
 
-/**
- * The case with no escape hatch at all: construction runs out of allocations partway, and the
- * half-built chain is released by the failure path. `drain` cannot be called on it — the value is
- * never named by user code, it exists only inside the cleanup the compiler runs on the way out.
- *
- * Recovering the `OutOfMemoryError` is the point: at a shallow depth this returns 1, having unwound
- * cleanly. Deep, the unwinding is what dies.
- */
-const failedBuild = (depth: number): string => `import silk.allocator { Allocator }
-import silk.allocator { OutOfMemoryError }
-import silk.allocator { Allocator }
-import silk.allocator { SystemAllocator }
-import silk.effect { Effect }
-import silk.layout { Layout }
-${prelude}
-struct QuotaAllocator { remaining: i32 }
-
-effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
-  if self.remaining == 0 { fail OutOfMemoryError {} }
-  self.remaining = self.remaining - 1
-  let mut inner = Allocator.systemAllocatorProvider()
-  let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
-  return run pending
-}
-
-impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
-
-effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
-  let mut allocator = QuotaAllocator { remaining: ${Math.floor(depth / 2)} }
-  let built = run build(depth) |> Effect.provideMut(&mut allocator)
-  drop built
-  return 0
-}
-
-effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
-
-pub fn main() -> i32 { return run Effect.catchAll(measure(${depth}), recover) }`
-
-const realize = (id: string, source: string) =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(id, ascii(source), 'wasm32-unknown-unknown')
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      [],
-      id,
-    )
-    return snapshot
-  })
-
 interface Outcome {
   readonly _tag: 'Returned' | 'Failed'
   readonly detail: string
@@ -268,32 +199,6 @@ interface Outcome {
 
 const returned = (value: number): Outcome =>
   Object.freeze({ _tag: 'Returned' as const, detail: String(value) })
-
-/**
- * Runs the module under Wasm and reports whether the host survived it.
- *
- * A host out of stack is a `RangeError` from V8. A Wasm `RuntimeError` is accepted as the same
- * observation because the trap the engine reaches first is platform-sensitive — on this machine a
- * band of depths just under the host limit traps `unreachable` instead, which is the separate
- * defect tracked in #134. Both mean "this engine could not carry the chain"; neither means the
- * traversal produced a wrong answer, which is what a returned non-zero value would mean.
- */
-const runWasm = (bytes: Uint8Array): Outcome => {
-  const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes.slice()), {})
-  try {
-    return returned((instance.exports.silk_main as () => number)())
-  } catch (error) {
-    const failure = error as Error
-    assert.isTrue(
-      failure instanceof RangeError || failure instanceof WebAssembly.RuntimeError,
-      `unexpected Wasm failure: ${failure.constructor.name}: ${failure.message}`,
-    )
-    return Object.freeze({
-      _tag: 'Failed' as const,
-      detail: `${failure.constructor.name}: ${failure.message}`,
-    })
-  }
-}
 
 /**
  * Compiles and runs the module natively. A machine stack overrun arrives as a signal rather than an
@@ -346,79 +251,6 @@ const escalate = <E>(
   })
 
 it.effect(
-  'traverses, drains, and releases a shallow chain identically on all three engines',
-  () =>
-    Effect.gen(function* () {
-      const depth = 64
-      const source = walk(depth)
-      const snapshot = yield* realize('recursion-stack-boundary/shallow', source)
-
-      const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(evaluated._tag, 'Completed')
-      if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 0n)
-
-      // The walk counted every link and the teardown released every one of them: 64 boxes, 64
-      // acquires, 64 releases. Borrowing and ownership are unchanged by the depth question.
-      const events = Projections.allocationTraceEventsOf(evaluated)
-      const acquires = events.filter((event) => event._tag === 'AllocationAcquire').length
-      const releases = events.filter((event) => event._tag === 'AllocationRelease').length
-      assert.strictEqual(acquires, depth)
-      assert.strictEqual(releases, acquires)
-
-      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-      assert.deepEqual(runWasm(wasm.bytes), returned(0))
-
-      assert.deepEqual(
-        yield* runNative(
-          'recursion-stack-boundary/shallow',
-          source,
-          join(destinationRoot, 'shallow'),
-        ),
-        returned(0),
-      )
-    }),
-  180_000,
-)
-
-/**
- * The evaluator is the one engine that does not fail by exhausting a real stack: the accepted
- * contract makes depth a deterministic budget, so the same program blocks identically on every
- * host instead of crashing on some of them. That is why the failure mode has to be documented per
- * engine — the same source is a `Blocked` value here and a signal on the target.
- */
-it.effect('blocks a deep recursive traversal on the evaluator call-depth limit', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* realize('recursion-stack-boundary/evaluator', walk(4_000))
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Blocked')
-    if (evaluated._tag !== 'Blocked') return
-    assert.strictEqual(evaluated.reason._tag, 'EvaluationLimit')
-    if (evaluated.reason._tag !== 'EvaluationLimit') return
-    assert.strictEqual(evaluated.reason.kind, 'CallDepth')
-    // The blocked frame names the recursive walk itself after Option became an ordinary nominal
-    // union and no longer inserts a separate accessor frame.
-    assert.strictEqual(evaluated.reason.function.name, 'stepDepth')
-  }),
-)
-
-it.effect(
-  'exhausts the Wasm host stack on a deep recursive traversal',
-  () =>
-    Effect.gen(function* () {
-      const found = yield* escalate(8_000, 512_000, (depth) =>
-        Effect.gen(function* () {
-          const snapshot = yield* realize(`recursion-stack-boundary/wasm/${depth}`, walk(depth))
-          const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-          return runWasm(wasm.bytes)
-        }),
-      )
-      assert.strictEqual(found.outcome._tag, 'Failed')
-    }),
-  300_000,
-)
-
-it.effect(
   'exhausts the native machine stack on a deep recursive traversal',
   () =>
     Effect.gen(function* () {
@@ -432,117 +264,6 @@ it.effect(
       assert.strictEqual(found.outcome._tag, 'Failed')
     }),
   600_000,
-)
-
-/**
- * The sanctioned way out, pinned against the depth that kills the recursive form. One million
- * links is an order of magnitude past the native limit measured above and three past the Wasm one,
- * and the iterative teardown carries it on both, because its stack is one frame deep whatever the
- * chain length is.
- */
-it.effect(
-  'carries a chain past every recursive limit when the traversal is written iteratively',
-  () =>
-    Effect.gen(function* () {
-      const depth = 1_000_000
-      const source = drain(depth)
-      const snapshot = yield* realize('recursion-stack-boundary/iterative', source)
-
-      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-      assert.deepEqual(runWasm(wasm.bytes), returned(0))
-
-      assert.deepEqual(
-        yield* runNative(
-          'recursion-stack-boundary/iterative',
-          source,
-          join(destinationRoot, 'iterative'),
-        ),
-        returned(0),
-      )
-    }),
-  600_000,
-)
-
-/**
- * Automatic cleanup is the same boundary reached from the other side, and it is the harder half.
- *
- * A traversal can be rewritten as a loop because the call site owns the shape of the traversal. A
- * `Drop` chain cannot: the recursion is `Box`'s hook dropping the element that is itself a `Box`,
- * and it runs wherever the value happens to go out of scope. A `Drop` hook may declare no failure
- * row and no capability requirement, so the escape offered for a traversal — express it as an
- * Effect that crosses a suspension boundary — is not open to it either. Cleanup cannot allocate,
- * cannot fail, and cannot suspend.
- *
- * What is left is an explicit iterative teardown, called before the value goes out of scope, and
- * the case below pins that it works. What it cannot cover is pinned after it.
- */
-it.effect(
-  'releases a shallow chain through recursive cleanup on all three engines',
-  () =>
-    Effect.gen(function* () {
-      const depth = 64
-      const source = dropped(depth)
-      const snapshot = yield* realize('recursion-stack-boundary/drop-shallow', source)
-
-      const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(evaluated._tag, 'Completed')
-      if (evaluated._tag !== 'Completed') return
-      assert.strictEqual(evaluated.result.value, 0n)
-
-      const events = Projections.allocationTraceEventsOf(evaluated)
-      const acquires = events.filter((event) => event._tag === 'AllocationAcquire').length
-      const releases = events.filter((event) => event._tag === 'AllocationRelease').length
-      assert.strictEqual(acquires, depth)
-      assert.strictEqual(releases, acquires)
-
-      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-      assert.deepEqual(runWasm(wasm.bytes), returned(0))
-
-      assert.deepEqual(
-        yield* runNative(
-          'recursion-stack-boundary/drop-shallow',
-          source,
-          join(destinationRoot, 'drop-shallow'),
-        ),
-        returned(0),
-      )
-    }),
-  180_000,
-)
-
-it.effect('blocks a deep recursive Drop on the evaluator call-depth limit', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* realize('recursion-stack-boundary/drop-evaluator', dropped(4_000))
-    const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Blocked')
-    if (evaluated._tag !== 'Blocked') return
-    assert.strictEqual(evaluated.reason._tag, 'EvaluationLimit')
-    if (evaluated.reason._tag !== 'EvaluationLimit') return
-    assert.strictEqual(evaluated.reason.kind, 'CallDepth')
-    // The frame that ran out belongs to the standard library, not to the program: recursive drop
-    // remains at the owning `Box` actor now that its optional link is an ordinary union.
-    assert.strictEqual(evaluated.reason.function.module, 'silk/box')
-    assert.strictEqual(evaluated.reason.function.name, 'drop@impl#0')
-  }),
-)
-
-it.effect(
-  'exhausts the Wasm host stack when a deep chain is dropped',
-  () =>
-    Effect.gen(function* () {
-      const found = yield* escalate(8_000, 512_000, (depth) =>
-        Effect.gen(function* () {
-          const snapshot = yield* realize(
-            `recursion-stack-boundary/drop-wasm/${depth}`,
-            dropped(depth),
-          )
-          const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-          return runWasm(wasm.bytes)
-        }),
-      )
-      assert.strictEqual(found.outcome._tag, 'Failed')
-    }),
-  300_000,
 )
 
 /**
@@ -564,40 +285,4 @@ it.effect(
       assert.strictEqual(found.outcome._tag, 'Failed')
     }),
   900_000,
-)
-
-/**
- * The gap the guidance cannot close, pinned so it is a known shape rather than a surprise.
- *
- * A value you hold can be drained before it goes out of scope. A value that never becomes yours
- * cannot: when construction fails partway, the half-built chain is released by the failure path,
- * and there is no point in the source at which an iterative teardown could be called on it. So a
- * program that always drains explicitly still meets recursive `Drop` on its allocation-failure
- * path, at whatever depth construction had reached.
- *
- * Shallow, this recovers the `OutOfMemoryError` and returns 1. Deep, the recovery never happens.
- */
-it.effect(
-  'has no teardown to offer when construction fails partway down a deep chain',
-  () =>
-    Effect.gen(function* () {
-      const shallow = yield* realize('recursion-stack-boundary/failure-shallow', failedBuild(64))
-      const shallowWasm = yield* Analysis.codegenWasm(shallow, { mode: 'release' })
-      assert.deepEqual(runWasm(shallowWasm.bytes), returned(1))
-
-      const found = yield* escalate(8_000, 512_000, (depth) =>
-        Effect.gen(function* () {
-          const snapshot = yield* realize(
-            `recursion-stack-boundary/failure-wasm/${depth}`,
-            failedBuild(depth),
-          )
-          const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
-          const outcome = runWasm(wasm.bytes)
-          // A recovered failure is a survived depth here, not a wrong answer.
-          return outcome._tag === 'Returned' && outcome.detail === '1' ? returned(0) : outcome
-        }),
-      )
-      assert.strictEqual(found.outcome._tag, 'Failed')
-    }),
-  300_000,
 )

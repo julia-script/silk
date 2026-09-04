@@ -257,7 +257,7 @@ later growth of the compiler-private execution stack remains fatal and does not 
 runtime trap according to the program-termination rules.
 
 **Evidence:** [fatal traps](typed-failures.md#fail-007--a-trap-is-fatal-and-remains-outside-effect-outcomes),
-[execution-storage requirements](../../../../openspec/changes/archive/2026-08-19-align-effect-suspension-coroutine-storage/specs/bootstrap-evaluation/spec.md).
+[execution-storage requirements](independent-execution.md#exec-001--construction-is-lazy-explicit-and-caller-funded).
 
 ## Execution and composition
 
@@ -403,51 +403,27 @@ an allocator is reachable from suspendable code.
 **Evidence:** [service rules](requirements-and-services.md),
 [allocator-independence requirements](../../../../openspec/changes/archive/2026-08-19-align-effect-suspension-coroutine-storage/specs/bootstrap-owned-allocation/spec.md).
 
-## Engines, limits, and tooling
+## Runtime targets and tooling
 
-### SUSP-016 — Suspended invocations still count toward logical CallDepth
-
-**Status:** Confirmed
-
-An invocation remains a live logical source call while its child runs through suspension. It
-therefore continues to count toward the evaluator's `CallDepth` limit. Compiler-generated helpers
-do not add logical calls.
-
-```silk,ignore
-let result = evaluate(count(10_000), limits: { CallDepth: 100 })
-```
-
-Suspension can keep the physical machine stack bounded without making this logical depth smaller.
-
-**Boundary:** Logical depth is not physical JavaScript, native, or Wasm stack depth. Suspension may
-bound the physical stack while the logical depth continues growing honestly.
-
-**Diagnostics:** Reaching an evaluator `CallDepth` limit reports the existing deterministic
-evaluation-limit outcome and the active logical source frames, not private helper frames.
-
-**Evidence:** [evaluation limits](../../../../openspec/specs/bootstrap-evaluation/spec.md),
-[suspension evaluation tests](../../../../packages/compiler/test/EffectSuspensionEvaluation.test.ts).
-
-### SUSP-017 — Evaluation, native, and Wasm preserve the same semantics
+### SUSP-016 — Native and WebAssembly artifacts preserve the same source semantics
 
 **Status:** Confirmed
 
-The evaluator, native execution, and direct Wasm produce the same typed outcome, retained
-ownership, and cleanup order for a suspended program. Native and Wasm additionally guarantee
-bounded machine stack for cycles covered by SUSP-003.
+Native execution and LLVM-generated WebAssembly produce the same typed outcome, retained ownership,
+and cleanup order for a suspended program. Both targets additionally guarantee bounded machine
+stack for cycles covered by SUSP-003.
 
-For the `count` example in SUSP-001, every engine must produce the same integer or typed failure;
-engine-specific execution machinery cannot become part of that result.
+For the `count` example in SUSP-001, every supported target must produce the same integer or typed failure;
+target-specific execution machinery cannot become part of that result.
 
-**Boundary:** Engines may use different private execution representations or storage growth
+**Boundary:** LLVM targets may use different private execution representations or storage growth
 policies. Those differences cannot change source-visible results or cleanup.
 
-**Diagnostics:** A valid program receives no engine-selection diagnostic. A target that cannot
+**Diagnostics:** A valid program receives no target-support diagnostic. A target that cannot
 honor the suspension contract is unavailable for that reachable executable closure.
 
 **Evidence:** [target availability](unsafe-intrinsics-and-targets.md#target-003--target-unavailability-is-a-compile-time-compatibility-error),
-[native suspension tests](../../../../packages/compiler/test/EffectSuspensionNative.test.ts),
-[Wasm suspension tests](../../../../packages/compiler/test/EffectSuspensionWasm.test.ts).
+[native suspension tests](../../../../packages/compiler/test/EffectSuspensionNative.test.ts).
 
 ### SUSP-018 — Non-suspending call graphs pay no coroutine cost
 
@@ -539,9 +515,8 @@ These are compiler architecture rules, not additional source obligations:
   bind different provider rows cannot share or select each other's frame layout.
 - The parent completes its ownership and state transition before the deferred child begins. A live
   value therefore has one owner throughout transfer, execution, resumption, and cleanup.
-- Evaluation keeps frames in its activation machine. Native uses non-moving segmented private
-  storage. Direct Wasm uses a private, non-overlapping linear-memory region. Growth failure follows
-  SUSP-006 on all three engines.
+- Native artifacts use non-moving segmented private storage. LLVM-generated WebAssembly uses a
+  private, non-overlapping linear-memory region. Growth failure follows SUSP-006 on both targets.
 
 The complete-key frame invariant is exercised by the
 [coroutine-frame lookup](../../../../packages/compiler/src/CoroutineFrame.ts) and the
