@@ -137,12 +137,13 @@ export const lowerInterfaceOperands = (
   arguments_: ReadonlyArray<Hir.Expression>,
   operands: ReadonlyArray<DeclarationFacts.InterfaceOperandFact>,
   span: SourceSpan.SourceSpan,
-): InterfaceOperands | undefined => {
+): InterfaceOperands | 'Transferred' | undefined => {
   if (arguments_.length !== operands.length) return undefined
   const lowered: Array<Mir.LocalId> = []
   const borrows: Array<{ readonly borrow: Hir.BorrowId; readonly local: Mir.LocalId }> = []
   for (const [ordinal, argument] of arguments_.entries()) {
     const value = lowerExpression(fn, argument)
+    if (value === 'Transferred') return value
     const operand = operands.at(ordinal)
     if (value === undefined || operand?.type._tag !== 'Resolved') return undefined
     const expected = fn.type(fn.semantic(operand.type.type))
@@ -340,6 +341,7 @@ export const lowerWitnessEffect = (
     contract.operands,
     expression.span,
   )
+  if (operands === 'Transferred') return operands
   if (operands === undefined) return undefined
   const destination = fn.alloc(type)
   const runner = Hir.effectRunnerId(fn.owner.key.declaration, site)
@@ -431,10 +433,11 @@ export const lowerBuiltinArguments = (
   fn: FunctionLowering,
   expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
   intrinsic: Intrinsic.BuiltinOperation,
-): ReadonlyArray<Mir.LocalId> | undefined => {
+): ReadonlyArray<Mir.LocalId> | 'Transferred' | undefined => {
   const loweredArguments: Array<Mir.LocalId> = []
   for (const [ordinal, argument] of expression.arguments.entries()) {
     const lowered = lowerExpression(fn, argument)
+    if (lowered === 'Transferred') return lowered
     if (lowered === undefined) return undefined
     const actual = fn.localTypes.at(lowered.result.ordinal)
     const callParameter = intrinsic.callParameters.at(ordinal)

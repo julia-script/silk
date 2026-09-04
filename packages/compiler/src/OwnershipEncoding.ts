@@ -172,7 +172,11 @@ export const encode = (self: ModuleOwnership): string =>
             break
         }
         const loanEnds = exit.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'
-        if (exit.releases.length === 0) {
+        if (
+          exit.releases.length === 0 &&
+          exit.temporaries.length === 0 &&
+          exit.matches.length === 0
+        ) {
           return `  exit ${label} ${spanText(exit.span)} loan-ends ${loanEnds} releases none`
         }
         return [
@@ -180,6 +184,16 @@ export const encode = (self: ModuleOwnership): string =>
           ...exit.releases.map(
             (release) =>
               `    release ${siteText(release.binding.site)}${release.fields.length === 0 ? '' : ` fields ${release.fields.map((field) => `#${field.ordinal}`).join(',')}`}${release.cleanup._tag === 'ArrayCleanup' || release.cleanup._tag === 'CallableCleanup' ? ` cleanup ${cleanupText(release.cleanup)}` : ''}`,
+          ),
+          ...exit.temporaries.map(
+            (temporary) =>
+              `    temporary #${temporary.ordinal} ${spanText(temporary.span)} cleanup ${cleanupText(temporary.cleanup)}`,
+          ),
+          ...exit.matches.flatMap((match) =>
+            match.cleanup.map(
+              (field) =>
+                `    match-payload #${match.ordinal} ${spanText(match.id.span)} arm=${match.arm.ordinal} path=${field.path.map((part) => `#${part.ordinal}`).join('.') || 'payload'} cleanup ${cleanupText(field.cleanup)}`,
+            ),
           ),
         ].join('\n')
       }),

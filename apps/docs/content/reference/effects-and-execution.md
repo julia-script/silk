@@ -37,6 +37,13 @@ as an expression statement is the separate `SEM0087` boundary described under
 Inside `effect {}` or an effect function body, `return` accepts the Effect's success value. It does
 not implicitly execute or flatten an Effect expression.
 
+An ordinary statement block immediately after a match arm's `=>` shares that enclosing Effect
+body. Its `run` statements execute eagerly in source order, and its `return` and `fail` transfer
+through the enclosing Effect contract. The braces neither construct an Effect nor create a new
+provider scope; lexical provider selection remains in force. A returned Effect value still requires
+an explicit `effect { ... }` expression when a new lazy computation is intended. See
+[match arm completion](functions-callables-and-control-flow.md#match-005--a-match-joins-the-results-of-reachable-arms).
+
 ```silk
 effect fn inner() -> i32 { return 42 }
 

@@ -222,28 +222,6 @@ const patternBindingKey = (
 ): string =>
   `${binding.arm.match.span.sourceId}:${binding.arm.match.span.start}:${binding.arm.match.span.end}:${binding.arm.ordinal}:${binding.ordinal}`
 
-const returnedExpressions = (
-  statements: ReadonlyArray<Hir.Statement>,
-): ReadonlyArray<Hir.Expression> =>
-  statements.flatMap((statement): ReadonlyArray<Hir.Expression> => {
-    switch (statement._tag) {
-      case 'Return':
-        return [statement.expression]
-      case 'Unsafe':
-        return returnedExpressions(statement.statements)
-      case 'If':
-      case 'IfLet':
-        return [
-          ...returnedExpressions(statement.taken),
-          ...returnedExpressions(statement.otherwise),
-        ]
-      case 'While':
-        return returnedExpressions(statement.body)
-      default:
-        return []
-    }
-  })
-
 /** Plans exact source allocation provenance over specialized HIR, including ordinary calls. */
 export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Index): Plan => {
   const instances = new Map(discovery.instances.map((instance) => [ownerKey(instance), instance]))
@@ -342,7 +320,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     const identity = ownerKey(instance)
     const cached = summaries.get(identity)
     if (cached !== undefined) return cached
-    const returns = returnedExpressions(instance.function.statements)
+    const returns = Hir.returnExpressions(instance.function.statements)
     const firstReturn = returns.at(0)
     if (firstReturn === undefined) return unreached
     if (resolving.has(identity))
@@ -452,7 +430,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     if (expression._tag === 'EffectCatch')
       return originOf(expression.protected, instance, parameterOrigins, resolving, activeBindings)
     if (expression._tag === 'EffectBlock') {
-      const returns = returnedExpressions(expression.statements)
+      const returns = Hir.returnExpressions(expression.statements)
       return returns.length === 0
         ? unreached
         : returns
@@ -464,7 +442,11 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     if (expression._tag === 'Match')
       return expression.arms
         .filter((arm) => arm.reachable)
-        .map((arm) => originOf(arm.result, instance, parameterOrigins, resolving, activeBindings))
+        .map((arm) =>
+          arm.body._tag === 'Expression'
+            ? originOf(arm.body.expression, instance, parameterOrigins, resolving, activeBindings)
+            : unreached,
+        )
         .reduce(mergeOrigin, unreached)
     if (expression._tag === 'BuiltinCall' && expression.operation === 'SharedLayout') {
       const raw = expression.typeArguments.at(0)

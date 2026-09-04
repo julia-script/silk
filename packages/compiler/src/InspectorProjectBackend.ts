@@ -902,7 +902,7 @@ const operationLabel = (operation: Mir.Operation): string => {
     case 'Drop':
       return `drop ${localText(operation.local)}`
     case 'Match':
-      return `${localText(operation.destination)} = match ${operation.access.toLowerCase()} ${localText(operation.scrutinee)}`
+      return `${operation.destination === undefined ? 'never' : localText(operation.destination)} = match ${operation.access.toLowerCase()} ${localText(operation.scrutinee)}`
     case 'Conditional':
       return `${localText(operation.destination)} = if ${localText(operation.condition)}`
     case 'ShortCircuit':
@@ -980,6 +980,8 @@ const outcomeLabel = (outcome: Mir.Outcome): string => {
       return `repeat loop${outcome.loop.ordinal}`
     case 'Exit':
       return `exit loop${outcome.loop.ordinal}`
+    case 'Complete':
+      return 'complete execution'
     case 'Yield':
       return 'yield condition'
   }
@@ -1037,7 +1039,7 @@ export const mirRows = (module: Mir.Module): ReadonlyArray<RowModel> => {
       tone: 'symbol',
     })
 
-    for (const region of Mir.topologicalRegions(fn)) {
+    for (const region of Mir.regionsTree(Mir.topologicalRegions(fn))) {
       rows.push({
         key: `${fnKey}-r${region.id.ordinal}`,
         depth: 1,
@@ -1074,7 +1076,7 @@ export const mirRows = (module: Mir.Module): ReadonlyArray<RowModel> => {
               key: `${fnKey}-r${region.id.ordinal}-${ordinal}-arm${arm.id.ordinal}`,
               depth: 3,
               label: `arm #${arm.id.ordinal} ${selection}`,
-              detail: `${arm.guard === undefined ? 'selected' : `guard ${localText(arm.guard.result)}`} · result ${localText(arm.selected.result)} → ${localText(operation.destination)} · cleanup ${arm.selected.cleanup.length}`,
+              detail: `${arm.guard === undefined ? 'selected' : `guard ${arm.guard.execution.result === undefined ? 'never' : localText(arm.guard.execution.result)}`} · result ${arm.selected.execution.result === undefined ? 'never' : localText(arm.selected.execution.result)} → ${operation.destination === undefined ? 'never' : localText(operation.destination)} · cleanup ${arm.selected.cleanup.length}`,
               span: armSpan,
             })
             for (const binding of arm.bindings) {

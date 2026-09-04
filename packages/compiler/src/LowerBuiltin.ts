@@ -53,6 +53,7 @@ export const lowerBuiltinExpression = (
     const type = effectValueAtSite(fn.layout, fn.owner.key, site)
     if (type === undefined) return undefined
     const captures = lowerBuiltinArguments(fn, expression, intrinsic)
+    if (captures === 'Transferred') return captures
     if (captures === undefined || captures.length !== type.environment.fields.length)
       return undefined
     const destination = fn.alloc(type)
@@ -91,6 +92,7 @@ export const lowerBuiltinExpression = (
     return Object.freeze({ result: destination })
   }
   const argumentLocals = lowerBuiltinArguments(fn, expression, intrinsic)
+  if (argumentLocals === 'Transferred') return argumentLocals
   if (argumentLocals === undefined) return undefined
   return lowerBuiltinOperation(fn, expression, argumentLocals)
 }

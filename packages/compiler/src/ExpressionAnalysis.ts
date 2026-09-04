@@ -41,6 +41,7 @@ import type {
   InterfaceOperationFact,
   IntrinsicReferenceFact,
   MatchArmFact,
+  MatchArmBodyFact,
   MatchExpressionFact,
   MoveExpressionFact,
   ParameterFact,
@@ -86,6 +87,7 @@ import {
   unavailableExpressionType,
   unavailableSyntax,
   unionConversionDiagnostic,
+  visitStatementFacts,
 } from './Elaboration.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Hir from './Hir.js'
@@ -107,6 +109,7 @@ import {
   analyzeStatements,
   reachableCallableWrites,
   returnFlowOf,
+  expressionNever,
   unsafeCallDiagnostic,
 } from './StatementAnalysis.js'
 import * as StaticEvaluation from './StaticEvaluation.js'
@@ -2388,6 +2391,15 @@ export const matchAccess = (node: SyntaxTree.Node): Match.Access => {
   return directToken(access, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive'
 }
 
+export const patternCoverage = (pattern: PatternFact): Match.CoverageIdentity | undefined => {
+  if (pattern._tag === 'EnumMemberPattern') return pattern.coverage
+  if (pattern._tag === 'UnionVariantPattern') return pattern.coverage
+  return (pattern._tag === 'NominalPattern' || pattern._tag === 'TypePattern') &&
+    pattern.member !== undefined
+    ? Match.structuralMember(pattern.member)
+    : undefined
+}
+
 export const analyzeMatch = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
@@ -2451,18 +2463,10 @@ export const analyzeMatch = (
     diagnostics.push(...pattern.diagnostics)
     return Object.freeze({ armNode, armId, pattern: pattern.fact })
   })
-  const coverageIdentity = (pattern: PatternFact): Match.CoverageIdentity | undefined => {
-    if (pattern._tag === 'EnumMemberPattern') return pattern.coverage
-    if (pattern._tag === 'UnionVariantPattern') return pattern.coverage
-    return (pattern._tag === 'NominalPattern' || pattern._tag === 'TypePattern') &&
-      pattern.member !== undefined
-      ? Match.structuralMember(pattern.member)
-      : undefined
-  }
   const coverage = Match.cover(
     members ?? Object.freeze([]),
     preliminary.map(({ armNode, pattern }) => {
-      const member = coverageIdentity(pattern)
+      const member = patternCoverage(pattern)
       return Object.freeze({
         ...(member === undefined ? {} : { member }),
         universal: pattern._tag === 'UniversalPattern',
@@ -2494,10 +2498,21 @@ export const analyzeMatch = (
     )
   const firstCoveringArm = new Map<string, SourceSpan.SourceSpan>()
   let wildcardArm: SourceSpan.SourceSpan | undefined
+  const callableWrites = resolution.writtenCallableBindings
+  const candidateWrites = new Set(callableWrites)
+  const continuationWrites = new Set<number>()
+  let pendingMembers = [...(members ?? [])]
+  const executedArms = new Set<number>()
+  const restoreWrites = (writes: ReadonlySet<number>): void => {
+    if (callableWrites === undefined) return
+    callableWrites.clear()
+    for (const ordinal of writes) callableWrites.add(ordinal)
+  }
   const arms = preliminary.map(({ armNode, armId, pattern }, ordinal): MatchArmFact => {
+    restoreWrites(candidateWrites)
     const transition = coverage.transitions.at(ordinal)
     if (transition === undefined) throw new RangeError('Match coverage lost an arm')
-    const member = coverageIdentity(pattern)
+    const member = patternCoverage(pattern)
     const guarded = directToken(armNode, 'IfKeyword') !== undefined
     const memberInDomain =
       member !== undefined && members?.some((candidate) => Match.selects(member, candidate))
@@ -2555,6 +2570,7 @@ export const analyzeMatch = (
     const armExpressions = armNode.children.filter(isExpressionNode)
     const guardNode = guarded ? armExpressions.at(0) : undefined
     const resultNode = armExpressions.at(guarded ? 1 : 0)
+    const blockNode = SyntaxTree.directNode(armNode, 'Block')
     const armScope: Scope = Object.freeze({
       parameters: scope.parameters,
       bindings: scope.bindings,
@@ -2566,39 +2582,101 @@ export const analyzeMatch = (
         : analyzeExpression(source, guardNode, declarations, declaration, armScope, resolution)
     if (guard !== undefined) {
       diagnostics.push(...guard.diagnostics)
-      if (guard.type !== undefined && guard.type !== 'bool') {
+      if (guard.type !== undefined && guard.type !== 'bool' && !Type.isNever(guard.type)) {
         diagnostics.push(
           Diagnostic.matchGuardNotBool(Type.display(guard.type), guardNode?.span ?? armNode.span),
         )
       }
     }
-    const result =
-      resultNode === undefined
-        ? undefined
-        : analyzeExpression(
-            source,
-            resultNode,
-            declarations,
-            declaration,
-            armScope,
-            resolution,
-            expected,
-            borrowAllowed,
-          )
-    if (result !== undefined) diagnostics.push(...result.diagnostics)
+    const guardCompletes = guard === undefined || !expressionNever(guard.fact)
+    const selectedMembers = pendingMembers.filter(
+      (candidate) =>
+        pattern._tag === 'UniversalPattern' ||
+        (member !== undefined && Match.selects(member, candidate)),
+    )
+    const executes = transition.reachable && selectedMembers.length > 0
+    if (executes) executedArms.add(ordinal)
+    if (guard === undefined || !guardCompletes)
+      pendingMembers = pendingMembers.filter((candidate) => !selectedMembers.includes(candidate))
+    if (executes && guardCompletes)
+      for (const ordinal of callableWrites ?? []) candidateWrites.add(ordinal)
+    let body: MatchArmBodyFact
+    if (blockNode !== undefined && resolution.execution !== undefined) {
+      const execution = resolution.execution
+      const blockDiagnostics: Array<Diagnostic.Diagnostic> = []
+      const statements = analyzeStatements(
+        { ...execution.context, resolution, diagnostics: blockDiagnostics },
+        blockNode,
+        armScope,
+        execution.loopStack,
+        pattern.bindings,
+      )
+      diagnostics.push(...blockDiagnostics)
+      const completion = Object.freeze({
+        fallsThrough: returnFlowOf(statements, false).fallsThrough,
+      })
+      body = Object.freeze({
+        _tag: 'Block',
+        statements,
+        completion,
+        type: availableExpressionType(completion.fallsThrough ? Type.unit : 'never'),
+        syntax: blockNode,
+      })
+    } else if (blockNode !== undefined) {
+      body = Object.freeze({
+        _tag: 'Block',
+        statements: Object.freeze([]),
+        completion: Object.freeze({ fallsThrough: true }),
+        type: unavailableExpressionType,
+        syntax: blockNode,
+      })
+    } else {
+      const result =
+        resultNode === undefined
+          ? undefined
+          : analyzeExpression(
+              source,
+              resultNode,
+              declarations,
+              declaration,
+              armScope,
+              resolution,
+              expected,
+              borrowAllowed,
+            )
+      if (result !== undefined) diagnostics.push(...result.diagnostics)
+      const expression = result?.fact ?? unavailableExpression(resultNode ?? armNode)
+      body = Object.freeze({
+        _tag: 'Expression',
+        expression,
+        type: expression.type,
+        syntax: expression.syntax,
+      })
+    }
+    if (
+      executes &&
+      guardCompletes &&
+      (body._tag === 'Expression'
+        ? !expressionNever(body.expression)
+        : body.completion.fallsThrough)
+    )
+      for (const ordinal of callableWrites ?? []) continuationWrites.add(ordinal)
     return Object.freeze({
       _tag: 'MatchArm',
       id: armId,
       pattern,
       bindings: pattern.bindings,
       ...(guard === undefined ? {} : { guard: guard.fact }),
-      result: result?.fact ?? unavailableExpression(resultNode ?? armNode),
+      body,
       before: transition.before,
       after: transition.after,
       reachable: transition.reachable,
       syntax: armNode,
     })
   })
+  restoreWrites(continuationWrites)
+  const contributes = (arm: MatchArmFact): boolean =>
+    executedArms.has(arm.id.ordinal) && (arm.guard === undefined || !expressionNever(arm.guard))
   if (
     members !== undefined &&
     !coverage.exhaustive &&
@@ -2623,11 +2701,13 @@ export const analyzeMatch = (
         : Diagnostic.incompleteMatch(coverage.missing.map(Match.encodeIdentity), node.span),
     )
   }
-  const reachableTypes = arms.flatMap((arm) =>
-    arm.reachable && arm.result.type._tag === 'Available' ? [arm.result.type.type] : [],
-  )
+  const reachableTypes = arms.flatMap((arm) => {
+    if (executedArms.has(arm.id.ordinal) && arm.guard !== undefined && expressionNever(arm.guard))
+      return ['never' as const]
+    return contributes(arm) && arm.body.type._tag === 'Available' ? [arm.body.type.type] : []
+  })
   const unavailableReachableResult = arms.some(
-    (arm) => arm.reachable && arm.result.type._tag !== 'Available',
+    (arm) => contributes(arm) && arm.body.type._tag !== 'Available',
   )
   const anonymousTypes = reachableTypes.filter((type) => {
     if (!Type.isNominal(type)) return false
@@ -2638,9 +2718,14 @@ export const analyzeMatch = (
     )
   })
   const anonymousDisagreement = new Set(anonymousTypes.map(Type.key)).size > 1
-  const joined: Match.Join = anonymousDisagreement
-    ? Object.freeze({ _tag: 'Incompatible', types: Object.freeze(reachableTypes) })
-    : Match.join(reachableTypes)
+  const unitDisagreement =
+    arms.some(
+      (arm) => contributes(arm) && arm.body._tag === 'Block' && arm.body.completion.fallsThrough,
+    ) && reachableTypes.some((type) => !Type.isNever(type) && !Type.equals(type, Type.unit))
+  const joined: Match.Join =
+    anonymousDisagreement || unitDisagreement
+      ? Object.freeze({ _tag: 'Incompatible', types: Object.freeze(reachableTypes) })
+      : Match.join(reachableTypes)
   if (joined._tag === 'Incompatible') {
     let divergentRepresentations:
       | {
@@ -2649,8 +2734,8 @@ export const analyzeMatch = (
         }
       | undefined
     const reachableResults = arms.flatMap((arm) =>
-      arm.reachable && arm.result.type._tag === 'Available'
-        ? [Object.freeze({ type: arm.result.type.type, span: arm.result.syntax.span })]
+      contributes(arm) && arm.body.type._tag === 'Available'
+        ? [Object.freeze({ type: arm.body.type.type, span: arm.body.syntax.span })]
         : [],
     )
     for (const [leftOrdinal, left] of reachableResults.entries()) {
@@ -2688,7 +2773,8 @@ export const analyzeMatch = (
     (arm) =>
       arm.guard !== undefined &&
       arm.guard.type._tag === 'Available' &&
-      arm.guard.type.type !== 'bool',
+      arm.guard.type.type !== 'bool' &&
+      !Type.isNever(arm.guard.type.type),
   )
   let joinedEffect: Type.Effect | undefined
   if (joined._tag === 'Joined') {
@@ -2712,8 +2798,11 @@ export const analyzeMatch = (
   } else {
     effectAlternatives = Object.freeze(
       arms.flatMap((arm) => {
-        if (!arm.reachable) return []
-        const representation = representationOfExpression(arm.result)
+        if (!contributes(arm)) return []
+        const representation =
+          arm.body._tag === 'Expression'
+            ? representationOfExpression(arm.body.expression)
+            : undefined
         return representation !== undefined &&
           Type.isExactRepresentationArgument(representation) &&
           Type.isEffectIdentityArgument(representation.identity) &&
@@ -2728,10 +2817,10 @@ export const analyzeMatch = (
       ? 0
       : arms.filter(
           (arm) =>
-            arm.reachable &&
+            contributes(arm) &&
             // Mirrors Match.join: diverging (never-typed) arms do not contribute to the join,
             // so they are not required to carry an exact static Effect representation.
-            !(arm.result.type._tag === 'Available' && Type.isNever(arm.result.type.type)),
+            !(arm.body.type._tag === 'Available' && Type.isNever(arm.body.type.type)),
         ).length
   const unavailableEffectComposite =
     joinedEffect !== undefined && effectAlternatives.length !== reachableEffectArms
@@ -2743,8 +2832,10 @@ export const analyzeMatch = (
       ),
     )
   const callableSites = arms.flatMap((arm) =>
-    arm.reachable && arm.result._tag === 'CallableSection'
-      ? [Hir.executableSiteKey(arm.result.site)]
+    contributes(arm) &&
+    arm.body._tag === 'Expression' &&
+    arm.body.expression._tag === 'CallableSection'
+      ? [Hir.executableSiteKey(arm.body.expression.site)]
       : [],
   )
   // Every reachable arm must construct the same exact callable: a structural callable type names
@@ -2752,7 +2843,10 @@ export const analyzeMatch = (
   const callableIdentities =
     joined._tag === 'Joined' && Type.isCallable(joined.type)
       ? arms.flatMap((arm) => {
-          const representation = arm.reachable ? representationOfExpression(arm.result) : undefined
+          const representation =
+            contributes(arm) && arm.body._tag === 'Expression'
+              ? representationOfExpression(arm.body.expression)
+              : undefined
           return representation !== undefined &&
             Type.isExactRepresentationArgument(representation) &&
             Type.isCallableIdentityArgument(representation.identity)
@@ -7802,16 +7896,25 @@ export const effectCaptureFacts = (
   options: {
     readonly localFunction?: DeclarationId
     readonly order?: 'Reference' | 'FirstUse'
-    readonly onPattern?: (
-      reference: PatternBindingFact,
-      requested: EffectCaptureFact['access'],
-      span: SourceSpan.SourceSpan,
-      copy: boolean,
-      expression: IdentifierExpressionFact,
-    ) => void
   } = {},
 ): ReadonlyArray<EffectCaptureFact> => {
   const captures = new Map<string, EffectCaptureFact>()
+  const patternKey = (id: Match.BindingId): string =>
+    `${id.arm.match.function.sourceId}:${id.arm.match.function.ordinal}:${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`
+  const localPatterns = new Set<string>()
+  visitStatementFacts(statements, {
+    descendEffectBlocks: false,
+    expression: (fact) => {
+      if (fact._tag === 'Match')
+        for (const arm of fact.arms)
+          for (const binding of arm.bindings) localPatterns.add(patternKey(binding.id))
+    },
+    statement: (statement) => {
+      if (statement._tag === 'PatternBindStatement' || statement._tag === 'IfLetStatement')
+        for (const binding of statement.selection.bindings)
+          localPatterns.add(patternKey(binding.id))
+    },
+  })
   const rank = (access: EffectCaptureFact['access']): number => {
     if (access === 'Take') {
       return 3
@@ -7825,14 +7928,16 @@ export const effectCaptureFacts = (
     return 0
   }
   const recordReference = (
-    reference: BindingDeclarationFact | ParameterFact | undefined,
+    reference: EffectCaptureFact['reference'] | undefined,
     requested: EffectCaptureFact['access'],
     span: SourceSpan.SourceSpan,
     copy: boolean,
     expression?: IdentifierExpressionFact,
   ): void => {
     if (reference === undefined) return
-    if (reference.phase === 'Static') return
+    if (reference._tag === 'PatternBinding') {
+      if (localPatterns.has(patternKey(reference.id))) return
+    } else if (reference.phase === 'Static') return
     if (
       reference._tag === 'BindingFact' &&
       reference.id.ordinal >= firstLocalBinding &&
@@ -7848,7 +7953,10 @@ export const effectCaptureFacts = (
       reference.id.function.ordinal === options.localFunction.ordinal
     )
       return
-    const key = `${reference._tag}:${reference.id.ordinal}`
+    const key =
+      reference._tag === 'PatternBinding'
+        ? `Pattern:${patternKey(reference.id)}`
+        : `${reference._tag}:${reference.id.function.sourceId}:${reference.id.function.ordinal}:${reference.id.ordinal}`
     const access = requested !== 'Exclusive' && copy ? 'Copy' : requested
     const prior = captures.get(key)
     if (prior === undefined)
@@ -7873,11 +7981,13 @@ export const effectCaptureFacts = (
       )
   }
   const record = (fact: IdentifierExpressionFact, requested: EffectCaptureFact['access']): void => {
-    let reference: DeclarationFacts.ParameterFact | BindingDeclarationFact | undefined
+    let reference: EffectCaptureFact['reference'] | undefined
     if (fact.reference._tag === 'ResolvedBinding') {
       reference = fact.reference.binding
     } else if (fact.reference._tag === 'Resolved') {
       reference = fact.reference.parameter
+    } else if (fact.reference._tag === 'ResolvedPattern') {
+      reference = fact.reference.binding
     } else {
       reference = undefined
     }
@@ -7891,16 +8001,6 @@ export const effectCaptureFacts = (
         (index === undefined
           ? typeof fact.type.type === 'string'
           : ConformanceProof.copyType(index, fact.type.type, assumptions)))
-    if (fact.reference._tag === 'ResolvedPattern') {
-      const owner = fact.reference.binding.id.arm.match.function
-      if (
-        options.localFunction === undefined ||
-        owner.sourceId !== options.localFunction.sourceId ||
-        owner.ordinal !== options.localFunction.ordinal
-      )
-        options.onPattern?.(fact.reference.binding, requested, fact.syntax.span, copy, fact)
-      return
-    }
     recordReference(reference, requested, fact.syntax.span, copy, fact)
   }
   const consumingAccess = (fact: ExpressionFact): EffectCaptureFact['access'] => {
@@ -7948,7 +8048,8 @@ export const effectCaptureFacts = (
         expression(fact.scrutinee, requested)
         for (const arm of fact.arms) {
           if (arm.guard !== undefined) expression(arm.guard)
-          expression(arm.result)
+          if (arm.body._tag === 'Expression') expression(arm.body.expression)
+          else visit(arm.body.statements)
         }
         return
       case 'Operator':
@@ -7990,7 +8091,13 @@ export const effectCaptureFacts = (
         // that Effect value. Bubble those dependencies into the enclosing Effect runner so a
         // parameter used only by the nested body remains available when the child is formed.
         for (const capture of fact.captures)
-          recordReference(capture.reference, capture.access, capture.span, false)
+          recordReference(
+            capture.reference,
+            capture.access,
+            capture.span,
+            false,
+            capture.expression,
+          )
         return
       case 'EnumValue':
         expression(fact.argument)
@@ -8240,13 +8347,6 @@ const analyzeAnonymousCallable = (
     anonymousOuterScope(authoredParameters, scope),
   )
   const firstLocalBinding = 0
-  const patternCaptures = new Map<string, AnonymousCaptureFact>()
-  const captureRank = (access: AnonymousCaptureFact['access']): number => {
-    if (access === 'Take') return 3
-    if (access === 'Exclusive') return 2
-    if (access === 'Shared') return 1
-    return 0
-  }
   const ordinaryCaptures = effectCaptureFacts(
     preliminary.fact.statements,
     firstLocalBinding,
@@ -8255,29 +8355,11 @@ const analyzeAnonymousCallable = (
     Object.freeze({
       localFunction: hiddenId,
       order: 'FirstUse',
-      onPattern: (reference, requested, span, copy, expression) => {
-        const access = requested !== 'Exclusive' && copy ? 'Copy' : requested
-        const key = `${reference.id.arm.match.function.sourceId}:${reference.id.arm.match.function.ordinal}:${reference.id.arm.match.span.start}:${reference.id.arm.ordinal}:${reference.id.ordinal}`
-        const prior = patternCaptures.get(key)
-        if (prior === undefined)
-          patternCaptures.set(
-            key,
-            Object.freeze({
-              _tag: 'AnonymousCapture',
-              reference,
-              access,
-              span,
-              expression,
-            }),
-          )
-        else if (captureRank(access) > captureRank(prior.access))
-          patternCaptures.set(key, Object.freeze({ ...prior, access }))
-      },
     }),
   )
   const captures = Object.freeze(
-    [
-      ...ordinaryCaptures.flatMap((capture): ReadonlyArray<AnonymousCaptureFact> =>
+    ordinaryCaptures
+      .flatMap((capture): ReadonlyArray<AnonymousCaptureFact> =>
         capture.expression === undefined
           ? []
           : [
@@ -8289,9 +8371,7 @@ const analyzeAnonymousCallable = (
                 expression: capture.expression,
               }),
             ],
-      ),
-      ...patternCaptures.values(),
-    ]
+      )
       .filter(
         (capture) =>
           anonymousCapturedType(capture) !== undefined &&
@@ -8437,6 +8517,13 @@ const analyzeAnonymousCallable = (
   })
 }
 
+/** Ordinary arm statements must execute only with the enclosing static statement flow. */
+export const containsOrdinaryArm = (node: SyntaxTree.Node): boolean => {
+  if (node.kind === 'AnonymousCallableExpression' || node.kind === 'EffectExpression') return false
+  if (node.kind === 'MatchArm' && SyntaxTree.directNode(node, 'Block') !== undefined) return true
+  return node.children.some((child) => SyntaxTree.isNode(child) && containsOrdinaryArm(child))
+}
+
 export function analyzeExpression(
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
@@ -8447,6 +8534,13 @@ export function analyzeExpression(
   expected?: SemanticType,
   borrowAllowed = false,
 ): ExpressionResult | undefined {
+  if (
+    declaration.phase === 'Static' &&
+    resolution.staticContext !== undefined &&
+    resolution.deferStaticCalls !== true &&
+    containsOrdinaryArm(node)
+  )
+    resolution = Object.freeze({ ...resolution, deferStaticCalls: true })
   if (node.kind === 'AnonymousCallableExpression')
     return analyzeAnonymousCallable(source, node, declarations, declaration, scope, resolution)
   if (node.kind === 'UnsafeExpression') {
@@ -8540,23 +8634,18 @@ export function analyzeExpression(
       effectBlock: true,
     }
     const statements = analyzeStatements(nested, block, scope)
-    const returned: Array<ExpressionFact> = []
-    // The fail statement's analysis already validated the failure type, so every recorded
-    // failure — nominal or a value-kind type parameter — belongs in the block's failure row.
+    const returned = returnFlowOf(statements, false).returns.map(
+      (statement) => statement.expression,
+    )
+    // Failures in ordinary arms belong to this execution boundary; nested Effects own theirs.
     const failures: Array<Type.Type> = []
-    const collectTerminals = (items: ReadonlyArray<StatementFact>): void => {
-      for (const statement of items) {
-        if (statement._tag === 'ReturnStatement') returned.push(statement.expression)
-        else if (statement._tag === 'FailStatement' && statement.failure !== undefined)
+    visitStatementFacts(statements, {
+      descendEffectBlocks: false,
+      statement: (statement) => {
+        if (statement._tag === 'FailStatement' && statement.failure !== undefined)
           failures.push(statement.failure)
-        else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
-          collectTerminals(statement.taken)
-          collectTerminals(statement.otherwise)
-        } else if (statement._tag === 'WhileStatement') collectTerminals(statement.body)
-        else if (statement._tag === 'UnsafeStatement') collectTerminals(statement.statements)
-      }
-    }
-    collectTerminals(statements)
+      },
+    })
     // Every return site contributes to the success type through the one canonical join rule;
     // disagreeing sites are diagnosed instead of silently adopting the last return's type.
     const returnedTypes = returned.flatMap((expression) =>
@@ -9909,6 +9998,11 @@ export interface BodyContext {
 }
 
 export interface ResolutionContext {
+  /** The current eager execution boundary and its lexical loop destinations. */
+  readonly execution?: {
+    readonly context: BodyContext
+    readonly loopStack: ReadonlyArray<Hir.LoopId>
+  }
   readonly scope: NameResolution.ModuleScope
   readonly index: DeclarationIndex.Index
   /** Occurrence-generated aggregates are semantic facts, deliberately outside lexical lookup. */

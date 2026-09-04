@@ -6,6 +6,7 @@ import {
   consumeTrivia,
   currentToken,
   expect,
+  isTrivia,
   missingToken,
   nextSignificantKind,
   peek,
@@ -542,10 +543,76 @@ const parseBlockChild = (state: State): NodeResult => {
   return parseErrorStatement(state)
 }
 
+/** Looks for a guard separator without recursively parsing expression-owned statement blocks. */
+const guardHasArmSeparator = (state: State): boolean => {
+  const closing: Array<Token.TokenKind> = []
+  let expressionBodies = 0
+  let previous: Token.TokenKind | undefined
+  let hasExpression = false
+  for (let index = state.index; index < state.lexical.tokens.length; index += 1) {
+    const kind = state.lexical.tokens.at(index)?.kind
+    if (kind === undefined || isTrivia(kind)) continue
+    if (closing.length === 0) {
+      if (kind === 'FatArrow') return hasExpression
+      if (kind === 'MatchKeyword' || kind === 'EffectKeyword') expressionBodies += 1
+      else if (kind === 'FnKeyword' && previous !== 'EffectKeyword') expressionBodies += 1
+      else if (kind === 'LeftBrace') {
+        // With struct literals disallowed at a guard's root, a brace belongs either to an
+        // expression introduced by match/fn/effect or to a following ordinary if statement.
+        if (expressionBodies === 0) return false
+        expressionBodies -= 1
+      } else if (
+        kind === 'RightBrace' ||
+        kind === 'Comma' ||
+        kind === 'EndOfFile' ||
+        kind === 'LetKeyword' ||
+        kind === 'IfKeyword' ||
+        kind === 'WhileKeyword' ||
+        kind === 'ReturnKeyword' ||
+        kind === 'FailKeyword' ||
+        kind === 'DropKeyword' ||
+        kind === 'BreakKeyword' ||
+        kind === 'ContinueKeyword' ||
+        kind === 'ElseKeyword' ||
+        kind === 'PubKeyword' ||
+        kind === 'ImportKeyword' ||
+        kind === 'UnsafeKeyword' ||
+        kind === 'StaticKeyword'
+      )
+        return false
+      hasExpression = true
+    }
+    if (kind === 'LeftParenthesis') closing.push('RightParenthesis')
+    else if (kind === 'LeftBracket') closing.push('RightBracket')
+    else if (kind === 'LeftBrace') closing.push('RightBrace')
+    else if (kind === 'RightParenthesis' || kind === 'RightBracket' || kind === 'RightBrace') {
+      if (closing.pop() !== kind) return false
+    }
+    previous = kind
+  }
+  return false
+}
+
+/** Recognizes a complete pattern prefix without committing speculative diagnostics or tokens. */
+const startsFollowingMatchArm = (state: State): boolean => {
+  const kind = nextSignificantKind(state)
+  if (kind !== 'Identifier' && kind !== 'DecimalInteger' && kind !== 'Minus') return false
+  const pattern = parsePattern(
+    Object.freeze({ ...state, diagnostics: Object.freeze([]), recovering: false }),
+    ['IfKeyword', 'FatArrow', 'RightBrace'],
+  )
+  if (pattern.state.diagnostics.length !== 0) return false
+  if (nextSignificantKind(pattern.state) === 'FatArrow') return true
+  if (nextSignificantKind(pattern.state) !== 'IfKeyword') return false
+  const keyword = expect(pattern.state, 'IfKeyword', [...expressionStarts, 'FatArrow'])
+  return guardHasArmSeparator(keyword.state)
+}
+
 export function parseBlock(
   initial: State,
   requireReturn: boolean,
   implicitUnitReturn = false,
+  matchArm = false,
 ): NodeResult {
   const leftBrace = expect(initial, 'LeftBrace', [
     'LetKeyword',
@@ -561,7 +628,7 @@ export function parseBlock(
   let state = leftBrace.state
   let children: ReadonlyArray<SyntaxTree.Element> = leftBrace.elements
 
-  while (!endsBlock(state)) {
+  while (!endsBlock(state) && !(matchArm && startsFollowingMatchArm(state))) {
     const statement = parseBlockChild(state)
     children = Object.freeze([...children, statement.node])
     state = statement.state
@@ -573,6 +640,7 @@ export function parseBlock(
   }
 
   const rightBrace = expect(state, 'RightBrace', [
+    ...(matchArm ? ['Identifier' as const, 'DecimalInteger' as const, 'Minus' as const] : []),
     'LetKeyword',
     'IfKeyword',
     'WhileKeyword',

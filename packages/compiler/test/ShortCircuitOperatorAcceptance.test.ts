@@ -3,7 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as Lexer from '../src/Lexer.js'
-import type * as Mir from '../src/Mir.js'
+import * as Mir from '../src/Mir.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
@@ -162,7 +162,9 @@ pub fn main() -> i32 { if choose(false, Flag { value: true }) { return 1 } retur
     )
     if (shortCircuit === undefined) return assert.fail('expected short-circuit MIR operation')
     assert.strictEqual(shortCircuit.operator, 'And')
-    assert.isTrue(shortCircuit.right.operations.some((operation) => operation._tag === 'Call'))
+    assert.isTrue(
+      Mir.executionOperations(shortCircuit.right).some((operation) => operation._tag === 'Call'),
+    )
     assert.isFalse(topLevel.some((operation) => operation._tag === 'Call'))
   }),
 )

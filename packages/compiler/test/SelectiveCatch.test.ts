@@ -389,12 +389,14 @@ it.effect('rejects uncovered match endings and path-exclusive endings replayed b
                         ...arm,
                         selected: Object.freeze({
                           ...arm.selected,
-                          operations: Object.freeze(
-                            arm.selected.operations.filter((nested) => {
-                              if (removed || nested._tag !== 'EndLoan') return true
-                              removed = true
-                              return false
-                            }),
+                          execution: Mir.mapExecutionOperations(
+                            arm.selected.execution,
+                            (operations) =>
+                              operations.filter((nested) => {
+                                if (removed || nested._tag !== 'EndLoan') return true
+                                removed = true
+                                return false
+                              }),
                           ),
                         }),
                       })
@@ -555,14 +557,19 @@ pub fn main() -> i32 {
             injected = true
             return [propagation, operation]
           }
+          if (operation._tag === 'Conditional')
+            return [
+              Object.freeze({
+                ...operation,
+                taken: Mir.mapExecutionOperations(operation.taken, injectBeforeEnding),
+                otherwise: Mir.mapExecutionOperations(operation.otherwise, injectBeforeEnding),
+              }),
+            ]
           if (operation._tag === 'ShortCircuit')
             return [
               Object.freeze({
                 ...operation,
-                right: Object.freeze({
-                  ...operation.right,
-                  operations: injectBeforeEnding(operation.right.operations),
-                }),
+                right: Mir.mapExecutionOperations(operation.right, injectBeforeEnding),
               }),
             ]
           if (operation._tag === 'Match')
@@ -578,12 +585,18 @@ pub fn main() -> i32 {
                         : {
                             guard: Object.freeze({
                               ...arm.guard,
-                              operations: injectBeforeEnding(arm.guard.operations),
+                              execution: Mir.mapExecutionOperations(
+                                arm.guard.execution,
+                                injectBeforeEnding,
+                              ),
                             }),
                           }),
                       selected: Object.freeze({
                         ...arm.selected,
-                        operations: injectBeforeEnding(arm.selected.operations),
+                        execution: Mir.mapExecutionOperations(
+                          arm.selected.execution,
+                          injectBeforeEnding,
+                        ),
                       }),
                     }),
                   ),

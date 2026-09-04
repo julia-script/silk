@@ -217,7 +217,7 @@ const operationText = (operation: Operation): string => {
     case 'Drop':
       return `drop ${localText(operation.local)}${operation.cleanup._tag === 'NoCleanup' ? '' : ` cleanup=${operation.cleanup._tag}`}${operation.localShared === undefined ? '' : ` element=${SilkType.encode(operation.localShared.element)} layout=${operation.localShared.block.provenance} transition=decrement-or-cleanup-release`} ${provenanceText(operation.provenance)}`
     case 'Match':
-      return `${localText(operation.destination)} = match#${operation.id.span.start} ${operation.access.toLowerCase()} ${localText(operation.scrutinee)} : ${typeText(operation.scrutineeType)} -> ${typeText(operation.type)}${operation.retainsBindings ? ' retain-bindings' : ''} ${provenanceText(operation.provenance)}`
+      return `${operation.destination === undefined ? 'never' : localText(operation.destination)} = match#${operation.id.span.start} ${operation.access.toLowerCase()} ${localText(operation.scrutinee)} : ${typeText(operation.scrutineeType)} -> ${typeText(operation.type)}${operation.retainsBindings ? ' retain-bindings' : ''} ${provenanceText(operation.provenance)}`
     case 'Conditional':
       return `${localText(operation.destination)} = conditional ${localText(operation.condition)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ShortCircuit':
@@ -232,17 +232,23 @@ const operationLines = (operation: Operation, indent: string): ReadonlyArray<str
   if (operation._tag === 'Conditional') {
     return [
       `${indent}${operationText(operation)}`,
-      `${indent}  taken -> ${localText(operation.taken.result)}`,
-      ...operation.taken.operations.flatMap((child) => operationLines(child, `${indent}    `)),
-      `${indent}  otherwise -> ${localText(operation.otherwise.result)}`,
-      ...operation.otherwise.operations.flatMap((child) => operationLines(child, `${indent}    `)),
+      `${indent}  taken -> ${operation.taken.result === undefined ? 'never' : localText(operation.taken.result)}`,
+      ...topologicalRegions(operation.taken)
+        .flatMap(regionLines)
+        .map((line) => `${indent}  ${line}`),
+      `${indent}  otherwise -> ${operation.otherwise.result === undefined ? 'never' : localText(operation.otherwise.result)}`,
+      ...topologicalRegions(operation.otherwise)
+        .flatMap(regionLines)
+        .map((line) => `${indent}  ${line}`),
     ]
   }
   if (operation._tag === 'ShortCircuit') {
     return [
       `${indent}${operationText(operation)}`,
-      `${indent}  right -> ${localText(operation.right.result)}`,
-      ...operation.right.operations.flatMap((child) => operationLines(child, `${indent}    `)),
+      `${indent}  right -> ${operation.right.result === undefined ? 'never' : localText(operation.right.result)}`,
+      ...topologicalRegions(operation.right)
+        .flatMap(regionLines)
+        .map((line) => `${indent}  ${line}`),
     ]
   }
   if (operation._tag !== 'Match') return [`${indent}${operationText(operation)}`]
@@ -266,11 +272,15 @@ const operationLines = (operation: Operation, indent: string): ReadonlyArray<str
         ...(arm.guard === undefined
           ? []
           : [
-              `${indent}    guard -> ${localText(arm.guard.result)}`,
-              ...arm.guard.operations.flatMap((child) => operationLines(child, `${indent}      `)),
+              `${indent}    guard -> ${arm.guard.execution.result === undefined ? 'never' : localText(arm.guard.execution.result)}`,
+              ...topologicalRegions(arm.guard.execution)
+                .flatMap(regionLines)
+                .map((line) => `${indent}    ${line}`),
             ]),
-        `${indent}    selected access=${arm.selected.access} result=${localText(arm.selected.result)} end-borrow=${arm.selected.endBorrow}`,
-        ...arm.selected.operations.flatMap((child) => operationLines(child, `${indent}      `)),
+        `${indent}    selected access=${arm.selected.access} result=${arm.selected.execution.result === undefined ? 'never' : localText(arm.selected.execution.result)} end-borrow=${arm.selected.endBorrow}`,
+        ...topologicalRegions(arm.selected.execution)
+          .flatMap(regionLines)
+          .map((line) => `${indent}    ${line}`),
         ...arm.selected.cleanup.map(
           (entry) =>
             `${indent}      cleanup ${localText(entry.destination)} <- ${fieldPathText(entry.path)} ${entry.cleanup._tag}`,
@@ -292,6 +302,8 @@ const outcomeText = (outcome: Outcome): string => {
       return `repeat ${loopText(outcome.loop)} ${provenanceText(outcome.provenance)}`
     case 'Exit':
       return `exit ${loopText(outcome.loop)} ${provenanceText(outcome.provenance)}`
+    case 'Complete':
+      return `complete ${provenanceText(outcome.provenance)}`
     case 'Yield':
       return `yield ${provenanceText(outcome.provenance)}`
   }

@@ -36,7 +36,7 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('retains every provider target forwarded through reachable Effect branches', () =>
+it.effect('retains provider targets through expression and ordinary statement arms', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(
       'effect-forwarding/service-branches',
@@ -53,7 +53,7 @@ struct First {}
 struct Second {}
 effect fn select(input: First | Second) -> i32 ? &mut Choice {
   return match move input {
-    First {} => run Choice.left()
+    First {} => { return run Choice.left() }
     Second {} => run Choice.right()
   }
 }

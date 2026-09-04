@@ -130,15 +130,22 @@ const withLocalSharedDropPlan = (layout: Layout.Plan, operation: Mir.Operation):
           localShared: Object.freeze({ element: operation.cleanup.element, block }),
         })
   }
+  if (operation._tag === 'Conditional')
+    return Object.freeze({
+      ...operation,
+      taken: Mir.mapExecutionOperations(operation.taken, (operations) =>
+        operations.map((child) => withLocalSharedDropPlan(layout, child)),
+      ),
+      otherwise: Mir.mapExecutionOperations(operation.otherwise, (operations) =>
+        operations.map((child) => withLocalSharedDropPlan(layout, child)),
+      ),
+    })
   if (operation._tag === 'ShortCircuit')
     return Object.freeze({
       ...operation,
-      right: Object.freeze({
-        ...operation.right,
-        operations: Object.freeze(
-          operation.right.operations.map((child) => withLocalSharedDropPlan(layout, child)),
-        ),
-      }),
+      right: Mir.mapExecutionOperations(operation.right, (operations) =>
+        operations.map((child) => withLocalSharedDropPlan(layout, child)),
+      ),
     })
   if (operation._tag === 'Match')
     return Object.freeze({
@@ -152,15 +159,15 @@ const withLocalSharedDropPlan = (layout: Layout.Plan, operation: Mir.Operation):
               : {
                   guard: Object.freeze({
                     ...arm.guard,
-                    operations: Object.freeze(
-                      arm.guard.operations.map((child) => withLocalSharedDropPlan(layout, child)),
+                    execution: Mir.mapExecutionOperations(arm.guard.execution, (operations) =>
+                      operations.map((child) => withLocalSharedDropPlan(layout, child)),
                     ),
                   }),
                 }),
             selected: Object.freeze({
               ...arm.selected,
-              operations: Object.freeze(
-                arm.selected.operations.map((child) => withLocalSharedDropPlan(layout, child)),
+              execution: Mir.mapExecutionOperations(arm.selected.execution, (operations) =>
+                operations.map((child) => withLocalSharedDropPlan(layout, child)),
               ),
             }),
           }),
@@ -266,6 +273,7 @@ import {
   lowerInstance,
   lowerWitnessEffectRunner,
   returnedEffectBlock,
+  returnedValueType,
 } from './EntryAssembly.js'
 import type {} from './Forwarding.js'
 import type { GeneratedEffectRunner } from './ValueType.js'
@@ -274,7 +282,6 @@ import {
   effectEntryAdapterId,
   effectValueType,
   instanceText,
-  representedValueType,
   unitEntryAdapterId,
 } from './ValueType.js'
 export const lowerProgram = (
@@ -353,16 +360,12 @@ export const lowerProgram = (
       )
       continue
     }
-    const terminal = instance.function.statements.at(-1)
-    const returned =
-      terminal?._tag === 'Return' && 'type' in terminal.expression
-        ? representedValueType(
-            layout,
-            opaqueRealizations,
-            terminal.expression.type,
-            instance.substitution,
-          )
-        : undefined
+    const returned = returnedValueType(
+      layout,
+      opaqueRealizations,
+      instance.function,
+      instance.substitution,
+    )
     if (returned?._tag === 'EffectComposite') effectResults.set(resultKey, returned)
   }
   const functions = discovery.instances.map((instance) =>

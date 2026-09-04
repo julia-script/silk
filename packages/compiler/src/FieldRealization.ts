@@ -91,7 +91,7 @@ export interface CallableRealization {
 export interface EffectEnvironmentSlot {
   readonly _tag: 'EffectEnvironmentSlot'
   readonly ordinal: number
-  readonly source: 'Parameter' | 'Binding'
+  readonly source: 'Parameter' | 'Binding' | 'Pattern'
   readonly sourceOrdinal: number
   readonly access: CaptureAccess
   readonly type: Type.Type

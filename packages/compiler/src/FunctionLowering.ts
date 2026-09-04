@@ -1,4 +1,5 @@
-import { cleanupForLocal, generated } from './CleanupEmission.js'
+import { cleanupForLocal, generated, indexExits } from './CleanupEmission.js'
+import type { ExitIndex } from './CleanupEmission.js'
 import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
@@ -47,6 +48,12 @@ export class FunctionLowering {
       readonly span: SourceSpan.SourceSpan
     }
   >()
+  readonly expressionLocals = new Map<string, Mir.LocalId>()
+  readonly matchCleanupLocals = new Map<string, Mir.LocalId>()
+  readonly extractedRegions = new Set<number>()
+  readonly exits: ExitIndex
+  ownerLoop: Mir.LoopId | undefined
+  activeRequirements: ReadonlyArray<ProvidedRequirement> | undefined
   private operations: Array<Mir.Operation> = []
   private syntheticBorrowOrdinal = 0
   private replayBorrowSubstitution: Map<string, Hir.BorrowId> | undefined
@@ -67,6 +74,7 @@ export class FunctionLowering {
     readonly opaqueRealizations: OpaqueRealization.Catalog,
     readonly providedRequirements: ReadonlyArray<ProvidedRequirement> = Object.freeze([]),
   ) {
+    this.exits = indexExits(ownership)
     this.issuedBorrowKeys = new Set((ownership?.loans ?? []).map((loan) => borrowKey(loan.id)))
     this.localTypes.push(...parameterTypes)
     parameterTypes.forEach((_, ordinal) => {
@@ -146,6 +154,27 @@ export class FunctionLowering {
     const operations = Object.freeze([...this.operations])
     this.operations = previous
     return [result, operations]
+  }
+
+  /** Captures an eager region graph without changing the enclosing operation sequence. */
+  captureExecution(
+    body: () => { readonly entry: Mir.RegionId; readonly result?: Mir.LocalId } | undefined,
+  ): Mir.Execution | undefined {
+    const first = this.regions.length
+    const result = body()
+    if (result === undefined) return undefined
+    const regions: Array<Mir.Region> = []
+    for (let ordinal = first; ordinal < this.regions.length; ordinal += 1) {
+      const region = this.regions.at(ordinal)
+      if (region === undefined) {
+        if (!this.extractedRegions.has(ordinal)) return undefined
+        continue
+      }
+      regions.push(region)
+      this.extractedRegions.add(ordinal)
+      this.regions[ordinal] = undefined
+    }
+    return Object.freeze({ ...result, regions: Object.freeze(regions) })
   }
 
   alloc(type: Mir.Type): Mir.LocalId {

@@ -108,7 +108,7 @@ export interface EffectInstance {
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
   readonly captures: ReadonlyArray<{
     readonly ordinal: number
-    readonly source: 'Parameter' | 'Binding'
+    readonly source: 'Parameter' | 'Binding' | 'Pattern'
     readonly sourceOrdinal: number
     readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
     readonly type: Type.Type

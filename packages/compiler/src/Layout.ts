@@ -409,7 +409,7 @@ export const effectEnvironmentByIdentity = (
 }
 
 export interface EffectEnvironmentField extends PlacedField {
-  readonly source: 'Binding' | 'Parameter'
+  readonly source: 'Binding' | 'Parameter' | 'Pattern'
   readonly ordinal: number
   readonly access: Type.CaptureAccess
   readonly type: DeclarationFacts.SemanticType
@@ -2250,7 +2250,9 @@ const addExpressionTypes = (
       }
       for (const binding of arm.bindings) types.set(Type.key(binding.type), binding.type)
       if (arm.guard !== undefined) addExpressionTypes(types, arm.guard, substitution)
-      addExpressionTypes(types, arm.result, substitution)
+      if (arm.body._tag === 'Expression')
+        addExpressionTypes(types, arm.body.expression, substitution)
+      else addStatementTypes(types, arm.body.statements, substitution)
     }
   }
 }
@@ -2380,8 +2382,16 @@ const effectEnvironments = (
     ).size
     for (const instance of [...discovery.instances].reverse()) {
       const bindingTypes = new Map<number, DeclarationFacts.SemanticType>()
+      const patternTypes = new Map<string, DeclarationFacts.SemanticType>()
+      const patternKey = (id: Match.BindingId): string =>
+        `${id.arm.match.function.sourceId}:${id.arm.match.function.ordinal}:${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`
+      const collectPatterns = (bindings: ReadonlyArray<Hir.PatternBinding>): void => {
+        for (const binding of bindings) patternTypes.set(patternKey(binding.id), binding.type)
+      }
       const collectBindings = (statements: ReadonlyArray<Hir.Statement>): void => {
         for (const statement of statements) {
+          if (statement._tag === 'PatternBind' || statement._tag === 'IfLet')
+            collectPatterns(statement.selection.bindings)
           if (statement._tag === 'Bind' && statement.initializer._tag !== 'Unavailable') {
             bindingTypes.set(
               statement.binding.ordinal,
@@ -2395,6 +2405,12 @@ const effectEnvironments = (
           for (const expression of Hir.statementExpressions(statement)) {
             for (const child of Hir.expressionTree(expression)) {
               if (child._tag === 'EffectBlock') collectBindings(child.statements)
+              if (child._tag === 'Match') {
+                for (const arm of child.arms) {
+                  collectPatterns(arm.bindings)
+                  if (arm.body._tag === 'Block') collectBindings(arm.body.statements)
+                }
+              }
             }
           }
         }
@@ -2425,11 +2441,13 @@ const effectEnvironments = (
                   captures: Object.freeze([
                     Object.freeze({
                       access: 'Take' as const,
+                      pattern: undefined,
                       binding: undefined,
                       parameter: undefined,
                     }),
                     Object.freeze({
                       access: 'Take' as const,
+                      pattern: undefined,
                       binding: undefined,
                       parameter: undefined,
                     }),
@@ -2470,6 +2488,7 @@ const effectEnvironments = (
                   }
                   return Object.freeze({
                     access,
+                    pattern: undefined,
                     binding: undefined,
                     parameter: undefined,
                   })
@@ -2500,12 +2519,20 @@ const effectEnvironments = (
         const fieldInputs: Array<Packing.Input<EffectFieldDraft>> = []
         for (const [captureOrdinal, capture] of block.captures.entries()) {
           const realized = realizedSlots.find((slot) => slot.ordinal === captureOrdinal)
-          const source =
-            realized?.source ?? (capture.binding === undefined ? 'Parameter' : 'Binding')
+          let source = realized?.source
+          if (source === undefined) {
+            if (capture.pattern !== undefined) source = 'Pattern'
+            else source = capture.binding === undefined ? 'Parameter' : 'Binding'
+          }
           const ordinal =
-            realized?.sourceOrdinal ?? capture.binding?.ordinal ?? capture.parameter?.ordinal
+            realized?.sourceOrdinal ??
+            capture.pattern?.ordinal ??
+            capture.binding?.ordinal ??
+            capture.parameter?.ordinal
           let type = realized?.type
-          if (type === undefined && capture.binding === undefined) {
+          if (type === undefined && capture.pattern !== undefined) {
+            type = patternTypes.get(patternKey(capture.pattern))
+          } else if (type === undefined && capture.binding === undefined) {
             if (instance.function.contract._tag === 'Contract' && ordinal !== undefined) {
               type = instance.function.contract.parameters.at(ordinal)
             }

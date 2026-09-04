@@ -361,7 +361,12 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
         if (arm.guard !== undefined) {
           expression(arm.guard, depth + 2, `${path}.arm${arm.id.ordinal}.guard`)
         }
-        expression(arm.result, depth + 2, `${path}.arm${arm.id.ordinal}.result`)
+        if (arm.body._tag === 'Expression')
+          expression(arm.body.expression, depth + 2, `${path}.arm${arm.id.ordinal}.body`)
+        else
+          arm.body.statements.forEach((node, ordinal) =>
+            statement(node, depth + 2, `${path}.arm${arm.id.ordinal}.body${ordinal}`),
+          )
       })
     }
   }

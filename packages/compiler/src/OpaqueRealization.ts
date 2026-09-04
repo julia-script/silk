@@ -98,7 +98,9 @@ const reachableResults = (
   if (expression._tag === 'Grouped') return reachableResults(expression.expression)
   if (expression._tag !== 'Match') return Object.freeze([expression])
   return Object.freeze(
-    expression.arms.flatMap((arm) => (arm.reachable ? reachableResults(arm.result) : [])),
+    expression.arms.flatMap((arm) =>
+      arm.reachable && arm.body._tag === 'Expression' ? reachableResults(arm.body.expression) : [],
+    ),
   )
 }
 
@@ -199,10 +201,12 @@ const constructionExpression = (
 }
 
 const captureType = (
-  reference: Elaboration.BindingDeclarationFact | DeclarationFacts.ParameterFact,
+  reference: Elaboration.EffectCaptureFact['reference'],
 ): Type.Type | undefined => {
   if (reference._tag === 'BindingFact')
     return reference.inferredType._tag === 'Available' ? reference.inferredType.type : undefined
+  if (reference._tag === 'PatternBinding')
+    return reference.type._tag === 'Available' ? reference.type.type : undefined
   return reference.declaredType._tag === 'Resolved' ? reference.declaredType.type : undefined
 }
 

@@ -632,7 +632,10 @@ moves, and borrows receive their ordinary diagnostics.
 
 `continue` ends the current iteration and begins the innermost loop's next condition evaluation.
 `break` exits the innermost loop and continues with the following statement. Neither form carries a
-value.
+value. The loop body establishes this transfer target; its condition is evaluated in the
+surrounding transfer context. A match arm inside a condition can return from the enclosing
+computation or transfer to an already enclosing loop, but cannot target the loop whose condition
+is still being evaluated.
 
 ```silk
 fn stopAtThree() -> i32 {
@@ -762,7 +765,9 @@ fn classify(event: Token | End) -> i32 {
 ```
 
 The second `Token` arm remains necessary because the first arm's guard may be false. Every guard
-must have type `bool` and may inspect its provisional pattern bindings without consuming them.
+that completes must have type `bool` and may inspect its provisional pattern bindings without consuming them.
+A guard that transfers control exits the enclosing function, Effect, or loop; it does not try another
+arm. An all-transferring guard has type `never` and needs no Boolean result.
 
 A scalar enum begins with its complete declared member set. An unguarded qualified member pattern
 such as `Status.Ready` covers that exact canonical member; a guarded occurrence does not remove it.
@@ -855,6 +860,41 @@ fn preserve(input: Left | Right) -> Left | Right {
 ```
 
 The result is the normalized union `Left | Right`, independent of arm order.
+
+Immediately after `=>`, braces introduce an ordinary statement block. Its statements execute in
+source order with the pattern bindings in scope. Reaching its closing brace produces `()`; the last
+statement does not become a result expression. A block whose paths all transfer has type `never`.
+A conditional return with a path to the closing brace still produces `()` on that path, and a
+`break` targeting a loop inside the block does not make the block non-completing.
+
+```silk
+struct Ready { value: i32 }
+struct Waiting {}
+
+fn inspect(event: Ready | Waiting) -> i32 {
+  match &event {
+    Ready { value } => {
+      let answer = value + 1
+      return answer
+    }
+    Waiting {} => {}
+  }
+  return 0
+}
+```
+
+`return` exits `inspect`, while the empty `Waiting` arm continues to `return 0`. A block creates a
+lexical scope, not a callable or Effect invocation. `break` and `continue` target the nearest
+lexically enclosing loop, and `fail` uses the enclosing Effect contract. These rules also apply when
+the match appears inside an argument, initializer, assignment, guard, or return operand. A transfer
+skips the surrounding expression's remaining operands and operations. Live arm owners and abandoned
+earlier temporaries are cleaned once in reverse acquisition order before the enclosing exit.
+
+A `()` block arm joins another `()` arm; a `never` arm contributes no value to a scalar join.
+If every reachable path transfers, the entire match has type `never`. A completing block and an
+`i32` arm do not form a legal join and report `SEM0049` on the match. `{ 42 }` reports the ordinary
+unused-value diagnostic `SEM0087`; `{ drop 42 }` completes with `()`. Braces in other expression
+positions do not introduce block expressions.
 
 **Boundary:** Result joining does not convert any arm result or erase its ownership and lifetime
 properties. If a result type is unavailable or cannot legally be stored in the resulting union, the

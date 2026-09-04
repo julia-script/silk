@@ -239,11 +239,104 @@ export const expandMatches = (
   fn: Mir.MirFunction,
   input: ReadonlyArray<StructuredBlock>,
 ): ReadonlyArray<LinearBlock> => {
-  let nextRegion = Math.max(-1, ...fn.regions.map((region) => region.id.ordinal)) + 1
+  let nextRegion =
+    Math.max(-1, ...Mir.regionsTree(fn.regions).map((region) => region.id.ordinal)) + 1
   const reserve = (): Mir.RegionId => Object.freeze({ _tag: 'Region', ordinal: nextRegion++ })
   const blocks: Array<LinearBlock> = []
   const jump = (target: Mir.RegionId, provenance: Mir.Provenance): LinearTerminator =>
     Object.freeze({ _tag: 'Jump', target, provenance })
+
+  let activeTargets = new Map(fn.regions.map((region) => [region.id.ordinal, region.id] as const))
+  let activeLoops = new Map(
+    fn.regions.flatMap((region) =>
+      region._tag === 'LoopRegion' ? [[region.loop.ordinal, region] as const] : [],
+    ),
+  )
+  const emitExecution = (
+    execution: Mir.Execution,
+    completionOperations: ReadonlyArray<LinearOperation>,
+    completion: LinearTerminator,
+  ): Mir.RegionId => {
+    const previousTargets = activeTargets
+    const previousLoops = activeLoops
+    activeTargets = new Map(activeTargets)
+    activeLoops = new Map(activeLoops)
+    for (const region of execution.regions) {
+      activeTargets.set(region.id.ordinal, reserve())
+      if (region._tag === 'LoopRegion') activeLoops.set(region.loop.ordinal, region)
+    }
+    const target = (id: Mir.RegionId): Mir.RegionId => activeTargets.get(id.ordinal) ?? id
+    const entry = target(execution.entry)
+    for (const region of execution.regions) {
+      const id = target(region.id)
+      if (region._tag === 'ConditionalRegion') {
+        blocks.push(
+          Object.freeze({
+            id,
+            origin: region.id,
+            kind: 'Normal',
+            operations: Object.freeze([]),
+            terminator: Object.freeze({
+              _tag: 'Branch',
+              condition: region.condition,
+              taken: target(region.taken),
+              otherwise: target(region.otherwise),
+              provenance: region.provenance,
+            }),
+          }),
+        )
+        continue
+      }
+      if (region._tag === 'LoopRegion') {
+        blocks.push(
+          Object.freeze({
+            id,
+            origin: region.id,
+            kind: 'Normal',
+            operations: Object.freeze([]),
+            terminator: jump(target(region.condition), region.provenance),
+          }),
+        )
+        continue
+      }
+      const outcome = region.outcome
+      let terminator: LinearTerminator
+      if (outcome._tag === 'Complete') terminator = completion
+      else if (outcome._tag === 'Forward')
+        terminator = jump(target(outcome.target), outcome.provenance)
+      else if (outcome._tag === 'Return' || outcome._tag === 'Trap') terminator = outcome
+      else if (outcome._tag === 'Exit' || outcome._tag === 'Repeat') {
+        const loop = activeLoops.get(outcome.loop.ordinal)
+        if (loop === undefined) throw new RangeError('Nested execution lost its lexical loop')
+        terminator = jump(
+          target(outcome._tag === 'Exit' ? loop.following : loop.id),
+          outcome.provenance,
+        )
+      } else {
+        const loop = [...activeLoops.values()].find(
+          (loop) => loop.condition.ordinal === region.id.ordinal,
+        )
+        if (loop === undefined) throw new RangeError('Nested execution lost its condition owner')
+        terminator = Object.freeze({
+          _tag: 'Branch',
+          condition: loop.conditionValue,
+          taken: target(loop.body),
+          otherwise: target(loop.following),
+          provenance: outcome.provenance,
+        })
+      }
+      lowerSequence(
+        id,
+        region.id,
+        region._tag === 'CleanupRegion' ? 'Cleanup' : 'Normal',
+        [...Mir.operationsOf(region), ...(outcome._tag === 'Complete' ? completionOperations : [])],
+        terminator,
+      )
+    }
+    activeTargets = previousTargets
+    activeLoops = previousLoops
+    return entry
+  }
 
   const lowerSequence = (
     id: Mir.RegionId,
@@ -453,8 +546,23 @@ export const expandMatches = (
     }
     if (special?._tag === 'Conditional') {
       const following = reserve()
-      const taken = reserve()
-      const otherwise = reserve()
+      const branch = (execution: Mir.Execution): Mir.RegionId =>
+        emitExecution(
+          execution,
+          execution.result === undefined
+            ? []
+            : [
+                Object.freeze({
+                  _tag: 'Move',
+                  destination: special.destination,
+                  source: execution.result,
+                  provenance: special.provenance,
+                }),
+              ],
+          jump(following, special.provenance),
+        )
+      const taken = branch(special.taken)
+      const otherwise = branch(special.otherwise)
       blocks.push(
         Object.freeze({
           id,
@@ -471,41 +579,24 @@ export const expandMatches = (
         }),
       )
       lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
-      lowerSequence(
-        taken,
-        origin,
-        'Normal',
-        [
-          ...special.taken.operations,
-          Object.freeze({
-            _tag: 'Move' as const,
-            destination: special.destination,
-            source: special.taken.result,
-            provenance: special.provenance,
-          }),
-        ],
-        jump(following, special.provenance),
-      )
-      lowerSequence(
-        otherwise,
-        origin,
-        'Normal',
-        [
-          ...special.otherwise.operations,
-          Object.freeze({
-            _tag: 'Move' as const,
-            destination: special.destination,
-            source: special.otherwise.result,
-            provenance: special.provenance,
-          }),
-        ],
-        jump(following, special.provenance),
-      )
       return
     }
     if (special?._tag === 'ShortCircuit') {
       const following = reserve()
-      const evaluateRight = reserve()
+      const evaluateRight = emitExecution(
+        special.right,
+        special.right.result === undefined
+          ? []
+          : [
+              Object.freeze({
+                _tag: 'Move',
+                destination: special.destination,
+                source: special.right.result,
+                provenance: special.provenance,
+              }),
+            ],
+        jump(following, special.provenance),
+      )
       const decided = reserve()
       blocks.push(
         Object.freeze({
@@ -525,21 +616,6 @@ export const expandMatches = (
         }),
       )
       lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
-      lowerSequence(
-        evaluateRight,
-        origin,
-        'Normal',
-        [
-          ...special.right.operations,
-          Object.freeze({
-            _tag: 'Move' as const,
-            destination: special.destination,
-            source: special.right.result,
-            provenance: special.provenance,
-          }),
-        ],
-        jump(following, special.provenance),
-      )
       blocks.push(
         Object.freeze({
           id: decided,
@@ -616,7 +692,10 @@ export const expandMatches = (
           ? arm.member
           : member
       const bindings: ReadonlyArray<LinearOperation> = Object.freeze(
-        arm.bindings.map((binding) =>
+        [
+          ...arm.bindings,
+          ...arm.cleanupBindings.map((binding) => ({ ...binding, provenance: arm.provenance })),
+        ].map((binding) =>
           Object.freeze({
             _tag: 'BindMatch' as const,
             scrutinee: match.scrutinee,
@@ -629,7 +708,6 @@ export const expandMatches = (
           }),
         ),
       )
-      const selected = reserve()
       const cleanup = arm.selected.cleanup.flatMap((entry): ReadonlyArray<LinearOperation> => {
         const type = fn.localTypes.at(entry.destination.ordinal)
         if (type === undefined) throw new RangeError('LLVM match cleanup lost its local type')
@@ -652,19 +730,20 @@ export const expandMatches = (
           }),
         ])
       })
-      lowerSequence(
-        selected,
-        origin,
-        'Normal',
+      const selected = emitExecution(
+        arm.selected.execution,
         [
-          ...arm.selected.operations,
           ...cleanup,
-          Object.freeze({
-            _tag: 'Move' as const,
-            destination: match.destination,
-            source: arm.selected.result,
-            provenance: arm.provenance,
-          }),
+          ...(match.destination === undefined || arm.selected.execution.result === undefined
+            ? []
+            : [
+                Object.freeze({
+                  _tag: 'Move' as const,
+                  destination: match.destination,
+                  source: arm.selected.execution.result,
+                  provenance: arm.provenance,
+                }),
+              ]),
         ],
         jump(following, arm.provenance),
       )
@@ -672,19 +751,22 @@ export const expandMatches = (
         lowerSequence(entry, origin, 'Normal', bindings, jump(selected, arm.provenance))
       } else {
         const fallback = candidateEntry(member, candidates, ordinal + 1)
-        lowerSequence(
-          entry,
-          origin,
-          'Normal',
-          [...bindings, ...arm.guard.operations],
-          Object.freeze({
-            _tag: 'Branch',
-            condition: arm.guard.result,
-            taken: selected,
-            otherwise: fallback,
-            provenance: arm.provenance,
-          }),
-        )
+        const completedGuard: LinearTerminator =
+          arm.guard.execution.result === undefined
+            ? Object.freeze({
+                _tag: 'Trap',
+                reason: 'noncompleting guard reached completion',
+                provenance: arm.provenance,
+              })
+            : Object.freeze({
+                _tag: 'Branch',
+                condition: arm.guard.execution.result,
+                taken: selected,
+                otherwise: fallback,
+                provenance: arm.provenance,
+              })
+        const guard = emitExecution(arm.guard.execution, [], completedGuard)
+        lowerSequence(entry, origin, 'Normal', bindings, jump(guard, arm.provenance))
       }
       return entry
     }
@@ -829,6 +911,8 @@ export const linearize = (fn: Mir.MirFunction): ReadonlyArray<LinearBlock> => {
         if (loop === undefined) throw new RangeError('LLVM linearizer lost exit loop')
         return Object.freeze({ _tag: 'Jump', target: loop.following, provenance: value.provenance })
       }
+      case 'Complete':
+        throw new RangeError('Function body contains a nested completion outcome')
       case 'Yield': {
         const loop = conditionOwners.get(region.id.ordinal)
         if (loop === undefined) throw new RangeError('LLVM linearizer found unowned yield')

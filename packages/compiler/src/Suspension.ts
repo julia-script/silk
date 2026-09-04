@@ -9,7 +9,7 @@ export type SuspensionClassification = 'Synchronous' | 'Suspendable' | 'Unknown'
 
 export interface Capture {
   readonly ordinal: number
-  readonly source: 'Binding' | 'Parameter'
+  readonly source: 'Binding' | 'Parameter' | 'Pattern'
   readonly sourceOrdinal: number
   readonly access: Type.CaptureAccess
   readonly type: DeclarationFacts.SemanticType

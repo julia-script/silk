@@ -9,6 +9,7 @@ import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
 import { elaborate, ownership } from './support/elaborate.js'
+import { raise } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -1208,3 +1209,288 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(mutated), [])
   }),
 )
+
+const checkValid = (id: string, text: string): Ownership.ModuleOwnership => {
+  const syntax = Parser.parse(Lexer.lex(SourceFile.make(id, ascii(text))))
+  assert.deepEqual(syntax.lexicalDiagnostics, [])
+  assert.deepEqual(syntax.parserDiagnostics, [])
+  const elaboration = elaborate(syntax)
+  assert.deepEqual(elaboration.diagnostics, [])
+  return ownership(elaboration)
+}
+
+it('joins only completing match arms and releases selected block owners at their exits', () => {
+  const source = `struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+struct Left { kept: Token omitted: Token }
+struct Right {}
+fn consume(earlier: Token, value: i32) -> i32 { return value }
+fn inspect(input: Left | Right, owner: Token) -> i32 {
+  let decision = consume(Token { value: 0 }, match move input {
+    Left { kept, .. } => {
+      let local = Token { value: 3 }
+      drop owner
+      return 7
+    }
+    Right {} => 2
+  })
+  return owner.value + decision
+}`
+  const facts = checkValid('ownership://ordinary-match-exits.silk', source)
+  const fn = facts.functions.at(1)
+  assert.deepEqual(facts.diagnostics, [])
+  assert.strictEqual(fn?.verdict._tag, 'Satisfied')
+  const selectedExit = fn?.exits.find(
+    (exit) => source.slice(exit.span.start, exit.span.end).trim() === '7',
+  )
+  assert.deepEqual(
+    selectedExit?.releases.map((release) => release.binding.name),
+    ['local', 'kept'],
+  )
+  assert.deepEqual(
+    selectedExit?.matches.map((release) =>
+      release.cleanup.map((field) => field.path.map((part) => part.ordinal)),
+    ),
+    [[[1]]],
+  )
+  assert.deepEqual(
+    [
+      ...(selectedExit?.releases.map((release) => ({
+        ordinal: release.ordinal,
+        name: release.binding.name,
+      })) ?? []),
+      ...(selectedExit?.matches.map((release) => ({ ordinal: release.ordinal, name: 'omitted' })) ??
+        []),
+      ...(selectedExit?.temporaries.map((release) => ({
+        ordinal: release.ordinal,
+        name: 'earlier',
+      })) ?? []),
+    ]
+      .sort((left, right) => right.ordinal - left.ordinal)
+      .map((entry) => entry.name),
+    ['local', 'kept', 'omitted', 'earlier'],
+  )
+  const followingExit = fn?.exits.find(
+    (exit) => source.slice(exit.span.start, exit.span.end).trim() === 'owner.value + decision',
+  )
+  assert.deepEqual(
+    followingExit?.releases.map((release) => release.binding.name),
+    ['decision', 'owner'],
+  )
+  assert.deepEqual(followingExit?.matches, [])
+})
+
+it('releases abandoned earlier arguments in reverse order without storing a transferring initializer', () => {
+  const source = `struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+struct Left {}
+struct Right {}
+fn consume(first: Token, second: Token, value: i32) -> i32 { return value }
+fn inspect(input: Left | Right) -> i32 {
+  let result = consume(Token { value: 1 }, Token { value: 2 }, match &input {
+    Left {} => { let local = Token { value: 3 } return 9 }
+    Right {} => 4
+  })
+  return result
+}`
+  const facts = checkValid('ownership://ordinary-match-temporaries.silk', source)
+  const fn = facts.functions.at(1)
+  assert.deepEqual(facts.diagnostics, [])
+  const early = fn?.exits.find(
+    (exit) => source.slice(exit.span.start, exit.span.end).trim() === '9',
+  )
+  assert.deepEqual(
+    early?.temporaries.map((temporary) =>
+      source.slice(temporary.span.start, temporary.span.end).trim(),
+    ),
+    ['Token { value: 2 }', 'Token { value: 1 }'],
+  )
+  assert.deepEqual(
+    early?.releases.map((release) => release.binding.name),
+    ['local', 'input'],
+  )
+  assert.isFalse(early?.releases.some((release) => release.binding.name === 'result'))
+  const following = fn?.exits.find(
+    (exit) => source.slice(exit.span.start, exit.span.end).trim() === 'result',
+  )
+  assert.deepEqual(following?.temporaries, [])
+})
+
+it('cleans a provisional consumed payload on guard transfer and preserves it on Boolean fallback', () => {
+  const source = `struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+struct Left { token: Token }
+struct Right {}
+struct Stop {}
+struct Keep {}
+fn inspect(input: Left | Right, decision: Stop | Keep) -> i32 {
+  return match move input {
+    Left { token } if match &decision {
+      Stop {} => { return 8 }
+      Keep {} => false
+    } => { drop token return 1 }
+    Left { token } => { return token.value }
+    Right {} => 0
+  }
+}`
+  const facts = checkValid('ownership://ordinary-match-guard.silk', source)
+  const fn = facts.functions.at(0)
+  assert.deepEqual(facts.diagnostics, [])
+  const guardExit = fn?.exits.find(
+    (exit) => source.slice(exit.span.start, exit.span.end).trim() === '8',
+  )
+  assert.deepEqual(
+    guardExit?.releases.map((release) => release.binding.name),
+    ['decision'],
+  )
+  assert.deepEqual(
+    guardExit?.matches.flatMap((release) => release.cleanup.map((field) => field.path)),
+    [[]],
+  )
+  const fallbackExit = fn?.exits.find(
+    (exit) => source.slice(exit.span.start, exit.span.end).trim() === 'token.value',
+  )
+  assert.deepEqual(
+    fallbackExit?.releases.map((release) => release.binding.name),
+    ['token', 'decision'],
+  )
+  assert.isTrue(fn?.matches.some((match) => match.access === 'Move' && match.arms.length === 3))
+})
+
+it('keeps enclosing argument temporaries alive when an arm breaks only its own inner loop', () => {
+  const source = `struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+struct Left {}
+struct Right {}
+fn consume(token: Token, unit: ()) -> i32 { return token.value }
+fn inspect(input: Left | Right) -> i32 {
+  return consume(Token { value: 1 }, match &input {
+    Left {} => { while true { let local = Token { value: 2 } break } }
+    Right {} => {}
+  })
+}`
+  const facts = checkValid('ownership://ordinary-match-inner-loop.silk', source)
+  const fn = facts.functions.at(1)
+  assert.deepEqual(facts.diagnostics, [])
+  const transfer = fn?.exits.find((exit) => exit.kind === 'Break')
+  assert.deepEqual(
+    transfer?.releases.map((release) => release.binding.name),
+    ['local'],
+  )
+  assert.deepEqual(transfer?.temporaries, [])
+  assert.deepEqual(transfer?.matches, [])
+  assert.isTrue(fn?.exits.some((exit) => exit.kind === 'Return'))
+})
+
+it('cleans abandoned operands on enclosing break continue and failure paths', () => {
+  const source = `struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+struct Leave {}
+struct Again {}
+struct Stop {}
+struct Problem {}
+fn consume(token: Token, unit: ()) -> () { return () }
+effect fn inspect(input: Leave | Again | Stop) -> () ! Problem {
+  while true {
+    drop consume(Token { value: 1 }, match &input {
+      Leave {} => { let local = Token { value: 2 } break }
+      Again {} => { let local = Token { value: 3 } continue }
+      Stop {} => { let local = Token { value: 4 } fail Problem {} }
+    })
+  }
+}`
+  const facts = checkValid('ownership://ordinary-match-loop-failure.silk', source)
+  const fn = facts.functions.at(1)
+  assert.deepEqual(facts.diagnostics, [])
+  const transfers =
+    fn?.exits.filter(
+      (exit) =>
+        exit.kind === 'Break' ||
+        exit.kind === 'Continue' ||
+        (exit.kind === 'Return' && exit.temporaries.length > 0),
+    ) ?? []
+  assert.deepEqual(
+    transfers.map((exit) => exit.kind),
+    ['Break', 'Continue', 'Return'],
+  )
+  for (const transfer of transfers) {
+    assert.deepEqual(
+      transfer.temporaries.map((temporary) =>
+        source.slice(temporary.span.start, temporary.span.end).trim(),
+      ),
+      ['Token { value: 1 }'],
+    )
+    assert.deepEqual(
+      transfer.releases
+        .filter((release) => release.binding.name === 'local')
+        .map((release) => release.binding.name),
+      ['local'],
+    )
+    assert.deepEqual(
+      transfer.matches.flatMap((match) => match.cleanup),
+      [],
+    )
+  }
+})
+
+it('keeps provisional pattern consumption illegal inside an ordinary guard block', () => {
+  const source = `struct Token { value: i32 }
+struct Left { token: Token }
+struct Right {}
+struct Stop {}
+struct Keep {}
+fn inspect(input: Left | Right, decision: Stop | Keep) -> i32 {
+  return match move input {
+    Left { token } if match &decision {
+      Stop {} => { drop token return 8 }
+      Keep {} => false
+    } => 1
+    Left { token } => token.value
+    Right {} => 0
+  }
+}
+fn capture(input: Left | Right) -> i32 {
+  return match move input {
+    Left { token } if run effect { drop move token return false } => 1
+    Left { token: fallback } => fallback.value
+    Right {} => 0
+  }
+}`
+  const facts = checkValid('ownership://ordinary-match-guard-consumption.silk', source)
+  assert.deepEqual(
+    facts.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+    })),
+    [
+      { code: 'OWN0008', span: 'token' },
+      { code: 'OWN0008', span: 'token' },
+    ],
+  )
+})
+
+it('ends an abandoned earlier argument loan only when control leaves its containing expression', () => {
+  const source = `struct Token { value: i32 }
+struct Left {}
+struct Right {}
+fn consume(token: &Token, unit: ()) -> i32 { return token.value }
+fn inspect(input: Left | Right, owner: Token) -> i32 {
+  return consume(&owner, match &input {
+    Left {} => { while true { break } return 7 }
+    Right {} => {}
+  })
+}`
+  const facts = checkValid('ownership://ordinary-match-abandoned-loan.silk', source)
+  const fn = facts.functions.at(1)
+  assert.deepEqual(facts.diagnostics, [])
+  const loan =
+    fn?.loans.find(
+      (entry) => source.slice(entry.startSpan.start, entry.startSpan.end).trim() === '&owner',
+    ) ?? raise('expected earlier argument loan')
+  const innerBreak = fn?.exits.find((exit) => exit.kind === 'Break')
+  assert.deepEqual(innerBreak?.loanEnds, [])
+  const earlyReturn = fn?.exits.find(
+    (exit) => source.slice(exit.span.start, exit.span.end).trim() === '7',
+  )
+  assert.deepEqual(earlyReturn?.loanEnds, [loan.id])
+})

@@ -6,7 +6,7 @@ import * as Hir from '../src/Hir.js'
 import * as Instances from '../src/Instances.js'
 import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as Match from '../src/Match.js'
-import type * as Mir from '../src/Mir.js'
+import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Realization from '../src/Realization.js'
@@ -827,7 +827,11 @@ it.effect('discovers calls and lowers nested matches as structured acyclic opera
         ? []
         : MirVerification.operations(main).filter((operation) => operation._tag === 'Match')
     assert.strictEqual(matches.length, 2)
-    assert.strictEqual(matches.at(0)?.arms.at(0)?.selected.operations.at(0)?._tag, 'Match')
+    const selected = matches.at(0)?.arms.at(0)?.selected.execution
+    assert.strictEqual(
+      selected === undefined ? undefined : Mir.executionOperations(selected).at(0)?._tag,
+      'Match',
+    )
     const outerMember = matches.at(0)?.decisions.at(0)?.member
     const innerMember = matches.at(1)?.decisions.at(0)?.member
     const outerType = outerMember === undefined ? undefined : Match.sourceType(outerMember)

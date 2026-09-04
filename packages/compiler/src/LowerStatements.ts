@@ -39,7 +39,7 @@ import * as Layout from './Layout.js'
 import type { DelayedEffectState } from './Lower.js'
 import { borrowKey, i32, patternKey, spanKey } from './Lower.js'
 import type {} from './LowerExpression.js'
-import { lowerExpression } from './LowerExpression.js'
+import { lowerExpression, lowerExecution } from './LowerExpression.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as Ownership from './Ownership.js'
@@ -55,9 +55,10 @@ export const lowerPatternSelection = (
   fn: FunctionLowering,
   selection: Hir.PatternSelection,
   result: 'Unit' | 'Bool',
-): LoweredPatternSelection | undefined => {
+): LoweredPatternSelection | 'Transferred' | undefined => {
   if (selection.subject._tag === 'Unavailable') return undefined
   const subject = lowerExpression(fn, selection.subject)
+  if (subject === 'Transferred') return subject
   const semanticSubject = fn.semantic(selection.subject.type)
   const subjectType = fn.type(selection.subject.type)
   // Statement selections need only one compiler-private branch bit. Keeping that result as bool
@@ -122,7 +123,7 @@ export const lowerPatternSelection = (
     )
   }
   const [selectedResult, selectedOperations] = fn.capture(() => literal(true))
-  if (selectedResult === undefined) return undefined
+  if (selectedResult === undefined || selectedResult === 'Transferred') return selectedResult
   const emptyCoverage: ReadonlyArray<Match.CoverageIdentity> = Object.freeze([])
   const selectedAfter = selection.universal
     ? emptyCoverage
@@ -158,6 +159,11 @@ export const lowerPatternSelection = (
       }),
     )
   }
+  const selectedExecution = lowerExecution(fn, selection.span, () => {
+    for (const operation of finalizedSelectedOperations) fn.emit(operation)
+    return selectedResult
+  })
+  if (selectedExecution === undefined) return undefined
   const selectedArm: Mir.MatchArm = Object.freeze({
     id: selection.arm,
     ...(member === undefined ? {} : { member }),
@@ -165,10 +171,10 @@ export const lowerPatternSelection = (
     before: members,
     after: selectedAfter,
     bindings: Object.freeze(selectedBindings),
+    cleanupBindings: Object.freeze([]),
     selected: Object.freeze({
       access: selection.access,
-      operations: Object.freeze(finalizedSelectedOperations),
-      result: selectedResult.result,
+      execution: selectedExecution,
       cleanup: Object.freeze(cleanup),
       endBorrow: false,
     }),
@@ -179,18 +185,18 @@ export const lowerPatternSelection = (
     match: selection.id,
     ordinal: 1,
   })
-  const [fallbackResult, fallbackOperations] = fn.capture(() => literal(false))
-  if (fallbackResult === undefined) return undefined
+  const fallbackExecution = lowerExecution(fn, selection.span, () => literal(false))
+  if (fallbackExecution === undefined) return undefined
   const fallbackArm: Mir.MatchArm = Object.freeze({
     id: fallbackId,
     universal: true,
     before: selectedAfter,
     after: Object.freeze([]),
     bindings: Object.freeze([]),
+    cleanupBindings: Object.freeze([]),
     selected: Object.freeze({
       access: selection.access,
-      operations: fallbackOperations,
-      result: fallbackResult.result,
+      execution: fallbackExecution,
       cleanup: Object.freeze([]),
       endBorrow: false,
     }),
@@ -248,7 +254,10 @@ export const lowerSequence = (
   // JavaScript stack depth. Only nested blocks recurse.
   let region = id
   for (const statement of statements) {
+    const previousLoop = fn.ownerLoop
+    fn.ownerLoop = ownerLoop
     const following = lowerStatement(fn, statement, exits, ownerLoop, terminal, region)
+    fn.ownerLoop = previousLoop
     if (following === undefined) return undefined
     if (following === 'Terminated') return id
     region = following
@@ -295,6 +304,22 @@ const lowerStatement = (
   terminal: Mir.Outcome,
   id: Mir.RegionId,
 ): Mir.RegionId | 'Terminated' | undefined => {
+  const transferred = (operations: ReadonlyArray<Mir.Operation>): 'Terminated' => {
+    fn.publish(
+      Object.freeze({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations,
+        outcome: Object.freeze({
+          _tag: 'Trap',
+          reason: 'unreachable expression continuation',
+          provenance: generated(statement.span),
+        }),
+      }),
+    )
+    return 'Terminated'
+  }
   if (statement._tag === 'UnavailableStatement') {
     fn.publish(
       Object.freeze({
@@ -445,6 +470,7 @@ const lowerStatement = (
     }
     const [initializer, operations] = fn.capture(() => {
       const lowered = lowerExpression(fn, statement.initializer)
+      if (lowered === 'Transferred') return lowered
       if (lowered === undefined) return undefined
       const destination = fn.alloc(fn.localTypes.at(lowered.result.ordinal) ?? i32)
       fn.emit(
@@ -468,6 +494,7 @@ const lowerStatement = (
       }
       return destination
     })
+    if (initializer === 'Transferred') return transferred(operations)
     if (initializer === undefined) return undefined
     const following = fn.reserve()
     fn.publish(
@@ -490,6 +517,7 @@ const lowerStatement = (
     const [selection, operations] = fn.capture(() =>
       lowerPatternSelection(fn, statement.selection, 'Unit'),
     )
+    if (selection === 'Transferred') return transferred(operations)
     if (selection === undefined) return undefined
     const following = fn.reserve()
     fn.publish(
@@ -510,6 +538,7 @@ const lowerStatement = (
 
   if (statement._tag === 'Evaluate') {
     const [evaluated, operations] = fn.capture(() => lowerExpression(fn, statement.expression))
+    if (evaluated === 'Transferred') return transferred(operations)
     if (evaluated === undefined) return undefined
     const following = fn.reserve()
     fn.publish(
@@ -546,6 +575,7 @@ const lowerStatement = (
         place._tag === 'BorrowedWritePlace'
           ? lowerBorrowedWriteSelectors(fn, place.selectors)
           : lowerWriteSelectors(fn, place.selectors)
+      if (selectors === 'Transferred') return selectors
       if (selectors === undefined) return false
       fn.emit(
         Object.freeze({
@@ -557,6 +587,7 @@ const lowerStatement = (
         }),
       )
       const value = lowerExpression(fn, statement.value)
+      if (value === 'Transferred') return value
       if (value === undefined) return false
       // A live displaced value leaves the place as the replacement commits (the verifier pairs
       // a consuming read with its write), then cleans exactly once through its own plan.
@@ -611,6 +642,7 @@ const lowerStatement = (
       endReturnedViewLoans(fn, statement.span)
       return true
     })
+    if (written === 'Transferred') return transferred(operations)
     if (!written) return undefined
     const following = fn.reserve()
     fn.publish(
@@ -659,6 +691,7 @@ const lowerStatement = (
       return following
     }
     const [lowered, operations] = fn.capture(() => lowerExpression(fn, statement.expression))
+    if (lowered === 'Transferred') return transferred(operations)
     if (lowered === undefined) return undefined
     const localType = fn.localTypes.at(lowered.result.ordinal)
     if (localType === undefined) return undefined
@@ -791,16 +824,17 @@ const lowerStatement = (
   }
 
   if (statement._tag === 'If' || statement._tag === 'IfLet') {
-    const conditional = fn.reserve()
-    const taken = fn.reserve()
-    const otherwise = fn.reserve()
-    const following = fn.reserve()
     const [condition, operations] = fn.capture(() =>
       statement._tag === 'If'
         ? lowerExpression(fn, statement.condition)
         : lowerPatternSelection(fn, statement.selection, 'Bool'),
     )
+    if (condition === 'Transferred') return transferred(operations)
     if (condition === undefined) return undefined
+    const conditional = fn.reserve()
+    const taken = fn.reserve()
+    const otherwise = fn.reserve()
+    const following = fn.reserve()
     fn.publish(
       Object.freeze({
         _tag: 'OperationRegion',
@@ -939,14 +973,15 @@ const lowerStatement = (
 
   if (statement._tag === 'While') {
     const loop: Mir.LoopId = Object.freeze({ _tag: 'Loop', ordinal: statement.loop.ordinal })
-    const conditionId = fn.reserve()
-    const bodyId = fn.reserve()
-    const following = fn.reserve()
     const entryState = delayedEffectState(fn)
     const [condition, conditionOperations] = fn.capture(() =>
       lowerExpression(fn, statement.condition),
     )
+    if (condition === 'Transferred') return transferred(conditionOperations)
     if (condition === undefined) return undefined
+    const conditionId = fn.reserve()
+    const bodyId = fn.reserve()
+    const following = fn.reserve()
     fn.publish(
       Object.freeze({
         _tag: 'LoopRegion',
@@ -1138,24 +1173,10 @@ const lowerStatement = (
 
   if (statement._tag === 'Fail') {
     const specializedFailure = fn.semantic(statement.failure)
-    if (Type.isNever(specializedFailure)) {
-      fn.publish(
-        Object.freeze({
-          _tag: 'OperationRegion',
-          id,
-          ...ownerFields(ownerLoop),
-          operations: Object.freeze([]),
-          outcome: Object.freeze({
-            _tag: 'Trap',
-            reason: 'unreachable failure of never',
-            provenance: generated(statement.span),
-          }),
-        }),
-      )
-      return 'Terminated'
-    }
     const [failedValue, operations] = fn.capture(() => {
       const failed = lowerExpression(fn, statement.expression)
+      if (failed === 'Transferred') return failed
+      if (failed !== undefined && Type.isNever(specializedFailure)) return 'Transferred'
       const outcomeType = fn.effectOutcome === undefined ? undefined : fn.type(fn.effectOutcome)
       if (failed === undefined || outcomeType?._tag !== 'EffectOutcome') return undefined
       const destination = fn.alloc(outcomeType)
@@ -1198,6 +1219,7 @@ const lowerStatement = (
       }
       return destination
     })
+    if (failedValue === 'Transferred') return transferred(operations)
     if (failedValue === undefined) return undefined
     const failureOutcome: Mir.Outcome = Object.freeze({
       _tag: 'Return',
@@ -1251,6 +1273,7 @@ const lowerStatement = (
 
   const [returnedValue, operations] = fn.capture(() => {
     const returned = lowerExpression(fn, statement.expression)
+    if (returned === 'Transferred') return returned
     if (returned === undefined) return undefined
     if (fn.effectOutcome === undefined) return returned.result
     const outcomeType = fn.type(fn.effectOutcome)
@@ -1268,6 +1291,7 @@ const lowerStatement = (
     )
     return destination
   })
+  if (returnedValue === 'Transferred') return transferred(operations)
   if (returnedValue === undefined) return undefined
   const returnOutcome: Mir.Outcome = Object.freeze({
     _tag: 'Return',
