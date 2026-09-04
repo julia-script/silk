@@ -32,8 +32,8 @@ export const corpusShardCount = 4
 /**
  * Registers the `opt -passes=verify` cross-check for one corpus shard.
  *
- * Both backends verify every module they emit, so every existing backend test is already a
- * verifier test. What is pinned here is that the in-process LLVM verifier agrees with the tool it
+ * LLVM verifies every module it emits for native and WebAssembly targets. What is pinned here is
+ * that the in-process LLVM verifier agrees with the tool it
  * stands in for: `opt -passes=verify`, the command that found #130. A verifier nobody has checked
  * against the real one is only a claim.
  */

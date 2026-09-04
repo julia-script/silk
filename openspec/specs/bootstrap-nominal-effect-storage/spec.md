@@ -3,7 +3,7 @@
 ## Purpose
 
 Define static inline storage and execution of concretely represented Effect environments inside
-move-only nominal values across ownership, suspension, cleanup, and every engine.
+move-only nominal values across ownership, suspension, cleanup, and LLVM lowering.
 
 ## Requirements
 
@@ -65,7 +65,7 @@ nominal.
 - **WHEN** a stored Effect owns an affine capture and leaves scope without execution
 - **THEN** its live capture is cleaned exactly once without entering the runner
 
-### Requirement: Effect storage has suspension-aware cross-engine parity
+### Requirement: Effect storage has suspension-aware LLVM lowering
 
 LLVM native and WebAssembly artifacts SHALL consume one shared concrete realization containing
 runner, layout, cleanup, access, and suspendability. A suspendability or capture-shape edit MUST
@@ -74,8 +74,9 @@ standalone structural Effect ABI.
 
 #### Scenario: Resume one stored suspending Effect
 
-- **WHEN** a stored Effect suspends and resumes in each engine
-- **THEN** result, failure behavior, cleanup trace, and static runner identity agree
+- **WHEN** a stored Effect suspends and resumes
+- **THEN** structural MIR proves the runner and exact cleanup path, and the pinned native result
+  proves the source-observable outcome
 
 ### Requirement: Effect layout fences retire case by case
 

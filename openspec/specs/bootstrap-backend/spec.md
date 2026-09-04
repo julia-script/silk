@@ -8,9 +8,9 @@ The LLVM-backed runtime implementation family for native and WebAssembly artifac
 
 ### Requirement: LLVM is the runtime backend
 
-The compiler SHALL expose one `llvm` backend. It SHALL consume target-aware monomorphized MIR and
-emit deterministic LLVM bitcode for every supported native target and `wasm32-unknown-unknown`.
-Backend selection MUST reject every other identifier before emission.
+The compiler SHALL lower runtime artifacts through LLVM. It SHALL consume target-aware
+monomorphized MIR and emit deterministic LLVM bitcode for every supported native target and
+`wasm32-unknown-unknown`. It SHALL expose no runtime-backend selection surface.
 
 #### Scenario: Emit a native artifact
 

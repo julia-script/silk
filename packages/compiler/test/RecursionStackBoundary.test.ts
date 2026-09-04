@@ -18,8 +18,8 @@ import * as Driver from './support/TestDriver.js'
  *
  * What is pinned:
  *
- * - a shallow chain traverses on all three engines and releases every link exactly once,
- * - a deep chain fails on every engine, each in that engine's own way, and
+ * - a shallow chain traverses through native and LLVM-to-Wasm artifacts and releases every link,
+ * - a deep chain fails at the real runtime boundary, and
  * - the escape hatch — an explicit iterative teardown — carries a chain far beyond the depth at
  *   which the recursive form dies.
  *

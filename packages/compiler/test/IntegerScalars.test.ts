@@ -2,6 +2,32 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+
+const contextualCallSource = `import silk.u8 as u8
+fn selectByte(
+  source: &[u8],
+  index: usize,
+  first: u8,
+  second: u8
+) -> u8 {
+  if source[index] == first { return second }
+  return u8.add(0, 0)
+}
+
+fn identity<T>(value: T) -> T { return move value }
+
+fn acceptByte(value: u8) -> u8 { return value }
+
+fn isCarriageReturn(value: u8) -> bool { return value == 13 }
+
+pub fn main() -> i32 {
+  let direct = selectByte(b"//", 0, 47, 42)
+  let explicit = identity<u8>(42)
+  let piped = 42 |> acceptByte
+  if !isCarriageReturn(13) { return 0 }
+  return u8.toI32(direct) + u8.toI32(explicit) + u8.toI32(piped) - 84
+}`
 
 it.effect(
   'rejects duration range and type mismatches before HIR without duplicate recovery errors',
@@ -88,5 +114,54 @@ pub fn main() -> i32 {
       Analysis.diagnostics(mismatch).map((diagnostic) => diagnostic.code),
       'SEM0012',
     )
+  }),
+)
+
+it.effect('uses call and pipeline parameters as exact integer literal contexts', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'integer/contextual-calls',
+      new TextEncoder().encode(contextualCallSource),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const contextualValues = Analysis.expressionsOf(snapshot, 'integer/contextual-calls').flatMap(
+      (expression) =>
+        expression._tag === 'Integer' &&
+        expression.integer._tag === 'Available' &&
+        expression.integer.value === 42n
+          ? [expression.integer.type]
+          : [],
+    )
+    assert.isAtLeast(contextualValues.filter((type) => type === 'u8').length, 3)
+    assert.include(Hir.encode(Analysis.rootAnalysis(snapshot).hir), 'literal 42 : u8')
+    assert.include(Hir.encode(Analysis.rootAnalysis(snapshot).hir), 'literal 13 : u8')
+    assert.include(MirEncoding.encode(Analysis.loweredMir(snapshot)), 'literal 42 : u8')
+  }),
+)
+
+it.effect('lets a declared scalar operand drive literal-first infix arithmetic', () =>
+  Effect.gen(function* () {
+    const id = 'integer/literal-first-infix'
+    const snapshot = yield* Analysis.ofSourceRealized(
+      id,
+      new TextEncoder().encode(`import silk.u16 as u16
+fn mixed(value: u16) -> i32 {
+  let literalFirst = 5 + value
+  let literalLast = value + 5
+  let defaulted = 5 + 5
+  return u16.toI32(literalFirst) + u16.toI32(literalLast) - defaulted
+}
+pub fn main() -> i32 { return mixed(21) }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const fives = Analysis.expressionsOf(snapshot, id).flatMap((expression) =>
+      expression._tag === 'Integer' &&
+      expression.integer._tag === 'Available' &&
+      expression.integer.value === 5n
+        ? [expression.integer.type]
+        : [],
+    )
+    assert.isAtLeast(fives.filter((type) => type === 'u16').length, 2)
+    assert.include(Hir.encode(Analysis.rootAnalysis(snapshot).hir), 'literal 5 : u16')
   }),
 )

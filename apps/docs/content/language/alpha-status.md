@@ -82,7 +82,7 @@ checked for staleness. The prescriptive reference records programmer-visible rul
 boundaries, and evidence.
 
 When prose and behavior disagree during alpha development, treat it as a bug. Report the smallest
-source example, selected target and backend, compiler revision, and diagnostic code or observed
+source example, selected target, compiler revision, and diagnostic code or observed
 result.
 
 ## See also

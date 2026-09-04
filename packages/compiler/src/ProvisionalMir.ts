@@ -12,7 +12,7 @@ import * as Type from './Type.js'
 
 /**
  * Monomorphic suspension control before normalization and MIR-local liveness. This is deliberately
- * not a `Mir.Module`: verification, evaluation, and backends cannot consume provisional control.
+ * not a `Mir.Module`: verification and LLVM lowering cannot consume provisional control.
  */
 
 export type Classification = Suspension.SuspensionClassification

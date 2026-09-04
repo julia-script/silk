@@ -929,13 +929,13 @@ erase the concrete alternatives.
 ### Requirement: Composite Effect realization is finite and deterministic
 
 HIR and MIR SHALL represent the admitted alternatives as a closed finite composite whose LLVM
-native and WebAssembly realizations select one alternative without heap allocation. A join with no finite
+native and LLVM-to-Wasm realizations select one alternative without heap allocation. A join with no finite
 compatible representation SHALL retain a source diagnostic.
 
-#### Scenario: Compare all engines
+#### Scenario: Compare real artifacts
 
-- **WHEN** equivalent joined Effects are evaluated and compiled repeatedly
-- **THEN** all engines produce the same typed outcome, ownership cleanup, and deterministic artifact identity
+- **WHEN** equivalent joined Effects are compiled repeatedly for native and WebAssembly targets
+- **THEN** structural MIR and pinned artifact outcomes preserve the same typed outcome, ownership cleanup, and deterministic identity
 
 ### Requirement: Effect-block result typing accounts for every terminal
 

@@ -165,7 +165,7 @@ pub fn main() -> i32 {
   return inspect(&flags)
 }`
 
-/** A generic Display call selects the interface-owned inline i32 witness on every engine. */
+/** A generic Display call selects the interface-owned inline i32 witness in native execution. */
 export const scalarDisplayAcceptance = `import silk.effect { Effect }
 import silk.format { Format }
 import silk.u8 as u8
@@ -257,7 +257,7 @@ pub fn main() -> i32 {
   return run Effect.catchAll(render(), recover)
 }`
 
-/** Explicit referent projection preserves runtime-indexed reads and writes on every engine. */
+/** Explicit referent projection preserves runtime-indexed reads and writes in native execution. */
 export const referenceProjectionAcceptance = `import silk.usize as usize
 
 struct Buffer { values: [i32; 3] }
@@ -1862,6 +1862,60 @@ pub fn main() -> i32 { let value = 42 return identity(move value) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'duration-arithmetic-overflow',
+    source: 'pub fn main() -> i32 { let overflow = 18446744073709551615ns + 1ns return 42 }',
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'generic-interface-runtime-contracts',
+    source: `import silk.numeric { Numeric }
+struct Box<T> { value: T }
+interface Marker { fn mark(value: &Self) -> i32 }
+impl<T> Marker for Box<T> { fn mark(value: &Self) -> i32 { return 42 } }
+unsafe fn raw(value: i32) -> i32 { return value * 2 }
+fn safe(value: i32) -> i32 { return value * 3 }
+fn prefix<F: unsafe fn(i32) -> i32>(operation: F, value: i32) -> i32 {
+  return unsafe operation(value)
+}
+fn block<F: unsafe fn(i32) -> i32>(operation: F, value: i32) -> i32 {
+  unsafe { return operation(value) }
+  return 0
+}
+pub fn main() -> i32 {
+  let box = Box { value: true }
+  if box.mark() != 42 { return 1 }
+  if Numeric.add<i32>(40, 2) != 42 { return 2 }
+  if prefix(raw, 1) != 2 { return 3 }
+  if block(safe, 1) != 3 { return 4 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'nominal-union-operator-provider',
+    source: `union Choice { Left { value: i32 }, Right { value: i32 } }
+interface Merge { operator + fn add(left: Self, right: Self) -> Self }
+fn add(left: Choice, right: Choice) -> Choice { return move left }
+impl Merge for Choice { add: Choice.add }
+pub fn main() -> i32 {
+  let combined = Choice.Left { value: 42 } + Choice.Right { value: 0 }
+  return match move combined {
+    Choice.Left { value } => value
+    Choice.Right { value } => value
+  }
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'usize-array-roundtrip',
+    source: `fn second(values: [usize; 2]) -> usize { return values[1] }
+pub fn main() -> i32 {
+  if second([7, 4294967295]) == 4294967295 { return 42 }
+  return 0
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'operator-precedence',
     source: 'pub fn main() -> i32 { return 2 + 5 * 8 }',
     expected: { _tag: 'Completes', result: 42 },
@@ -2862,7 +2916,7 @@ pub fn main() -> i32 {
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
-  // folded from Transcendental.test.ts: bit-exact sin/cos results across every engine.
+  // folded from Transcendental.test.ts: bit-exact sin/cos results in native execution.
   {
     name: 'transcendental-canonical-bits',
     source: transcendentalCanonicalBits,
@@ -3124,6 +3178,7 @@ effect fn build() -> i32 ! OutOfMemoryError {
     Option<i32>.None => 0
   }
   if poppedValue != 40 { return 6 }
+  if Vector.length<i32>(&values) != 2 { return 10 }
   Vector.truncate<i32>(&mut values, usize.ONE)
   if Vector.length<i32>(&values) != usize.ONE { return 7 }
   Vector.clear<i32>(&mut values)
@@ -3175,14 +3230,33 @@ effect fn build() -> i32 ! OutOfMemoryError {
   let hit = Vector.binarySearch<i32>(&numbers, 7)
   let miss = Vector.binarySearch<i32>(&numbers, 4)
   let duplicate = Vector.binarySearch<i32>(&numbers, 2)
+  let below = Vector.binarySearch<i32>(&numbers, -1)
+  let above = Vector.binarySearch<i32>(&numbers, 10)
   let hitIndex = match move hit { Option<usize>.Some { value } => usize.toI32(value) _ => -1 }
   let missIndex = match move miss { Option<usize>.Some { value } => usize.toI32(value) _ => -1 }
   let duplicateIndex = match move duplicate { Option<usize>.Some { value } => usize.toI32(value) _ => -1 }
   if hitIndex != 3 { return 2 }
   if missIndex != -1 { return 3 }
   if duplicateIndex != 0 { return 4 }
-  let empty = Vector.make<i32>()
+  let belowIndex = match move below { Option<usize>.Some { value } => usize.toI32(value) _ => -1 }
+  let aboveIndex = match move above { Option<usize>.Some { value } => usize.toI32(value) _ => -1 }
+  if belowIndex != -1 || aboveIndex != -1 { return 6 }
+
+  let mut already = Vector.make<i32>()
+  let a0 = run Vector.append<i32>(&mut already, 1) |> Effect.provideMut(&mut allocator)
+  let a1 = run Vector.append<i32>(&mut already, 2) |> Effect.provideMut(&mut allocator)
+  let a2 = run Vector.append<i32>(&mut already, 3) |> Effect.provideMut(&mut allocator)
+  let alreadySorted = run Vector.sort<i32>(&mut already) |> Effect.provideMut(&mut allocator)
+  if Vector.get<i32>(&already, usize.ZERO) != 1 { return 7 }
+  if Vector.get<i32>(&already, usize.ONE) != 2 { return 7 }
+
+  let mut empty = Vector.make<i32>()
   let emptyMiss = Vector.binarySearch<i32>(&empty, 1)
+  let emptySorted = run Vector.sort<i32>(&mut empty) |> Effect.provideMut(&mut allocator)
+  let mut singleton = Vector.make<i32>()
+  let one = run Vector.append<i32>(&mut singleton, 42) |> Effect.provideMut(&mut allocator)
+  let singletonSorted = run Vector.sort<i32>(&mut singleton) |> Effect.provideMut(&mut allocator)
+  if Vector.get<i32>(&singleton, usize.ZERO) != 42 { return 8 }
   return match move emptyMiss { Option<usize>.Some { value } => 5 _ => 42 }
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
@@ -3214,6 +3288,10 @@ effect fn build() -> i32 ! OutOfMemoryError {
   let b = run Vector.append<Tracked>(&mut items, move second) |> Effect.provideMut(&mut allocator)
   let third = run hold(2) |> Effect.provideMut(&mut allocator)
   let c = run Vector.append<Tracked>(&mut items, move third) |> Effect.provideMut(&mut allocator)
+  let fourth = run hold(5) |> Effect.provideMut(&mut allocator)
+  let d = run Vector.append<Tracked>(&mut items, move fourth) |> Effect.provideMut(&mut allocator)
+  let fifth = run hold(4) |> Effect.provideMut(&mut allocator)
+  let e = run Vector.append<Tracked>(&mut items, move fifth) |> Effect.provideMut(&mut allocator)
   let ordered = run Vector.sort<Tracked>(&mut items) |> Effect.provideMut(&mut allocator)
   let view = Vector.asSlice<Tracked>(&items)
   let mut folded = 0
@@ -3222,11 +3300,12 @@ effect fn build() -> i32 ! OutOfMemoryError {
     folded = folded * 10 + view[index].key
     index = index + usize.ONE
   }
-  return folded
+  if folded != 12345 { return 1 }
+  return 42
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
-    expected: { _tag: 'Completes', result: 123 },
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'raw-buffer-copy-range',
@@ -4170,8 +4249,57 @@ pub fn main() -> i32 {
     expected: { _tag: 'Completes', result: 58 },
   },
   {
+    name: 'method-call-matrix',
+    source: readFileSync(new URL('../fixtures/method-calls/main.silk', import.meta.url), 'utf8'),
+    expected: { _tag: 'Completes', result: 38 },
+  },
+  {
+    name: 'stored-callable-lazy-moved-effect',
+    source: `struct Token { value: i32 }
+fn consume(token: Token) -> i32 { return token.value }
+pub fn main() -> i32 {
+  let token = Token { value: 42 }
+  let deferred = effect fn() -> i32 { return consume(move token) }
+  let pending = deferred()
+  return run pending
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'stored-callable-drop-lane-mutation',
+    source: `import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effect { Effect }
+import silk.shared { Shared }
+struct Cell { value: i32 }
+struct Guard { primary: Shared<Cell> replacement: Shared<Cell> }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let next = Shared.clone<Cell>(&self.replacement)
+    let previous = Intrinsic.replace(self.primary, move next)
+    drop previous
+    return ()
+  }
+}
+struct Holder<F: once fn(i32) -> i32> { step: F }
+fn consume(value: i32, guard: Guard) -> i32 { return value }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let primary = run (Shared.make<Cell>(Cell { value: 1 })
+    |> Effect.provideMut<Allocator>(&mut allocator))
+  let replacement = run (Shared.make<Cell>(Cell { value: 2 })
+    |> Effect.provideMut<Allocator>(&mut allocator))
+  let guard = Guard { primary: move primary, replacement: move replacement }
+  let holder = Holder { step: consume(move guard) }
+  drop holder
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     // FAIL-004: both the protected `i32` and the handler `string` are injected into the recovered
-    // `i32 | string`, so the later `match` finds its active member on every engine.
+    // `i32 | string`, so the later `match` finds its active member in the native artifact.
     name: 'catch-union-success-match',
     source: `import silk.effect { Effect }
 struct NotFoundError {}
@@ -4312,6 +4440,57 @@ pub fn main() -> i32 {
   if output[2] != 7 { return 3 }
   return 42
 }`
+
+const independentExecutionLatchedResume = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
+struct Empty {}
+struct Stored { execution: Intrinsic.Execution<i32> }
+struct Owner { slot: Empty | Stored result: i32 }
+struct Guard {}
+fn register(wake: Intrinsic.Wake) -> Guard {
+  Intrinsic.wake(move wake)
+  return Guard {}
+}
+effect fn body() -> i32 {
+  run Execution.park(register)
+  return 42
+}
+fn complete(owner: &mut Owner, result: i32) -> () {
+  owner.result = result
+  return ()
+}
+fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
+  let previous = Intrinsic.replace(owner.slot, Stored { execution: move execution })
+  drop previous
+  return ()
+}
+fn ready(state: &()) -> () { return () }
+effect fn driveOnce(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
+  return run Execution.drive(move execution, move owner, complete, suspend)
+}
+effect fn finish(selected: Empty | Stored, owner: &mut Owner) -> () {
+  return match move selected {
+    Empty {} => ()
+    Stored { execution: next } => run finishStored(move next, move owner)
+  }
+}
+effect fn finishStored(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
+  return run Execution.drive(move execution, move owner, complete, suspend)
+}
+effect fn program() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut owner = Owner { slot: Empty {}, result: 0 }
+  let mut execution = run Execution.make(body(), (), ready)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  Execution.notifyInitial(&mut execution)
+  run driveOnce(move execution, &mut owner)
+  let selected = Intrinsic.replace(owner.slot, Empty {})
+  run finish(move selected, &mut owner)
+  return owner.result
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return -2 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
 const nativeSecureRandom = `import silk.effect { Effect }
 import silk.os_random { OsRandom }
@@ -5061,6 +5240,11 @@ pub effect fn main() -> () ! WriterError {
     name: 'independent-execution-non-lifo',
     source: independentExecutionNonLifo,
     expected: { _tag: 'Completes', result: 240 },
+  },
+  {
+    name: 'independent-execution-latched-resume',
+    source: independentExecutionLatchedResume,
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'independent-execution-illegal-dormant-drive',

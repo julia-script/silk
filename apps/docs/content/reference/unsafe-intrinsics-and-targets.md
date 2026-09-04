@@ -547,7 +547,7 @@ initialized extent, live handle kind, valid UTF-8, non-aliasing access, or priva
 be unsafe” and “caller must use correctly” are not sufficient contracts.
 
 The same canonical contract drives name resolution, generic inference, signature help, hover,
-diagnostics, HIR, MIR, evaluation, target validation, and backend lowering. Those consumers cannot
+diagnostics, HIR, MIR, static evaluation, target validation, and LLVM lowering. Those consumers cannot
 independently reconstruct or weaken it.
 
 **Boundary:** An intrinsic may still have defined typed failures or traps. Unsafe marks only the

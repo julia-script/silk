@@ -92,7 +92,7 @@ pub fn main() -> i32 {
  * Both Audit providers conform to Allocator, and one is supplied with exclusive provider strength.
  * Suspension preserves those explicit requirements exactly but never selects either provider for
  * private coroutine storage. The Audit implementation always refuses, so accidental selection is
- * observable on every engine.
+ * observable in the pinned native corpus.
  */
 export const auditAllocatorSuspension = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }

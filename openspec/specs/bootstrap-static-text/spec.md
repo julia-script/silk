@@ -92,7 +92,9 @@ SHALL represent each physical CRLF pair in multiline content by one LF.
 
 ### Requirement: Static storage is target-neutral compiler data
 
-Literal identity and content SHALL be deterministic before backend selection. Backends MAY place or coalesce data differently, but observable bytes, length, immutability, and lifetime MUST match evaluation.
+Literal identity and content SHALL be deterministic before target-specific LLVM lowering. Native
+and LLVM-generated WebAssembly artifacts MAY place or coalesce data differently, but observable
+bytes, length, immutability, and lifetime MUST match the language contract.
 
 #### Scenario: Reuse a literal
 

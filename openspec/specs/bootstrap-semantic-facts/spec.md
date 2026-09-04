@@ -1023,7 +1023,7 @@ Invalid places SHALL be rejected with the existing assignment diagnostics.
 #### Scenario: Swap an affine union field through an exclusive reference
 
 - **WHEN** a function swaps `self.state` for a replacement member through `&mut self` and consumes the returned old value
-- **THEN** the program compiles without partial-move diagnostics and all three engines observe the old value exactly once and the replacement thereafter
+- **THEN** the program compiles without partial-move diagnostics and native plus LLVM-generated WebAssembly artifacts observe the old value exactly once and the replacement thereafter
 
 #### Scenario: Reject an unwritable place
 
@@ -1040,7 +1040,7 @@ verified, and initializedness remains the unsafe caller's obligation exactly as 
 #### Scenario: Copy twice then take once
 
 - **WHEN** unsafe code copies the same initialized Copy slot twice and then takes it
-- **THEN** both copies observe the stored value, the take still succeeds, and all three engines agree on the result
+- **THEN** both copies observe the stored value, the take still succeeds, and native plus LLVM-generated WebAssembly artifacts agree on the result
 
 #### Scenario: Reject a non-Copy element copy
 

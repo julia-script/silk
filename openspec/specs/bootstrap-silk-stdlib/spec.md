@@ -962,7 +962,7 @@ edited by hand.
 Canonical standard-library source SHALL define `Box<T>`, one owned heap indirection holding exactly
 one value of `T`, as ordinary Silk with no compiler privilege. No compiler phase SHALL know `Box` by
 name: it MUST NOT appear in the intrinsic nominal registry, gain a layout branch, gain a cleanup
-plan node, or be recognized by spelling in semantic analysis, HIR, MIR, evaluation, or a backend. It
+plan node, or be recognized by spelling in semantic analysis, HIR, MIR, static evaluation, or LLVM. It
 SHALL be built from the existing typed raw storage and slot primitives, mirroring how `Vector<T>` is
 built.
 

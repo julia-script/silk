@@ -848,7 +848,7 @@ it.effect('discovers calls and lowers nested matches as structured acyclic opera
   }),
 )
 
-it.effect('rejects hand-built match decisions before evaluation or emission', () =>
+it.effect('rejects hand-built match decisions before LLVM emission', () =>
   Effect.gen(function* () {
     const mir = Analysis.loweredMir(yield* snapshot(nestedMatchSource))
     let changed = false

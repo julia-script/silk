@@ -3,10 +3,65 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as Lexer from '../src/Lexer.js'
+import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
+import * as SyntaxTree from '../src/SyntaxTree.js'
+import type * as Token from '../src/Token.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const infixOperatorKinds: ReadonlyArray<Token.TokenKind> = Object.freeze([
+  'Star',
+  'Slash',
+  'Percent',
+  'Plus',
+  'Minus',
+  'Ampersand',
+  'Caret',
+  'Pipe',
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+  'EqualEqual',
+  'BangEqual',
+  'AmpersandAmpersand',
+  'PipePipe',
+])
+
+const outermostInfix = (element: SyntaxTree.Element): SyntaxTree.Node | undefined => {
+  if (!SyntaxTree.isNode(element)) return undefined
+  if (element.kind === 'InfixExpression') return element
+  for (const child of element.children) {
+    const found = outermostInfix(child)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+type InfixShape = string | readonly [string, InfixShape, InfixShape]
+
+const shapeOf = (element: SyntaxTree.Element): InfixShape => {
+  if (!SyntaxTree.isNode(element) || element.kind !== 'InfixExpression') return 'operand'
+  const kind = infixOperatorKinds.find(
+    (candidate) => SyntaxTree.directToken(element, candidate) !== undefined,
+  )
+  const operands = element.children.filter(SyntaxTree.isNode)
+  const left = operands.at(0)
+  const right = operands.at(-1)
+  return [
+    kind ?? 'unknown',
+    left === undefined ? 'operand' : shapeOf(left),
+    right === undefined || operands.length < 2 ? 'operand' : shapeOf(right),
+  ]
+}
+
+const infixShape = (source: string): InfixShape => {
+  const file = Parser.parse(Lexer.lex(SourceFile.make('short-circuit/shape', ascii(source))))
+  const outermost = outermostInfix(file.root)
+  return outermost === undefined ? 'operand' : shapeOf(outermost)
+}
 
 it.effect('lexes `&&` and `||` as one token each', () =>
   Effect.gen(function* () {
@@ -33,6 +88,24 @@ it.effect('lexes `&&` and `||` as one token each', () =>
     yield* Effect.void
   }),
 )
+
+it('binds `&&` tighter than `||` and both looser than equality', () => {
+  assert.deepEqual(infixShape('fn f(a: bool, b: bool, c: bool) -> bool { return a && b || c }'), [
+    'PipePipe',
+    ['AmpersandAmpersand', 'operand', 'operand'],
+    'operand',
+  ])
+  assert.deepEqual(infixShape('fn f(a: bool, b: bool, c: bool) -> bool { return a || b && c }'), [
+    'PipePipe',
+    'operand',
+    ['AmpersandAmpersand', 'operand', 'operand'],
+  ])
+  assert.deepEqual(infixShape('fn f(a: i32, b: i32) -> bool { return a == b && a != b }'), [
+    'AmpersandAmpersand',
+    ['EqualEqual', 'operand', 'operand'],
+    ['BangEqual', 'operand', 'operand'],
+  ])
+})
 
 it.effect('rejects a non-bool operand on either side', () =>
   Effect.gen(function* () {

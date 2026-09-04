@@ -5,11 +5,11 @@ Implementation began at `ee6ebb3d41a55fee65f1119b9c495c16d8dfec09`.
 The baseline inventory was generated with:
 
 ```sh
-rg -n 'Analysis\.evaluate|BootstrapEvaluation\.evaluate' --glob '!**/node_modules/**'
-rg -n '@silklang/wasm|WasmBackend|WasmCleanup|WasmEmitContext|WasmLanes|WasmMemory' --glob '!**/node_modules/**'
+rg --hidden -n 'Analysis\.evaluate|BootstrapEvaluation\.evaluate' --glob '!.git/**' --glob '!**/node_modules/**'
+rg --hidden -n '@silklang/wasm|WasmBackend|WasmCleanup|WasmEmitContext|WasmLanes|WasmMemory' --glob '!.git/**' --glob '!**/node_modules/**'
 ```
 
-It found 671 runtime-evaluator references in 174 files, and 266 direct-Wasm references in 82 files.
+It found 671 runtime-evaluator references in 174 files, and 274 direct-Wasm references in 86 files.
 The [assertion ledger](JUL-115-ASSERTION-DISPOSITIONS.md) records the disposition and surviving
 evidence for every affected test registration.
 
@@ -59,7 +59,7 @@ The Labs-only archives removed in the final review were
 The following source/package search returns no matches:
 
 ```sh
-rg -n '@silklang/wasm|WasmBackend|WasmCleanup|WasmEmitContext|WasmLanes|WasmMemory|Analysis\.evaluate|BootstrapEvaluation|codegenWasm|WebAssemblyModuleArtifact|corpusOutcomeShard' packages apps scripts .github package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json --glob '!node_modules/**' --glob '!dist/**'
+rg --hidden -n '@silklang/wasm|WasmBackend|WasmCleanup|WasmEmitContext|WasmLanes|WasmMemory|Analysis\.evaluate|BootstrapEvaluation|codegenWasm|WebAssemblyModuleArtifact|corpusOutcomeShard' packages apps scripts .github .changeset package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json --glob '!.git/**' --glob '!node_modules/**' --glob '!dist/**'
 ```
 
 `packages/wasm` and `apps/docs/app/labs` do not exist. Repository-wide matches are permitted only

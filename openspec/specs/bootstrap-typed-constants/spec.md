@@ -100,7 +100,7 @@ and without an initialization routine, allocation, cleanup obligation, or runtim
 #### Scenario: Compare constants with direct literals
 
 - **WHEN** equivalent programs use named constants or their direct scalar literals
-- **THEN** all three engines return the same scalar observations and perform the same allocations and cleanup
+- **THEN** native and LLVM-generated WebAssembly artifacts return the same scalar observations and perform the specified allocations and cleanup
 
 #### Scenario: Preserve target-aware usize checking
 
@@ -109,8 +109,8 @@ and without an initialization routine, allocation, cleanup obligation, or runtim
 
 ### Requirement: Constant artifacts and tools remain deterministic
 
-Semantic facts, occurrences, hover, navigation, formatting, HIR, MIR, evaluation, symbols, and
-backend artifacts SHALL present constants deterministically and preserve exact declaration/use
+Semantic facts, occurrences, hover, navigation, formatting, HIR, MIR, symbols, and LLVM artifacts
+SHALL present constants deterministically and preserve exact declaration/use
 provenance across fresh processes.
 
 #### Scenario: Navigate and reproduce a public constant
@@ -122,7 +122,7 @@ provenance across fresh processes.
 
 The lexer and stack VM pressure programs SHALL replace representative repeated byte classes,
 opcodes, status values, or fixed bounds with typed constants while preserving their oracle results,
-allocation evidence, cleanup, engine parity, and determinism.
+allocation evidence, cleanup, artifact parity, and determinism.
 
 #### Scenario: Run the constant-backed pressure corpus
 
@@ -173,7 +173,7 @@ cannot differ from the bound the checked path applies.
 ### Requirement: A target fact resolves to one value at the selected target
 
 A constant that names a target fact SHALL resolve to exactly one value once a target is selected,
-and every execution engine SHALL observe that same value. The selection SHALL happen in lowering, so
+and every emitted artifact SHALL observe that same value. The selection SHALL happen in lowering, so
 that LLVM-generated WebAssembly and native LLVM read one already-selected value rather than
 each applying the pointer-width rule themselves. No value belonging to a pointer width other than
 the selected target's SHALL appear in the lowered program.

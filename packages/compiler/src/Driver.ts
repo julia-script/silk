@@ -10,7 +10,6 @@ import * as Frontend from './Frontend.js'
 import * as HeapObservation from './HeapObservation.js'
 import type * as Instances from './Instances.js'
 import * as LlvmBackend from './LlvmBackend.js'
-import * as LlvmWasmRuntime from './LlvmWasmRuntime.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as NativeLinkInput from './NativeLinkInput.js'
 import * as NativeToolchain from './NativeToolchain.js'
@@ -389,13 +388,6 @@ export const compile = Effect.fn('Driver.compile')(function* (
       diagnostics: preparation.diagnostics,
       report: Object.freeze([...report]),
     })
-  if (preparation._tag === 'BackendFailed')
-    return Object.freeze({
-      _tag: 'BackendFailed',
-      error: preparation.error,
-      diagnostics: preparation.diagnostics,
-      report: Object.freeze([...report]),
-    })
   const { diagnostics, program, target } = preparation
   const targetIntegrity = PhaseReport.measureInto(
     report,
@@ -531,15 +523,11 @@ export const compile = Effect.fn('Driver.compile')(function* (
       ? (request.toolchain.artifactCache ??
         NativeToolchain.defaultArtifactCache(nativeCacheDirectory))
       : undefined
-  let runtimeSource = ''
-  if (cacheKind === 'NativeExecutable')
-    runtimeSource = ToolchainPlan.executableSource(
-      artifact.termination,
-      artifact.nativeRuntimeSymbols,
-    )
-  else if (cacheKind === 'WebAssemblyModule') runtimeSource = LlvmWasmRuntime.source
-  else if (ArtifactKind.isLibrary(cacheKind))
-    runtimeSource = ToolchainPlan.runtimeSource(artifact.nativeRuntimeSymbols)
+  const runtimeSource = NativeToolchain.artifactRuntimeSource(
+    cacheKind,
+    artifact.termination,
+    artifact.nativeRuntimeSymbols,
+  )
   const cacheKey =
     artifactCache !== undefined && artifact._tag === 'LlvmBitcodeArtifact'
       ? yield* NativeToolchain.artifactCacheKey(

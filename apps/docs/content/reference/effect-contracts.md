@@ -334,7 +334,7 @@ contract, access, ownership, lifetime, or finite-representation boundary that fa
 [callable-value specification](../../../../openspec/specs/bootstrap-callable-values/spec.md),
 [nominal Effect storage specification](../../../../openspec/specs/bootstrap-nominal-effect-storage/spec.md),
 [finite-join elaboration test](../../../../packages/compiler/test/Elaboration.test.ts),
-[cross-engine join tests](../../../../packages/compiler/test/EffectJoin.test.ts).
+[finite-join structural tests](../../../../packages/compiler/test/EffectJoin.test.ts).
 
 Typed-failure compatibility, requirement membership, and Effect execution access intentionally
 remain for their own reference areas.

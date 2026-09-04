@@ -118,7 +118,7 @@ MUST remain unchanged.
 #### Scenario: Call one concrete primitive
 
 - **WHEN** source calls `Intrinsic.i32Add` with two `i32` values
-- **THEN** it produces the same `i32` value or overflow trap on every execution engine
+- **THEN** it produces the same `i32` value or overflow trap in native and LLVM-generated WebAssembly artifacts
 
 #### Scenario: Reject a mismatched concrete type
 

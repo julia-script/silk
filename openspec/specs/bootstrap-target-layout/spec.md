@@ -210,17 +210,17 @@ MUST use that same selected shape in MIR structure and every backend.
 - **WHEN** identical declarations, discovery, and target inputs are planned in fresh processes
 - **THEN** aggregate parameter and result shapes, lane paths, and encodings are byte-identical
 
-### Requirement: Backends cannot choose aggregate ABI independently
+### Requirement: LLVM lowering cannot choose aggregate ABI independently
 
 The runtime plan SHALL express aggregate call and return shapes without LLVM types, WebAssembly
-value types, registers, instructions, or handles. A backend SHALL either realize the selected shape
-exactly or reject the plan as target-incompatible; it MUST NOT choose a different flattening,
+value types, registers, instructions, or handles. LLVM lowering SHALL either realize the selected
+shape exactly or reject the plan as target-incompatible; it MUST NOT choose a different flattening,
 field order, padding rule, or indirect convention.
 
 #### Scenario: Compare native and WebAssembly planning authority
 
-- **WHEN** native and WebAssembly backends receive plans for the same logical aggregate program
-- **THEN** each consumes its compiler-selected target plan and neither derives aggregate calling shape from its own type system
+- **WHEN** native and LLVM-to-Wasm lowering receive plans for the same logical aggregate program
+- **THEN** each consumes its compiler-selected target plan and neither derives aggregate calling shape from LLVM types
 
 ### Requirement: Fixed arrays have compiler-owned repeated-element layout
 
@@ -299,7 +299,7 @@ or code generation rather than allowing backend-specific fallback.
 The target layout catalog and runtime plan SHALL compute physical facts for each reachable concrete
 application of a generic nominal type from its normalized substituted fields. Open generic types
 MUST NOT receive speculative physical layouts, and equivalent concrete applications SHALL reuse one
-canonical layout entry before MIR and backend selection.
+canonical layout entry before MIR and LLVM lowering.
 
 #### Scenario: Plan two concrete boxes
 

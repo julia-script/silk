@@ -205,8 +205,8 @@ symbolic evidence SHALL propagate through nested generic calls.
 
 Runtime instance discovery SHALL key each generic function by its canonical declaration and
 normalized concrete type arguments, record the key before following dependencies, and require every
-recursive generic call to preserve its current type arguments. MIR, evaluation, and backend emission
-MUST receive only concrete monomorphic instances and MUST NOT require runtime generic dictionaries or
+recursive generic call to preserve its current type arguments. MIR and LLVM emission MUST receive
+only concrete monomorphic instances and MUST NOT require runtime generic dictionaries or
 type descriptors.
 
 #### Scenario: Discover two concrete instances

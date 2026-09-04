@@ -173,7 +173,7 @@ MUST NOT create method lookup, implicit imports, or runtime namespace objects.
 Elaboration SHALL erase surface operator sugar into ordinary canonical HIR builtin calls and SHALL
 erase pipeline syntax into canonical unary callable application while retaining the complete source
 expression span. Lowering SHALL reuse the existing MIR operation and callable-application
-vocabulary; interpretation, LLVM emission, and WebAssembly emission SHALL consume that MIR without
+vocabulary; LLVM native and LLVM-to-Wasm emission SHALL consume that MIR without
 a surface-operator-specific or surface-pipeline-specific path. Equivalent programs SHALL have the
 same result or trap behavior, and repeated compilation SHALL produce deterministic facts and
 encodings.

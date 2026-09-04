@@ -27,7 +27,7 @@ Silk SHALL provide distinct lowercase `f32` and `f64` types. Decimal fractions a
 #### Scenario: Compare NaN
 
 - **WHEN** an ordinary ordered comparison receives NaN
-- **THEN** it returns `false` in evaluation and both backends
+- **THEN** native and LLVM-generated WebAssembly artifacts return `false`
 
 #### Scenario: Reinterpret signed zero
 
@@ -163,8 +163,8 @@ not negative for this purpose and SHALL pass through, returning negative zero as
 #### Scenario: Lower a square root to the native instruction
 
 - **WHEN** `sqrt` is compiled
-- **THEN** the native backend emits `llvm.sqrt` and the WebAssembly backend emits `f64.sqrt` or
-  `f32.sqrt`, and neither module imports or calls a `libm` symbol
+- **THEN** LLVM emits `llvm.sqrt` for native artifacts and lowers it to `f64.sqrt` or `f32.sqrt`
+  for WebAssembly, and neither artifact imports or calls a `libm` symbol
 
 ### Requirement: Concrete floating primitives use the Intrinsic namespace
 

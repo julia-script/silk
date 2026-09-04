@@ -37,9 +37,7 @@ describe('view registry', () => {
     }
   })
 
-  it('has one backend view rather than one per backend', () => {
-    // The target picks the backend, so a pane per backend would be a choice the user cannot get
-    // right — picking the one the target does not serve just yields a rejection.
+  it('has one target-aware LLVM emission view', () => {
     expect(views.filter((view) => view.phase === 'backend').map((view) => view.id)).toEqual([
       'backend',
     ])

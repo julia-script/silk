@@ -11,14 +11,14 @@ standard library, services, and portable application APIs without hidden name-ba
 
 Every source-callable operation selected by compiler identity SHALL be a qualified member of the
 compiler-sealed `Intrinsic` namespace. No service, interface, standard-library actor, or ordinary
-source declaration name outside that namespace MAY select special elaboration, HIR, MIR,
-evaluation, or backend behavior. Language syntax and primitive type identities are not callable
+source declaration name outside that namespace MAY select special elaboration, HIR, MIR, static
+evaluation, or LLVM lowering behavior. Language syntax and primitive type identities are not callable
 intrinsics merely because the compiler implements them.
 
 #### Scenario: Recognize one explicit intrinsic
 
 - **WHEN** source calls a declared member of `Intrinsic`
-- **THEN** analysis records its canonical intrinsic identity and every execution engine applies the same primitive contract
+- **THEN** analysis records its canonical intrinsic identity and LLVM lowering applies the same primitive contract for each supported target
 
 #### Scenario: Reject hidden name privilege
 
@@ -64,7 +64,7 @@ SHALL remain callable from safe code even when it can return a typed failure or 
 
 The compiler SHALL publish one deterministic catalog of every intrinsic operation, signature,
 safety classification, semantic operation, and supported target. Completion, hover, analysis,
-evaluation, HIR, MIR, LLVM, and LLVM-generated WebAssembly MUST consume that catalog or verified derived
+static evaluation, HIR, MIR, LLVM, and LLVM-generated WebAssembly MUST consume that catalog or verified derived
 data. Private host imports SHALL be traceable to catalog operations but SHALL NOT become additional
 public intrinsic spellings.
 
@@ -339,8 +339,8 @@ ownership. `sharedLayout` SHALL be pure, allocation-free, target-aware, and spec
 `T`. `sharedFromAllocation` SHALL consume both arguments, accept only the exact planned layout, and
 publish one initialized core without a failure or requirement channel.
 
-Both operations SHALL declare normalized availability for evaluation, every supported native target,
-and LLVM-generated WebAssembly. A `sharedLayout<T>` specialization whose complete control block cannot be
+Both operations SHALL declare normalized availability for every supported native target and
+LLVM-generated WebAssembly. A `sharedLayout<T>` specialization whose complete control block cannot be
 represented by the selected target SHALL remain unavailable before MIR and execution, retaining a
 stable diagnostic at the intrinsic call; it MUST NOT return a partial `Layout`, runtime validation
 member, allocation failure, or trap.
@@ -613,8 +613,8 @@ spelling.
 
 No intrinsic contract SHALL name, construct, match, or recognize source-defined `Option`, `Result`,
 or their variants. Existing checked scalar primitives SHALL receive ordinary present and absent
-carrier inputs and return their shared result type. The inventory, semantic analysis, HIR, MIR,
-evaluation, and every backend SHALL treat those carriers through their ordinary exact callable and
+carrier inputs and return their shared result type. The inventory, semantic analysis, HIR, MIR, and
+LLVM lowering SHALL treat those carriers through their ordinary exact callable and
 value contracts. Completed Effect outcomes SHALL be handled by ordinary Effect composition rather
 than an intrinsic. This change SHALL replace the abstraction-shaped existing signatures, SHALL remove
 `Intrinsic.effectResult` and all of its compiler support, and SHALL add no replacement source-callable

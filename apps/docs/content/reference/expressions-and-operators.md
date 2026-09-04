@@ -579,7 +579,7 @@ rounded finite results are values, not diagnostics or traps.
 **Evidence:** [floating scalar specification](../../../../openspec/specs/bootstrap-floating-point-scalars/spec.md),
 [floating actor modules](../../../../packages/compiler/stdlib/silk/f32.silk),
 [floating-point tests](../../../../packages/compiler/test/FloatingPointScalars.test.ts),
-[cross-engine arithmetic corpus](../../../../packages/compiler/test/support/corpus.ts).
+[pinned native arithmetic corpus](../../../../packages/compiler/test/support/corpus.ts).
 
 ### OP-006 — Concrete comparison availability is explicit and narrow
 

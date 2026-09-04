@@ -198,11 +198,11 @@ integer or member subtype.
 ### Requirement: Only declared members inhabit safe scalar enums
 
 Every enum value produced by well-typed Silk source SHALL correspond to exactly one declared member.
-HIR, MIR, evaluation, and backend lowering SHALL preserve or verify that member identity. Physical
+HIR, MIR, and LLVM lowering SHALL preserve or verify that member identity. Physical
 integer lowering SHALL NOT create a source-level path for arbitrary representation values to inhabit
 the enum.
 
 #### Scenario: Preserve member identity through execution
 
 - **WHEN** a member value is copied, passed through a function, compared, converted with `value`, and matched
-- **THEN** analysis, evaluation, Wasm, and native execution agree on the same declared member and discriminant
+- **THEN** analysis, native execution, and LLVM-generated WebAssembly agree on the same declared member and discriminant

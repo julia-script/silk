@@ -820,8 +820,8 @@ candidate whose synchronous premise is not proven. Repeating normalization MUST 
 
 #### Scenario: Normalize once for all consumers
 
-- **WHEN** one target-aware MIR program is evaluated or emitted by LLVM or LLVM-generated WebAssembly
-- **THEN** every consumer observes the same normalized operations and verdicts
+- **WHEN** one target-aware MIR program is emitted by LLVM for native or WebAssembly targets
+- **THEN** each artifact observes the same normalized operations and verdicts
 
 #### Scenario: Repeat normalization
 
@@ -1044,14 +1044,14 @@ structure.
 #### Scenario: Skip an effectful right region
 
 - **WHEN** the left Boolean decides a short-circuit expression
-- **THEN** MIR execution skips every operation and cleanup local to the right region while producing the decided Boolean
+- **THEN** MIR control flow bypasses every operation and cleanup local to the right region while producing the decided Boolean
 
-#### Scenario: Emit engines consistently
+#### Scenario: Emit real artifacts consistently
 
-- **WHEN** a valid operator and short-circuit corpus is evaluated and emitted for native and Wasm targets
-- **THEN** every engine agrees on results, skipped work, traps, and cleanup order
+- **WHEN** a valid operator and short-circuit corpus is emitted for native and LLVM-to-Wasm targets
+- **THEN** structural MIR and pinned artifact outcomes agree on results, skipped work, traps, and cleanup order
 
-### Requirement: Local shared MIR is verified before every execution engine
+### Requirement: Local shared MIR is verified before LLVM emission
 
 Target-neutral MIR SHALL represent local-shared layout planning, initialization, clone, callback
 access, and opaque-core drop with the canonical core and element types, selected-target layout

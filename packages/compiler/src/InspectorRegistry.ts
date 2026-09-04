@@ -59,7 +59,7 @@ export const viewIds = [
   'instances',
   'layout',
   'mir',
-  // One backend view, not one per backend: the target picks the backend.
+  // LLVM emission is one target-aware view of the selected program.
   'backend',
   'toolchain',
   'pipeline',

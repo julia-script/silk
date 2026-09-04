@@ -16,7 +16,7 @@ import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Result from 'effect/Result'
-import type * as ArtifactKind from './ArtifactKind.js'
+import * as ArtifactKind from './ArtifactKind.js'
 import type * as Backend from './Backend.js'
 import * as LlvmWasmRuntime from './LlvmWasmRuntime.js'
 import * as NativeLinkInput from './NativeLinkInput.js'
@@ -68,6 +68,19 @@ export const makeRuntimeObjectCache = (): RuntimeObjectCache => {
 
 export const runtimeObjectCacheStats = (self: RuntimeObjectCache): RuntimeObjectCacheStats =>
   self.stats()
+
+/** Returns the exact runtime source participating in one final artifact and its cache identity. */
+export const artifactRuntimeSource = (
+  kind: FinalArtifact['kind'],
+  termination: Backend.Termination,
+  nativeRuntimeSymbols: ReadonlyArray<string>,
+): string => {
+  if (kind === 'NativeExecutable')
+    return ToolchainPlan.executableSource(termination, nativeRuntimeSymbols)
+  if (kind === 'WebAssemblyModule') return LlvmWasmRuntime.source
+  if (ArtifactKind.isLibrary(kind)) return ToolchainPlan.runtimeSource(nativeRuntimeSymbols)
+  return ''
+}
 
 export type Stage =
   | 'host-target'

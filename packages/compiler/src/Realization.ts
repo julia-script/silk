@@ -419,7 +419,6 @@ export const prepare = (
 
 import { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import * as ArtifactKind from './ArtifactKind.js'
-import * as Backend from './Backend.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
@@ -506,12 +505,6 @@ export type Preparation =
   | {
       readonly _tag: 'TargetFailed'
       readonly error: Target.TargetError
-      readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
-      readonly report: ReadonlyArray<PhaseReport.PhaseReport>
-    }
-  | {
-      readonly _tag: 'BackendFailed'
-      readonly error: Backend.BackendError
       readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
       readonly report: ReadonlyArray<PhaseReport.PhaseReport>
     }

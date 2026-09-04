@@ -2497,7 +2497,7 @@ const verifyCache = new WeakMap<Module, ReadonlyArray<Violation>>()
 
 /**
  * Verification is pure over an immutable Module, and the same module is routinely verified more
- * than once (tests assert emptiness, then evaluation re-verifies before executing), so the result
+ * than once (tests assert emptiness, then LLVM emission re-verifies before lowering), so the result
  * is cached per module identity.
  */
 /** The structural reason one pointer operation disagrees with its operand types, if any. */

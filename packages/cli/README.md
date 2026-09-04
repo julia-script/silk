@@ -102,11 +102,10 @@ prints target outcomes followed by success/failure totals. Artifacts use LLVM-qu
 build/llvm/<canonical-target>/<profile>/<artifact-file>
 ```
 
-For example, the two WebAssembly implementations do not collide:
+For example:
 
 ```text
 build/llvm/wasm32-unknown-unknown/debug/hello.wasm
-build/wasm/wasm32-unknown-unknown/debug/hello.wasm
 build/llvm/aarch64-apple-darwin/release/libhello.dylib
 build/llvm/x86_64-unknown-linux-gnu/release/libhello.so
 build/llvm/aarch64-apple-darwin/release/libhello.a
@@ -137,7 +136,7 @@ Shared options are:
 
 `silk format` formats every exact `.silk` file beneath the project source root. Positional files and
 directories restrict the selection; `--check` reports drift without writing. Formatting does not
-accept backend, target, or profile options.
+accept target or profile options.
 
 ```bash
 silk format

@@ -169,7 +169,7 @@ it.effect('rejects malformed build metadata before loading the entry', () =>
     const invalid = [
       '[package]\nname = "invalid"\nversion = "1.0"\nroot = "Main.silk"\n',
       '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\ntargets = []\n',
-      '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nbackend = "llvm"\n',
+      '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nmystery = true\n',
       '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\noutput-dir = "../outside"\n',
       '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nartifact = "dynamic-library"\n',
       '[package]\nname = "invalid"\nversion = "1.0.0"\nroot = "Main.silk"\n[build]\nnative-link-inputs = [{ library = "-Wl,--export-dynamic", mode = "dynamic" }]\n',

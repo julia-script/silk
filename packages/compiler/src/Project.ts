@@ -95,6 +95,8 @@ const hasExactKeys = (table: TomlTable, keys: ReadonlyArray<string>): boolean =>
   return actual.length === expected.length && actual.every((key, index) => key === expected[index])
 }
 
+const buildKeys = Object.freeze(['targets', 'output-dir', 'artifact', 'native-link-inputs'])
+
 const decodeNativeLinkInput = (value: TomlValue): NativeLinkInput.NativeLinkInput | undefined => {
   if (!isTable(value)) return undefined
   if (hasExactKeys(value, ['object']) && isSafeRelativePath(value.object))
@@ -178,8 +180,15 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
   if (buildTable !== undefined && !isTable(buildTable)) {
     return yield* invalidManifest(manifestPath, '[build] must be a table')
   }
-  if (buildTable?.backend !== undefined)
-    return yield* invalidManifest(manifestPath, 'build.backend is not a supported field')
+  const unsupportedBuildKey =
+    buildTable === undefined
+      ? undefined
+      : Object.keys(buildTable).find((key) => !buildKeys.includes(key))
+  if (unsupportedBuildKey !== undefined)
+    return yield* invalidManifest(
+      manifestPath,
+      `build.${unsupportedBuildKey} is not a supported field`,
+    )
   const defaultTargets: ReadonlyArray<TargetSelector.TargetSelector> = ['host']
   const targetsValue = buildTable?.targets ?? defaultTargets
   if (

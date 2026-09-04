@@ -52,11 +52,11 @@ Without an explicit manifest path, the system SHALL search the current directory
 ### Requirement: Deterministic project artifact layout
 
 The system SHALL derive each artifact destination below
-`<output-dir>/<backend>/<target>/<profile>/`. Executables SHALL use the package name, WebAssembly
+`<output-dir>/llvm/<target>/<profile>/`. Executables SHALL use the package name, WebAssembly
 modules SHALL append `.wasm`, shared libraries SHALL use the target platform's conventional shared
 library prefix and suffix, and static libraries SHALL use the target platform's conventional static
-archive prefix and suffix. Backend and target segments SHALL use resolved canonical identifiers,
-including resolution of `host`, and required parent directories SHALL be created before compilation.
+archive prefix and suffix. Target segments SHALL use resolved canonical identifiers, including
+resolution of `host`, and required parent directories SHALL be created before compilation.
 
 #### Scenario: Build a debug host artifact
 
@@ -66,7 +66,7 @@ including resolution of `host`, and required parent directories SHALL be created
 #### Scenario: Build host libraries
 
 - **WHEN** package `hello` is built as shared and static libraries for an Apple host
-- **THEN** their filenames are `libhello.dylib` and `libhello.a` beneath their backend, target, and profile directory
+- **THEN** their filenames are `libhello.dylib` and `libhello.a` beneath their LLVM, target, and profile directory
 
 #### Scenario: Build WebAssembly through LLVM
 
@@ -75,7 +75,7 @@ including resolution of `host`, and required parent directories SHALL be created
 
 #### Scenario: Replan the same build
 
-- **WHEN** the same project, backend, targets, profile, and artifact kind are planned repeatedly
+- **WHEN** the same project, targets, profile, and artifact kind are planned repeatedly
 - **THEN** every canonical entry, source root, root module identity, and destination is identical and ordered deterministically
 
 ### Requirement: Optional build defaults
@@ -100,9 +100,9 @@ loading with a typed project error; WebAssembly planning SHALL reject non-empty 
 - **WHEN** `[build]` declares `targets = ["host", "wasm32-unknown-unknown"]`
 - **THEN** target selectors retain their declared order and `host` resolves to the canonical current-host triple before planning
 
-#### Scenario: Reject a removed backend selector
+#### Scenario: Reject an unknown build field
 
-- **WHEN** `[build]` declares a `backend` field
+- **WHEN** `[build]` declares a field outside its defined schema
 - **THEN** project loading fails before creating or replacing any artifact
 
 #### Scenario: Deduplicate target selectors
@@ -137,5 +137,5 @@ loading with a typed project error; WebAssembly planning SHALL reject non-empty 
 
 #### Scenario: Reject a library kind for Wasm
 
-- **WHEN** the manifest selects `artifact = "shared-library"` with a WebAssembly backend or target
+- **WHEN** the manifest selects `artifact = "shared-library"` with a WebAssembly target
 - **THEN** project planning fails before creating or replacing any artifact
