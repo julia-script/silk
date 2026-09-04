@@ -6275,27 +6275,35 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     source: `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.layout { Layout }
-struct QuotaAllocator { remaining: i32 }
+struct QuotaAllocator { remaining: i32 calls: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  self.calls = self.calls + 1
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
   let mut inner = Allocator.systemAllocatorProvider()
   return run Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
 }
 impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
-effect fn attempt(quota: i32) -> i32 ! OutOfMemoryError {
-  let mut allocator = QuotaAllocator { remaining: quota }
+effect fn attempt() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let first = run Allocator.allocate(Layout.of<[i32; 2]>())
-    |> Effect.provideMut(&mut allocator)
   let second = run Allocator.allocate(Layout.of<[i32; 2]>())
-    |> Effect.provideMut(&mut allocator)
   drop first
   drop second
-  if allocator.remaining != quota - 2 { return 2 }
   return 42
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
-fn probe(quota: i32) -> i32 { return run Effect.catchAll(attempt(quota), recover) }
+fn probe(quota: i32) -> i32 {
+  let mut allocator = QuotaAllocator { remaining: quota, calls: 0 }
+  let result = run Effect.catchAll(
+    attempt() |> Effect.provideMut<Allocator>(&mut allocator),
+    recover
+  )
+  let mut expectedCalls = 2
+  if quota == 0 { expectedCalls = 1 }
+  if allocator.calls != expectedCalls { return 10 + quota }
+  if allocator.remaining != 0 { return 20 + quota }
+  return result
+}
 pub fn main() -> i32 {
   if probe(0) != 7 { return 1 }
   if probe(1) != 7 { return 2 }
@@ -6364,6 +6372,7 @@ union Choice { Small { marker: i8, guard: Guard }, Wide { value: i64 } }
 fn ready(state: &()) -> () { return () }
 fn complete(state: (), value: i32) -> () { return () }
 fn suspend(state: (), execution: Intrinsic.Execution<i32>, choice: Choice) -> () {
+  let unexpected = 1 / 0
   drop execution
   drop choice
   return ()
@@ -6393,6 +6402,307 @@ effect fn program() -> i32 ! OutOfMemoryError {
   let result = run packaged(&counter) |> Effect.provideMut<Allocator>(&mut allocator)
   drop counter
   return result
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 2 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'generic-inline-effect-conformance',
+    source: `interface Marker { effect fn mark(value: &Self) -> i32 }
+struct Box<T> { value: T }
+impl<T> Marker for Box<T> {
+  effect fn mark(value: &Self) -> i32 { return 42 }
+}
+effect fn through<T: Marker>(value: &T) -> i32 { return run Marker.mark(value) }
+pub fn main() -> i32 {
+  let boxed = Box { value: true }
+  return run through(&boxed)
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'bound-inline-scalar-effect-rows',
+    source: `import silk.effect { Effect }
+import silk.result { Result }
+struct Problem { code: i32 }
+service Output { effect fn emit(number: i32) -> i32 ? &Output }
+struct FixedOutput {}
+effect fn emit(self: &FixedOutput, number: i32) -> i32 { return number }
+impl Output for FixedOutput { emit: FixedOutput.emit }
+interface Present { effect fn present(value: &Self) -> i32 ! Problem ? &Output }
+impl Present for i32 {
+  effect fn present(value: &Self) -> i32 ! Problem ? &Output { return run Output.emit(42) }
+}
+fn pending<T: Present>(value: &T) -> Effect<i32 ! Problem ? &Output> {
+  return Present.present(value)
+}
+fn observe(result: Result<i32, Problem>) -> i32 {
+  return match move result {
+    Result<i32, Problem>.Success { value } => value
+    Result<i32, Problem>.Failure { error } => error.code
+  }
+}
+pub fn main() -> i32 {
+  let output = FixedOutput {}
+  let value = 7
+  let provided = pending<i32>(&value) |> Effect.provide(&output)
+  return observe(run Effect.result(provided))
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'generic-service-stabilization-contracts',
+    source: `import silk.effect { Effect }
+interface Hashable { fn hash(value: &Self) -> i32 }
+interface Display { fn display(value: &Self) -> i32 }
+struct Key { value: i32 }
+impl Hashable for Key { fn hash(value: &Self) -> i32 { return value.value } }
+impl Display for Key { fn display(value: &Self) -> i32 { return value.value * 2 } }
+fn onlyHash<T: Hashable>(value: &T) -> i32 { return Hashable.hash(value) }
+fn onlyDisplay<T: Display>(value: &T) -> i32 { return Display.display(value) }
+fn forward<T: Hashable>(value: &T) -> i32 { return onlyHash(value) }
+fn byValue<T: Hashable>(value: T) -> i32 { return onlyHash<T>(&value) }
+fn subset<T: Hashable + Display>(value: &T) -> i32 {
+  return onlyDisplay(value) + Display.display(value)
+}
+
+interface Wrap { fn wrap(value: &Self) -> i32 }
+struct Box<T> { value: T }
+struct Leaf { value: i32 }
+fn boxSize<T>(value: &Box<T>) -> i32 { return 40 }
+impl<T> Wrap for Box<T> {
+  fn wrap(value: &Self) -> i32 {
+    let inner: &T = &value.value
+    return boxSize<T>(value) + 2
+  }
+}
+fn wrapped<T: Wrap>(value: &T) -> i32 { return Wrap.wrap(value) }
+
+interface Printable { fn print(value: &Self) -> i32 }
+struct Document { size: i32 }
+impl Printable for Document { fn print(value: &Self) -> i32 { return value.size } }
+impl<T: Printable> Printable for Box<T> {
+  fn print(value: &Self) -> i32 { return value.value.print() + 1 }
+}
+fn printed<T: Printable>(value: &T) -> i32 { return Printable.print(value) }
+
+interface SchemaInterface {
+  fn decode(value: &Self) -> i32
+  fn width(value: &Self) -> i32
+}
+service SchemaService {
+  fn decode(value: &Self) -> i32
+  fn width(value: &Self) -> i32
+}
+struct InterfaceSchema {}
+struct ServiceSchema {}
+fn interfaceWidth(value: &InterfaceSchema) -> i32 { return 32 }
+fn serviceWidth(value: &ServiceSchema) -> i32 { return 32 }
+impl SchemaInterface for InterfaceSchema {
+  fn decode(value: &Self) -> i32 { return 42 }
+  width: InterfaceSchema.interfaceWidth
+}
+impl SchemaService for ServiceSchema {
+  fn decode(value: &Self) -> i32 { return 42 }
+  width: ServiceSchema.serviceWidth
+}
+fn useInterface<T: SchemaInterface>(value: &T) -> i32 {
+  return SchemaInterface.decode(value) + SchemaInterface.width(value)
+}
+fn useService<T: SchemaService>(value: &T) -> i32 {
+  return SchemaService.decode(value) + SchemaService.width(value)
+}
+
+interface Encodable<A> { fn encode(value: &Self) -> A }
+struct Age { years: i32 }
+impl Encodable<i32> for Age { fn encode(value: &Self) -> i32 { return value.years } }
+
+service Clock {}
+service Logger {}
+struct SystemClock {}
+struct Log {}
+impl Clock for SystemClock {}
+impl Logger for Log {}
+role Primary
+effect fn work() -> i32 ? &Clock | &Logger { return 1 }
+fn narrowed(clock: &SystemClock) -> Effect<i32 ? Without<&Clock | &Logger, Clock>> {
+  return Effect.provide<Clock>(work(), clock)
+}
+effect fn primaryWork() -> i32 ? &Clock at Primary { return 1 }
+fn primaryNarrowed(
+  clock: &SystemClock
+) -> Effect<i32 ? Without<&Clock at Primary, Clock at Primary>> {
+  return Effect.provide<Clock at Primary>(primaryWork(), clock)
+}
+
+pub fn main() -> i32 {
+  let key = Key { value: 42 }
+  if forward(&key) != 42 { return 1 }
+  if byValue<Key>(Key { value: 42 }) != 42 { return 2 }
+  let half = Key { value: 21 }
+  if subset(&half) != 84 { return 3 }
+  let boxed = Box { value: Leaf { value: 1 } }
+  if wrapped(&boxed) != 42 { return 4 }
+  let document = Box { value: Box { value: Document { size: 40 } } }
+  if printed(&document) != 42 { return 5 }
+  let interfaceSchema = InterfaceSchema {}
+  let serviceSchema = ServiceSchema {}
+  if useInterface(&interfaceSchema) != 74 || useService(&serviceSchema) != 74 { return 6 }
+  let age = Age { years: 42 }
+  if Encodable.encode(&age) != 42 { return 7 }
+  let clock = SystemClock {}
+  let logger = Log {}
+  let ordinary = run Effect.provide<Logger>(narrowed(&clock), &logger)
+  if ordinary != 1 { return 8 }
+  let primary = run primaryNarrowed(&clock)
+  if primary != 1 { return 9 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'finite-effect-join-selected-requirement',
+    source: `import silk.effect { Effect }
+service LeftClock { effect fn read() -> i32 ? &LeftClock }
+service RightClock { effect fn read() -> i32 ? &RightClock }
+struct Left { value: i32 }
+struct Right { value: i32 }
+effect fn readLeft(self: &Left) -> i32 { return self.value }
+effect fn readRight(self: &Right) -> i32 { return self.value }
+impl LeftClock for Left { read: Left.readLeft }
+impl RightClock for Right { read: Right.readRight }
+effect fn useLeft() -> i32 ? &LeftClock { return run LeftClock.read() }
+effect fn useRight() -> i32 ? &RightClock { return run RightClock.read() }
+struct First {}
+struct Second {}
+fn choose(input: First | Second) -> Effect<i32 ? &LeftClock | &RightClock> {
+  return match move input {
+    First {} => useLeft()
+    Second {} => useRight()
+  }
+}
+pub fn main() -> i32 {
+  let left = Left { value: 41 }
+  let right = Right { value: 42 }
+  let selected = choose(Second {})
+    |> Effect.provide<LeftClock>(&left)
+    |> Effect.provide<RightClock>(&right)
+  return run selected
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'role-keyed-service-provider-selection',
+    source: `role Left
+role Right
+service Values {
+  effect fn left() -> i32 ? &Values at Left
+  effect fn right() -> i32 ? &Values at Right
+}
+struct Fixed { value: i32 }
+effect fn left(self: &Fixed) -> i32 { return self.value }
+effect fn right(self: &Fixed) -> i32 { return self.value }
+impl Values for Fixed { left: Fixed.left right: Fixed.right }
+effect fn total() -> i32 ? &Values at Left | &Values at Right {
+  let leftValue = run Values.left()
+  let rightValue = run Values.right()
+  return leftValue * 10 + rightValue
+}
+pub fn main() -> i32 {
+  let leftProvider = Fixed { value: 4 }
+  let rightProvider = Fixed { value: 2 }
+  let selected = total()
+    |> Intrinsic.bindRequirement<Values at Left>(&leftProvider)
+    |> Intrinsic.bindRequirement<Values at Right>(&rightProvider)
+  return run selected
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'inherent-member-over-module-projection',
+    source: `import counter { Counter, read }
+pub fn main() -> i32 {
+  let made = Counter.make()
+  return read(&made)
+}`,
+    nativeImports: Object.freeze({
+      counter: `pub struct Counter { value: i32 }
+pub fn make() -> Counter { return Counter { value: 1 } }
+impl Counter { pub fn make() -> Self { return Counter { value: 42 } } }
+pub fn read(counter: &Counter) -> i32 { return counter.value }`,
+    }),
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'execution-body-and-endpoint-cleanup',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
+import silk.layout { Layout }
+import silk.shared { Shared }
+struct Audit { body: i32 endpoint: i32 }
+fn recordBody(audit: &mut Audit) -> i32 { audit.body = audit.body + 1 return audit.body }
+fn recordEndpoint(audit: &mut Audit) -> i32 {
+  audit.endpoint = audit.endpoint + 1
+  return audit.endpoint
+}
+fn readAudit(audit: &Audit) -> i32 { return audit.body * 10 + audit.endpoint }
+struct BodyGuard { storage: Allocation audit: Shared<Audit> }
+impl Drop for BodyGuard {
+  fn drop(self: &mut BodyGuard) -> () {
+    let count = Shared.withMut<Audit, i32>(&self.audit, recordBody)
+    return ()
+  }
+}
+struct EndpointGuard { storage: Allocation audit: Shared<Audit> }
+impl Drop for EndpointGuard {
+  fn drop(self: &mut EndpointGuard) -> () {
+    let count = Shared.withMut<Audit, i32>(&self.audit, recordEndpoint)
+    return ()
+  }
+}
+struct Ready { guard: EndpointGuard }
+fn ready(state: &Ready) -> () { return () }
+fn readyUnit(state: &()) -> () { return () }
+fn complete(state: (), value: i32) -> () { return () }
+fn suspend(state: (), execution: Intrinsic.Execution<i32>) -> () {
+  drop execution
+  return ()
+}
+effect fn body(guard: BodyGuard) -> i32 {
+  let unexpected = 1 / 0
+  return unexpected
+}
+effect fn exercise(audit: &Shared<Audit>) -> () ! OutOfMemoryError ? &mut Allocator {
+  let bodyStorage = run Allocator.allocate(Layout.of<i32>())
+  let bodyExecution = run Execution.make(
+    body(BodyGuard { storage: move bodyStorage, audit: Shared.clone<Audit>(audit) }),
+    (), readyUnit
+  )
+  drop bodyExecution
+  let endpointStorage = run Allocator.allocate(Layout.of<i32>())
+  let endpointExecution = run Execution.make(
+    effect { return 42 },
+    Ready {
+      guard: EndpointGuard {
+        storage: move endpointStorage, audit: Shared.clone<Audit>(audit),
+      },
+    },
+    ready
+  )
+  let endpointDriven = run Execution.drive(move endpointExecution, (), complete, suspend)
+  return ()
+}
+effect fn program() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let audit = run Shared.make<Audit>(Audit { body: 0, endpoint: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let exercised = run exercise(&audit) |> Effect.provideMut<Allocator>(&mut allocator)
+  let observed = Shared.with<Audit, i32>(&audit, readAudit)
+  drop audit
+  if observed != 11 { return 1 }
+  return 42
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`,

@@ -1,7 +1,7 @@
 ---
-'@silklang/compiler': major
-'@silklang/cli': major
-'@silklang/lsp': major
+'@silklang/compiler': minor
+'@silklang/cli': minor
+'@silklang/lsp': minor
 ---
 
 Remove the provisional runtime evaluator, evaluator host and inspection APIs, and independent

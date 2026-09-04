@@ -109,11 +109,20 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`),
     )
     if (releaseScratch === undefined) return assert.fail('expected Vector.releaseScratch MIR')
 
-    const releases = MirVerification.operations(releaseScratch).filter(
-      (operation) => operation._tag === 'Drop',
-    )
+    const operations = MirVerification.operations(releaseScratch)
+    const moves = operations.filter((operation) => operation._tag === 'Move')
+    const releases = operations.filter((operation) => operation._tag === 'Drop')
+    assert.strictEqual(releaseScratch.parameterCount, 2)
+    assert.lengthOf(moves, 1)
+    assert.strictEqual(moves[0]?.source.ordinal, 1)
+    assert.strictEqual(moves[0]?.destination.ordinal, 2)
     assert.strictEqual(releases.length, 1)
+    assert.strictEqual(releases[0]?.local.ordinal, 2)
     assert.strictEqual(releases[0]?.cleanup._tag, 'RawBufferCleanup')
-    assert.notStrictEqual(releaseScratch.result, releases[0]?.local)
+    const returns = releaseScratch.regions.flatMap((region) =>
+      'outcome' in region && region.outcome._tag === 'Return' ? [region.outcome.value] : [],
+    )
+    assert.lengthOf(returns, 1)
+    assert.strictEqual(returns[0]?.ordinal, 0)
   }),
 )
