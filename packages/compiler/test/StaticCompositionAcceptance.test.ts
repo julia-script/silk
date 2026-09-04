@@ -4,6 +4,11 @@ import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
+import * as FormattedDocument from '../src/FormattedDocument.js'
+import * as Lexer from '../src/Lexer.js'
+import * as Parser from '../src/Parser.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 
 const decoder = new TextDecoder()
 const encoder = new TextEncoder()
@@ -17,7 +22,28 @@ const fixture = Effect.fnUntraced(function* (name: string) {
   return decoder.decode(yield* fileSystem.readFile(file))
 })
 
+const canonical = Effect.fnUntraced(function* (id: string, source: string) {
+  const parsed = Parser.parse(Lexer.lex(SourceFile.make(id, encoder.encode(source))))
+  const formatted = yield* SyntaxFormatter.format(parsed)
+  return decoder.decode(FormattedDocument.toUint8Array(formatted))
+})
+
 layer(NodeServices.layer)('static composition acceptance', (it) => {
+  it.effect('keeps canonical and renamed pressure fixtures formatter-idempotent', () =>
+    Effect.gen(function* () {
+      for (const name of [
+        'static-composition-acceptance',
+        'renamed-static-composition-acceptance',
+      ]) {
+        const source = yield* fixture(name)
+        const first = yield* canonical(`static-composition/${name}/first`, source)
+        const second = yield* canonical(`static-composition/${name}/second`, first)
+        assert.strictEqual(source, first, `${name} checked-in canonical source`)
+        assert.strictEqual(first, second, name)
+      }
+    }),
+  )
+
   it.effect('reports the first representation divergence and exposes complete tooling facts', () =>
     Effect.gen(function* () {
       const source = yield* fixture('static-composition-acceptance')

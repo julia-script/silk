@@ -413,13 +413,13 @@ Native execution and LLVM-generated WebAssembly produce the same typed outcome, 
 and cleanup order for a suspended program. Both targets additionally guarantee bounded machine
 stack for cycles covered by SUSP-003.
 
-For the `count` example in SUSP-001, every engine must produce the same integer or typed failure;
+For the `count` example in SUSP-001, every supported target must produce the same integer or typed failure;
 target-specific execution machinery cannot become part of that result.
 
-**Boundary:** Engines may use different private execution representations or storage growth
+**Boundary:** LLVM targets may use different private execution representations or storage growth
 policies. Those differences cannot change source-visible results or cleanup.
 
-**Diagnostics:** A valid program receives no engine-selection diagnostic. A target that cannot
+**Diagnostics:** A valid program receives no target-support diagnostic. A target that cannot
 honor the suspension contract is unavailable for that reachable executable closure.
 
 **Evidence:** [target availability](unsafe-intrinsics-and-targets.md#target-003--target-unavailability-is-a-compile-time-compatibility-error),

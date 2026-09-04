@@ -69,7 +69,7 @@ not belong in a language rule unless a program can observe them.
   nested Effects, and the two delayed boundaries of effectful anonymous callables.
 - [Effect suspension and stack-safe recursion](effect-suspension.md) — the explicit suspension
   boundary, covered recursive cycles, exact channel preservation, ownership and cleanup, logical
-  depth, cross-engine parity, pay-for-use, and the boundary with future async execution.
+  depth, supported-target behavior, pay-for-use, and the boundary with future async execution.
 - [Independently resumable Effect executions](independent-execution.md) — explicit caller-funded
   Execution ownership, activation, external parking, Wake readiness, cancellation, cleanup, and the
   ordinary-source scheduling boundary.

@@ -9,10 +9,12 @@ import * as Instances from '../src/Instances.js'
 import * as TypeInference from '../src/internal/TypeInference.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as ModuleSurface from '../src/ModuleSurface.js'
 import * as Parser from '../src/Parser.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
+import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as SourceSpan from '../src/SourceSpan.js'
@@ -678,6 +680,32 @@ it.effect('does not fabricate a second identity for duplicate type parameters', 
     assert.notStrictEqual(first, undefined)
     assert.strictEqual(duplicate?.type, first?.type)
     assert.strictEqual(duplicate?.duplicateOf, first?.type)
+  }),
+)
+
+it.effect('keeps open cleanup symbolic and specializes it before MIR', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'generics/Cleanup',
+      new TextEncoder().encode(`struct Payload {}
+fn discard<T>(value: T) -> i32 { return 42 }
+pub fn main() -> i32 { return discard<Payload>(Payload {}) }`),
+    )
+    assert.deepEqual(snapshot.diagnostics, [])
+    const ownership = Analysis.ownershipOf(snapshot, 'generics/Cleanup')
+    assert.notStrictEqual(ownership, undefined)
+    if (ownership !== undefined) {
+      assert.include(OwnershipEncoding.encode(ownership), 'release p0')
+      const discard = ownership.functions.find(
+        (fn) =>
+          fn.declaration.canonical._tag === 'Canonical' &&
+          fn.declaration.canonical.id.name === 'discard',
+      )
+      assert.strictEqual(discard?.exits.at(0)?.releases.at(0)?.cleanup._tag, 'ParameterCleanup')
+    }
+    assert.strictEqual(snapshot.mir._tag, 'Available')
+    if (snapshot.mir._tag !== 'Available') return
+    assert.notInclude(MirEncoding.encode(snapshot.mir.value), 'TypeParameter')
   }),
 )
 

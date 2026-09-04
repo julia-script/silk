@@ -857,7 +857,7 @@ separately documented presentation adds styling.
 Every integer actor SHALL continue to parse complete canonical decimal text without allocation and
 return either the exact in-range value or the existing typed not-a-number or out-of-range reason.
 Removing owned-String rendering MUST NOT change accepted text, rejection offsets, range checks, or
-engine parity.
+supported-target behavior.
 
 #### Scenario: Parse a displayed integer
 
@@ -1018,7 +1018,7 @@ value including each type's own bounds.
 #### Scenario: Render a bound
 
 - **WHEN** a program renders the largest or the smallest value of an integer type
-- **THEN** the text spells that bound exactly, on every engine
+- **THEN** the text spells that bound exactly on every supported target
 
 #### Scenario: Round trip a value
 

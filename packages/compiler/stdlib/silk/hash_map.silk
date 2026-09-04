@@ -63,7 +63,7 @@
 //! ```
 
 // A hashed map over the allocation substrate. Ordinary Silk: no compiler phase knows this type, no
-// engine contains a hash operation, and every hash a program computes is a call to a function Option.some
+// LLVM lowering contains no hash operation, and every hash a program computes is a call to a function Option.some
 // `HashKey` witness declared in Silk.
 //
 // Open addressing with linear probing over two buffers of one width: the entries, whose slot is
@@ -516,7 +516,7 @@ fn emptySlice<K, V>(anchor: &[Entry<K, V>]) -> &[Entry<K, V>] {
 }
 
 /// Reduces a hash to a bucket index in u64 arithmetic, so the index does not depend on the width of
-/// `usize` and one seed therefore fixes one order in every engine.
+/// `usize` and one seed therefore fixes one order on every supported target.
 fn bucketOf(hashed: u64, width: usize) -> usize {
   return u64.toUsize(u64.remainder(hashed, usize.toU64(width)))
 }

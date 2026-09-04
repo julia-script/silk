@@ -84,7 +84,7 @@ include its expression in source order.
 - **WHEN** equivalent source containing expression statements is analyzed repeatedly in fresh processes
 - **THEN** its statement facts and encoded HIR are byte-identical across runs
 
-### Requirement: Expression statements execute in source order on every engine
+### Requirement: Expression statements execute in source order on every supported target
 
 Lowering SHALL evaluate each valid expression statement exactly once, preserve its effect and
 failure behavior, and continue with the next statement only after successful completion. Unit
@@ -96,7 +96,7 @@ execution SHALL agree on outcomes and observable traces.
 #### Scenario: Execute two unit effects in order
 
 - **WHEN** two standalone `run` expressions append distinguishable observations
-- **THEN** every engine records each observation exactly once in source order
+- **THEN** every supported target records each observation exactly once in source order
 
 #### Scenario: Propagate a declared failure from effectful main
 
@@ -106,7 +106,7 @@ execution SHALL agree on outcomes and observable traces.
 #### Scenario: Keep successful execution moving
 
 - **WHEN** a unit expression statement completes successfully before a following return
-- **THEN** every engine evaluates the following return normally
+- **THEN** every supported target evaluates the following return normally
 
 ### Requirement: Canonical formatting preserves expression statements
 

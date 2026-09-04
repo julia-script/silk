@@ -7,7 +7,7 @@ Provider-replaceable deterministic words, booleans, bounded values, and byte fil
 ## When to use
 
 Require [`InsecureRandom`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a496e73656375726552616e646f6d) when a reproducible pseudorandom stream is needed. Use
-[`Xoshiro256StarStar`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a586f736869726f3235365374617253746172) with [`seeded`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a496e73656375726552616e646f6d2e736565646564) for one stable cross-engine sequence.
+[`Xoshiro256StarStar`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a586f736869726f3235365374617253746172) with [`seeded`](#declaration-73696c6b2f696e7365637572655f72616e646f6d3a3a496e73656375726552616e646f6d2e736565646564) for one stable supported-target sequence.
 
 ## Details
 

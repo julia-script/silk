@@ -119,4 +119,4 @@ executable partial formatter body.
 #### Scenario: Agree across execution engines
 
 - **WHEN** one accepted template specialization runs through LLVM-generated WebAssembly and native LLVM
-- **THEN** every engine performs the same ordered Writer and Display operations with no engine-specific parsing or reflection path
+- **THEN** native LLVM and LLVM-generated WebAssembly perform the same ordered Writer and Display operations with no target-specific parsing or reflection path

@@ -20,7 +20,6 @@
     "@openrouter/ai-sdk-provider": "^3.0.0",
     "@silklang/compiler": "workspace:*",
     "@silklang/editor-support": "workspace:*",
-    "@silklang/lsp": "workspace:*",
     "@silklang/platform-webcontainer": "workspace:*",
     "@vercel/analytics": "^2.0.1",
     "@xterm/addon-fit": "^0.11.0",
@@ -46,7 +45,6 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
-    "@silklang/formatter": "workspace:*",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/hast": "^3.0.5",
     "@types/mdx": "^2.0.14",

@@ -71,9 +71,6 @@ importers:
       '@silklang/editor-support':
         specifier: workspace:*
         version: link:../../packages/editor-support
-      '@silklang/lsp':
-        specifier: workspace:*
-        version: link:../../packages/lsp
       '@silklang/platform-webcontainer':
         specifier: workspace:*
         version: link:../../packages/platform-webcontainer
@@ -144,9 +141,6 @@ importers:
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-rc.112(effect@4.0.0-rc.112)(vitest@4.1.10)
-      '@silklang/formatter':
-        specifier: workspace:*
-        version: link:../../packages/formatter
       '@tailwindcss/postcss':
         specifier: ^4.3.3
         version: 4.3.3

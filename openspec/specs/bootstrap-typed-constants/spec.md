@@ -185,10 +185,10 @@ program under analysis mentions it.
 Presentation of a target fact SHALL name the fact rather than a value, because the module surface
 and the HIR text are target-independent artifacts.
 
-#### Scenario: Select the same bound on every engine
+#### Scenario: Select the same bound on every supported target
 
 - **WHEN** a program comparing `usize.MAX`, `usize.BITS`, `isize.MAX`, and `isize.MIN` against the identities that define them runs on WebAssembly and native LLVM
-- **THEN** every engine agrees, and the observed pointer width is the selected target's
+- **THEN** the supported targets agree, and the observed pointer width is the selected target's
 
 #### Scenario: Observe a different bound on a different width
 

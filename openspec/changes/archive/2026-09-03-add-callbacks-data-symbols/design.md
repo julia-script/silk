@@ -56,9 +56,9 @@ pointer and aggregate initializers remain future work.
 ### Extend availability by operation kind
 
 The executable inventory distinguishes function calls, callback addresses, and static loads.
-Native emission admits all three. Evaluator/direct Wasm continue to admit JUL-100 function calls
-but reject callback/static operations before execution or emission. Unreachable declarations add no
-inventory entry.
+Native LLVM emission admits all three. LLVM-to-WebAssembly availability is decided per operation
+before lowering. Unreachable declarations add no inventory entry. The provisional evaluator and
+direct-Wasm JUL-100 path was superseded by JUL-115 and is not part of the contract.
 
 ## Risks / Trade-offs
 

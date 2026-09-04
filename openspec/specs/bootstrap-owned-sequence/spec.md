@@ -53,7 +53,7 @@ rejected before element storage is read.
 #### Scenario: Out-of-bounds read is rejected
 
 - **WHEN** a program reads an index at or beyond the current length
-- **THEN** the checked-access contract rejects it identically in the LLVM native and WebAssembly artifacts engines before element storage is read
+- **THEN** the checked-access contract rejects it identically in LLVM-native and LLVM-generated WebAssembly artifacts before element storage is read
 
 #### Scenario: Shared read has no ownership side effects
 

@@ -1,7 +1,7 @@
 /*
- * The introduction page in the workbench's own visual language: warm near-black, hairlines,
+ * The introduction page in the editor's visual language: warm near-black, hairlines,
  * off-white ink, amber and violet, JetBrains Mono. Deliberately one dark theme regardless of the
- * site theme, for the same reason the workbench is — it presents the tool, so it looks like it.
+ * site theme: it presents the language tooling, so it looks like the editor.
  * Everything is scoped under .silk-intro so fumadocs' global styles stay untouched.
  */
 
@@ -37,7 +37,7 @@
   font-variant-ligatures: none;
 }
 
-/* ── top bar, like the workbench chrome ───────── */
+/* ── top bar, like the editor chrome ──────────── */
 .silk-intro header.bar {
   position: sticky;
   top: 0;
@@ -339,7 +339,7 @@
   margin-top: -0.6rem;
 }
 
-/* ── the element, in workbench colors ─────────── */
+/* ── the element, in editor colors ────────────── */
 .silk-intro silk-snippet {
   display: block;
   font-family: var(--mono);

@@ -11,7 +11,7 @@
     "typed allocation failure",
     "bounded malformed-program recovery",
     "portable semantic logging",
-    "cross-engine determinism"
+    "supported-target determinism"
   ],
   "nonGoals": ["production VM", "assembler or JIT", "compiler execution engine", "self-hosting"]
 }

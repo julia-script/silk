@@ -1080,7 +1080,7 @@ MUST preserve that single active obligation. Fatal traps SHALL retain the existi
 #### Scenario: Clean one selected payload
 
 - **WHEN** a union holding a droppable field in one variant leaves scope
-- **THEN** every engine runs the union-level and active-field cleanup prescribed by ordinary struct ordering without touching inactive variant storage
+- **THEN** every supported target runs the union-level and active-field cleanup prescribed by ordinary struct ordering without touching inactive variant storage
 
 #### Scenario: Consume one field variant through matching
 

@@ -93,7 +93,7 @@ A hashed collection SHALL be constructed with a `HashSeed`, and the order in whi
 entries SHALL be a function of that seed and the sequence of operations performed on it alone. It
 MUST NOT depend on allocation addresses, on wall-clock or monotonic time, or on any ambient source
 of entropy. Two runs of one program constructing one collection with one seed and performing one
-sequence of operations SHALL observe one order, in every engine.
+sequence of operations SHALL observe one order on every supported target.
 
 #### Scenario: Two runs over one seed agree
 

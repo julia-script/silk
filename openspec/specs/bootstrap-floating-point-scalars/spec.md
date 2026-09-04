@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define conservative `f32` and `f64` values, literals, operations, conversions, representation access, and deterministic cross-engine behavior for numerical Silk programs.
+Define conservative `f32` and `f64` values, literals, operations, conversions, representation access, and deterministic supported-target behavior for numerical Silk programs.
 
 ## Requirements
 
@@ -34,7 +34,7 @@ Silk SHALL provide distinct lowercase `f32` and `f64` types. Decimal fractions a
 - **WHEN** positive and negative `f64` zero are reinterpreted as `u64`
 - **THEN** their bits differ only by the sign bit
 
-### Requirement: Floating operations have engine parity
+### Requirement: Floating operations are target-consistent
 
 HIR, MIR, layout, LLVM native and WebAssembly artifacts SHALL support every admitted float operation. Exact bit parity SHALL apply where specified; NaN arithmetic SHALL compare specified classification/order behavior when payload is unspecified.
 
@@ -63,12 +63,12 @@ and native and WebAssembly execution SHALL return identical result bits.
 #### Scenario: Evaluate non-finite inputs
 
 - **WHEN** sine or cosine receives NaN or positive or negative infinity
-- **THEN** it returns the canonical quiet NaN for that width on every engine
+- **THEN** it returns the canonical quiet NaN for that width on every supported target
 
 #### Scenario: Compare representative finite values
 
 - **WHEN** the conformance corpus evaluates small, large, positive, negative, and quadrant-boundary finite inputs
-- **THEN** every result satisfies the accuracy bound and has identical bits across all engines
+- **THEN** every result satisfies the accuracy bound and has identical bits across supported targets
 
 ### Requirement: Floating scalars provide exact sign, rounding, and ordering operations
 
@@ -94,12 +94,12 @@ than a signed NaN.
 
 - **WHEN** `abs`, `floor`, `ceil`, `round`, or `trunc` receives negative zero, or `trunc` receives a
   value in `(-1.0, -0.0)`
-- **THEN** every engine returns negative zero, except `abs`, which returns positive zero
+- **THEN** every supported target returns negative zero, except `abs`, which returns positive zero
 
 #### Scenario: Round a half away from zero
 
 - **WHEN** `round` receives `2.5`, `-2.5`, or the value one unit in the last place below `0.5`
-- **THEN** it returns `3.0`, `-3.0`, and `0.0` respectively, with identical bits on every engine
+- **THEN** it returns `3.0`, `-3.0`, and `0.0` respectively, with identical bits on every supported target
 
 #### Scenario: Order signed zero through min and max
 
@@ -109,13 +109,13 @@ than a signed NaN.
 #### Scenario: Propagate a NaN operand through min and max
 
 - **WHEN** `min` or `max` receives a NaN in either operand
-- **THEN** it returns the canonical quiet NaN for that width on every engine
+- **THEN** it returns the canonical quiet NaN for that width on every supported target
 
 #### Scenario: Canonicalize a NaN input
 
 - **WHEN** any of `abs`, `copysign`, `floor`, `ceil`, `round`, `trunc`, `min`, `max`, or `sqrt`
   receives a NaN
-- **THEN** it returns the canonical quiet NaN bit pattern for that width on every engine
+- **THEN** it returns the canonical quiet NaN bit pattern for that width on every supported target
 
 ### Requirement: Floating scalars provide a correctly rounded square root
 
@@ -128,7 +128,7 @@ intrinsic, and the exception rests on the standard rather than on convenience. I
 that a square root be correctly rounded, so for a given operand exactly one result is admissible
 and every conforming implementation must produce it: `llvm.sqrt`, the WebAssembly `f64.sqrt` and
 native and WebAssembly `f32.sqrt` opcodes agree because the standard requires
-them to, not because the hosts happen to match. Engine parity is therefore preserved by
+them to, not because the hosts happen to match. Target consistency is therefore preserved by
 construction. No comparable mandate covers `pow` or `log`, whose results are implementation-defined
 and which SHALL continue to reach neither an LLVM math intrinsic nor the platform `libm`.
 
@@ -142,7 +142,7 @@ not negative for this purpose and SHALL pass through, returning negative zero as
 #### Scenario: Round a square root exactly
 
 - **WHEN** `sqrt` receives an operand whose root is irrational, such as two, three, or ten
-- **THEN** every engine returns the correctly rounded root with identical bits
+- **THEN** every supported target returns the correctly rounded root with identical bits
 
 #### Scenario: Root a subnormal operand
 
@@ -158,7 +158,7 @@ not negative for this purpose and SHALL pass through, returning negative zero as
 #### Scenario: Screen an invalid square root
 
 - **WHEN** `sqrt` receives a negative operand other than negative zero
-- **THEN** every engine returns the canonical quiet NaN, rather than the host's unspecified NaN sign
+- **THEN** every supported target returns the canonical quiet NaN, rather than the host's unspecified NaN sign
 
 #### Scenario: Lower a square root to the native instruction
 
@@ -172,7 +172,7 @@ Every concrete `f32` and `f64` arithmetic, comparison, classification, total-ord
 square-root, transcendental, and numeric-conversion primitive SHALL be a type-specific member of
 `Intrinsic`.
 Source-defined floating actor modules and numeric interfaces SHALL wrap those primitives without
-changing their deterministic semantics or engine parity.
+changing their deterministic semantics or supported-target consistency.
 
 #### Scenario: Specialize generic floating addition
 

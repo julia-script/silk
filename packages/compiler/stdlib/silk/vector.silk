@@ -710,7 +710,7 @@ struct Read<T> {
 
 impl<T: Copy> Copy for Read<T> {}
 
-// Checked read for Copy element types: out-of-range access traps identically on every engine.
+// Checked read for Copy element types: out-of-range access traps identically on every supported target.
 
 fn readAt<T: Copy>(buffer: &RawBuffer<T>, index: usize) -> T {
   unsafe {
@@ -826,7 +826,7 @@ fn replaceSlot<T>(buffer: RawBuffer<T>, index: usize, value: T) -> RawBuffer<T> 
 
 // Ordering. A bottom-up merge sort over a permutation of the element indices, so it is stable, and
 // deterministic because every comparison and every exchange is decided by the run boundaries alone
-// and never by an address, a capacity, or an engine detail. The same input therefore produces the
+// and never by an address, a capacity, or a target detail. The same input therefore produces the
 // same output for every LLVM target.
 //
 // Merging cannot happen in place, so the sort allocates and carries `! OutOfMemoryError ? &mut Allocator`.

@@ -82,8 +82,8 @@ const diagnosticFailure = (
 }
 
 /**
- * The callback-driven JSON-RPC boundary. Compiler and semantic execution remain behind the
- * workspace engine and its project workers; this module only translates protocol values.
+ * The callback-driven JSON-RPC boundary. Compiler analysis remains behind the workspace engine
+ * and its project workers; this module only translates protocol values and never runs Silk code.
  */
 export const start = (options: Options = {}): void => {
   const connection = createConnection(ProposedFeatures.all, process.stdin, process.stdout)

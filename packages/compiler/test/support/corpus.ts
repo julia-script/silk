@@ -2763,6 +2763,91 @@ pub fn main() -> i32 {
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'effect-suspended-map-flat-map',
+    source: `import silk.effect { Effect }
+effect fn base() -> i32 { return run Effect.suspend(effect { return 20 }) }
+fn double(value: i32) -> i32 { return value * 2 }
+effect fn addTwo(value: i32) -> i32 { return value + 2 }
+pub fn main() -> i32 {
+  return run base() |> Effect.map(double) |> Effect.flatMap(addTwo)
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'effect-ensuring-fallible-finalizer',
+    source: `import silk.effect { Effect }
+struct Problem { code: i32 }
+effect fn work() -> i32 ! Problem { fail Problem { code: 42 } }
+effect fn stubborn() -> () ! Problem { fail Problem { code: 8 } }
+effect fn swallow(problem: Problem) -> () { return () }
+effect fn tolerant() -> () { return run Effect.catchAll(stubborn(), swallow) }
+effect fn recover(problem: Problem) -> i32 { return problem.code }
+pub fn main() -> i32 {
+  return run Effect.catchAll(Effect.ensuring(work(), tolerant()), recover)
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'effect-string-failure-channel',
+    source: `import silk.effect { Effect }
+effect fn failText() -> i32 ! string { fail "oops" }
+effect fn recoverText(error: string) -> i32 { return 42 }
+pub fn main() -> i32 { return run Effect.catchAll(failText(), recoverText) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'result-alternate-generic-union',
+    source: `import silk.effect { Effect }
+union Outcome<A, E> { Good { value: A }, Bad { error: E } }
+struct First { code: i32 }
+struct Second { code: i32 }
+fn good<A, E>(value: A) -> Outcome<A, E> { return Outcome<A, E>.Good { value: move value } }
+effect fn bad<A, E>(error: E) -> Outcome<A, E> { return Outcome<A, E>.Bad { error: move error } }
+effect fn outcome<A, E>(protected: once Effect<A ! E>) -> Outcome<A, E> {
+  let succeeded = Effect.map<A, Outcome<A, E>, E>(move protected, good)
+  return run Effect.catchAll<Outcome<A, E>, Outcome<A, E>, E, never>(move succeeded, bad)
+}
+effect fn choose(kind: i32) -> i32 ! First | Second {
+  if kind == 0 { return 5 }
+  if kind == 1 { fail First { code: 20 } }
+  fail Second { code: 22 }
+}
+effect fn inspect(kind: i32) -> i32 {
+  return match move (run outcome(choose(kind))) {
+    Outcome<i32, First | Second>.Good { value } => value
+    Outcome<i32, First | Second>.Bad { error } => match move error {
+      First { code } => code
+      Second { code } => code
+    }
+  }
+}
+pub fn main() -> i32 { return (run inspect(0)) + (run inspect(1)) + (run inspect(2)) - 5 }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'result-source-channel-maps',
+    source: `import silk.effect { Effect }
+import silk.result { Result }
+struct First { code: i32 }
+struct Second { code: i32 }
+effect fn succeed() -> i32 ! First { return 40 }
+effect fn failFirst() -> i32 ! First { fail First { code: 2 } }
+fn addTwo(value: i32) -> i32 { return value + 2 }
+fn toSecond(error: First) -> Second { return Second { code: error.code + 40 } }
+fn observe(result: Result<i32, Second>) -> i32 {
+  return match move result {
+    Result<i32, Second>.Success { value } => value
+    Result<i32, Second>.Failure { error } => error.code
+  }
+}
+pub fn main() -> i32 {
+  let success = run Effect.result(succeed() |> Effect.mapError(toSecond) |> Effect.map(addTwo))
+  let failure = run Effect.result(failFirst() |> Effect.mapBoth(addTwo, toSecond))
+  return observe(move success) + observe(move failure) - 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'effect-retry-and-provide-effect',
     source: `import silk.effect { Effect }
 import silk.result { Result }
@@ -3192,6 +3277,54 @@ effect fn build() -> i32 ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'vector-failed-growth-and-reserve-rollback',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.layout { Layout }
+import silk.vector { Vector }
+struct QuotaAllocator { remaining: i32 }
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  if self.remaining == 0 { fail OutOfMemoryError {} }
+  self.remaining = self.remaining - 1
+  let mut inner = Allocator.systemAllocatorProvider()
+  return run Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
+}
+impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
+effect fn append(values: &mut Vector<i32>, value: i32) -> () ! OutOfMemoryError ? &mut Allocator {
+  return run Vector.append<i32>(move values, value)
+}
+effect fn reserve(values: &mut Vector<i32>) -> () ! OutOfMemoryError ? &mut Allocator {
+  return run Vector.reserve<i32>(move values, 100)
+}
+effect fn rejected(error: OutOfMemoryError) -> () { return () }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = QuotaAllocator { remaining: 1 }
+  let mut values = Vector.make<i32>()
+  let a = run append(&mut values, 10) |> Effect.provideMut(&mut allocator)
+  let b = run append(&mut values, 11) |> Effect.provideMut(&mut allocator)
+  let c = run append(&mut values, 12) |> Effect.provideMut(&mut allocator)
+  let d = run append(&mut values, 13) |> Effect.provideMut(&mut allocator)
+  let growth = run Effect.catchAll(
+    append(&mut values, 14) |> Effect.provideMut(&mut allocator),
+    rejected,
+  )
+  drop growth
+  if Vector.length<i32>(&values) != 4 || Vector.capacity<i32>(&values) != 4 { return 2 }
+  if Vector.get<i32>(&values, 0) != 10 || Vector.get<i32>(&values, 3) != 13 { return 3 }
+  let reserved = run Effect.catchAll(
+    reserve(&mut values) |> Effect.provideMut(&mut allocator),
+    rejected,
+  )
+  drop reserved
+  if Vector.length<i32>(&values) != 4 || Vector.capacity<i32>(&values) != 4 { return 5 }
+  if Vector.get<i32>(&values, 0) != 10 || Vector.get<i32>(&values, 3) != 13 { return 6 }
+  return 42
+}
+effect fn outer(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), outer) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

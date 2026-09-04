@@ -17,7 +17,7 @@ export class ProjectWorkerError extends Data.TaggedError('ProjectWorkerError')<{
   readonly cause?: unknown
 }> {}
 
-/** Replaceable execution context for one project's compiler and semantic queries. */
+/** Replaceable processing context for one project's compiler-analysis queries. */
 export interface ProjectWorker {
   readonly _tag: 'ProjectWorker'
   readonly epoch: WorkerEpoch.WorkerEpoch

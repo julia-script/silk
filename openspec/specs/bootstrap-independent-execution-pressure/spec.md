@@ -20,7 +20,7 @@ or Coroutine APIs.
 #### Scenario: Choose first activation in homogeneous owner storage
 
 - **WHEN** a source owner erases two distinct exact Effect body representations into the same `Execution<TaskOutput>` type, stores both in one homogeneous task owner, publishes them Initial, and selects the second first
-- **THEN** the first body remains unrun and every engine observes the owner-selected activation order through one homogeneous storage contract
+- **THEN** the first body remains unrun and every supported target observes the owner-selected activation order through one homogeneous storage contract
 
 #### Scenario: Await a source-owned result
 

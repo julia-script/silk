@@ -7,9 +7,17 @@ The baseline inventory was generated with:
 ```sh
 rg --hidden -n 'Analysis\.evaluate|BootstrapEvaluation\.evaluate' --glob '!.git/**' --glob '!**/node_modules/**'
 rg --hidden -n '@silklang/wasm|WasmBackend|WasmCleanup|WasmEmitContext|WasmLanes|WasmMemory' --glob '!.git/**' --glob '!**/node_modules/**'
+git grep -n 'BootstrapEvaluation' ee6ebb3d41a55fee65f1119b9c495c16d8dfec09 -- .
+git grep -n -E 'codegenWasm|WebAssemblyModuleArtifact|corpusOutcomeShard' ee6ebb3d41a55fee65f1119b9c495c16d8dfec09 -- .
+git grep -n -E 'direct[- ]Wasm|direct WebAssembly' ee6ebb3d41a55fee65f1119b9c495c16d8dfec09 -- .
 ```
 
 It found 671 runtime-evaluator references in 174 files, and 274 direct-Wasm references in 86 files.
+The supplemental whole-actor evaluator search found 141 lines in 56 files, including 118 lines that
+did not spell the `.evaluate` entry point. The supplemental direct-backend API/shard search found
+384 lines in 133 files; the prose/identifier search found 672 lines in 360 files. These supplemental
+sets overlap the primary inventories and deliberately include tracked hidden files and archived
+documents so consumers described without an actor import are not omitted.
 The [assertion ledger](JUL-115-ASSERTION-DISPOSITIONS.md) records the disposition and surviving
 evidence for every affected test registration.
 
@@ -21,10 +29,11 @@ The lockfile contained these 13 importers at implementation start: `.`, `apps/do
 `packages/platform-webcontainer`, and `packages/wasm`. It now contains the same list except for
 `packages/wasm`: 12 importers including the root, or 11 non-root importers.
 
-The removed dependency edges are `apps/docs -> @silklang/wasm` and
-`@silklang/compiler -> @silklang/wasm`; the removed workspace node is `packages/wasm`. The package
-exports, workspace scripts, release validation, and lockfile entries for the deleted package are
-absent.
+The removed dependency edges are `apps/docs -> @silklang/wasm`,
+`@silklang/compiler -> @silklang/wasm`, `apps/docs -> @silklang/formatter`, and
+`apps/docs -> @silklang/lsp`; the removed external Labs-only dependencies are `dockview` and
+`dockview-react`, and the removed workspace node is `packages/wasm`. The package exports, workspace
+scripts, release validation, and lockfile entries for the deleted package are absent.
 
 ## Deleted surfaces
 
@@ -41,6 +50,10 @@ absent.
 
 The Labs-only archives removed in the final review were
 `2026-08-04-visualize-bootstrap-data-flow` and `2026-08-05-visualize-nested-value-flow`.
+The archive audit also removed 47 `bootstrap-syntax-inspector` delta specifications and 49
+`bootstrap-evaluation` delta specifications whose only subject was the deleted inspection or
+runtime-evaluator implementation. Mixed archived changes retain only their still-relevant
+language and LLVM-facing specifications.
 
 ## Surviving authoritative evidence
 

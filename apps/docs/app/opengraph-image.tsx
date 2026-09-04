@@ -69,7 +69,7 @@ export default async function Image() {
         fontFamily: 'JetBrains Mono',
       }}
     >
-      {/* top bar, like the workbench chrome */}
+      {/* top bar, like the editor chrome */}
       <div
         style={{
           height: 54,

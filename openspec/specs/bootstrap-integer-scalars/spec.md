@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define Silk's complete bootstrap integer vocabulary, ergonomic unit and bottom forms, exact literals, conversions, operation modes, and cross-engine behavior for real width-conscious programs.
+Define Silk's complete bootstrap integer vocabulary, ergonomic unit and bottom forms, exact literals, conversions, operation modes, and supported-target behavior for real width-conscious programs.
 
 ## Requirements
 
@@ -98,7 +98,7 @@ return `T`. No numeric conversion SHALL be implicit.
 - **WHEN** ordinary source calls the same checked scalar primitive with equivalent present and absent constructors for another nominal union
 - **THEN** the primitive reports the same arithmetic outcome without compiler registration of either carrier or variant spelling
 
-### Requirement: Every admitted integer operation has engine parity
+### Requirement: Every admitted integer operation is target-consistent
 
 HIR, MIR, layout, native LLVM and LLVM-generated WebAssembly SHALL support every integer type and operation accepted by analysis. Unsupported target behavior MUST be rejected before artifact commitment.
 
@@ -154,12 +154,12 @@ standard-library source backed by the smallest concrete Intrinsic primitives.
 #### Scenario: Convert the maximum scalar
 
 - **WHEN** checked conversion receives `0x10ffff`
-- **THEN** it returns `Some<char>` containing that scalar on every engine
+- **THEN** it returns `Some<char>` containing that scalar on every supported target
 
 #### Scenario: Reject the surrogate hole
 
 - **WHEN** checked conversion receives a value from `0xd800` through `0xdfff`
-- **THEN** it returns `None` on every engine
+- **THEN** it returns `None` on every supported target
 
 #### Scenario: Recover the scalar integer
 

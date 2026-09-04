@@ -73,7 +73,7 @@ public intrinsic spellings.
 - **WHEN** verification scans compiler operation identities, lowering branches, and host imports
 - **THEN** every callable compiler primitive maps to one catalog member and no unregistered public operation remains
 
-#### Scenario: Preserve engine parity
+#### Scenario: Preserve supported-target behavior
 
 - **WHEN** an accepted intrinsic program succeeds, fails, or traps
 - **THEN** logical native LLVM and LLVM-generated WebAssembly execution agree on its observable outcome
