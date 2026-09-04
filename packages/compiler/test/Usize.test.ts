@@ -105,6 +105,39 @@ it.effect('lowers native usize lanes and operations as unsigned i64', () =>
   }),
 )
 
+it.effect('lowers WebAssembly usize lanes and comparisons as unsigned i32 through LLVM', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* source(sharedUnsigned, 'wasm32-unknown-unknown')
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+
+    assert.strictEqual(artifact.target.id, 'wasm32-unknown-unknown')
+    assert.include(artifact.ir, 'llvm.uadd.with.overflow.i32')
+    assert.include(artifact.ir, 'icmp ugt i32')
+  }),
+)
+
+it.effect('guards wasm32 usize overflow and division by zero in LLVM IR', () =>
+  Effect.gen(function* () {
+    const compile = Effect.fnUntraced(function* (expression: string) {
+      const snapshot = yield* source(
+        `fn invalid() -> usize { return ${expression} }
+pub fn main() -> i32 { if invalid() == 0 { return 1 } return 0 }`,
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      return yield* Analysis.codegen(snapshot, { mode: 'release' })
+    })
+    const overflow = yield* compile('4294967295 + 1')
+    const division = yield* compile('1 / 0')
+
+    assert.include(overflow.ir, 'llvm.uadd.with.overflow.i32')
+    assert.include(overflow.ir, '@llvm.trap()')
+    assert.include(division.ir, 'udiv i32')
+    assert.include(division.ir, '@llvm.trap()')
+  }),
+)
+
 it.effect('executes an exact native i64 call and rejects it for the WebAssembly target', () =>
   Effect.gen(function* () {
     const native = yield* Driver.compile({

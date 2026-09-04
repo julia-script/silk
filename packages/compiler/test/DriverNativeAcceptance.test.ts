@@ -325,6 +325,8 @@ it.each(shardedCorpus)(
         const run = yield* runCompiled(outcome.path, program.nativeEnvironment)
         if (program.nativeStdout !== undefined)
           assert.strictEqual(run.stdout, program.nativeStdout, program.name)
+        if (program.nativeStderr !== undefined)
+          assert.strictEqual(run.stderr, program.nativeStderr, program.name)
         const nativeStatus = run.status === null ? null : BigInt(run.status)
         // POSIX exposes only the low unsigned byte of a process exit value.
         const expectedStatus = BigInt(program.expected.result) & 0xffn

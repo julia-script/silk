@@ -29,6 +29,7 @@ const source = 'pub fn main() -> i32 { return 42 }'
 
 const llvmWasmRuntimeSource = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
+import silk.u8 as u8
 import silk.vector { Vector }
 
 effect fn program() -> i32 ! OutOfMemoryError {
@@ -37,7 +38,12 @@ effect fn program() -> i32 ! OutOfMemoryError {
   let appended = run Vector.append<i32>(&mut values, 41)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let one = run Effect.suspend(effect { return 1 })
-  if !Intrinsic.stringEqualsExact("silk", "silk") { return 1 }
+  let text = "silk"
+  let bytes = Intrinsic.stringUtf8Bytes(text)
+  if !Intrinsic.stringEqualsExact(text, "silk") { return 1 }
+  if Intrinsic.stringByteLength(text) != 4 { return 2 }
+  if bytes.length != 4 { return 3 }
+  if u8.toI32(bytes[0]) != 115 { return 4 }
   return Vector.get<i32>(&values, 0) + one
 }
 

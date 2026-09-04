@@ -31,6 +31,38 @@ void *malloc(size_t size) {
 
 void free(void *allocation) { (void)allocation; }
 
+__attribute__((optnone)) void *memcpy(void *destination, const void *source, size_t count) {
+  unsigned char *destination_bytes = (unsigned char *)destination;
+  const unsigned char *source_bytes = (const unsigned char *)source;
+  for (size_t index = 0; index < count; index += 1) {
+    destination_bytes[index] = source_bytes[index];
+  }
+  return destination;
+}
+
+__attribute__((optnone)) void *memmove(void *destination, const void *source, size_t count) {
+  unsigned char *destination_bytes = (unsigned char *)destination;
+  const unsigned char *source_bytes = (const unsigned char *)source;
+  if (destination_bytes < source_bytes) {
+    for (size_t index = 0; index < count; index += 1) {
+      destination_bytes[index] = source_bytes[index];
+    }
+  } else if (destination_bytes > source_bytes) {
+    for (size_t index = count; index > 0; index -= 1) {
+      destination_bytes[index - 1] = source_bytes[index - 1];
+    }
+  }
+  return destination;
+}
+
+__attribute__((optnone)) void *memset(void *destination, int value, size_t count) {
+  unsigned char *destination_bytes = (unsigned char *)destination;
+  for (size_t index = 0; index < count; index += 1) {
+    destination_bytes[index] = (unsigned char)value;
+  }
+  return destination;
+}
+
 int memcmp(const void *left, const void *right, size_t count) {
   const unsigned char *left_bytes = (const unsigned char *)left;
   const unsigned char *right_bytes = (const unsigned char *)right;

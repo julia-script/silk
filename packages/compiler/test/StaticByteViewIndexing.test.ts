@@ -89,6 +89,19 @@ it.effect('keeps byte literals as shared u8 slices through semantic facts, HIR, 
   }),
 )
 
+it.effect('lowers immutable static byte storage through LLVM for native and WebAssembly', () =>
+  Effect.gen(function* () {
+    for (const target of ['aarch64-apple-darwin', 'wasm32-unknown-unknown']) {
+      const snapshot = yield* Analysis.ofSourceRealized(moduleName, ascii(directSource), target)
+      assert.deepEqual(Analysis.diagnostics(snapshot), [], target)
+      const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+      assert.include(artifact.ir, 'constant [4 x i8]', target)
+      assert.include(artifact.ir, 'load i8', target)
+      assert.notInclude(artifact.ir, '@malloc', target)
+    }
+  }),
+)
+
 it.effect('accepts canonical static selectors and rejects malformed roots, indices, and data', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(moduleName, ascii(directSource))

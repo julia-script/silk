@@ -100,6 +100,7 @@ export interface CorpusProgram {
   readonly nativeCSources?: Readonly<Record<string, string>>
   readonly nativeDynamicLibraries?: ReadonlyArray<string>
   readonly nativeStdout?: string
+  readonly nativeStderr?: string
   readonly expected:
     | { readonly _tag: 'Completes'; readonly result: number }
     | { readonly _tag: 'Trap' }
@@ -4907,6 +4908,23 @@ int32_t silk_test_libm_order(double value) { return (int32_t)fmod(value, 43.0); 
     nativeSource: recoveredProvidedWrite,
     nativeImports: { recovered_writer: recoveredWriterModule },
     nativeStdout: 'Hello',
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'standard-stream-ordering',
+    source: 'pub fn main() -> i32 { return 0 }',
+    nativeSource: `import silk.effect { Effect }
+import silk.writer { Writer, WriterError }
+pub effect fn main() -> () ! WriterError {
+  let mut stdout = Writer.stdoutWriterProvider()
+  let mut stderr = Writer.stderrWriterProvider()
+  run Effect.provideMut(Writer.writeAll(Intrinsic.stringUtf8Bytes("heading\\n")), &mut stdout)
+  run Effect.provideMut(Writer.writeAll(b"warning\\n"), &mut stderr)
+  run Effect.provideMut(Writer.writeAll(Intrinsic.stringUtf8Bytes("row\\n")), &mut stdout)
+  return ()
+}`,
+    nativeStdout: 'heading\nrow\n',
+    nativeStderr: 'warning\n',
     expected: { _tag: 'Completes', result: 0 },
   },
   {
