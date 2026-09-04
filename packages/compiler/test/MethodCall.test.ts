@@ -124,6 +124,19 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('rejects associated functions selected from values', () =>
+  Effect.gen(function* () {
+    for (const body of ['return value.zero().read()', 'let zero = value.zero\n  return 0']) {
+      const snapshot = yield* analyze(`${counter}
+pub fn main() -> i32 {
+  let value = Counter { value: 1 }
+  ${body}
+}`)
+      assert.deepEqual(codes(snapshot), ['SEM0198'])
+    }
+  }),
+)
+
 it.effect('completes bound operations after a generic receiver', () =>
   Effect.gen(function* () {
     const source = `${printable}

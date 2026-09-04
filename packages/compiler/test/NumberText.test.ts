@@ -2,9 +2,13 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Hir from '../src/Hir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 import * as Scalar from '../src/Scalar.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as StaticValue from '../src/StaticValue.js'
+import { templateFormattingAcceptance } from './support/corpus.js'
 
 const encoder = new TextEncoder()
 const ascii = (value: string): Uint8Array => encoder.encode(value)
@@ -132,6 +136,81 @@ pub fn main() -> i32 { return 42 }`),
       Analysis.diagnostics(missingDisplay).map((diagnostic) => diagnostic.code),
       ['SEM0083'],
     )
+  }),
+)
+
+it.effect('classifies static template bytes and residualizes only the selected arm', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'number-text/template-byte',
+      ascii(`import silk.static_text as StaticText
+import silk.static_sequence as StaticSequence
+import silk.usize as usize
+static fn startsOpen(value: string) -> bool {
+  let parts = StaticSequence.empty<i32>()
+  let length = StaticText.byteLength(value)
+  let mut index = usize.ZERO
+  while index < length {
+    let byte = StaticText.byteAt(value, index)
+    if byte == 123 { return true }
+    index = index + usize.ONE
+  }
+  return false
+}
+pub fn main() -> i32 {
+  static if startsOpen("name") { return 0 } else { return 42 }
+}`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const encoded = MirEncoding.encode(Analysis.loweredMir(snapshot))
+    assert.include(encoded, 'literal 42 : i32')
+    assert.notInclude(encoded, 'literal 0 : i32')
+    assert.notInclude(encoded, 'StaticText.byteAt')
+  }),
+)
+
+it.effect('residualizes borrowed aggregate formatting without allocator machinery', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'number-text/templates-structure',
+      ascii(templateFormattingAcceptance),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const formatInstances = Analysis.instancesOf(snapshot).instances.filter(
+      (instance) =>
+        instance.key.declaration.module === 'silk/format' &&
+        instance.key.declaration.name === 'Format.format',
+    )
+    assert.strictEqual(formatInstances.length, 4)
+    assert.strictEqual(
+      new Set(
+        formatInstances.map((instance) =>
+          instance.key.staticArguments.map(StaticValue.presentation).join('|'),
+        ),
+      ).size,
+      4,
+    )
+    const projectedLoans = formatInstances.flatMap((instance) =>
+      instance.ownership.loans.filter((loan) => loan.root._tag === 'Parameter'),
+    )
+    assert.isAbove(projectedLoans.length, 0)
+    assert.isTrue(projectedLoans.every((loan) => loan.access === 'Shared'))
+    const residualHir = Hir.encode(
+      Object.freeze({
+        _tag: 'HirModule',
+        module: 'silk/format',
+        functions: Object.freeze(formatInstances.map((instance) => instance.function)),
+      }),
+    )
+    const mir = MirEncoding.encode(Analysis.loweredMir(snapshot))
+    assert.include(residualHir, 'borrow-value')
+    assert.include(mir, 'begin-loan')
+    for (const spelling of ['silk/allocator', 'Intrinsic.Fields', 'silk/static_sequence']) {
+      assert.notInclude(residualHir, spelling)
+      assert.notInclude(mir, spelling)
+    }
   }),
 )
 

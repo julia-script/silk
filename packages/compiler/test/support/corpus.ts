@@ -217,15 +217,19 @@ import silk.usize as usize
 import silk.writer { Writer, WriterError }
 
 struct Capture { index: usize valid: bool }
+struct Person { pub name: string pub age: i32 }
 
 effect fn writeAll(self: &mut Capture, bytes: &[u8]) -> () {
   let expected = [
-    u8.toU8(74), u8.toU8(117), u8.toU8(108), u8.toU8(105),
-    u8.toU8(97), u8.toU8(58), u8.toU8(51), u8.toU8(49)
+    u8.toU8(65), u8.toU8(58), u8.toU8(51), u8.toU8(49), u8.toU8(124),
+    u8.toU8(74), u8.toU8(58), u8.toU8(74), u8.toU8(124),
+    u8.toU8(123), u8.toU8(110), u8.toU8(97), u8.toU8(109), u8.toU8(101),
+    u8.toU8(125), u8.toU8(124), u8.toU8(77), u8.toU8(58), u8.toU8(50),
+    u8.toU8(56)
   ]
   let mut offset = usize.ZERO
   while offset < bytes.length {
-    if 8 <= self.index || bytes[offset] != expected[self.index] { self.valid = false }
+    if 20 <= self.index || bytes[offset] != expected[self.index] { self.valid = false }
     self.index = self.index + usize.ONE
     offset = offset + usize.ONE
   }
@@ -241,13 +245,18 @@ impl Writer for Capture {
 
 effect fn render() -> i32 ! WriterError {
   let mut capture = Capture { index: usize.ZERO, valid: true }
-  let args = .{ name: "Julia", age: 31 }
-  run Format.format("{name}", &args)
+  run Format.format("{}:{}", &("A", 31)) |> Effect.provideMut<Writer>(&mut capture)
+  run Writer.writeAll(b"|") |> Effect.provideMut<Writer>(&mut capture)
+  run Format.format("{name}:{name}", &.{ name: "J" })
     |> Effect.provideMut<Writer>(&mut capture)
-  run Format.format(":{age}", &args)
+  run Writer.writeAll(b"|") |> Effect.provideMut<Writer>(&mut capture)
+  run Format.format("{{name}}", &.{ name: "unused" })
     |> Effect.provideMut<Writer>(&mut capture)
+  run Writer.writeAll(b"|") |> Effect.provideMut<Writer>(&mut capture)
+  let person = Person { name: "M", age: 28 }
+  run Format.format("{name}:{age}", &person) |> Effect.provideMut<Writer>(&mut capture)
   if !capture.valid { return 1 }
-  if capture.index != 8 { return 2 }
+  if capture.index != 20 { return 2 }
   return 42
 }
 
@@ -257,19 +266,150 @@ pub fn main() -> i32 {
   return run Effect.catchAll(render(), recover)
 }`
 
+/** Formatting options are observed through the real native stdout boundary. */
+export const formatOptionsAcceptance = `import silk.effect { Effect }
+import silk.format { Alignment, Format, FormatOptions, Sign }
+import silk.option { Option }
+import silk.usize as usize
+import silk.writer { Writer, WriterError }
+
+fn options(
+  width: usize,
+  alignment: Alignment,
+  fill: char,
+  sign: Sign,
+  zeroPad: bool,
+  precision: Option<usize>,
+) -> FormatOptions {
+  return FormatOptions {
+    width: Option.some<usize>(width), alignment: alignment, fill: fill, sign: sign,
+    alternate: true, zeroPad: zeroPad, precision: move precision, color: true,
+  }
+}
+
+fn accessorsHold() -> bool {
+  let defaults = Format.makeDefault()
+  if Format.hasWidth(&defaults) { return false }
+  if Format.width(&defaults) != usize.ZERO { return false }
+  if Format.alignment(&defaults) != Alignment.Default { return false }
+  if Format.fill(&defaults) != ' ' { return false }
+  if Format.sign(&defaults) != Sign.NegativeOnly { return false }
+  if Format.alternate(&defaults) { return false }
+  if Format.zeroPad(&defaults) { return false }
+  if Format.hasPrecision(&defaults) { return false }
+  if Format.precision(&defaults) != usize.ZERO { return false }
+  if Format.color(&defaults) { return false }
+  let explicit = Format.make(
+    options(12, Alignment.Left, '*', Sign.Space, true, Option.some<usize>(9)),
+  )
+  if !Format.hasWidth(&explicit) { return false }
+  if Format.width(&explicit) != 12 { return false }
+  if Format.alignment(&explicit) != Alignment.Left { return false }
+  if Format.fill(&explicit) != '*' { return false }
+  if Format.sign(&explicit) != Sign.Space { return false }
+  if !Format.alternate(&explicit) { return false }
+  if !Format.zeroPad(&explicit) { return false }
+  if !Format.hasPrecision(&explicit) { return false }
+  if Format.precision(&explicit) != 9 { return false }
+  return Format.color(&explicit)
+}
+
+effect fn render() -> () ! WriterError ? &mut Writer {
+  let negative = 0 - 42
+  run Format.displayWith(
+    &negative,
+    options(8, Alignment.Right, '*', Sign.NegativeOnly, false, Option.some<usize>(4)),
+  )
+  run Writer.writeAll(b"|")
+  let positive = 42
+  run Format.displayWith(
+    &positive,
+    options(6, Alignment.Left, '.', Sign.Always, false, Option.none<usize>()),
+  )
+  run Writer.writeAll(b"|")
+  let zero = 0
+  run Format.displayWith(
+    &zero,
+    options(7, Alignment.Center, '\u{e9}', Sign.NegativeOnly, false, Option.some<usize>(3)),
+  )
+  run Writer.writeAll(b"|")
+  run Format.displayWith(
+    &negative,
+    options(7, Alignment.Default, ' ', Sign.NegativeOnly, true, Option.none<usize>()),
+  )
+  run Writer.writeAll(b"|")
+  let seven = 0 - 7
+  run Format.displayWith(
+    &seven,
+    options(5, Alignment.Center, '\u{b7}', Sign.NegativeOnly, false, Option.none<usize>()),
+  )
+  run Writer.writeAll(b"|")
+  return run Format.displayWith(
+    &positive,
+    options(35, Alignment.Right, '_', Sign.NegativeOnly, false, Option.none<usize>()),
+  )
+}
+
+effect fn build() -> i32 ! WriterError {
+  if !accessorsHold() { return 2 }
+  let mut writer = Writer.stdoutWriterProvider()
+  run render() |> Effect.provideMut<Writer>(&mut writer)
+  return 42
+}
+effect fn recover(error: WriterError) -> i32 { return 1 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
+
+/** Closed Effect values survive ordinary passing, storage, capture, return, and specialization. */
+export const effectHigherOrderValues = `effect fn succeed(value: i32) -> i32 { return value }
+effect fn alternate(value: i32) -> i32 { return value }
+fn pass(self: once Effect<i32>) -> once Effect<i32> { return move self }
+fn specialize<A, E, ?R>(self: once Effect<A ! E ? R>) -> once Effect<A ! E ? R> {
+  return move self
+}
+fn wrap(self: once Effect<i32>) -> once Effect<i32> {
+  return effect { return run self }
+}
+pub fn main() -> i32 {
+  let stored = specialize(pass(succeed(20)))
+  let distinct = pass(alternate(0))
+  let captured = wrap(succeed(22))
+  return (run stored) + (run distinct) + (run captured)
+}`
+
 /** Explicit referent projection preserves runtime-indexed reads and writes in native execution. */
 export const referenceProjectionAcceptance = `import silk.usize as usize
 
+struct Empty {}
+impl Copy for Empty {}
 struct Buffer { values: [i32; 3] }
+struct Box { value: i32 }
+
+fn readEmpty(value: &Empty) -> Empty { return value.* }
 
 fn update(buffer: &mut Buffer, index: usize) -> i32 {
   buffer.*.values[index] = 42
   return buffer.*.values[index]
 }
+fn increment(box: &mut Box) -> () { box.value = box.value + 1 }
+fn observe(box: &Box) -> i32 { return box.value }
+fn read(value: &i32) -> i32 { return value.* }
+fn forwarded(value: &i32) -> i32 { return read(&value.*) }
+fn twice(box: &mut Box) -> i32 {
+  increment(&mut box)
+  increment(&mut box)
+  return observe(&box) + forwarded(&box.value)
+}
 
 pub fn main() -> i32 {
+  let empty = Empty {}
+  let copied = readEmpty(&empty)
+  drop copied
   let mut buffer = Buffer { values: [1, 2, 3] }
-  return update(&mut buffer, usize.ONE)
+  if update(&mut buffer, usize.ONE) != 42 { return 1 }
+  let mut box = Box { value: 20 }
+  if twice(&mut box) != 44 { return 2 }
+  if box.value != 22 { return 3 }
+  return 42
 }`
 
 /** Statement-form `if let` keeps pattern bindings live on every native success branch. */
@@ -1500,6 +1640,12 @@ pub fn main() -> i32 {
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'format-options',
+    source: formatOptionsAcceptance,
+    nativeStdout: `***-0042|+42...|éé000éé|-000042|·-7··|${'_'.repeat(33)}42`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'number-parsing',
     source: numberParsingAcceptance,
     expected: { _tag: 'Completes', result: 42 },
@@ -1999,7 +2145,14 @@ pub fn main() -> i32 {
   },
   {
     name: 'closed-operator-surface',
-    source: `pub fn main() -> i32 {
+    source: `import silk.i16 as i16
+import silk.u8 as u8
+import silk.option { Option }
+fn checkedSection() -> Option<u8> {
+  let addOne = u8.checkedAdd(1)
+  return addOne(u8.add(40, 1))
+}
+pub fn main() -> i32 {
 if 6 * 7 != 42 { return 0 }
 if 84 / 2 != 42 { return 0 }
 if 85 % 43 != 42 { return 0 }
@@ -2011,6 +2164,23 @@ if !(3 > 2) { return 0 }
 if !(3 >= 3) { return 0 }
 if true != true { return 0 }
 if false == true { return 0 }
+let overflow = u8.checkedAdd(255, 1)
+let overflowed = match move overflow {
+  Option<u8>.None => false
+  Option<u8>.Some { value } => true
+}
+if overflowed { return 1 }
+let converted = i16.checkedToU8(255)
+let convertedValue = match move converted {
+  Option<u8>.None => 0
+  Option<u8>.Some { value } => u8.toI32(value)
+}
+if convertedValue != 255 { return 2 }
+let sectioned = match move checkedSection() {
+  Option<u8>.None => 0
+  Option<u8>.Some { value } => u8.toI32(value)
+}
+if sectioned != 42 { return 3 }
 return (40 + 2) * 1
 }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -2643,7 +2813,12 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
   // `&&`/`||` runs exactly when short-circuiting says it must.
   {
     name: 'short-circuit-counting',
-    source: `fn bump(counter: &mut [i32], answer: bool) -> bool {
+    source: `struct Flag { value: bool }
+fn unwrap(flag: Flag) -> bool { return flag.value }
+fn chooseRight(gate: bool, flag: Flag) -> bool { return gate && unwrap(move flag) }
+fn chooseLeft(gate: bool, flag: Flag) -> bool { return unwrap(move flag) && gate }
+
+fn bump(counter: &mut [i32], answer: bool) -> bool {
   counter[0] = counter[0] + 1
   return answer
 }
@@ -2661,6 +2836,10 @@ fn disjunction(gate: bool) -> i32 {
 }
 
 pub fn main() -> i32 {
+  if chooseRight(false, Flag { value: true }) == false {} else { return 5 }
+  if chooseRight(true, Flag { value: true }) {} else { return 6 }
+  if chooseLeft(true, Flag { value: true }) {} else { return 7 }
+  if chooseLeft(false, Flag { value: true }) == false {} else { return 8 }
   if conjunction(false) == 0 {} else { return 1 }
   if conjunction(true) == 1 {} else { return 2 }
   if disjunction(true) == 0 {} else { return 3 }
@@ -2694,6 +2873,7 @@ pub fn main() -> i32 {
 import silk.result { Result }
 
 struct Wide { code: i32 }
+struct Token { code: i32 }
 fn double(value: i32) -> i32 { return value * 2 }
 fn halve(value: i32) -> Option<i32> {
   if value == 0 { return Option.none<i32>() }
@@ -2705,6 +2885,7 @@ fn halfResult(value: i32) -> Result<i32, i32> {
   return Result.succeed<i32, i32>(value / 2)
 }
 fn widen(error: i32) -> Wide { return Wide { code: error + 30 } }
+fn advance(token: Token) -> Token { return Token { code: token.code + 1 } }
 fn observeWide(self: Result<i32, Wide>) -> i32 {
   return match move self {
     Result<i32, Wide>.Success { value: success } => success
@@ -2729,8 +2910,25 @@ pub fn main() -> i32 {
   if Result.unwrapOr<i32, i32>(move carriedFailure, 23) != 23 { return 6 }
   let changed = Result.mapError<i32, i32, Wide>(Result.failResult<i32, i32>(4), widen)
   if observeWide(move changed) != 34 { return 7 }
+  let movedOption = Option.map<Token, Token>(Option.some<Token>(Token { code: 40 }), advance)
+  let optionToken = Option.unwrapOr<Token>(move movedOption, Token { code: 0 })
+  if optionToken.code != 41 { return 8 }
+  let movedResult = Result.map<Token, i32, Token>(
+    Result.succeed<Token, i32>(move optionToken),
+    advance,
+  )
+  let resultToken = match move movedResult {
+    Result<Token, i32>.Success { value } => move value
+    Result<Token, i32>.Failure { error } => Token { code: error }
+  }
+  if resultToken.code != 42 { return 9 }
   return 42
 }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'effect-higher-order-values',
+    source: effectHigherOrderValues,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -2740,6 +2938,7 @@ import silk.result { Result }
 
 struct First { code: i32 }
 struct Second { code: i32 }
+struct Token { value: i32 }
 effect fn succeed(value: i32) -> i32 ! First { return value }
 effect fn failFirst() -> i32 ! First { fail First { code: 2 } }
 fn addTwo(value: i32) -> i32 { return value + 2 }
@@ -2786,6 +2985,9 @@ pub fn main() -> i32 {
   let created = Effect.of(42)
   let createdValue = run created
   if createdValue != 42 { return 6 }
+  let tokenEffect = Effect.of(Token { value: 42 })
+  let token = run tokenEffect
+  if token.value != 42 { return 7 }
   return 42
 }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -2877,21 +3079,39 @@ pub fn main() -> i32 {
   },
   {
     name: 'effect-retry-and-provide-effect',
-    source: `import silk.effect { Effect }
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
 import silk.result { Result }
+import silk.shared { Shared }
 
 struct Problem { code: i32 }
 service Clock { effect fn value() -> i32 ? &Clock }
 struct FixedClock { value: i32 }
 effect fn clockValue(self: &FixedClock) -> i32 { return self.value }
 impl Clock for FixedClock { value: FixedClock.clockValue }
-service Journal { effect fn acquire() -> () ? &mut Journal }
-struct MemoryJournal { count: i32 }
-effect fn acquire(self: &mut MemoryJournal) -> () {
-  self.count = self.count + 1
-  return ()
+struct Lifecycle { acquired: i32 released: i32 valid: bool }
+struct TrackedClock { value: i32 lifecycle: Shared<Lifecycle> }
+fn acquire(lifecycle: &mut Lifecycle) -> i32 {
+  if lifecycle.acquired != lifecycle.released { lifecycle.valid = false }
+  lifecycle.acquired = lifecycle.acquired + 1
+  return 0
 }
-impl Journal for MemoryJournal { acquire: MemoryJournal.acquire }
+fn release(lifecycle: &mut Lifecycle) -> i32 {
+  if lifecycle.acquired != (lifecycle.released + 1) { lifecycle.valid = false }
+  lifecycle.released = lifecycle.released + 1
+  return 0
+}
+fn lifecycleAccepted(lifecycle: &Lifecycle) -> bool {
+  return lifecycle.valid && lifecycle.acquired == 3 && lifecycle.released == 3
+}
+effect fn trackedClockValue(self: &TrackedClock) -> i32 { return self.value }
+impl Clock for TrackedClock { value: TrackedClock.trackedClockValue }
+impl Drop for TrackedClock {
+  fn drop(self: &mut TrackedClock) -> () {
+    let changed = Shared.withMut<Lifecycle, i32>(&self.lifecycle, release)
+    return ()
+  }
+}
 effect fn read() -> i32 ? &Clock { return run Clock.value() }
 effect fn nestedRead(inner: &FixedClock) -> i32 ? &Clock {
   let before = run read()
@@ -2900,9 +3120,9 @@ effect fn nestedRead(inner: &FixedClock) -> i32 ? &Clock {
   return before + inside + after
 }
 effect fn makeClock() -> FixedClock { return FixedClock { value: 42 } }
-effect fn makeTrackedClock() -> FixedClock ? &mut Journal {
-  run Journal.acquire()
-  return FixedClock { value: 42 }
+effect fn makeTrackedClock(lifecycle: &Shared<Lifecycle>) -> TrackedClock {
+  let changed = Shared.withMut<Lifecycle, i32>(lifecycle, acquire)
+  return TrackedClock { value: 42, lifecycle: Shared.clone<Lifecycle>(lifecycle) }
 }
 effect fn readAndFail() -> i32 ! Problem ? &Clock {
   let value = run Clock.value()
@@ -2912,6 +3132,16 @@ effect fn succeed() -> i32 ! Problem { return 42 }
 effect fn failAlways() -> i32 ! Problem { fail Problem { code: 2 } }
 effect fn recoverProblem(error: Problem) -> i32 { return error.code }
 fn addForty(value: i32) -> i32 { return value + 40 }
+fn addThirtyNine(value: i32) -> i32 { return value + 39 }
+effect fn retryThenSucceed() -> i32 ! Problem {
+  let mut count = 0
+  let attempt = effect {
+    count = count + 1
+    if count < 3 { fail Problem { code: count } }
+    return count
+  }
+  return run move attempt |> Effect.retry(2)
+}
 fn observe(result: Result<i32, Problem>) -> i32 {
   return match move result {
     Result<i32, Problem>.Success { value } => value
@@ -2919,7 +3149,7 @@ fn observe(result: Result<i32, Problem>) -> i32 {
   }
 }
 
-pub fn main() -> i32 {
+effect fn scenario() -> i32 ! OutOfMemoryError {
   let success = run Effect.result(succeed() |> Effect.retry(3))
   let failure = run Effect.result(failAlways() |> Effect.retry(2))
   if observe(move success) != 42 { return 1 }
@@ -2933,19 +3163,34 @@ pub fn main() -> i32 {
   let inner = FixedClock { value: 2 }
   let nested = run nestedRead(&inner) |> Effect.provide(&outer)
   if nested != 42 { return 5 }
-  let mut journal = MemoryJournal { count: 0 }
-  let tracked = readAndFail() |> Effect.provideEffect(makeTrackedClock()) |> Effect.retry(2)
-  let trackedResult = run Effect.result(move tracked) |> Effect.provideMut(&mut journal)
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let lifecycle = run Shared.make<Lifecycle>(Lifecycle {
+    acquired: 0,
+    released: 0,
+    valid: true,
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let tracked = readAndFail()
+    |> Effect.provideEffect<Clock>(makeTrackedClock(&lifecycle))
+    |> Effect.retry(2)
+  let trackedResult = run Effect.result(move tracked)
   if observe(move trackedResult) != 42 { return 6 }
-  if journal.count != 3 { return 7 }
+  let balanced = Shared.with<Lifecycle, bool>(&lifecycle, lifecycleAccepted)
+  drop lifecycle
+  if !balanced { return 7 }
   let recoveredMapped = run (
     failAlways()
       |> Effect.catchAll(recoverProblem)
       |> Effect.map(addForty)
   )
   if recoveredMapped != 42 { return 8 }
+  let retryMapped = run retryThenSucceed()
+    |> Effect.catchAll(recoverProblem)
+    |> Effect.map(addThirtyNine)
+  if retryMapped != 42 { return 9 }
   return 42
-}`,
+}
+effect fn recoverAllocation(error: OutOfMemoryError) -> i32 { return 99 }
+pub fn main() -> i32 { return run Effect.catchAll(scenario(), recoverAllocation) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -3018,6 +3263,11 @@ pub fn main() -> i32 {
     |> Effect.provideMut(&mut successLog)
   if success != 42 { return 1 }
   if successLog.value != 12 { return 2 }
+  let mut pipedLog = MemoryJournal { value: 0 }
+  let piped = run first() |> Effect.zip(second()) |> Effect.map(pairValue)
+    |> Effect.provideMut(&mut pipedLog)
+  if piped != 42 { return 9 }
+  if pipedLog.value != 12 { return 10 }
   let mut tripleLog = MemoryJournal { value: 0 }
   let triple = run Effect.zip3(first(), second(), third()) |> Effect.map(tripleValue)
     |> Effect.provideMut(&mut tripleLog)
@@ -3033,6 +3283,13 @@ pub fn main() -> i32 {
     |> Effect.catchAll(recover) |> Effect.provideMut(&mut secondFailureLog)
   if secondFailure != 8 { return 7 }
   if secondFailureLog.value != 12 { return 8 }
+  let mut middleFailureLog = MemoryJournal { value: 0 }
+  let middleFailure = run Effect.zip3(first(), failSecond(), third())
+    |> Effect.map(tripleValue)
+    |> Effect.catchAll(recover)
+    |> Effect.provideMut(&mut middleFailureLog)
+  if middleFailure != 8 { return 11 }
+  if middleFailureLog.value != 12 { return 12 }
   return 42
 }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -3572,6 +3829,7 @@ effect fn build() -> i32 ! OutOfMemoryError {
   let alreadySorted = run Vector.sort<i32>(&mut already) |> Effect.provideMut(&mut allocator)
   if Vector.get<i32>(&already, usize.ZERO) != 1 { return 7 }
   if Vector.get<i32>(&already, usize.ONE) != 2 { return 7 }
+  if Vector.get<i32>(&already, usize.ONE + usize.ONE) != 3 { return 7 }
 
   let mut empty = Vector.make<i32>()
   let emptyMiss = Vector.binarySearch<i32>(&empty, 1)
@@ -4578,14 +4836,38 @@ pub fn main() -> i32 {
   },
   {
     name: 'stored-callable-lazy-moved-effect',
-    source: `struct Token { value: i32 }
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+struct Token { value: i32 }
+struct Counter { value: i32 }
 fn consume(token: Token) -> i32 { return token.value }
-pub fn main() -> i32 {
+fn increment(counter: &mut Counter) -> i32 {
+  counter.value = counter.value + 1
+  return counter.value
+}
+fn read(counter: &Counter) -> i32 { return counter.value }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let counter = run Shared.make<Counter>(Counter { value: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let captured = Shared.clone<Counter>(&counter)
   let token = Token { value: 42 }
-  let deferred = effect fn() -> i32 { return consume(move token) }
+  let deferred = effect fn() -> i32 {
+    let changed = Shared.withMut<Counter, i32>(&captured, increment)
+    return consume(move token)
+  }
   let pending = deferred()
-  return run pending
-}`,
+  let before = Shared.with<Counter, i32>(&counter, read)
+  if before != 0 { return 1 }
+  let result = run pending
+  let after = Shared.with<Counter, i32>(&counter, read)
+  drop counter
+  if after != 1 { return 2 }
+  return result
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -4594,12 +4876,27 @@ pub fn main() -> i32 {
 import silk.effect { Effect }
 import silk.shared { Shared }
 struct Cell { value: i32 }
-struct Guard { primary: Shared<Cell> replacement: Shared<Cell> }
+struct Observation { value: i32 }
+struct Guard {
+  primary: Shared<Cell>
+  replacement: Shared<Cell>
+  observation: Shared<Observation>
+}
+fn readCell(cell: &Cell) -> i32 { return cell.value }
+fn markObserved(observation: &mut Observation) -> i32 {
+  observation.value = 2
+  return observation.value
+}
+fn readObservation(observation: &Observation) -> i32 { return observation.value }
 impl Drop for Guard {
   fn drop(self: &mut Guard) -> () {
     let next = Shared.clone<Cell>(&self.replacement)
     let previous = Intrinsic.replace(self.primary, move next)
     drop previous
+    let selected = Shared.with<Cell, i32>(&self.primary, readCell)
+    if selected == 2 {
+      let observed = Shared.withMut<Observation, i32>(&self.observation, markObserved)
+    }
     return ()
   }
 }
@@ -4611,9 +4908,19 @@ effect fn build() -> i32 ! OutOfMemoryError {
     |> Effect.provideMut<Allocator>(&mut allocator))
   let replacement = run (Shared.make<Cell>(Cell { value: 2 })
     |> Effect.provideMut<Allocator>(&mut allocator))
-  let guard = Guard { primary: move primary, replacement: move replacement }
+  let observation = run (Shared.make<Observation>(Observation { value: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator))
+  let retainedObservation = Shared.clone<Observation>(&observation)
+  let guard = Guard {
+    primary: move primary,
+    replacement: move replacement,
+    observation: move observation,
+  }
   let holder = Holder { step: consume(move guard) }
   drop holder
+  let selected = Shared.with<Observation, i32>(&retainedObservation, readObservation)
+  drop retainedObservation
+  if selected != 2 { return 1 }
   return 42
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
@@ -4811,6 +5118,47 @@ effect fn program() -> i32 ! OutOfMemoryError {
   let selected = Intrinsic.replace(owner.slot, Empty {})
   run finish(move selected, &mut owner)
   return owner.result
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return -2 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
+
+const independentExecutionLatchedDestroy = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
+import silk.shared { Shared }
+struct Guard {}
+struct ReadyState { called: i32 }
+fn register(wake: Intrinsic.Wake) -> Guard {
+  Intrinsic.wake(move wake)
+  return Guard {}
+}
+effect fn body() -> i32 { run Execution.park(register) return 1 }
+fn markReady(state: &mut ReadyState) -> () { state.called = 1 return () }
+fn ready(state: &Shared<ReadyState>) -> () {
+  Shared.withMut(state, markReady)
+  return ()
+}
+fn readReady(state: &mut ReadyState) -> i32 { return state.called }
+fn complete(state: &mut (), value: i32) -> () { return () }
+fn suspend(state: &mut (), execution: Intrinsic.Execution<i32>) -> () {
+  drop execution
+  return ()
+}
+effect fn driveOnce(execution: Intrinsic.Execution<i32>, state: &mut ()) -> () {
+  return run Execution.drive(move execution, move state, complete, suspend)
+}
+effect fn program() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let readyState = run Shared.make<ReadyState>(ReadyState { called: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let endpoint = Shared.clone(&readyState)
+  let execution = run Execution.make(body(), move endpoint, ready)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut state = ()
+  run driveOnce(move execution, &mut state)
+  let called = Shared.withMut(&readyState, readReady)
+  drop readyState
+  return 42 + called * 1000
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
@@ -5572,6 +5920,11 @@ pub effect fn main() -> () ! WriterError {
   {
     name: 'independent-execution-latched-resume',
     source: independentExecutionLatchedResume,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'independent-execution-latched-destroy',
+    source: independentExecutionLatchedDestroy,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

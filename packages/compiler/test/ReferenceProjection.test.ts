@@ -6,6 +6,7 @@ import type * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Residualization from '../src/Residualization.js'
 import type * as StaticValue from '../src/StaticValue.js'
+import { referenceProjectionAcceptance } from './support/corpus.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -54,6 +55,22 @@ fn invalid(box: &Box) -> () { mutate(&mut box) }`),
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
       ['SEM0056'],
     )
+  }),
+)
+
+it.effect('retains zero-lane reads and nested reborrows while restoring the parent', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'reference-projection/surviving-runtime-structure',
+      ascii(referenceProjectionAcceptance),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const encoded = Hir.encode(Analysis.rootAnalysis(snapshot).hir)
+    assert.include(encoded, 'reborrow-value')
+    assert.include(encoded, 'readEmpty')
+    assert.deepEqual(Hir.verify(Analysis.rootAnalysis(snapshot).hir), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
   }),
 )
 

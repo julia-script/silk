@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as Type from '../src/Type.js'
 import * as Projections from './support/projections.js'
+import { effectHigherOrderValues } from './support/corpus.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -100,5 +101,30 @@ it.effect('resolves flatten through the ordinary declaration path without an int
     )
     assert.notInclude(catalog, 'effectResult')
     assert.notInclude(catalog, 'flatten')
+  }),
+)
+
+it.effect('specializes passed, returned, stored, and captured closed Effect values', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'effect-runtime/higher-order-structure',
+      ascii(effectHigherOrderValues),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const passInstances = Analysis.instancesOf(snapshot).instances.filter(
+      (instance) => instance.key.declaration.name === 'pass',
+    )
+    assert.strictEqual(passInstances.length, 2)
+    assert.strictEqual(
+      new Set(
+        passInstances.flatMap((instance) =>
+          instance.key.typeArguments
+            .filter(Type.isEffectIdentityArgument)
+            .map((argument) => argument.identity),
+        ),
+      ).size,
+      2,
+    )
   }),
 )

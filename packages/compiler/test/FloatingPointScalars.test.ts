@@ -33,6 +33,17 @@ it('rounds decimal source directly to canonical IEEE bits', () => {
     width: 64,
     bits: 0x8000000000000000n,
   })
+  assert.deepEqual(FloatingPoint.fromDecimal('1.000_5'.replaceAll('_', ''), 64), {
+    width: 64,
+    bits: 0x3ff0020c49ba5e35n,
+  })
+  assert.deepEqual(FloatingPoint.fromDecimal('1e5', 64), FloatingPoint.fromDecimal('100000.0', 64))
+  assert.deepEqual(FloatingPoint.fromDecimal('1e+5', 64), FloatingPoint.fromDecimal('100000.0', 64))
+  assert.deepEqual(FloatingPoint.fromDecimal('1e-5', 64), FloatingPoint.fromDecimal('0.00001', 64))
+  assert.deepEqual(
+    FloatingPoint.fromDecimal('1.5e10', 64),
+    FloatingPoint.fromDecimal('15000000000.0', 64),
+  )
 })
 
 it.effect('fails to compile a float literal whose exponent has no digits', () =>

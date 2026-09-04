@@ -272,8 +272,11 @@ it.each(shardedCorpus)(
         snapshot.mir._tag,
         'Available',
         `${program.name}: ${Analysis.diagnostics(snapshot)
-          .map((diagnostic) => diagnostic.code)
-          .join(',')}`,
+          .map(
+            (diagnostic) =>
+              `${diagnostic.code}@${diagnostic.span.start}-${diagnostic.span.end}: ${diagnostic.message}`,
+          )
+          .join('\n')}`,
       )
       if (snapshot.mir._tag !== 'Available') return
       const compiledObjects =
