@@ -384,7 +384,7 @@ it.effect('reuses backend emission while denying native final-cache reads and wr
         yield* NativeToolchain.writeArtifactCache(
           {
             _tag: 'ArtifactCache',
-            get: () => Effect.succeed(undefined),
+            get: (seedKey: string) => Effect.sync(() => entries.get(seedKey)),
             set: (seedKey: string, bytes: Uint8Array) =>
               Effect.sync(() => {
                 entries.set(seedKey, bytes)
