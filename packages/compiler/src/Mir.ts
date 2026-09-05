@@ -124,6 +124,15 @@ export const semanticType = (self: Type): DeclarationFacts.SemanticType => {
     : self._tag
 }
 
+/** Distinguishes borrowing a stored view descriptor from reborrowing the memory it denotes. */
+export const borrowsDescriptor = (
+  self: Extract<Operation, { readonly _tag: 'BeginLoan' }>,
+): boolean =>
+  !self.reborrow &&
+  self.type._tag === 'Reference' &&
+  (self.sourceType._tag === 'Reference' || self.sourceType._tag === 'Slice') &&
+  SilkType.runtimeKey(self.type.type.target) === SilkType.runtimeKey(semanticType(self.sourceType))
+
 export const typeText = (self: Type): string => SilkType.encode(semanticType(self))
 /** Reads the concrete sealed Copy verdict published by target layout. */
 export const isCopy = (layout: Layout.Plan, type: DeclarationFacts.SemanticType): boolean =>

@@ -1019,16 +1019,22 @@ pub fn main() -> i32 {
 it.effect('shares runtime instances and layouts across distinct proven lifetime arguments', () =>
   Effect.gen(function* () {
     const result = yield* snapshot(`struct View<'a> { value: &'a i32 }
+struct Exclusive<'a> { value: &'a mut i32 }
+impl<'a> Drop for Exclusive<'a> { fn drop(self: &mut Exclusive<'a>) -> () { return () } }
+fn guard<'a>(value: &'a mut i32) -> Exclusive<'a> { return Exclusive { value: move value } }
 fn wrap<'a>(value: &'a i32) -> View<'a> { return View<'a> { value: value } }
 fn reborrow<'a>(value: &'a i32) -> &'a i32 { return &value.* }
 effect fn read<'a>(value: &'a i32) -> i32 { return value.* }
 pub fn main() -> i32 {
-  let left = 20
-  let right = 22
+  let mut left = 20
+  let mut right = 22
   let first = wrap(&left)
   let second = wrap(&right)
   let firstValue = run read(reborrow(first.value))
   let secondValue = run read(reborrow(second.value))
+  let exclusiveLeft = guard(&mut left)
+  let exclusiveRight = guard(&mut right)
+  drop exclusiveLeft drop exclusiveRight
   return firstValue + secondValue
 }`)
     assert.deepEqual(Analysis.diagnostics(result), [])
@@ -1044,6 +1050,10 @@ pub fn main() -> i32 {
     )
     assert.strictEqual(
       discovery.instances.filter((instance) => instance.key.declaration.name === 'reborrow').length,
+      1,
+    )
+    assert.strictEqual(
+      discovery.instances.filter((instance) => instance.key.declaration.name === 'guard').length,
       1,
     )
     const plan = Analysis.layoutOf(result)
@@ -1069,6 +1079,13 @@ pub fn main() -> i32 {
       Type.runtimeKey(firstView),
     )
     assert.strictEqual(Layout.entry(plan.value, firstView), Layout.entry(plan.value, secondView))
+    const firstExclusive = Type.nominal('golden/program', 'Exclusive', [first.lifetime])
+    const secondExclusive = Type.nominal('golden/program', 'Exclusive', [second.lifetime])
+    assert.isDefined(Layout.entry(plan.value, firstExclusive))
+    assert.strictEqual(
+      Layout.entry(plan.value, firstExclusive),
+      Layout.entry(plan.value, secondExclusive),
+    )
     assert.strictEqual(
       Layout.callingShape(plan.value, first),
       Layout.callingShape(plan.value, second),

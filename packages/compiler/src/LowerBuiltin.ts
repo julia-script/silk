@@ -619,7 +619,7 @@ const lowerBuiltinOperation = (
     const [buffer, index] = argumentLocals
     const type = fn.type(expression.type)
     const element = Type.isSlot(expression.type)
-      ? Type.typeArgumentAt(expression.type, 0)
+      ? Type.typeArgumentAt(expression.type, 1)
       : undefined
     if (
       buffer === undefined ||
@@ -819,7 +819,7 @@ const lowerBuiltinOperation = (
     const slotArgument = expression.arguments.at(0)
     const slotType = slotArgument?._tag === 'Unavailable' ? undefined : slotArgument?.type
     const slotElement =
-      slotType !== undefined && Type.isSlot(slotType) ? Type.typeArgumentAt(slotType, 0) : undefined
+      slotType !== undefined && Type.isSlot(slotType) ? Type.typeArgumentAt(slotType, 1) : undefined
     const type = fn.type(expression.type)
     if (
       slot === undefined ||
@@ -882,7 +882,7 @@ const lowerBuiltinOperation = (
     const slotArgument = expression.arguments.at(0)
     const slotType = slotArgument?._tag === 'Unavailable' ? undefined : slotArgument?.type
     const element =
-      slotType !== undefined && Type.isSlot(slotType) ? Type.typeArgumentAt(slotType, 0) : undefined
+      slotType !== undefined && Type.isSlot(slotType) ? Type.typeArgumentAt(slotType, 1) : undefined
     const type = fn.type(expression.type)
     if (
       slot === undefined ||

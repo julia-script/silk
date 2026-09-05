@@ -278,6 +278,10 @@ export interface Work {
 export interface FunctionOwnership {
   readonly _tag: 'FunctionOwnership'
   readonly work?: Work
+  readonly cleanupLifetimeWork?: {
+    readonly liveness?: Lifetime.Work
+    readonly validity?: Lifetime.Work
+  }
   readonly declaration: DeclarationFacts.DeclarationFact
   /**
    * Bindings this function's own statements introduce: parameters, `let` statements, and match
@@ -2249,9 +2253,44 @@ const analyzeLoans = (
     const direct = directSite(expression)?.site
     return direct === undefined ? undefined : { root: direct, path: [] }
   }
+  const borrowedRootType = (expression: Elaboration.ExpressionFact): Type.Type | undefined => {
+    if (expression._tag === 'Borrow') return borrowedRootType(expression.subject)
+    if (expression._tag === 'Grouped') return borrowedRootType(expression.expression)
+    if (
+      expression._tag === 'FieldProjection' ||
+      expression._tag === 'IndexProjection' ||
+      expression._tag === 'ReferentProjection' ||
+      expression._tag === 'Move'
+    ) {
+      const type = expression.subject.type
+      return type._tag === 'Available' && (Type.isReference(type.type) || Type.isSlice(type.type))
+        ? type.type
+        : borrowedRootType(expression.subject)
+    }
+    if (expression._tag !== 'Identifier' || expression.type._tag !== 'Available') return undefined
+    const type = expression.type.type
+    return Type.isReference(type) || Type.isSlice(type) ? type : undefined
+  }
   const sourceReferents = (expression: Elaboration.ExpressionFact): ReadonlyArray<LoanReferent> => {
-    if (expression._tag === 'Borrow' && expression.formation._tag !== 'Unavailable')
-      return rootsOf(borrowSite(expression.formation.root), expression.formation.root.path)
+    if (expression._tag === 'Borrow' && expression.formation._tag !== 'Unavailable') {
+      const formation = expression.formation
+      const root = borrowSite(formation.root)
+      const descriptor =
+        expression.type._tag === 'Available' &&
+        Type.isReference(expression.type.type) &&
+        expression.subject.type._tag === 'Available' &&
+        (Type.isReference(expression.subject.type.type) ||
+          Type.isSlice(expression.subject.type.type)) &&
+        Type.equals(expression.type.type.target, expression.subject.type.type)
+      const projectedReferent = !descriptor && borrowedRootType(expression) !== undefined
+      // Borrowing a container's own storage is distinct from borrowing the external payload
+      // it retains. Only reborrow formations inherit the descriptor's referent authority.
+      return projectedReferent ||
+        formation._tag === 'ValueReborrow' ||
+        formation._tag === 'SliceReborrow'
+        ? rootsOf(root, formation.root.path)
+        : [{ root, path: formation.root.path }]
+    }
     if (fn.lifetimeFlow !== undefined && expression.type._tag === 'Available') {
       const origins = LifetimeFlow.sources(fn.lifetimeFlow, expression.type.type).flatMap(
         (origin) => (origin.root === undefined ? [] : rootsOf(origin.root, origin.path ?? [])),
@@ -2328,20 +2367,6 @@ const analyzeLoans = (
         ]),
       ).values(),
     ]
-  }
-  const borrowedRootType = (expression: Elaboration.ExpressionFact): Type.Type | undefined => {
-    if (expression._tag === 'Borrow') return borrowedRootType(expression.subject)
-    if (expression._tag === 'Grouped') return borrowedRootType(expression.expression)
-    if (
-      expression._tag === 'FieldProjection' ||
-      expression._tag === 'IndexProjection' ||
-      expression._tag === 'ReferentProjection' ||
-      expression._tag === 'Move'
-    )
-      return borrowedRootType(expression.subject)
-    if (expression._tag !== 'Identifier' || expression.type._tag !== 'Available') return undefined
-    const type = expression.type.type
-    return Type.isReference(type) || Type.isSlice(type) ? type : undefined
   }
   // A descriptor inherits authority from its originating loan; reborrowing uses that capability.
   // An outstanding sibling loan is absent from the descriptor's provenance and still conflicts.
@@ -2975,10 +3000,14 @@ const analyzeLoans = (
               ? { parent: root, suspendsParent: candidate.formation.suspendsParent }
               : { suspendsParent: false }),
             startRegion: region,
-            endRegion: delayedEnd?.region ?? region,
+            endRegion: returnedOrdinal.has(argumentOrdinal)
+              ? (delayedEnd?.region ?? region)
+              : region,
             startSpan: candidate.syntax.span,
             referents: referentsAt(root, candidate.syntax.span),
-            endSpan: delayedEnd?.span ?? expression.syntax.span,
+            endSpan: returnedOrdinal.has(argumentOrdinal)
+              ? (delayedEnd?.span ?? expression.syntax.span)
+              : expression.syntax.span,
           })
           loans.push(loan)
           callActive.push(loan)
@@ -3266,14 +3295,6 @@ const checkFunction = (
         : [],
     ),
   )
-  const loanAnalysis =
-    semantic === undefined
-      ? Object.freeze({
-          loanAccessChecks: 0,
-          loans: Object.freeze([]),
-          diagnostics: Object.freeze([]),
-        })
-      : analyzeLoans(semantic, index, copyAssumptions)
   const state: CheckState = {
     work: {
       pathChecks: 0,
@@ -3281,7 +3302,7 @@ const checkFunction = (
       shapeCacheHits: 0,
       shapeProjectionSteps: 0,
       initializationJoins: 0,
-      loanAccessChecks: loanAnalysis.loanAccessChecks,
+      loanAccessChecks: 0,
       cleanupPlanQueries: 0,
     },
     nextAcquisition: 0,
@@ -3289,7 +3310,7 @@ const checkFunction = (
     copyAssumptions,
     bindings: new Map(),
     order: [],
-    diagnostics: [...loanAnalysis.diagnostics],
+    diagnostics: [],
     matches: [],
     callables: [],
     replacements: [],
@@ -4483,7 +4504,7 @@ const checkFunction = (
     [...bindings, ...deferredBindings].map((binding) => [siteKey(binding.site), binding] as const),
   )
 
-  const exitPlans = Object.freeze(
+  const cleanupExits = Object.freeze(
     exits.map((exit): ExitPlan =>
       Object.freeze({
         _tag: 'Exit' as const,
@@ -4494,21 +4515,7 @@ const checkFunction = (
         ...(exit.region === undefined ? {} : { region: exit.region }),
         ...(exit.arm === undefined ? {} : { arm: exit.arm }),
         ...(exit.target === undefined ? {} : { target: exit.target }),
-        loanEnds: Object.freeze(
-          loanAnalysis.loans
-            .filter(
-              (loan) =>
-                (exit.region !== undefined && loan.endRegion.ordinal === exit.region.ordinal) ||
-                ((exit.loanRegions ?? []).some(
-                  (region) =>
-                    region.ordinal === loan.endRegion.ordinal ||
-                    region.ordinal === loan.startRegion.ordinal,
-                ) &&
-                  loan.startSpan.start <= exit.span.start &&
-                  loan.endSpan.end > exit.span.start),
-            )
-            .map((loan) => loan.id),
-        ),
+        loanEnds: Object.freeze([]),
         releases: Object.freeze(
           exit.sites.flatMap((site): ReadonlyArray<Release> => {
             const fact = bindingBySite.get(site)
@@ -4531,6 +4538,48 @@ const checkFunction = (
         ),
       }),
     ),
+  )
+
+  const loanSemantic =
+    semantic?.lifetimeFlow === undefined
+      ? semantic
+      : {
+          ...semantic,
+          lifetimeFlow: LifetimeFlow.withCleanupUses(semantic.lifetimeFlow, cleanupExits),
+        }
+  const loanAnalysis =
+    loanSemantic === undefined
+      ? Object.freeze({
+          loanAccessChecks: 0,
+          loans: Object.freeze([]),
+          diagnostics: Object.freeze([]),
+        })
+      : analyzeLoans(loanSemantic, index, copyAssumptions)
+  state.work.loanAccessChecks = loanAnalysis.loanAccessChecks
+  state.diagnostics.push(...loanAnalysis.diagnostics)
+  const exitPlans = Object.freeze(
+    cleanupExits.map((plan, ordinal): ExitPlan => {
+      const exit = exits.at(ordinal)
+      if (exit === undefined) return plan
+      return Object.freeze({
+        ...plan,
+        loanEnds: Object.freeze(
+          loanAnalysis.loans
+            .filter(
+              (loan) =>
+                (exit.region !== undefined && loan.endRegion.ordinal === exit.region.ordinal) ||
+                ((exit.loanRegions ?? []).some(
+                  (region) =>
+                    region.ordinal === loan.endRegion.ordinal ||
+                    region.ordinal === loan.startRegion.ordinal,
+                ) &&
+                  loan.startSpan.start <= exit.span.start &&
+                  loan.endSpan.end > exit.span.start),
+            )
+            .map((loan) => loan.id),
+        ),
+      })
+    }),
   )
 
   const firstUnavailable = Hir.firstUnavailable(fn)
@@ -4556,6 +4605,12 @@ const checkFunction = (
     ownership: Object.freeze({
       _tag: 'FunctionOwnership' as const,
       work: Object.freeze({ ...state.work }),
+      cleanupLifetimeWork: Object.freeze(
+        loanSemantic?.lifetimeFlow !== semantic?.lifetimeFlow &&
+          loanSemantic?.lifetimeFlow?.solution._tag === 'Solved'
+          ? { liveness: loanSemantic.lifetimeFlow.solution.work }
+          : {},
+      ),
       declaration,
       bindings,
       deferredBindings,
@@ -4592,14 +4647,17 @@ const checkFunction = (
   })
   if (semantic?.lifetimeFlow === undefined || checked.ownership.verdict._tag !== 'Satisfied')
     return checked
-  const cleanupDiagnostics = LifetimeFlow.validateCleanup(semantic.lifetimeFlow, checked.ownership)
-  const firstCleanupViolation = cleanupDiagnostics.at(0)
-  if (firstCleanupViolation === undefined) return checked
+  const cleanup = LifetimeFlow.validateCleanup(semantic.lifetimeFlow, checked.ownership)
+  const firstCleanupViolation = cleanup.diagnostics.at(0)
   return Object.freeze({
     ownership: Object.freeze({
       ...checked.ownership,
+      cleanupLifetimeWork: Object.freeze({
+        ...checked.ownership.cleanupLifetimeWork,
+        ...(cleanup.work === undefined ? {} : { validity: cleanup.work }),
+      }),
       verdict:
-        checked.ownership.verdict._tag === 'Satisfied'
+        firstCleanupViolation !== undefined
           ? Object.freeze({
               _tag: 'Violation' as const,
               cause: Diagnostic.identity(firstCleanupViolation),
@@ -4607,7 +4665,7 @@ const checkFunction = (
           : checked.ownership.verdict,
     }),
     diagnostics: Object.freeze(
-      [...checked.diagnostics, ...cleanupDiagnostics].sort(Diagnostic.compare),
+      [...checked.diagnostics, ...cleanup.diagnostics].sort(Diagnostic.compare),
     ),
   })
 }

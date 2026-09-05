@@ -117,14 +117,7 @@ fn hidden<T>(value: T) -> () { let owner = Guard<T> { value: move value } return
 pub fn main() -> i32 { let value = 42 forward(&value) return 0 }`),
     )
     const diagnostics = Analysis.diagnostics(snapshot)
-    assert.deepEqual(
-      diagnostics.map((diagnostic) => diagnostic.code),
-      ['SEM0214'],
-    )
-    const reason = diagnostics.at(0)?.reason
-    assert.strictEqual(reason?._tag, 'UnsupportedLifetimeFeature')
-    if (reason?._tag === 'UnsupportedLifetimeFeature')
-      assert.strictEqual(reason.feature, 'DependentDrop')
+    assert.deepEqual(diagnostics, [])
   }),
 )
 
@@ -161,26 +154,7 @@ pub fn main() -> i32 {
         'lifetimes/InterfaceStorageAdmission',
         ascii(source),
       )
-      const calls = [
-        'invoke(Wrapper { value: &value })',
-        'Consume.consume(Wrapper { value: &value })',
-        'item(Wrapper { value: &value })',
-        'section(Wrapper { value: &value })',
-        'forwarded(Wrapper { value: &value })',
-        'indirect(&value)',
-      ]
-      assert.deepEqual(
-        Analysis.diagnostics(snapshot).map((diagnostic) => ({
-          code: diagnostic.code,
-          sourceId: diagnostic.span.sourceId,
-          selected: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
-        })),
-        calls.map((call) => ({
-          code: 'SEM0214',
-          sourceId: 'lifetimes/InterfaceStorageAdmission',
-          selected: call,
-        })),
-      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
     }),
 )
 

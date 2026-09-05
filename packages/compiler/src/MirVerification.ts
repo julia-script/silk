@@ -38,6 +38,7 @@ import type {
 } from './Mir.js'
 import {
   acceptsRuntimeOperand,
+  borrowsDescriptor,
   callingShapeEquals,
   executionOperations,
   regionsTree,
@@ -2375,17 +2376,23 @@ const loanViolations = (
         const rootMatchesSource =
           selectedSource !== undefined && SilkType.equals(selectedSource, sourceSemantic)
         const borrowed = operation.type.type
+        const descriptor = borrowsDescriptor(operation)
         const sourceElement =
           operation.sourceType._tag === 'FixedArray' || operation.sourceType._tag === 'Slice'
             ? operation.sourceType.type.element
             : undefined
         const sourceReferenceTarget =
-          operation.sourceType._tag === 'Reference' ? operation.sourceType.type.target : undefined
-        const parent = [...active.entries()].find(
-          ([, loan]) => loan.operation.destination.ordinal === operation.root.ordinal,
-        )
+          operation.sourceType._tag === 'Reference' && !descriptor
+            ? operation.sourceType.type.target
+            : undefined
+        const parent = descriptor
+          ? undefined
+          : [...active.entries()].find(
+              ([, loan]) => loan.operation.destination.ordinal === operation.root.ordinal,
+            )
         const reborrowSource =
-          operation.sourceType._tag === 'Slice' || operation.sourceType._tag === 'Reference'
+          !descriptor &&
+          (operation.sourceType._tag === 'Slice' || operation.sourceType._tag === 'Reference')
         const reborrowValid = reborrowSource
           ? operation.reborrow &&
             operation.suspendsParent === (operation.sourceType.type.access === 'Exclusive')
@@ -3274,6 +3281,20 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
   const instanceKeys = new Set<string>()
   for (const fn of self.functions) {
     const allRegions = regionsTree(fn.regions)
+    const descriptorUses = new Map<number, Set<Operation>>()
+    const controlLocals = new Set<number>()
+    for (const region of allRegions) {
+      for (const operation of operationsOf(region).flatMap(operationTree))
+        for (const local of operationLocals(operation)) {
+          const uses = descriptorUses.get(local.ordinal) ?? new Set<Operation>()
+          uses.add(operation)
+          descriptorUses.set(local.ordinal, uses)
+        }
+      const outcome = outcomeOf(region)
+      if (outcome?._tag === 'Return') controlLocals.add(outcome.value.ordinal)
+      if (region._tag === 'ConditionalRegion') controlLocals.add(region.condition.ordinal)
+      if (region._tag === 'LoopRegion') controlLocals.add(region.conditionValue.ordinal)
+    }
     violations.push(...suspensionViolations(fn, self.layout))
     const currentInstance = instanceText(fn.instance)
     const concreteTypes = [
@@ -5066,7 +5087,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             !SilkType.isSlot(destination.type) ||
             bufferElement === undefined ||
             !SilkType.equals(bufferElement, operation.element) ||
-            !SilkType.equals(destination.type.arguments[0], operation.element)
+            !SilkType.equals(destination.type.arguments[1], operation.element)
           )
             violations.push(
               Object.freeze({
@@ -5230,7 +5251,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const slotElement =
             slot?._tag === 'Nominal' && SilkType.isSlot(slot.type)
-              ? slot.type.arguments[0]
+              ? slot.type.arguments[1]
               : undefined
           const unitResult =
             operation._tag === 'SlotTake' || operation._tag === 'SlotCopy'
@@ -5559,7 +5580,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           const source = fn.localTypes.at(operation.source.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const compatibility = TypeCompatibility.check(
-            operation.sourceShape.type,
+            semanticType(operation.sourceType),
             operation.targetType.type,
           )
           const mappingsValid =
@@ -5581,11 +5602,12 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             SilkType.equals(semanticType(source), semanticType(operation.sourceType)) &&
             SilkType.equals(semanticType(destination), operation.targetType.type) &&
             mappingsValid &&
-            SilkType.haveSameRepresentationShape(
-              operation.sourceShape.type,
-              semanticType(operation.sourceType),
-            ) &&
-            SilkType.equals(operation.targetShape.type, operation.targetType.type) &&
+            (sameRuntimeType(operation.sourceShape.type, semanticType(operation.sourceType)) ||
+              SilkType.haveSameRepresentationShape(
+                operation.sourceShape.type,
+                semanticType(operation.sourceType),
+              )) &&
+            sameRuntimeType(operation.targetShape.type, operation.targetType.type) &&
             (() => {
               const sourceShape = Layout.callingShape(self.layout, operation.sourceShape.type)
               const targetShape = Layout.callingShape(self.layout, operation.targetShape.type)
@@ -5984,6 +6006,30 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 candidate.access === 'Shared' &&
                 candidate.root.ordinal === operation.destination.ordinal,
             )
+          // Loading an exclusive descriptor to access its referent is a reborrow, not an
+          // owning copy. The temporary cannot escape, transfer, or be used as a value.
+          const referenceViewProjection =
+            operation._tag === 'ReadPlace' &&
+            SilkType.isReference(selected ?? 'never') &&
+            operation.type._tag === 'Reference' &&
+            !controlLocals.has(operation.destination.ordinal) &&
+            [...(descriptorUses.get(operation.destination.ordinal) ?? [])].every((candidate) => {
+              if (candidate === operation) return true
+              if (
+                !operationLocals(candidate).some(
+                  (local) => local.ordinal === operation.destination.ordinal,
+                )
+              )
+                return true
+              return (
+                (candidate._tag === 'ReadPlace' ||
+                  candidate._tag === 'CheckPlace' ||
+                  candidate._tag === 'WritePlace') &&
+                candidate.root.ordinal === operation.destination.ordinal &&
+                (candidate._tag !== 'WritePlace' ||
+                  candidate.source.ordinal !== operation.destination.ordinal)
+              )
+            })
           const callableViewProjection =
             operation._tag === 'ReadPlace' &&
             operation.consume !== true &&
@@ -6026,6 +6072,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               operation.consume !== true &&
               !sharedMatchProjection &&
               !sharedBorrowProjection &&
+              !referenceViewProjection &&
               !callableViewProjection &&
               !effectViewProjection)
           ) {

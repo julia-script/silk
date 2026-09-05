@@ -848,7 +848,7 @@ export type Reason =
   | { readonly _tag: 'UnsatisfiedTypeOutlives'; readonly type: string; readonly lifetime: string }
   | {
       readonly _tag: 'UnsupportedLifetimeFeature'
-      readonly feature: 'ExclusiveStorage' | 'DependentDrop' | 'EffectOutcome'
+      readonly feature: 'EffectOutcome'
     }
   | {
       readonly _tag: 'IntegerOutOfRange'
@@ -5711,19 +5711,9 @@ export const unsatisfiedTypeOutlives = (
     span,
   })
 
-const lifetimeFeatureMessage = (
-  feature: 'ExclusiveStorage' | 'DependentDrop' | 'EffectOutcome',
-): string => {
-  if (feature === 'ExclusiveStorage')
-    return 'Exclusive references cannot yet be stored inside aggregate values'
-  if (feature === 'DependentDrop')
-    return 'User-defined Drop cannot yet retain non-static borrowed storage'
-  return 'Effect success and failure values cannot yet retain non-static borrowed storage'
-}
-
 /** Rejects lifetime-bearing storage whose required ownership semantics are not yet available. */
 export const unsupportedLifetimeFeature = (
-  feature: 'ExclusiveStorage' | 'DependentDrop' | 'EffectOutcome',
+  feature: 'EffectOutcome',
   span: SourceSpan.SourceSpan,
 ): Diagnostic => {
   return Object.freeze({
@@ -5731,7 +5721,7 @@ export const unsupportedLifetimeFeature = (
     phase: 'semantic',
     code: unsupportedLifetimeFeatureCode,
     severity: 'error',
-    message: lifetimeFeatureMessage(feature),
+    message: 'Effect success and failure values cannot yet retain non-static borrowed storage',
     reason: Object.freeze({ _tag: 'UnsupportedLifetimeFeature', feature }),
     span,
   })

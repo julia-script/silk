@@ -2342,23 +2342,6 @@ service Work { effect<'static> fn tick() -> i32 }`
 it.effect('gates later lifetime storage features after resolving aliases and generic fields', () =>
   Effect.gen(function* () {
     const cases = [
-      ["struct Holder<'a> { value: &'a mut i32 }", 'ExclusiveStorage'],
-      [
-        "type Borrowed = &'static mut i32\nstruct Holder { values: [Borrowed; 1] }",
-        'ExclusiveStorage',
-      ],
-      [
-        "struct Holder<T> { value: T }\nfn inspect<'a>(value: Holder<&'a mut i32>) -> i32 { return 0 }",
-        'ExclusiveStorage',
-      ],
-      [
-        "struct Guard<T> { value: T }\nimpl<T> Drop for Guard<T> { fn drop(self: &mut Guard<T>) -> () { return () } }\nfn inspect<'a>(value: Guard<&'a i32>) -> i32 { return 0 }",
-        'DependentDrop',
-      ],
-      [
-        "struct Holder<T> { value: T }\nfn inspect<'a>(value: &'a mut i32) -> i32 { let held = Holder { value: move value } return 0 }",
-        'ExclusiveStorage',
-      ],
       [
         "fn inspect<'a>(value: &'a i32) -> i32 { let pending = effect { return value } return 0 }",
         'EffectOutcome',

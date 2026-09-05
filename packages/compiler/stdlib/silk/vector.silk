@@ -128,7 +128,9 @@ pub struct Full<T> {
 /// # Details
 ///
 /// The vector releases each initialized element and its storage on drop. Length counts initialized
-/// elements. Capacity counts elements that fit without growth.
+/// elements. Capacity counts elements that fit without growth. Borrowed elements retain their
+/// referent lifetimes through replacement, extraction, and required cleanup. An allocation does
+/// not make its payload detached.
 pub struct Vector<T> {
   storage: Empty<T> | Full<T>
   count: usize

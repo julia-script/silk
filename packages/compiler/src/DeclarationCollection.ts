@@ -4497,6 +4497,8 @@ export const finalizeLifetimeHeader = (
     undefined,
     (path) => {
       const analyzed = analyzeDeclaredType(prior.source, path, prior.parameters, true, prior)
+      if (analyzed.fact._tag === 'Resolved' && Type.isNominal(analyzed.fact.type))
+        return Type.intrinsicNominalParameters(analyzed.fact.type)
       return analyzed.fact._tag === 'Unresolved' ? nominalParameters(analyzed.fact.path) : undefined
     },
   )

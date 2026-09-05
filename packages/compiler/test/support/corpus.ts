@@ -6149,6 +6149,66 @@ const pressurePrograms: ReadonlyArray<CorpusProgram> = [
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
+    name: 'vector-dependent-elements-cleanup-and-extraction',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.vector { Vector }
+import silk.layout { Layout }
+struct Quota { remaining: i32 }
+effect fn allocate(self: &mut Quota, layout: Layout) -> Allocation ! OutOfMemoryError {
+  if self.remaining == 0 { fail OutOfMemoryError {} }
+  self.remaining = self.remaining - 1
+  let mut system = Allocator.systemAllocatorProvider()
+  return run Allocator.allocate(move layout) |> Effect.provideMut(&mut system)
+}
+impl Allocator for Quota { allocate: Quota.allocate }
+effect fn ignoreFailure(error: OutOfMemoryError) -> () { return () }
+struct Entry<'a> { value: &'a mut i32 }
+impl<'a> Drop for Entry<'a> {
+  fn drop(self: &mut Entry<'a>) -> () { self.value.* = self.value.* + 1 return () }
+}
+struct Outer<'a> { entry: Entry<'a> code: i32 }
+effect fn exercise<'a>(a: &'a mut i32, b: &'a mut i32, c: &'a mut i32, d: &'a mut i32, e: &'a mut i32, f: &'a mut i32) -> () ! OutOfMemoryError ? &mut Allocator {
+  let mut values = Vector.make<Entry<'a>>()
+  run Vector.append<Entry<'a>>(&mut values, Entry { value: move a })
+  run Vector.append<Entry<'a>>(&mut values, Entry { value: move b })
+  run Vector.insert<Entry<'a>>(&mut values, 1, Entry { value: move c })
+  run Vector.append<Entry<'a>>(&mut values, Entry { value: move d })
+  run Vector.append<Entry<'a>>(&mut values, Entry { value: move e })
+  Vector.set<Entry<'a>>(&mut values, 0, Entry { value: move f })
+  let outer = Outer { entry: Vector.remove<Entry<'a>>(&mut values, 1), code: 7 }
+  let extracted = move outer.entry
+  drop outer
+  let last = Vector.pop<Entry<'a>>(&mut values)
+  drop values
+  drop extracted
+  drop last
+  return ()
+}
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut a = 0 let mut b = 0 let mut c = 0 let mut d = 0 let mut e = 0 let mut f = 0
+  let mut parent = &mut a let nested = &mut parent
+  nested.*.* = 4 drop nested drop parent
+  if a != 4 { return 0 } a = 0
+  run exercise(&mut a, &mut b, &mut c, &mut d, &mut e, &mut f) |> Effect.provideMut(&mut allocator)
+  if a != 1 || b != 1 || c != 1 || d != 1 || e != 1 || f != 1 { return 0 }
+  a = 0 b = 0 c = 0 d = 0 e = 0 f = 0
+  let mut quota = Quota { remaining: 1 }
+  run Effect.catchAll(exercise(&mut a, &mut b, &mut c, &mut d, &mut e, &mut f), ignoreFailure)
+    |> Effect.provideMut(&mut quota)
+  let mut references = Vector.make<&i32>()
+  run Vector.append<&i32>(&mut references, &a) |> Effect.provideMut(&mut allocator)
+  let saved = Vector.remove<&i32>(&mut references, 0)
+  drop references
+  if saved.* == 1 && b == 1 && c == 1 && d == 1 && e == 1 && f == 0 { return 42 }
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'partial-owner-cleanup-and-refinement',
     source: `unsafe extern "C" fn silk_record_drop(value: i32) -> ()
 unsafe extern "C" fn silk_verify_drops() -> i32

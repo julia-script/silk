@@ -2,6 +2,7 @@ import type { ExitIndex } from './CleanupEmission.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import {
   authored,
+  lowerBorrowedWritePlace,
   cleanupForLocal,
   concreteCleanup,
   delayedLoopLoans,
@@ -11,7 +12,6 @@ import {
   generated,
   initializationFor,
   initializeBinding,
-  lowerBorrowedWriteSelectors,
   lowerWriteSelectors,
   lowerOwnershipPath,
   ownershipLocal,
@@ -588,7 +588,7 @@ const lowerStatement = (
     if (place._tag === 'BorrowedWritePlace') root = borrowedWriteRoot(fn, place.root)
     else if (transition !== undefined) root = ownershipLocal(fn, transition.root)
     else root = ownedWriteRoot(fn, place.root)
-    const rootType = root === undefined ? undefined : fn.localTypes.at(root.ordinal)
+    let rootType = root === undefined ? undefined : fn.localTypes.at(root.ordinal)
     // A whole callable binding keeps its exact representation; the written value carries the same
     // identity once analysis admitted the write.
     const type =
@@ -597,13 +597,19 @@ const lowerStatement = (
     const [written, operations] = fn.capture(() => {
       if (root === undefined || rootType === undefined || type === undefined) return false
       let selectors: ReadonlyArray<Mir.PlaceSelector> | 'Transferred' | undefined
-      if (place._tag === 'BorrowedWritePlace')
-        selectors = lowerBorrowedWriteSelectors(fn, place.selectors)
-      else if (transition !== undefined)
+      if (place._tag === 'BorrowedWritePlace') {
+        const lowered = lowerBorrowedWritePlace(fn, root, place.selectors, place.type, place.span)
+        if (lowered === 'Transferred') return lowered
+        if (lowered === undefined) return false
+        root = lowered.root
+        selectors = lowered.selectors
+      } else if (transition !== undefined)
         selectors = lowerOwnershipPath(fn, root, transition.path, place.span)
       else selectors = lowerWriteSelectors(fn, place.selectors)
       if (selectors === 'Transferred') return selectors
       if (selectors === undefined) return false
+      rootType = fn.localTypes.at(root.ordinal)
+      if (rootType === undefined) return false
       fn.emit(
         Object.freeze({
           _tag: 'CheckPlace',

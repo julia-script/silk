@@ -623,7 +623,8 @@ export const unit: Nominal = nominal('silk/core', 'Unit')
 /** Compiler-checked typed raw storage owned independently from its allocator provider. */
 export const rawBuffer = (element: Type): Nominal => nominal('silk/core', 'RawBuffer', [element])
 /** A lexical exclusive projection into one RawBuffer element. */
-export const slot = (element: Type): Nominal => nominal('silk/core', 'Slot', [element])
+export const slot = (element: Type, lifetime: Lifetime.Lifetime): Nominal =>
+  nominal('silk/core', 'Slot', [lifetime, element])
 /** The compiler-sealed local strong handle identity. Its representation is intentionally opaque. */
 export const sharedCore = (element: Type): Nominal => sealedSharedCore([element])
 /** Opaque affine owner-neutral execution identity. Runtime layout belongs to the packaging slice. */
@@ -666,11 +667,18 @@ export const isSlot = (
 ): self is Nominal & {
   readonly module: 'silk/core'
   readonly name: 'Slot'
-  readonly arguments: readonly [Type]
+  readonly arguments: readonly [Lifetime.Lifetime, Type]
 } => {
   if (!isNominal(self) || self.module !== 'silk/core' || self.name !== 'Slot') return false
-  const argument = self.arguments.at(0)
-  return self.arguments.length === 1 && argument !== undefined && isTypeArgument(argument)
+  const lifetime = self.arguments.at(0)
+  const argument = self.arguments.at(1)
+  return (
+    self.arguments.length === 2 &&
+    lifetime !== undefined &&
+    Lifetime.isLifetime(lifetime) &&
+    argument !== undefined &&
+    isTypeArgument(argument)
+  )
 }
 
 /** Tests the canonical sealed local-shared core identity without consulting source spelling. */
@@ -779,9 +787,10 @@ export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
 
 /** Returns the compiler-known generic arity of an intrinsic nominal actor. */
 export const intrinsicNominalArity = (self: Nominal): number => {
+  if (self.module === 'silk/core' && self.name === 'Slot') return 2
   if (self.sealed === 'Intrinsic.Field') return 2
   if (
-    (self.module === 'silk/core' && (self.name === 'RawBuffer' || self.name === 'Slot')) ||
+    (self.module === 'silk/core' && self.name === 'RawBuffer') ||
     self.sealed === 'Intrinsic.SharedCore' ||
     self.sealed === 'Intrinsic.Execution' ||
     self.sealed === 'Intrinsic.Type' ||
@@ -791,6 +800,12 @@ export const intrinsicNominalArity = (self: Nominal): number => {
     return 1
   return 0
 }
+
+/** Declared binders of the sealed lexical slot, used by ordinary header elaboration. */
+export const intrinsicNominalParameters = (self: Nominal): ReadonlyArray<Parameter> | undefined =>
+  self.module === 'silk/core' && self.name === 'Slot'
+    ? [parameter(self, 0, "'storage", 'Lifetime'), parameter(self, 1, 'T')]
+    : undefined
 export const intrinsicNominalOrdinal = (self: Nominal): number =>
   [...intrinsicNominals.values()].findIndex(
     (candidate) =>

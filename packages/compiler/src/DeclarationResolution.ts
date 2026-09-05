@@ -466,7 +466,9 @@ export const resolveDeclaredType = (
         target.fact.type.arguments.length > 0
           ? 0
           : (declaration?.typeParameters.length ?? Type.intrinsicNominalArity(target.fact.type))
-      const declaredParameters = declaration?.typeParameters.map((parameter) => parameter.type)
+      const declaredParameters =
+        declaration?.typeParameters.map((parameter) => parameter.type) ??
+        Type.intrinsicNominalParameters(target.fact.type)
       const ordinaryParameters = declaredParameters?.filter(
         (parameter) => parameter.kind !== 'Lifetime',
       )

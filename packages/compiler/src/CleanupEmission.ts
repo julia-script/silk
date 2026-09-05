@@ -629,6 +629,71 @@ export const generated = (span: SourceSpan.SourceSpan): Mir.Provenance =>
 export const authored = (span: SourceSpan.SourceSpan): Mir.Provenance =>
   Object.freeze({ span, generated: false })
 
+/** Loads stored reference descriptors before continuing a checked write through their referents. */
+export const lowerBorrowedWritePlace = (
+  fn: FunctionLowering,
+  initialRoot: Mir.LocalId,
+  declared: ReadonlyArray<Hir.BorrowedWriteSelector>,
+  result: Type.Type,
+  span: SourceSpan.SourceSpan,
+):
+  | { readonly root: Mir.LocalId; readonly selectors: ReadonlyArray<Mir.PlaceSelector> }
+  | 'Transferred'
+  | undefined => {
+  let root = initialRoot
+  let remaining: Array<Mir.PlaceSelector> = []
+  let rootType = fn.localTypes.at(root.ordinal)
+  while (
+    rootType?._tag === 'Reference' &&
+    Type.isReference(rootType.type.target) &&
+    (declared.length > 0 || Type.runtimeKey(rootType.type.target) !== Type.runtimeKey(result))
+  ) {
+    const type = fn.type(rootType.type.target)
+    if (type === undefined) return undefined
+    const destination = fn.alloc(type)
+    fn.emit({
+      _tag: 'ReadPlace',
+      destination,
+      root,
+      selectors: [],
+      type,
+      provenance: authored(span),
+    })
+    root = destination
+    rootType = type
+  }
+  for (const [ordinal, selector] of declared.entries()) {
+    // Resolve each selector before evaluating the next index, preserving source evaluation order.
+    const lowered = lowerBorrowedWriteSelectors(fn, [selector])
+    if (lowered === undefined || lowered === 'Transferred') return lowered
+    remaining.push(...lowered)
+    let current = selector.type
+    while (
+      Type.isReference(current) &&
+      (ordinal < declared.length - 1 || Type.runtimeKey(current) !== Type.runtimeKey(result))
+    ) {
+      const type = fn.type(current)
+      if (type === undefined) return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'ReadPlace',
+          destination,
+          root,
+          selectors: Object.freeze(remaining),
+          type,
+          provenance: authored(selector.span),
+        }),
+      )
+      root = destination
+      remaining = []
+      current = current.target
+      if (ordinal < declared.length - 1) break
+    }
+  }
+  return { root, selectors: Object.freeze(remaining) }
+}
+
 export const lowerWriteSelectors = (
   fn: FunctionLowering,
   selectors: ReadonlyArray<Hir.WriteSelector>,

@@ -54,7 +54,7 @@ the provider that created it, and failed allocation MUST NOT create storage or r
 
 The language SHALL expose `RawBuffer<T>` as an affine typed view over one `Allocation` and one
 compiler-validated repeated-element layout. Qualified unsafe operations SHALL construct a buffer,
-project one bounds-checked lexical `Slot<T>`, initialize an uninitialized slot, move from or destroy
+project one bounds-checked lexical `Slot<'storage, T>`, initialize an uninitialized slot, move from or destroy
 an initialized slot, inspect the logical count, and copy one initialized recursively Copy element
 through a shared buffer borrow. Supported elements SHALL include structural unions exactly when all
 members are Copy and cleanup-free. A shared copy MUST NOT expose a Slot, move or mutate the buffer,
@@ -245,3 +245,12 @@ ordinary allocator policy and expose any typed failure before the initializer.
 
 - **WHEN** package construction is inspected for a parking-capable specialization
 - **THEN** it contains one Allocation owner and no intrinsic-created second allocation or allocator access
+
+### Requirement: Dependent destruction observes valid payloads
+
+Every lifetime-bearing component a user Drop hook can observe and every generic recursive cleanup dependency SHALL remain valid through its required destruction. Hooks remain complete-receiver, synchronous, infallible, non-allocating, requirement-free and non-escaping. No unchecked unused-lifetime exemption or hook-body inspection may weaken that contract. Structured return, failure, explicit cleanup and admitted interruption boundaries obey it; fatal traps do not unwind.
+
+#### Scenario: Backing storage survives required cleanup
+
+- **WHEN** a borrowed payload owner has no explicit later read but has a required Drop invocation
+- **THEN** earlier referent invalidation or relocation is rejected, while destruction in valid dependency order is accepted

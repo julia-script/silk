@@ -17,7 +17,7 @@ temporary storage. [`fill`](#declaration-73696c6b2f7261775f6275666665723a3a52617
 
 ## Gotchas
 
-These wrappers are unchecked. The caller must prove that an allocation fits the recorded
+These wrappers do not verify allocation capacity or initialization. The caller must prove that an allocation fits the recorded
 element count, every selected range is in bounds, and every read or view covers initialized
 elements. Releasing a raw buffer releases its allocation but does not discover and drop values
 still stored in it; a container must clear initialized `Slot` values before release.
@@ -101,15 +101,16 @@ The caller must prove that the allocation has the size and alignment for `count`
 ### Associated function `RawBuffer.slot`
 
 ```silk
-pub fn slot<T, 'life1>(buffer: &'life1 mut silk/core.RawBuffer<T>, index: usize) -> silk/core.Slot<T>
+pub fn slot<'storage, T>(buffer: &'storage mut silk/core.RawBuffer<T>, index: usize) -> silk/core.Slot<'storage, T>
 ```
 
-Selects one raw storage slot without checking bounds or initialization.
+Selects one raw storage slot after checking the buffer's recorded element count.
 
 #### Gotchas
 
-`index` must be less than [`count`](#declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e636f756e74). The caller must separately track whether the slot is
-initialized.
+An `index` outside [`count`](#declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e636f756e74) traps. The caller must separately track whether the slot is
+initialized. The result retains exclusive access to the buffer until the slot is consumed.
+Lifetimes inside `T` remain separate from this storage access.
 
 <a id="declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e636f756e74"></a>
 
@@ -134,6 +135,7 @@ Copies one initialized element without changing its slot state.
 #### Gotchas
 
 `index` must be less than [`count`](#declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e636f756e74), and the selected slot must contain an initialized `T`.
+A copied reference retains its original referent lifetime after the buffer is released.
 
 <a id="declaration-73696c6b2f7261775f6275666665723a3a5261774275666665722e636f7079"></a>
 

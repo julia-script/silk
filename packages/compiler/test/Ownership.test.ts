@@ -1733,7 +1733,7 @@ it('keeps a Slot loan active until the lexical Slot is consumed', () => {
     facts.diagnostics.map((diagnostic) => diagnostic.code),
     'OWN0011',
   )
-  assert.strictEqual(facts.functions.at(0)?.loans.at(0)?.origin, 'ValueBorrow')
+  assert.strictEqual(facts.functions.at(0)?.loans.at(0)?.origin, 'ReturnedView')
 })
 
 it('reports moves and double drops inside lazy effect bodies', () => {

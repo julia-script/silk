@@ -186,7 +186,7 @@ export const complete = (
       )
         return undefined
       const reached = memberByNominal(self.modules, resolved.fact.type)
-      if (reached === undefined) return undefined
+      if (reached === undefined) return Type.intrinsicNominalParameters(resolved.fact.type)
       const closed = finalize(reached)
       return 'typeParameters' in closed
         ? closed.typeParameters.map((parameter) => parameter.type)
@@ -230,8 +230,10 @@ export const complete = (
         resolved.fact.type.arguments.length > 0
       )
         return undefined
-      return memberByNominal(headers, resolved.fact.type)?.typeParameters.map(
-        (parameter) => parameter.type,
+      return (
+        memberByNominal(headers, resolved.fact.type)?.typeParameters.map(
+          (parameter) => parameter.type,
+        ) ?? Type.intrinsicNominalParameters(resolved.fact.type)
       )
     }
     const members = module.members.map((member): MemberFact => {

@@ -1005,11 +1005,79 @@ const cleanupLifetimes = (
   return []
 }
 
+const orderedSourcePoints = new WeakMap<
+  LifetimeFlow,
+  ReadonlyArray<readonly [number, SourceSpan.SourceSpan]>
+>()
+
+const cleanupSourcePoint = (
+  self: LifetimeFlow,
+  exit: SourceSpan.SourceSpan,
+): number | undefined => {
+  let points = orderedSourcePoints.get(self)
+  if (points === undefined) {
+    points = [...self.spans]
+      .filter(([point]) => point < self.syntaxPointCount)
+      .sort((left, right) => left[1].end - right[1].end || left[1].start - right[1].start)
+    orderedSourcePoints.set(self, points)
+  }
+  let low = 0
+  let high = points.length
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+    const entry = points.at(middle)
+    if (entry !== undefined && entry[1].end <= exit.end) low = middle + 1
+    else high = middle
+  }
+  const selected = points.at(low - 1)
+  return low > 0 && selected?.[1].sourceId === exit.sourceId ? selected[0] : undefined
+}
+
+/** Adds destructor uses from initialized remainders before checking conflicting place access. */
+export const withCleanupUses = (
+  self: LifetimeFlow,
+  exits: ReadonlyArray<Ownership.ExitPlan>,
+): LifetimeFlow => {
+  const regions = new Map(
+    self.input.regions.map((region) => [
+      Lifetime.key(region.lifetime),
+      {
+        ...region,
+        required: new Set(region.required),
+      },
+    ]),
+  )
+  let changed = false
+  for (const exit of exits) {
+    const required = exit.releases.flatMap((release) =>
+      cleanupLifetimes(release.cleanup, release.initialization),
+    )
+    if (required.length === 0) continue
+    // The final source point before the ordered release is a CFG point, so loan reachability
+    // includes the cleanup without fabricating source statements or expanding partial states.
+    const selected = cleanupSourcePoint(self, exit.span)
+    if (selected === undefined) continue
+    for (const lifetime of required) {
+      const region = regions.get(Lifetime.key(lifetime))
+      if (region !== undefined && !region.required.has(selected)) {
+        region.required.add(selected)
+        changed = true
+      }
+    }
+  }
+  if (!changed) return self
+  const input = { ...self.input, regions: [...regions.values()] }
+  return Object.freeze({ ...self, input, solution: Lifetime.solve(input) })
+}
+
 /** Checks actual branch-specific destruction after ownership has produced ordered releases. */
 export const validateCleanup = (
   self: LifetimeFlow,
   ownership: Ownership.FunctionOwnership,
-): ReadonlyArray<Diagnostic.Diagnostic> => {
+): {
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly work?: Lifetime.Work
+} => {
   const regions = new Map(
     self.input.regions.map((region) => [
       Lifetime.key(region.lifetime),
@@ -1019,24 +1087,7 @@ export const validateCleanup = (
   const spans = new Map(self.spans)
   let pointCount = self.input.pointCount
   for (const exit of ownership.exits) {
-    let sourcePoint: number | undefined
-    let sourceSpan: SourceSpan.SourceSpan | undefined
-    for (const [point, span] of self.spans) {
-      if (
-        point >= self.syntaxPointCount ||
-        span.sourceId !== exit.span.sourceId ||
-        span.end > exit.span.end
-      )
-        continue
-      if (
-        sourceSpan === undefined ||
-        span.end > sourceSpan.end ||
-        (span.end === sourceSpan.end && span.start > sourceSpan.start)
-      ) {
-        sourcePoint = point
-        sourceSpan = span
-      }
-    }
+    const sourcePoint = cleanupSourcePoint(self, exit.span)
     const released = new Set<string>()
     for (const release of exit.releases) {
       const point = pointCount++
@@ -1057,7 +1108,10 @@ export const validateCleanup = (
     }
   }
   const solution = Lifetime.solve({ ...self.input, pointCount, regions: [...regions.values()] })
-  return diagnosticsOf(solution, self.origins, spans, ownership.declaration.syntax.span)
+  return {
+    diagnostics: diagnosticsOf(solution, self.origins, spans, ownership.declaration.syntax.span),
+    ...(solution._tag === 'Solved' ? { work: solution.work } : {}),
+  }
 }
 
 const sourceCache = new WeakMap<LifetimeFlow, Map<string, ReadonlyArray<Origin>>>()

@@ -41,6 +41,64 @@ const sumWork = (values) => {
 }
 
 const generators = {
+  exclusiveChains: (size, invalid = false) => ({
+    dimensions: { exclusiveReborrowDepth: size, sharedChildCopies: 1 },
+    invalid,
+    source: `struct Holder<'a> { value: &'a mut i32 }
+fn inspect(value: &mut i32) -> i32 {
+  let h0 = Holder { value: &mut value.* }
+${range(size)
+  .map((index) => `let h${index + 1} = Holder { value: &mut h${index}.value.* }`)
+  .join('\n')}
+  let child = &h${size}.value.* let copied = child drop child
+  ${invalid ? 'value.* = 0' : ''}
+  let result = copied.* drop copied
+${range(size + 1)
+  .reverse()
+  .map((index) => `drop h${index}`)
+  .join('\n')}
+  value.* = result return result
+}`,
+  }),
+  dependentCleanup: (size) => ({
+    dimensions: { recursiveTypeComponent: size, dependentHooks: size },
+    source: `${range(size)
+      .map(
+        (index) => `struct N${index}<'a> { next: &'a mut N${(index + 1) % size}<'a> }
+impl<'a> Drop for N${index}<'a> { fn drop(self: &mut N${index}<'a>) -> () { return () } }
+fn consume${index}<'a>(value: N${index}<'a>) { drop value }`,
+      )
+      .join('\n')}`,
+  }),
+  exclusiveReplacements: (size, invalid = false) => ({
+    dimensions: { replacements: size, genericTypeComparisons: size },
+    invalid,
+    source: `struct Guard<'a> { value: &'a mut i32 }
+impl<'a> Drop for Guard<'a> { fn drop(self: &mut Guard<'a>) -> () { return () } }
+fn inspect<'a, 'b>(slot: &mut Guard<'a>, incoming: Guard<${invalid ? "'b" : "'a"}>) {
+${range(size)
+  .map(
+    (index) =>
+      `let next${index} = Intrinsic.replace(slot.*, move ${index === 0 ? 'incoming' : `next${index - 1}`})`,
+  )
+  .join('\n')}
+}`,
+  }),
+  dependentPartial: (size) => ({
+    dimensions: { dependentFields: size, independentlyJoinedFields: size },
+    source: `struct Guard<'a> { value: &'a mut i32 }
+impl<'a> Drop for Guard<'a> { fn drop(self: &mut Guard<'a>) -> () { return () } }
+struct Record<'a> { ${range(size)
+      .map((index) => `f${index}: Guard<'a>`)
+      .join(' ')} }
+fn inspect<'a>(record: Record<'a>, ${range(size)
+      .map((index) => `b${index}: bool`)
+      .join(', ')}) {
+${range(size)
+  .map((index) => `if b${index} { drop record.f${index} }`)
+  .join('\n')}
+drop record }`,
+  }),
   wrappers: (size) => ({
     dimensions: { wrapperDepth: size },
     source: `struct W0<'a> { value: &'a i32 }\n${range(size)
@@ -286,6 +344,8 @@ const retainedProofs = (view) => {
     ),
     finalBodyComparisons: sumWork(functions.map((fn) => fn.comparisonWork)),
     ownershipOperations: sumWork(ownership.map((fn) => fn.work)),
+    cleanupLivenessSolver: sumWork(ownership.map((fn) => fn.cleanupLifetimeWork?.liveness)),
+    cleanupValiditySolver: sumWork(ownership.map((fn) => fn.cleanupLifetimeWork?.validity)),
     loans: ownership.reduce((sum, fn) => sum + fn.loans.length, 0),
     loanReferents: ownership.reduce(
       (sum, fn) => sum + fn.loans.reduce((count, loan) => count + loan.referents.length, 0),
@@ -481,6 +541,17 @@ const resolutionExamples = (results) => {
 }
 
 const residualGenerators = {
+  dependentOwners: (size) => ({
+    dimensions: { dependentOwnerCalls: size, distinctLifetimeArguments: size },
+    source: `struct Guard<'a> { value: &'a mut i32 }
+impl<'a> Drop for Guard<'a> { fn drop(self: &mut Guard<'a>) -> () { return () } }
+fn owner<T>(value: T) { drop value }
+pub fn main() -> i32 {
+${range(size)
+  .map((index) => `let mut value${index} = ${index} owner(Guard { value: &mut value${index} })`)
+  .join('\n')}
+return 0 }`,
+  }),
   ordinarySpecializations: (size) => ({
     dimensions: { ordinaryOwnerSpecializations: size },
     source: `${range(size)
@@ -667,6 +738,12 @@ const main = Effect.fn('LifetimeBenchmark.main')(function* () {
   if (sizes.some((size) => !Number.isSafeInteger(size) || size < 2 || size > 128))
     return yield* new BenchmarkError({ message: 'sizes must be integers from 2 through 128' })
   const residualOnly = process.argv.includes('--residual-only')
+  const families = process.argv
+    .find((argument) => argument.startsWith('--families='))
+    ?.slice('--families='.length)
+    .split(',')
+  if (families?.some((family) => !(family in generators)))
+    return yield* new BenchmarkError({ message: 'families must name source workload generators' })
   const results = []
   for (const size of sizes) {
     if (residualOnly) {
@@ -675,11 +752,15 @@ const main = Effect.fn('LifetimeBenchmark.main')(function* () {
       continue
     }
     for (const [family, generate] of Object.entries(generators))
-      results.push(yield* checkSource(family, size, generate(size)))
-    for (const family of ['loans', 'joins'])
-      results.push(yield* checkSource(`${family}-invalid`, size, generators[family](size, true)))
-    results.push(binderWorkload(size))
-    results.push(...(yield* editWorkload(size)))
+      if (families === undefined || families.includes(family))
+        results.push(yield* checkSource(family, size, generate(size)))
+    for (const family of ['loans', 'joins', 'exclusiveChains', 'exclusiveReplacements'])
+      if (families === undefined || families.includes(family))
+        results.push(yield* checkSource(`${family}-invalid`, size, generators[family](size, true)))
+    if (families === undefined) {
+      results.push(binderWorkload(size))
+      results.push(...(yield* editWorkload(size)))
+    }
   }
   const memory = yield* Effect.try({
     try: () => ({

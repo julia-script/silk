@@ -25,16 +25,17 @@ References use `&'data T` or `&'data mut T`; slices use `&'data [T]` or `&'data 
 `'static`, the distinguished program-valid lifetime. An owned value satisfying a `'static` contents
 bound may still be dropped normally; that bound does not require its owner to live forever.
 
-**Boundary:** Shared views may appear in fields, generic arguments, fixed arrays, and ordinary
+**Boundary:** Shared and exclusive views may appear in fields, generic arguments, fixed arrays, and ordinary
 unions. Each containing type retains their lifetimes. A reference into a local owner's inline
 storage cannot become `'static`, and moving an owner together with such a reference does not make
-a valid self-referential value. Exclusive borrowed storage, dependent user `Drop`, and borrowed
-Effect success or failure outcomes remain unsupported in this layer.
+a valid self-referential value. Exclusive fields remain affine. A dependent user `Drop` keeps all
+observable borrowed components valid through cleanup, even without an explicit source read.
+Borrowed Effect success or failure outcomes remain unsupported in this layer.
 
 **Diagnostics:** An unknown lifetime reports `SEM0209`. Duplicate, invalid, or unsupported binders
 report the corresponding declaration diagnostic, including `SEM0211` for invalid lifetime forms.
-A use beyond a referent's validity reports `OWN0019`. Storage and Effect outcome forms reserved
-for later lifetime layers report `SEM0214`, including when selected through generic helpers.
+A use beyond a referent's validity reports `OWN0019`. Effect outcome forms reserved
+for the next lifetime layer report `SEM0214`, including when selected through generic helpers.
 
 **Evidence:** [lifetime requirements](../../../../openspec/specs/bootstrap-lifetimes/spec.md),
 [lifetime syntax tests](../../../../packages/compiler/test/Parser.test.ts),
@@ -147,3 +148,40 @@ reports `SEM0076`; invalid retention uses the ordinary lifetime or ownership dia
 
 **Evidence:** [quantified callable requirements](../../../../openspec/specs/bootstrap-callable-values/spec.md),
 [lifetime checking tests](../../../../packages/compiler/test/Type.test.ts).
+
+## LIFE-005 — Dependent storage keeps cleanup and access lifetimes distinct
+
+**Status:** Confirmed
+
+`RawBuffer<T>` is invariant in its payload type. `Slot<'storage, T>` adds the exclusive storage
+access lifetime; that lifetime may shorten, while `T` remains invariant. The elided spelling
+`Slot<T>` follows ordinary nominal lifetime elision. A slot cannot escape the buffer that supplied
+it. Slot projection checks the recorded element count; the caller still proves that the underlying
+allocation fits that count. Taking an initialized element transfers `T`, including its external referent lifetimes;
+copying one requires `T: Copy` and retains those same lifetimes. Neither operation extends a
+reference into the buffer's own allocation beyond that allocation's lifetime.
+
+`Vector<T>` uses these operations in ordinary Silk source. Its empty constructor, ordinary
+replacement and extraction operations, and insertion Effects with unit outcomes admit shared
+references and affine elements containing exclusive references. Extracted external references may
+survive the Vector while their backing owners remain valid. A Vector's Drop cleans its initialized
+elements before releasing storage, including after growth failure.
+
+A user Drop hook conservatively retains every component its declared receiver could observe.
+An empty hook body does not waive this contract. Recursive field cleanup follows the initialized
+remainder: a moved whole Drop-bearing field belongs to its new owner, while its plain former
+container cleans the fields it still owns. Moving through a whole-value Drop ancestor is invalid.
+Replacement preserves the declared destination type and evaluates incoming expressions before
+committing installation. A typed failure cleans the actual remaining state, including earlier
+permitted moves, without rollback.
+
+**Boundary:** Raw storage callers still prove bounds, initializedness and aliasing. Hooks remain
+synchronous, infallible, non-allocating, requirement-free and non-escaping. Borrowed Effect outcomes
+and suspension with a partial owner remain gated. Fatal traps do not unwind source cleanup.
+
+**Diagnostics:** Conflicting access reports `OWN0010` or `OWN0011`; invalidation beyond validity
+reports `OWN0019`. Invalid replacement uses the ordinary type and lifetime diagnostics.
+
+**Evidence:** [owned-allocation requirements](../../../../openspec/specs/bootstrap-owned-allocation/spec.md),
+[dependent ownership tests](../../../../packages/compiler/test/RuntimeSliceOwnership.test.ts),
+[Vector tests](../../../../packages/compiler/test/VectorAcceptance.test.ts).

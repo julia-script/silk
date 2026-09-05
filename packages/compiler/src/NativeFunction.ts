@@ -142,8 +142,9 @@ export const discoverRoots = (
     ...blocks.flatMap((block) =>
       block.operations.flatMap((operation) =>
         operation._tag === 'BeginLoan' &&
-        operation.sourceType._tag !== 'Slice' &&
-        fn.localTypes.at(operation.root.ordinal)?._tag !== 'Reference'
+        (Mir.borrowsDescriptor(operation) ||
+          (operation.sourceType._tag !== 'Slice' &&
+            fn.localTypes.at(operation.root.ordinal)?._tag !== 'Reference'))
           ? [operation.root.ordinal]
           : [],
       ),

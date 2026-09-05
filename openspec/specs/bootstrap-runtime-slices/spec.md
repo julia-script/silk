@@ -160,7 +160,7 @@ An ordinary function SHALL return a shared or exclusive reference, slice, or sha
 
 ### Requirement: Returned views preserve validity through ordinary storage
 
-A returned view SHALL be usable in local bindings, compatible reborrows, shared borrowed aggregate storage, generic payloads, and valid callable or Effect captures. Every nested lifetime SHALL remain visible to compatibility, ownership, and escape checking. Retained uses MUST NOT exceed referent validity. Exclusive stored borrows, dependent user Drop, and borrowed Effect success or failure values SHALL remain explicitly gated until their respective proofs are implemented.
+A returned view SHALL be usable in local bindings, compatible reborrows, shared borrowed aggregate storage, generic payloads, and valid callable or Effect captures. Every nested lifetime SHALL remain visible to compatibility, ownership, and escape checking. Retained uses MUST NOT exceed referent validity. Exclusive stored borrows SHALL preserve affine authority and dependent user Drop SHALL retain every observable payload lifetime through cleanup. Borrowed Effect success or failure values SHALL remain explicitly gated until their outcome proofs are implemented.
 
 #### Scenario: Use and release a returned local view
 

@@ -13,7 +13,7 @@ should prefer an initialized collection, which maintains the slot state on the c
 
 [`write`](#declaration-73696c6b2f736c6f743a3a536c6f742e7772697465) changes an uninitialized slot to initialized. [`take`](#declaration-73696c6b2f736c6f743a3a536c6f742e74616b65) and [`dropValue`](#declaration-73696c6b2f736c6f743a3a536c6f742e64726f7056616c7565) change it
 back to uninitialized, while [`copy`](#declaration-73696c6b2f736c6f743a3a536c6f742e636f7079) leaves an initialized `Copy` value in place. Consuming a
-`Slot<T>` prevents reusing the same selection accidentally, but the container must still keep
+`Slot<'storage, T>` prevents reusing the same selection accidentally, but the container must still keep
 its own initialization map.
 
 ## Gotchas
@@ -80,14 +80,14 @@ The owner of the slot operations.
 
 This struct carries no data and is never constructed by the library. Every operation is an
 inherent member declared in `impl Slot`, so `import silk.slot { Slot }` is the one import that
-reaches `Slot.write(...)` and the rest. It is unrelated to the builtin `Slot<T>` place type.
+reaches `Slot.write(...)` and the rest. It is unrelated to the builtin `Slot<'storage, T>` place type.
 
 <a id="declaration-73696c6b2f736c6f743a3a536c6f742e7772697465"></a>
 
 ### Associated function `Slot.write`
 
 ```silk
-pub fn write<T>(slot: silk/core.Slot<T>, value: T) -> ()
+pub fn write<'storage, T>(slot: silk/core.Slot<'storage, T>, value: T) -> ()
 ```
 
 Moves one value into a selected uninitialized raw slot.
@@ -95,17 +95,21 @@ Moves one value into a selected uninitialized raw slot.
 #### Gotchas
 
 The slot must be in bounds and uninitialized. A second write without a state transition is
-invalid.
+invalid. The value must satisfy the unchanged slot type, including every payload lifetime.
 
 <a id="declaration-73696c6b2f736c6f743a3a536c6f742e74616b65"></a>
 
 ### Associated function `Slot.take`
 
 ```silk
-pub fn take<T>(slot: silk/core.Slot<T>) -> T
+pub fn take<'storage, T>(slot: silk/core.Slot<'storage, T>) -> T
 ```
 
 Moves a value out of a selected initialized raw slot and leaves the slot uninitialized.
+
+#### Details
+
+The result retains every lifetime inside `T`. It does not retain the slot selection itself.
 
 #### Gotchas
 
@@ -116,7 +120,7 @@ The slot must be in bounds and initialized.
 ### Associated function `Slot.copy`
 
 ```silk
-pub fn copy<T>(slot: silk/core.Slot<T>) -> T
+pub fn copy<'storage, T>(slot: silk/core.Slot<'storage, T>) -> T
 ```
 
 Copies a `Copy` value from a selected initialized raw slot without changing its state.
@@ -130,7 +134,7 @@ The slot must be in bounds and initialized.
 ### Associated function `Slot.dropValue`
 
 ```silk
-pub fn dropValue<T>(slot: silk/core.Slot<T>) -> ()
+pub fn dropValue<'storage, T>(slot: silk/core.Slot<'storage, T>) -> ()
 ```
 
 Drops a value in a selected initialized raw slot and leaves the slot uninitialized.

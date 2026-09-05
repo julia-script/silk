@@ -38,6 +38,67 @@ const projectViewIsNotSingleRoot: ProjectAnalysis.View extends Analysis.SingleRo
   ? false
   : true = true
 
+it.effect('invalidates dependent storage consumers when exported variance or cleanup changes', () =>
+  Effect.gen(function* () {
+    const root = SourceFile.make(
+      'query/Dependent',
+      ascii(`import shared.Core
+fn consume<'a>(value: Core.Guard<'a>) { drop value }
+fn unrelated() -> i32 { return 7 }`),
+    )
+    const library = `pub struct Guard<'a> { value: &'a i32 }
+fn privateValue() -> i32 { return 1 }`
+    const resolve = (source: string) =>
+      SourceResolver.memory(new Map([['shared/Core', ascii(source)]]))
+    const initial = yield* ProjectAnalysis.make([root]).pipe(Effect.provide(resolve(library)))
+    const editedSource = library.replace('return 1', 'return 2')
+    const edited = yield* ProjectAnalysis.revise(initial, [root]).pipe(
+      Effect.provide(resolve(editedSource)),
+    )
+    const privateQueries = edited.report.find((phase) => phase.phase === 'body-queries')?.counters
+    assert.strictEqual(privateQueries?._tag, 'BodyQueryCounters')
+    if (privateQueries?._tag !== 'BodyQueryCounters') return
+    assert.strictEqual(privateQueries.checked, 1)
+    assert.strictEqual(privateQueries.ownershipReused, 2)
+    const exclusiveSource = editedSource.replace("&'a i32", "&'a mut i32")
+    const exclusive = yield* ProjectAnalysis.revise(edited, [root]).pipe(
+      Effect.provide(resolve(exclusiveSource)),
+    )
+    const varianceQueries = exclusive.report.find(
+      (phase) => phase.phase === 'body-queries',
+    )?.counters
+    assert.strictEqual(varianceQueries?._tag, 'BodyQueryCounters')
+    if (varianceQueries?._tag !== 'BodyQueryCounters') return
+    assert.strictEqual(varianceQueries.checked, 1)
+    assert.strictEqual(varianceQueries.reused, 2)
+    const cleanupSource =
+      exclusiveSource +
+      `
+impl<'a> Drop for Guard<'a> { fn drop(self: &mut Guard<'a>) -> () { return () } }`
+    const cleanup = yield* ProjectAnalysis.revise(exclusive, [root]).pipe(
+      Effect.provide(resolve(cleanupSource)),
+    )
+    const cleanupQueries = cleanup.report.find((phase) => phase.phase === 'body-queries')?.counters
+    assert.strictEqual(cleanupQueries?._tag, 'BodyQueryCounters')
+    if (cleanupQueries?._tag !== 'BodyQueryCounters') return
+    // Adding a conformance changes the resolution catalog; implementation-only hook edits do not.
+    assert.strictEqual(cleanupQueries.ownershipChecked, 4)
+    assert.strictEqual(cleanupQueries.ownershipReused, 0)
+    const hookEdited = yield* ProjectAnalysis.revise(cleanup, [root]).pipe(
+      Effect.provide(resolve(cleanupSource.replace('return ()', 'self.value.* = 0 return ()'))),
+    )
+    const hookQueries = hookEdited.report.find((phase) => phase.phase === 'body-queries')?.counters
+    assert.strictEqual(hookQueries?._tag, 'BodyQueryCounters')
+    if (hookQueries?._tag !== 'BodyQueryCounters') return
+    assert.strictEqual(hookQueries.checked, 1)
+    assert.strictEqual(hookQueries.ownershipReused, 3)
+    for (const project of [initial, edited, exclusive, cleanup, hookEdited]) {
+      const view = ProjectAnalysis.view(project, 'query/Dependent') ?? raise('dependent view')
+      assert.deepEqual(Analysis.diagnostics(view), [])
+    }
+  }),
+)
+
 it.effect(
   'checks only edited bodies and rebinds alpha-renamed lifetime declarations in cached consumers',
   () =>
