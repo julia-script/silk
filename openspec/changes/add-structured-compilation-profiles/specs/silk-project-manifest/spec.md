@@ -13,3 +13,34 @@ The manifest SHALL support a named default through build.profile, named logical 
 
 - **WHEN** a request names a profile absent from the manifest
 - **THEN** selection reports the unknown name and manifest origin without falling back to host defaults
+
+## MODIFIED Requirements
+
+### Requirement: Deterministic project artifact layout
+
+The system SHALL derive each artifact destination below
+`<output-dir>/llvm/<target>/<optimization>/`. Executables SHALL use the package name, WebAssembly
+modules SHALL append `.wasm`, shared libraries SHALL use the target platform's conventional shared
+library prefix and suffix, and static libraries SHALL use the target platform's conventional static
+archive prefix and suffix. Target segments SHALL use resolved canonical identifiers, including
+resolution of `host`, and required parent directories SHALL be created before compilation.
+
+#### Scenario: Build a debug host artifact
+
+- **WHEN** package `hello` is built as an executable through LLVM for `aarch64-apple-darwin` with optimization mode `debug`
+- **THEN** its destination is `<project>/build/llvm/aarch64-apple-darwin/debug/hello`
+
+#### Scenario: Build host libraries
+
+- **WHEN** package `hello` is built as shared and static libraries for an Apple host
+- **THEN** their filenames are `libhello.dylib` and `libhello.a` beneath their LLVM, target, and optimization directory
+
+#### Scenario: Build WebAssembly through LLVM
+
+- **WHEN** package `hello` is built for `wasm32-unknown-unknown`
+- **THEN** the artifact is `<project>/build/llvm/wasm32-unknown-unknown/debug/hello.wasm`
+
+#### Scenario: Replan the same build
+
+- **WHEN** the same project, complete profile or target shorthand, and artifact kind are planned repeatedly
+- **THEN** every canonical entry, source root, root module identity, and destination is identical and ordered deterministically

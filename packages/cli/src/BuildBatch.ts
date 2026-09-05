@@ -92,7 +92,7 @@ export const make = Effect.fn('BuildBatch.make')(function* (
         ]
       }
       const targets = TargetSelector.resolveAll(
-        options.targets ?? project.build.targets,
+        options.targets ?? (options.purpose === 'run' ? ['host'] : project.build.targets),
         NativeToolchain.hostSelection(),
       )
       if (Result.isFailure(targets))

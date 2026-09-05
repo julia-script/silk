@@ -22,6 +22,8 @@ JUL-120 requires packages to expose typed compile-time configuration and permits
 - `static-evaluation`: canonical profile identity replaces ordinal target identity.
 - `bootstrap-target-layout`: canonical targets are machine descriptions within complete profiles; host selection belongs at the application edge.
 - `silk-project-manifest`: named profiles and typed binding transport.
+- `silk-cli-workflows`: shared logical selectors and explicit optimization shorthand.
+- `bootstrap-native-toolchain`: completed logical optimization/debug facts own object arguments.
 
 ## Impact
 

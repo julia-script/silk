@@ -8,7 +8,7 @@ Defines the user-visible Silk language-tool commands for project checking, build
 
 ### Requirement: Project-oriented command surface
 
-The root `silk` command SHALL expose `init`, `build`, `check`, `clean`, `format`, `run`, and `build-exe`. `init` SHALL accept an optional path and package-name override. Project compilation commands SHALL accept a shared optional `--manifest-path`, repeatable `--target`, and profile selection. Repeated command-line targets SHALL replace rather than append to manifest targets. `--release` SHALL select the release profile and SHALL conflict with an explicitly different `--profile`.
+The root `silk` command SHALL expose `init`, `build`, `check`, `clean`, `format`, `run`, and `build-exe`. `init` SHALL accept an optional path and package-name override. Project compilation commands SHALL accept a shared optional `--manifest-path`, repeatable `--target`, named `--profile`, complete `--profile-input`, and `--optimization` selection. Repeated command-line targets SHALL replace rather than append to manifest targets. `--release` SHALL select the release optimization mode and SHALL conflict with an explicitly different `--optimization`. Named/full profiles SHALL conflict with target and optimization flags.
 
 #### Scenario: Display root help
 
@@ -22,12 +22,12 @@ The root `silk` command SHALL expose `init`, `build`, `check`, `clean`, `format`
 
 #### Scenario: Select release shorthand
 
-- **WHEN** a project command receives `--release` without `--profile`
-- **THEN** it uses the `release` profile
+- **WHEN** a project command receives `--release` without `--optimization`
+- **THEN** it uses the `release` optimization mode
 
 #### Scenario: Reject conflicting profiles
 
-- **WHEN** a project command receives `--release --profile debug`
+- **WHEN** a project command receives `--release --optimization debug`
 - **THEN** it fails before loading or compiling the project
 
 ### Requirement: Project check
@@ -53,7 +53,7 @@ The root `silk` command SHALL expose `init`, `build`, `check`, `clean`, `format`
 
 `silk build` SHALL validate the complete target, artifact-kind, and structured native-link
 batch before compilation, then compile sequentially in first-seen canonical target order. It SHALL
-honor the manifest's executable, shared-library, or static-library selection and deterministic
+honor the selected logical profile's artifact form, or the manifest artifact for target shorthand, and deterministic
 target filename. Each target SHALL commit independently; every valid target SHALL be attempted and
 a failure SHALL NOT remove another target's artifact. Successful library outcomes SHALL report the
 primary library, generated C header, and generated ABI manifest. Ordinary project builds SHALL NOT
@@ -72,7 +72,7 @@ require source-root, exact output, Clang, archive-tool, temporary-artifact, or t
 #### Scenario: Build multiple valid targets
 
 - **WHEN** an executable LLVM project selects `host` and `wasm32-unknown-unknown`
-- **THEN** both targets are built in declared order to distinct LLVM/target/profile destinations without C-library companions
+- **THEN** both targets are built in declared order to distinct LLVM/target/optimization destinations without C-library companions
 
 #### Scenario: Retain an independent success
 
@@ -86,10 +86,9 @@ require source-root, exact output, Clang, archive-tool, temporary-artifact, or t
 
 ### Requirement: Project run
 
-`silk run` SHALL require executable artifact kind, select exactly the resolved host target, build it
+`silk run` SHALL require executable artifact kind, use the selected named/full profile or resolve the host at the application edge for target shorthand, build it
 through LLVM, then execute the result with inherited
-standard input, output, and error and all arguments after `--`. A manifest library kind SHALL fail
-preflight rather than being overridden or executed.
+standard input, output, and error and all arguments after `--`. A selected library or foreign-target profile SHALL fail preflight. Without a named/full selection, a manifest library kind SHALL also fail rather than being overridden or executed.
 
 #### Scenario: Run an executable project
 
@@ -141,7 +140,7 @@ preflight rather than being overridden or executed.
 
 ### Requirement: Explicit direct-file compilation
 
-`silk build-exe <source>` SHALL retain direct-file controls for source root, output, target, profile, Clang path, saved temporary artifacts, and timing reports. The former `silk compile` command SHALL NOT be registered.
+`silk build-exe <source>` SHALL retain direct-file controls for source root, output, target, complete profile input, optimization mode, Clang path, saved temporary artifacts, and timing reports. The former `silk compile` command SHALL NOT be registered.
 
 #### Scenario: Compile one rooted graph directly
 

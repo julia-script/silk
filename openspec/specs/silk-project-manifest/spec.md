@@ -52,7 +52,7 @@ Without an explicit manifest path, the system SHALL search the current directory
 ### Requirement: Deterministic project artifact layout
 
 The system SHALL derive each artifact destination below
-`<output-dir>/llvm/<target>/<profile>/`. Executables SHALL use the package name, WebAssembly
+`<output-dir>/llvm/<target>/<optimization>/`. Executables SHALL use the package name, WebAssembly
 modules SHALL append `.wasm`, shared libraries SHALL use the target platform's conventional shared
 library prefix and suffix, and static libraries SHALL use the target platform's conventional static
 archive prefix and suffix. Target segments SHALL use resolved canonical identifiers, including
@@ -60,13 +60,13 @@ resolution of `host`, and required parent directories SHALL be created before co
 
 #### Scenario: Build a debug host artifact
 
-- **WHEN** package `hello` is built as an executable through LLVM for `aarch64-apple-darwin` with profile `debug`
+- **WHEN** package `hello` is built as an executable through LLVM for `aarch64-apple-darwin` with optimization mode `debug`
 - **THEN** its destination is `<project>/build/llvm/aarch64-apple-darwin/debug/hello`
 
 #### Scenario: Build host libraries
 
 - **WHEN** package `hello` is built as shared and static libraries for an Apple host
-- **THEN** their filenames are `libhello.dylib` and `libhello.a` beneath their LLVM, target, and profile directory
+- **THEN** their filenames are `libhello.dylib` and `libhello.a` beneath their LLVM, target, and optimization directory
 
 #### Scenario: Build WebAssembly through LLVM
 
@@ -75,7 +75,7 @@ resolution of `host`, and required parent directories SHALL be created before co
 
 #### Scenario: Replan the same build
 
-- **WHEN** the same project, targets, profile, and artifact kind are planned repeatedly
+- **WHEN** the same project, complete profile or target shorthand, and artifact kind are planned repeatedly
 - **THEN** every canonical entry, source root, root module identity, and destination is identical and ordered deterministically
 
 ### Requirement: Optional build defaults

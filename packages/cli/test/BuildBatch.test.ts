@@ -149,6 +149,9 @@ it.effect('selects default and explicit complete profiles before host fallback',
       origin,
     )
     const configured = { ...project(), profiles }
+    const runnable = yield* BuildBatch.make(project(), { purpose: 'run' })
+    assert.strictEqual(runnable.plans.length, 1)
+    assert.strictEqual(runnable.plans[0].artifactKind, 'NativeExecutable')
     const batch = yield* BuildBatch.make(configured, {})
     assert.strictEqual(batch.plans[0].target.id, 'x86_64-unknown-linux-gnu')
     assert.strictEqual(batch.plans[0].artifactKind, 'NativeStaticLibrary')
