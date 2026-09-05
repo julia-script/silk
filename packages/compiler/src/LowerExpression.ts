@@ -1951,6 +1951,7 @@ function lowerUnionConvertExpression(
       destination,
       source: source.result,
       sourceType,
+      sourceSemantic: fn.semantic(expression.sourceType),
       targetType,
       conversion: expression.conversion,
       mappings,

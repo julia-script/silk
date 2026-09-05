@@ -17,9 +17,10 @@ temporary storage. [`fill`](#declaration-73696c6b2f7261775f6275666665723a3a52617
 
 ## Gotchas
 
-These wrappers do not verify allocation capacity or initialization. The caller must prove that an allocation fits the recorded
-element count, every selected range is in bounds, and every read or view covers initialized
-elements. Releasing a raw buffer releases its allocation but does not discover and drop values
+These wrappers do not verify allocation capacity or initialization. The caller must prove that
+an allocation fits the recorded element count, every selected range is in bounds, and every
+read or view covers initialized elements. Releasing a raw buffer releases its allocation but
+does not discover and drop values
 still stored in it; a container must clear initialized `Slot` values before release.
 
 ## Examples

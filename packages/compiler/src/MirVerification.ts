@@ -5580,7 +5580,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           const source = fn.localTypes.at(operation.source.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const compatibility = TypeCompatibility.check(
-            semanticType(operation.sourceType),
+            operation.sourceSemantic,
             operation.targetType.type,
           )
           const mappingsValid =
@@ -5602,9 +5602,10 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             SilkType.equals(semanticType(source), semanticType(operation.sourceType)) &&
             SilkType.equals(semanticType(destination), operation.targetType.type) &&
             mappingsValid &&
-            (sameRuntimeType(operation.sourceShape.type, semanticType(operation.sourceType)) ||
+            sameRuntimeType(operation.sourceShape.type, operation.sourceSemantic) &&
+            (sameRuntimeType(operation.sourceSemantic, semanticType(operation.sourceType)) ||
               SilkType.haveSameRepresentationShape(
-                operation.sourceShape.type,
+                operation.sourceSemantic,
                 semanticType(operation.sourceType),
               )) &&
             sameRuntimeType(operation.targetShape.type, operation.targetType.type) &&

@@ -1,6 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 import * as TypeCompatibility from '../src/TypeCompatibility.js'
 
@@ -13,6 +15,48 @@ struct C { left: i32 right: i32 }
 fn accept(value: A | B | C) -> i32 { return 42 }
 fn widen(value: A | B) -> i32 { return accept(move value) }
 pub fn main() -> i32 { return widen(A {}) }`
+
+it.effect('verifies union conversion with exact executable source identity', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'unions/executable-source',
+      ascii(`fn add(left: i32, right: i32) -> i32 { return left + right }
+fn selectedCallable() -> typeof(add) | i32 { return add }
+fn selectedEffect() -> some<F: Effect<'static; i32>> F | i32 { return effect { return 42 } }
+pub fn main() -> i32 { drop selectedCallable() drop selectedEffect() return 42 }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(program), [])
+    const conversions = program.functions.flatMap((fn) =>
+      MirVerification.operations(fn).filter((operation) => operation._tag === 'ConvertUnion'),
+    )
+    assert.lengthOf(conversions, 2)
+    assert.isTrue(conversions.every((operation) => Type.isRepresented(operation.sourceSemantic)))
+    const invalid: Mir.Module = {
+      ...program,
+      functions: program.functions.map((fn) => ({
+        ...fn,
+        regions: fn.regions.map((region) =>
+          region._tag !== 'OperationRegion'
+            ? region
+            : {
+                ...region,
+                operations: region.operations.map((operation) =>
+                  operation._tag !== 'ConvertUnion'
+                    ? operation
+                    : { ...operation, sourceSemantic: 'i32' },
+                ),
+              },
+        ),
+      })),
+    }
+    assert.deepEqual(
+      MirVerification.verify(invalid).map((violation) => violation.rule),
+      ['InvalidAggregateOperation', 'InvalidAggregateOperation'],
+    )
+  }),
+)
 
 it('computes canonical total member mappings', () => {
   const a = Type.nominal('unions/main', 'A')

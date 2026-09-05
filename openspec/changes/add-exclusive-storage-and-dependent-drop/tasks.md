@@ -13,4 +13,4 @@
 
 - [x] 3.1 Extend structural summary invalidation and erased generic reuse witnesses and opt-in exclusive-chain/recursive-cleanup/replacement failure workloads; run and document attributable work without state-combination expansion.
 - [x] 3.2 Reconcile prescriptive reference, affected main specs, diagnostics, generated artifacts and fixtures; verify strict OpenSpec validation and documentation checks.
-- [ ] 3.3 Run pnpm typecheck, pnpm format:check, pnpm lint, pnpm test, pnpm check and pnpm release:candidate; record exact results and distinguish pre-existing failures.
+- [x] 3.3 Run pnpm typecheck, pnpm format:check, pnpm lint, pnpm test, pnpm check and pnpm release:candidate; record exact results and distinguish pre-existing failures.

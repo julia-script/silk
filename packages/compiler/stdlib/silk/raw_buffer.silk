@@ -10,9 +10,10 @@
 //! temporary storage. [`fill`] writes raw bytes and therefore operates only on `RawBuffer<u8>`.
 //!
 //! # Gotchas
-//! These wrappers do not verify allocation capacity or initialization. The caller must prove that an allocation fits the recorded
-//! element count, every selected range is in bounds, and every read or view covers initialized
-//! elements. Releasing a raw buffer releases its allocation but does not discover and drop values
+//! These wrappers do not verify allocation capacity or initialization. The caller must prove that
+//! an allocation fits the recorded element count, every selected range is in bounds, and every
+//! read or view covers initialized elements. Releasing a raw buffer releases its allocation but
+//! does not discover and drop values
 //! still stored in it; a container must clear initialized `Slot` values before release.
 //!
 //! # Examples
@@ -144,4 +145,3 @@ impl RawBuffer {
     unsafe { return Intrinsic.rawBufferViewMut<T>(buffer, offset, length) }
   }
 }
-

@@ -886,6 +886,8 @@ export type Operation =
       readonly destination: LocalId
       readonly source: LocalId
       readonly sourceType: Exclude<Type, { readonly _tag: 'EffectOutcome' }>
+      /** Instantiated source proof, including executable identity, before layout erasure. */
+      readonly sourceSemantic: SilkType.Type
       readonly targetType: Extract<Type, { readonly _tag: 'Union' }>
       readonly conversion: 'Inject' | 'Widen'
       readonly mappings: ReadonlyArray<TypeCompatibility.MemberMapping>
