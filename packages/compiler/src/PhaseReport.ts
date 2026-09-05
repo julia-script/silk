@@ -1,4 +1,5 @@
 import type * as BodyQuery from './BodyQuery.js'
+import type * as Instances from './Instances.js'
 import * as Clock from 'effect/Clock'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
@@ -26,7 +27,11 @@ export interface ModuleReuseCounters {
   readonly recomputed: number
 }
 
-export type Counters = SemanticInvalidationCounters | ModuleReuseCounters | BodyQuery.Counters
+export type Counters =
+  | SemanticInvalidationCounters
+  | ModuleReuseCounters
+  | BodyQuery.Counters
+  | Instances.Counters
 
 /** One compiler or artifact-production phase's operational observation. */
 export interface PhaseReport {

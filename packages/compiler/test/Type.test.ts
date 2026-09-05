@@ -1588,25 +1588,20 @@ it.effect('rejects a borrowed temporary which escapes its full expression', () =
   }),
 )
 
-it.effect(
-  'conservatively retains an earlier holder assignment dependency until replacement flow is versioned',
-  () =>
-    Effect.gen(function* () {
-      const source = `fn reset() -> i32 {
+it.effect('releases a replaced local reference before its former source expires', () =>
+  Effect.gen(function* () {
+    const source = `fn reset() -> i32 {
   let outer = 1
   let mut view = &outer
   if true { let inner = 2 view = &inner view = &outer }
   return view.*
 }`
-      const snapshot = yield* Analysis.ofSource(
-        'lifetimes/reset',
-        Uint8Array.from(source, (character) => character.charCodeAt(0)),
-      )
-      assert.include(
-        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-        Diagnostic.expiredLifetimeCode,
-      )
-    }),
+    const snapshot = yield* Analysis.ofSource(
+      'lifetimes/reset',
+      Uint8Array.from(source, (character) => character.charCodeAt(0)),
+    )
+    assert.deepStrictEqual(Analysis.diagnostics(snapshot), [])
+  }),
 )
 
 it('separates stored executable environments from hypothetical outcome and invocation lifetimes', () => {
@@ -1810,6 +1805,83 @@ it('retains type outlives predicates through quantifier comparison, substitution
   const changed = Type.substitute(required, new Map([[Type.key(value), 'i32']]))
   assert.isTrue(Type.isCallable(changed))
   if (Type.isCallable(changed)) assert.strictEqual(changed.typeOutlives.at(0)?.type, 'i32')
+})
+
+it('carries executable formation facts without assuming invocation predicates or strengthening environments', () => {
+  const owner = { module: 'lifetimes/formation', name: 'retained' }
+  const env = Lifetime.bound(owner, 0, 'env')
+  const source = Lifetime.bound(owner, 1, 'source')
+  const value = Type.parameter(owner, 2, 'T')
+  const outer = Type.parameter({ ...owner, name: 'outer' }, 0, 'U')
+  const plain = Type.callable([], 'i32', { environment: env, lifetimeBinders: [] })
+  const retained = Type.callable([], 'i32', {
+    ...plain,
+    lifetimeBounds: [{ longer: source, shorter: env }],
+    typeOutlives: [{ type: outer, lifetime: env }],
+  })
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(retained, plain)))
+  assert.isTrue(TypeInference.infer(plain, retained, new Map()))
+  const forgedEnvironment = Type.callable([], 'i32', {
+    ...retained,
+    lifetimeBounds: [{ longer: env, shorter: Lifetime.staticLifetime }],
+  })
+  assert.isFalse(
+    TypeCompatibility.isCompatible(
+      TypeCompatibility.check(forgedEnvironment, Type.callable([], 'i32', detached)),
+    ),
+  )
+  assert.isFalse(
+    TypeInference.infer(Type.callable([], 'i32', detached), forgedEnvironment, new Map()),
+  )
+  const contract = CallableContract.make({
+    ...detached,
+    functionKind: 'Function',
+    binders: [value],
+    parameters: [],
+    result: 'i32',
+    constraints: [],
+    captures: [],
+  })
+  const schema: Type.CallableSchema = {
+    contract,
+    binders: contract.binders,
+    constraints: [],
+    evidence: [],
+    substitution: new Map(),
+    contractKey: CallableContract.key(contract),
+    constraintKeys: [],
+    evidenceKeys: [],
+    origins: [],
+  }
+  const generic = Type.callable(
+    [],
+    'i32',
+    {
+      ...plain,
+      typeOutlives: [{ type: value, lifetime: env }],
+    },
+    'Shared',
+    schema,
+  )
+  assert.deepEqual(Type.executableFormationRequirements(generic).typeOutlives, [])
+  assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(generic, plain)))
+  assert.isFalse(TypeInference.infer(plain, generic, new Map()))
+  const selected = Type.callable(
+    [],
+    'i32',
+    {
+      ...generic,
+      typeOutlives: [{ type: outer, lifetime: env }],
+    },
+    'Shared',
+    schema,
+  )
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(selected, plain)))
+  assert.isTrue(TypeInference.infer(plain, selected, new Map()))
+  const effect = Type.effect('i32', [], { ...retained, lifetimeBinders: [] })
+  const expectedEffect = Type.effect('i32', [], { ...plain, lifetimeBinders: [] })
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(effect, expectedEffect)))
+  assert.isTrue(TypeInference.infer(expectedEffect, effect, new Map()))
 })
 
 it.effect('keeps captured generic Effect storage bounded independently from its result type', () =>

@@ -54,15 +54,13 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const source = NativeStorage.readLocal(nativeStorage, operation.scrutinee)
       const root = context.entry.fn.localTypes.at(operation.scrutinee.ordinal)
       const place =
-        (operation.selectors?.length ?? 0) === 0
+        (operation.selectors?.length ?? 0) === 0 || root === undefined
           ? undefined
-          : root === undefined
-            ? undefined
-            : NativeOwnedPlace.make(
-                context.program.layout,
-                Mir.semanticType(root),
-                operation.selectors ?? [],
-              )
+          : NativeOwnedPlace.make(
+              context.program.layout,
+              Mir.semanticType(root),
+              operation.selectors ?? [],
+            )
       if ((operation.selectors?.length ?? 0) > 0 && place === undefined)
         throw new RangeError('LLVM pattern binding lost its owned scrutinee path')
       const sourceLanes = place?.source.lanes ?? operation.shape.lanes

@@ -689,15 +689,28 @@ export const plan = (
           )
           continue
         }
-        const planned = planFor(program, index, fn, region, operation, live.get(operation) ?? new Set(), control)
-        const partial = MirVerification.initializationOf(fn, program.layout).partialBefore.get(operation)
-        if (planned.slots.some(slot => partial?.has(slot.local.ordinal))) {
-          violations.push(Object.freeze({
-            _tag: 'SuspensionOwnershipViolation',
-            function: fn.instance,
-            span: operation.provenance.span,
-            detail: 'a partially initialized owner cannot cross suspension before its frame initialization state is preserved',
-          }))
+        const planned = planFor(
+          program,
+          index,
+          fn,
+          region,
+          operation,
+          live.get(operation) ?? new Set(),
+          control,
+        )
+        const partial = MirVerification.initializationOf(fn, program.layout).partialBefore.get(
+          operation,
+        )
+        if (planned.slots.some((slot) => partial?.has(slot.local.ordinal))) {
+          violations.push(
+            Object.freeze({
+              _tag: 'SuspensionOwnershipViolation',
+              function: fn.instance,
+              span: operation.provenance.span,
+              detail:
+                'a partially initialized owner cannot cross suspension before its frame initialization state is preserved',
+            }),
+          )
           continue
         }
         plans.push(planned)

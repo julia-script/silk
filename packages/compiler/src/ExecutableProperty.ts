@@ -4,10 +4,12 @@ import * as Diagnostic from './Diagnostic.js'
 import * as ExecutionAffinity from './ExecutionAffinity.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
+import * as Lifetime from './Lifetime.js'
 import * as TypeInference from './internal/TypeInference.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import * as Type from './Type.js'
+import * as TypeOutlives from './TypeOutlives.js'
 
 export type Property = Type.SealedStaticProperty
 
@@ -63,7 +65,11 @@ const nestedLoanCauses = (
   path: ReadonlyArray<string>,
   active: ReadonlySet<string> = new Set(),
 ): ReadonlyArray<Cause> => {
-  if (Type.isString(type) || Type.isReference(type) || Type.isSlice(type) || Type.isSlot(type))
+  if (Type.isString(type) || Type.isReference(type) || Type.isSlice(type))
+    return TypeOutlives.check(type, Lifetime.staticLifetime, TypeOutlives.context(index.modules))
+      ? []
+      : Object.freeze([cause('NestedLoan', [...path, Type.encode(type)])])
+  if (Type.isSlot(type))
     return Object.freeze([cause('NestedLoan', [...path, Type.encode(type)])])
   if (Type.isFixedArray(type))
     return nestedLoanCauses(index, type.element, [...path, 'element'], active)
@@ -135,9 +141,12 @@ const detachedCapture = (
   if (
     capture.access === 'Shared' ||
     capture.access === 'Exclusive' ||
-    Type.isReference(capture.type) ||
-    Type.isSlice(capture.type) ||
-    Type.isString(capture.type) ||
+    ((Type.isReference(capture.type) || Type.isSlice(capture.type) || Type.isString(capture.type)) &&
+      !TypeOutlives.check(
+        capture.type,
+        Lifetime.staticLifetime,
+        TypeOutlives.context(index.modules),
+      )) ||
     Type.isSlot(capture.type)
   )
     return Object.freeze([cause('LexicalLoan', path)])
@@ -170,11 +179,7 @@ const sameArguments = (
   left: ReadonlyArray<Type.GenericArgument>,
   right: ReadonlyArray<Type.GenericArgument>,
 ): boolean =>
-  left.length === right.length &&
-  left.every((argument, ordinal) => {
-    const candidate = right.at(ordinal)
-    return candidate !== undefined && Type.equalsGenericArgument(argument, candidate)
-  })
+  Type.runtimeArgumentKeys(left).join('\0') === Type.runtimeArgumentKeys(right).join('\0')
 
 const callableSubjectOf = (
   discovery: Instances.Discovery,
@@ -304,11 +309,7 @@ export const derive = (
           (instance) =>
             instance.key.declaration.module === declaration.module &&
             instance.key.declaration.name === declaration.name &&
-            instance.key.typeArguments.length === callable.typeArguments.length &&
-            instance.key.typeArguments.every((argument, ordinal) => {
-              const expected = callable.typeArguments.at(ordinal)
-              return expected !== undefined && Type.equalsGenericArgument(argument, expected)
-            }),
+            sameArguments(instance.key.typeArguments, callable.typeArguments),
         )
         return target === undefined
           ? verdict([cause('Unavailable', [`callable:${identity}`])])
@@ -488,8 +489,8 @@ const factOfExact = (
             sameArguments(instance.key.typeArguments, identity.typeArguments),
         )
       : undefined
-  const summary =
-    target === undefined ? SuspensionMode.direct : Instances.suspensionOf(self, target.key)
+  if (target === undefined) return undefined
+  const summary = Instances.suspensionOf(self, target.key)
   return Object.freeze({
     _tag: 'ExecutablePropertyFact',
     subject: Object.freeze({ _tag: 'Callable', identity: identity.identity }),

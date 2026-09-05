@@ -173,7 +173,7 @@ function discoverAndLower(
           ),
     (value) => value.instances.length,
     (value) => value.violations.length,
-    options,
+    { ...options, counters: (value) => value.counters },
   )
   const declarationDiagnosticKeys = new Set(
     self.diagnostics.map(
@@ -327,8 +327,16 @@ function discoverAndLower(
           message: 'MIR is unavailable because a usize literal exceeds the selected target',
         })
       : undefined
-  const program =
-    targetLayout._tag === 'Available' && targetLiteralError === undefined
+  const residualizationError = Diagnostic.hasErrors(instances.residualizationDiagnostics)
+    ? new AnalysisUnavailable({
+        operation: 'Analysis.realize',
+        message: 'MIR is unavailable after failed source residualization',
+      })
+    : undefined
+  const finalized =
+    targetLayout._tag === 'Available' &&
+    targetLiteralError === undefined &&
+    residualizationError === undefined
       ? PhaseReport.measureInto(
           report,
           'mir-lowering',
@@ -345,27 +353,35 @@ function discoverAndLower(
               self.index,
               options,
             ),
-          (value) => value.functions.length,
-          () => 0,
+          (value) => value.program?.functions.length ?? 0,
+          (value) => value.diagnostics.length,
           options,
         )
       : undefined
+  const program = finalized?.program
+  const finalizedDiagnostics = Diagnostic.merge(diagnostics, finalized?.diagnostics ?? [])
 
   if (prepareForEmission) {
+    if (Diagnostic.hasErrors(finalizedDiagnostics))
+      return Object.freeze({
+        _tag: 'Rejected',
+        diagnostics: finalizedDiagnostics,
+        report: Object.freeze(report),
+      })
     if (targetLayout._tag !== 'Available' || program === undefined)
       throw new RangeError('Driver lowering reached an unavailable target after its gates')
     const planning = ForeignPlanning.check(program, targetLayout.target)
     if (planning.length > 0)
       return Object.freeze({
         _tag: 'Rejected',
-        diagnostics: Diagnostic.merge(diagnostics, planning),
+        diagnostics: Diagnostic.merge(finalizedDiagnostics, planning),
         report: Object.freeze(report),
       })
     return Object.freeze({
       _tag: 'Prepared',
       target: targetLayout.target,
       program,
-      diagnostics,
+      diagnostics: finalizedDiagnostics,
       report: Object.freeze(report),
     })
   }
@@ -392,13 +408,14 @@ function discoverAndLower(
             _tag: 'Unavailable',
             error:
               targetLiteralError ??
+              residualizationError ??
               unavailable ??
               new AnalysisUnavailable({
                 operation: 'Analysis.realize',
                 message: 'MIR is unavailable',
               }),
           }),
-    diagnostics,
+    diagnostics: finalizedDiagnostics,
     report: Object.freeze([...report]),
   })
 }
@@ -455,18 +472,23 @@ const finalizeMir = (
   provisional: ProvisionalMir.Module,
   index: DeclarationIndex.Index,
   options: Options,
-): Mir.Module => {
+): {
+  readonly program: Mir.Module | undefined
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
   const normalized = normalizeMir(program, provisional, options)
-  return options.normalizeMir === false
-    ? normalized
-    : CoroutineFrame.apply(
-        SuspensionMir.finalize(
-          normalized,
-          provisional,
-          SuspensionOwnership.plan(normalized, provisional, index),
-          index,
-        ),
-      )
+  const ownership = SuspensionOwnership.plan(normalized, provisional, index)
+  const diagnostics = ownership.violations.map((violation) =>
+    Diagnostic.invalidSuspensionOwnership(violation.detail, violation.span),
+  )
+  if (diagnostics.length > 0) return { program: undefined, diagnostics }
+  if (options.normalizeMir === false) return { program: normalized, diagnostics }
+  return {
+    program: CoroutineFrame.apply(
+      SuspensionMir.finalize(normalized, provisional, ownership, index),
+    ),
+    diagnostics,
+  }
 }
 
 /** An available target-owned artifact or the reason realization could not construct it. */

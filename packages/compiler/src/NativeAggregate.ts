@@ -235,7 +235,13 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
       .sort((left, right) => right.path.length - left.path.length)
       .at(0)
     if (flag === undefined) throw new RangeError('Conditional cleanup lost its initialization flag')
-    const condition = yield* FunctionBody.integerCompare(body, 'ne', NativeStorage.readScalar(storage, flag.local), yield* Constant.integerSigned(builder, i32, 0n), `${tag}_is_initialized`)
+    const condition = yield* FunctionBody.integerCompare(
+      body,
+      'ne',
+      NativeStorage.readScalar(storage, flag.local),
+      yield* Constant.integerSigned(builder, i32, 0n),
+      `${tag}_is_initialized`,
+    )
     const selected = yield* LlvmBlock.make(body, `${tag}_initialized`)
     const following = yield* LlvmBlock.make(body, `${tag}_initialization_next`)
     yield* FunctionBody.conditionalBranch(body, condition, selected, following)

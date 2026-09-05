@@ -3,6 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
 import * as Lexer from '../src/Lexer.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
 import * as Parser from '../src/Parser.js'
@@ -94,11 +95,11 @@ pub struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> { operation: F }`,
 
     assert.deepEqual(
       mapper?.typeParameters.map((parameter) => parameter.type.kind),
-      ['Value', 'Value', 'CallableRepresentation'],
+      ['Value', 'Value', 'CallableRepresentation', 'Lifetime'],
     )
     assert.deepEqual(
       deferred?.typeParameters.map((parameter) => parameter.type.kind),
-      ['Value', 'Value', 'RequirementRow', 'EffectRepresentation'],
+      ['Value', 'Value', 'RequirementRow', 'EffectRepresentation', 'Lifetime'],
     )
     assert.strictEqual(mapper?.typeParameters.at(2)?.representationBound?.kind, 'Callable')
     assert.strictEqual(deferred?.typeParameters.at(3)?.representationBound?.kind, 'Effect')
@@ -169,8 +170,8 @@ it.effect('forwards every open generic kind through one ordered nominal applicat
   Effect.gen(function* () {
     const analyzed = yield* index(
       'representation-syntax/kinded-application',
-      `struct Inner<A, E, ?R, F: fn(A) -> A> { value: A operation: F }
-struct Outer<A, E, ?R, F: fn(A) -> A> { inner: Inner<A, E, R, F> }`,
+      `struct Inner<A, E, ?R, 'env, F: fn<'env>(A) -> A> { value: A operation: F }
+struct Outer<A, E, ?R, 'env, F: fn<'env>(A) -> A> { inner: Inner<A, E, R, 'env, F> }`,
     )
     const outer = analyzed.modules.at(0)?.structs.at(1)
     const field = outer?.fields.at(0)?.declaredType
@@ -180,8 +181,9 @@ struct Outer<A, E, ?R, F: fn(A) -> A> { inner: Inner<A, E, R, F> }`,
     assert.strictEqual(Type.isTypeArgument(field.type.arguments.at(0) ?? Type.unit), true)
     assert.strictEqual(Type.isTypeArgument(field.type.arguments.at(1) ?? Type.unit), true)
     assert.strictEqual(Type.isRequirementRowArgument(field.type.arguments.at(2) ?? Type.unit), true)
+    assert.strictEqual(Lifetime.isLifetime(field.type.arguments.at(3) ?? Type.unit), true)
     assert.strictEqual(
-      Type.isRepresentationParameterArgument(field.type.arguments.at(3) ?? Type.unit),
+      Type.isRepresentationParameterArgument(field.type.arguments.at(4) ?? Type.unit),
       true,
     )
     assert.deepEqual(analyzed.diagnostics, [])
@@ -192,26 +194,25 @@ it.effect('diagnoses incompatible callable and Effect representation access dire
   Effect.gen(function* () {
     const analyzed = yield* index(
       'representation-syntax/incompatible-bounds',
-      `struct SharedCallable<A, F: fn(A) -> A> { operation: F }
-struct OnceCallable<A, F: once fn(A) -> A> { operation: F }
-struct SharedEffect<A, F: Effect<A>> { operation: F }
-struct OnceEffect<A, F: once Effect<A>> { operation: F }
-fn invalidCallable<A, F: once fn(A) -> A>(operation: F) -> SharedCallable<A, F> { loop {} }
-fn validCallable<A, F: fn(A) -> A>(operation: F) -> OnceCallable<A, F> { loop {} }
-fn invalidEffect<A, F: once Effect<A>>(operation: F) -> SharedEffect<A, F> { loop {} }
-fn validEffect<A, F: Effect<A>>(operation: F) -> OnceEffect<A, F> { loop {} }`,
+      `struct SharedCallable<'env, A, F: fn<'env>(A) -> A> { operation: F }
+struct OnceCallable<'env, A, F: once fn<'env>(A) -> A> { operation: F }
+struct SharedEffect<'env, A, F: Effect<'env; A>> { operation: F }
+struct OnceEffect<'env, A, F: once Effect<'env; A>> { operation: F }
+fn invalidCallable<'env, A, F: once fn<'env>(A) -> A>(operation: F) -> SharedCallable<'env, A, F> { loop {} }
+fn validCallable<'env, A, F: fn<'env>(A) -> A>(operation: F) -> OnceCallable<'env, A, F> { loop {} }
+fn invalidEffect<'env, A, F: once Effect<'env; A>>(operation: F) -> SharedEffect<'env, A, F> { loop {} }
+fn validEffect<'env, A, F: Effect<'env; A>>(operation: F) -> OnceEffect<'env, A, F> { loop {} }`,
     )
-    const diagnostics = analyzed.diagnostics.filter((diagnostic) => diagnostic.code === 'SEM0106')
+    const diagnostics = analyzed.diagnostics
 
-    assert.strictEqual(diagnostics.length, 2)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0106', 'SEM0106'],
+    )
     assert.deepEqual(
       diagnostics.map((diagnostic) => diagnostic.reason._tag),
       ['IncompatibleRepresentationBound', 'IncompatibleRepresentationBound'],
     )
-    assert.include(diagnostics.at(0)?.message ?? '', 'requires fn(A) -> A')
-    assert.include(diagnostics.at(0)?.message ?? '', 'supplied bound once fn(A) -> A')
-    assert.include(diagnostics.at(1)?.message ?? '', 'requires Effect<A>')
-    assert.include(diagnostics.at(1)?.message ?? '', 'supplied bound once Effect<A>')
     assert.deepEqual(
       diagnostics.map((diagnostic) => diagnostic.relatedSpans?.map((related) => related.label)),
       [

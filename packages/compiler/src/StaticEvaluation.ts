@@ -1621,6 +1621,21 @@ const evaluateExpression = (
         ? unavailableFact(fact, context, 'projected static field has no admitted value')
         : complete(field.value)
     }
+    case 'IndexProjection': {
+      const subject = evaluateExpression(fact.subject, context)
+      if (subject._tag !== 'Complete') return subject
+      const index = evaluateStaticIndex(fact, context)
+      if (index._tag !== 'Complete') return index
+      if (
+        subject.value._tag !== 'AggregateValue' ||
+        subject.value.identity._tag !== 'ArrayAggregateIdentity'
+      )
+        return unavailableFact(fact, context, 'array projection depends on runtime storage')
+      const field = subject.value.fields.find((candidate) => candidate.ordinal === index.value)
+      return field === undefined
+        ? unavailableFact(fact, context, 'projected static element has no admitted value')
+        : complete(field.value)
+    }
     case 'Identifier': {
       const reference = fact.reference
       let value: StaticValue.Value | undefined
@@ -1999,6 +2014,94 @@ type ExecutionOutcome<A> =
       readonly control: StatementControl
     }
 
+const evaluateStaticIndex = (
+  fact: Elaboration.IndexProjectionExpressionFact,
+  context: FactEvaluationContext,
+): ExecutionOutcome<number> => {
+  const index = evaluateExpression(fact.index, context)
+  if (index._tag !== 'Complete') return index
+  if (
+    fact.array === undefined ||
+    index.value._tag !== 'IntegerValue' ||
+    index.value.value < 0n ||
+    index.value.value >= BigInt(fact.array.length)
+  )
+    return failed(
+      phaseViolation(
+        'StaticEvaluation.evaluateFact',
+        'array projection requires an in-bounds static index',
+        fact.syntax.span,
+        context.trace,
+      ),
+    )
+  return complete(Number(index.value.value))
+}
+
+/** Resolves destination selectors before evaluating the incoming value, as ordinary writes do. */
+const staticWritePath = (
+  destination: Elaboration.ExpressionFact,
+  context: FactEvaluationContext,
+): ExecutionOutcome<ReadonlyArray<number>> => {
+  if (destination._tag === 'Identifier') return complete([])
+  if (destination._tag === 'Grouped') return staticWritePath(destination.expression, context)
+  if (destination._tag === 'FieldProjection' && destination.state._tag === 'Resolved') {
+    const parent = staticWritePath(destination.subject, context)
+    return parent._tag === 'Complete'
+      ? complete([...parent.value, destination.state.field.id.ordinal])
+      : parent
+  }
+  if (destination._tag === 'IndexProjection') {
+    const parent = staticWritePath(destination.subject, context)
+    if (parent._tag !== 'Complete') return parent
+    const index = evaluateStaticIndex(destination, context)
+    return index._tag === 'Complete' ? complete([...parent.value, index.value]) : index
+  }
+  return failed(
+    phaseViolation(
+      'StaticEvaluation.evaluateStatements',
+      'assignment destination is not an owned static place',
+      destination.syntax.span,
+      context.trace,
+    ),
+  )
+}
+
+const replaceStaticPlace = (
+  current: StaticValue.Value | undefined,
+  path: ReadonlyArray<number>,
+  incoming: StaticValue.Value,
+  span: SourceSpan.SourceSpan,
+  context: FactEvaluationContext,
+): Outcome<StaticValue.Value> => {
+  const ordinal = path.at(0)
+  if (ordinal === undefined) return complete(incoming)
+  const field =
+    current?._tag === 'AggregateValue'
+      ? current.fields.find((candidate) => candidate.ordinal === ordinal)
+      : undefined
+  if (current?._tag !== 'AggregateValue' || field === undefined)
+    return failed(
+      phaseViolation(
+        'StaticEvaluation.evaluateStatements',
+        'assignment projection has no admitted static storage',
+        span,
+        context.trace,
+      ),
+    )
+  const nested = replaceStaticPlace(field.value, path.slice(1), incoming, span, context)
+  if (nested._tag !== 'Complete') return nested
+  return constructAggregate(
+    context.environment,
+    current.identity,
+    current.fields.map((candidate) =>
+      candidate.ordinal === ordinal ? { ...candidate, value: nested.value } : candidate,
+    ),
+    span,
+    context.trace,
+    current.runtimeFields,
+  )
+}
+
 const sameLoop = (left: Hir.LoopId | undefined, right: Hir.LoopId): boolean =>
   left !== undefined &&
   left.ordinal === right.ordinal &&
@@ -2109,10 +2212,21 @@ const evaluateStatementSequence = (
             context.trace,
           ),
         )
+      const path = staticWritePath(statement.destination, contextual)
+      if (path._tag !== 'Complete') return path
       const value = evaluateExpression(statement.value, contextual)
       if (value._tag !== 'Complete') return value
       const key = localValueKey(statement.root)
-      values.set(key, value.value)
+      const replaced = replaceStaticPlace(
+        values.get(key),
+        path.value,
+        value.value,
+        statement.destination.syntax.span,
+        contextual,
+      )
+      if (replaced._tag !== 'Complete') return replaced
+      values.set(key, replaced.value)
+      if (path.value.length > 0) continue
       const span = staticTextSpan(statement.value, contextual)
       if (span === undefined) valueSpans.delete(key)
       else valueSpans.set(key, span)

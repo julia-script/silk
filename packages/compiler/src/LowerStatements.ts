@@ -402,9 +402,7 @@ const lowerStatement = (
     if (
       staticCallable !== undefined &&
       callableSchema !== undefined &&
-      (callableSchema.binders.length > 0 ||
-        callableSchema.constraints.length > 0 ||
-        callableSchema.evidence.length > 0)
+      (callableSchema.constraints.length > 0 || callableSchema.evidence.length > 0)
     ) {
       fn.callableRecipes.set(statement.binding.ordinal, statement.initializer)
       const following = fn.reserve()
@@ -709,7 +707,9 @@ const lowerStatement = (
     const transition = transitionAt(fn, statement.span, 'Drop')
     if (transition !== undefined && ownershipLocal(fn, transition.root) !== undefined) {
       const root = ownershipLocal(fn, transition.root)
-      const type = 'type' in statement.expression ? fn.type(statement.expression.type) : undefined
+      let type: Mir.Type | undefined
+      if (transition.path.length === 0 && root !== undefined) type = fn.localTypes.at(root.ordinal)
+      else if ('type' in statement.expression) type = fn.type(statement.expression.type)
       if (root === undefined || type === undefined) return undefined
       const selectors = lowerOwnershipPath(fn, root, transition.path, statement.span)
       if (selectors === undefined) return undefined
@@ -760,7 +760,9 @@ const lowerStatement = (
     if (
       droppedRecipeType !== undefined &&
       Type.isCallable(droppedRecipeType) &&
-      droppedRecipeType.schema !== undefined
+      droppedRecipeType.schema !== undefined &&
+      (droppedRecipeType.schema.constraints.length > 0 ||
+        droppedRecipeType.schema.evidence.length > 0)
     ) {
       if (droppedExpression._tag === 'BindingReference')
         fn.callableRecipes.delete(droppedExpression.binding.ordinal)
@@ -1383,21 +1385,41 @@ const lowerStatement = (
   })
   if (returnedValue === 'Transferred') return transferred(operations)
   if (returnedValue === undefined) return undefined
-  const returnOutcome: Mir.Outcome = Object.freeze({
-    _tag: 'Return',
-    value: returnedValue,
-    provenance: authored(statement.span),
-  })
   const [, releases] = fn.capture(() =>
     emitReleases(fn, exits.returns.get(spanKey(statement.span))),
   )
+  const returnedType = fn.localTypes.at(returnedValue.ordinal)
+  // A Copy read produces its return value before scope cleanup ends the source local's storage.
+  const copyBeforeCleanup =
+    returnedType !== undefined &&
+    Mir.isCopy(fn.layout, Mir.semanticType(returnedType)) &&
+    releases.some(
+      (operation) => operation._tag === 'Drop' && operation.local.ordinal === returnedValue.ordinal,
+    )
+  const result = copyBeforeCleanup ? fn.alloc(returnedType) : returnedValue
+  const returnOperations = copyBeforeCleanup
+    ? Object.freeze([
+        ...operations,
+        Object.freeze({
+          _tag: 'Move' as const,
+          destination: result,
+          source: returnedValue,
+          provenance: authored(statement.span),
+        }),
+      ])
+    : operations
+  const returnOutcome: Mir.Outcome = Object.freeze({
+    _tag: 'Return',
+    value: result,
+    provenance: authored(statement.span),
+  })
   if (releases.length === 0) {
     fn.publish(
       Object.freeze({
         _tag: 'OperationRegion',
         id,
         ...ownerFields(ownerLoop),
-        operations,
+        operations: returnOperations,
         outcome: returnOutcome,
       }),
     )
@@ -1408,7 +1430,7 @@ const lowerStatement = (
         _tag: 'OperationRegion',
         id,
         ...ownerFields(ownerLoop),
-        operations,
+        operations: returnOperations,
         outcome: Object.freeze({
           _tag: 'Forward',
           target: cleanup,

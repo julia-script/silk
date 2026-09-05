@@ -674,7 +674,16 @@ export const interfaceWitnessTarget = (
   capability: Type.Nominal,
   operation: string,
 ): InterfaceWitnessTarget | undefined => {
-  const proof = prove(self, provider, capability)
+  return selectedInterfaceTarget(self, prove(self, provider, capability), operation)
+}
+
+/** Reads an operation target from an existing proof without initiating conformance discovery. */
+export const selectedInterfaceTarget = (
+  self: Index,
+  proof: ConformanceGoal.Proof,
+  operation: string,
+): InterfaceWitnessTarget | undefined => {
+  const provider = proof.goal.provider
   if (proof._tag !== 'Proved' || proof.selection._tag !== 'SourceSelection') return undefined
   const conformance = selectedConformance(self, proof.selection)
   if (conformance === undefined) return undefined

@@ -2,6 +2,7 @@ import * as Elaboration from './Elaboration.js'
 import type * as Hir from './Hir.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as SyntaxTree from './SyntaxTree.js'
+import * as Type from './Type.js'
 
 /** Evaluation boundaries for one retained source node. */
 export interface Boundary {
@@ -15,7 +16,7 @@ export interface BodyControlFlow {
   readonly spans: ReadonlyMap<string, Boundary>
   readonly writes: ReadonlyMap<string, number>
   readonly edges: ReadonlyArray<ReadonlyArray<number>>
-  readonly queries: Map<string, boolean>
+  readonly queries: Map<string, ReadonlySet<number>>
   readonly work: { queries: number; cacheHits: number; visitedEdges: number }
 }
 
@@ -51,7 +52,7 @@ export const make = (
   type Loops = ReadonlyMap<string, { readonly exit: number; readonly repeat: number }>
   const expression = (value: Elaboration.ExpressionFact, next: number, loops: Loops): number => {
     const own = boundary(value.syntax)
-    edge(own.after, next)
+    if (value.type._tag !== 'Available' || !Type.isNever(value.type.type)) edge(own.after, next)
     if (value._tag === 'Match') {
       const dispatch = point()
       let fallback = own.after
@@ -68,8 +69,10 @@ export const make = (
           edge(choice, fallback)
           selected = expression(arm.guard, choice, loops)
         }
-        edge(dispatch, selected)
-        fallback = selected
+        const entered = boundary(arm.syntax)
+        edge(entered.before, selected)
+        edge(dispatch, entered.before)
+        fallback = entered.before
       }
       edge(own.before, expression(value.scrutinee, dispatch, loops))
     } else if (value._tag === 'ShortCircuit') {
@@ -142,14 +145,12 @@ export const make = (
         edge(own.after, previous)
       } else {
         let evaluated = own.after
-        const values =
-          statement._tag === 'BindStatement'
-            ? [statement.binding.initializer]
-            : statement._tag === 'WriteStatement'
-              ? [statement.destination, statement.value]
-              : statement._tag === 'PatternBindStatement'
-                ? [statement.selection.source]
-                : [statement.expression]
+        let values: ReadonlyArray<Elaboration.ExpressionFact>
+        if (statement._tag === 'BindStatement') values = [statement.binding.initializer]
+        else if (statement._tag === 'WriteStatement')
+          values = [statement.destination, statement.value]
+        else if (statement._tag === 'PatternBindStatement') values = [statement.selection.source]
+        else values = [statement.expression]
         for (const value of [...values].reverse()) evaluated = expression(value, evaluated, loops)
         if (statement._tag === 'WriteStatement')
           writes.set(spanKey(statement.destination.syntax.span), own.after)
@@ -179,35 +180,32 @@ export const at = (self: BodyControlFlow, span: SourceSpan.SourceSpan): Boundary
 export const writeAt = (self: BodyControlFlow, span: SourceSpan.SourceSpan): number | undefined =>
   self.writes.get(spanKey(span))
 
-/** Answers only requested reachability pairs; a barrier stops re-creation of the same loan. */
+/** Lazily reuses reachability from requested starts; barriers stop re-creation of a loan. */
 export const reaches = (
   self: BodyControlFlow,
   from: number,
   to: number,
-  barrier?: number,
+  barrier?: number | ReadonlyArray<number>,
 ): boolean => {
   self.work.queries += 1
-  const key = `${from}:${to}:${barrier ?? ''}`
+  const barriers = new Set(typeof barrier === 'number' ? [barrier] : (barrier ?? []))
+  const key = `${from}:${[...barriers].sort((left, right) => left - right).join(',')}`
   const cached = self.queries.get(key)
   if (cached !== undefined) {
     self.work.cacheHits += 1
-    return cached
+    return cached.has(to)
   }
   const pending = [from]
   const visited = new Set<number>()
   while (pending.length > 0) {
     const current = pending.pop()
-    if (current === undefined || current === barrier || visited.has(current)) continue
-    if (current === to) {
-      self.queries.set(key, true)
-      return true
-    }
+    if (current === undefined || barriers.has(current) || visited.has(current)) continue
     visited.add(current)
     for (const next of self.edges.at(current) ?? []) {
       self.work.visitedEdges += 1
       pending.push(next)
     }
   }
-  self.queries.set(key, false)
-  return false
+  self.queries.set(key, visited)
+  return visited.has(to)
 }

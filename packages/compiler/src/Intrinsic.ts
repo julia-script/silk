@@ -234,7 +234,6 @@ const builtin = (options: {
   readonly semanticResult: Type.Type
   readonly unsafe?: boolean
   readonly targets?: ReadonlyArray<Target.Id>
-
 }): BuiltinOperation => {
   const spelling = intrinsicSpelling(options.actor, options.name)
   let invariant: string | undefined
@@ -350,7 +349,11 @@ const sharedElement = Type.parameter({ module: 'Intrinsic', name: '$LocalShared'
 const sharedResult = Type.parameter({ module: 'Intrinsic', name: '$LocalShared' }, 1, 'A')
 const sharedTypeParameters = Object.freeze([sharedElement])
 const sharedLifecycleTypeParameters = Object.freeze([sharedElement, sharedResult])
-const sharedAccessLifetime = Lifetime.bound({ module: 'Intrinsic', name: 'SharedWithMut.use' }, 0, 'access')
+const sharedAccessLifetime = Lifetime.bound(
+  { module: 'Intrinsic', name: 'SharedWithMut.use' },
+  0,
+  'access',
+)
 const executionPackageOwner = Object.freeze({ module: 'Intrinsic', name: '$ExecutionPackage' })
 const executionResult = Type.parameter(executionPackageOwner, 0, 'A')
 const executionBodyBound = Type.effect(
@@ -377,9 +380,7 @@ const executionEndpoint = Type.parameter(
 )
 const executionReadyLifetime = contractLifetime('executionReadyBound')
 const executionReadyBound = Type.callable(
-  Object.freeze([
-    Type.reference('Shared', executionEndpoint, executionReadyLifetime),
-  ]),
+  Object.freeze([Type.reference('Shared', executionEndpoint, executionReadyLifetime)]),
   Type.unit,
   { environment: Lifetime.staticLifetime, lifetimeBinders: [executionReadyLifetime] },
   'Shared',
@@ -855,7 +856,6 @@ const stringOperations = Object.freeze([
       result: 'string',
       semanticResult: Type.string(byteSlice.lifetime),
       unsafe: true,
-
     }),
     invariant:
       'bytes remain live and immutable for the returned view lifetime and contain complete valid UTF-8',
@@ -868,7 +868,6 @@ const stringOperations = Object.freeze([
     semanticParameters: Object.freeze([Type.string(byteSlice.lifetime)]),
     result: '&[u8]',
     semanticResult: byteSlice,
-
   }),
   builtin({
     actor: 'string',
@@ -1882,7 +1881,6 @@ const intrinsicOperations = Object.freeze([
       result: '&[T]',
       semanticResult: Type.slice('Shared', rawElement, contractLifetime('view')),
       unsafe: true,
-
     }),
     builtin({
       actor: 'RawBuffer',
@@ -1903,7 +1901,6 @@ const intrinsicOperations = Object.freeze([
       result: '&mut [T]',
       semanticResult: Type.slice('Exclusive', rawElement, contractLifetime('viewMut')),
       unsafe: true,
-
     }),
     builtin({
       actor: 'RawBuffer',

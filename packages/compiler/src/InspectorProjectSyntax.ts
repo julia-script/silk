@@ -404,12 +404,11 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
     if (node._tag === 'Write') {
       let root: string
       if (node.place._tag === 'WritePlace') {
-        root =
-          node.place.root._tag === 'BindingWriteRoot'
-            ? `b${node.place.root.binding.ordinal}`
-            : node.place.root._tag === 'PatternWriteRoot'
-              ? `match-b${node.place.root.binding.ordinal}`
-              : `p${node.place.root.parameter.ordinal}`
+        if (node.place.root._tag === 'BindingWriteRoot')
+          root = `b${node.place.root.binding.ordinal}`
+        else if (node.place.root._tag === 'PatternWriteRoot')
+          root = `match-b${node.place.root.binding.ordinal}`
+        else root = `p${node.place.root.parameter.ordinal}`
       } else {
         root =
           node.place.root._tag === 'BindingSliceRoot'

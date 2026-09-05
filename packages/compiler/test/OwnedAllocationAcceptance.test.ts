@@ -1,6 +1,5 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as Lifetime from '../src/Lifetime.js'
@@ -23,7 +22,10 @@ unsafe fn construct<'scope>(core: &'scope Intrinsic.SharedCore<Pair>) -> () {
 }
 pub fn main() -> i32 { return 0 }`)
     const snapshot = yield* Analysis.ofSource('local-shared-lifecycle/escape', source)
-    assert.deepEqual(Analysis.diagnostics(snapshot).map(diagnostic => diagnostic.code), ['SEM0076'])
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0076'],
+    )
   }),
 )
 
@@ -68,7 +70,10 @@ unsafe fn directProbe<'scope>(core: &'scope Intrinsic.SharedCore<Pair>) -> &'sco
 }
 pub fn main() -> i32 { return 0 }`)
     const snapshot = yield* Analysis.ofSource('local-shared-lifecycle/direct-escape', source)
-    assert.deepEqual(Analysis.diagnostics(snapshot).map(diagnostic => diagnostic.code), ['SEM0076'])
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0076'],
+    )
   }),
 )
 
@@ -86,15 +91,14 @@ fn deferredConflict() -> Box<Effect<'static; i32>> {
 }
 effect fn read(value: &mut Pair) -> i32 { return value.second }
 fn suspended(value: &mut Pair) -> i32 {
-  let result = run read(value)
+  let result = run read(move value)
   return result
 }
 fn numberConflict() -> i32 { return 0 }
 unsafe fn aggregateProbe<'scope>(core: &'scope Intrinsic.SharedCore<Pair>) -> Box<Effect<'scope; i32>> {
-  let callback = deferred
   return Intrinsic.sharedWithMut<Pair, Box<Effect<'scope; i32>>>(
     core,
-    move callback,
+    deferred,
     deferredConflict,
   )
 }
@@ -106,7 +110,12 @@ pub fn main() -> i32 { return 0 }`)
       'local-shared-lifecycle/aggregate-suspension-escape',
       source,
     )
-    assert.deepEqual(Analysis.diagnostics(snapshot).map(diagnostic => diagnostic.code), ['SEM0076', 'OWN0016'])
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot)
+        .map((diagnostic) => diagnostic.code)
+        .sort(),
+      ['OWN0016', 'SEM0076'],
+    )
     const diagnostics = Analysis.diagnostics(snapshot).filter(
       (candidate) => candidate.code === 'OWN0016',
     )
@@ -542,8 +551,9 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
           'buffer-moves-under-a-live-slot',
           guarded(`    let slot = RawBuffer.slot(&mut buffer, 0)
     let moved = move buffer
+    let value = Slot.take(move slot)
     drop moved
-    return 1`),
+    return value`),
           'OWN0011',
         ],
         [
@@ -565,18 +575,23 @@ pub fn main() -> i32 { return 0 }`,
       ]
 
       for (const [name, source, code] of cases) {
-        const snapshot = yield* Analysis.ofSourceRealized(
-          `owned-allocation-negative/${name}`,
-          ascii(source),
-          'wasm32-unknown-unknown',
-        )
+        const realized =
+          code === 'SEM0138'
+            ? yield* Analysis.ofSourceRealized(
+                `owned-allocation-negative/${name}`,
+                ascii(source),
+                'wasm32-unknown-unknown',
+              )
+            : undefined
+        const snapshot =
+          realized ?? (yield* Analysis.ofSource(`owned-allocation-negative/${name}`, ascii(source)))
         assert.include(
           Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
           code,
           `${name}\n${Hir.encode(Analysis.rootAnalysis(snapshot).hir)}`,
         )
-        if (code === 'SEM0138')
-          assert.throws(() => Analysis.loweredMir(snapshot), /MIR is unavailable/)
+        if (realized !== undefined)
+          assert.throws(() => Analysis.loweredMir(realized), /MIR is unavailable/)
       }
     }),
   // Measured near the 60s floor while the full parallel gate saturates the host; the timeout

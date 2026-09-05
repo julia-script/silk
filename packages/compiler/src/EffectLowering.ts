@@ -516,7 +516,7 @@ export const lowerEffectCatch = (
     handlerType?._tag !== 'CallableValue' ||
     handlerEffectType === undefined
   )
-    { if (fn.owner.key.declaration.name === 'Effect.catchAll') console.log('TEMP catch-stop', 47, JSON.stringify({ handler: handlerType, keys: [...fn.effectResults.keys()].filter((key) => key.includes('recover')) })); return undefined }
+    return undefined
   const unusedHandlerDrop = (): ReadonlyArray<Mir.DropOperation> => {
     const cleanup = cleanupForLocal(
       fn,
@@ -571,7 +571,7 @@ export const lowerEffectCatch = (
       (member) => !protectedFailures.some((failure) => Type.equals(failure, member)),
     )
   )
-    { if (fn.owner.key.declaration.name === 'Effect.catchAll') console.log('TEMP catch-stop', 102); return undefined }
+    return undefined
 
   const caught = runCaughtEffectValue(
     fn,
@@ -637,7 +637,7 @@ export const lowerEffectCatch = (
     propagationType?._tag !== 'EffectOutcome' ||
     propagationShape === undefined
   )
-    { if (fn.owner.key.declaration.name === 'Effect.catchAll') console.log('TEMP catch-stop', 168); return undefined }
+    return undefined
 
   if (failureValueMir._tag !== 'Nominal' && failureValueMir._tag !== 'Union') {
     const onlyFailure = protectedFailures.at(0)
@@ -646,7 +646,7 @@ export const lowerEffectCatch = (
       onlyFailure === undefined ||
       !selectedMembers.some((candidate) => Type.equals(candidate, onlyFailure))
     )
-      { if (fn.owner.key.declaration.name === 'Effect.catchAll') console.log('TEMP catch-stop', 177); return undefined }
+      return undefined
     const otherwise = lowerExecution(fn, expression.span, () => {
       const applied = fn.alloc(handlerEffectType)
       fn.emit(
@@ -736,7 +736,7 @@ export const lowerEffectCatch = (
             targetShape === undefined ||
             conversion._tag !== 'Inject'
           )
-            { if (fn.owner.key.declaration.name === 'Effect.catchAll') console.log('TEMP catch-stop', 267); return undefined }
+            return undefined
           handlerArgument = fn.alloc(selectedType)
           fn.emit(
             Object.freeze({

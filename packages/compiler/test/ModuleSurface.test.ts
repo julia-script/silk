@@ -508,6 +508,7 @@ it.effect('validates canonical substitutions against their local parameter scope
       [Type.key(second), 'bool'],
     ])
     const schema: Type.CallableSchema = {
+      source: owner,
       contract,
       binders: contract.binders,
       constraints: contract.constraints,

@@ -702,6 +702,7 @@ const selectedCallLifetimes = (
       ? {}
       : {
           inference: {
+            compatibility,
             typeOutlives: (type, lifetime) =>
               TypeCompatibility.typeOutlives(compatibility, { type, lifetime }),
             accepts: (source: Lifetime.Lifetime, target: Lifetime.Lifetime, invariant: boolean) =>
@@ -1573,16 +1574,36 @@ export const analyzeCallContract = (
   })
 }
 
-export const interfaceConstraintDiagnostics = (
+/** Retains the ordinary operation selection so later semantic passes never rediscover witnesses. */
+export const interfaceEvidence = (
   reference: CallReferenceFact,
-  contract: CallContractResult,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<ConformanceGoal.Proof> => {
+  if (
+    reference._tag !== 'ResolvedInterfaceOperation' ||
+    !Type.isRuntimeConcrete(reference.provider)
+  )
+    return []
+  const proof = ConformanceProof.prove(index, reference.provider, reference.capability)
+  return proof._tag === 'Proved' ? [proof] : []
+}
+
+export const interfaceConstraints = (
+  reference: CallReferenceFact,
+  substitution: Type.Substitution | undefined,
   index: DeclarationIndex.Index,
   caller: DeclarationFact,
   span: SourceSpan.SourceSpan,
-): ReadonlyArray<Diagnostic.Diagnostic> => {
-  if (reference._tag !== 'Resolved' || contract.fact._tag !== 'Compatible') return Object.freeze([])
-  const substitution = contract.fact.substitution
-  return Object.freeze(
+): {
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly proofs: ReadonlyArray<ConformanceGoal.Proof>
+} => {
+  const proofs: Array<ConformanceGoal.Proof> = []
+  if (reference._tag !== 'Resolved' || substitution === undefined) {
+    proofs.push(...interfaceEvidence(reference, index))
+    return { diagnostics: [], proofs }
+  }
+  const diagnostics = Object.freeze(
     reference.declaration.typeParameters.flatMap((parameter) => {
       const provider = substitution.get(Type.key(parameter.type))
       if (provider === undefined || !Type.isTypeArgument(provider)) return []
@@ -1646,10 +1667,13 @@ export const interfaceConstraintDiagnostics = (
             ),
           ]
         }
+        const proof = ConformanceProof.prove(index, provider, capability)
+        if (proof._tag === 'Proved') proofs.push(proof)
         return []
       })
     }),
   )
+  return { diagnostics, proofs }
 }
 
 /**
@@ -1785,9 +1809,12 @@ export const callableTypeOfReference = (
     result,
     { ...DeclarationFacts.executableLifetimes(callable), environment: Lifetime.staticLifetime },
     'Shared',
-    contract === undefined || contract.constraints.length === 0
+    contract === undefined || (contract.constraints.length === 0 && contract.binders.length === 0)
       ? undefined
       : Object.freeze({
+          ...(reference._tag === 'Resolved' && reference.declaration.canonical._tag === 'Canonical'
+            ? { source: reference.declaration.canonical.id }
+            : {}),
           contract,
           binders: contract.binders,
           constraints: contract.constraints,
@@ -1847,7 +1874,7 @@ export const interfaceOperationContract = (
       : Type.effectWithRows(
           operation.success.type,
           operation.failureRow.row,
-          { ...DeclarationFacts.executableLifetimes(operation.declaration), lifetimeBinders: [] },
+          { ...operation.lifetimes, lifetimeBinders: [] },
           'Shared',
           operation.requirementRow.row,
         )
@@ -2051,6 +2078,7 @@ export const analyzeFunctionItem = (
   node: SyntaxTree.Node,
   declarations: ReadonlyArray<DeclarationFact>,
   resolution: ResolutionContext,
+  caller: DeclarationFact,
   expected?: SemanticType,
 ): ExpressionResult | undefined => {
   const reference = resolvedFunctionReference(source, node, declarations, resolution)
@@ -2207,25 +2235,37 @@ export const analyzeFunctionItem = (
     TypeInference.infer(contextualPattern, expectedCallable, contextual, itemInference)
   if (!specialized && contextualPattern !== undefined && expectedCallable !== undefined) {
     const partial = new Map<string, Type.GenericArgument>(callLifetimes.substitution)
-    const parametersCompatible =
-      contextualPattern.parameters.length === expectedCallable.parameters.length &&
-      contextualPattern.parameters.every((parameter, ordinal) => {
-        const expectedParameter = expectedCallable.parameters.at(ordinal)
-        return (
-          expectedParameter !== undefined &&
-          TypeInference.infer(parameter, expectedParameter, partial, itemInference)
-        )
-      })
-    const patternResult = contextualPattern.result
-    const expectedResult = expectedCallable.result
-    const resultCompatible =
-      Type.isEffect(patternResult) && Type.isEffect(expectedResult)
-        ? TypeInference.infer(patternResult.success, expectedResult.success, partial, itemInference)
-        : TypeInference.infer(patternResult, expectedResult, partial, itemInference)
-    const allBindersDetermined = (contract?.binders ?? []).every((parameter) =>
-      partial.has(Type.key(parameter)),
-    )
-    if (parametersCompatible && resultCompatible && allBindersDetermined) {
+    const attempt = (): boolean => {
+      const parametersCompatible =
+        contextualPattern.parameters.length === expectedCallable.parameters.length &&
+        contextualPattern.parameters.every((parameter, ordinal) => {
+          const expectedParameter = expectedCallable.parameters.at(ordinal)
+          return (
+            expectedParameter !== undefined &&
+            TypeInference.infer(parameter, expectedParameter, partial, itemInference)
+          )
+        })
+      const patternResult = contextualPattern.result
+      const expectedResult = expectedCallable.result
+      const resultCompatible =
+        Type.isEffect(patternResult) && Type.isEffect(expectedResult)
+          ? TypeInference.infer(
+              patternResult.success,
+              expectedResult.success,
+              partial,
+              itemInference,
+            )
+          : TypeInference.infer(patternResult, expectedResult, partial, itemInference)
+      const allBindersDetermined = (contract?.binders ?? []).every((parameter) =>
+        partial.has(Type.key(parameter)),
+      )
+      return parametersCompatible && resultCompatible && allBindersDetermined
+    }
+    const accepted =
+      callLifetimes.compatibility === undefined
+        ? attempt()
+        : TypeCompatibility.commitWhen(callLifetimes.compatibility, attempt, (result) => result)
+    if (accepted) {
       contextual.clear()
       for (const [key, argument] of partial) contextual.set(key, argument)
       specialized = true
@@ -2264,21 +2304,48 @@ export const analyzeFunctionItem = (
   const firstClass =
     foreignFirstClassDiagnostic(reference, node) ??
     staticFirstClassDiagnostic(reference, node, resolution)
+  const constraints = interfaceConstraints(
+    reference,
+    contextual,
+    resolution.index,
+    caller,
+    node.span,
+  )
+  // Specialization can turn invocation predicates into free formation facts. Prove them before
+  // publishing the value: structural callable comparison may thereafter assume those facts.
+  const formation =
+    callable === undefined ? undefined : Type.executableFormationRequirements(callable)
+  const lifetimeDiagnostics =
+    formation === undefined
+      ? []
+      : selectedLifetimeBoundDiagnostics(
+          formation.lifetimeBounds,
+          new Map(),
+          resolution.lifetimeCompatibility,
+          node.span,
+          formation.typeOutlives,
+        )
+  const available = firstClass === undefined && lifetimeDiagnostics.length === 0
   const type =
-    callable === undefined || firstClass !== undefined
+    callable === undefined || !available
       ? unavailableExpressionType
       : availableExpressionType(callable)
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'FunctionItem',
+      selectedConformances: constraints.proofs,
       reference,
       path: referencePath(node),
       typeArguments,
       type,
       syntax: node,
     }),
-    diagnostics: Object.freeze(firstClass === undefined ? [] : [firstClass]),
-    type: firstClass === undefined ? callable : undefined,
+    diagnostics: Object.freeze([
+      ...constraints.diagnostics,
+      ...lifetimeDiagnostics,
+      ...(firstClass === undefined ? [] : [firstClass]),
+    ]),
+    type: available ? callable : undefined,
   })
 }
 
@@ -2674,9 +2741,12 @@ export const sectionCallableType = (
       ],
     },
     mode,
-    contract.constraints.length === 0
+    contract.constraints.length === 0 && contract.binders.length === 0
       ? undefined
       : Object.freeze({
+          ...(reference._tag === 'Resolved' && reference.declaration.canonical._tag === 'Canonical'
+            ? { source: reference.declaration.canonical.id }
+            : {}),
           contract,
           binders: contract.binders,
           constraints: contract.constraints,
@@ -2796,6 +2866,13 @@ export const finishCallableSection = (
     capturedParameters,
     resolution,
   )
+  const constraints = interfaceConstraints(
+    reference,
+    contract.substitution,
+    resolution.index,
+    caller,
+    node.span,
+  )
   const captures = Object.freeze(
     capturedParameters.map((parameterOrdinal, ordinal) => {
       const argument = argumentsResult.facts.at(ordinal)
@@ -2846,6 +2923,7 @@ export const finishCallableSection = (
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'CallableSection',
+      selectedConformances: constraints.proofs,
       site: executableSite('CallableSiteId', resolution, node),
       reference,
       path,
@@ -2872,6 +2950,7 @@ export const finishCallableSection = (
       ...argumentsResult.diagnostics,
       ...callTypeArguments.diagnostics,
       ...contract.diagnostics,
+      ...constraints.diagnostics,
       ...(foreign === undefined ? [] : [foreign]),
     ]),
     type: type._tag === 'Available' ? type.type : undefined,
@@ -2976,7 +3055,11 @@ export const finishCallableApplication = (
     )
     valid = false
   }
-  if (schema !== undefined && !concreteCallableIdentity(callee.fact, writtenBindings)) {
+  if (
+    schema !== undefined &&
+    schema.source === undefined &&
+    !concreteCallableIdentity(callee.fact, writtenBindings)
+  ) {
     diagnostics.push(Diagnostic.nonConcreteSpecialization('constrained callable', node.span))
     valid = false
   }
@@ -3155,6 +3238,31 @@ export const finishCallableApplication = (
     diagnostics.push(...solved.diagnostics)
     if (solved.diagnostics.length > 0) valid = false
   }
+  const schemaDeclaration =
+    schema?.source === undefined || resolution === undefined
+      ? undefined
+      : DeclarationFacts.byCanonical(resolution.index, {
+          _tag: 'CanonicalDeclarationId',
+          ...schema.source,
+        })
+  let sourceTarget: Extract<CallReferenceFact, { readonly _tag: 'Resolved' }> | undefined
+  if (exactCallable?.reference._tag === 'Resolved') sourceTarget = exactCallable.reference
+  else if (
+    schemaDeclaration?._tag === 'FunctionDeclaration' &&
+    schemaDeclaration.name._tag === 'Present'
+  )
+    sourceTarget = {
+      _tag: 'Resolved',
+      spelling: schemaDeclaration.name.spelling,
+      token: schemaDeclaration.name.token,
+      declaration: schemaDeclaration,
+    }
+  const selectedConformances =
+    sourceTarget === undefined || resolution === undefined || caller === undefined
+      ? { diagnostics: [], proofs: [] }
+      : interfaceConstraints(sourceTarget, inferred, resolution.index, caller, node.span)
+  diagnostics.push(...selectedConformances.diagnostics)
+  if (selectedConformances.diagnostics.length > 0) valid = false
   const type = (() => {
     if (!valid || callable === undefined) return unavailableExpressionType
     if (stagedSection !== undefined && stagedCaptures !== undefined) {
@@ -3245,6 +3353,7 @@ export const finishCallableApplication = (
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'CallableSection',
+        selectedConformances: selectedConformances.proofs,
         site: executableSite('CallableSiteId', resolution, node),
         reference: stagedSection.reference,
         path: stagedSection.path,
@@ -3361,6 +3470,8 @@ export const finishCallableApplication = (
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'CallableApply',
+      ...(sourceTarget === undefined ? {} : { sourceTarget }),
+      selectedConformances: selectedConformances.proofs,
       callee: callee.fact,
       arguments: argumentsResult.facts,
       mode,

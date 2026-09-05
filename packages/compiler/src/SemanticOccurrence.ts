@@ -114,7 +114,11 @@ const aliasAtPath = (
   index: DeclarationIndex.Index,
 ): DeclarationFacts.AliasFact | undefined => {
   if (path === undefined || scope === undefined) return undefined
-  const result = NameResolution.lookupPath(scope, index, path)
+  const result = NameResolution.lookupPath(scope, index, path, {
+    kind: 'ToolingPath',
+    key: path.spelling,
+    span: path.syntax.span,
+  })
   return result._tag === 'Resolved' && result.declaration._tag === 'AliasDeclaration'
     ? result.declaration
     : undefined
@@ -161,7 +165,7 @@ const locationOfServiceOperation = (
 const locationOfTypeParameter = (
   parameter: DeclarationFacts.TypeParameterFact,
 ): DeclarationLocation | undefined =>
-  parameter.name._tag === 'Present'
+  parameter.implicitLifetime !== true && parameter.name._tag === 'Present'
     ? location(parameter.name.token.span.sourceId, parameter.syntax.span, parameter.name.token.span)
     : undefined
 
@@ -318,7 +322,11 @@ const collectQualifier = (
     push(pending, token.span, 'Actor', Object.freeze({ _tag: 'Unavailable' }))
     return
   }
-  const lookup = NameResolution.lookup(scope, index, spelling)
+  const lookup = NameResolution.lookup(scope, index, spelling, {
+    kind: 'ToolingName',
+    key: spelling,
+    span: token.span,
+  })
   if (lookup._tag === 'Resolved') {
     push(
       pending,
@@ -401,7 +409,8 @@ const collectResolvedType = (
   }
   if (fact.components !== undefined) {
     for (const component of fact.components) collectDeclaredType(component, index, scope, pending)
-    return
+    // The lifetime argument supplements the named string type rather than replacing its token.
+    if (!Type.isString(fact.type)) return
   }
   if (fact.unionSource !== undefined) {
     for (const member of fact.unionSource.members)
@@ -480,8 +489,8 @@ const collectResolvedType = (
     )
     return
   }
-  if (typeof fact.type === 'string' && fact.type !== 'never') {
-    const actor = Intrinsic.findActor(fact.type)
+  if (Type.isString(fact.type) || (typeof fact.type === 'string' && fact.type !== 'never')) {
+    const actor = Intrinsic.findActor(Type.isString(fact.type) ? 'string' : fact.type)
     push(
       pending,
       token.span,
@@ -1268,6 +1277,8 @@ const collectMember = (
       declaration,
     )
   for (const typeParameter of member.typeParameters) {
+    // Elision anchors a semantic binder to an annotation; it does not declare a source name there.
+    if (typeParameter.implicitLifetime === true) continue
     // An inherent member carries its impl head's binders ahead of its own; the head declares
     // those once (see `collectInherentImpl`), so only binders spelled inside the member count.
     if (typeParameter.syntax.span.start < member.syntax.span.start) continue
@@ -1468,7 +1479,11 @@ const collectTypePath = (
     collectQualifier(qualifier.token, qualifier.spelling, scope, index, pending)
   const selected = path.segments.at(-1)
   if (selected === undefined || scope === undefined) return
-  const lookup = NameResolution.lookupPath(scope, index, path)
+  const lookup = NameResolution.lookupPath(scope, index, path, {
+    kind: 'ToolingPath',
+    key: path.spelling,
+    span: path.syntax.span,
+  })
   if (lookup._tag === 'Resolved') {
     push(
       pending,

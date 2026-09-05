@@ -183,7 +183,7 @@ pub fn main() -> i32 {
 
     assert.include(first.ir, '!DIStringType(name: "string"')
     assert.include(first.ir, 'encoding: DW_ATE_UTF')
-    assert.include(first.ir, 'name: "&[u8]"')
+    assert.match(first.ir, /name: "&'[^" ]+ \[u8\]"/)
     assert.notInclude(release.ir, 'DIStringType')
     assert.notInclude(release.ir, 'DW_ATE_UTF')
     assert.strictEqual(first.ir, second.ir)

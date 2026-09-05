@@ -1,4 +1,5 @@
 import { generated } from './CleanupEmission.js'
+import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type { LoweredExpression } from './EffectLowering.js'
@@ -149,7 +150,7 @@ export const lowerInterfaceOperands = (
     const expected = fn.type(fn.semantic(operand.type.type))
     const actual = fn.localTypes.at(value.result.ordinal)
     if (expected === undefined || actual === undefined) return undefined
-    if (Type.equals(Mir.semanticType(actual), Mir.semanticType(expected))) {
+    if (Type.runtimeKey(Mir.semanticType(actual)) === Type.runtimeKey(Mir.semanticType(expected))) {
       lowered.push(value.result)
       continue
     }
@@ -223,17 +224,53 @@ export const sourceWitnessArguments = (
     const actual = fn.localTypes.at(argument.ordinal)
     const expected = parameters.at(ordinal)
     if (actual === undefined || expected === undefined) return undefined
-    if (Type.equals(Mir.semanticType(actual), Mir.semanticType(expected))) {
+    if (Type.runtimeKey(Mir.semanticType(actual)) === Type.runtimeKey(Mir.semanticType(expected))) {
       lowered.push(argument)
+      continue
+    }
+    if (
+      expected._tag === 'Reference' &&
+      actual._tag !== 'Reference' &&
+      actual._tag !== 'Slice' &&
+      Type.runtimeKey(Mir.semanticType(actual)) === Type.runtimeKey(expected.type.target)
+    ) {
+      const borrow = fn.beginRecipeBorrow({
+        _tag: 'BorrowId',
+        function: fn.owner.function.declaration.id,
+        callSpan: span,
+        ordinal: arguments_.length + ordinal,
+      })
+      const destination = fn.alloc(expected)
+      fn.emit({
+        _tag: 'BeginLoan',
+        borrow,
+        destination,
+        root: argument,
+        selectors: [],
+        sourceType: actual,
+        type: expected,
+        access: expected.type.access,
+        reborrow: false,
+        suspendsParent: false,
+        provenance: generated(span),
+      })
+      fn.temporaryBorrowOwners.set(borrowKey(borrow), {
+        local: argument,
+        cleanup: CleanupPlan.cleanupPlan(fn.index, Mir.semanticType(actual)),
+        span,
+      })
+      fn.loanLocals.set(borrowKey(borrow), destination)
+      lowered.push(destination)
+      reborrows.push({ borrow, local: destination })
       continue
     }
     const actualReference = actual._tag === 'Reference' || actual._tag === 'Slice'
     const expectedReference = expected._tag === 'Reference' || expected._tag === 'Slice'
     let sameTarget = false
     if (actual._tag === 'Reference' && expected._tag === 'Reference') {
-      sameTarget = Type.equals(actual.type.target, expected.type.target)
+      sameTarget = Type.runtimeKey(actual.type.target) === Type.runtimeKey(expected.type.target)
     } else if (actual._tag === 'Slice' && expected._tag === 'Slice') {
-      sameTarget = Type.equals(actual.type.element, expected.type.element)
+      sameTarget = Type.runtimeKey(actual.type.element) === Type.runtimeKey(expected.type.element)
     }
     if (
       !actualReference ||
@@ -386,8 +423,8 @@ export const lowerWitnessEffect = (
  * operator path reaches through `lowerInterfaceWitnessCall`.
  *
  * Interface calls already elaborated and ownership-checked their arguments against the literal
- * applied contract. Lowering therefore forwards those locals unchanged; introducing any borrow or
- * move here would restore a second hidden user-interface calling convention.
+ * applied contract. A source witness may weaken that owned access to a temporary borrow; the
+ * ownership of that operand remains with this adapter until the selected witness completes.
  */
 export const lowerStaticInterfaceWitnessCall = (
   fn: FunctionLowering,

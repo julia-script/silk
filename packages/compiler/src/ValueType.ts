@@ -562,7 +562,7 @@ export const callableValueType = (
   applicationSubstitution: Type.Substitution = new Map(),
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
   const expected = Type.substitute(
-    Type.substitute(section.type, fn.substitution),
+    fn.semantic(section.type),
     new Map([...section.substitution, ...applicationSubstitution]),
   )
   const candidates = fn.layout.callableEnvironments.filter(
@@ -605,7 +605,7 @@ export const stagedCallableValueType = (
   expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
   site: Hir.CallableSiteId,
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
-  const expected = Type.substitute(expression.type, fn.substitution)
+  const expected = fn.semantic(expression.type)
   const candidates = fn.layout.callableEnvironments.filter(
     (
       candidate,
@@ -633,7 +633,7 @@ export const directCallableSectionValueType = (
   applicationSubstitution: Type.Substitution,
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
   const type = Type.substitute(
-    Type.substitute(section.type, fn.substitution),
+    fn.semantic(section.type),
     new Map([...section.substitution, ...applicationSubstitution]),
   )
   return Type.isCallable(type) && Type.isRuntimeConcrete(type)
@@ -646,16 +646,18 @@ export const functionItemValueType = (
   item: Extract<Hir.Expression, { readonly _tag: 'FunctionItem' }>,
   applicationSubstitution: Type.Substitution = new Map(),
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
-  const type = Type.substitute(Type.substitute(item.type, fn.substitution), applicationSubstitution)
+  const type = Type.substitute(
+    fn.semantic(item.type),
+    applicationSubstitution,
+    fn.owner.specialization.compatibility,
+  )
   return Type.isCallable(type) && Type.isRuntimeConcrete(type)
     ? Object.freeze({
         _tag: 'CallableValue',
         type,
         target: item.target,
         typeArguments: Object.freeze(
-          item.typeArguments.map((argument) =>
-            Type.substituteGenericArgument(argument, fn.substitution),
-          ),
+          item.typeArguments.map((argument) => fn.semanticArgument(argument)),
         ),
       })
     : undefined

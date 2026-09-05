@@ -6,6 +6,8 @@ import * as Analysis from '../src/Analysis.js'
 import * as Elaboration from '../src/Elaboration.js'
 import * as FrontendTooling from '../src/FrontendTooling.js'
 import * as ProjectAnalysis from '../src/ProjectAnalysis.js'
+import * as Ownership from '../src/Ownership.js'
+import * as ResidualOwnership from '../src/ResidualOwnership.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceOrigin from '../src/SourceOrigin.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -455,6 +457,24 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
     )
     assert.strictEqual(currentView.results.get('app/B'), previousView.results.get('app/B'))
     assert.strictEqual(currentView.ownership.get('app/B'), previousView.ownership.get('app/B'))
+    const retainedResult = currentView.results.get('shared/Core') ?? raise('retained library')
+    const retainedFunction = retainedResult.hir.functions.at(0) ?? raise('retained HIR function')
+    const retainedFact = retainedResult.functions.at(0) ?? raise('retained semantic function')
+    const ownershipInput = Ownership.input(
+      retainedFunction,
+      retainedFact,
+      currentView.index,
+      Ownership.localSharedAccessBoundaryPlan(currentView.results),
+    )
+    const sourceProof = Ownership.sourceProof(ownershipInput) ?? raise('current-index source proof')
+    const residual = ResidualOwnership.make()
+    assert.strictEqual(
+      ResidualOwnership.check(residual, ownershipInput, 'UnchangedBody'),
+      sourceProof,
+    )
+    assert.strictEqual(ResidualOwnership.counters(residual).sourceReused, 1)
+    assert.strictEqual(ResidualOwnership.counters(residual).checked, 0)
+
     assert.deepEqual(current.report.find(({ phase }) => phase === 'elaboration')?.counters, {
       _tag: 'ModuleReuseCounters',
       reused: 2,
@@ -574,4 +594,68 @@ it.effect('recomputes tooling conservatively when prior module tooling is missin
       { _tag: 'ModuleReuseCounters', reused: 2, recomputed: 1 },
     )
   }),
+)
+
+it.effect(
+  'rechecks retained callback ownership when an incoming caller adds an access boundary',
+  () =>
+    Effect.gen(function* () {
+      const callbackSource = ascii('pub fn use(value: &mut i32) -> i32 { return value.* }')
+      const caller = `import shared.Callbacks
+fn conflict() -> i32 { return 0 }
+unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
+      const initial = yield* ProjectAnalysis.make([
+        SourceFile.make('boundary/Main', ascii(caller)),
+      ]).pipe(
+        Effect.provide(SourceResolver.memory(new Map([['shared/Callbacks', callbackSource]]))),
+      )
+      const edited = caller.replace(
+        'return 1',
+        'return Intrinsic.sharedWithMut<i32, i32>(core, Callbacks.use, conflict)',
+      )
+      const revised = yield* ProjectAnalysis.revise(initial, [
+        SourceFile.make('boundary/Main', ascii(edited)),
+      ]).pipe(
+        Effect.provide(SourceResolver.memory(new Map([['shared/Callbacks', callbackSource]]))),
+      )
+      const before = ProjectAnalysis.view(initial, 'boundary/Main') ?? raise('initial view')
+      const after = ProjectAnalysis.view(revised, 'boundary/Main') ?? raise('revised view')
+      assert.deepEqual(Analysis.diagnostics(before), [])
+      assert.deepEqual(Analysis.diagnostics(after), [])
+      const beforeResult = before.results.get('shared/Callbacks') ?? raise('initial callbacks')
+      const afterResult = after.results.get('shared/Callbacks') ?? raise('revised callbacks')
+      assert.strictEqual(afterResult, beforeResult)
+      const fn = afterResult.hir.functions.at(0) ?? raise('callback HIR')
+      const fact = afterResult.functions.at(0) ?? raise('callback fact')
+      const previousInput = Ownership.input(
+        fn,
+        fact,
+        before.index,
+        Ownership.localSharedAccessBoundaryPlan(before.results),
+      )
+      const currentInput = Ownership.input(
+        fn,
+        fact,
+        after.index,
+        Ownership.localSharedAccessBoundaryPlan(after.results),
+      )
+      assert.lengthOf(previousInput.boundaries, 0)
+      assert.lengthOf(currentInput.boundaries, 1)
+      const previousProof = Ownership.sourceProof(previousInput) ?? raise('previous callback proof')
+      const currentProof = Ownership.sourceProof(currentInput) ?? raise('current callback proof')
+      assert.notStrictEqual(currentProof.ownership, previousProof.ownership)
+      assert.notStrictEqual(
+        after.ownership.get('shared/Callbacks'),
+        before.ownership.get('shared/Callbacks'),
+      )
+      assert.strictEqual(
+        after.semantics.get('shared/Callbacks')?.ownership,
+        after.ownership.get('shared/Callbacks'),
+      )
+      const counters = revised.report.find((phase) => phase.phase === 'body-queries')?.counters
+      assert.strictEqual(counters?._tag, 'BodyQueryCounters')
+      if (counters?._tag !== 'BodyQueryCounters') return
+      assert.strictEqual(counters.checked, 1)
+      assert.strictEqual(counters.ownershipChecked, 2)
+    }),
 )

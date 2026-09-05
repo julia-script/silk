@@ -462,7 +462,7 @@ export const lowerEffectRunner = (
     layout,
     opaqueRealizations,
   )
-  if (captureParameterTypes.length !== block.captures.length) { console.log('TEMP capture-fail', id.name); return undefined }
+  if (captureParameterTypes.length !== block.captures.length) return undefined
   const parameterizedRequirements = spec.providedRequirements.filter(
     (requirement) => requirement.witness._tag === 'SourceConformanceWitness',
   )
@@ -519,7 +519,6 @@ export const lowerEffectRunner = (
     provenance: generated(block.span),
   })
   const entry = lowerSequence(lowering, block.statements, indexExits(plan), undefined, terminal)
-  if (id.name.includes('catchAll')) console.log('TEMP entry', id.name, entry, lowering.regions.map((r) => r?._tag))
   if (
     entry === undefined ||
     lowering.regions.some(

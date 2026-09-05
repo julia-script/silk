@@ -254,9 +254,9 @@ export const concreteCleanup = (
   type: Type.Type,
   seen = new Set<string>(),
 ): CleanupPlan.CleanupPlan => {
-  const specialized = Type.substitute(type, fn.substitution)
+  const specialized = fn.semantic(type)
   const resolveRepresented = (candidate: Type.Type): CleanupPlan.CleanupPlan | undefined => {
-    const concrete = Type.substitute(candidate, fn.substitution)
+    const concrete = fn.semantic(candidate)
     if (!Type.isRepresented(concrete)) return undefined
     const value =
       storedCallableValueType(fn.layout, concrete) ??
@@ -407,8 +407,9 @@ export const cleanupForLocal = (
 
 /**
  * The Drop operations a propagating failure must execute before it leaves this function:
- * every owner the ownership phase saw live at the run site, resolved to this function's
- * locals. Sites without a local here belong to a different compiled body and are skipped.
+ * every owner the ownership phase saw live at the run site, plus generated temporary
+ * owners held by active loans. Sites without a local here belong to a different compiled
+ * body and are skipped.
  */
 export const propagationReleases = (
   fn: FunctionLowering,
@@ -420,10 +421,21 @@ export const propagationReleases = (
       candidate.span.start === span.start &&
       candidate.span.end === span.end,
   )
-  if (exit === undefined) return Object.freeze([])
-  return Object.freeze(
-    exitDrops(fn, exit).filter((release) => release.cleanup._tag !== 'NoCleanup'),
-  )
+  const releases = exit === undefined ? [] : [...exitDrops(fn, exit)]
+  const retained = new Set(releases.map((release) => release.local.ordinal))
+  for (const temporary of [...fn.temporaryBorrowOwners.values()].reverse()) {
+    if (retained.has(temporary.local.ordinal)) continue
+    const localType = fn.localTypes.at(temporary.local.ordinal)
+    if (localType === undefined) continue
+    releases.push({
+      _tag: 'Drop',
+      local: temporary.local,
+      cleanup: cleanupForLocal(fn, temporary.cleanup, localType),
+      provenance: generated(temporary.span),
+    })
+    retained.add(temporary.local.ordinal)
+  }
+  return Object.freeze(releases.filter((release) => release.cleanup._tag !== 'NoCleanup'))
 }
 
 /**

@@ -368,12 +368,12 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 /** Closed Effect values survive ordinary passing, storage, capture, return, and specialization. */
 export const effectHigherOrderValues = `effect fn succeed(value: i32) -> i32 { return value }
 effect fn alternate(value: i32) -> i32 { return value }
-fn pass(self: once Effect<i32>) -> once Effect<i32> { return move self }
-fn specialize<A, E, ?R>(self: once Effect<A ! E ? R>) -> once Effect<A ! E ? R> {
+fn pass<'env>(self: once Effect<'env; i32>) -> once Effect<'env; i32> { return move self }
+fn specialize<'env, A, E, ?R>(self: once Effect<'env; A ! E ? R>) -> once Effect<'env; A ! E ? R> {
   return move self
 }
-fn wrap(self: once Effect<i32>) -> once Effect<i32> {
-  return effect { return run self }
+fn wrap<'env>(self: once Effect<'env; i32>) -> once Effect<'env; i32> {
+  return effect { return run move self }
 }
 pub fn main() -> i32 {
   let stored = specialize(pass(succeed(20)))

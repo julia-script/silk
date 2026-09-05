@@ -270,6 +270,8 @@ export interface Work {
   readonly shapeCacheHits: number
   readonly shapeProjectionSteps: number
   readonly initializationJoins: number
+  readonly loanAccessChecks: number
+  readonly cleanupPlanQueries: number
 }
 
 /** One function's ownership facts and its target-neutral cleanup plan. */
@@ -412,6 +414,8 @@ interface CheckState {
     shapeCacheHits: number
     shapeProjectionSteps: number
     initializationJoins: number
+    loanAccessChecks: number
+    cleanupPlanQueries: number
   }
   nextAcquisition: number
   readonly index: DeclarationIndex.Index
@@ -900,7 +904,7 @@ const callableEnvironment = (
             : LocalSharedOwnership.none,
         cleanup:
           capture.access === 'Take' && type !== undefined
-            ? CleanupPlan.cleanupPlan(state.index, type)
+            ? cleanupPlan(state, type)
             : Object.freeze({
                 _tag: 'NoCleanup' as const,
                 type: type ?? ('i32' as const),
@@ -1070,7 +1074,7 @@ const checkPlaceInterior = (
 const retainTemporary = (state: CheckState, expression: Hir.Expression): void => {
   const execution = state.execution
   if (expression._tag === 'Unavailable' || execution === undefined) return
-  const cleanup = CleanupPlan.cleanupPlan(state.index, expression.type)
+  const cleanup = cleanupPlan(state, expression.type)
   if (cleanup._tag !== 'NoCleanup')
     execution.temporaries.push({
       frame: execution.frames.length - 1,
@@ -1705,7 +1709,13 @@ const deferredBlocks = (
   return Hir.expressionChildren(expression).flatMap(deferredBlocks)
 }
 
+const cleanupPlan = (state: CheckState, type: Type.Type): CleanupPlan.CleanupPlan => {
+  state.work.cleanupPlanQueries += 1
+  return CleanupPlan.cleanupPlan(state.index, type)
+}
+
 interface LoanAnalysis {
+  readonly loanAccessChecks: number
   readonly loans: ReadonlyArray<LoanFact>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
@@ -1731,6 +1741,7 @@ const analyzeLoans = (
   index: DeclarationIndex.Index,
   copyAssumptions: ReadonlySet<string>,
 ): LoanAnalysis => {
+  let loanAccessChecks = 0
   const loans: Array<LoanFact> = []
   const diagnostics: Array<Diagnostic.Diagnostic> = []
 
@@ -2318,7 +2329,42 @@ const analyzeLoans = (
       ).values(),
     ]
   }
+  const borrowedRootType = (expression: Elaboration.ExpressionFact): Type.Type | undefined => {
+    if (expression._tag === 'Borrow') return borrowedRootType(expression.subject)
+    if (expression._tag === 'Grouped') return borrowedRootType(expression.expression)
+    if (
+      expression._tag === 'FieldProjection' ||
+      expression._tag === 'IndexProjection' ||
+      expression._tag === 'ReferentProjection' ||
+      expression._tag === 'Move'
+    )
+      return borrowedRootType(expression.subject)
+    if (expression._tag !== 'Identifier' || expression.type._tag !== 'Available') return undefined
+    const type = expression.type.type
+    return Type.isReference(type) || Type.isSlice(type) ? type : undefined
+  }
+  // A descriptor inherits authority from its originating loan; reborrowing uses that capability.
+  // An outstanding sibling loan is absent from the descriptor's provenance and still conflicts.
+  const grantsParentCapability = (
+    loan: LoanFact,
+    root: BindingSite,
+    span: SourceSpan.SourceSpan,
+  ): boolean => {
+    if (sameSite(loan.root, root) || fn.lifetimeFlow === undefined) return false
+    const expression = expressionsBySpan.get(expressionSpanKey(span))
+    const parent = expression === undefined ? undefined : borrowedRootType(expression)
+    return (
+      parent !== undefined &&
+      LifetimeFlow.sources(fn.lifetimeFlow, parent).some(
+        (origin) =>
+          origin.span.sourceId === loan.startSpan.sourceId &&
+          origin.span.start === loan.startSpan.start &&
+          origin.span.end === loan.startSpan.end,
+      )
+    )
+  }
   const loanConflicts = (loan: LoanFact, root: BindingSite, span: SourceSpan.SourceSpan): boolean =>
+    !grantsParentCapability(loan, root, span) &&
     referentsAt(root, span).some((source) =>
       loan.referents.some((referent) => referentsOverlap(referent, source)),
     )
@@ -2488,7 +2534,7 @@ const analyzeLoans = (
       const live =
         fn.lifetimeFlow === undefined
           ? undefined
-          : LifetimeFlow.liveAt(fn.lifetimeFlow, loan.startSpan, span, write)
+          : LifetimeFlow.liveAt(fn.lifetimeFlow, loan.startSpan, span, loan.endSpan, write)
       if (live !== undefined) return live
       return (
         loan.startSpan.sourceId === span.sourceId &&
@@ -2506,9 +2552,15 @@ const analyzeLoans = (
     const direct = directSite(expression)
     const place = physicalPlace(expression)
     if (direct === undefined || place === undefined) return
+    loanAccessChecks += 1
+    const places =
+      borrowedRootType(expression) === undefined ? [place] : rootsOf(place.root, place.path)
     const conflict = active.find(
       (loan) =>
-        (loan.referents.some((referent) => referentsOverlap(referent, place)) ||
+        !grantsParentCapability(loan, direct.site, expression.syntax.span) &&
+        (loan.referents.some((referent) =>
+          places.some((selected) => referentsOverlap(referent, selected)),
+        ) ||
           (loan.suspendsParent && sameSite(loan.root, direct.site))) &&
         (access !== 'Read' || loan.access === 'Exclusive'),
     )
@@ -3172,6 +3224,7 @@ const analyzeLoans = (
   }
   statements(fn.statements)
   return Object.freeze({
+    loanAccessChecks,
     loans: Object.freeze(loans),
     diagnostics: Object.freeze(diagnostics),
   })
@@ -3215,7 +3268,11 @@ const checkFunction = (
   )
   const loanAnalysis =
     semantic === undefined
-      ? Object.freeze({ loans: Object.freeze([]), diagnostics: Object.freeze([]) })
+      ? Object.freeze({
+          loanAccessChecks: 0,
+          loans: Object.freeze([]),
+          diagnostics: Object.freeze([]),
+        })
       : analyzeLoans(semantic, index, copyAssumptions)
   const state: CheckState = {
     work: {
@@ -3224,6 +3281,8 @@ const checkFunction = (
       shapeCacheHits: 0,
       shapeProjectionSteps: 0,
       initializationJoins: 0,
+      loanAccessChecks: loanAnalysis.loanAccessChecks,
+      cleanupPlanQueries: 0,
     },
     nextAcquisition: 0,
     index,
@@ -3512,7 +3571,7 @@ const checkFunction = (
           )
           return type === undefined
             ? []
-            : [Object.freeze({ path, cleanup: CleanupPlan.cleanupPlan(index, type) })]
+            : [Object.freeze({ path, cleanup: cleanupPlan(state, type) })]
         }),
         ...(includeBindings
           ? selection.bindings.flatMap((binding) => {
@@ -3522,7 +3581,7 @@ const checkFunction = (
                 ? [
                     Object.freeze({
                       path: binding.path,
-                      cleanup: CleanupPlan.cleanupPlan(index, binding.type),
+                      cleanup: cleanupPlan(state, binding.type),
                     }),
                   ]
                 : []
@@ -3926,7 +3985,7 @@ const checkFunction = (
           if (Result.isFailure(target)) continue
           selected = target.success.state
         }
-        const cleanup = CleanupPlan.cleanupPlan(state.index, statement.place.type)
+        const cleanup = cleanupPlan(state, statement.place.type)
         if (selected.initialization !== 'Missing' && cleanup._tag !== 'NoCleanup')
           state.replacements.push(
             Object.freeze({
@@ -4230,7 +4289,7 @@ const checkFunction = (
                 const type = CleanupPlan.cleanupTypeAtPath(index, payloadType, path)
                 return type === undefined
                   ? []
-                  : [Object.freeze({ path, cleanup: CleanupPlan.cleanupPlan(index, type) })]
+                  : [Object.freeze({ path, cleanup: cleanupPlan(state, type) })]
               }),
             )
           : Object.freeze([])
@@ -4281,7 +4340,7 @@ const checkFunction = (
             id: expression.id,
             arm: arm.id,
             cleanup: Object.freeze([
-              { path: Object.freeze([]), cleanup: CleanupPlan.cleanupPlan(index, payloadType) },
+              { path: Object.freeze([]), cleanup: cleanupPlan(state, payloadType) },
             ]),
           }),
         })
@@ -4417,7 +4476,7 @@ const checkFunction = (
         binding.cleanup ??
         (binding.type === undefined
           ? Object.freeze({ _tag: 'NoCleanup' as const, type: 'i32' as const })
-          : CleanupPlan.cleanupPlan(index, binding.type)),
+          : cleanupPlan(state, binding.type)),
       liveFrom: binding.liveFrom,
       liveTo: binding.liveTo,
       ...(binding.movedAt === undefined ? {} : { movedAt: binding.movedAt }),
@@ -4558,22 +4617,80 @@ const checkFunction = (
   })
 }
 
-/** Checks one target-selected residual function without reusing declaration-level ownership. */
-export const checkResidualFunction = (
+/** Every input read by the ownership checker, after callback boundaries are selected. */
+export interface CheckInput {
+  readonly function: Hir.HirFunction
+  readonly semantic: Elaboration.FunctionFact | undefined
+  readonly index: DeclarationIndex.Index
+  readonly boundaries: ReadonlyArray<SourceSpan.SourceSpan>
+}
+
+/** Resolves ownership inputs without running the checker or reconstructing prior diagnostics. */
+export const input = (
   fn: Hir.HirFunction,
-  semantic: Elaboration.FunctionFact,
+  semantic: Elaboration.FunctionFact | undefined,
   index: DeclarationIndex.Index,
   accessBoundaryPlan: LocalSharedAccessBoundaryPlan,
-): CheckedFunction =>
-  checkFunction(
-    fn,
-    index,
+): CheckInput =>
+  Object.freeze({
+    function: fn,
     semantic,
-    fn.declaration.canonical._tag === 'Canonical'
-      ? (accessBoundaryPlan.boundaries.get(localSharedTargetKey(fn.declaration.canonical.id)) ??
+    index,
+    boundaries:
+      fn.declaration.canonical._tag === 'Canonical'
+        ? (accessBoundaryPlan.boundaries.get(localSharedTargetKey(fn.declaration.canonical.id)) ??
           Object.freeze([]))
-      : Object.freeze([]),
-  )
+        : Object.freeze([]),
+  })
+
+/** Requires identical semantic authorities and equal ordered access-boundary spans. */
+export const matchesInput = (self: CheckInput, other: CheckInput): boolean =>
+  self.function === other.function &&
+  self.semantic === other.semantic &&
+  self.index === other.index &&
+  self.boundaries.length === other.boundaries.length &&
+  self.boundaries.every((span, ordinal) => {
+    const right = other.boundaries[ordinal]
+    return (
+      right !== undefined &&
+      span.sourceId === right.sourceId &&
+      span.start === right.start &&
+      span.end === right.end
+    )
+  })
+
+/** Executes ownership checking with exactly the supplied semantic authorities. */
+export const check = (self: CheckInput): CheckedFunction =>
+  checkFunction(self.function, self.index, self.semantic, self.boundaries)
+
+interface SourceProof {
+  readonly input: CheckInput
+  readonly checked: CheckedFunction
+}
+
+const sourceProofs = new WeakMap<
+  DeclarationIndex.Index,
+  WeakMap<Hir.HirFunction, Array<SourceProof>>
+>()
+
+/** Reads a result published at the source checker boundary for these exact current inputs. */
+export const sourceProof = (self: CheckInput): CheckedFunction | undefined =>
+  sourceProofs
+    .get(self.index)
+    ?.get(self.function)
+    ?.find((proof) => matchesInput(proof.input, self))?.checked
+
+const publishSourceProof = (self: CheckInput, checked: CheckedFunction): void => {
+  let functions = sourceProofs.get(self.index)
+  if (functions === undefined) {
+    functions = new WeakMap()
+    sourceProofs.set(self.index, functions)
+  }
+  const proofs = functions.get(self.function) ?? []
+  if (!proofs.some((proof) => matchesInput(proof.input, self)))
+    proofs.push({ input: self, checked })
+  functions.set(self.function, proofs)
+}
 
 /** Classifies the result-side ownership facts of one access-scoped callback invocation. */
 export const localSharedResultEscapes = (facts: {
@@ -4783,15 +4900,12 @@ export const checkModule = (
         fact.declaration.id.sourceId === fn.declaration.id.sourceId &&
         fact.declaration.id.ordinal === fn.declaration.id.ordinal,
     )
-    const boundaries =
-      fn.declaration.canonical._tag === 'Canonical'
-        ? (accessBoundaryPlan.boundaries.get(localSharedTargetKey(fn.declaration.canonical.id)) ??
-          Object.freeze([]))
-        : Object.freeze([])
-    const compute = () => checkFunction(fn, index, semantic, boundaries)
-    return bodyQuery === undefined
-      ? compute()
-      : BodyQuery.ownership(bodyQuery, semantic, boundaries, compute)
+    const selected = input(fn, semantic, index, accessBoundaryPlan)
+    const compute = () => check(selected)
+    const checked =
+      bodyQuery === undefined ? compute() : BodyQuery.ownership(bodyQuery, selected, compute)
+    publishSourceProof(selected, checked)
+    return checked
   })
   return Object.freeze({
     _tag: 'OwnershipFacts',

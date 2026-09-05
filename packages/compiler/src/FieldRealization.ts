@@ -673,13 +673,14 @@ export const isEffectRealization = (self: Realization): self is EffectRealizatio
 
 /** True when every realized field of one complete instance has a runtime realization. */
 export const supportsInstance = (self: Index, instance: Type.Nominal): boolean => {
-  const entries = self.entries.filter((entry) =>
-    Type.equals(
-      entry.support._tag === 'Supported'
-        ? entry.support.realization.instance
-        : entry.support.instance,
-      instance,
-    ),
+  const identity = Type.runtimeKey(instance)
+  const entries = self.entries.filter(
+    (entry) =>
+      Type.runtimeKey(
+        entry.support._tag === 'Supported'
+          ? entry.support.realization.instance
+          : entry.support.instance,
+      ) === identity,
   )
   return entries.length > 0 && entries.every((entry) => entry.support._tag === 'Supported')
 }

@@ -53,7 +53,7 @@ it.effect('defines a stable private realization for one capturing opaque family'
     const self = yield* snapshot(
       module,
       `fn add(left: i32, right: i32) -> i32 { return left + right }
-pub fn make(value: i32) -> some<F: fn(i32) -> i32> F { return add(value) }`,
+pub fn make(value: i32) -> some<F: fn<'static>(i32) -> i32> F { return add(value) }`,
     )
     assert.deepEqual(
       self.diagnostics.map((diagnostic) => diagnostic.code),
@@ -91,14 +91,14 @@ it.effect('keeps family identity stable across value edits and distinct across p
     const before = yield* snapshot(
       module,
       `fn add(left: i32, right: i32) -> i32 { return left + right }
-pub fn first() -> some<F: fn(i32) -> i32> F { return add(1) }
-pub fn second() -> some<G: fn(i32) -> i32> G { return add(1) }`,
+pub fn first() -> some<F: fn<'static>(i32) -> i32> F { return add(1) }
+pub fn second() -> some<G: fn<'static>(i32) -> i32> G { return add(1) }`,
     )
     const after = yield* snapshot(
       module,
       `fn add(left: i32, right: i32) -> i32 { return left + right }
-pub fn first() -> some<F: fn(i32) -> i32> F { return add(2) }
-pub fn second() -> some<G: fn(i32) -> i32> G { return add(1) }`,
+pub fn first() -> some<F: fn<'static>(i32) -> i32> F { return add(2) }
+pub fn second() -> some<G: fn<'static>(i32) -> i32> G { return add(1) }`,
     )
     const beforeFirst = opaqueArgument(before, module, 'first')
     const afterFirst = opaqueArgument(after, module, 'first')
@@ -126,7 +126,7 @@ it.effect('specializes a generic opaque family over every enclosing argument', (
     const self = yield* snapshot(
       module,
       `fn keep<T>(value: T, enabled: bool) -> T { return move value }
-pub fn make<T>(enabled: bool) -> some<F: fn(T) -> T> F { return keep<T>(enabled) }`,
+pub fn make<T>(enabled: bool) -> some<F: fn<'static>(T) -> T> F { return keep<T>(enabled) }`,
     )
     const open = opaqueArgument(self, module, 'make')
     const i32 = Type.opaqueRepresentationArgument(open.family, open.contract, ['i32'])
@@ -144,7 +144,7 @@ it.effect('unifies every reachable nested return and reachable match arm', () =>
       `struct Left {}
 struct Right {}
 fn identity(value: i32) -> i32 { return value }
-pub fn make(choice: Left | Right, flag: bool) -> some<F: fn(i32) -> i32> F {
+pub fn make(choice: Left | Right, flag: bool) -> some<F: fn<'static>(i32) -> i32> F {
   if flag { unsafe { return identity } }
   while flag { return identity }
   return match move choice {
@@ -171,7 +171,7 @@ it.effect('rejects divergent reachable opaque returns', () =>
       'opaque/divergent',
       `fn decimal(value: i32) -> i32 { return value }
 fn hexadecimal(value: i32) -> i32 { return value }
-pub fn make(flag: bool) -> some<F: fn(i32) -> i32> F {
+pub fn make(flag: bool) -> some<F: fn<'static>(i32) -> i32> F {
   if flag { return decimal }
   return hexadecimal
 }`,
@@ -186,7 +186,7 @@ it.effect('accepts recursion after local evidence and rejects realization-only r
     const accepted = yield* snapshot(
       'opaque/recursive-base',
       `fn identity(value: i32) -> i32 { return value }
-pub fn make(flag: bool) -> some<F: fn(i32) -> i32> F {
+pub fn make(flag: bool) -> some<F: fn<'static>(i32) -> i32> F {
   if flag { return identity }
   return make(true)
 }`,
@@ -198,7 +198,7 @@ pub fn make(flag: bool) -> some<F: fn(i32) -> i32> F {
 
     const rejected = yield* snapshot(
       'opaque/recursive-cycle',
-      `pub fn make(flag: bool) -> some<F: fn(i32) -> i32> F { return make(flag) }`,
+      `pub fn make(flag: bool) -> some<F: fn<'static>(i32) -> i32> F { return make(flag) }`,
     )
     const diagnostic = rejected.diagnostics.find((candidate) => candidate.code === 'SEM0114')
     assert.strictEqual(diagnostic?.reason._tag, 'OpaqueRealizationCycle')
@@ -209,7 +209,7 @@ it.effect('distinguishes missing construction evidence from a realization cycle'
   Effect.gen(function* () {
     const self = yield* snapshot(
       'opaque/missing-realization',
-      'pub fn make() -> some<F: fn(i32) -> i32> F { return 0 }',
+      "pub fn make() -> some<F: fn<'static>(i32) -> i32> F { return 0 }",
     )
     const codes = self.diagnostics.map((diagnostic) => diagnostic.code)
     assert.include(codes, 'SEM0117')
@@ -223,8 +223,8 @@ it.effect('rejects an inline capture of the family being realized', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
       'opaque/inline-cycle',
-      `fn apply<F: fn(i32) -> i32>(value: i32, parser: F) -> i32 { return parser(value) }
-pub fn make(flag: bool) -> some<F: fn(i32) -> i32> F {
+      `fn apply<F: fn<'static>(i32) -> i32>(value: i32, parser: F) -> i32 { return parser(value) }
+pub fn make(flag: bool) -> some<F: fn<'static>(i32) -> i32> F {
   let previous = make(flag)
   return apply(move previous)
 }`,
@@ -238,12 +238,12 @@ it.effect('rejects a mutually recursive inline capture cycle across two opaque f
   Effect.gen(function* () {
     const self = yield* snapshot(
       'opaque/mutual-inline-cycle',
-      `fn apply<F: fn(i32) -> i32>(value: i32, parser: F) -> i32 { return parser(value) }
-pub fn first(flag: bool) -> some<F: fn(i32) -> i32> F {
+      `fn apply<F: fn<'static>(i32) -> i32>(value: i32, parser: F) -> i32 { return parser(value) }
+pub fn first(flag: bool) -> some<F: fn<'static>(i32) -> i32> F {
   let other = second(flag)
   return apply(move other)
 }
-pub fn second(flag: bool) -> some<G: fn(i32) -> i32> G {
+pub fn second(flag: bool) -> some<G: fn<'static>(i32) -> i32> G {
   let other = first(flag)
   return apply(move other)
 }`,
@@ -259,8 +259,8 @@ it.effect('specializes and lowers a generic opaque family forwarded through anot
   Effect.gen(function* () {
     const module = 'opaque/forwarded-generic'
     const source = `fn keep<T>(value: T, enabled: bool) -> T { return move value }
-pub fn inner<T>(enabled: bool) -> some<F: fn(T) -> T> F { return keep<T>(enabled) }
-pub fn outer<T>(enabled: bool) -> some<G: fn(T) -> T> G { return inner<T>(enabled) }
+pub fn inner<T>(enabled: bool) -> some<F: fn<'static>(T) -> T> F { return keep<T>(enabled) }
+pub fn outer<T>(enabled: bool) -> some<G: fn<'static>(T) -> T> G { return inner<T>(enabled) }
 pub fn main() -> i32 { let parser = outer<i32>(true) return parser(1) }`
     const frontend = yield* snapshot(module, source)
     assert.deepEqual(
@@ -299,7 +299,7 @@ it.effect(
       const module = 'opaque/specialized-layouts'
       const source = `pub struct Token { left: i32 right: i32 }
 fn keep<T>(ignored: i32, value: T) -> T { return move value }
-pub fn make<T>(value: T) -> some<F: once fn(i32) -> T> F { return keep<T>(move value) }
+pub fn make<'env, T: 'env>(value: T) -> some<F: once fn<'env>(i32) -> T> F { return keep<T>(move value) }
 pub fn main() -> i32 {
   let first = make<i32>(40)
   let second = make<i32>(1)
@@ -312,10 +312,7 @@ pub fn main() -> i32 {
         encoder.encode(source),
         'wasm32-unknown-unknown',
       )
-      assert.deepEqual(
-        self.diagnostics.map((diagnostic) => diagnostic.code),
-        [],
-      )
+      assert.deepEqual(Analysis.diagnostics(self), [])
       const makeInstances = self.instances.instances.filter(
         (instance) => instance.key.declaration.name === 'make',
       )
@@ -341,8 +338,8 @@ it.effect('rejects a static join between values from distinct opaque families', 
       `struct First {}
 struct Second {}
 fn identity(value: i32) -> i32 { return value }
-fn first() -> some<F: fn(i32) -> i32> F { return identity }
-fn second() -> some<G: fn(i32) -> i32> G { return identity }
+fn first() -> some<F: fn<'static>(i32) -> i32> F { return identity }
+fn second() -> some<G: fn<'static>(i32) -> i32> G { return identity }
 fn choose(input: First | Second) -> i32 {
   let parser = match move input {
     First {} => first()
@@ -365,7 +362,7 @@ it.effect('keeps cross-module realization details compiler-private and specializ
 pub fn use() -> i32 { let parser = make<i32>(true) return parser(1) }`,
       {
         [library]: `fn keep<T>(value: T, enabled: bool) -> T { return move value }
-pub fn make<T>(enabled: bool) -> some<F: fn(T) -> T> F { return keep<T>(enabled) }`,
+pub fn make<T>(enabled: bool) -> some<F: fn<'static>(T) -> T> F { return keep<T>(enabled) }`,
       },
     )
     const open = opaqueArgument(self, library, 'make')
@@ -392,7 +389,7 @@ pub fn make<T>(enabled: bool) -> some<F: fn(T) -> T> F { return keep<T>(enabled)
 it.effect('keeps opaque identity out of runtime facts', () =>
   Effect.gen(function* () {
     const source = `fn add(left: i32, right: i32) -> i32 { return left + right }
-fn make(value: i32) -> some<F: fn(i32) -> i32> F { return add(value) }
+fn make(value: i32) -> some<F: fn<'static>(i32) -> i32> F { return add(value) }
 pub fn main() -> i32 { let parser = make(40) return parser(2) }`
     const self = yield* Analysis.ofSourceRealized(
       'opaque/runtime-fence',
@@ -435,7 +432,7 @@ it.effect('lowers an opaque Effect through its private static runner', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(
       'opaque/effect-runtime-fence',
-      encoder.encode(`fn make(value: i32) -> some<F: Effect<i32>> F {
+      encoder.encode(`fn make(value: i32) -> some<F: Effect<'static; i32>> F {
   return effect { return value }
 }
 pub fn main() -> i32 { return run make(42) }`),

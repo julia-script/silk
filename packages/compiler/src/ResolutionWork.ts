@@ -10,6 +10,8 @@ export interface Initiator {
     | 'AssociatedMember'
     | 'ConformanceGoal'
     | 'CallConstraint'
+    | 'ToolingName'
+    | 'ToolingPath'
   readonly key: string
   readonly span?: SourceSpan.SourceSpan
 }
@@ -113,6 +115,10 @@ export const accept = (self: Observation): void => {
 export const snapshot = (self: ResolutionWork): ReadonlyArray<Entry> =>
   Object.freeze(
     [...self.entries.entries()]
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .sort(([left], [right]) => {
+        if (left < right) return -1
+        if (left > right) return 1
+        return 0
+      })
       .map(([, entry]) => Object.freeze({ ...entry })),
   )

@@ -183,6 +183,7 @@ export interface Input {
   readonly pointCount: number
   readonly regions: ReadonlyArray<Region>
   readonly constraints: ReadonlyArray<Outlives>
+  readonly activatedConstraints?: ReadonlyArray<Outlives & { readonly points: ReadonlySet<number> }>
 }
 
 export interface Work {
@@ -220,7 +221,10 @@ export const solve = (input: Input): Solution => {
     return Object.freeze({ _tag: 'InvalidDomain', dimension: 'PointCount' })
   const regions = new Map<string, Region>()
   const required = new Map<string, Set<number>>()
-  const edges = new Map<string, Set<string>>()
+  const edges = new Map<
+    string,
+    Map<string, { readonly longer: string; readonly points?: ReadonlySet<number> }>
+  >()
   const pending: Array<readonly [string, number]> = []
   for (const region of input.regions) {
     const identity = key(region.lifetime)
@@ -243,7 +247,11 @@ export const solve = (input: Input): Solution => {
     for (const point of [...region.required].sort((left, right) => left - right))
       pending.push([identity, point])
   }
-  for (const constraint of input.constraints) {
+  const constraints: ReadonlyArray<Outlives & { readonly points?: ReadonlySet<number> }> = [
+    ...input.constraints,
+    ...(input.activatedConstraints ?? []),
+  ]
+  for (const constraint of constraints) {
     const longer = key(constraint.longer)
     const shorter = key(constraint.shorter)
     let absent: Lifetime | undefined
@@ -255,8 +263,20 @@ export const solve = (input: Input): Solution => {
         dimension: 'MissingRegion',
         lifetime: absent,
       })
-    const parents = edges.get(shorter) ?? new Set<string>()
-    parents.add(longer)
+    const points = constraint.points
+    if (points !== undefined)
+      for (const point of points)
+        if (!Number.isSafeInteger(point) || point < 0 || point >= input.pointCount)
+          return Object.freeze({
+            _tag: 'InvalidDomain',
+            dimension: 'Point',
+            lifetime: constraint.longer,
+          })
+    const parents = edges.get(shorter) ?? new Map()
+    parents.set(
+      `${longer}:${points === undefined ? '*' : [...points].sort((a, b) => a - b).join(',')}`,
+      { longer, ...(points === undefined ? {} : { points }) },
+    )
     edges.set(shorter, parents)
   }
   const requiredPoints = pending.length
@@ -265,12 +285,13 @@ export const solve = (input: Input): Solution => {
     const fact = pending.at(cursor)
     if (fact === undefined) continue
     const [shorter, point] = fact
-    for (const longer of edges.get(shorter) ?? []) {
+    for (const edge of edges.get(shorter)?.values() ?? []) {
       edgeVisits += 1
-      const points = required.get(longer)
+      if (edge.points !== undefined && !edge.points.has(point)) continue
+      const points = required.get(edge.longer)
       if (points === undefined || points.has(point)) continue
       points.add(point)
-      pending.push([longer, point])
+      pending.push([edge.longer, point])
     }
   }
   const violations: Array<{ readonly lifetime: Lifetime; readonly point: number }> = []

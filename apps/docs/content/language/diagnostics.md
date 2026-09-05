@@ -17,10 +17,10 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | `PAR`  | Parser    | 5     |
 | `MOD`  | Module    | 3     |
 | `SEM`  | Semantic  | 201   |
-| `OWN`  | Ownership | 18    |
+| `OWN`  | Ownership | 19    |
 | `LAY`  | Layout    | 1     |
 
-There are 240 codes in total.
+There are 241 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -285,6 +285,7 @@ There are 240 codes in total.
 | `OWN0017` | Stable code for an owner consumed in only some arms of a branch merge.                               | `Branches merge with incompatible owner liveness for <spelling>`                                                                                                                                                                                                           |
 | `OWN0018` | Stable code for returning a callable or Effect that borrows storage owned by the returning function. | `<executable> cannot escape with a <toLowerCase> borrow of local <spelling>`                                                                                                                                                                                               |
 | `OWN0019` |                                                                                                      | `Lifetime <lifetime> does not remain valid at this use`                                                                                                                                                                                                                    |
+| `OWN0020` | An owner cannot be preserved by the suspension frame at this run boundary.                           | `Cannot preserve ownership across suspension: <detail>`                                                                                                                                                                                                                    |
 
 ## Layout (`LAY`)
 

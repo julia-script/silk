@@ -96,7 +96,7 @@ pub fn selected() -> typeof(identity<i32>) { return 0 }`,
       module: 'exact-representation/positive',
       name: 'identity',
     })
-    assert.strictEqual(Type.encode(argument.contract), 'fn(i32) -> i32')
+    assert.strictEqual(Type.encode(argument.contract), "fn<'static>(i32) -> i32")
   }),
 )
 
@@ -351,7 +351,7 @@ it.effect(
         `pub struct Failure {}
 pub service Capability {}
 pub fn callable(value: i32) -> i32 { return value }
-pub fn target<A, E, ?R, F: fn(A) -> A>(value: A) -> A {
+pub fn target<A, E, ?R, F: fn<'static>(A) -> A>(value: A) -> A {
   return move value
 }
 pub fn selected() -> typeof(target<i32, Failure, Capability, typeof(callable)>) {
@@ -394,9 +394,9 @@ it.effect('rejects private exact identities nested in every non-value generic po
     const self = yield* index(
       'exact-representation/nested-private',
       `fn hidden(value: i32) -> i32 { return value }
-pub struct Failure<F: fn(i32) -> i32> { value: i32 }
-pub struct Capability<F: fn(i32) -> i32> { value: i32 }
-pub fn generic<F: fn(i32) -> i32>(value: i32) -> i32 { return value }
+pub struct Failure<F: fn<'static>(i32) -> i32> { value: i32 }
+pub struct Capability<F: fn<'static>(i32) -> i32> { value: i32 }
+pub fn generic<F: fn<'static>(i32) -> i32>(value: i32) -> i32 { return value }
 pub fn rows<E, ?R>(value: i32) -> i32 { return value }
 pub fn nominalLeak() -> Failure<typeof(hidden)> { loop {} }
 pub fn identityLeak() -> typeof(generic<typeof(hidden)>) { loop {} }

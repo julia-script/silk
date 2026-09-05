@@ -14,12 +14,14 @@ import type {
   RowInferenceFailure,
   SealedStaticProperty,
   Substitution,
+  TypeOutlives,
   Type,
 } from '../Type.js'
 import {
   callable,
   compareAccess,
   effectWithRows,
+  executableFormationRequirements,
   lifetimes,
   encode,
   equals,
@@ -80,6 +82,8 @@ export interface OpenGenericInference {
 
 export interface LifetimeInference {
   readonly compatibility?: TypeCompatibility.Context
+  /** Declaration-owned lifetime variables still open at this inference boundary. */
+  readonly inferable?: ReadonlySet<string>
   readonly typeOutlives?: (type: Type, lifetime: Lifetime.Lifetime) => boolean
   /** Checks one selected source-to-expected region relation; invariant positions require both directions. */
   readonly accepts: (
@@ -373,6 +377,10 @@ const inferLifetime = (
 ): boolean => {
   const identity = Lifetime.key(pattern)
   const previous = inferred.get(identity)
+  if (previous === undefined && context.lifetimes?.inferable?.has(identity)) {
+    inferred.set(identity, actual)
+    return true
+  }
   if (Lifetime.equals(pattern, actual) && previous === undefined) {
     if (
       context.lifetimes === undefined &&
@@ -657,20 +665,21 @@ const inferQuantifiedExecutable = (
   return true
 }
 
-/** A supplied executable may not strengthen the expected contract's lifetime preconditions. */
+/** Invocation preconditions need implication; independent formation facts travel with the value. */
 const inferExecutableBounds = (
   pattern: Callable | Effect,
   actual: Callable | Effect,
   inferred: Substitution,
   context: InferenceContext,
 ): boolean => {
+  const formation = executableFormationRequirements(actual)
   const expected = Lifetime.assumptions(
-    pattern.lifetimeBounds.map((bound) => ({
+    [...pattern.lifetimeBounds, ...formation.lifetimeBounds].map((bound) => ({
       longer: substituteLifetime(bound.longer, inferred),
       shorter: substituteLifetime(bound.shorter, inferred),
     })),
   )
-  const expectedTypes = pattern.typeOutlives.map((bound) => ({
+  const expectedTypes = [...pattern.typeOutlives, ...formation.typeOutlives].map((bound) => ({
     type: substitute(bound.type, inferred),
     lifetime: substituteLifetime(bound.lifetime, inferred),
   }))
@@ -890,6 +899,12 @@ export const inferOpenGenericArguments = (
 export const prefixSubstitution = (
   declared: ReadonlyArray<Parameter>,
   arguments_: ReadonlyArray<GenericArgument>,
+): Substitution | undefined => bindPrefix(declared, arguments_)
+
+const bindPrefix = (
+  declared: ReadonlyArray<Parameter>,
+  arguments_: ReadonlyArray<GenericArgument>,
+  representationContext?: TypeCompatibility.Context,
 ): Substitution | undefined => {
   if (arguments_.length > declared.length) return undefined
   const result = new Map<string, GenericArgument>()
@@ -948,8 +963,11 @@ export const prefixSubstitution = (
           requiredRepresentationBound === undefined ||
           representationContract === undefined ||
           !preservesStaticProperties ||
-          representationAdmissibility(representationContract, requiredRepresentationBound)._tag !==
-            'Admitted'))
+          representationAdmissibility(
+            representationContract,
+            requiredRepresentationBound,
+            representationContext,
+          )._tag !== 'Admitted'))
     )
       return undefined
   }
@@ -962,3 +980,44 @@ export const substitution = (
   arguments_: ReadonlyArray<GenericArgument>,
 ): Substitution | undefined =>
   declared.length !== arguments_.length ? undefined : prefixSubstitution(declared, arguments_)
+
+/** Exact semantic arguments and the selected call's proven representation lifetime relations. */
+export interface SelectedSubstitution {
+  readonly substitution: Substitution
+  readonly compatibility: TypeCompatibility.Context
+}
+
+/**
+ * Rebinds a complete invocation selected by semantic checking. Only Instances and ExecutableOrigin
+ * may use this boundary: the caller must supply already checked HIR arguments. Kind, access and
+ * representation structure are verified again; only their accepted lifetime relations are carried
+ * forward as explicit assumptions. Detached and NonParking obligations remain independently checked.
+ */
+export const selectedSubstitution = (
+  declared: ReadonlyArray<Parameter>,
+  arguments_: ReadonlyArray<GenericArgument>,
+): SelectedSubstitution | undefined => {
+  if (declared.length !== arguments_.length) return undefined
+  const bounds: Array<Lifetime.Outlives> = []
+  const typeBounds: Array<TypeOutlives> = []
+  const collect = TypeCompatibility.context({
+    outlives: () => true,
+    commitOutlives: (longer, shorter) => {
+      bounds.push({ longer, shorter })
+    },
+    typeOutlives: () => true,
+    commitTypeOutlives: (type, lifetime) => {
+      typeBounds.push({ type, lifetime })
+    },
+  })
+  const substitution = bindPrefix(declared, arguments_, collect)
+  return substitution === undefined
+    ? undefined
+    : Object.freeze({
+        substitution,
+        compatibility: TypeCompatibility.context({
+          assumptions: Lifetime.assumptions(bounds),
+          typeBounds,
+        }),
+      })
+}

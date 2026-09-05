@@ -172,3 +172,36 @@ it.effect('publishes deterministic state ownership and restoration', () =>
     }
   }),
 )
+
+it.effect('reports partial owner suspension during ordinary realized checking', () =>
+  Effect.gen(function* () {
+    const source = `struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+struct Pair { left: Token right: Token }
+effect fn delayed() -> i32 { return run Intrinsic.suspendEffect(effect { return 2 }) }
+effect fn partial() -> i32 {
+  let owner = Pair { left: Token { value: 1 }, right: Token { value: 2 } }
+  let extracted = move owner.left
+  drop extracted
+  let result = run delayed()
+  return owner.right.value + result
+}
+effect fn complete() -> i32 {
+  let owner = Pair { left: Token { value: 1 }, right: Token { value: 2 } }
+  let result = run delayed()
+  return owner.left.value + owner.right.value + result
+}
+pub fn main() -> i32 { let first = run partial() return first + run complete() }`
+    const self = yield* snapshot(source)
+    const start = source.indexOf(' run delayed()')
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => ({
+        code: diagnostic.code,
+        start: diagnostic.span.start,
+        end: diagnostic.span.end,
+      })),
+      [{ code: 'OWN0020', start, end: start + ' run delayed()'.length }],
+    )
+    assert.strictEqual(self.mir._tag, 'Unavailable')
+  }),
+)

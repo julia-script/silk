@@ -144,7 +144,10 @@ pub fn main() -> i32 { let whenEnabled = select(true) return whenEnabled(42) }`)
     assert.deepEqual(generic.callables.at(0)?.typeArguments.map(Type.encodeGenericArgument), [
       'i32',
     ])
-    assert.strictEqual(Type.encode(generic.callables.at(0)?.type ?? 'i32'), 'fn(i32) -> i32')
+    assert.strictEqual(
+      Type.encode(generic.callables.at(0)?.type ?? 'i32'),
+      "fn<'static>(i32) -> i32",
+    )
   }),
 )
 
@@ -182,9 +185,10 @@ pub fn main() -> i32 {
 
 it.effect('keeps inferred hidden calls scoped to the function that contains their expression', () =>
   Effect.gen(function* () {
-    const result = yield* snapshot(`fn make() -> once Effect<i32> { return effect { return 42 } }
-fn relay() -> once Effect<i32> { return make() }
-fn forward<A, E, ?R>(protected: once Effect<A ! E ? R>) -> once Effect<A ! E ? R> {
+    const result =
+      yield* snapshot(`fn make() -> once Effect<'static; i32> { return effect { return 42 } }
+fn relay() -> once Effect<'static; i32> { return make() }
+fn forward<'env, A, E, ?R>(protected: once Effect<'env; A ! E ? R>) -> once Effect<'env; A ! E ? R> {
   return move protected
 }
 pub fn main() -> i32 { return run forward(relay()) }`)
@@ -218,10 +222,9 @@ pub fn main() -> i32 { return run forward(relay()) }`)
 
 it.effect('keeps executable sites distinct across generic owner specializations', () =>
   Effect.gen(function* () {
-    const result = Analysis.instancesOf(
-      yield* snapshot(`import silk.i32 as i32
+    const analyzed = yield* snapshot(`fn add(left: i32, right: i32) -> i32 { return left + right }
 fn section<T>(value: T) -> i32 {
-  let plusOne = i32.add(1)
+  let plusOne = add(1)
   return plusOne(41)
 }
 effect fn deferred<T>(value: T) -> T { return move value }
@@ -232,7 +235,23 @@ pub fn main() -> i32 {
   let flag = run deferred<bool>(true)
   if flag { return number }
   return 0
-}`),
+}`)
+    assert.deepEqual(Analysis.diagnostics(analyzed), [])
+    const result = Analysis.instancesOf(analyzed)
+    assert.strictEqual(result.counters.residualBodies.checked, 0)
+    assert.strictEqual(result.counters.residualOwnership.checked, 0)
+    assert.strictEqual(result.counters.residualOwnership.cacheReused, 2)
+    assert.isAbove(result.counters.residualOwnership.sourceReused, 0)
+    assert.strictEqual(
+      Object.values(result.counters.residualOwnership.executedWork).reduce(
+        (total, count) => total + count,
+        0,
+      ),
+      0,
+    )
+    assert.deepEqual(
+      analyzed.report.find((phase) => phase.phase === 'instance-discovery')?.counters,
+      result.counters,
     )
     const sections = result.callables.filter(
       (callable) => callable.owner.declaration.name === 'section',
@@ -642,7 +661,7 @@ it.effect('ends callable capture loans before drop and transfers consuming captu
     const borrowed = Analysis.loweredMir(
       yield* snapshot(`fn read(value: i32, values: &mut [i32]) -> i32 { return value }
 pub fn main() -> i32 {
-  let mut values = [1]
+  let mut values: [i32; 1] = [1]
   let callback = read(&mut values)
   drop callback
   values[0] = 2
@@ -684,11 +703,14 @@ it.effect(
   'lowers complete ungrouped run operands before grouped post-run callable transforms',
   () =>
     Effect.gen(function* () {
-      const composed = Analysis.loweredMir(
-        yield* snapshot(`import silk.effect { Effect }
-effect fn work() -> i32 { return 41 }
-pub fn main() -> i32 { return run work() |> Effect.retry(2) }`),
-      )
+      const composedSnapshot = yield* snapshot(`effect fn work() -> i32 { return 41 }
+effect<'env> fn offset<'env>(self: Effect<'env; i32>, amount: i32) -> i32 {
+  let value = run self
+  return value + amount
+}
+pub fn main() -> i32 { return run work() |> offset(1) }`)
+      assert.deepEqual(Analysis.diagnostics(composedSnapshot), [])
+      const composed = Analysis.loweredMir(composedSnapshot)
       const grouped = Analysis.loweredMir(
         yield* snapshot(`effect fn work() -> i32 { return 41 }
 pub fn main() -> i32 { return (run work()) |> Intrinsic.i32Add(1) }`),
@@ -766,7 +788,7 @@ it.effect('lowers bindings and ownership violations with generated cleanup or tr
       bindingFunction === undefined
         ? []
         : MirVerification.operations(bindingFunction).map((operation) => operation._tag),
-      ['Literal', 'Call', 'Move', 'Literal', 'Move', 'Drop', 'Drop'],
+      ['Literal', 'Call', 'Move', 'Literal', 'Move', 'Move', 'Drop', 'Drop'],
     )
 
     const violated = Analysis.loweredMir(
@@ -997,13 +1019,16 @@ it.effect('shares runtime instances and layouts across distinct proven lifetime 
   Effect.gen(function* () {
     const result = yield* snapshot(`struct View<'a> { value: &'a i32 }
 fn wrap<'a>(value: &'a i32) -> View<'a> { return View<'a> { value: value } }
-fn read<'a>(value: &'a i32) -> i32 { return value.* }
+fn reborrow<'a>(value: &'a i32) -> &'a i32 { return &value.* }
+effect fn read<'a>(value: &'a i32) -> i32 { return value.* }
 pub fn main() -> i32 {
   let left = 20
   let right = 22
   let first = wrap(&left)
   let second = wrap(&right)
-  return read(first.value) + read(second.value)
+  let firstValue = run read(reborrow(first.value))
+  let secondValue = run read(reborrow(second.value))
+  return firstValue + secondValue
 }`)
     assert.deepEqual(Analysis.diagnostics(result), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(result)), [])
@@ -1014,6 +1039,10 @@ pub fn main() -> i32 {
     )
     assert.strictEqual(
       discovery.instances.filter((instance) => instance.key.declaration.name === 'wrap').length,
+      1,
+    )
+    assert.strictEqual(
+      discovery.instances.filter((instance) => instance.key.declaration.name === 'reborrow').length,
       1,
     )
     const plan = Analysis.layoutOf(result)

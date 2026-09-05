@@ -57,10 +57,7 @@ const soleEffectRealization = (
 }
 
 const assertEffectRealized = (snapshot: Analysis.Snapshot): void => {
-  assert.notInclude(
-    Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-    'SEM0107',
-  )
+  assert.deepEqual(Analysis.diagnostics(snapshot), [])
   assert.strictEqual(snapshot.layoutCatalog._tag, 'Available')
   assert.strictEqual(snapshot.layout._tag, 'Available')
   assert.strictEqual(snapshot.mir._tag, 'Available')
@@ -73,10 +70,10 @@ pub fn main() -> i32 {
   return parser.parse(1)
 }`
 
-const capturingSection = `import silk.i32 as i32
+const capturingSection = `fn add(left: i32, right: i32) -> i32 { return left + right }
 struct Adder<F: fn(i32) -> i32> { step: F }
 pub fn main() -> i32 {
-  let adder = Adder { step: i32.add(1) }
+  let adder = Adder { step: add(1) }
   return adder.step(2)
 }`
 
@@ -176,10 +173,9 @@ it.effect('realizes a suspending stored runner with exact rows and no structural
   Effect.gen(function* () {
     const snapshot = yield* realized(
       'effect-field/suspending',
-      `import silk.effect { Effect }
-struct Deferred<F: Effect<i32>> { operation: F }
+      `struct Deferred<F: Effect<i32>> { operation: F }
 effect fn delayed() -> i32 {
-  return run Effect.suspend(effect { return 42 })
+  return run Intrinsic.suspendEffect(effect { return 42 })
 }
 pub fn main() -> i32 {
   let deferred = Deferred { operation: effect { return run delayed() } }
@@ -277,19 +273,19 @@ pub fn main() -> i32 {
 
     assertEffectRealized(snapshot)
     assert.strictEqual(realizations.length, 2)
+    const runtimeArguments = realizations.map((realization) =>
+      realization.runnerArguments.filter((argument) => !Lifetime.isLifetime(argument)),
+    )
     assert.strictEqual(
-      realizations.every(
-        (realization) =>
-          realization.runnerArguments.length === 1 &&
-          Type.isEffectIdentityArgument(realization.runnerArguments[0] ?? Type.unit),
+      runtimeArguments.every(
+        (arguments_) =>
+          arguments_.length === 1 && Type.isEffectIdentityArgument(arguments_[0] ?? Type.unit),
       ),
       true,
     )
     assert.strictEqual(
       new Set(
-        realizations.map((realization) =>
-          Type.genericArgumentKey(realization.runnerArguments[0] ?? Type.unit),
-        ),
+        runtimeArguments.map((arguments_) => Type.genericArgumentKey(arguments_[0] ?? Type.unit)),
       ).size,
       2,
     )
@@ -449,10 +445,21 @@ it.effect('keeps the realization keyed by the shared representation field identi
       RepresentationField.plansOf(snapshot.index, instance).at(0) ??
       unreachable('expected one representation field plan')
 
-    // The same identity #187 resolves is the identity #189 realizes; no second scheme exists.
+    const otherLifetime = Type.specializeNominal(
+      instance,
+      instance.arguments.map((argument) =>
+        Lifetime.isLifetime(argument)
+          ? Lifetime.local({ module: 'callable-field/lookup', name: 'other' }, 'stored', 0)
+          : argument,
+      ),
+    )
+    assert.notStrictEqual(
+      RepresentationField.key(instance, plan.id),
+      RepresentationField.key(otherLifetime, plan.id),
+    )
     assert.strictEqual(
       FieldRealization.key(instance, plan.id),
-      RepresentationField.key(instance, plan.id),
+      FieldRealization.key(otherLifetime, plan.id),
     )
     const support = FieldRealization.lookup(index, instance, plan.id)
     assert.strictEqual(support?._tag, 'Supported')
@@ -599,11 +606,11 @@ it.effect('reports an unresolved representation field as explicitly unsupported'
 
 it.effect('orders realization entries deterministically across repeated analyses', () =>
   Effect.gen(function* () {
-    const source = `struct Parser<F: fn(i32) -> i32> { parse: F }
-struct Pair<F: fn(i32) -> i32> { first: Parser<F> second: Parser<F> }
+    const source = `struct Parser<'env, F: fn<'env>(i32) -> i32> { parse: F }
+struct Pair<'env, F: fn<'env>(i32) -> i32> { first: Parser<'env, F> second: Parser<'env, F> }
 fn decode(value: i32) -> i32 { return value }
-fn pair<F: fn(i32) -> i32>(first: Parser<F>, second: Parser<F>) -> Pair<F> {
-  return Pair<F> { first: move first, second: move second }
+fn pair<'env, F: fn<'env>(i32) -> i32>(first: Parser<'env, F>, second: Parser<'env, F>) -> Pair<'env, F> {
+  return Pair<'env, F> { first: move first, second: move second }
 }
 pub fn main() -> i32 {
   let first = Parser { parse: decode }
@@ -613,6 +620,8 @@ pub fn main() -> i32 {
 }`
     const first = yield* realized('callable-field/determinism', source)
     const second = yield* realized('callable-field/determinism', source)
+    assert.deepEqual(Analysis.diagnostics(first), [])
+    assert.deepEqual(Analysis.diagnostics(second), [])
 
     const keys = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
       realizationsOf(snapshot).entries.map((entry) => entry.key)
@@ -774,39 +783,25 @@ fn decode(value: i32) -> i32 { return value }
 pub fn main() -> i32 {
   let parser = Parser { parse: decode }
   let taken = move parser.parse
-  return 0
+  return taken(42)
 }`
-    const snapshot = yield* realized('callable-field/extraction', source)
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-  }),
-)
-
-it.effect('allows moving an ordinary owned struct field', () =>
-  Effect.gen(function* () {
-    const source = `struct Token { value: i32 }
-struct Holder { token: Token }
-pub fn main() -> i32 {
-  let holder = Holder { token: Token { value: 1 } }
-  let taken = move holder.token
-  return 0
-}`
-    const snapshot = yield* realized('callable-field/ordinary-extraction', source)
+    const snapshot = yield* Analysis.ofSource('callable-field/extraction', ascii(source))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
   }),
 )
 
 it.effect('keeps a representation-bearing nominal move-only', () =>
   Effect.gen(function* () {
-    const source = `struct Parser<F: fn(i32) -> i32> { parse: F }
+    const source = `struct Parser<'env, F: fn<'env>(i32) -> i32> { parse: F }
 fn decode(value: i32) -> i32 { return value }
-fn consume<F: fn(i32) -> i32>(parser: Parser<F>) -> i32 { return 0 }
+fn consume<'env, F: fn<'env>(i32) -> i32>(parser: Parser<'env, F>) -> i32 { return 0 }
 pub fn main() -> i32 {
   let parser = Parser { parse: decode }
   let first = consume(move parser)
   let second = consume(parser)
   return first + second
 }`
-    const snapshot = yield* realized('callable-field/move-only', source)
+    const snapshot = yield* Analysis.ofSource('callable-field/move-only', ascii(source))
     const codes = Analysis.diagnostics(snapshot).map((candidate) => candidate.code)
 
     // A whole-value move transfers the environment; the aggregate is not implicitly copyable.

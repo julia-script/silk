@@ -6,7 +6,7 @@ import * as MirVerification from '../src/MirVerification.js'
 const utf8 = (value: string): Uint8Array => new TextEncoder().encode(value)
 
 const analyze = (name: string, text: string) =>
-  Analysis.ofSourceRealized(`char-literal/${name}`, utf8(text), 'wasm32-unknown-unknown')
+  Analysis.ofSource(`char-literal/${name}`, utf8(text))
 
 const codes = (snapshot: Analysis.FrontendSnapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)
@@ -44,7 +44,7 @@ it.effect('keeps a character literal distinct from every integer and from a stri
       'pub fn takesU32(value: u32) -> u32 { return value }\n' +
         "pub fn passesChar() -> u32 { return takesU32('a') }\n" +
         "const wrong: u32 = 'a'\n" +
-        "const alsoWrong: string = 'a'\n" +
+        "const alsoWrong: string<'static> = 'a'\n" +
         'pub fn main() -> i32 { return 0 }',
     )
     assert.deepEqual(codes(snapshot), ['SEM0012', 'SEM0086', 'SEM0086'])
@@ -77,7 +77,7 @@ it.effect('reports exactly one lexical diagnostic for a body that is not one sca
     for (const [name, spelling] of [
       ['empty', "''"],
       ['two', "'ab'"],
-      ['unterminated', "'a"],
+      ['unterminated', "'\\n"],
     ] as const) {
       const snapshot = yield* analyze(
         `count-${name}`,
@@ -98,10 +98,13 @@ it.effect('reports exactly one lexical diagnostic for a body that is not one sca
  */
 it.effect('lowers a character literal to one general MIR literal over char', () =>
   Effect.gen(function* () {
-    const snapshot = yield* analyze(
-      'lowering',
-      'pub fn below(left: char, right: char) -> bool { return left < right }\n' +
-        "pub fn main() -> i32 { if below('a', 'b') { return 0 }\n  return 1 }",
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'char-literal/lowering',
+      utf8(
+        'pub fn below(left: char, right: char) -> bool { return left < right }\n' +
+          "pub fn main() -> i32 { if below('a', 'b') { return 0 }\n  return 1 }",
+      ),
+      'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const lowered = Analysis.loweredMir(snapshot)

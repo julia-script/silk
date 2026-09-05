@@ -8,6 +8,11 @@ import * as Analysis from '../dist/Analysis.js'
 import * as CleanupPlan from '../dist/CleanupPlan.js'
 import * as Elaboration from '../dist/Elaboration.js'
 import * as Lifetime from '../dist/Lifetime.js'
+import * as Instances from '../dist/Instances.js'
+import * as Residualization from '../dist/Residualization.js'
+import * as ResidualOwnership from '../dist/ResidualOwnership.js'
+import * as StaticValue from '../dist/StaticValue.js'
+import * as Target from '../dist/Target.js'
 import * as MovePath from '../dist/MovePath.js'
 import * as NominalVariance from '../dist/NominalVariance.js'
 import * as Ownership from '../dist/Ownership.js'
@@ -61,6 +66,31 @@ ${invalid ? 'v0 = 100' : ''}
 return ${range(size)
       .map((index) => `r${index}.*`)
       .join(' + ')} }`,
+  }),
+  storedResets: (size) => ({
+    dimensions: { consecutiveBorrowedFieldResets: size, oldSourceMutations: size },
+    source: `struct Holder<'a> { value: &'a [i32] }
+fn read(value: &Holder) -> i32 { return value.value[0] }
+fn inspect() -> i32 { let mut source0 = [0] let mut holder = Holder { value: &source0 }
+${range(size)
+  .map(
+    (index) =>
+      `let mut source${index + 1} = [${index + 1}] holder.value = &source${index + 1} source${index} = [0]`,
+  )
+  .join('\n')}
+return read(&holder) }`,
+  }),
+  loanBackedges: (size) => ({
+    dimensions: { loopCarriedLoans: size, loopBodies: 1, sourceInvalidations: 1 },
+    invalid: true,
+    source: `fn inspect() -> i32 {
+${range(size)
+  .map((index) => `let mut source${index} = ${index} let r${index} = &source${index}`)
+  .join('\n')}
+let mut sum = 0 while sum < 2 { sum = ${range(size)
+      .map((index) => `r${index}.*`)
+      .join(' + ')} source0 = 100 }
+return sum }`,
   }),
   reborrows: (size) => ({
     dimensions: { reborrowDepth: size },
@@ -221,6 +251,38 @@ const retainedProofs = (view) => {
       functions.map((fn) =>
         fn.lifetimeFlow?.solution._tag === 'Solved' ? fn.lifetimeFlow.solution.work : undefined,
       ),
+    ),
+    controlFlowReachability: sumWork(functions.map((fn) => fn.lifetimeFlow?.controlFlow.work)),
+    controlFlowNodes: functions.reduce(
+      (sum, fn) => sum + (fn.lifetimeFlow?.controlFlow.edges.length ?? 0),
+      0,
+    ),
+    reachabilityCacheRows: functions.reduce(
+      (sum, fn) => sum + (fn.lifetimeFlow?.controlFlow.queries.size ?? 0),
+      0,
+    ),
+    reachabilityRetainedPoints: functions.reduce(
+      (sum, fn) =>
+        sum +
+        [...(fn.lifetimeFlow?.controlFlow.queries.values() ?? [])].reduce(
+          (count, points) => count + points.size,
+          0,
+        ),
+      0,
+    ),
+    activatedConstraints: functions.reduce(
+      (sum, fn) => sum + (fn.lifetimeFlow?.input.activatedConstraints?.length ?? 0),
+      0,
+    ),
+    retirementComparisons: sumWork(functions.map((fn) => fn.lifetimeFlow?.retirementWork)),
+    retiredCarrierUses: functions.reduce(
+      (sum, fn) =>
+        sum +
+        [...(fn.lifetimeFlow?.retiredUses.values() ?? [])].reduce(
+          (count, points) => count + points.size,
+          0,
+        ),
+      0,
     ),
     finalBodyComparisons: sumWork(functions.map((fn) => fn.comparisonWork)),
     ownershipOperations: sumWork(ownership.map((fn) => fn.work)),
@@ -388,6 +450,215 @@ const binderWorkload = (size) => {
   }
 }
 
+const compactResolution = (resolution, details) => {
+  const kinds = new Map()
+  for (const entry of resolution.byInitiator) {
+    const observations = kinds.get(entry.initiator.kind) ?? []
+    observations.push(entry)
+    kinds.set(entry.initiator.kind, observations)
+  }
+  return {
+    totals: resolution.totals,
+    byInitiatorKind: [...kinds].map(([kind, observations]) => ({ kind, ...sumWork(observations) })),
+    ...(details ? { byInitiator: resolution.byInitiator } : {}),
+  }
+}
+
+const resolutionExamples = (results) => {
+  const examples = new Map()
+  for (const result of results)
+    for (const entry of result.resolution?.byInitiator ?? []) {
+      const category = `${entry.initiator.kind}:${entry.operation}`
+      if (!examples.has(category))
+        examples.set(category, {
+          family: result.family,
+          size: result.size,
+          dimensions: result.dimensions,
+          ...entry,
+        })
+    }
+  return [...examples.values()]
+}
+
+const residualGenerators = {
+  ordinarySpecializations: (size) => ({
+    dimensions: { ordinaryOwnerSpecializations: size },
+    source: `${range(size)
+      .map((index) => `struct V${index} { value: i32 }`)
+      .join('\n')}
+fn owner<T>(value: T) { drop value }
+pub fn main() -> i32 {
+${range(size)
+  .map((index) => `owner(V${index} { value: ${index} })`)
+  .join('\n')}
+return 0 }`,
+  }),
+  selectedBranches: (size) => {
+    let branches = 'return value'
+    for (let index = size - 2; index >= 0; index -= 1)
+      branches = `static if selected == ${index} { return value + ${index} } else { ${branches} }`
+    return {
+      dimensions: { selectedStaticBranches: size, distinctStaticArguments: size },
+      source: `fn choose(static selected: i32, value: i32) -> i32 { ${branches} }
+pub fn main() -> i32 { return ${range(size)
+        .map((index) => `choose(${index}, 1)`)
+        .join(' + ')} }`,
+    }
+  },
+  repeatedStaticQuery: (size) => ({
+    dimensions: { repeatedApplications: size, distinctStaticArguments: 1 },
+    source: `fn choose(static selected: bool, value: i32) -> i32 {
+static if selected { return value } else { return 0 }
+}
+pub fn main() -> i32 { return choose(true, 42) }`,
+  }),
+}
+
+const compactOwnership = (observations) => {
+  const groups = new Map()
+  for (const observation of observations) {
+    const key = JSON.stringify([observation.declaration, observation.reason, observation.branch])
+    const group = groups.get(key) ?? {
+      declaration: observation.declaration,
+      reason: observation.reason,
+      branch: observation.branch,
+      requests: 0,
+      executedWork: {},
+    }
+    group.requests += 1
+    group.executedWork = sumWork([group.executedWork, observation.work])
+    groups.set(key, group)
+  }
+  return [...groups.values()]
+}
+
+const diagnosticObservations = (diagnostics) =>
+  diagnostics.map((diagnostic) => ({
+    code: diagnostic.code,
+    source: diagnostic.span.sourceId,
+    start: diagnostic.span.start,
+    end: diagnostic.span.end,
+  }))
+
+const residualWorkload = Effect.fnUntraced(
+  /**
+   * @param {string} family
+   * @param {number} size
+   * @param {{ source: string, dimensions: Record<string, number> }} input
+   */ function* (family, size, input) {
+    const root = `benchmark/residual/${family}/${size}`
+    const target = Target.x8664UnknownLinuxGnu
+    const [frontendDuration, snapshot] = yield* Effect.timed(
+      Analysis.ofSource(root, bytes(input.source)),
+    )
+    const diagnostics = diagnosticObservations(Analysis.diagnostics(snapshot))
+    if (diagnostics.length > 0)
+      return yield* new BenchmarkError({
+        message: `${family}/${size} frontend rejected: ${diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.source}:${diagnostic.start}-${diagnostic.end}`).join(', ')}`,
+      })
+    const [residualDuration, residual] = yield* Effect.timed(
+      Effect.try({
+        try: () => {
+          if (family !== 'repeatedStaticQuery') {
+            const discovery = Instances.discover(
+              root,
+              snapshot.results,
+              snapshot.index,
+              target,
+              snapshot.resolution,
+            )
+            return {
+              instanceCount: discovery.instances.length,
+              diagnostics: diagnosticObservations(discovery.residualizationDiagnostics),
+              unavailableOwnership: discovery.unavailableOwnership.length,
+              specializationFailures: discovery.specializationFailures.length,
+              violations: discovery.violations.length,
+              unavailableEntry: discovery.entry._tag === 'Unavailable',
+              residualBodies: discovery.counters.residualBodies,
+              residualOwnership: discovery.counters.residualOwnership,
+              bodyReasons: discovery.residualBodies,
+              ownershipReasons: compactOwnership(discovery.residualOwnership),
+            }
+          }
+          const declaration = snapshot.results
+            .get(root)
+            ?.functions.find(
+              (fact) =>
+                fact.declaration.canonical._tag === 'Canonical' &&
+                fact.declaration.canonical.id.name === 'choose',
+            )?.declaration
+          if (declaration?.canonical._tag !== 'Canonical') return { unavailableDeclaration: true }
+          const application = {
+            declaration: declaration.canonical.id,
+            typeArguments: [],
+            evidence: [],
+            contractRow: [],
+            staticArguments: [StaticValue.boolean(true)],
+          }
+          const bodies = Residualization.make(
+            target,
+            snapshot.results,
+            snapshot.resolution,
+            snapshot.index,
+          )
+          const ownership = ResidualOwnership.make()
+          const plan = Ownership.localSharedAccessBoundaryPlan(snapshot.results)
+          const failures = []
+          for (let repetition = 0; repetition < size; repetition += 1) {
+            const body = Residualization.residualize(bodies, application)
+            if (body._tag !== 'ResidualBody') {
+              failures.push({
+                failure: body.failure._tag,
+                diagnostics: diagnosticObservations(body.diagnostics),
+              })
+              continue
+            }
+            const checked = ResidualOwnership.check(
+              ownership,
+              Ownership.input(body.function, body.fact, snapshot.index, plan),
+              'SelectedStaticBody',
+            )
+            failures.push(...diagnosticObservations([...body.diagnostics, ...checked.diagnostics]))
+          }
+          return {
+            failures,
+            residualBodies: Residualization.counters(bodies),
+            residualOwnership: ResidualOwnership.counters(ownership),
+            bodyReasons: Residualization.observations(bodies),
+            ownershipReasons: compactOwnership(ResidualOwnership.observations(ownership)),
+          }
+        },
+        catch: (cause) =>
+          new BenchmarkError({ message: `${family}/${size} residual query failed`, cause }),
+      }),
+    )
+    if (
+      residual.unavailableDeclaration ||
+      residual.unavailableEntry ||
+      residual.unavailableOwnership ||
+      residual.specializationFailures ||
+      residual.violations ||
+      residual.diagnostics?.length ||
+      residual.failures?.length
+    )
+      return yield* new BenchmarkError({
+        message: `${family}/${size} residual rejected: ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(residual)}`,
+      })
+    return {
+      family,
+      size,
+      dimensions: input.dimensions,
+      sourceBytes: input.source.length,
+      frontend: {
+        elapsedMs: Duration.toMillis(frontendDuration),
+        diagnostics,
+        queries: snapshot.report.find((phase) => phase.phase === 'body-queries')?.counters,
+      },
+      residual: { elapsedMs: Duration.toMillis(residualDuration), ...residual },
+    }
+  },
+)
+
 const main = Effect.fn('LifetimeBenchmark.main')(function* () {
   const argument = process.argv
     .find((argument) => argument.startsWith('--sizes='))
@@ -395,8 +666,14 @@ const main = Effect.fn('LifetimeBenchmark.main')(function* () {
   const sizes = (argument ?? '4,8,16').split(',').map(Number)
   if (sizes.some((size) => !Number.isSafeInteger(size) || size < 2 || size > 128))
     return yield* new BenchmarkError({ message: 'sizes must be integers from 2 through 128' })
+  const residualOnly = process.argv.includes('--residual-only')
   const results = []
   for (const size of sizes) {
+    if (residualOnly) {
+      for (const [family, generate] of Object.entries(residualGenerators))
+        results.push(yield* residualWorkload(family, size, generate(size)))
+      continue
+    }
     for (const [family, generate] of Object.entries(generators))
       results.push(yield* checkSource(family, size, generate(size)))
     for (const family of ['loans', 'joins'])
@@ -418,7 +695,10 @@ const main = Effect.fn('LifetimeBenchmark.main')(function* () {
         node: process.version,
         platform: process.platform,
         arch: process.arch,
-        pipeline: 'target-neutral frontend; no backend emission or optimizer',
+        pipeline: residualOnly
+          ? 'frontend then target-selected residual queries; no MIR, backend emission or optimizer'
+          : 'target-neutral frontend; no backend emission or optimizer',
+        ...(residualOnly ? { target: Target.x8664UnknownLinuxGnu.id } : {}),
         memoryUnits: { heapUsed: 'bytes', processMaxRss: 'host resourceUsage maxRSS units' },
         ...memory,
       },
@@ -432,9 +712,19 @@ const main = Effect.fn('LifetimeBenchmark.main')(function* () {
           'Required conditional state paths; MIR flag construction is not executed in this frontend workload.',
         resolution:
           'Actual reachable-index name/path/associated/conformance discovery and explicitly observed selected-call provider loops, keyed by their initiating request. Intermediate discarded declaration indexes and unobserved standalone provider oracles are outside this report. Lifetime actors receive no resolver.',
-        residualOwnership: 'Not requested by this frontend-only workload.',
+        residualOwnership: residualOnly
+          ? 'Actual source-proof hits, cache hits and checker executions; executedWork sums only new checks. Frontend elapsed time is separate. Ownership observations group exact declaration, reason and branch.'
+          : 'Not requested by this frontend-only workload.',
       },
-      results,
+      resolutionExamples: resolutionExamples(results),
+      results: results.map((result) =>
+        result.resolution === undefined
+          ? result
+          : {
+              ...result,
+              resolution: compactResolution(result.resolution, process.argv.includes('--details')),
+            },
+      ),
     }),
   )
 })

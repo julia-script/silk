@@ -224,7 +224,6 @@ const patternBindingKey = (
 
 /** Plans exact source allocation provenance over specialized HIR, including ordinary calls. */
 export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Index): Plan => {
-  if (discovery.rootModule.includes('local-shared-allocation')) console.log('TEMP discovery', JSON.stringify({ instances: discovery.instances.filter((instance) => /catchAll|provideMut/.test(instance.key.declaration.name)).map((instance) => ({ key: ownerKey(instance), statementTags: instance.function.statements.map((stmt) => stmt._tag) })), effects: discovery.effects.filter((effect) => /catchAll|provideMut/.test(effect.owner.declaration.name)).map((effect) => ({ owner: Instances.keyText(effect.owner), site: effect.site })) }))
   const instances = new Map(discovery.instances.map((instance) => [ownerKey(instance), instance]))
   const contexts = new Map<string, FunctionContext>()
   for (const instance of discovery.instances) {
@@ -306,11 +305,14 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     const recorded = callAt(instance, expression)
     if (recorded !== undefined) return instances.get(Instances.keyText(recorded.target))
     if (expression._tag === 'CallableApply') {
-      if (instance.key.declaration.module.includes('local-shared-allocation')) console.log('TEMP callable', JSON.stringify({ owner: ownerKey(instance), span: expression.span, realization: expression.realization, callee: expression.callee._tag, calls: discovery.calls.filter((call) => call.owner.declaration.module === instance.key.declaration.module && call.owner.declaration.name === instance.key.declaration.name).map((call) => ({ owner: Instances.keyText(call.owner), span: call.span, target: Instances.keyText(call.target) })) }))
       return undefined
     }
     const typeArguments = expression.typeArguments.map((argument) =>
-      Type.substituteGenericArgument(argument, instance.substitution),
+      Type.substituteGenericArgument(
+        argument,
+        instance.substitution,
+        instance.specialization.compatibility,
+      ),
     )
     const matches = Instances.matchingSpecialization(discovery, {
       declaration: expression.target,
@@ -457,7 +459,11 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       return raw !== undefined && Type.isTypeArgument(raw)
         ? Object.freeze({
             _tag: 'ConcreteOrigin',
-            element: Type.substitute(raw, instance.substitution),
+            element: Type.substitute(
+              raw,
+              instance.substitution,
+              instance.specialization.compatibility,
+            ),
             span: expression.span,
           })
         : Object.freeze({
@@ -471,7 +477,11 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         _tag: 'ExecutionOrigin',
         arguments: Object.freeze(
           expression.typeArguments.map((argument) =>
-            Type.substituteGenericArgument(argument, instance.substitution),
+            Type.substituteGenericArgument(
+              argument,
+              instance.substitution,
+              instance.specialization.compatibility,
+            ),
           ),
         ),
         span: expression.span,
@@ -496,10 +506,21 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       const layouts = expression.arguments.filter(
         (argument) =>
           'type' in argument &&
-          Type.equals(Type.substitute(argument.type, instance.substitution), Type.layout),
+          Type.equals(
+            Type.substitute(
+              argument.type,
+              instance.substitution,
+              instance.specialization.compatibility,
+            ),
+            Type.layout,
+          ),
       )
       const layout = layouts.length === 1 ? layouts.at(0) : undefined
-      const service = Type.substitute(expression.service, instance.substitution)
+      const service = Type.substitute(
+        expression.service,
+        instance.substitution,
+        instance.specialization.compatibility,
+      )
       return layout === undefined || !Type.isNominal(service)
         ? Object.freeze({
             _tag: 'InvalidOrigin',
@@ -859,7 +880,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       const allocation = expression.arguments.at(0)
       const expected =
         raw !== undefined && Type.isTypeArgument(raw)
-          ? Type.substitute(raw, instance.substitution)
+          ? Type.substitute(raw, instance.substitution, instance.specialization.compatibility)
           : undefined
       const unresolved =
         allocation === undefined
@@ -933,7 +954,11 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
           Instances.concreteEffectRepresentationArgument(
             instance.function,
             instance.key,
-            Type.substituteGenericArgument(argument, instance.substitution),
+            Type.substituteGenericArgument(
+              argument,
+              instance.substitution,
+              instance.specialization.compatibility,
+            ),
           ),
         ),
       )

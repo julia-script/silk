@@ -237,6 +237,8 @@ export interface LowerStatementOptions {
   readonly lifetimeAssumptions?: Lifetime.Assumptions
   readonly lifetimeCompatibility?: TypeCompatibility.Context
   readonly resultType?: SemanticType
+  /** The declaration-owned opaque family constructed at this function's return boundary. */
+  readonly opaqueResultFamily?: Type.OpaqueFamilyKey
   /** A composite Effect representation every return site packs into (EFF-013). */
   readonly resultRepresentation?: SemanticType
   readonly functionId?: DeclarationId
@@ -1768,6 +1770,18 @@ export const hirExpectedExpression = (
       ? Type.represented(sourceContract, sourceContract, representation)
       : undefined
   const source = loweredSource
+  if (
+    context === 'Return' &&
+    options.opaqueResultFamily !== undefined &&
+    Type.isRepresented(target) &&
+    Type.isOpaqueRepresentationArgument(target.representation.argument) &&
+    Type.equalsOpaqueFamily(target.representation.argument.family, options.opaqueResultFamily) &&
+    representationOfExpression(fact) !== undefined &&
+    TypeCompatibility.isCompatible(
+      TypeCompatibility.check(sourceContract, target.contract, options.lifetimeCompatibility),
+    )
+  )
+    return source
   if (Type.isRepresented(target) && Type.haveSameRepresentationShape(source.type, target))
     return source
   const compatibility = TypeCompatibility.check(
@@ -1999,7 +2013,7 @@ export const hirAssignmentWritePlace = (
   root: AssignmentRootFact,
   options: LowerStatementOptions = {},
 ): Hir.WritePlace | undefined => {
-  const access = assignmentRootAccess(root)
+  const access = assignmentRootAccess(root, fact)
   if (access === 'ExclusiveBorrowed') return hirBorrowedWritePlace(fact, root, options)
   if (access === 'MutableOwned') return hirWritePlace(fact, root, options)
   return undefined

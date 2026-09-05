@@ -27,7 +27,7 @@ import type {
   SuspensionRunner,
 } from './Suspension.js'
 import * as SilkType from './Type.js'
-import type * as TypeCompatibility from './TypeCompatibility.js'
+import * as TypeCompatibility from './TypeCompatibility.js'
 
 /**
  * MIR is the monomorphic, target-aware, backend-neutral structured control DAG. Structural child
@@ -1626,6 +1626,15 @@ export const applyOperands = <T>(
     [...slots.entries()].sort(([left], [right]) => left - right).flatMap(([, items]) => [...items]),
   )
 }
+
+/**
+ * Checks an operand at an already selected emitted-function boundary. Source lifetime proofs were
+ * checked before lowering; one emitted instance can serve calls from different lifetime domains.
+ * Access and callable mode adaptations still use the ordinary compatibility relation.
+ */
+export const acceptsRuntimeOperand = (actual: SilkType.Type, expected: SilkType.Type): boolean =>
+  SilkType.runtimeKey(actual) === SilkType.runtimeKey(expected) ||
+  TypeCompatibility.isCompatible(TypeCompatibility.check(actual, expected))
 
 /** Tests whether a MIR function realizes one concrete call target. */
 export const matchesInstance = (

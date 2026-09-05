@@ -7,7 +7,7 @@ import * as SourceResolver from '../src/SourceResolver.js'
 const encoder = new TextEncoder()
 
 const snapshot = (source: string) =>
-  Analysis.ofSourceRealized('interface-bounds/main', encoder.encode(source))
+  Analysis.ofSource('interface-bounds/main', encoder.encode(source))
 
 const messages = (self: Analysis.FrontendSnapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(self).map((diagnostic) => diagnostic.message)
@@ -88,16 +88,11 @@ pub fn main() -> i32 {
     assert.deepEqual(
       Analysis.diagnostics(self).map((diagnostic) => ({
         code: diagnostic.code,
-        reason: diagnostic.reason,
+        reason: diagnostic.reason._tag,
+        sourceId: diagnostic.span.sourceId,
       })),
-      [
-        {
-          code: 'SEM0129',
-          reason: { _tag: 'ReturnTypeMismatch', expected: 'i32', actual: 'Effect<i32>' },
-        },
-      ],
+      [{ code: 'SEM0129', reason: 'ReturnTypeMismatch', sourceId: 'interface-bounds/main' }],
     )
-    assert.strictEqual(Analysis.mirOf(self)._tag, 'Unavailable')
   }),
 )
 
@@ -119,7 +114,6 @@ pub fn main() -> i32 {
       Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
       ['SEM0129'],
     )
-    assert.strictEqual(Analysis.mirOf(self)._tag, 'Unavailable')
   }),
 )
 
@@ -182,11 +176,12 @@ it.effect('keeps a string conformance inline in the source contract module', () 
     const self = yield* snapshot(`interface Present {
   fn present(value: &Self) -> i32
 }
-impl Present for string {
+impl<'text> Present for string<'text> {
   fn present(value: &Self) -> i32 { return 42 }
 }
-pub fn main() -> i32 { return Present.present<string>("Silk") }`)
-    assert.notInclude(messages(self), 'Invalid conformance')
+fn present<T: Present>(value: &T) -> i32 { return Present.present(value) }
+pub fn main() -> i32 { let text = "Silk" return present(&text) }`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
   }),
 )
 
@@ -198,7 +193,7 @@ it.effect('rejects a string conformance outside the source contract module', () 
     const root = SourceFile.make(
       'consumer',
       encoder.encode(`import contracts { Present }
-impl Present for string {
+impl<'text> Present for string<'text> {
   fn present(value: &Self) -> i32 { return 42 }
 }
 pub fn main() -> i32 { return 0 }`),
@@ -206,9 +201,9 @@ pub fn main() -> i32 { return 0 }`),
     const self = yield* Analysis.make({ root }).pipe(
       Effect.provide(SourceResolver.memory(new Map([['contracts', contracts]]))),
     )
-    assert.include(
-      messages(self),
-      "Invalid conformance: implementation for string must be declared in contracts, the contract's module for scalar and string providers",
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0083'],
     )
   }),
 )

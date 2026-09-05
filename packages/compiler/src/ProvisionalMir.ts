@@ -25,7 +25,7 @@ export type ExecutionKey =
       readonly identity: string
     }
   | {
-      readonly _tag: 'EffectRunnerExecution'
+      readonly _tag: 'EffectRunnerExecution' | 'WitnessEffectRunnerExecution'
       readonly owner: Instances.InstanceKey
       readonly site: Hir.EffectSiteId
       readonly identity: string
@@ -126,7 +126,7 @@ const executionInstance = (key: ExecutionKey): Instances.InstanceKey => {
       staticArguments: key.owner.staticArguments,
       contractRow: Object.freeze([
         ...key.owner.contractRow,
-        `effect-site:${Hir.executableSiteKey(key.site)}`,
+        `${key._tag === 'WitnessEffectRunnerExecution' ? 'witness-effect-site' : 'effect-site'}:${Hir.executableSiteKey(key.site)}`,
         ...(key._tag === 'ProvidedEffectRunnerExecution'
           ? key.providers.map(providedContractEntry)
           : []),
@@ -203,7 +203,8 @@ const executionForInstance = (
   return candidates.find((execution) => {
     const executionKey = executionInstance(execution.key)
     return (
-      execution.key._tag === 'EffectRunnerExecution' &&
+      (execution.key._tag === 'EffectRunnerExecution' ||
+        execution.key._tag === 'WitnessEffectRunnerExecution') &&
       Instances.keyText(Object.freeze({ ...executionKey, declaration: instance.declaration })) ===
         Instances.keyText(openInstance)
     )
@@ -251,27 +252,7 @@ const providedClassification = (
   )
   if (classifications.length > 0) return mergeClassifications(classifications)
 
-  // A synchronous bound-operation or forwarded Effect is not represented by a provisional
-  // suspension region, so it cannot contribute to the collection above. Its generated runner
-  // still belongs to the exact source-function instance and must inherit that proven
-  // classification; leaving it Unknown makes backends invent suspension control for a contract
-  // that contributes no source allocation requirement.
-  if (!instance.contractRow.some((entry) => entry.startsWith('witness-effect-site:')))
-    return undefined
-  const effectMarker = baseName.lastIndexOf('$effect$')
-  if (effectMarker < 0) return undefined
-  const ownerName = baseName.slice(0, effectMarker)
-  const owner = self.executions.find((execution) => {
-    if (execution.key._tag !== 'InstanceExecution') return false
-    const key = execution.key.instance
-    return (
-      key.declaration.module === instance.declaration.module &&
-      key.declaration.name === ownerName &&
-      sameTypeArguments(key.typeArguments, instance.typeArguments) &&
-      key.contractRow.every((entry, ordinal) => instance.contractRow.at(ordinal) === entry)
-    )
-  })
-  return owner?.classification
+  return undefined
 }
 
 const controlId = (
@@ -366,7 +347,11 @@ const storedEffectRealizationOf = (
   if (expression._tag === 'EffectBindRequirement')
     return storedEffectRealizationOf(expression.protected, context)
   if (expression._tag !== 'Project') return undefined
-  const represented = Type.substitute(expression.type, context.instance.substitution)
+  const represented = Type.substitute(
+    expression.type,
+    context.instance.substitution,
+    context.instance.specialization.compatibility,
+  )
   const planned = Layout.entry(context.layout, represented)?.representation
   if (planned?._tag === 'StoredEffectEnvironment') return planned.realization
   return undefined
@@ -376,7 +361,11 @@ const serviceResultEffectOf = (
   expression: Extract<Hir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,
   context: BuildContext,
 ): string | undefined => {
-  const capability = Type.substitute(expression.service, context.instance.substitution)
+  const capability = Type.substitute(
+    expression.service,
+    context.instance.substitution,
+    context.instance.specialization.compatibility,
+  )
   if (!Type.isNominal(capability)) return undefined
   const provider = context.ambientProviders.find(
     (candidate) =>
@@ -416,10 +405,17 @@ const effectIdentityOf = (
   if (expression._tag === 'Move') return effectIdentityOf(expression.subject, context)
   if (expression._tag === 'UnionConvert') return effectIdentityOf(expression.source, context)
   if (expression._tag === 'EffectBindRequirement')
-    return effectIdentityOf(expression.protected, context)
+    return effectIdentityOf(expression.protected, {
+      ...context,
+      ambientProviders: providersOf(expression, context),
+    })
   if (expression._tag === 'Project') {
     const realization = storedEffectRealizationOf(expression, context)
-    const represented = Type.substitute(expression.type, context.instance.substitution)
+    const represented = Type.substitute(
+      expression.type,
+      context.instance.substitution,
+      context.instance.specialization.compatibility,
+    )
     const retainedIdentity =
       Type.isRepresented(represented) &&
       Type.isEffect(represented.contract) &&
@@ -429,6 +425,11 @@ const effectIdentityOf = (
         : undefined
     return realization?.runnerIdentity ?? retainedIdentity
   }
+  if (
+    (expression._tag === 'InterfaceOperationCall' || expression._tag === 'BuiltinCall') &&
+    expression.witnessEffectSite !== undefined
+  )
+    return Instances.effectIdentity(context.instance.key, expression.witnessEffectSite)
   if (expression._tag === 'EffectBlock')
     return Instances.effectIdentity(context.instance.key, expression.site)
   if (expression._tag === 'EffectCatch')
@@ -469,7 +470,7 @@ const effectIdentityOf = (
         call.span.end === expression.span.end,
     )?.resultEffect
   }
-  if (expression._tag === 'EffectConstruct') {
+  if (expression._tag === 'Call' || expression._tag === 'EffectConstruct') {
     return context.discovery.calls.find(
       (call) =>
         Instances.keyText(call.owner) === Instances.keyText(context.instance.key) &&
@@ -516,6 +517,27 @@ const providersOf = (
   ])
 }
 
+const witnessExpressionAt = (
+  instance: Instances.Instance,
+  site: Hir.EffectSiteId,
+):
+  | Extract<Hir.Expression, { readonly _tag: 'InterfaceOperationCall' | 'BuiltinCall' }>
+  | undefined =>
+  instance.function.statements
+    .flatMap(Hir.statementExpressions)
+    .flatMap(Hir.expressionTree)
+    .find(
+      (
+        expression,
+      ): expression is Extract<
+        Hir.Expression,
+        { readonly _tag: 'InterfaceOperationCall' | 'BuiltinCall' }
+      > =>
+        (expression._tag === 'InterfaceOperationCall' || expression._tag === 'BuiltinCall') &&
+        expression.witnessEffectSite !== undefined &&
+        Hir.sameExecutableSite(expression.witnessEffectSite, site),
+    )
+
 const runnerOf = (
   expression: Hir.Expression,
   context: BuildContext,
@@ -535,13 +557,23 @@ const runnerOf = (
   )
   const expressionType =
     'type' in expression
-      ? Type.substitute(expression.type, context.instance.substitution)
+      ? Type.substitute(
+          expression.type,
+          context.instance.substitution,
+          context.instance.specialization.compatibility,
+        )
       : undefined
+  const expressionContract =
+    expressionType !== undefined && Type.isRepresented(expressionType)
+      ? expressionType.contract
+      : expressionType
   const effect =
     resolved?.effect ??
     stored?.contract ??
     (environment?._tag === 'EffectEnvironment' ? environment.effect : undefined) ??
-    (expressionType !== undefined && Type.isEffect(expressionType) ? expressionType : undefined)
+    (expressionContract !== undefined && Type.isEffect(expressionContract)
+      ? expressionContract
+      : undefined)
   if (effect === undefined)
     throw new RangeError('Provisional runner requires a resolved Effect contract')
   const availableProviders = resolved?.providers ?? providersOf(expression, context)
@@ -573,8 +605,15 @@ const runnerOf = (
       providers,
     })
   }
+  const environmentOwner = context.discovery.instances.find(
+    (candidate) => Instances.keyText(candidate.key) === Instances.keyText(environment.instance),
+  )
+  const witness =
+    environmentOwner === undefined
+      ? undefined
+      : witnessExpressionAt(environmentOwner, environment.site)
   const baseExecution: ExecutionKey = Object.freeze({
-    _tag: 'EffectRunnerExecution',
+    _tag: witness === undefined ? 'EffectRunnerExecution' : 'WitnessEffectRunnerExecution',
     owner: stored?.runnerInstance ?? environment.instance,
     site: stored?.site ?? environment.site,
     identity,
@@ -663,7 +702,11 @@ const runnerOf = (
           suspendableSummary(Instances.effectSuspensionOf(context.discovery, resultEffect)))
       )
         return 'Suspendable'
-      const capability = Type.substitute(service.service, owner.substitution)
+      const capability = Type.substitute(
+        service.service,
+        owner.substitution,
+        owner.specialization.compatibility,
+      )
       const selected = providers.find(
         (provider) =>
           Type.equals(provider.capability, capability) && provider.role === service.role,
@@ -809,7 +852,11 @@ const catchHandlerRunner = (
   const callableIdentity = catchEffect?.captures.find(
     (capture) => capture.callableIdentity !== undefined,
   )?.callableIdentity
-  const handlerType = Type.substitute(expression.handler.type, context.instance.substitution)
+  const handlerType = Type.substitute(
+    expression.handler.type,
+    context.instance.substitution,
+    context.instance.specialization.compatibility,
+  )
   if (
     callableIdentity?.target._tag !== 'Declaration' ||
     !Type.isCallable(handlerType) ||
@@ -850,12 +897,24 @@ const controlsOfCatch = (
 ): ReadonlyArray<Region> => {
   const regions: Array<Region> = []
   if (expression.protected._tag === 'Unavailable') return Object.freeze(regions)
-  const protectedEffect = Type.substitute(expression.protected.type, context.instance.substitution)
-  const resultEffect = Type.substitute(expression.type, context.instance.substitution)
+  const protectedEffect = Type.substitute(
+    expression.protected.type,
+    context.instance.substitution,
+    context.instance.specialization.compatibility,
+  )
+  const resultEffect = Type.substitute(
+    expression.type,
+    context.instance.substitution,
+    context.instance.specialization.compatibility,
+  )
   if (!Type.isEffect(protectedEffect) || !Type.isEffect(resultEffect)) return Object.freeze([])
 
   const protectedRunner = runnerOf(expression.protected, context)
-  const selected = Type.substitute(expression.selected, context.instance.substitution)
+  const selected = Type.substitute(
+    expression.selected,
+    context.instance.substitution,
+    context.instance.specialization.compatibility,
+  )
   if (Type.isNever(selected)) {
     if (protectedRunner.classification === 'Synchronous') return Object.freeze(regions)
     const policy: Extract<CompletionPolicy, { readonly _tag: 'Propagate' }> = Object.freeze({
@@ -1094,6 +1153,118 @@ const providedRunnersOf = (
   return Object.freeze(runners)
 }
 
+/** The adapter itself runs the selected implementation's returned Effect. */
+const witnessExecution = (
+  expression: Extract<Hir.Expression, { readonly _tag: 'InterfaceOperationCall' | 'BuiltinCall' }>,
+  context: BuildContext,
+): Execution | undefined => {
+  const site = expression.witnessEffectSite
+  const bound =
+    expression._tag === 'InterfaceOperationCall' ? expression : expression.interfaceOperation
+  if (site === undefined || bound === undefined) return undefined
+  const capability = Type.substitute(
+    bound.capability,
+    context.instance.substitution,
+    context.instance.specialization.compatibility,
+  )
+  const provider = Type.substitute(
+    bound.provider,
+    context.instance.substitution,
+    context.instance.specialization.compatibility,
+  )
+  if (!Type.isNominal(capability)) return undefined
+  const selected = ConformanceProof.interfaceWitnessTarget(
+    context.index,
+    provider,
+    capability,
+    bound.operation,
+  )
+  const key: ExecutionKey = Object.freeze({
+    _tag: 'WitnessEffectRunnerExecution',
+    owner: context.instance.key,
+    site,
+    identity: Instances.effectIdentity(context.instance.key, site),
+    runner: Hir.effectRunnerId(context.instance.key.declaration, site),
+  })
+  const regions: Array<Region> = []
+  let classification: Classification = 'Unknown'
+  if (selected === undefined) {
+    const intrinsic = ConformanceProof.interfaceOperationIntrinsic(
+      context.index,
+      provider,
+      capability,
+      bound.operation,
+    )
+    if (intrinsic?.rule._tag !== 'BuiltinRule') return undefined
+    classification = classificationOfEffect(context.discovery, key.identity)
+  } else {
+    const candidates = Instances.matchingSpecialization(context.discovery, {
+      declaration: selected.implementation,
+      typeArguments: selected.typeArguments,
+    })
+    const target = candidates.length === 1 ? candidates.at(0) : undefined
+    if (target === undefined) return undefined
+    if (target.function.declaration.functionKind === 'Ordinary') {
+      classification = suspendableSummary(
+        Instances.executionSuspensionOf(context.discovery, target.key),
+      )
+        ? 'Suspendable'
+        : 'Synchronous'
+    } else if (target.resultEffect !== undefined) {
+      const result = target.specialization.result
+      const effect = Type.isRepresented(result) ? result.contract : result
+      if (!Type.isEffect(effect)) return undefined
+      const runner = runnerOf(expression, context, {
+        identity: target.resultEffect,
+        effect,
+        providers: context.ambientProviders,
+      })
+      if (runner.execution._tag === 'UnknownExecution') return undefined
+      classification = runner.classification
+      if (classification !== 'Synchronous') {
+        const policy: CompletionPolicy = Object.freeze({
+          _tag: 'Propagate',
+          outcome: runner.outcome,
+          failureMappings: Object.freeze(
+            Type.failureMembers(runner.outcome).map((_failure, ordinal) =>
+              Object.freeze({ source: ordinal + 1, target: ordinal + 1 }),
+            ),
+          ),
+        })
+        const complete = controlId(key, expression.span, 0, 'Complete')
+        regions.push(
+          Object.freeze({
+            _tag: 'ProvisionalRegion',
+            id: controlId(key, expression.span, 0, 'Invoke'),
+            outcome: Object.freeze({
+              _tag: 'RunSuspendableEffect',
+              runner,
+              completion: policy,
+              complete,
+              relay: Object.freeze({
+                _tag: 'RelayExistingTransfer',
+                preserves: ['Child', 'Origin', 'TypedOutcome'] as const,
+              }),
+              span: expression.span,
+            }),
+          }),
+          Object.freeze({
+            _tag: 'ProvisionalRegion',
+            id: complete,
+            outcome: Object.freeze({ _tag: 'Complete', policy }),
+          }),
+        )
+      }
+    }
+  }
+  return Object.freeze({
+    _tag: 'ProvisionalExecution',
+    key,
+    classification,
+    regions: Object.freeze(regions),
+  })
+}
+
 const classificationWithRegions = (
   base: Classification,
   regions: ReadonlyArray<Region>,
@@ -1152,6 +1323,14 @@ export const build = (
       for (const expression of instance.function.statements
         .flatMap(Hir.statementExpressions)
         .flatMap(Hir.expressionTree)) {
+        if (
+          (expression._tag === 'InterfaceOperationCall' || expression._tag === 'BuiltinCall') &&
+          expression.witnessEffectSite !== undefined
+        ) {
+          const execution = witnessExecution(expression, context)
+          if (execution !== undefined) executions.push(execution)
+          continue
+        }
         if (expression._tag !== 'EffectBlock' && expression._tag !== 'EffectCatch') continue
         const site =
           expression._tag === 'EffectBlock'

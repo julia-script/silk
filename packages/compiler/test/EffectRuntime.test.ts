@@ -9,7 +9,7 @@ import { effectHigherOrderValues } from './support/corpus.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 const flattenPrelude = `effect fn inner(value: i32) -> i32 { return value * 2 }
-effect fn outer(value: i32) -> Effect<i32> { return inner(value) }`
+effect fn outer(value: i32) -> Effect<'static; i32> { return inner(value) }`
 const flattenSource = `import silk.effect { Effect }
 ${flattenPrelude}
 pub fn main() -> i32 {
@@ -23,7 +23,7 @@ struct Inner { code: i32 }
 service Clock {}
 service Meter {}
 effect fn inner() -> i32 ! Inner ? &Clock | &Meter { return 21 }
-effect fn outer() -> Effect<i32 ! Inner ? &Clock | &Meter> ! Outer ? &Clock { return inner() }
+effect fn outer() -> Effect<'static; i32 ! Inner ? &Clock | &Meter> ! Outer ? &Clock { return inner() }
 pub fn main() -> i32 {
   let nested = outer()
   let flattened = Effect.flatten(move nested)
@@ -33,18 +33,40 @@ pub fn main() -> i32 {
 it.effect('unions both failure rows and both requirement rows through flatten', () =>
   Effect.gen(function* () {
     const module = 'effect-runtime/flatten-rows'
-    const snapshot = yield* Analysis.ofSourceRealized(module, ascii(flattenRowsSource))
+    const snapshot = yield* Analysis.ofSource(module, ascii(flattenRowsSource))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
     const encoded = Analysis.expressionsOf(snapshot, module).flatMap((expression) =>
-      expression._tag === 'Call' && expression.type._tag === 'Available'
-        ? [Type.encode(expression.type.type)]
+      expression._tag === 'Call' &&
+      expression.type._tag === 'Available' &&
+      Type.isEffect(expression.type.type)
+        ? [
+            {
+              success: Type.encode(expression.type.type.success),
+              failures: Type.failureMembers(expression.type.type).map((type) => Type.encode(type)),
+              requirements: Type.requirementMembers(expression.type.type).map((requirement) =>
+                Type.encodeRequirement(requirement),
+              ),
+            },
+          ]
         : [],
     )
     assert.deepEqual(encoded, [
-      `Effect<i32 ! ${module}.Inner ? &${module}.Clock | &${module}.Meter>`,
-      `Effect<Effect<i32 ! ${module}.Inner ? &${module}.Clock | &${module}.Meter> ! ${module}.Outer ? &${module}.Clock>`,
-      `Effect<i32 ! ${module}.Inner | ${module}.Outer ? &${module}.Clock | &${module}.Meter>`,
+      {
+        success: 'i32',
+        failures: [`${module}.Inner`],
+        requirements: [`&${module}.Clock`, `&${module}.Meter`],
+      },
+      {
+        success: `Effect<'static; i32 ! ${module}.Inner ? &${module}.Clock | &${module}.Meter>`,
+        failures: [`${module}.Outer`],
+        requirements: [`&${module}.Clock`],
+      },
+      {
+        success: 'i32',
+        failures: [`${module}.Inner`, `${module}.Outer`],
+        requirements: [`&${module}.Clock`, `&${module}.Meter`],
+      },
     ])
   }),
 )
@@ -52,7 +74,7 @@ it.effect('unions both failure rows and both requirement rows through flatten', 
 it.effect('resolves flatten through the ordinary declaration path without an intrinsic', () =>
   Effect.gen(function* () {
     const module = 'effect-runtime/flatten-declaration'
-    const snapshot = yield* Analysis.ofSourceRealized(module, ascii(flattenSource))
+    const snapshot = yield* Analysis.ofSource(module, ascii(flattenSource))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
     const occurrence = Analysis.semanticOccurrenceAt(
@@ -66,7 +88,7 @@ it.effect('resolves flatten through the ordinary declaration path without an int
       occurrence === undefined
         ? ''
         : (Analysis.occurrencePresentation(snapshot, module, occurrence)?.text ?? ''),
-      'pub effect fn flatten',
+      "pub effect<'env> fn flatten",
     )
 
     const constructed = (Projections.hirOf(snapshot, module)?.functions ?? []).flatMap((fn) =>

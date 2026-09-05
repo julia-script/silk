@@ -56,7 +56,6 @@ import { lowerBuiltinExpression } from './LowerBuiltin.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as Ownership from './Ownership.js'
-import * as Lifetime from './Lifetime.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Scalar from './Scalar.js'
 import * as Type from './Type.js'
@@ -364,13 +363,14 @@ export function lowerExpressionInner(
       if (transition === undefined)
         return lowerExpression(fn, expression.subject, availableRequirements)
       const root = ownershipLocal(fn, transition.root)
-      const type =
-        expression.subject._tag === 'Unavailable' ? undefined : fn.type(expression.subject.type)
-      if (root === undefined || type === undefined) return undefined
+      if (root === undefined) return undefined
       if (transition.path.length === 0) {
         emitInitializationTransition(fn, transition)
         return { result: root }
       }
+      const type =
+        expression.subject._tag === 'Unavailable' ? undefined : fn.type(expression.subject.type)
+      if (type === undefined) return undefined
       const selectors = lowerOwnershipPath(fn, root, transition.path, expression.span)
       if (selectors === undefined) return undefined
       const destination = fn.alloc(type)
@@ -615,7 +615,8 @@ function lowerRuntimeStringViewExpression(
   if (
     source === undefined ||
     sourceType?._tag !== 'Slice' ||
-    sourceType.type.access !== 'Shared' || sourceType.type.element !== 'u8' ||
+    sourceType.type.access !== 'Shared' ||
+    sourceType.type.element !== 'u8' ||
     type?._tag !== 'String'
   )
     return undefined

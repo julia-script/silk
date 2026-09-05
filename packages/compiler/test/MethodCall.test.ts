@@ -104,11 +104,11 @@ pub fn main() -> i32 {
     )
     assert.strictEqual(
       completion?.candidates.find((candidate) => candidate.label === 'add')?.detail?.text,
-      'fn(other: &Counter) -> i32',
+      "fn<'life0, 'life1>(other: &'life1 Counter) -> i32",
     )
     // Receiver syntax hovers the receiver-bound contract; the type side keeps the whole contract.
     const method = Analysis.hoverSubjectAt(self, 'main', source.indexOf('value.read()') + 6)
-    assert.strictEqual(method?.presentation.text, 'fn() -> i32')
+    assert.strictEqual(method?.presentation.text, "fn<'life0>() -> i32")
     const explicit = yield* analyze(`${counter}
 pub fn main() -> i32 {
   let value = Counter { value: 42 }
@@ -120,7 +120,10 @@ pub fn main() -> i32 {
       `${counter}\npub fn main() -> i32 {\n  let value = Counter { value: 42 }\n  return Counter.`
         .length,
     )
-    assert.strictEqual(typeSide?.presentation.text, 'pub fn read(self: &Counter) -> i32')
+    assert.strictEqual(
+      typeSide?.presentation.text,
+      "pub fn read<'life0>(self: &'life0 Counter) -> i32",
+    )
   }),
 )
 
@@ -164,12 +167,15 @@ pub fn main() -> i32 {
 }`
     const self = yield* analyze(source)
     const hover = Analysis.hoverSubjectAt(self, 'main', source.indexOf('value.map(') + 6)
-    assert.strictEqual(hover?.presentation.text, 'fn<U>(transform: once fn(i32) -> U) -> Option<U>')
+    assert.strictEqual(
+      hover?.presentation.text,
+      "fn<U, 'life2>(transform: once fn<'life2>(i32) -> U) -> Option<U>",
+    )
     const completion = Analysis.completionAt(self, 'main', source.indexOf('value.\n') + 6)
     assert.deepEqual(
       completion?.candidates.map((candidate) => [candidate.label, candidate.detail?.text]),
       [
-        ['map', 'fn<U>(transform: once fn(i32) -> U) -> Option<U>'],
+        ['map', "fn<U, 'life2>(transform: once fn<'life2>(i32) -> U) -> Option<U>"],
         ['unwrapOr', 'fn(fallback: i32) -> i32'],
       ],
     )
@@ -228,7 +234,7 @@ pub fn main() -> i32 {
     const hover = Analysis.hoverSubjectAt(self, 'main', source.indexOf('Option.map(') + 7)
     assert.strictEqual(
       hover?.presentation.text,
-      'pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> main.Option<U>',
+      "pub fn map<T, U, 'life2>(self: Option<T>, transform: once fn<'life2>(T) -> U) -> main.Option<U>",
     )
   }),
 )

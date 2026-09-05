@@ -14,6 +14,7 @@ import type * as NameResolution from './NameResolution.js'
 import * as Ownership from './Ownership.js'
 import * as ProviderSelection from './ProviderSelection.js'
 import * as Residualization from './Residualization.js'
+import * as ResidualOwnership from './ResidualOwnership.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Specialization from './Specialization.js'
@@ -22,6 +23,7 @@ import * as StaticValue from './StaticValue.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
+import type * as TypeCompatibility from './TypeCompatibility.js'
 
 /**
  * Instance discovery: which concrete runtime instances are reachable from the user entry. Keys
@@ -68,6 +70,7 @@ export type ConcreteEvidence = Exclude<Constraint.ConstraintEvidence, { readonly
 export interface ConcreteSpecialization {
   readonly _tag: 'ConcreteSpecialization'
   readonly [concreteSpecializationBrand]: true
+  readonly compatibility?: TypeCompatibility.Context
   readonly parameters: ReadonlyArray<Type.Type>
   readonly result: Type.Type
   readonly failureRow?: Type.FailureRow
@@ -228,6 +231,13 @@ export type Entry =
     }
 
 /** The deterministic discovery result. */
+export interface Counters {
+  readonly _tag: 'InstanceDiscoveryCounters'
+  readonly residualBodies: Residualization.Counters
+  readonly residualOwnership: ResidualOwnership.Counters
+}
+
+/** The deterministic discovery result and work actually performed to obtain it. */
 export interface Discovery {
   readonly _tag: 'InstanceDiscovery'
   readonly rootModule: string
@@ -250,6 +260,9 @@ export interface Discovery {
   readonly residualizationDiagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly specializationFailures: ReadonlyArray<NonConcreteSpecialization>
   readonly violations: ReadonlyArray<PolymorphicRecursion>
+  readonly counters: Counters
+  readonly residualBodies: ReadonlyArray<Residualization.Observation>
+  readonly residualOwnership: ReadonlyArray<ResidualOwnership.Observation>
 }
 
 /** One specialization-keyed unavailable ownership result retained for semantic inspection. */
@@ -346,6 +359,13 @@ export const invalid = (rootModule: string): Discovery =>
     residualizationDiagnostics: Object.freeze([]),
     specializationFailures: Object.freeze([]),
     violations: Object.freeze([]),
+    counters: Object.freeze({
+      _tag: 'InstanceDiscoveryCounters',
+      residualBodies: Residualization.noWork,
+      residualOwnership: ResidualOwnership.counters(ResidualOwnership.make()),
+    }),
+    residualBodies: Object.freeze([]),
+    residualOwnership: Object.freeze([]),
   })
 
 /**
@@ -393,13 +413,14 @@ const keyOf = (
 ): InstanceKey =>
   (() => {
     const typeArguments = rawTypeArguments.map(carriedSectionArgument)
-    const substitution = TypeInference.substitution(
+    const selected = TypeInference.selectedSubstitution(
       typeParameters,
       typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
     )
-    if (substitution === undefined) {
+    if (selected === undefined) {
       throw new RangeError('Instance key type arguments do not match declaration parameters')
     }
+    const { substitution, compatibility } = selected
     return Object.freeze({
       _tag: 'InstanceKey',
       declaration,
@@ -410,7 +431,7 @@ const keyOf = (
         contract._tag === 'Contract'
           ? Object.freeze([
               ...contract.parameters.map((type) =>
-                Type.runtimeKey(Type.substitute(type, substitution)),
+                Type.runtimeKey(Type.substitute(type, substitution, compatibility)),
               ),
               `result:${Type.runtimeKey(Type.substitute(contract.result, substitution))}`,
               ...(contract.failureRow === undefined
@@ -555,12 +576,13 @@ export const specialize = (
   fn: Hir.HirFunction,
   substitution: Type.Substitution,
   index: DeclarationIndex.Index,
+  compatibility?: TypeCompatibility.Context,
 ): ConcreteSpecialization | undefined => {
   if (fn.contract._tag !== 'Contract') return undefined
   const parameters = fn.contract.parameters.map((parameter) =>
-    Type.substitute(parameter, substitution),
+    Type.substitute(parameter, substitution, compatibility),
   )
-  const result = Type.substitute(fn.contract.result, substitution)
+  const result = Type.substitute(fn.contract.result, substitution, compatibility)
   if (
     parameters.some((parameter) => !Type.isRuntimeConcrete(parameter)) ||
     !Type.isRuntimeConcrete(result)
@@ -570,11 +592,11 @@ export const specialize = (
   const failureRow =
     fn.contract.failureRow === undefined
       ? undefined
-      : Type.substituteFailureRow(fn.contract.failureRow, substitution)
+      : Type.substituteFailureRow(fn.contract.failureRow, substitution, compatibility)
   const requirementRow =
     fn.contract.requirementRow === undefined
       ? undefined
-      : Type.substituteRequirementsRow(fn.contract.requirementRow, substitution)
+      : Type.substituteRequirementsRow(fn.contract.requirementRow, substitution, compatibility)
   if (
     (failureRow !== undefined &&
       (RowAlgebra.concretize(Type.failureRowPolicy(), failureRow)._tag !== 'Concrete' ||
@@ -617,6 +639,7 @@ export const specialize = (
   )
   return Object.freeze({
     _tag: 'ConcreteSpecialization',
+    ...(compatibility === undefined ? {} : { compatibility }),
     [concreteSpecializationBrand]: true as const,
     parameters: Object.freeze(parameters),
     result,
@@ -735,10 +758,10 @@ const instanceSubstitution = (
   fn: Hir.HirFunction,
   key: InstanceKey,
 ): Type.Substitution | undefined =>
-  TypeInference.substitution(
+  TypeInference.selectedSubstitution(
     fn.declaration.typeParameters.map((parameter) => parameter.type),
     key.typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
-  )
+  )?.substitution
 
 const effectParameterOrdinals = (
   fn: Hir.HirFunction,
@@ -1054,27 +1077,11 @@ export const discover = (
     entry = Object.freeze({ _tag: 'Unavailable', reason: 'MissingLibraryExport' })
   else entry = Object.freeze({ _tag: 'Library' })
   if (entry._tag === 'Unavailable') {
-    return Object.freeze({
-      _tag: 'InstanceDiscovery',
-      rootModule,
-      entry,
-      instances: Object.freeze([]),
-      unavailableOwnership: Object.freeze([]),
-      callables: Object.freeze([]),
-      effects: Object.freeze([]),
-      calls: Object.freeze([]),
-      intrinsics: Object.freeze([]),
-      foreignCalls: Object.freeze([]),
-      foreignExports,
-      constants: Object.freeze([]),
-      suspension: Object.freeze([]),
-      residualizationDiagnostics: Object.freeze([]),
-      specializationFailures: Object.freeze([]),
-      violations: Object.freeze([]),
-    })
+    return Object.freeze({ ...invalid(rootModule), entry, foreignExports })
   }
 
   const residualization = Residualization.make(target, results, resolution, index)
+  const residualOwnership = ResidualOwnership.make()
   const accessBoundaryPlan = Ownership.localSharedAccessBoundaryPlan(results)
   interface PreparedInstance {
     readonly instance: Omit<Instance, 'ownership'>
@@ -1299,14 +1306,17 @@ export const discover = (
       }
       const fn = residual.function
       const parameters = template.declaration.typeParameters.map((parameter) => parameter.type)
-      const substitution = TypeInference.substitution(
+      const selected = TypeInference.selectedSubstitution(
         parameters,
         key.typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
       )
+      const substitution = selected?.substitution
       // A key whose arguments no longer fit the declaration's binders is as unreachable as one
       // that cannot be made concrete; both are reported rather than silently dropped.
       const specialization =
-        substitution === undefined ? undefined : specialize(fn, substitution, index)
+        substitution === undefined
+          ? undefined
+          : specialize(fn, substitution, index, selected?.compatibility)
       if (substitution === undefined || specialization === undefined) {
         specializationFailures.set(
           keyText(key),
@@ -1578,11 +1588,12 @@ export const discover = (
   const preparedInstances = [...prepared.values()].map((candidate) => candidate.instance)
   const instances = Object.freeze(
     [...prepared.values()].map(({ instance, fact }) => {
-      const checked = Ownership.checkResidualFunction(
-        instance.function,
-        fact,
-        index,
-        accessBoundaryPlan,
+      const checked = ResidualOwnership.check(
+        residualOwnership,
+        Ownership.input(instance.function, fact, index, accessBoundaryPlan),
+        Residualization.selectionReason(residualization, instance.key) === undefined
+          ? 'UnchangedBody'
+          : 'SelectedStaticBody',
       )
       for (const diagnostic of checked.diagnostics)
         residualizationDiagnostics.set(
@@ -1605,11 +1616,12 @@ export const discover = (
   )
   const unavailableOwnership = Object.freeze(
     [...preparedUnavailableOwnership.values()].map((candidate) => {
-      const checked = Ownership.checkResidualFunction(
-        candidate.function,
-        candidate.fact,
-        index,
-        accessBoundaryPlan,
+      const checked = ResidualOwnership.check(
+        residualOwnership,
+        Ownership.input(candidate.function, candidate.fact, index, accessBoundaryPlan),
+        Residualization.selectionReason(residualization, candidate.key) === undefined
+          ? 'UnchangedBody'
+          : 'SelectedStaticBody',
       )
       for (const diagnostic of checked.diagnostics)
         residualizationDiagnostics.set(
@@ -1687,5 +1699,12 @@ export const discover = (
     residualizationDiagnostics: Object.freeze([...residualizationDiagnostics.values()]),
     specializationFailures: Object.freeze([...specializationFailures.values()]),
     violations: Object.freeze(violations),
+    counters: Object.freeze({
+      _tag: 'InstanceDiscoveryCounters',
+      residualBodies: Residualization.counters(residualization),
+      residualOwnership: ResidualOwnership.counters(residualOwnership),
+    }),
+    residualBodies: Residualization.observations(residualization),
+    residualOwnership: ResidualOwnership.observations(residualOwnership),
   })
 }

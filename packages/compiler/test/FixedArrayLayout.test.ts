@@ -19,8 +19,9 @@ struct Bucket { pairs: [Pair; 2] tail: i32 }
 fn choose(values: [Pair; 2], index: usize) -> i32 { return values[index].left }
 pub fn main() -> i32 {
   let values = [Pair { left: 1, right: true }, Pair { left: 2, right: false }]
-  return choose(values, 1)
+  return choose(move values, 1)
 }`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
     const selected = Analysis.layoutOf(self)
     assert.strictEqual(selected._tag, 'Available')
     if (selected._tag !== 'Available') return
@@ -84,7 +85,7 @@ pub fn main() -> i32 { let values = empty() return 0 }`)
     assert.deepEqual(shape?.lanes, [])
     assert.include(
       Analysis.instancesOf(self).instances.at(1)?.key.contractRow ?? [],
-      `result:${Type.key(type)}`,
+      `result:${Type.runtimeKey(type)}`,
     )
   }),
 )

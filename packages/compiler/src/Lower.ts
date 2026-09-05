@@ -345,7 +345,6 @@ export const lowerProgram = (
     )
     const block = returnedEffectBlock(instance.function)
     const type = block === undefined ? undefined : effectValueType(layout, instance.key, block)
-    if (instance.key.declaration.name === 'Effect.catchAll') console.log('TEMP lower', JSON.stringify({ block: block?.site.ordinal, type: type?._tag, envs: layout.effectEnvironments.filter((env) => env.instance.declaration.name === 'Effect.catchAll').map((env) => ({ tag: env._tag, same: Instances.keyText(env.instance) === Instances.keyText(instance.key), site: env.site.ordinal, reason: 'reason' in env ? env.reason : undefined })) }))
     if (type !== undefined && block !== undefined) {
       effectResults.set(resultKey, type)
       generatedRunners.push(

@@ -926,6 +926,7 @@ function encodeTypeNode(value: Type.Type): unknown {
         : {
             schema: {
               tag: 'CallableSchema',
+              ...(value.schema.source === undefined ? {} : { source: value.schema.source }),
               contract: encodeCallableContract(value.schema.contract),
               binders: value.schema.binders.map(encodeParameter),
               constraints: value.schema.constraints.map(encodeConstraintNode),
@@ -1107,7 +1108,17 @@ function decodeCallableSchemaNode(value: unknown): Type.CallableSchema {
     contract.binders,
     'callable schema substitution',
   )
+  const source =
+    current.source === undefined ? undefined : serializedRecord(current.source, 'schema source')
   return Object.freeze({
+    ...(source === undefined
+      ? {}
+      : {
+          source: {
+            module: serializedString(source.module, 'schema source module'),
+            name: serializedString(source.name, 'schema source name'),
+          },
+        }),
     contract,
     binders,
     constraints,

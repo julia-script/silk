@@ -9,7 +9,6 @@ import type * as Ownership from './Ownership.js'
 import * as SemanticRebinding from './SemanticRebinding.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceOrigin from './SourceOrigin.js'
-import type * as SourceSpan from './SourceSpan.js'
 import * as SyntaxTree from './SyntaxTree.js'
 
 /** Actual source-body query work, independent of module invalidation observations. */
@@ -46,7 +45,7 @@ interface Entry {
   readonly ownership: Map<
     string,
     {
-      readonly boundaries: ReadonlyArray<SourceSpan.SourceSpan>
+      readonly input: Ownership.CheckInput
       readonly checked: Ownership.CheckedFunction
     }
   >
@@ -440,19 +439,22 @@ export const check = (
 /** Reuses source ownership only beside a reused semantic body and unchanged access boundaries. */
 export const ownership = (
   self: BodyQuery,
-  fact: Elaboration.FunctionFact | undefined,
-  boundaries: ReadonlyArray<SourceSpan.SourceSpan>,
+  input: Ownership.CheckInput,
   compute: () => Ownership.CheckedFunction,
 ): Ownership.CheckedFunction => {
+  const { semantic: fact, boundaries } = input
   const key = fact === undefined ? undefined : memberKey(fact.declaration)
   const parent = fact === undefined ? undefined : self.parents.get(fact)
   const current = parent === undefined ? undefined : self.entries.get(parent)
   const reuse = fact === undefined ? undefined : self.reuse.get(fact)
   const prior = key === undefined ? undefined : reuse?.prior.ownership.get(key)
+  // Rebind only the checked result and spans; the input retains its original index authority.
+  const retained =
+    prior === undefined ? undefined : { boundaries: prior.input.boundaries, checked: prior.checked }
   const rebound =
-    prior === undefined || reuse?.rebinding === undefined
-      ? prior
-      : SemanticRebinding.rebind(reuse.rebinding, prior)
+    retained === undefined || reuse?.rebinding === undefined
+      ? retained
+      : SemanticRebinding.rebind(reuse.rebinding, retained)
   let checked: Ownership.CheckedFunction
   if (rebound !== undefined && JSON.stringify(rebound.boundaries) === JSON.stringify(boundaries)) {
     checked = rebound.checked
@@ -461,8 +463,7 @@ export const ownership = (
     checked = compute()
     self.work.ownershipChecked += 1
   }
-  if (current !== undefined && key !== undefined)
-    current.ownership.set(key, { boundaries, checked })
+  if (current !== undefined && key !== undefined) current.ownership.set(key, { input, checked })
   return checked
 }
 
@@ -486,11 +487,6 @@ export const publish = (self: BodyQuery, result: Elaboration.Result): Elaboratio
     }),
   )
   return published
-}
-
-/** Accounts for bodies structurally retained by their whole-module ownership boundary. */
-export const retainOwnership = (self: BodyQuery, result: Elaboration.Result): void => {
-  self.work.ownershipReused += result.hir.functions.length
 }
 
 /** Returns deterministic counters recorded at actual query execution and reuse branches. */

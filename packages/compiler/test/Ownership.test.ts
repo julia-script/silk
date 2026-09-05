@@ -10,6 +10,7 @@ import type * as Mir from '../src/Mir.js'
 import * as Ownership from '../src/Ownership.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Parser from '../src/Parser.js'
+import * as ResidualOwnership from '../src/ResidualOwnership.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
 import { elaborate, ownership } from './support/elaborate.js'
@@ -75,6 +76,177 @@ fn branches<'a>(x: &'a i32, flag: bool) -> &'a i32 {
     }),
 )
 
+it.effect(
+  'starts incoming borrowed field obligations at installation and retains later invalidation checks',
+  () =>
+    Effect.gen(function* () {
+      const source = `struct Holder<'a> { value: &'a [i32] }
+fn read(h: &Holder) -> i32 { return h.value[0] }
+fn valid() -> i32 {
+  let mut first = [1] let mut h = Holder { value: &first }
+  let second = [2] h.value = &second
+  first = [3]
+  return read(&h)
+}
+fn replacedAgain() -> i32 {
+  let first = [1] let mut h = Holder { value: &first }
+  let mut second = [2] h.value = &second
+  let third = [3] h.value = &third
+  second = [4]
+  return h.value[0]
+}
+fn invalid() -> i32 {
+  let first = [1] let mut h = Holder { value: &first }
+  let mut second = [2] h.value = &second
+  second = [3]
+  return h.value[0]
+}
+fn conditional(flag: bool) -> i32 {
+  let mut first = [1] let mut h = Holder { value: &first }
+  let second = [2]
+  if flag { h.value = &second }
+  first = [3]
+  return h.value[0]
+}
+struct Pair<'a> { left: &'a [i32] right: &'a [i32] }
+fn sibling() -> i32 {
+  let mut first = [1] let mut h = Pair { left: &first, right: &first }
+  let second = [2] h.left = &second
+  first = [3]
+  return h.right[0]
+}`
+      const snapshot = yield* Analysis.ofSource(
+        'ownership/installed-reference',
+        Uint8Array.from(source, (character) => character.charCodeAt(0)),
+      )
+      const diagnostics = Analysis.diagnostics(snapshot)
+      assert.isAbove(diagnostics.length, 0)
+      assert.isTrue(
+        diagnostics.every(
+          (diagnostic) => diagnostic.code === 'OWN0011' || diagnostic.code === 'OWN0019',
+        ),
+      )
+      assert.isTrue(
+        diagnostics.every((diagnostic) => diagnostic.span.start >= source.indexOf('fn invalid')),
+      )
+      for (const [start, end] of [
+        ['fn invalid', 'fn conditional'],
+        ['fn conditional', 'struct Pair'],
+        ['fn sibling', undefined],
+      ])
+        assert.isTrue(
+          diagnostics.some(
+            (diagnostic) =>
+              diagnostic.span.start >= source.indexOf(start ?? '') &&
+              (end === undefined || diagnostic.span.end < source.indexOf(end)),
+          ),
+        )
+    }),
+)
+
+it.effect('releases outgoing sources after complete array and variant payload replacement', () =>
+  Effect.gen(function* () {
+    const source = `fn readArray<'a>(values: [&'a [i32]; 2]) -> i32 { return values[0][0] }
+fn arrayReset() -> i32 {
+  let mut first = [1] let mut values = [&first, &first]
+  let second = [2] values[0] = &second values[1] = &second
+  first = [3]
+  return readArray(move values)
+}
+union Choice<'a> { Hold { value: &'a [i32] }, Empty }
+fn readChoice<'a>(choice: Choice<'a>) -> i32 {
+  return match move choice { Choice<'a>.Hold { value } => value[0] Choice<'a>.Empty {} => 0 }
+}
+fn unionReset() -> i32 {
+  let mut first = [1] let mut choice = Choice.Hold { value: &first }
+  let second = [2]
+  match place choice { Choice.Hold { value } => { value = &second } Choice.Empty {} => {} }
+  first = [3]
+  return readChoice(move choice)
+}
+fn partialArray() -> i32 {
+  let mut first = [1] let mut values = [&first, &first]
+  let second = [2] values[0] = &second
+  first = [3]
+  return readArray(move values)
+}
+fn conditionalVariant(flag: bool) -> i32 {
+  let mut first = [1] let mut choice = Choice.Hold { value: &first }
+  let second = [2]
+  match place choice { Choice.Hold { value } => { if flag { value = &second } } Choice.Empty {} => {} }
+  first = [3]
+  return readChoice(move choice)
+}`
+    const snapshot = yield* Analysis.ofSource('ownership/complete-carrier-reset', ascii(source))
+    const diagnostics = Analysis.diagnostics(snapshot)
+    assert.isTrue(
+      diagnostics.every(
+        (diagnostic) =>
+          (diagnostic.code === 'OWN0011' || diagnostic.code === 'OWN0019') &&
+          diagnostic.span.start >= source.indexOf('fn partialArray'),
+      ),
+    )
+    for (const [start, end] of [
+      ['fn partialArray', 'fn conditionalVariant'],
+      ['fn conditionalVariant', undefined],
+    ])
+      assert.isTrue(
+        diagnostics.some(
+          (diagnostic) =>
+            diagnostic.span.start >= source.indexOf(start ?? '') &&
+            (end === undefined || diagnostic.span.end < source.indexOf(end)),
+        ),
+      )
+  }),
+)
+
+it.effect('reborrows returned exclusive views while keeping sibling loans exclusive', () =>
+  Effect.gen(function* () {
+    const source = `struct Entry { value: i32 }
+fn view<'a>(value: &'a mut Entry) -> &'a mut Entry { return value }
+fn use(value: &mut i32) { value.* = 2 }
+fn valid() -> i32 {
+  let mut entry = Entry { value: 1 }
+  let mut held = view(&mut entry)
+  use(&mut held.value)
+  return entry.value
+}
+fn invalid() -> i32 {
+  let mut entry = Entry { value: 1 }
+  let mut held = view(&mut entry)
+  let first = &mut held.value
+  let second = &mut held.value
+  use(move first)
+  use(move second)
+  return entry.value
+}
+fn invalidParent() -> i32 {
+  let mut entry = Entry { value: 1 }
+  let mut held = view(&mut entry)
+  let first = &mut held.value
+  let observed = held.value
+  use(move first)
+  return observed
+}`
+    const snapshot = yield* Analysis.ofSource(
+      'ownership/returned-exclusive-reborrow',
+      ascii(source),
+    )
+    const diagnostics = Analysis.diagnostics(snapshot)
+    assert.isTrue(
+      diagnostics.every((diagnostic) => diagnostic.span.start >= source.indexOf('fn invalid')),
+    )
+    assert.isTrue(diagnostics.some((diagnostic) => diagnostic.code === 'OWN0010'))
+    assert.isTrue(
+      diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === 'OWN0011' &&
+          diagnostic.span.start >= source.indexOf('fn invalidParent'),
+      ),
+    )
+  }),
+)
+
 it('restores sparse children while refusing projections through a consumed ancestor', () => {
   const outer = fieldPath(0)
   const left = fieldPath(0)
@@ -105,8 +277,8 @@ it('restores sparse children while refusing projections through a consumed ances
 
 it('joins sparse array holes to conditional state and reaches a finite fixed point', () => {
   const shape: MovePath.ShapeOf = (path) =>
-    path.length === 0 ? { _tag: 'Array', length: 1_000_000 } : { _tag: 'Leaf' }
-  const slot: MovePath.Selector = { _tag: 'ConstantIndex', index: 999_999 }
+    path.length === 0 ? { _tag: 'Array', length: 3 } : { _tag: 'Leaf' }
+  const slot: MovePath.Selector = { _tag: 'ConstantIndex', index: 2 }
   const initial = MovePath.make()
   const partial = movedState(MovePath.consume(initial, [slot], shape))
   assert.deepEqual(
@@ -1973,3 +2145,99 @@ fn inspect(input: Left | Right, owner: Token) -> i32 {
   )
   assert.deepEqual(earlyReturn?.loanEnds, [loan.id])
 })
+
+it.effect(
+  'reuses exact source ownership proofs and caches failed residual checks without replaying work',
+  () =>
+    Effect.gen(function* () {
+      const source = `fn choose(left: i32, right: i32) -> i32 { return right }
+fn good(value: &i32) -> i32 { return value.* }
+fn bad() -> i32 { let value = 42 return choose(move value, value) }`
+      const snapshot = yield* Analysis.ofSource(
+        'ownership/residual-cache',
+        new TextEncoder().encode(source),
+      )
+      const result =
+        snapshot.results.get(snapshot.closure.rootModule) ?? unreachable('expected source result')
+      const plan = Ownership.localSharedAccessBoundaryPlan(snapshot.results)
+      const selected = (name: string): Ownership.CheckInput => {
+        const fn =
+          result.hir.functions.find(
+            (candidate) =>
+              candidate.declaration.name._tag === 'Present' &&
+              candidate.declaration.name.spelling === name,
+          ) ?? unreachable('expected HIR function')
+        const fact =
+          result.functions.find((candidate) => candidate.declaration === fn.declaration) ??
+          unreachable('expected semantic function')
+        return Ownership.input(fn, fact, snapshot.index, plan)
+      }
+      const good = selected('good')
+      const bad = selected('bad')
+      const query = ResidualOwnership.make()
+      for (const input of [good, bad]) {
+        const sourceProof =
+          Ownership.sourceProof(input) ?? unreachable('expected published source proof')
+        assert.strictEqual(ResidualOwnership.check(query, input, 'UnchangedBody'), sourceProof)
+        assert.strictEqual(
+          ResidualOwnership.check(
+            query,
+            { ...input, boundaries: [...input.boundaries] },
+            'UnchangedBody',
+          ),
+          sourceProof,
+        )
+      }
+      const retained = ResidualOwnership.counters(query)
+      assert.strictEqual(retained.sourceReused, 2)
+      assert.strictEqual(retained.cacheReused, 2)
+      assert.strictEqual(retained.checked, 0)
+      assert.isTrue(Object.values(retained.executedWork).every((count) => count === 0))
+      const changed: ReadonlyArray<Ownership.CheckInput> = [
+        { ...good, function: { ...good.function } },
+        { ...good, semantic: { ...(good.semantic ?? unreachable('expected semantic fact')) } },
+        { ...good, index: { ...good.index } },
+        { ...good, boundaries: [good.function.declaration.syntax.span] },
+      ]
+      for (const input of changed) {
+        assert.isUndefined(Ownership.sourceProof(input))
+        ResidualOwnership.check(query, input, 'ChangedOwnershipInputs')
+      }
+      const failedInput = { ...bad, function: { ...bad.function } }
+      const failed = ResidualOwnership.check(query, failedInput, 'SelectedStaticBody')
+      assert.strictEqual(failed.ownership.verdict._tag, 'Violation')
+      assert.deepEqual(
+        failed.diagnostics.map((diagnostic) => diagnostic.code),
+        ['OWN0001'],
+      )
+      const beforeHit = ResidualOwnership.counters(query)
+      assert.strictEqual(ResidualOwnership.check(query, failedInput, 'SelectedStaticBody'), failed)
+      const afterHit = ResidualOwnership.counters(query)
+      assert.strictEqual(afterHit.checked, 5)
+      assert.strictEqual(afterHit.requests, 10)
+      assert.strictEqual(afterHit.cacheReused, 3)
+      assert.deepEqual(afterHit.executedWork, beforeHit.executedWork)
+      assert.isAbove(afterHit.executedWork.loanAccessChecks, 0)
+      assert.isAbove(afterHit.executedWork.cleanupPlanQueries, 0)
+      assert.deepEqual(
+        ResidualOwnership.observations(query).map((observation) => observation.branch),
+        [
+          'SourceReused',
+          'CacheReused',
+          'SourceReused',
+          'CacheReused',
+          'Checked',
+          'Checked',
+          'Checked',
+          'Checked',
+          'Checked',
+          'CacheReused',
+        ],
+      )
+      assert.isTrue(
+        ResidualOwnership.observations(query)
+          .filter((observation) => observation.branch !== 'Checked')
+          .every((observation) => observation.work === undefined),
+      )
+    }),
+)

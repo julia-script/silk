@@ -4,7 +4,6 @@ import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import type * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
 import * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
 import type { LinearOperation } from './MirLinearization.js'
@@ -38,20 +37,6 @@ type Operation = Extract<
       | 'CloseEffectEntry'
   }
 >
-
-/**
- * An exclusive reference operand reborrows into a shared reference parameter: an owned or `&mut`
- * provider dispatching a `&Self` operation passes its `&mut Self` local straight through.
- */
-const acceptsOperand = (
-  expected: DeclarationFacts.SemanticType,
-  actual: DeclarationFacts.SemanticType,
-): boolean =>
-  SilkType.equals(expected, actual) ||
-  (SilkType.isReference(expected) &&
-    SilkType.isReference(actual) &&
-    expected.access === 'Shared' &&
-    SilkType.equals(expected.target, actual.target))
 
 export const emit = Effect.fnUntraced(function* (context: Context, operation: Operation) {
   const {
@@ -720,7 +705,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
                 return (
                   actual !== undefined &&
                   expected !== undefined &&
-                  acceptsOperand(Mir.semanticType(expected), Mir.semanticType(actual))
+                  Mir.acceptsRuntimeOperand(Mir.semanticType(actual), Mir.semanticType(expected))
                 )
               }))),
       )

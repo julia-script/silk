@@ -1240,20 +1240,34 @@ export const analyzeStatements = (
         throw new RangeError(`Semantic analysis cannot analyze ${destinationNode.kind}`)
       }
       context.diagnostics.push(...destination.diagnostics)
+      const root = assignmentRoot(destination.fact)
+      const writeCompatibility =
+        context.resolution.bodyLifetimes === undefined ||
+        context.resolution.lifetimeCompatibility === undefined
+          ? context.resolution.lifetimeCompatibility
+          : BodyLifetime.activatedCompatibility(
+              context.resolution.bodyLifetimes,
+              context.resolution.lifetimeCompatibility,
+              element,
+              root?.syntax,
+            )
+      const writeResolution: ResolutionContext = {
+        ...context.resolution,
+        ...(writeCompatibility === undefined ? {} : { lifetimeCompatibility: writeCompatibility }),
+      }
       const value = analyzeExpression(
         context.source,
         valueNode,
         context.declarations,
         context.declaration,
         scope,
-        context.resolution,
+        writeResolution,
         destination.type,
       )
       if (value === undefined) {
         throw new RangeError(`Semantic analysis cannot analyze ${valueNode.kind}`)
       }
       context.diagnostics.push(...value.diagnostics)
-      const root = assignmentRoot(destination.fact)
       if (destination.fact._tag === 'ForeignStatic') {
         context.diagnostics.push(
           Diagnostic.immutableAssignment(
@@ -1267,7 +1281,7 @@ export const analyzeStatements = (
         if (SyntaxTree.isAvailableSyntax(destinationNode) && destination.diagnostics.length === 0) {
           context.diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
         }
-      } else if (assignmentRootAccess(root) === 'ImmutableOwned') {
+      } else if (assignmentRootAccess(root, destination.fact) === 'ImmutableOwned') {
         context.diagnostics.push(
           Diagnostic.immutableAssignment(
             root.name._tag === 'Present' ? root.name.spelling : '?',
@@ -1275,8 +1289,8 @@ export const analyzeStatements = (
           ),
         )
       } else if (
-        assignmentRootAccess(root) === 'SharedBorrowed' ||
-        (assignmentRootAccess(root) === 'ExclusiveBorrowed' &&
+        assignmentRootAccess(root, destination.fact) === 'SharedBorrowed' ||
+        (assignmentRootAccess(root, destination.fact) === 'ExclusiveBorrowed' &&
           destination.fact._tag !== 'IndexProjection' &&
           destination.fact._tag !== 'ReferentProjection' &&
           destination.fact._tag !== 'FieldProjection')
@@ -1286,7 +1300,7 @@ export const analyzeStatements = (
       const compatible =
         destination.type !== undefined &&
         value.type !== undefined &&
-        typesCompatible(value.type, destination.type, context.resolution?.lifetimeCompatibility)
+        typesCompatible(value.type, destination.type, writeCompatibility)
       if (destination.type !== undefined && value.type !== undefined && !compatible) {
         const expectedOrigin =
           root?._tag === 'BindingFact' ? root.initializer.syntax.span : destinationNode.span

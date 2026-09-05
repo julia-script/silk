@@ -32,6 +32,7 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
   DocComment: { name: 'doc-comment', tags: [tags.docComment] },
   ModuleDocComment: { name: 'module-doc-comment', tags: [tags.docComment] },
   Identifier: { name: 'identifier', tags: [tags.variableName] },
+  Lifetime: { name: 'lifetime', tags: [tags.typeName] },
   DecimalInteger: { name: 'number', tags: [tags.integer] },
   DecimalFloat: { name: 'number', tags: [tags.float] },
   DurationLiteral: { name: 'number', tags: [tags.integer] },

@@ -100,7 +100,10 @@ const proofFrames = new WeakMap<Work, Array<Array<() => void>>>()
 const retain = (self: Context, obligations: ReadonlyArray<() => void>): void => {
   const current = proofFrames.get(self.work)?.at(-1)
   if (current === undefined) for (const obligation of obligations) obligation()
-  else current.push(...obligations)
+  else if (obligations.length > 0)
+    current.push(() => {
+      for (const obligation of obligations) obligation()
+    })
 }
 
 /** Keeps obligations from successful inference alternatives and discards rejected trials. */
@@ -114,7 +117,11 @@ export const commitWhen = <A>(
   const obligations: Array<() => void> = []
   frames.push(obligations)
   let result: A
-  try { result = evaluate() } finally { frames.pop() }
+  try {
+    result = evaluate()
+  } finally {
+    frames.pop()
+  }
   if (accepted(result)) retain(self, obligations)
   return result
 }
@@ -138,7 +145,9 @@ export const context = (
     ...(options.typeOutlives === undefined ? {} : { typeOutlives: options.typeOutlives }),
     ...(options.outlives === undefined ? {} : { outlives: options.outlives }),
     ...(options.commitOutlives === undefined ? {} : { commitOutlives: options.commitOutlives }),
-    ...(options.commitTypeOutlives === undefined ? {} : { commitTypeOutlives: options.commitTypeOutlives }),
+    ...(options.commitTypeOutlives === undefined
+      ? {}
+      : { commitTypeOutlives: options.commitTypeOutlives }),
     work: { comparisons: 0, cacheHits: 0, outlivesObligations: 0, rigidBinders: 0 },
   })
 
@@ -162,9 +171,12 @@ const outlives = (
 
 /** Proves one selected structural data-validity obligation in the current comparison scope. */
 export const typeOutlives = (self: Context, bound: Type.TypeOutlives): boolean => {
-  if (Type.satisfiesOutlives(bound.type, bound.lifetime, self.typeBounds, (longer, shorter) =>
-    Lifetime.outlives(self.assumptions, longer, shorter),
-  )) return true
+  if (
+    Type.satisfiesOutlives(bound.type, bound.lifetime, self.typeBounds, (longer, shorter) =>
+      Lifetime.outlives(self.assumptions, longer, shorter),
+    )
+  )
+    return true
   const proven = self.typeOutlives?.(bound.type, bound.lifetime) ?? false
   if (proven && self.commitTypeOutlives !== undefined)
     retain(self, [() => self.commitTypeOutlives?.(bound.type, bound.lifetime)])
@@ -264,15 +276,18 @@ const callableCompatible = (
       type: Type.substituteLifetimes(bound.type, substitution),
       lifetime: Lifetime.substitute(bound.lifetime, substitution),
     }))
+  const formation = Type.executableFormationRequirements(source)
   const scoped = Object.freeze({
     ...self,
     typeBounds: [
       ...self.typeBounds,
       ...substituteTypeBounds(target.typeOutlives, targetSubstitution),
+      ...formation.typeOutlives,
     ],
     assumptions: Lifetime.assumptions([
       ...self.assumptions.bounds,
       ...substitutedBounds(target.lifetimeBounds, targetSubstitution),
+      ...formation.lifetimeBounds,
     ]),
   })
   if (
@@ -330,12 +345,18 @@ export const check = (
     return previous.result
   }
   self.work.comparisons += 1
-  return commitWhen(self, () => {
-    const result = compareSelected(source, target, self)
-    const obligations = isCompatible(result) ? [...(proofFrames.get(self.work)?.at(-1) ?? [])] : []
-    cache.set(identity, {result, obligations})
-    return result
-  }, isCompatible)
+  return commitWhen(
+    self,
+    () => {
+      const result = compareSelected(source, target, self)
+      const obligations = isCompatible(result)
+        ? [...(proofFrames.get(self.work)?.at(-1) ?? [])]
+        : []
+      cache.set(identity, { result, obligations })
+      return result
+    },
+    isCompatible,
+  )
 }
 
 const compareSelected = (source: Type.Type, target: Type.Type, self: Context): Compatibility => {
@@ -444,10 +465,15 @@ const compareSelected = (source: Type.Type, target: Type.Type, self: Context): C
       Type.requirementRowParameters(source).every((parameter) =>
         Type.requirementRowParameters(target).some((expected) => Type.equals(parameter, expected)),
       )
+    const formation = Type.executableFormationRequirements(source)
     const boundsContext = Object.freeze({
       ...self,
-      typeBounds: [...self.typeBounds, ...target.typeOutlives],
-      assumptions: Lifetime.assumptions([...self.assumptions.bounds, ...target.lifetimeBounds]),
+      typeBounds: [...self.typeBounds, ...target.typeOutlives, ...formation.typeOutlives],
+      assumptions: Lifetime.assumptions([
+        ...self.assumptions.bounds,
+        ...target.lifetimeBounds,
+        ...formation.lifetimeBounds,
+      ]),
     })
     if (
       source.lifetimeBinders.length === 0 &&

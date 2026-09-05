@@ -119,6 +119,8 @@ export type CaptureAccess = 'Copy' | CallableMode
  * Origins are diagnostic provenance and deliberately do not participate in semantic identity.
  */
 export interface CallableSchema {
+  /** Already selected source declaration retained through generic value substitution. */
+  readonly source?: { readonly module: string; readonly name: string }
   readonly contract: CallableContract.CallableContract
   readonly binders: ReadonlyArray<Parameter>
   readonly constraints: ReadonlyArray<Constraint.Constraint>
@@ -1421,8 +1423,9 @@ export const represented = (
   contract: RepresentationBound,
   requiredBound: RepresentationBound,
   argument: RepresentationArgument,
+  compatibility?: TypeCompatibility.Context,
 ): Represented => {
-  const admissibility = representationAdmissibility(contract, requiredBound)
+  const admissibility = representationAdmissibility(contract, requiredBound, compatibility)
   let resolvedAdmissibility: RepresentationAdmissibility = admissibility
   if (argument._tag === 'RepresentationParameterArgument' && admissibility._tag === 'Admitted') {
     resolvedAdmissibility = Object.freeze({ _tag: 'Open' })
@@ -1886,6 +1889,9 @@ const computeKey = (self: Type): string => {
       schema === undefined
         ? ''
         : Canonical.record('QuantifiedCallableSchema', [
+            schema.source === undefined
+              ? ''
+              : Canonical.array([schema.source.module, schema.source.name]),
             schema.contractKey,
             Canonical.array(schema.constraintKeys),
             Canonical.array(schema.evidenceKeys),
@@ -2885,7 +2891,15 @@ export function runtimeAvailable(self: Type): boolean {
       // availability is therefore decided on the substituted constraints, the evidence, and the
       // substitution itself — never on the raw blueprint.
       (self.schema === undefined ||
-        (self.schema.binders.every(runtimeAvailable) &&
+        (self.schema.binders.every((binder) => {
+          if (binder.kind === 'Lifetime') return true
+          const argument = self.schema?.substitution.get(key(binder))
+          return (
+            argument !== undefined &&
+            !equalsGenericArgument(argument, parameterArgument(binder)) &&
+            runtimeAvailableGenericArgument(argument)
+          )
+        }) &&
           self.schema.constraints.every((constraint) =>
             runtimeAvailableConstraintUnder(constraint, self.schema?.substitution ?? new Map()),
           ) &&
@@ -3011,9 +3025,10 @@ export const containsBorrowWrapper = (self: Type): boolean =>
 export const specializeFailureRow = (
   self: FailureRow,
   substitution: Substitution,
+  compatibility?: TypeCompatibility.Context,
 ): RowAlgebra.SubstitutionResult<Type, Parameter, FailureMemberShape> => {
   const concrete = RowAlgebra.mapConcreteMembers(failureRowPolicy(), self, (failure) => {
-    return substitute(failure, substitution)
+    return substitute(failure, substitution, compatibility)
   })
   const result = RowAlgebra.substitute(failureRowPolicy(), concrete, {
     row: (parameter_) => {
@@ -3043,8 +3058,12 @@ export const specializeFailureRow = (
   return result
 }
 
-export const substituteFailureRow = (self: FailureRow, substitution: Substitution): FailureRow => {
-  const result = specializeFailureRow(self, substitution)
+export const substituteFailureRow = (
+  self: FailureRow,
+  substitution: Substitution,
+  compatibility?: TypeCompatibility.Context,
+): FailureRow => {
+  const result = specializeFailureRow(self, substitution, compatibility)
   return result._tag === 'Substituted' ? result.row : self
 }
 
@@ -3052,9 +3071,10 @@ export const substituteFailureRow = (self: FailureRow, substitution: Substitutio
 export const specializeRequirementsRow = (
   self: RequirementsRow,
   substitution: Substitution,
+  compatibility?: TypeCompatibility.Context,
 ): RowAlgebra.SubstitutionResult<Requirement, Parameter, RequirementMemberShape> => {
   const concrete = RowAlgebra.mapConcreteMembers(requirementRowPolicy(), self, (requirement) => {
-    const capability = substitute(requirement.capability, substitution)
+    const capability = substitute(requirement.capability, substitution, compatibility)
     return isNominal(capability) || isParameter(capability)
       ? Object.freeze({ ...requirement, capability })
       : requirement
@@ -3094,13 +3114,22 @@ export const specializeRequirementsRow = (
 export const substituteRequirementsRow = (
   self: RequirementsRow,
   substitution: Substitution,
+  compatibility?: TypeCompatibility.Context,
 ): RequirementsRow => {
-  const result = specializeRequirementsRow(self, substitution)
+  const result = specializeRequirementsRow(self, substitution, compatibility)
   return result._tag === 'Substituted' ? result.row : self
 }
 
-/** Replaces declaration-owned parameters recursively through one canonical type. */
-export const substitute = (self: Type, substitution: Substitution): Type => {
+/**
+ * Replaces declaration-owned parameters recursively through one canonical type. Runtime discovery
+ * may pass the finite compatibility context carried by an already checked selected invocation;
+ * ordinary type formation omits it and must prove representation admissibility in its own context.
+ */
+export const substitute = (
+  self: Type,
+  substitution: Substitution,
+  compatibility?: TypeCompatibility.Context,
+): Type => {
   if ((isCallable(self) || isEffect(self)) && self.lifetimeBinders.length > 0) {
     const bound = new Set(self.lifetimeBinders.map(Lifetime.key))
     substitution = new Map([...substitution].filter(([identity]) => !bound.has(identity)))
@@ -3116,32 +3145,36 @@ export const substitute = (self: Type, substitution: Substitution): Type => {
   if (isNominal(self))
     return specializeNominal(
       self,
-      self.arguments.map((argument) => substituteGenericArgument(argument, substitution)),
+      self.arguments.map((argument) =>
+        substituteGenericArgument(argument, substitution, compatibility),
+      ),
     )
-  if (isFixedArray(self)) return fixedArray(substitute(self.element, substitution), self.length)
+  if (isFixedArray(self))
+    return fixedArray(substitute(self.element, substitution, compatibility), self.length)
   if (isSlice(self))
     return slice(
       self.access,
-      substitute(self.element, substitution),
+      substitute(self.element, substitution, compatibility),
       substituteLifetime(self.lifetime, substitution),
     )
   if (isReference(self))
     return reference(
       self.access,
-      substitute(self.target, substitution),
+      substitute(self.target, substitution, compatibility),
       substituteLifetime(self.lifetime, substitution),
     )
-  if (isPointer(self)) return pointer(self.mutable, substitute(self.pointee, substitution))
+  if (isPointer(self))
+    return pointer(self.mutable, substitute(self.pointee, substitution, compatibility))
   if (isForeignFunction(self))
     return foreignFunction(
-      self.parameters.map((parameter_) => substitute(parameter_, substitution)),
-      substitute(self.result, substitution),
+      self.parameters.map((parameter_) => substitute(parameter_, substitution, compatibility)),
+      substitute(self.result, substitution, compatibility),
     )
   if (isCallable(self))
     return callable(
-      self.parameters.map((parameter_) => substitute(parameter_, substitution)),
-      substitute(self.result, substitution),
-      substituteExecutableLifetimes(self, substitution),
+      self.parameters.map((parameter_) => substitute(parameter_, substitution, compatibility)),
+      substitute(self.result, substitution, compatibility),
+      substituteExecutableLifetimes(self, substitution, compatibility),
       self.mode,
       self.schema === undefined
         ? undefined
@@ -3150,7 +3183,10 @@ export const substitute = (self: Type, substitution: Substitution): Type => {
             substitution: new Map([
               ...[...self.schema.substitution.entries()].map(
                 ([parameter_, argument]) =>
-                  [parameter_, substituteGenericArgument(argument, substitution)] as const,
+                  [
+                    parameter_,
+                    substituteGenericArgument(argument, substitution, compatibility),
+                  ] as const,
               ),
               ...self.schema.binders.flatMap((binder) => {
                 const replacement = substitution.get(key(binder))
@@ -3161,18 +3197,18 @@ export const substitute = (self: Type, substitution: Substitution): Type => {
       self.unsafe,
     )
   if (isEffect(self)) {
-    const success = substitute(self.success, substitution)
+    const success = substitute(self.success, substitution, compatibility)
     return effectWithRows(
       success,
-      substituteFailureRow(self.failureRow, substitution),
-      substituteExecutableLifetimes(self, substitution),
+      substituteFailureRow(self.failureRow, substitution, compatibility),
+      substituteExecutableLifetimes(self, substitution, compatibility),
       self.access,
-      substituteRequirementsRow(self.requirementRow, substitution),
+      substituteRequirementsRow(self.requirementRow, substitution, compatibility),
     )
   }
   if (isRepresented(self)) {
-    const requiredBound = substitute(self.representation.requiredBound, substitution)
-    const contextualContract = substitute(self.contract, substitution)
+    const requiredBound = substitute(self.representation.requiredBound, substitution, compatibility)
+    const contextualContract = substitute(self.contract, substitution, compatibility)
     if (!isCallable(requiredBound) && !isEffect(requiredBound)) return self
     const open = self.representation.argument
     const replacement =
@@ -3182,7 +3218,7 @@ export const substitute = (self: Type, substitution: Substitution): Type => {
     const argument =
       replacement !== undefined && isRepresentationArgument(replacement)
         ? replacement
-        : substituteGenericArgument(open, substitution)
+        : substituteGenericArgument(open, substitution, compatibility)
     if (!isRepresentationArgument(argument)) return self
     const intrinsicContract =
       argument._tag === 'RepresentationParameterArgument'
@@ -3192,12 +3228,14 @@ export const substitute = (self: Type, substitution: Substitution): Type => {
       intrinsicContract === undefined ||
       (replacement === undefined && argument._tag === 'RepresentationParameterArgument')
         ? contextualContract
-        : substitute(intrinsicContract, substitution)
+        : substitute(intrinsicContract, substitution, compatibility)
     if (!isCallable(contract) && !isEffect(contract)) return self
-    return represented(contract, requiredBound, argument)
+    return represented(contract, requiredBound, argument, compatibility)
   }
   if (isUnion(self)) {
-    const normalized = union(self.members.map((member) => substitute(member, substitution)))
+    const normalized = union(
+      self.members.map((member) => substitute(member, substitution, compatibility)),
+    )
     return normalized._tag === 'Normalized' ? normalized.type : self
   }
   return self
@@ -3207,6 +3245,7 @@ export const substitute = (self: Type, substitution: Substitution): Type => {
 export const substituteGenericArgument = (
   self: GenericArgument,
   substitution: Substitution,
+  compatibility?: TypeCompatibility.Context,
 ): GenericArgument => {
   if (Lifetime.isLifetime(self)) return substituteLifetime(self, substitution)
   if (isUnavailableGenericArgument(self)) return self
@@ -3215,26 +3254,28 @@ export const substituteGenericArgument = (
     if (replacement !== undefined) return replacement
     const bound = self.parameter.representationBound
     if (bound === undefined) return self
-    const applied = substitute(bound, substitution)
+    const applied = substitute(bound, substitution, compatibility)
     if (!isCallable(applied) && !isEffect(applied)) return self
     return representationParameterArgument(
       Object.freeze({ ...self.parameter, representationBound: applied }),
     )
   }
   if (isOpaqueRepresentationArgument(self)) {
-    const contract = substitute(self.contract, substitution)
+    const contract = substitute(self.contract, substitution, compatibility)
     if (!isCallable(contract) && !isEffect(contract)) return self
     return opaqueRepresentationArgument(
       self.family,
       contract,
-      self.arguments.map((argument) => substituteGenericArgument(argument, substitution)),
+      self.arguments.map((argument) =>
+        substituteGenericArgument(argument, substitution, compatibility),
+      ),
     )
   }
   if (isCompositeEffectRepresentationArgument(self)) {
-    const contract = substitute(self.contract, substitution)
+    const contract = substitute(self.contract, substitution, compatibility)
     if (!isEffect(contract)) return self
     const alternatives = self.alternatives.flatMap((alternative) => {
-      const specialized = substituteGenericArgument(alternative, substitution)
+      const specialized = substituteGenericArgument(alternative, substitution, compatibility)
       if (
         isExactRepresentationArgument(specialized) &&
         isEffect(specialized.contract) &&
@@ -3247,9 +3288,9 @@ export const substituteGenericArgument = (
     return compositeEffectRepresentationArgument(contract, alternatives)
   }
   if (isExactRepresentationArgument(self)) {
-    const contract = substitute(self.contract, substitution)
+    const contract = substitute(self.contract, substitution, compatibility)
     if (!isCallable(contract) && !isEffect(contract)) return self
-    const identity = substituteGenericArgument(self.identity, substitution)
+    const identity = substituteGenericArgument(self.identity, substitution, compatibility)
     if (!isCallableIdentityArgument(identity) && !isEffectIdentityArgument(identity)) return self
     return exactRepresentationArgument(identity, contract)
   }
@@ -3259,7 +3300,7 @@ export const substituteGenericArgument = (
       owner = {
         declaration: self.owner.declaration,
         typeArguments: self.owner.typeArguments.map((argument) =>
-          substituteGenericArgument(argument, substitution),
+          substituteGenericArgument(argument, substitution, compatibility),
         ),
       }
     }
@@ -3271,21 +3312,25 @@ export const substituteGenericArgument = (
       environment = callableEnvironmentIdentity(self.environment.site, {
         declaration: self.environment.owner.declaration,
         typeArguments: self.environment.owner.typeArguments.map((argument) =>
-          substituteGenericArgument(argument, substitution),
+          substituteGenericArgument(argument, substitution, compatibility),
         ),
       })
     }
     return callableIdentityArgument(
       self.identity,
       self.target,
-      self.typeArguments.map((argument) => substituteGenericArgument(argument, substitution)),
+      self.typeArguments.map((argument) =>
+        substituteGenericArgument(argument, substitution, compatibility),
+      ),
       environment,
     )
   }
   if (isRequirementRowArgument(self)) {
-    return requirementRowArgumentFromRow(substituteRequirementsRow(self.row, substitution))
+    return requirementRowArgumentFromRow(
+      substituteRequirementsRow(self.row, substitution, compatibility),
+    )
   }
-  return substitute(self, substitution)
+  return substitute(self, substitution, compatibility)
 }
 
 const sameExecutableOwnerDeclaration = (
@@ -3470,6 +3515,34 @@ export const freeLifetimes = (self: Type): ReadonlyArray<Lifetime.Lifetime> =>
     ).values(),
   ])
 
+/** Facts guaranteed when an executable value is formed, independent of its invocation binders. */
+export const executableFormationRequirements = (
+  self: Callable | Effect,
+): {
+  readonly lifetimeBounds: ReadonlyArray<Lifetime.Outlives>
+  readonly typeOutlives: ReadonlyArray<TypeOutlives>
+} => {
+  const invocation = new Set([
+    ...self.lifetimeBinders.map(Lifetime.key),
+    ...(isCallable(self) ? (self.schema?.binders.map(key) ?? []) : []),
+  ])
+  // Inference opens invocation binders to rigid placeholders before comparing contracts. Those
+  // placeholders still denote invocation requirements even after the binder list has been opened.
+  const independent = (lifetime: Lifetime.Lifetime): boolean =>
+    lifetime._tag !== 'PlaceholderLifetime' && !invocation.has(Lifetime.key(lifetime))
+  return {
+    lifetimeBounds: self.lifetimeBounds.filter(
+      (bound) => independent(bound.longer) && independent(bound.shorter),
+    ),
+    typeOutlives: self.typeOutlives.filter(
+      (bound) =>
+        independent(bound.lifetime) &&
+        freeLifetimes(bound.type).every(independent) &&
+        parameters(bound.type).every((parameter) => !invocation.has(key(parameter))),
+    ),
+  }
+}
+
 const representationStorageLifetime = (
   argument: RepresentationArgument,
 ): Lifetime.Lifetime | undefined =>
@@ -3610,12 +3683,13 @@ const executableLifetimeKey = (self: ExecutableLifetimes): string =>
 const substituteExecutableLifetimes = (
   self: ExecutableLifetimes,
   substitution: Substitution,
+  compatibility?: TypeCompatibility.Context,
 ): ExecutableLifetimes =>
   Object.freeze({
     environment: substituteLifetime(self.environment, substitution),
     lifetimeBinders: self.lifetimeBinders,
     typeOutlives: (self.typeOutlives ?? []).map((bound) => ({
-      type: substitute(bound.type, substitution),
+      type: substitute(bound.type, substitution, compatibility),
       lifetime: substituteLifetime(bound.lifetime, substitution),
     })),
     lifetimeBounds: (self.lifetimeBounds ?? []).map((bound) => ({

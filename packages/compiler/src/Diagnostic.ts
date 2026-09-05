@@ -437,6 +437,8 @@ export const unsatisfiedTypeOutlivesCode = 'SEM0213' as const
 /** Stable code for lifetime storage requiring an unavailable ownership capability. */
 export const unsupportedLifetimeFeatureCode = 'SEM0214' as const
 export const expiredLifetimeCode = 'OWN0019' as const
+/** An owner cannot be preserved by the suspension frame at this run boundary. */
+export const invalidSuspensionOwnershipCode = 'OWN0020' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -476,6 +478,7 @@ export type Code =
   | typeof unsatisfiedTypeOutlivesCode
   | typeof unsupportedLifetimeFeatureCode
   | typeof expiredLifetimeCode
+  | typeof invalidSuspensionOwnershipCode
   | typeof unsupportedBytesCode
   | typeof unknownLiteralModifierCode
   | typeof unterminatedStaticLiteralCode
@@ -737,6 +740,7 @@ export type ParserContext = 'syntax' | 'statement' | 'expression' | 'parameter' 
 /** Structured per-code data explaining why the originating phase diagnosed. */
 export type Reason =
   | { readonly _tag: 'ExpiredLifetime'; readonly lifetime: string }
+  | { readonly _tag: 'InvalidSuspensionOwnership'; readonly detail: string }
   | { readonly _tag: 'UnsupportedBytes' }
   | { readonly _tag: 'UnknownLiteralModifier'; readonly modifier: string }
   | {
@@ -5707,6 +5711,16 @@ export const unsatisfiedTypeOutlives = (
     span,
   })
 
+const lifetimeFeatureMessage = (
+  feature: 'ExclusiveStorage' | 'DependentDrop' | 'EffectOutcome',
+): string => {
+  if (feature === 'ExclusiveStorage')
+    return 'Exclusive references cannot yet be stored inside aggregate values'
+  if (feature === 'DependentDrop')
+    return 'User-defined Drop cannot yet retain non-static borrowed storage'
+  return 'Effect success and failure values cannot yet retain non-static borrowed storage'
+}
+
 /** Rejects lifetime-bearing storage whose required ownership semantics are not yet available. */
 export const unsupportedLifetimeFeature = (
   feature: 'ExclusiveStorage' | 'DependentDrop' | 'EffectOutcome',
@@ -5717,11 +5731,7 @@ export const unsupportedLifetimeFeature = (
     phase: 'semantic',
     code: unsupportedLifetimeFeatureCode,
     severity: 'error',
-    message: feature === 'ExclusiveStorage'
-      ? 'Exclusive references cannot yet be stored inside aggregate values'
-      : feature === 'DependentDrop'
-        ? 'User-defined Drop cannot yet retain non-static borrowed storage'
-        : 'Effect success and failure values cannot yet retain non-static borrowed storage',
+    message: lifetimeFeatureMessage(feature),
     reason: Object.freeze({ _tag: 'UnsupportedLifetimeFeature', feature }),
     span,
   })
@@ -5748,4 +5758,19 @@ export const expiredLifetime = (
             Object.freeze({ label: 'borrowed storage originates here', span: origin }),
           ]),
         }),
+  })
+
+/** Publishes an ownership planner rejection at the source suspension boundary. */
+export const invalidSuspensionOwnership = (
+  detail: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: invalidSuspensionOwnershipCode,
+    severity: 'error',
+    message: `Cannot preserve ownership across suspension: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidSuspensionOwnership', detail }),
+    span,
   })

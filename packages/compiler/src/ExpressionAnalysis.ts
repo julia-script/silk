@@ -315,13 +315,13 @@ export const analyzeConstant = (
 
   if (
     declared._tag !== 'Resolved' ||
-    typeof declared.type !== 'string' ||
     !(
-      declared.type === 'bool' ||
-      declared.type === 'char' ||
       Type.isString(declared.type) ||
-      Scalar.isIntegerSpelling(declared.type) ||
-      Scalar.isFloatSpelling(declared.type)
+      (typeof declared.type === 'string' &&
+        (declared.type === 'bool' ||
+          declared.type === 'char' ||
+          Scalar.isIntegerSpelling(declared.type) ||
+          Scalar.isFloatSpelling(declared.type)))
     )
   ) {
     detail = 'the declared type must be one primitive scalar or string'
@@ -1481,7 +1481,14 @@ export const resolveStructTarget = (
               NameResolution.resolveType(nameResolution, resolution.index, module, argumentPath),
           ),
         )
-        let suppliedOrdinal = 0
+        const suppliedLifetimes = resolvedArguments.filter(
+          (argument) => argument.fact._tag === 'Lifetime',
+        )
+        const suppliedValues = resolvedArguments.filter(
+          (argument) => argument.fact._tag !== 'Lifetime',
+        )
+        let lifetimeOrdinal = 0
+        let valueOrdinal = 0
         const arguments_ = candidate.typeParameters.flatMap(
           (parameter): ReadonlyArray<Type.GenericArgument> => {
             if (
@@ -1489,8 +1496,15 @@ export const resolveStructTarget = (
               parameter.type.kind === 'EffectRepresentation'
             )
               return [Type.representationParameterArgument(parameter.type)]
-            const resolved = resolvedArguments.at(suppliedOrdinal)
-            suppliedOrdinal += 1
+            if (parameter.type.kind === 'Lifetime') {
+              const resolved = suppliedLifetimes.at(lifetimeOrdinal)
+              lifetimeOrdinal += 1
+              return resolved?.fact._tag === 'Lifetime'
+                ? [resolved.fact.lifetime]
+                : [Type.parameterArgument(parameter.type)]
+            }
+            const resolved = suppliedValues.at(valueOrdinal)
+            valueOrdinal += 1
             if (resolved === undefined) return [Type.parameterArgument(parameter.type)]
             if (resolved?.fact._tag !== 'Resolved') return []
             if (parameter.type.kind === 'Value')
@@ -1504,7 +1518,11 @@ export const resolveStructTarget = (
             return []
           },
         )
-        if (arguments_.length === candidate.typeParameters.length) {
+        if (
+          arguments_.length === candidate.typeParameters.length &&
+          suppliedLifetimes.length <= lifetimeOrdinal &&
+          suppliedValues.length <= valueOrdinal
+        ) {
           const parameters = candidate.typeParameters.map((parameter) => parameter.type)
           if (TypeInference.prefixSubstitution(parameters, arguments_) !== undefined) {
             const token = SyntaxTree.tokens(syntax).find(
@@ -2498,7 +2516,9 @@ export const analyzeMatch = (
   const placeRoot =
     access === 'Place' && scrutinee !== undefined ? assignmentRoot(scrutinee.fact) : undefined
   const placeMutability =
-    placeRoot !== undefined && assignmentRootAccess(placeRoot) === 'MutableOwned'
+    placeRoot !== undefined &&
+    scrutinee !== undefined &&
+    assignmentRootAccess(placeRoot, scrutinee.fact) === 'MutableOwned'
       ? 'Mutable'
       : 'Immutable'
   const preliminary = SyntaxTree.directNodes(node, 'MatchArm').map((armNode, ordinal) => {
@@ -2789,21 +2809,24 @@ export const analyzeMatch = (
     arms.some(
       (arm) => contributes(arm) && arm.body._tag === 'Block' && arm.body.completion.fallsThrough,
     ) && reachableTypes.some((type) => !Type.isNever(type) && !Type.equals(type, Type.unit))
-  const joined: Match.Join =
-    anonymousDisagreement || unitDisagreement
-      ? Object.freeze({ _tag: 'Incompatible', types: Object.freeze(reachableTypes) })
-      : expected !== undefined &&
-          reachableTypes.every(
-            (type) =>
-              Type.isNever(type) ||
-              (Type.runtimeKey(type) === Type.runtimeKey(expected) &&
-                typesCompatible(type, expected, resolution.lifetimeCompatibility)),
-          )
-        ? Object.freeze({ _tag: 'Joined', type: expected })
-        : Match.join(
-            reachableTypes,
-            BodyLifetime.environment(resolution?.bodyLifetimes, node, reachableTypes),
-          )
+  let joined: Match.Join
+  if (anonymousDisagreement || unitDisagreement)
+    joined = Object.freeze({ _tag: 'Incompatible', types: Object.freeze(reachableTypes) })
+  else if (
+    expected !== undefined &&
+    reachableTypes.every(
+      (type) =>
+        Type.isNever(type) ||
+        (Type.runtimeKey(type) === Type.runtimeKey(expected) &&
+          typesCompatible(type, expected, resolution.lifetimeCompatibility)),
+    )
+  )
+    joined = Object.freeze({ _tag: 'Joined', type: expected })
+  else
+    joined = Match.join(
+      reachableTypes,
+      BodyLifetime.environment(resolution?.bodyLifetimes, node, reachableTypes),
+    )
   if (joined._tag === 'Incompatible') {
     let divergentRepresentations:
       | {
@@ -3284,6 +3307,24 @@ export const analyzeAggregateLiteral = (
   const structSubstitution = new Map<string, Type.GenericArgument>()
   for (const [parameterKey, inferred] of inferredArguments)
     structSubstitution.set(parameterKey, inferred.argument)
+  const compatibility = resolution?.lifetimeCompatibility
+  const representationInference: TypeInference.LifetimeInference | undefined =
+    compatibility === undefined
+      ? undefined
+      : {
+          compatibility,
+          inferable: new Set(
+            aggregate?.typeParameters.flatMap((parameter) =>
+              parameter.type.kind === 'Lifetime' ? [Type.key(parameter.type)] : [],
+            ) ?? [],
+          ),
+          typeOutlives: (type, lifetime) =>
+            TypeCompatibility.typeOutlives(compatibility, { type, lifetime }),
+          accepts: (source, target, invariant) =>
+            typesCompatible(Type.string(source), Type.string(target), compatibility) &&
+            (!invariant ||
+              typesCompatible(Type.string(target), Type.string(source), compatibility)),
+        }
   const definingModule = nominal?.module
   const authorized =
     definingModule !== undefined &&
@@ -3379,9 +3420,21 @@ export const analyzeAggregateLiteral = (
             for (const [parameterKey, inferred] of inferredArguments)
               currentSubstitution.set(parameterKey, inferred.argument)
             const candidateSubstitution = new Map(currentSubstitution)
-            if (TypeInference.infer(expectedType.contract, actualValue, candidateSubstitution)) {
+            if (
+              TypeInference.infer(
+                expectedType.contract,
+                actualValue,
+                candidateSubstitution,
+                representationInference,
+              )
+            ) {
               const siteSubstitution = new Map<string, Type.GenericArgument>()
-              TypeInference.infer(expectedType.contract, actualValue, siteSubstitution)
+              TypeInference.infer(
+                expectedType.contract,
+                actualValue,
+                siteSubstitution,
+                representationInference,
+              )
               for (const parameter of aggregate.typeParameters) {
                 if (
                   parameter.type.kind === 'CallableRepresentation' ||
@@ -4260,7 +4313,8 @@ import {
   finishCallableSection,
   genericArgumentOfTypeArgument,
   hasAvailableCallSyntax,
-  interfaceConstraintDiagnostics,
+  interfaceConstraints,
+  interfaceEvidence,
   interfaceOperationContract,
   instantiateInterfaceReference,
   isSectionArity,
@@ -4344,7 +4398,7 @@ export function analyzePlaceReplace(
     if (SyntaxTree.isAvailableSyntax(destinationNode) && destination.diagnostics.length === 0) {
       diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
     }
-  } else if (assignmentRootAccess(root) === 'ImmutableOwned') {
+  } else if (assignmentRootAccess(root, destination.fact) === 'ImmutableOwned') {
     diagnostics.push(
       Diagnostic.immutableAssignment(
         root.name._tag === 'Present' ? root.name.spelling : '?',
@@ -4352,8 +4406,8 @@ export function analyzePlaceReplace(
       ),
     )
   } else if (
-    assignmentRootAccess(root) === 'SharedBorrowed' ||
-    (assignmentRootAccess(root) === 'ExclusiveBorrowed' &&
+    assignmentRootAccess(root, destination.fact) === 'SharedBorrowed' ||
+    (assignmentRootAccess(root, destination.fact) === 'ExclusiveBorrowed' &&
       destination.fact._tag !== 'IndexProjection' &&
       destination.fact._tag !== 'ReferentProjection' &&
       destination.fact._tag !== 'FieldProjection')
@@ -6313,6 +6367,7 @@ export const finishInterfaceOperator = (
         }),
       ),
       contract: contract.fact,
+      selectedConformances: interfaceEvidence(reference, resolution.index),
       interfaceOperation: selection,
       ...(selection.contract.functionKind === 'Effect'
         ? { witnessEffectSite: executableSite('EffectSiteId', resolution, node) }
@@ -7871,7 +7926,11 @@ export const analyzePipelineExpression = (
             scope,
             resolution,
             appliedTarget._tag === 'Resolved'
-              ? appliedTarget.reference.parameters.at(0)
+              ? instantiateInterfaceReference(
+                  appliedTarget.reference,
+                  node,
+                  resolution,
+                ).parameters.at(0)
               : undefined,
           )
     const inputFact = input?.fact ?? unavailableExpression(inputNode ?? node)
@@ -9108,7 +9167,7 @@ export function analyzeExpression(
     return (
       analyzeConstantReference(source, node, resolution) ??
       analyzeForeignStaticReference(source, node, resolution) ??
-      analyzeFunctionItem(source, node, declarations, resolution, expected) ??
+      analyzeFunctionItem(source, node, declarations, resolution, declaration, expected) ??
       value
     )
   }
@@ -9299,7 +9358,7 @@ export function analyzeExpression(
       analyzeEnumMember(source, node, resolution, expected) ??
       analyzeConstantReference(source, node, resolution) ??
       analyzeForeignStaticReference(source, node, resolution) ??
-      analyzeFunctionItem(source, node, declarations, resolution, expected) ??
+      analyzeFunctionItem(source, node, declarations, resolution, declaration, expected) ??
       analyzeProjection(source, node, declarations, declaration, scope, resolution)
     )
   }
@@ -9374,7 +9433,9 @@ export function analyzeExpression(
       declaration,
       scope,
       resolution,
-      appliedTarget._tag === 'Resolved' ? appliedTarget.reference.parameters : Object.freeze([]),
+      appliedTarget._tag === 'Resolved'
+        ? instantiateInterfaceReference(appliedTarget.reference, node, resolution).parameters
+        : Object.freeze([]),
     )
     return finishAppliedInterfaceOperation(
       node,
@@ -9864,9 +9925,9 @@ export const finishDeclarationCall = (
     resolution,
     caller,
   )
-  const constraintDiagnostics = interfaceConstraintDiagnostics(
+  const constraints = interfaceConstraints(
     reference,
-    callContract,
+    callContract.fact._tag === 'Compatible' ? callContract.fact.substitution : undefined,
     resolution.index,
     caller,
     node.span,
@@ -9945,7 +10006,7 @@ export const finishDeclarationCall = (
     callable !== undefined &&
     callable.returnType._tag === 'Resolved' &&
     callContract.fact._tag === 'Compatible' &&
-    constraintDiagnostics.length === 0 &&
+    constraints.diagnostics.length === 0 &&
     unsafeDiagnostic === undefined
       ? availableExpressionType(
           (() => {
@@ -9999,6 +10060,7 @@ export const finishDeclarationCall = (
     staticArguments: staticArguments.values,
     mappings: callContract.mappings,
     contract: callContract.fact,
+    selectedConformances: constraints.proofs,
     type: expressionType,
     syntax: node,
   })
@@ -10034,7 +10096,7 @@ export const finishDeclarationCall = (
       ...argumentsResult.diagnostics,
       ...callTypeArguments.diagnostics,
       ...callContract.diagnostics,
-      ...constraintDiagnostics,
+      ...constraints.diagnostics,
       ...phaseDiagnostics,
       ...staticArguments.diagnostics,
       ...staticDiagnostics,
@@ -10098,6 +10160,7 @@ export const finishInterfaceOperationCall = (
       arguments: argumentsResult.facts,
       mappings: callContract.mappings,
       contract: callContract.fact,
+      selectedConformances: interfaceEvidence(reference, resolution.index),
       ...(expressionType._tag === 'Available' &&
       reference.interfaceContract.functionKind === 'Effect'
         ? { witnessEffectSite: executableSite('EffectSiteId', resolution, effectSiteNode) }

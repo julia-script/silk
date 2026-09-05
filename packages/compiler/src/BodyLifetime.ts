@@ -8,6 +8,11 @@ export interface BodyLifetime {
   readonly owner: Lifetime.Owner
   readonly points: ReadonlyMap<SyntaxTree.Node, number>
   readonly constraints: Map<string, Lifetime.Outlives>
+  readonly activatedConstraints: Array<{
+    readonly bound: Lifetime.Outlives
+    readonly installed: SyntaxTree.Node
+    readonly owner?: SyntaxTree.Node
+  }>
   readonly parameterBounds: ReadonlyMap<string, ReadonlyArray<Lifetime.Lifetime>>
   readonly genericStorage: Map<
     string,
@@ -37,6 +42,7 @@ export const make = (
     owner: Object.freeze({ ...owner }),
     points,
     constraints: new Map(),
+    activatedConstraints: [],
     parameterBounds,
     genericStorage: new Map(),
   }
@@ -68,30 +74,31 @@ export const compatibility = (
     if (longer._tag !== 'LocalLifetime' && shorter._tag !== 'LocalLifetime') return false
     return true
   }
+  const declaredTypeOutlives = (type: Type.Type, lifetime: Lifetime.Lifetime): boolean => {
+    const parameters = Type.storageParameters(type)
+    const bounds = parameters.flatMap((parameter) =>
+      (self.parameterBounds.get(Type.key(parameter)) ?? []).map((region) => ({
+        type: parameter,
+        lifetime: region,
+      })),
+    )
+    return Type.satisfiesOutlives(type, lifetime, bounds, (longer, shorter) =>
+      Lifetime.outlives(assumptions, longer, shorter),
+    )
+  }
   return TypeCompatibility.context({
     assumptions,
     nominalVariance,
     outlives: proves,
     commitOutlives: (longer, shorter) => constrain(self, longer, shorter),
     typeOutlives: (type, lifetime) => {
-      const parameters = Type.storageParameters(type)
-      const bounds = parameters.flatMap((parameter) =>
-        (self.parameterBounds.get(Type.key(parameter)) ?? []).map((region) => ({
-          type: parameter,
-          lifetime: region,
-        })),
-      )
-      if (
-        Type.satisfiesOutlives(type, lifetime, bounds, (longer, shorter) =>
-          Lifetime.outlives(assumptions, longer, shorter),
-        )
-      )
-        return true
+      if (declaredTypeOutlives(type, lifetime)) return true
       if (lifetime._tag === 'PlaceholderLifetime') return false
       if (!Type.storageLifetimes(type).every((region) => proves(region, lifetime))) return false
       return true
     },
     commitTypeOutlives: (type, lifetime) => {
+      if (declaredTypeOutlives(type, lifetime)) return
       for (const region of Type.storageLifetimes(type)) constrain(self, region, lifetime)
       for (const parameter of Type.storageParameters(type)) {
         if (parameter.staticProperties.includes('Intrinsic.Detached')) continue
@@ -119,6 +126,38 @@ export const constrain = (
   const bound = { longer, shorter }
   const normalized = Lifetime.assumptions([bound])
   self.constraints.set(normalized.key, Object.freeze(bound))
+}
+
+/** Defers concrete storage obligations until a successful assignment installs its incoming value. */
+export const activatedCompatibility = (
+  self: BodyLifetime,
+  base: TypeCompatibility.Context,
+  installed: SyntaxTree.Node,
+  owner?: SyntaxTree.Node,
+): TypeCompatibility.Context => {
+  const retain = (longer: Lifetime.Lifetime, shorter: Lifetime.Lifetime): void => {
+    // A caller-owned universal lifetime remains a whole-contract requirement.
+    if (shorter._tag !== 'LocalLifetime') {
+      base.commitOutlives?.(longer, shorter)
+      return
+    }
+    self.activatedConstraints.push({
+      bound: { longer, shorter },
+      installed,
+      ...(owner === undefined ? {} : { owner }),
+    })
+  }
+  return {
+    ...base,
+    commitOutlives: retain,
+    commitTypeOutlives: (type, lifetime) => {
+      for (const region of Type.storageLifetimes(type)) retain(region, lifetime)
+      for (const parameter of Type.storageParameters(type)) {
+        if (!parameter.staticProperties.includes('Intrinsic.Detached'))
+          retain(genericRegion(self, parameter), lifetime)
+      }
+    },
+  }
 }
 
 /** Derives environment validity from every retained semantic dependency, including nested views. */

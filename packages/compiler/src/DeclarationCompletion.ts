@@ -161,6 +161,12 @@ export const complete = (
   resolvers: ResolutionSeams.ResolutionSeams,
 ): DeclarationIndex.Index => {
   const diagnostics: Array<Diagnostic.Diagnostic> = [...self.diagnostics]
+  // Alias declarations own their one-shot resolution diagnostics. Header arity probes also
+  // traverse property bounds and may ignore non-nominal results, so they must not force these first.
+  for (const module of self.modules)
+    for (const member of module.members)
+      if (member._tag === 'AliasDeclaration')
+        diagnostics.push(...(resolvers.alias?.(member).diagnostics ?? []))
   const finalized = new Map<MemberFact, MemberFact>()
   const active = new Set<MemberFact>()
   const finalize = (member: MemberFact): MemberFact => {
@@ -243,8 +249,7 @@ export const complete = (
           ),
         )
       if (member._tag === 'AliasDeclaration') {
-        // The resolver memoizes each alias, so a use that already forced it reported its
-        // diagnostics; this forcing only guarantees every alias resolves at least once.
+        // Alias diagnostics were retained before header replay; this reads the memoized target.
         const resolved = resolvers.alias?.(member)
         if (resolved === undefined) return member
         diagnostics.push(...resolved.diagnostics)
@@ -1484,6 +1489,7 @@ export const complete = (
               mapping.contract,
               implementation,
               inference.substitution,
+              conformance.typeParameters,
             )
             if (compatibility === undefined || compatibility._tag === 'Incompatible')
               rejectIncompatibleMapping(

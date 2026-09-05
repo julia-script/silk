@@ -126,13 +126,26 @@ const operandProblem = (
 export const lifetimeContract = (
   contract: Type.ExecutableLifetimes,
   witness: Type.ExecutableLifetimes,
+  context: TypeCompatibility.Context = TypeCompatibility.context(),
 ): Compatibility => {
   const expected = Type.callable([], Type.unit, {
     ...contract,
     environment: Lifetime.staticLifetime,
   })
   const actual = Type.callable([], Type.unit, { ...witness, environment: Lifetime.staticLifetime })
-  return TypeCompatibility.isCompatible(TypeCompatibility.check(actual, expected))
+  // A mapped declaration has not yet formed a function value. Its specialized free predicates
+  // must be established by the conformance before structural comparison may assume them.
+  const formation = Type.executableFormationRequirements(actual)
+  if (
+    !formation.lifetimeBounds.every((bound) =>
+      TypeCompatibility.isCompatible(
+        TypeCompatibility.check(Type.string(bound.longer), Type.string(bound.shorter), context),
+      ),
+    ) ||
+    !formation.typeOutlives.every((bound) => TypeCompatibility.typeOutlives(context, bound))
+  )
+    return incompatible(Object.freeze({ _tag: 'LifetimeContract' }))
+  return TypeCompatibility.isCompatible(TypeCompatibility.check(actual, expected, context))
     ? Object.freeze({ _tag: 'Compatible' })
     : incompatible(Object.freeze({ _tag: 'LifetimeContract' }))
 }

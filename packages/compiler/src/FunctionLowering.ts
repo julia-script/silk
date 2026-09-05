@@ -228,7 +228,11 @@ export class FunctionLowering {
   }
 
   type(type: Type.Type): Mir.Type | undefined {
-    const specialized = Type.substitute(type, this.substitution)
+    const specialized = Type.substitute(
+      type,
+      this.substitution,
+      this.owner.specialization.compatibility,
+    )
     return (
       storedCallableValueType(this.layout, specialized) ??
       storedEffectValueType(this.layout, specialized) ??
@@ -238,11 +242,15 @@ export class FunctionLowering {
   }
 
   semantic(type: Type.Type): Type.Type {
-    return Type.substitute(type, this.substitution)
+    return Type.substitute(type, this.substitution, this.owner.specialization.compatibility)
   }
 
   semanticArgument(argument: Type.GenericArgument): Type.GenericArgument {
-    return Type.substituteGenericArgument(argument, this.substitution)
+    return Type.substituteGenericArgument(
+      argument,
+      this.substitution,
+      this.owner.specialization.compatibility,
+    )
   }
 
   call(

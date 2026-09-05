@@ -73,11 +73,11 @@ pub fn main() -> i32 { return 0 }`),
 
 it.effect('compiles the raw-string example block that motivated the raw literal form', () =>
   Effect.gen(function* () {
-    // Reproduced verbatim from the Example block of issue #13.
-    const example = String.raw`const decimalPattern: string = r"\d+\.\d+"
-const windowsPath: string = r"C:\Users\build\output"
+    // Original issue #13 raw literal bodies, with explicit static storage lifetimes.
+    const example = String.raw`const decimalPattern: string<'static> = r"\d+\.\d+"
+const windowsPath: string<'static> = r"C:\Users\build\output"
 
-const helpText: string = r"""
+const helpText: string<'static> = r"""
 Usage: silk build [options]
   --target \path\to\dir
 """
@@ -92,10 +92,10 @@ it.effect('accepts constant references while retaining string initializer restri
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'constants/string-invalid',
-      encoder.encode(`const source: string = "a"
-const copied: string = source
-const bytes: string = b"a"
-const escape: string = "\\q"
+      encoder.encode(`const source: string<'static> = "a"
+const copied: string<'static> = source
+const bytes: string<'static> = b"a"
+const escape: string<'static> = "\\q"
 pub fn main() -> i32 { return 0 }`),
     )
     const messages = Analysis.diagnostics(snapshot)

@@ -36,6 +36,7 @@ import type {
   Violation,
 } from './Mir.js'
 import {
+  acceptsRuntimeOperand,
   callingShapeEquals,
   executionOperations,
   regionsTree,
@@ -3606,7 +3607,8 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         if (
           returned === undefined ||
           (returned._tag !== 'Bottom' &&
-            !SilkType.equals(semanticType(returned), semanticType(fn.result)))
+            SilkType.runtimeKey(semanticType(returned)) !==
+              SilkType.runtimeKey(semanticType(fn.result)))
         )
           violations.push(
             Object.freeze({
@@ -3647,7 +3649,8 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         if (
           returned !== undefined &&
           returned._tag !== 'Bottom' &&
-          !SilkType.equals(semanticType(returned), semanticType(fn.result))
+          SilkType.runtimeKey(semanticType(returned)) !==
+            SilkType.runtimeKey(semanticType(fn.result))
         ) {
           violations.push(
             Object.freeze({
@@ -3772,11 +3775,9 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           if (
             string?._tag !== 'String' ||
             destination?._tag !== 'Slice' ||
-            !SilkType.equals(
-              destination.type,
-              operation.type.type,
-            ) ||
-            operation.type.type.access !== 'Shared' || operation.type.type.element !== 'u8' ||
+            !SilkType.equals(destination.type, operation.type.type) ||
+            operation.type.type.access !== 'Shared' ||
+            operation.type.type.element !== 'u8' ||
             !heldStringLoansValid(operation.heldLoans)
           ) {
             invalidString(
@@ -6699,9 +6700,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                   return (
                     actual !== undefined &&
                     expectedType !== undefined &&
-                    TypeCompatibility.isCompatible(
-                      TypeCompatibility.check(actual, semanticType(expectedType)),
-                    )
+                    acceptsRuntimeOperand(actual, semanticType(expectedType))
                   )
                 })
               return (
@@ -6753,7 +6752,6 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               candidate.result._tag === 'EffectOutcome' &&
               SilkType.equals(candidate.result.type, operation.outcomeType.type),
           )
-          if (runner === undefined && fn.id.module.includes('local-shared-allocation')) console.log('TEMP runner', JSON.stringify({ requested: { id: operation.runner, args: operation.runnerTypeArguments.map(SilkType.genericArgumentKey), type: SilkType.key(operation.outcomeType.type) }, candidates: self.functions.filter((candidate) => candidate.id.module === operation.runner.module && candidate.id.name === operation.runner.name).map((candidate) => ({ id: candidate.id, args: candidate.instance.typeArguments.map(SilkType.genericArgumentKey), result: candidate.result._tag === 'EffectOutcome' ? SilkType.key(candidate.result.type) : candidate.result._tag })) }))
           const parametersValid =
             runner !== undefined &&
             runner.parameterCount === inputs.length &&
@@ -6763,9 +6761,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               return (
                 actual !== undefined &&
                 expected !== undefined &&
-                TypeCompatibility.isCompatible(
-                  TypeCompatibility.check(semanticType(actual), semanticType(expected)),
-                )
+                acceptsRuntimeOperand(semanticType(actual), semanticType(expected))
               )
             })
           const propagationValid = runPropagationValid(self.layout, fn, operation)
@@ -6823,7 +6819,6 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           const expectedFailureValue = SilkType.failureValue(
             SilkType.failureMembers(operation.outcomeType.type),
           )
-          if (fn.id.module.includes('local-shared-allocation') && !SilkType.equals(operation.outcomeShape.type, operation.outcomeType.type)) console.log('TEMP shape', SilkType.key(operation.outcomeShape.type), SilkType.key(operation.outcomeType.type))
           const disagreements = [
             runner?.result._tag === 'EffectOutcome' &&
             SilkType.equals(runner.result.type, operation.outcomeType.type)
@@ -6851,7 +6846,8 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             SilkType.equals(operation.successShape.type, operation.outcomeType.type.success)
               ? undefined
               : 'success-shape',
-            SilkType.runtimeKey(operation.outcomeShape.type) === SilkType.runtimeKey(operation.outcomeType.type)
+            SilkType.runtimeKey(operation.outcomeShape.type) ===
+            SilkType.runtimeKey(operation.outcomeType.type)
               ? undefined
               : 'outcome-shape',
             SilkType.equals(operation.failureValueShape.type, expectedFailureValue)

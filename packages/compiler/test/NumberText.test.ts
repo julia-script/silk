@@ -241,7 +241,7 @@ pub effect fn main() -> () ! WriterError {
           new Map([
             [
               'model/Person',
-              encoder.encode(`pub struct Person { pub name: string token: i32 }
+              encoder.encode(`pub struct Person { pub name: string<'static> token: i32 }
 pub fn make() -> Person { return Person { name: "Julia", token: 42 } }`),
             ],
           ]),
@@ -282,7 +282,7 @@ it('declares inline Display witnesses without a second string-writing route', ()
   for (const spelling of integerSpellings) assert.include(source, `impl Display for ${spelling} {`)
   assert.include(
     source,
-    `impl Display for string {
+    `impl<'text> Display for string<'text> {
   /// Writes the string's UTF-8 bytes through the ambient mutable Writer.`,
   )
   assert.include(source, 'return run Format.writeText(&mut formatter, self.*)')

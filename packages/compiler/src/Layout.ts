@@ -2416,7 +2416,11 @@ const effectEnvironments = (
           if (statement._tag === 'Bind' && statement.initializer._tag !== 'Unavailable') {
             bindingTypes.set(
               statement.binding.ordinal,
-              Type.substitute(statement.initializer.type, instance.substitution),
+              Type.substitute(
+                statement.initializer.type,
+                instance.substitution,
+                instance.specialization.compatibility,
+              ),
             )
           } else if (statement._tag === 'If' || statement._tag === 'IfLet') {
             collectBindings(statement.taken)
@@ -2482,7 +2486,11 @@ const effectEnvironments = (
         .flatMap((expression) => {
           if (expression._tag !== 'BuiltinCall' || expression.witnessEffectSite !== undefined)
             return []
-          const type = Type.substitute(expression.type, instance.substitution)
+          const type = Type.substitute(
+            expression.type,
+            instance.substitution,
+            instance.specialization.compatibility,
+          )
           if (!Type.isEffect(type)) return []
           return [
             Object.freeze({
@@ -2497,7 +2505,11 @@ const effectEnvironments = (
                   const specialized =
                     argument._tag === 'Unavailable'
                       ? undefined
-                      : Type.substitute(argument.type, instance.substitution)
+                      : Type.substitute(
+                          argument.type,
+                          instance.substitution,
+                          instance.specialization.compatibility,
+                        )
                   let access: 'Copy' | 'Shared' | 'Exclusive' | 'Take' = 'Take'
                   if (
                     specialized !== undefined &&
@@ -2526,7 +2538,11 @@ const effectEnvironments = (
         ...builtinSites,
       ])
       for (const block of effectSites) {
-        const structuralEffect = Type.substitute(block.type, instance.substitution)
+        const structuralEffect = Type.substitute(
+          block.type,
+          instance.substitution,
+          instance.specialization.compatibility,
+        )
         if (!Type.isEffect(structuralEffect)) continue
         const effectInstance = discovery.effects.find(
           (candidate) => candidate.identity === Instances.effectIdentity(instance.key, block.site),
@@ -2564,7 +2580,9 @@ const effectEnvironments = (
             unavailable = `capture ${source.toLowerCase()} has no concrete type`
             break
           }
-          const specialized = realized?.type ?? Type.substitute(type, instance.substitution)
+          const specialized =
+            realized?.type ??
+            Type.substitute(type, instance.substitution, instance.specialization.compatibility)
           const representedEffect =
             Type.isRepresented(specialized) &&
             Type.isEffect(specialized.contract) &&
@@ -2793,7 +2811,11 @@ const effectEnvironments = (
             : [Object.freeze({ expression, contract, site: expression.witnessEffectSite })]
         })
       for (const witness of witnessEffects) {
-        const structuralEffect = Type.substitute(witness.expression.type, instance.substitution)
+        const structuralEffect = Type.substitute(
+          witness.expression.type,
+          instance.substitution,
+          instance.specialization.compatibility,
+        )
         if (!Type.isEffect(structuralEffect)) continue
         let unavailable: string | undefined
         const fieldInputs: Array<Packing.Input<EffectFieldDraft>> = []
@@ -2802,7 +2824,11 @@ const effectEnvironments = (
             unavailable = `interface operand ${ordinal} has no concrete type`
             break
           }
-          const fieldType = Type.substitute(operand.type.type, instance.substitution)
+          const fieldType = Type.substitute(
+            operand.type.type,
+            instance.substitution,
+            instance.specialization.compatibility,
+          )
           const valueLayout = layouts.get(Type.runtimeKey(fieldType))
           if (valueLayout === undefined) {
             unavailable = `interface operand ${ordinal} has no value layout`
@@ -3058,7 +3084,11 @@ const wordLiteralVerdicts = (
       .flatMap(Hir.expressionTree)
     for (const expression of expressions) {
       if (expression._tag !== 'IntegerLiteral' || expression.constant !== undefined) continue
-      const type = Type.substitute(expression.type, instance.substitution)
+      const type = Type.substitute(
+        expression.type,
+        instance.substitution,
+        instance.specialization.compatibility,
+      )
       if (!isWordType(type)) continue
       add(type, BigInt(expression.value), expression.span)
     }
@@ -3093,7 +3123,11 @@ export const plan = (
         Instances.concreteEffectRepresentationArgument(
           instance.function,
           instance.key,
-          Type.substituteGenericArgument(argument, instance.substitution),
+          Type.substituteGenericArgument(
+            argument,
+            instance.substitution,
+            instance.specialization.compatibility,
+          ),
         ),
       )
       for (const argument of [arguments_.at(0), arguments_.at(2)])
@@ -3197,7 +3231,7 @@ export const plan = (
       const raw = expression.typeArguments.at(0)
       const element =
         raw !== undefined && Type.isTypeArgument(raw)
-          ? Type.substitute(raw, instance.substitution)
+          ? Type.substitute(raw, instance.substitution, instance.specialization.compatibility)
           : undefined
       const elementLayout = element === undefined ? undefined : resolve(element)
       if (
@@ -3330,7 +3364,11 @@ export const plan = (
         Instances.concreteEffectRepresentationArgument(
           instance.function,
           instance.key,
-          Type.substituteGenericArgument(argument, instance.substitution),
+          Type.substituteGenericArgument(
+            argument,
+            instance.substitution,
+            instance.specialization.compatibility,
+          ),
         ),
       )
       const result = arguments_.at(0)

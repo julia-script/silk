@@ -103,7 +103,7 @@ it('intersects complete candidate maps before selecting a late common member', (
   assert.deepEqual(
     ResolutionWork.snapshot(work)
       .map((entry) => [entry.queries, entry.candidatesVisited, entry.candidatesAccepted])
-      .sort(),
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
     [
       [1, 1, 1],
       [1, 3, 3],

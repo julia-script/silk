@@ -46,6 +46,7 @@ import * as ResolutionSeams from './ResolutionSeams.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
+import * as TypeCompatibility from './TypeCompatibility.js'
 
 const resolveExactRepresentation = (
   module: string,
@@ -1216,12 +1217,6 @@ export const inferInterfaceWitnessTarget = (
   const binders = implementation.typeParameters
     .filter((parameter) => parameter.duplicateOf === undefined)
     .map((parameter) => parameter.type)
-  if (binders.length === 0)
-    return Object.freeze({
-      _tag: 'Inferred',
-      arguments: Object.freeze([]),
-      substitution: new Map<string, Type.GenericArgument>(),
-    })
   const constraints: Array<InterfaceWitnessInference.Constraint> = []
   for (const [ordinal, operand] of contract.operands.entries()) {
     const pattern = implementation.parameters.at(ordinal)?.declaredType
@@ -1230,6 +1225,31 @@ export const inferInterfaceWitnessTarget = (
       operand.parameter.name._tag === 'Present'
         ? operand.parameter.name.spelling
         : `#${ordinal + 1}`
+    // An owned operand can be lent to a source witness for this invocation. Its temporary borrow
+    // is rigid: it cannot satisfy a static precondition or escape through the promised result.
+    const actual =
+      Type.isReference(pattern.type) &&
+      !Type.isReference(operand.type.type) &&
+      !Type.isSlice(operand.type.type)
+        ? Type.reference(
+            pattern.type.access,
+            operand.type.type,
+            Lifetime.placeholder(
+              Lifetime.bound(
+                {
+                  module: implementation.id.sourceId,
+                  name:
+                    implementation.name._tag === 'Present'
+                      ? implementation.name.spelling
+                      : `witness@${implementation.id.ordinal}`,
+                },
+                0,
+                'witnessBorrow',
+              ),
+              'owned witness invocation',
+            ),
+          )
+        : operand.type.type
     constraints.push(
       Object.freeze({
         label: Type.equals(
@@ -1239,7 +1259,7 @@ export const inferInterfaceWitnessTarget = (
           ? `receiver ${name}`
           : `parameter ${name}`,
         pattern: pattern.type,
-        actual: operand.type.type,
+        actual,
       }),
     )
   }
@@ -1295,6 +1315,7 @@ export const interfaceWitnessCompatibility = (
   contract: InterfaceOperationApplicationFact | undefined,
   implementation: DeclarationFact,
   substitution: Type.Substitution,
+  conformanceParameters: ReadonlyArray<TypeParameterFact>,
 ): InterfaceWitnessCompatibility.Compatibility | undefined => {
   if (contract === undefined || contract.success._tag !== 'Resolved') return undefined
   const writtenLifetimes = (
@@ -1318,17 +1339,38 @@ export const interfaceWitnessCompatibility = (
           }))
         : [],
     ),
+    typeOutlives: parameters.flatMap((parameter) => {
+      const argument = Type.parameterArgument(parameter.type)
+      let type: Type.Type | undefined
+      if (Type.isTypeArgument(argument)) type = argument
+      else if (Type.isRepresentationArgument(argument)) type = Type.representedType(argument)
+      return type === undefined
+        ? []
+        : (parameter.lifetimeBounds ?? []).map((lifetime) => ({ type, lifetime }))
+    }),
   })
-  const expectedLifetimes = writtenLifetimes(contract.source.declaration.typeParameters)
+  const expectedLifetimes = contract.lifetimes
   const actualLifetimes = writtenLifetimes(implementation.typeParameters)
-  const lifetimeCompatibility = InterfaceWitnessCompatibility.lifetimeContract(expectedLifetimes, {
-    ...actualLifetimes,
-    lifetimeBinders: expectedLifetimes.lifetimeBinders,
-    lifetimeBounds: (actualLifetimes.lifetimeBounds ?? []).map((bound) => ({
-      longer: Type.substituteLifetime(bound.longer, substitution),
-      shorter: Type.substituteLifetime(bound.shorter, substitution),
-    })),
-  })
+  const conformanceLifetimes = writtenLifetimes(conformanceParameters)
+  const lifetimeCompatibility = InterfaceWitnessCompatibility.lifetimeContract(
+    expectedLifetimes,
+    {
+      ...actualLifetimes,
+      lifetimeBinders: expectedLifetimes.lifetimeBinders,
+      lifetimeBounds: (actualLifetimes.lifetimeBounds ?? []).map((bound) => ({
+        longer: Type.substituteLifetime(bound.longer, substitution),
+        shorter: Type.substituteLifetime(bound.shorter, substitution),
+      })),
+      typeOutlives: (actualLifetimes.typeOutlives ?? []).map((bound) => ({
+        type: Type.substitute(bound.type, substitution),
+        lifetime: Type.substituteLifetime(bound.lifetime, substitution),
+      })),
+    },
+    TypeCompatibility.context({
+      assumptions: Lifetime.assumptions(conformanceLifetimes.lifetimeBounds ?? []),
+      typeBounds: conformanceLifetimes.typeOutlives ?? [],
+    }),
+  )
   if (lifetimeCompatibility._tag === 'Incompatible') return lifetimeCompatibility
   const contractOperands = contract.operands.flatMap((operand) =>
     operand.type._tag === 'Resolved'

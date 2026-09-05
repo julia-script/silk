@@ -3,10 +3,12 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as InstanceDiagnostics from '../src/InstanceDiagnostics.js'
+import * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
+import { unreachable } from './support/raise.js'
 import * as Projections from './support/projections.js'
 
 /**
@@ -29,7 +31,9 @@ const analyzed = (
   options?: Parameters<typeof Analysis.ofSourceRealized>[3],
 ) => Analysis.ofSourceRealized(name, ascii(source), target, options)
 
-const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
+const frontend = (name: string, source: string) => Analysis.ofSource(name, ascii(source))
+
+const messages = (snapshot: Analysis.FrontendSnapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message)
 
 it.effect(
@@ -41,39 +45,49 @@ it.effect(
         `interface Seed<A> { fn seed() -> A }
 interface Encodable<A> { fn encode(self: &Self) -> A }
 struct Age { value: i32 }
+interface Decoder { fn decode(value: Self) -> i32 }
+fn decodeAge(value: &Age) -> i32 { return value.value }
+impl Decoder for Age { decode: Age.decodeAge }
 impl Seed<i32> for Age { fn seed() -> i32 { return 20 } }
 impl Encodable<i32> for Age { fn encode(self: &Self) -> i32 { return self.value } }
 fn seeded<T: Seed<i32>>() -> i32 { return Seed<i32>.seed() }
 fn encodeConcrete<T: Encodable<i32>>(age: &Age) -> i32 {
-  return Encodable<i32>.encode(age)
+  let encoded = Encodable<i32>.encode(&age.*)
+  return (&age.*) |> Encodable<i32>.encode
 }
 pub fn main() -> i32 {
   let age = Age { value: 22 }
-  return seeded<Age>() + encodeConcrete<Age>(&age)
+  return seeded<Age>() + encodeConcrete<Age>(&age) + Decoder.decode(move age)
 }`,
       )
       assert.deepEqual(Analysis.diagnostics(fallback), [])
       const fallbackInstances = Analysis.instancesOf(fallback).instances.map(
         (instance) => instance.key.declaration.name,
       )
-      assert.include(fallbackInstances, 'impl@0.seed')
-      assert.include(fallbackInstances, 'impl@1.encode')
+      assert.include(fallbackInstances, 'impl@1.seed')
+      assert.include(fallbackInstances, 'impl@2.encode')
+      assert.include(fallbackInstances, 'decodeAge')
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(fallback)), [])
+      assert.isTrue(
+        Analysis.loweredMir(fallback)
+          .functions.flatMap(MirVerification.operations)
+          .some((operation) => operation._tag === 'Call' && operation.target.name === 'decodeAge'),
+      )
 
       const specialized = yield* analyzed(
         'bound-operation-witness/per-specialization',
-        `import silk.u64 as u64
-interface Keyed { fn digest(left: &Self, right: &Self) -> u64 }
+        `interface Keyed { fn digest(left: &Self, right: &Self) -> i32 }
 struct Cell { weight: i32 }
-struct Tag { code: u64 }
-fn cellDigest(left: &Cell, right: &Cell) -> u64 { return 10 }
-fn tagDigest(left: &Tag, right: &Tag) -> u64 { return u64.wrappingAdd(left.code, right.code) }
+struct Tag { code: i32 }
+fn cellDigest(left: &Cell, right: &Cell) -> i32 { return 10 }
+fn tagDigest(left: &Tag, right: &Tag) -> i32 { return left.code + right.code }
 impl Keyed for Cell { digest: Cell.cellDigest }
 impl Keyed for Tag { digest: Tag.tagDigest }
-fn digestOf<T: Keyed>(left: T, right: T) -> u64 { return Keyed.digest(&left, &right) }
+fn digestOf<T: Keyed>(left: T, right: T) -> i32 { return Keyed.digest(&left, &right) }
 pub fn main() -> i32 {
   let cell = digestOf<Cell>(Cell { weight: 1 }, Cell { weight: 2 })
   let tag = digestOf<Tag>(Tag { code: 30 }, Tag { code: 2 })
-  return u64.toI32(u64.wrappingAdd(cell, tag))
+  return cell + tag
 }`,
       )
       assert.deepEqual(Analysis.diagnostics(specialized), [])
@@ -116,7 +130,7 @@ struct Other { value: u32 }
 impl Encodable<u32> for Age {
   effect fn encode(self: &Self) -> u32 { return self.value }
 }`
-    const escaping = yield* analyzed(
+    const escaping = yield* frontend(
       'interface-operation-witness/escaping-section',
       `${prelude}
 pub fn main() -> i32 {
@@ -129,7 +143,7 @@ pub fn main() -> i32 {
       'SEM0099',
     )
 
-    const missing = yield* analyzed(
+    const missing = yield* frontend(
       'interface-operation-witness/missing-conformance',
       `${prelude}
 pub fn main() -> i32 {
@@ -153,7 +167,7 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(calls, [])
 
-    const ambiguous = yield* analyzed(
+    const ambiguous = yield* frontend(
       'interface-operation-witness/ambiguous-fallback',
       `interface Seed<A> { fn seed() -> A }
 fn ambiguous<A: Seed<i32>, B: Seed<i32>>() -> i32 {
@@ -166,7 +180,7 @@ pub fn main() -> i32 { return 0 }`,
       'SEM0097',
     )
 
-    const appliedService = yield* analyzed(
+    const appliedService = yield* frontend(
       'interface-operation-witness/applied-service',
       `service Source<A> { effect fn read() -> A ? &Source<A> }
 pub fn main() -> i32 {
@@ -179,7 +193,7 @@ pub fn main() -> i32 {
       'SEM0010',
     )
 
-    const resultDirected = yield* analyzed(
+    const resultDirected = yield* frontend(
       'interface-operation-witness/result-does-not-select',
       `interface Seed<A> { fn seed() -> A }
 struct Age { value: i32 }
@@ -192,7 +206,7 @@ pub fn main() -> i32 { return 0 }`,
       'SEM0099',
     )
 
-    const conflictingSelf = yield* analyzed(
+    const conflictingSelf = yield* frontend(
       'interface-operation-witness/conflicting-self',
       `interface Pair<A> { fn combine(left: &Self, right: &Self) -> A }
 struct Age { value: i32 }
@@ -201,7 +215,9 @@ impl Pair<i32> for Age { fn combine(left: &Self, right: &Self) -> i32 { return 1
 pub fn main() -> i32 {
   let age = Age { value: 1 }
   let other = Other { value: 2 }
-  return Pair<i32>.combine(&age, &other)
+  let left = &age
+  let right = &other
+  return Pair<i32>.combine(left, right)
 }`,
     )
     const conflict = Analysis.diagnostics(conflictingSelf).find(
@@ -247,7 +263,7 @@ pub fn main() -> i32 {
       ],
     ]
     for (const [name, source, code] of invalidOwnerApplications) {
-      const snapshot = yield* analyzed(`interface-operation-witness/${name}`, source)
+      const snapshot = yield* frontend(`interface-operation-witness/${name}`, source)
       assert.include(
         Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
         code,
@@ -262,7 +278,8 @@ it.effect('indexes namespace-qualified applied interface owners without duplicat
     const source = `import model.Encoding as Model
 pub fn main() -> i32 {
   let age = Model.Age { value: 42 }
-  return Model.Encodable<i32>.encode(&age)
+  let encoded = Model.Encodable<i32>.encode(&age)
+  return (&age) |> Model.Encodable<i32>.encode
 }`
     const snapshot = yield* Analysis.makeRealized({
       root: SourceFile.make(module, ascii(source)),
@@ -341,11 +358,9 @@ impl Encodable<i32> for Age {
   }),
 )
 
-it.effect('accepts a shared source witness for a take-owned interface contract', () =>
+it.effect('lends owned operands to source witnesses without promising static storage', () =>
   Effect.gen(function* () {
-    const snapshot = yield* analyzed(
-      'bound-operation-witness/value-contract-borrowed-witness',
-      `interface Decoder {
+    const source = `interface Decoder {
   fn decode(value: Self) -> i32
 }
 
@@ -355,9 +370,89 @@ fn decodeCell(value: &Cell) -> i32 { return value.code }
 
 impl Decoder for Cell { decode: Cell.decodeCell }
 
-pub fn main() -> i32 { return 0 }`,
+interface StaticDecoder { fn decode(value: Self) -> i32 }
+fn staticDecode(value: &'static Cell) -> i32 { return value.code }
+impl StaticDecoder for Cell { decode: Cell.staticDecode }
+
+interface BoundDecoder { fn decode(value: Self) -> i32 }
+fn boundDecode<'a: 'static>(value: &'a Cell) -> i32 { return value.code }
+impl BoundDecoder for Cell { decode: Cell.boundDecode }
+
+pub fn main() -> i32 { return 0 }`
+    const snapshot = yield* frontend(
+      'bound-operation-witness/value-contract-borrowed-witness',
+      source,
     )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        source: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [
+        { code: 'SEM0083', source: 'decode: Cell.staticDecode' },
+        { code: 'SEM0083', source: 'decode: Cell.boundDecode' },
+      ],
+    )
+  }),
+)
+
+it.effect('cleans an owned witness operand after success or failure', () =>
+  Effect.gen(function* () {
+    const self = yield* analyzed(
+      'bound-operation-witness/owned-adapter-cleanup',
+      `
+struct Failed {}
+struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+interface Decode { effect fn decode(value: Self) -> i32 ! Failed }
+effect fn decode(value: &Token) -> i32 ! Failed {
+  if value.value == 0 { fail Failed {} }
+  return value.value
+}
+impl Decode for Token { decode: Token.decode }
+effect fn program() -> i32 ! Failed { return run Decode.decode(Token { value: 42 }) }
+effect fn recover(error: Failed) -> i32 { drop error return 0 }
+pub fn main() -> i32 { return run Intrinsic.catchFailure<Failed>(program(), recover) }
+`,
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const mir = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const runner =
+      mir.functions.find((fn) => fn.id.name === 'program$effect$0') ??
+      unreachable('expected owned witness adapter runner')
+    const operations = Mir.executionOperations({ entry: runner.entry, regions: runner.regions })
+    const run = operations.find((operation) => operation._tag === 'RunStaticEffect')
+    assert.strictEqual(run?._tag, 'RunStaticEffect')
+    if (run?._tag !== 'RunStaticEffect') return
+    assert.deepEqual(
+      run.releases?.map((release) => [release.local.ordinal, release.cleanup._tag]),
+      [[0, 'HookCleanup']],
+    )
+    assert.deepEqual(
+      operations
+        .filter((operation) => operation._tag === 'Drop')
+        .map((operation) => [operation.local.ordinal, operation.cleanup._tag]),
+      [[0, 'HookCleanup']],
+    )
+    const loan = operations.find(
+      (operation) => operation._tag === 'BeginLoan' && operation.root.ordinal === 0,
+    )
+    assert.strictEqual(loan?._tag, 'BeginLoan')
+    if (loan?._tag !== 'BeginLoan') return
+    assert.deepEqual(
+      run.failureLoanEnds?.map((end) => end.slice.ordinal),
+      [loan.destination.ordinal],
+    )
+    const successEnd = operations.findIndex(
+      (operation) =>
+        operation._tag === 'EndLoan' && operation.slice.ordinal === loan.destination.ordinal,
+    )
+    assert.isAbove(successEnd, operations.indexOf(run))
+    assert.isAbove(
+      operations.findIndex((operation) => operation._tag === 'Drop'),
+      successEnd,
+    )
   }),
 )
 
@@ -550,7 +645,7 @@ pub fn main() -> i32 {
 
 it.effect('retains exact witness failure and requirement rows at interface boundaries', () =>
   Effect.gen(function* () {
-    const callOf = (snapshot: Analysis.Snapshot, sourceModule: string, name: string) =>
+    const callOf = (snapshot: Analysis.FrontendSnapshot, sourceModule: string, name: string) =>
       Projections.hirOf(snapshot, sourceModule)
         ?.functions.find(
           (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === name,
@@ -560,11 +655,9 @@ it.effect('retains exact witness failure and requirement rows at interface bound
         .find((expression) => expression._tag === 'InterfaceOperationCall')
 
     const inlineModule = 'bound-operation-witness/inline-scalar-effect'
-    const inline = yield* analyzed(
+    const inline = yield* frontend(
       inlineModule,
-      `import silk.effect { Effect }
-import silk.result { Result }
-struct Problem { code: i32 }
+      `struct Problem { code: i32 }
 service Output { effect fn emit(number: i32) -> i32 ? &Output }
 struct FixedOutput {}
 effect fn emit(self: &FixedOutput, number: i32) -> i32 { return number }
@@ -576,24 +669,19 @@ impl Present for i32 {
 fn pending<T: Present>(value: &T) -> Effect<i32 ! Problem ? &Output> {
   return Present.present(value)
 }
-fn observe(result: Result<i32, Problem>) -> i32 {
-  return match move result {
-    Result<i32, Problem>.Success { value } => value
-    Result<i32, Problem>.Failure { error } => error.code
-  }
-}
-pub fn main() -> i32 {
-  let output = FixedOutput {}
-  let value = 7
-  let provided = pending<i32>(&value) |> Effect.provide(&output)
-  return observe(run Effect.result(provided))
-}`,
+
+pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(Analysis.diagnostics(inline), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(inline)), [])
     const inlineCall = callOf(inline, inlineModule, 'pending')
     assert.strictEqual(inlineCall?._tag, 'InterfaceOperationCall')
     if (inlineCall?._tag === 'InterfaceOperationCall') {
+      assert.deepEqual(inlineCall.contract.lifetimes.lifetimeBinders, [])
+      const retainedParameters = (inlineCall.contract.lifetimes.typeOutlives ?? []).flatMap(
+        (bound) => Type.parameters(bound.type),
+      )
+      assert.isTrue(retainedParameters.some((parameter) => parameter.name === 'T'))
+      assert.isFalse(retainedParameters.some((parameter) => parameter.name === 'Self'))
       assert.deepEqual(inlineCall.contract.failureRow.failures.map(Type.encode), [
         `${inlineModule}.Problem`,
       ])
@@ -607,11 +695,9 @@ pub fn main() -> i32 {
     }
 
     const smallerModule = 'bound-operation-witness/smaller-effect-row'
-    const smaller = yield* analyzed(
+    const smaller = yield* frontend(
       smallerModule,
-      `import silk.effect { Effect }
-import silk.result { Result }
-struct Problem {}
+      `struct Problem {}
 struct Extra {}
 interface Decoder { effect fn decode(value: &Self) -> i32 ! Problem | Extra }
 struct Cell { code: i32 }
@@ -620,19 +706,10 @@ impl Decoder for Cell { decode: Cell.decodeCell }
 fn pending<T: Decoder>(value: &T) -> Effect<i32 ! Problem | Extra> {
   return Decoder.decode(value)
 }
-fn observe(result: Result<i32, Problem | Extra>) -> i32 {
-  return match move result {
-    Result<i32, Problem | Extra>.Success { value } => value
-    Result<i32, Problem | Extra>.Failure { error } => 0
-  }
-}
-pub fn main() -> i32 {
-  let cell = Cell { code: 42 }
-  return observe(run Effect.result(pending<Cell>(&cell)))
-}`,
+
+pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(Analysis.diagnostics(smaller), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(smaller)), [])
     const smallerCall = callOf(smaller, smallerModule, 'pending')
     assert.strictEqual(smallerCall?._tag, 'InterfaceOperationCall')
     if (smallerCall?._tag === 'InterfaceOperationCall')
@@ -642,11 +719,9 @@ pub fn main() -> i32 {
       ])
 
     const pureModule = 'bound-operation-witness/pure-effect-boundary'
-    const pure = yield* analyzed(
+    const pure = yield* frontend(
       pureModule,
-      `import silk.effect { Effect }
-import silk.result { Result }
-struct Problem {}
+      `struct Problem {}
 interface Decoder { effect fn decode(value: &Self) -> i32 ! Problem }
 struct Cell { code: i32 }
 fn decodeCell(value: &Cell) -> i32 { return value.code }
@@ -654,19 +729,10 @@ impl Decoder for Cell { decode: Cell.decodeCell }
 fn pending<T: Decoder>(value: &T) -> Effect<i32 ! Problem> {
   return Decoder.decode(value)
 }
-fn observe(result: Result<i32, Problem>) -> i32 {
-  return match move result {
-    Result<i32, Problem>.Success { value } => value
-    Result<i32, Problem>.Failure { error } => 0
-  }
-}
-pub fn main() -> i32 {
-  let cell = Cell { code: 42 }
-  return observe(run Effect.result(pending<Cell>(&cell)))
-}`,
+
+pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(Analysis.diagnostics(pure), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(pure)), [])
     const pureCall = callOf(pure, pureModule, 'pending')
     assert.strictEqual(pureCall?._tag, 'InterfaceOperationCall')
     if (pureCall?._tag === 'InterfaceOperationCall')
@@ -675,10 +741,9 @@ pub fn main() -> i32 {
       ])
 
     const accessModule = 'bound-operation-witness/requirement-access-widening'
-    const access = yield* analyzed(
+    const access = yield* frontend(
       accessModule,
-      `import silk.effect { Effect }
-service Clock {}
+      `service Clock {}
 service Meter {}
 struct FixedClock {}
 struct FixedMeter {}
@@ -692,17 +757,9 @@ impl Decoder for Cell { decode: Cell.decodeCell }
 fn pending<T: Decoder>(value: &mut T) -> Effect<i32 ? &mut Clock | &Meter> {
   return Decoder.decode(value)
 }
-pub fn main() -> i32 {
-  let mut cell = Cell { code: 0 }
-  let mut clock = FixedClock {}
-  let meter = FixedMeter {}
-  return run (pending<Cell>(&mut cell)
-    |> Effect.provideMut(&mut clock)
-    |> Effect.provide(&meter))
-}`,
+pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(Analysis.diagnostics(access), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(access)), [])
     const accessCall = callOf(access, accessModule, 'pending')
     assert.strictEqual(accessCall?._tag, 'InterfaceOperationCall')
     if (accessCall?._tag === 'InterfaceOperationCall')

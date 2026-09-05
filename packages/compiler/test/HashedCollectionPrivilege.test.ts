@@ -2,7 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Intrinsic from '../src/Intrinsic.js'
-import type * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 /**
  * No engine contains a hash operation.
@@ -22,9 +22,6 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const analyzed = (name: string, source: string) => Analysis.ofSourceRealized(name, ascii(source))
-
-const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
-  Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message)
 
 /** A program that inserts, grows, looks up and removes, so the whole map is lowered, not a corner. */
 const usingAMap = `import silk.allocator { OutOfMemoryError }
@@ -60,23 +57,13 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
-/** Every operation of every region of every lowered function, in one flat sequence. */
-const operationsOf = (module: Mir.Module): ReadonlyArray<Mir.Operation> =>
-  module.functions.flatMap((lowered) =>
-    lowered.regions.flatMap((region) => {
-      if (region._tag === 'OperationRegion') return region.operations
-      if (region._tag === 'CleanupRegion') return region.releases
-      return []
-    }),
-  )
-
 /** A name that would betray a hash operation whatever it was called. */
 const hashing = /hash|digest|fnv|murmur|siphash|checksum|crc/i
 
 it.effect('computes every hash as an ordinary call to a witness’s own Silk function', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyzed('hashed-privilege/map', usingAMap)
-    assert.deepEqual(messages(snapshot), [])
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const mir = Analysis.mirOf(snapshot)
     assert.strictEqual(mir._tag, 'Available')
     if (mir._tag !== 'Available') return
@@ -87,11 +74,12 @@ it.effect('computes every hash as an ordinary call to a witness’s own Silk fun
     assert.include(lowered, 'silk/hash.wordHash', `lowered functions: ${lowered.join(', ')}`)
     assert.include(lowered, 'silk/hash.Hash.mix')
 
-    // And it is reached the ordinary way: a `Call` naming that declaration, not an operation of its
-    // own. This is the positive half of the constraint — the hash exists, and it is Silk.
-    const calls = operationsOf(mir.value).flatMap((operation) =>
-      operation._tag === 'Call' ? [`${operation.target.module}.${operation.target.name}`] : [],
-    )
+    // The selected witness call still names that ordinary source body at the runtime boundary.
+    const calls = mir.value.functions
+      .flatMap(MirVerification.operations)
+      .flatMap((operation) =>
+        operation._tag === 'Call' ? [`${operation.target.module}.${operation.target.name}`] : [],
+      )
     assert.include(calls, 'silk/hash.wordHash')
 
     // The collection itself is library source too, lowered from `hash_map.silk`.

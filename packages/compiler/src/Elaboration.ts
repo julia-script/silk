@@ -3,6 +3,7 @@ import { dual } from 'effect/Function'
 import * as Option from 'effect/Option'
 import type * as CallableContract from './CallableContract.js'
 import * as ConformanceProof from './ConformanceProof.js'
+import type * as ConformanceGoal from './ConformanceGoal.js'
 import type * as Constraint from './Constraint.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
@@ -824,6 +825,7 @@ export interface ShortCircuitExpressionFact {
 /** One prefix or infix operator and its canonical builtin resolution. */
 export interface OperatorExpressionFact {
   readonly _tag: 'Operator'
+  readonly selectedConformances?: ReadonlyArray<ConformanceGoal.Proof>
   readonly operator: Operator.Prefix | Operator.Infix
   readonly reference: CallReferenceFact
   readonly arguments: ReadonlyArray<ArgumentFact>
@@ -853,6 +855,7 @@ export interface InterfaceOperationFact {
 /** One declaration or builtin named as a callable value without invocation. */
 export interface FunctionItemExpressionFact {
   readonly _tag: 'FunctionItem'
+  readonly selectedConformances?: ReadonlyArray<ConformanceGoal.Proof>
   readonly reference: CallReferenceFact
   readonly path: ReferencePathFact
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
@@ -883,6 +886,7 @@ export interface AnonymousCaptureFact {
 /** One hidden concrete section construction awaiting an ordered leading parameter prefix. */
 export interface CallableSectionExpressionFact {
   readonly _tag: 'CallableSection'
+  readonly selectedConformances?: ReadonlyArray<ConformanceGoal.Proof>
   readonly site: Hir.CallableSiteId
   readonly reference: CallReferenceFact
   readonly path: ReferencePathFact
@@ -905,6 +909,9 @@ export interface CallableSectionExpressionFact {
 /** One ordinary invocation through a first-class callable expression. */
 export interface CallableApplyExpressionFact {
   readonly _tag: 'CallableApply'
+  /** Exact source identity, when semantic application can discharge its generic obligations. */
+  readonly sourceTarget?: Extract<CallReferenceFact, { readonly _tag: 'Resolved' }>
+  readonly selectedConformances?: ReadonlyArray<ConformanceGoal.Proof>
   readonly callee: ExpressionFact
   readonly arguments: ReadonlyArray<ArgumentFact>
   readonly mode: Type.CallableMode
@@ -1086,6 +1093,8 @@ export type ExpressionFact =
     }
   | {
       readonly _tag: 'Call'
+      /** Selected source evidence retained for generic semantic obligation replay. */
+      readonly selectedConformances?: ReadonlyArray<ConformanceGoal.Proof>
       readonly reference: CallReferenceFact
       readonly path: ReferencePathFact
       readonly interfaceApplication?: DeclarationFacts.DeclaredTypeFact
@@ -1234,7 +1243,11 @@ export type AssignmentRootAccess =
   | 'ExclusiveBorrowed'
 
 /** Classifies writable roots without conflating owned binding mutability with pointee access. */
-export const assignmentRootAccess = (root: AssignmentRootFact): AssignmentRootAccess => {
+export const assignmentRootAccess = (
+  root: AssignmentRootFact,
+  place: ExpressionFact,
+): AssignmentRootAccess => {
+  if (place._tag === 'Grouped') return assignmentRootAccess(root, place.expression)
   if (root._tag === 'PatternBinding')
     return root.access === 'Place' && root.placeMutability === 'Mutable'
       ? 'MutableOwned'
@@ -1251,7 +1264,11 @@ export const assignmentRootAccess = (root: AssignmentRootFact): AssignmentRootAc
   } else {
     type = undefined
   }
-  if (type !== undefined && (Type.isSlice(type) || Type.isReference(type))) {
+  if (
+    place._tag !== 'Identifier' &&
+    type !== undefined &&
+    (Type.isSlice(type) || Type.isReference(type))
+  ) {
     return type.access === 'Exclusive' ? 'ExclusiveBorrowed' : 'SharedBorrowed'
   }
   const mutability = root._tag === 'ParameterDeclaration' ? root.bindingMutability : root.mutability
@@ -1476,6 +1493,13 @@ export const declaredReturnTypesCompatible = (
   if (typesCompatible(source, target, context)) return true
   const representation = representationOfExpression(expression)
   const contract = Type.isRepresented(source) ? source.contract : source
+  if (
+    declaration.opaqueResult !== undefined &&
+    Type.isRepresented(target) &&
+    Type.isOpaqueRepresentationArgument(target.representation.argument) &&
+    Type.equalsOpaqueFamily(target.representation.argument.family, declaration.opaqueResult.family)
+  )
+    return representation !== undefined && typesCompatible(contract, target.contract, context)
   if (
     representation !== undefined &&
     (Type.isCallable(contract) || Type.isEffect(contract)) &&
@@ -1822,7 +1846,11 @@ const constrainedCallableSchema = (expression: ExpressionFact): Type.CallableSch
     return undefined
   const schema = expression.type.type.schema
   return schema !== undefined &&
-    (schema.binders.length > 0 || schema.constraints.length > 0 || schema.evidence.length > 0)
+    (schema.binders.some(
+      (binder) => binder.kind !== 'Lifetime' && !schema.substitution.has(Type.key(binder)),
+    ) ||
+      schema.constraints.length > 0 ||
+      schema.evidence.length > 0)
     ? schema
     : undefined
 }
@@ -2218,6 +2246,9 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
       statements: lowerStatements(fact.statements, {
         lifetimeAssumptions,
         lifetimeCompatibility,
+        ...(fact.declaration.opaqueResult === undefined
+          ? {}
+          : { opaqueResultFamily: fact.declaration.opaqueResult.family }),
         resultType: fact.declaration.returnType.type,
         functionId: fact.declaration.id,
         eraseIntrinsicSections: true,
@@ -2272,6 +2303,9 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
     statements: lowerStatements(fact.statements, {
       lifetimeAssumptions,
       lifetimeCompatibility,
+      ...(fact.declaration.opaqueResult === undefined
+        ? {}
+        : { opaqueResultFamily: fact.declaration.opaqueResult.family }),
       ...(fact.declaration.returnType._tag === 'Resolved'
         ? { resultType: fact.declaration.returnType.type }
         : {}),

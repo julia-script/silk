@@ -211,28 +211,34 @@ const analyzeSemantics = Effect.fnUntraced(function* (
     headers.index.diagnostics,
     generatedAggregates,
   )
+  const retainedOwnership = new Set<string>()
   const ownership = yield* PhaseReport.measureEffectInto(
     report,
     'ownership',
-    results.size - retained.size,
+    results.size,
     Effect.gen(function* () {
       const ownership = new Map<string, Ownership.ModuleOwnership>()
       const localSharedAccessBoundaries = Ownership.localSharedAccessBoundaryPlan(results)
       let ordinal = 0
       for (const [name, result] of results) {
         yield* IncrementalReuse.checkpointModuleBatch(ordinal)
-        if (retained.has(name) && precomputed?.bodyQueries !== undefined)
-          BodyQuery.retainOwnership(precomputed.bodyQueries, result)
-        ownership.set(
-          name,
-          retained.get(name)?.ownership ??
-            Ownership.checkModule(
-              result,
-              index,
-              localSharedAccessBoundaries,
-              precomputed?.bodyQueries,
-            ),
+        const checked = Ownership.checkModule(
+          result,
+          index,
+          localSharedAccessBoundaries,
+          precomputed?.bodyQueries,
         )
+        const previous = retained.get(name)?.ownership
+        const unchanged =
+          previous !== undefined &&
+          previous.functions.length === checked.functions.length &&
+          previous.functions.every((fn, ordinal) => fn === checked.functions[ordinal]) &&
+          previous.diagnostics.length === checked.diagnostics.length &&
+          previous.diagnostics.every(
+            (diagnostic, ordinal) => diagnostic === checked.diagnostics[ordinal],
+          )
+        if (unchanged) retainedOwnership.add(name)
+        ownership.set(name, unchanged ? previous : checked)
         ordinal += 1
       }
       return ownership
@@ -244,8 +250,8 @@ const analyzeSemantics = Effect.fnUntraced(function* (
       counters: () =>
         Object.freeze({
           _tag: 'ModuleReuseCounters' as const,
-          reused: retained.size,
-          recomputed: results.size - retained.size,
+          reused: retainedOwnership.size,
+          recomputed: results.size - retainedOwnership.size,
         }),
     },
   )
@@ -265,7 +271,8 @@ const analyzeSemantics = Effect.fnUntraced(function* (
   for (const [module, elaboration] of results) {
     yield* IncrementalReuse.checkpointModuleBatch(semanticOrdinal)
     const reused = retained.get(module)
-    if (reused !== undefined) semantics.set(module, reused)
+    if (reused !== undefined && reused.ownership === ownership.get(module))
+      semantics.set(module, reused)
     else {
       const moduleOwnership = ownership.get(module)
       if (moduleOwnership === undefined)

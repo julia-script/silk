@@ -1079,6 +1079,7 @@ export interface InterfaceOperationContractFact {
   readonly declaration: ServiceOperationFact
   readonly provider?: Type.Type
   readonly functionKind: ServiceOperationFact['functionKind']
+  readonly lifetimes: Type.ExecutableLifetimes
   readonly unsafe: boolean
   readonly operands: ReadonlyArray<InterfaceOperandFact>
   readonly success: ReturnTypeFact
@@ -1239,6 +1240,7 @@ const interfaceOperationContract = (
     declaration: operation,
     ...(provider === undefined ? {} : { provider }),
     functionKind: operation.functionKind,
+    lifetimes: executableLifetimes(operation),
     unsafe: operation.unsafe,
     operands,
     success: operation.returnType,
@@ -1499,6 +1501,7 @@ const applyInterfaceOperation = (
       provider,
       source,
       functionKind: source.functionKind,
+      lifetimes: source.lifetimes,
       unsafe: source.unsafe,
       operands: source.operands,
       success: source.success,
@@ -1521,7 +1524,7 @@ const applyInterfaceOperation = (
     Type.effectWithRows(
       Type.unit,
       source.failureRow.row,
-      rowLifetimes,
+      source.lifetimes,
       'Shared',
       source.requirementRow.row,
     ),
@@ -1537,6 +1540,12 @@ const applyInterfaceOperation = (
     provider,
     source,
     functionKind: source.functionKind,
+    lifetimes: {
+      environment: rows.environment,
+      lifetimeBinders: rows.lifetimeBinders,
+      lifetimeBounds: rows.lifetimeBounds,
+      typeOutlives: rows.typeOutlives,
+    },
     unsafe: source.unsafe,
     operands,
     success: substituteDeclaredTypeFact(source.success, substitution, capability.module),
@@ -1558,7 +1567,16 @@ export const instantiateInterfaceOperation = (
 ): InterfaceOperationApplicationFact =>
   Object.freeze({
     ...applyInterfaceOperation(
-      { ...self, _tag: 'InterfaceOperationContract' },
+      {
+        ...self,
+        _tag: 'InterfaceOperationContract',
+        lifetimes: {
+          ...self.lifetimes,
+          lifetimeBinders: self.lifetimes.lifetimeBinders.filter(
+            (binder) => !substitution.has(Lifetime.key(binder)),
+          ),
+        },
+      },
       self.capability,
       self.provider,
       substitution,
