@@ -3881,7 +3881,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
   ): ReadonlyArray<TypeParameterFact> => {
     const mentioned = new Set(
       SyntaxTree.tokens(member)
-        .filter((token) => token.kind === 'Identifier')
+        .filter((token) => token.kind === 'Identifier' || token.kind === 'Lifetime')
         .map((token) => spelling(source, token)),
     )
     const namesSelf = mentioned.has('Self')
@@ -4161,23 +4161,9 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
             .join('.')
         : undefined,
     )
-    // The owner is module-local, so its own binder count is visible syntactically: a head with
-    // fewer binders than the owner declares (`impl Option {}` for `Option<T>`) is not whole-family.
-    const ownerNode = nodes.find((candidate) => {
-      const candidateName = presentName(source, candidate)
-      return candidateName._tag === 'Present' && candidateName.spelling === ownerSpelling
-    })
-    const ownerBinderCount =
-      ownerNode === undefined
-        ? undefined
-        : (SyntaxTree.directNode(ownerNode, 'TypeParameterList') ?? ownerNode).children.filter(
-            (child) =>
-              SyntaxTree.isNode(child) &&
-              (child.kind === 'TypeParameter' || child.kind === 'LifetimeParameter'),
-          ).length
+    // Completed owner arity includes omitted lifetimes and is checked during completion.
     const wholeFamily =
       argumentSpellings.length === binders.length &&
-      (ownerBinderCount === undefined || ownerBinderCount === binders.length) &&
       binders.every(
         (binder, index) =>
           binder.name._tag === 'Present' && argumentSpellings[index] === binder.name.spelling,
@@ -4199,6 +4185,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
     inherentImpls.push(
       Object.freeze({
         _tag: 'InherentImplDeclaration' as const,
+        lifetimeElaboration: collected.lifetimeContext,
         module: source.id,
         ordinal,
         self: selfType,
@@ -4484,23 +4471,35 @@ export const collect = (closure: ModuleClosure.Facts): DeclarationIndex.Index =>
 
 /** Replays header elision after nominal declarations have published their lifetime arity. */
 export const finalizeLifetimeHeader = (
-  member: DeclarationFact | ServiceOperationFact | StructFact | UnionFact,
+  member: DeclarationFact | ServiceOperationFact | StructFact | UnionFact | InherentImplFact,
   nominalParameters: (path: TypePathFact) => ReadonlyArray<Type.Parameter> | undefined,
-): DeclarationFact | ServiceOperationFact | StructFact | UnionFact => {
+  inherentHead?: InherentImplFact,
+): DeclarationFact | ServiceOperationFact | StructFact | UnionFact | InherentImplFact => {
   const prior = member.lifetimeElaboration
   if (prior === undefined) return member
+  // Owner lifetimes stay lexical while the member elaborates its own input/result relationship.
+  // Only Self retains these otherwise unmentioned binders in the callable's generic contract.
+  const ambient =
+    inherentHead?.typeParameters.filter((parameter) => parameter.implicitLifetime) ?? []
+  const environment = new Map(prior.parameters)
+  for (const parameter of ambient) environment.set(parameter.type.name, parameter.type)
+  const retainsOwner =
+    ambient.length > 0 &&
+    SyntaxTree.tokens(prior.syntax).some(
+      (token) => token.kind === 'Identifier' && spelling(prior.source, token) === 'Self',
+    )
   const context = DeclarationLifetime.forHeader(
     prior.source,
     prior.owner,
     prior.syntax,
-    prior.parameters,
+    environment,
     undefined,
     (path) => {
-      const analyzed = analyzeDeclaredType(prior.source, path, prior.parameters, true, prior)
+      const analyzed = analyzeDeclaredType(prior.source, path, environment, true, prior)
       return analyzed.fact._tag === 'Unresolved' ? nominalParameters(analyzed.fact.path) : undefined
     },
   )
-  const parameters = new Map(prior.parameters)
+  const parameters = new Map(environment)
   const implicit: ReadonlyArray<TypeParameterFact> = context.implicit.map((binder) => {
     parameters.set(binder.parameter.name, binder.parameter)
     return Object.freeze({
@@ -4520,6 +4519,7 @@ export const finalizeLifetimeHeader = (
   })
   const typeParameters = Object.freeze([
     ...member.typeParameters.filter((parameter) => !parameter.implicitLifetime),
+    ...(retainsOwner ? ambient : []),
     ...implicit,
   ])
   const declared = (fact: DeclaredTypeFact): DeclaredTypeFact => {
@@ -4539,6 +4539,13 @@ export const finalizeLifetimeHeader = (
         Object.freeze({ ...field, declaredType: declared(field.declaredType) }),
       ),
     )
+  if (member._tag === 'InherentImplDeclaration')
+    return Object.freeze({
+      ...member,
+      typeParameters,
+      lifetimeElaboration: context,
+      owner: declared(member.owner),
+    })
   if (member._tag === 'StructDeclaration')
     return Object.freeze({
       ...member,

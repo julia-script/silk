@@ -90,6 +90,13 @@ adds its own outer lifetime; that outer borrow does not merge the wrapper's stor
 Omitted nominal output lifetimes use the same result default. Each omitted borrowed field introduces
 an independent parameter of its containing declaration.
 
+An inherent impl also introduces owner binders for omitted nominal lifetimes. For example,
+`impl<A> SliceStream<A>` can define `make(slice: &[A]) -> SliceStream<A>`: its returned
+holder uses the input's lifetime, so `SliceStream.make(&values)` is callable. Returning `Self`
+instead keeps the impl's applied owner, including its stored-data lifetimes. It does not connect
+those lifetimes to an independently elided input; name the shared lifetime explicitly when a
+constructor returns `Self`.
+
 Local type annotations instead infer body-scoped lifetimes from their uses and cleanup. Public
 relationships never depend on return bodies, setter histories, or which constructor happened to
 initialize a field.

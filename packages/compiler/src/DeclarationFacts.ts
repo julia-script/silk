@@ -71,6 +71,7 @@ export interface AssociatedMemberFact {
 /** One inherent impl head: `impl [<Binders>] Owner { ... }` before and after owner resolution. */
 export interface InherentImplFact {
   readonly _tag: 'InherentImplDeclaration'
+  readonly lifetimeElaboration?: DeclarationLifetime.Context
   readonly module: string
   readonly ordinal: number
   readonly self: Type.Parameter

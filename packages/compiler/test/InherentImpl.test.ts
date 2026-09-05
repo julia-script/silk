@@ -3,6 +3,8 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as Type from '../src/Type.js'
+import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -29,7 +31,7 @@ const analyzeModules = (
   )
 }
 
-const codes = (self: Analysis.Snapshot): ReadonlyArray<string> =>
+const codes = (self: Analysis.SingleRootFrontendSnapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(self).map((diagnostic) => diagnostic.code)
 
 const counter = `pub struct Counter { value: i32 }
@@ -174,5 +176,109 @@ fn make() -> Guard { return Guard { value: 1 } }
 impl Guard { make: make }
 pub fn main() -> i32 { return 0 }`)
     assert.deepEqual(codes(mapped), ['SEM0195'])
+  }),
+)
+
+const elidedSliceStream = `pub struct SliceStream<A> {
+  slice: &[A]
+  index: usize
+}
+impl<A> SliceStream<A> {
+  pub fn make(slice: &[A]) -> SliceStream<A> {
+    return SliceStream<A> { slice: slice, index: 0 }
+  }
+}`
+const explicitSliceStream = `pub struct SliceStream<'data, A> {
+  slice: &'data [A]
+  index: usize
+}
+impl<'data, A> SliceStream<'data, A> {
+  pub fn make(slice: &'data [A]) -> Self {
+    return SliceStream<'data, A> { slice: slice, index: 0 }
+  }
+}`
+const explicitHeadSliceStream = elidedSliceStream
+  .replace('impl<A> SliceStream<A>', "impl<'data, A> SliceStream<'data, A>")
+  .replace('make(slice: &[A]) -> SliceStream<A>', "make(slice: &'data [A]) -> Self")
+  .replace('return SliceStream<A>', "return SliceStream<'data, A>")
+const makeSliceStream = `pub fn main() -> i32 {
+  let values = [1, 2, 3]
+  let stream = SliceStream.make(&values)
+  return 0
+}`
+
+for (const [form, declaration, main] of [
+  ['elided declaration', elidedSliceStream, 'pub fn main() -> i32 { return 0 }'],
+  ['explicit invocation', explicitSliceStream, makeSliceStream],
+  ['elided invocation', elidedSliceStream, makeSliceStream],
+  ['explicit head with implicit owner', explicitHeadSliceStream, makeSliceStream],
+  [
+    'explicit nominal result',
+    explicitSliceStream.replace('-> Self', "-> SliceStream<'data, A>"),
+    makeSliceStream,
+  ],
+]) {
+  it.effect(`preserves inherent constructor lifetime elision: ${form}`, () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSource('root', ascii(`${declaration}\n${main}`))
+      assert.deepEqual(codes(snapshot), [])
+      const lookup = Analysis.memberByName(snapshot, 'root', 'SliceStream.make')
+      const member =
+        lookup._tag === 'Resolved' && lookup.declaration._tag === 'FunctionDeclaration'
+          ? lookup.declaration
+          : unreachable('expected a published constructor')
+      assert.deepEqual(member.associatedMember?.owner, {
+        _tag: 'CanonicalDeclarationId',
+        module: 'root',
+        name: 'SliceStream',
+      })
+      const input = member.parameters.at(0)?.declaredType
+      const result = member.returnType
+      if (input?._tag !== 'Resolved' || result._tag !== 'Resolved')
+        return unreachable('expected resolved constructor types')
+      assert.deepEqual(Type.freeLifetimes(result.type), Type.freeLifetimes(input.type))
+      assert.strictEqual(Type.freeLifetimes(result.type).length, 1)
+      assert.strictEqual(
+        member.typeParameters.filter((parameter) => parameter.type.kind === 'Lifetime').length,
+        1,
+      )
+    }),
+  )
+}
+
+it.effect('keeps elided inherent Self fixed to the owner lifetime', () =>
+  Effect.gen(function* () {
+    const source = elidedSliceStream.replace('-> SliceStream<A>', '-> Self')
+    const snapshot = yield* Analysis.ofSource('root', ascii(source))
+    assert.deepEqual(codes(snapshot), ['SEM0129'])
+    assert.strictEqual(
+      Analysis.diagnostics(snapshot).at(0)?.span.start,
+      source.indexOf(' SliceStream<A> { slice:'),
+    )
+    const lookup = Analysis.memberByName(snapshot, 'root', 'SliceStream.make')
+    const member =
+      lookup._tag === 'Resolved' && lookup.declaration._tag === 'FunctionDeclaration'
+        ? lookup.declaration
+        : unreachable('expected a published constructor')
+    const input = member.parameters.at(0)?.declaredType
+    const result = member.returnType
+    if (input?._tag !== 'Resolved' || result._tag !== 'Resolved')
+      return unreachable('expected resolved constructor types')
+    assert.strictEqual(Type.isNominal(result.type), true)
+    assert.notDeepEqual(Type.freeLifetimes(result.type), Type.freeLifetimes(input.type))
+    assert.strictEqual(
+      member.typeParameters.filter((parameter) => parameter.type.kind === 'Lifetime').length,
+      2,
+    )
+  }),
+)
+
+it.effect('rejects missing ordinary inherent owner arguments after lifetime elision', () =>
+  Effect.gen(function* () {
+    const source = `pub struct Holder<A> { value: &A }
+impl Holder { pub fn zero() -> i32 { return 0 } }`
+    const snapshot = yield* Analysis.ofSource('root', ascii(source))
+    assert.deepEqual(codes(snapshot), ['SEM0194'])
+    assert.strictEqual(Analysis.diagnostics(snapshot).at(0)?.span.start, source.indexOf('Holder {'))
   }),
 )
