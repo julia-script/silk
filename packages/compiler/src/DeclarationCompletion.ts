@@ -779,13 +779,16 @@ export const complete = (
         // Keep resolved nominal arguments in the declaration's canonical order, including inferred
         // lifetimes. Only a builtin shadow requires rebuilding the local declaration's nominal.
         if (Type.isNominal(owner.fact.type)) diagnostics.push(...owner.diagnostics)
-        const ownerType = Type.isNominal(owner.fact.type)
-          ? owner.fact.type
-          : Type.nominal(
-              module.module,
-              localOwner.canonical.id.name,
-              binders.map((parameter) => Type.parameterArgument(parameter.type)),
-            )
+        const ownerType =
+          Type.isNominal(owner.fact.type) &&
+          owner.fact.type.module === module.module &&
+          owner.fact.type.name === localOwner.canonical.id.name
+            ? owner.fact.type
+            : Type.nominal(
+                module.module,
+                localOwner.canonical.id.name,
+                binders.map((parameter) => Type.parameterArgument(parameter.type)),
+              )
         return Object.freeze({ ...head, owner: Object.freeze({ ...owner.fact, type: ownerType }) })
       }
       const ownerType = owner.fact._tag === 'Resolved' ? owner.fact.type : undefined

@@ -48,7 +48,9 @@ it.effect('classifies inherent receivers and keeps members out of root scope', (
     const self = yield* analyze(`${counter}
 pub struct Runner {}
 impl Runner { pub fn go(self: i32) -> i32 { return self } }
-pub fn main() -> i32 { return Runner.go(42) }`)
+pub struct Slot {}
+impl Slot { pub fn zero() -> i32 { return 42 } }
+pub fn main() -> i32 { return Runner.go(Slot.zero()) }`)
     assert.deepEqual(codes(self), [])
     const receiver = (name: string): boolean | undefined => {
       const lookup = Analysis.memberByName(self, 'root', name)
@@ -60,6 +62,14 @@ pub fn main() -> i32 { return Runner.go(42) }`)
     assert.strictEqual(receiver('Counter.plus'), true)
     assert.strictEqual(receiver('Counter.zero'), false)
     assert.strictEqual(receiver('Runner.go'), false)
+    const slot = Analysis.memberByName(self, 'root', 'Slot.zero')
+    if (slot._tag !== 'Resolved' || slot.declaration._tag !== 'FunctionDeclaration')
+      return unreachable('expected the local builtin-shadowing owner member')
+    assert.deepEqual(slot.declaration.associatedMember?.owner, {
+      _tag: 'CanonicalDeclarationId',
+      module: 'root',
+      name: 'Slot',
+    })
     assert.strictEqual(Analysis.memberByName(self, 'root', 'read')._tag, 'Missing')
   }),
 )
