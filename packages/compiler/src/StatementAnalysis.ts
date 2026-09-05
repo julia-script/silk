@@ -9,6 +9,7 @@ import type {
   DeclarationFact,
   ExpressionFact,
   PatternSelectionFact,
+  PatternBindingFact,
   StatementFact,
   StaticIterationFact,
 } from './Elaboration.js'
@@ -41,12 +42,15 @@ import {
   analyzePattern,
   bindingName,
   coverageMembersOf,
+  containsOrdinaryArm,
   enumFactByType,
   representationOfExpression,
+  patternCoverage,
   statementExpressionNode,
   unsafeCallAuthorized,
 } from './ExpressionAnalysis.js'
 import type * as Hir from './Hir.js'
+import { directStatementExpressions } from './HirLowering.js'
 import * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
 import * as Presentation from './Presentation.js'
@@ -150,7 +154,9 @@ export const analyzeStatements = (
   blockNode: SyntaxTree.Node,
   initialScope: Scope,
   loopStack: ReadonlyArray<Hir.LoopId> = Object.freeze([]),
+  introducedPatterns: ReadonlyArray<PatternBindingFact> = Object.freeze([]),
 ): ReadonlyArray<StatementFact> => {
+  context = { ...context, resolution: { ...context.resolution, execution: { context, loopStack } } }
   const facts: Array<StatementFact> = []
   let scope = initialScope
   const ordinaryControlContext: BodyContext =
@@ -160,7 +166,13 @@ export const analyzeStatements = (
           ...context,
           resolution: Object.freeze({ ...context.resolution, deferStaticCalls: true as const }),
         })
-  const blockBindings = new Map<string, SourceSpan.SourceSpan>()
+  const blockBindings = new Map<string, SourceSpan.SourceSpan>(
+    introducedPatterns.flatMap((binding) =>
+      binding.name._tag === 'Present'
+        ? [[binding.name.spelling, binding.name.token.span] as const]
+        : [],
+    ),
+  )
   const callableWrites = context.resolution.writtenCallableBindings
   const snapshotCallableWrites = (): ReadonlySet<number> => new Set(callableWrites)
   const restoreCallableWrites = (snapshot: ReadonlySet<number>): void => {
@@ -232,6 +244,17 @@ export const analyzeStatements = (
     const writes = new Set(initial)
     visitExpressionFacts(expression, {
       descendEffectBlocks: false,
+      statement: (statement) => {
+        if (
+          statement._tag === 'WriteStatement' &&
+          !expressionNever(statement.destination) &&
+          !expressionNever(statement.value) &&
+          statement.root?._tag === 'BindingFact' &&
+          statement.root.inferredType._tag === 'Available' &&
+          Type.isCallable(statement.root.inferredType.type)
+        )
+          writes.add(statement.root.id.ordinal)
+      },
       expression: (candidate) => {
         if (
           candidate._tag === 'PlaceReplace' &&
@@ -503,7 +526,11 @@ export const analyzeStatements = (
       throw new RangeError(`Semantic analysis cannot analyze ${conditionNode.kind}`)
     }
     context.diagnostics.push(...condition.diagnostics)
-    if (condition.fact.type._tag === 'Available' && condition.fact.type.type !== 'bool') {
+    if (
+      condition.fact.type._tag === 'Available' &&
+      condition.fact.type.type !== 'bool' &&
+      !Type.isNever(condition.fact.type.type)
+    ) {
       context.diagnostics.push(
         Diagnostic.conditionNotBool(
           Type.encode(condition.fact.type.type),
@@ -732,7 +759,8 @@ export const analyzeStatements = (
       const evaluated =
         phase === 'Static' &&
         context.staticContext !== undefined &&
-        context.resolution.deferStaticCalls !== true
+        context.resolution.deferStaticCalls !== true &&
+        !containsOrdinaryArm(initializerNode)
           ? StaticEvaluation.evaluateFact(initializer.fact, context.staticContext)
           : undefined
       if (evaluated?._tag === 'Failed')
@@ -1335,7 +1363,11 @@ export const analyzeStatements = (
           throw new RangeError(`Semantic analysis cannot analyze ${conditionNode.kind}`)
         }
         context.diagnostics.push(...condition.diagnostics)
-        if (condition.fact.type._tag === 'Available' && condition.fact.type.type !== 'bool') {
+        if (
+          condition.fact.type._tag === 'Available' &&
+          condition.fact.type.type !== 'bool' &&
+          !Type.isNever(condition.fact.type.type)
+        ) {
           context.diagnostics.push(
             Diagnostic.conditionNotBool(Type.encode(condition.fact.type.type), conditionNode.span),
           )
@@ -1539,17 +1571,69 @@ export interface ReturnFlow {
   readonly returns: ReadonlyArray<Extract<StatementFact, { readonly _tag: 'ReturnStatement' }>>
 }
 
-export const expressionNever = (expression: ExpressionFact): boolean =>
-  expression.type._tag === 'Available' && Type.isNever(expression.type.type)
-
 export const implicitReturn = (
   statement: Extract<StatementFact, { readonly _tag: 'ReturnStatement' }>,
 ): boolean => SyntaxTree.directToken(statement.syntax, 'ReturnKeyword') === undefined
 
-/**
- * Computes source-level return reachability. Parser-created zero-width unit returns preserve a
- * recoverable terminal node, but remain ordinary fallthrough for contract checking.
- */
+/** Eager expression flow; constructing a callable or Effect never executes its body. */
+export const expressionReturnFlow = (expression: ExpressionFact): ReturnFlow => {
+  const returns: Array<Extract<StatementFact, { readonly _tag: 'ReturnStatement' }>> = []
+  const visit = (child: ExpressionFact): boolean => {
+    const flow = expressionReturnFlow(child)
+    returns.push(...flow.returns)
+    return flow.fallsThrough
+  }
+  let fallsThrough = true
+  if (expression._tag === 'EffectBlock')
+    return Object.freeze({ fallsThrough, returns: Object.freeze(returns) })
+  if (expression._tag === 'Match') {
+    fallsThrough = visit(expression.scrutinee)
+    if (fallsThrough) {
+      fallsThrough = false
+      let remaining = [...expression.members]
+      for (const arm of expression.arms) {
+        const member = patternCoverage(arm.pattern)
+        const selected = remaining.filter(
+          (candidate) =>
+            arm.pattern._tag === 'UniversalPattern' ||
+            (member !== undefined && Match.selects(member, candidate)),
+        )
+        if (!arm.reachable || selected.length === 0) continue
+        const guardCompletes = arm.guard === undefined || visit(arm.guard)
+        if (arm.guard === undefined || !guardCompletes)
+          remaining = remaining.filter((candidate) => !selected.includes(candidate))
+        if (!guardCompletes) continue
+        if (arm.body._tag === 'Expression') {
+          if (visit(arm.body.expression)) fallsThrough = true
+        } else {
+          const flow = returnFlowOf(arm.body.statements, false)
+          returns.push(...flow.returns)
+          if (flow.fallsThrough) fallsThrough = true
+        }
+      }
+    }
+  } else if (expression._tag === 'ShortCircuit') {
+    const left = expression.arguments.at(0)?.expression
+    fallsThrough = left === undefined || visit(left)
+    const right = expression.arguments.at(1)?.expression
+    if (fallsThrough && right !== undefined) visit(right)
+  } else {
+    for (const child of expressionChildren(expression)) {
+      if (!visit(child)) {
+        fallsThrough = false
+        break
+      }
+    }
+  }
+  if (expression.type._tag === 'Available' && Type.isNever(expression.type.type))
+    fallsThrough = false
+  return Object.freeze({ fallsThrough, returns: Object.freeze(returns) })
+}
+
+export const expressionNever = (expression: ExpressionFact): boolean =>
+  !expressionReturnFlow(expression).fallsThrough
+
+/** Ordinary statements share eager operand transfers with their current execution boundary. */
 export const returnFlowOf = (
   body: ReadonlyArray<StatementFact>,
   implicitReturnFallsThrough = true,
@@ -1558,63 +1642,41 @@ export const returnFlowOf = (
   let fallsThrough = true
   for (const statement of body) {
     if (!fallsThrough) break
+    for (const expression of directStatementExpressions(statement)) {
+      const flow = expressionReturnFlow(expression)
+      returns.push(...flow.returns)
+      if (!flow.fallsThrough) {
+        fallsThrough = false
+        break
+      }
+    }
+    if (!fallsThrough) break
     if (statement._tag === 'ReturnStatement') {
       if (implicitReturn(statement)) {
         fallsThrough = implicitReturnFallsThrough
+        if (!implicitReturnFallsThrough) returns.push(statement)
       } else {
         returns.push(statement)
         fallsThrough = false
       }
-      continue
-    }
-    if (
+    } else if (
       statement._tag === 'FailStatement' ||
       statement._tag === 'BreakStatement' ||
       statement._tag === 'ContinueStatement'
     ) {
       fallsThrough = false
-      continue
-    }
-    if (statement._tag === 'UnsafeStatement') {
+    } else if (statement._tag === 'UnsafeStatement') {
       const nested = returnFlowOf(statement.statements, implicitReturnFallsThrough)
       returns.push(...nested.returns)
       fallsThrough = nested.fallsThrough
-      continue
-    }
-    if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
-      if (statement._tag === 'IfStatement' && expressionNever(statement.condition)) {
-        fallsThrough = false
-        continue
-      }
+    } else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
       const taken = returnFlowOf(statement.taken, implicitReturnFallsThrough)
       const otherwise = returnFlowOf(statement.otherwise, implicitReturnFallsThrough)
       returns.push(...taken.returns, ...otherwise.returns)
       fallsThrough = taken.fallsThrough || otherwise.fallsThrough
-      continue
-    }
-    if (statement._tag === 'WhileStatement') {
-      if (expressionNever(statement.condition)) {
-        fallsThrough = false
-        continue
-      }
+    } else if (statement._tag === 'WhileStatement') {
       returns.push(...returnFlowOf(statement.body, implicitReturnFallsThrough).returns)
-      fallsThrough = true
-      continue
     }
-    if (statement._tag === 'BindStatement') {
-      fallsThrough = !expressionNever(statement.binding.initializer)
-      continue
-    }
-    if (statement._tag === 'PatternBindStatement') {
-      fallsThrough = !expressionNever(statement.selection.subject)
-      continue
-    }
-    if (statement._tag === 'ExpressionStatement' || statement._tag === 'DropStatement') {
-      fallsThrough = !expressionNever(statement.expression)
-      continue
-    }
-    if (statement._tag === 'WriteStatement')
-      fallsThrough = !expressionNever(statement.destination) && !expressionNever(statement.value)
   }
   return Object.freeze({ fallsThrough, returns: Object.freeze(returns) })
 }
@@ -1651,7 +1713,12 @@ export const reachableCallableWrites = (
       for (const arm of fact.arms) {
         if (!arm.reachable) continue
         if (arm.guard !== undefined && !expression(arm.guard)) continue
-        if (expression(arm.result)) completes = true
+        if (
+          arm.body._tag === 'Expression'
+            ? expression(arm.body.expression)
+            : visit(arm.body.statements)
+        )
+          completes = true
       }
       return completes
     }
@@ -1862,9 +1929,13 @@ export const analyzeFunctionBody = (
   const returnedBorrow = DeclarationFacts.returnedBorrow(declaration)
 
   const bindingOrigins = new Map<number, DeclarationFacts.ParameterFact | undefined>()
+  const borrowedPatternOrigins = new Map<string, DeclarationFacts.ParameterFact | undefined>()
   const originOf = (
     expression: ExpressionFact,
-    patternOrigins: ReadonlyMap<string, DeclarationFacts.ParameterFact | undefined> = new Map(),
+    patternOrigins: ReadonlyMap<
+      string,
+      DeclarationFacts.ParameterFact | undefined
+    > = borrowedPatternOrigins,
   ): DeclarationFacts.ParameterFact | undefined => {
     if (expression._tag === 'Grouped') return originOf(expression.expression, patternOrigins)
     if (expression._tag === 'Move') return originOf(expression.subject, patternOrigins)
@@ -1905,14 +1976,21 @@ export const analyzeFunctionBody = (
     if (expression._tag === 'Match') {
       const scrutinee = originOf(expression.scrutinee, patternOrigins)
       const origins = expression.arms
-        .filter((arm) => arm.reachable)
+        .filter(
+          (arm) =>
+            arm.reachable &&
+            arm.body._tag === 'Expression' &&
+            !(arm.body.type._tag === 'Available' && Type.isNever(arm.body.type.type)),
+        )
         .map((arm) => {
           const armOrigins = new Map(patternOrigins)
           for (const binding of arm.bindings) {
             const id = binding.id
             armOrigins.set(`${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`, scrutinee)
           }
-          return originOf(arm.result, armOrigins)
+          return arm.body._tag === 'Expression'
+            ? originOf(arm.body.expression, armOrigins)
+            : undefined
         })
       if (origins.some((origin) => origin === undefined)) return undefined
       const first = origins.at(0)
@@ -1923,6 +2001,22 @@ export const analyzeFunctionBody = (
     }
     return undefined
   }
+
+  visitStatementFacts(statements, {
+    descendEffectBlocks: false,
+    expression: (expression) => {
+      if (expression._tag !== 'Match') return
+      const origin = originOf(expression.scrutinee)
+      for (const arm of expression.arms)
+        for (const binding of arm.bindings) {
+          const id = binding.id
+          borrowedPatternOrigins.set(
+            `${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`,
+            origin,
+          )
+        }
+    },
+  })
 
   const staticView = DeclarationFacts.returnsStaticView(declaration)
   if ((returnedBorrow !== undefined || staticView) && context.declaration.phase !== 'Static') {
@@ -1946,29 +2040,16 @@ export const analyzeFunctionBody = (
         )
       )
     }
-    const validateReturns = (body: ReadonlyArray<StatementFact>): void => {
-      for (const statement of body) {
-        if (statement._tag === 'ReturnStatement') {
-          const origin = originOf(statement.expression)
-          if (
-            origin?.id.ordinal !== returnedBorrow?.parameter.id.ordinal &&
-            !isBorrowFreeReturn(statement.expression)
-          ) {
-            context.diagnostics.push(
-              Diagnostic.invalidReturnedBorrowOrigin(statement.expression.syntax.span),
-            )
-          }
-        } else if (statement._tag === 'UnsafeStatement') {
-          validateReturns(statement.statements)
-        } else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
-          validateReturns(statement.taken)
-          validateReturns(statement.otherwise)
-        } else if (statement._tag === 'WhileStatement') {
-          validateReturns(statement.body)
-        }
-      }
+    for (const statement of returnFlowOf(statements).returns) {
+      const origin = originOf(statement.expression)
+      if (
+        origin?.id.ordinal !== returnedBorrow?.parameter.id.ordinal &&
+        !isBorrowFreeReturn(statement.expression)
+      )
+        context.diagnostics.push(
+          Diagnostic.invalidReturnedBorrowOrigin(statement.expression.syntax.span),
+        )
     }
-    validateReturns(statements)
   }
 
   type Terminal = Extract<StatementFact, { _tag: 'ReturnStatement' | 'FailStatement' }>

@@ -4,7 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as ExecutionAffinity from '../src/ExecutionAffinity.js'
 import type * as ExecutionTransition from '../src/ExecutionTransition.js'
-import type * as Mir from '../src/Mir.js'
+import * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 import { independentExecutionMultiplePackages } from './support/corpus.js'
@@ -18,13 +18,18 @@ const replaceMirOperation = (
     // This boundary deliberately admits malformed operation shapes so verifier-negative tests can
     // prove rejection of values TypeScript correctly excludes from the valid MIR union.
     if (operation === target) return replacement as Mir.Operation
+    if (operation._tag === 'Conditional')
+      return Object.freeze({
+        ...operation,
+        taken: Mir.mapExecutionOperations(operation.taken, (operations) => operations.map(rewrite)),
+        otherwise: Mir.mapExecutionOperations(operation.otherwise, (operations) =>
+          operations.map(rewrite),
+        ),
+      })
     if (operation._tag === 'ShortCircuit')
       return Object.freeze({
         ...operation,
-        right: Object.freeze({
-          ...operation.right,
-          operations: Object.freeze(operation.right.operations.map(rewrite)),
-        }),
+        right: Mir.mapExecutionOperations(operation.right, (operations) => operations.map(rewrite)),
       })
     if (operation._tag !== 'Match') return operation
     return Object.freeze({
@@ -38,12 +43,16 @@ const replaceMirOperation = (
               : {
                   guard: Object.freeze({
                     ...arm.guard,
-                    operations: Object.freeze(arm.guard.operations.map(rewrite)),
+                    execution: Mir.mapExecutionOperations(arm.guard.execution, (operations) =>
+                      operations.map(rewrite),
+                    ),
                   }),
                 }),
             selected: Object.freeze({
               ...arm.selected,
-              operations: Object.freeze(arm.selected.operations.map(rewrite)),
+              execution: Mir.mapExecutionOperations(arm.selected.execution, (operations) =>
+                operations.map(rewrite),
+              ),
             }),
           }),
         ),

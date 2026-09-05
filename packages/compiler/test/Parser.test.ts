@@ -286,6 +286,7 @@ it('counts every structurally distinct child-expression edge', () => {
     ['array', `[${atBoundary}]`],
     ['aggregate', `Point { value: ${atBoundary} }`],
     ['match-scrutinee', `match ${atBoundary} { _ => 0 }`],
+    ['match-block-statement', `match value { _ => { drop ${atBoundary} } }`],
     ['match-result', `match value { _ => ${atBoundary} }`],
   ] as const
 
@@ -3216,6 +3217,36 @@ pub fn inspect(event: Token | End) -> i32 {
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
 
+it('parses ordinary arm statements without an implicit return losslessly', () => {
+  let condition = 'true'
+  for (let depth = 0; depth < 3; depth += 1)
+    condition = `match 0 { _ => { u u if ${condition} {} } }`
+  const source = `pub fn inspect(value: i32) -> i32 {
+  invoke(first(), match value {
+    0 => { // empty
+    }
+    1 => { let next = 2 let u = () u u if true { drop next } while false { break } }
+    _ => { return match value { _ => 3 } }
+  }, later())
+  return 0
+}
+fn nested() -> () { let u = () if ${condition} {} }`
+  const result = parseText('memory/match-arm-blocks', source)
+  const arms = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'MatchArm',
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.strictEqual(
+    arms.filter((arm) => SyntaxTree.directNode(arm, 'Block') !== undefined).length,
+    6,
+  )
+  const empty = SyntaxTree.directNode(arms.at(0) ?? result.root, 'Block') ?? result.root
+  assert.strictEqual(empty.children.filter(SyntaxTree.isNode).length, 0)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('retains damaged patterns explicitly in every pattern position', () => {
   const sources = [
     `pub fn inspect(value: i32) -> i32 {
@@ -3326,7 +3357,14 @@ pub fn inspect(event: Token | End) -> i32 {
 })
 
 it('bounds damaged pattern fields, nesting, braces, and guards at their arm', () => {
-  const cases: ReadonlyArray<readonly [string, string, Token.TokenKind]> = [
+  const cases: ReadonlyArray<readonly [string, string, Token.TokenKind, string?]> = [
+    [
+      'missing-arm-before-nested-guard',
+      'Token { .. } => { drop 1',
+      'RightBrace',
+      'End {} if match 0 { _ => true } => 0',
+    ],
+    ['missing-arm-block-brace', 'Token { .. } => { drop 1', 'RightBrace'],
     ['missing-pattern-name', '{ kind } => 1', 'Identifier'],
     ['missing-binding-name', 'Token { kind: , .. } => 1', 'Identifier'],
     ['missing-field-comma', 'Token { kind other } => 1', 'Comma'],
@@ -3335,14 +3373,14 @@ it('bounds damaged pattern fields, nesting, braces, and guards at their arm', ()
     ['missing-guard-expression', 'Token { kind, .. } if => 1', 'Identifier'],
   ]
 
-  for (const [name, damagedArm, expected] of cases) {
+  for (const [name, damagedArm, expected, followingArm] of cases) {
     const source = `pub struct Inner {}
 pub struct Token { kind: i32 other: i32 child: Inner }
 pub struct End {}
 pub fn inspect(event: Token | End) -> i32 {
   return match event {
     ${damagedArm}
-    End {} => 0
+    ${followingArm ?? 'End {} => 0'}
   }
 }
 pub fn after() -> i32 { return 2 }`

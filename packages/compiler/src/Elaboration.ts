@@ -507,13 +507,29 @@ export type PatternFact =
       readonly syntax: SyntaxTree.Node
     }
 
+/** The authored match body, with ordinary blocks retaining their statement region. */
+export type MatchArmBodyFact =
+  | {
+      readonly _tag: 'Expression'
+      readonly expression: ExpressionFact
+      readonly type: ExpressionTypeFact
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'Block'
+      readonly statements: ReadonlyArray<StatementFact>
+      readonly completion: { readonly fallsThrough: boolean }
+      readonly type: ExpressionTypeFact
+      readonly syntax: SyntaxTree.Node
+    }
+
 export interface MatchArmFact {
   readonly _tag: 'MatchArm'
   readonly id: Match.ArmId
   readonly pattern: PatternFact
   readonly bindings: ReadonlyArray<PatternBindingFact>
   readonly guard?: ExpressionFact
-  readonly result: ExpressionFact
+  readonly body: MatchArmBodyFact
   readonly before: ReadonlyArray<Match.CoverageIdentity>
   readonly after: ReadonlyArray<Match.CoverageIdentity>
   readonly reachable: boolean
@@ -917,10 +933,10 @@ export interface CallableApplyExpressionFact {
   readonly syntax: SyntaxTree.Node
 }
 
-/** One outer binding or parameter captured by a lazy effect block. */
+/** One outer lexical value captured by a lazy effect block. */
 export interface EffectCaptureFact {
   readonly _tag: 'EffectCapture'
-  readonly reference: BindingDeclarationFact | ParameterFact
+  readonly reference: BindingDeclarationFact | ParameterFact | PatternBindingFact
   readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
   readonly span: SourceSpan.SourceSpan
   /** First lexical identifier occurrence retained for anonymous environment construction. */
@@ -1758,7 +1774,8 @@ const visitExpressionFact = (expression: ExpressionFact, visitor: FactVisitor): 
     visitExpressionFact(expression.scrutinee, visitor)
     for (const arm of expression.arms) {
       if (arm.guard !== undefined) visitExpressionFact(arm.guard, visitor)
-      visitExpressionFact(arm.result, visitor)
+      if (arm.body._tag === 'Expression') visitExpressionFact(arm.body.expression, visitor)
+      else visitStatementFacts(arm.body.statements, visitor)
     }
     return
   }
@@ -2013,7 +2030,8 @@ const lexicalScopesOf = (
             patternBindings: arm.bindings,
           })
           if (arm.guard !== undefined) visitExpression(arm.guard, armScope)
-          visitExpression(arm.result, armScope)
+          if (arm.body._tag === 'Expression') visitExpression(arm.body.expression, armScope)
+          else visitStatements(arm.body.statements, armScope, arm.body.syntax.span)
         }
         return
       }
@@ -2191,9 +2209,13 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
       captures: Object.freeze(
         captures.map((capture) =>
           Object.freeze({
-            ...(capture.reference._tag === 'BindingFact'
-              ? { binding: capture.reference.id }
-              : { parameter: capture.reference.id }),
+            ...(capture.reference._tag === 'BindingFact' ? { binding: capture.reference.id } : {}),
+            ...(capture.reference._tag === 'PatternBinding'
+              ? { pattern: capture.reference.id }
+              : {}),
+            ...(capture.reference._tag === 'ParameterDeclaration'
+              ? { parameter: capture.reference.id }
+              : {}),
             access: capture.access,
             span: capture.span,
           }),

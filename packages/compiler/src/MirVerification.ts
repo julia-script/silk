@@ -14,6 +14,7 @@ import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
 import * as Match from './Match.js'
 import type {
   CleanupRegion,
+  Execution,
   CoroutineFrameHeaderRole,
   CoroutineFrameRelease,
   EndLoanOperation,
@@ -34,6 +35,8 @@ import type {
 } from './Mir.js'
 import {
   callingShapeEquals,
+  executionOperations,
+  regionsTree,
   conformanceWitnessMatches,
   isCopy,
   matchesInstance,
@@ -90,6 +93,68 @@ const structuredCfgPathsValid = <State>(
     for (const operation of operations) states = transfer(operation, states)
     return states
   }
+  const execution = (value: Execution, initial: ReadonlySet<State>): ReadonlySet<State> => {
+    const regions = new Map(value.regions.map((region) => [region.id.ordinal, region] as const))
+    const states = new Map<number, Set<State>>()
+    const pending: Array<number> = []
+    const completed = new Set<State>()
+    const add = (target: RegionId, values: ReadonlySet<State>): void => {
+      if (values.size === 0) return
+      if (!regions.has(target.ordinal)) {
+        enqueue(target, values)
+        return
+      }
+      const existing = states.get(target.ordinal) ?? new Set<State>()
+      const size = existing.size
+      for (const value of values) existing.add(value)
+      states.set(target.ordinal, existing)
+      if (existing.size !== size) pending.push(target.ordinal)
+    }
+    add(value.entry, initial)
+    while (pending.length > 0) {
+      const ordinal = pending.shift()
+      if (ordinal === undefined) continue
+      const region = regions.get(ordinal)
+      const incoming = states.get(ordinal)
+      if (region === undefined || incoming === undefined) continue
+      if (region._tag === 'ConditionalRegion') {
+        add(region.taken, incoming)
+        add(region.otherwise, incoming)
+        continue
+      }
+      if (region._tag === 'LoopRegion') {
+        add(region.condition, incoming)
+        continue
+      }
+      const result = sequence(operationsOf(region), incoming)
+      const outcome = region.outcome
+      if (outcome._tag === 'Complete') for (const state of result) completed.add(state)
+      else if (outcome._tag === 'Forward') add(outcome.target, result)
+      else if (outcome._tag === 'Return' || outcome._tag === 'Trap') semantics.terminal(result)
+      else if (outcome._tag === 'Repeat' || outcome._tag === 'Exit') {
+        const loop = loops.get(outcome.loop.ordinal)
+        if (loop === undefined) {
+          valid = false
+          continue
+        }
+        add(
+          outcome._tag === 'Repeat' ? loop.condition : loop.following,
+          outcome._tag === 'Repeat' ? semantics.repeat(result) : result,
+        )
+      } else {
+        const loop = [...loops.values()].find(
+          (loop) => loop.condition.ordinal === region.id.ordinal,
+        )
+        if (loop === undefined) {
+          valid = false
+          continue
+        }
+        add(loop.body, result)
+        add(loop.following, result)
+      }
+    }
+    return completed
+  }
   const matchCandidates = (
     operation: MatchOperation,
     candidates: ReadonlyArray<Match.ArmId>,
@@ -106,8 +171,8 @@ const structuredCfgPathsValid = <State>(
       valid = false
       return new Set()
     }
-    const guarded = arm.guard === undefined ? incoming : sequence(arm.guard.operations, incoming)
-    const selected = sequence(arm.selected.operations, guarded)
+    const guarded = arm.guard === undefined ? incoming : execution(arm.guard.execution, incoming)
+    const selected = execution(arm.selected.execution, guarded)
     return arm.guard === undefined
       ? selected
       : semantics.merge(selected, matchCandidates(operation, candidates, ordinal + 1, guarded))
@@ -129,11 +194,11 @@ const structuredCfgPathsValid = <State>(
     }
     if (operation._tag === 'Conditional')
       return semantics.merge(
-        sequence(operation.taken.operations, incoming),
-        sequence(operation.otherwise.operations, incoming),
+        execution(operation.taken, incoming),
+        execution(operation.otherwise, incoming),
       )
     if (operation._tag === 'ShortCircuit')
-      return semantics.merge(incoming, sequence(operation.right.operations, incoming))
+      return semantics.merge(incoming, execution(operation.right, incoming))
     if (operation._tag === 'Match') {
       if (operation.decisions.length === 0) {
         semantics.terminal(incoming)
@@ -193,6 +258,161 @@ const structuredCfgPathsValid = <State>(
     else route(region, sequence(operationsOf(region), states))
   }
   return valid
+}
+
+/** Candidate selection stops when a guard transfers; only a Boolean result can reject it. */
+const selectableMatchArms = (operation: MatchOperation): ReadonlySet<number> => {
+  const selected = new Set<number>()
+  for (const decision of operation.decisions)
+    for (const candidate of decision.candidates) {
+      const arm = operation.arms.find((arm) => arm.id.ordinal === candidate.ordinal)
+      if (arm === undefined) break
+      if (arm.guard !== undefined && arm.guard.execution.result === undefined) break
+      selected.add(arm.id.ordinal)
+      if (arm.guard === undefined) break
+    }
+  return selected
+}
+
+interface ExecutionCompletion {
+  readonly completes: boolean
+  readonly valid: boolean
+}
+
+/** Verifies normal-result availability on every reachable completion, including nested transfers. */
+const executionCompletion = (
+  fn: MirFunction,
+  root: Execution,
+  forbiddenResult?: LocalId,
+  active = new Set<Execution>(),
+): ExecutionCompletion => {
+  if (active.has(root)) return { completes: false, valid: false }
+  active.add(root)
+  let valid = true
+  let completes = false
+  const regions = new Map(root.regions.map((region) => [region.id.ordinal, region] as const))
+  const loops = new Map(
+    regionsTree(root.regions).flatMap((region) =>
+      region._tag === 'LoopRegion' ? [[region.loop.ordinal, region] as const] : [],
+    ),
+  )
+  const ownOperations = new Set(root.regions.flatMap(operationsOf).flatMap(operationTree))
+  const declares = (operation: Operation, local: LocalId): boolean => {
+    if ('destination' in operation && operation.destination?.ordinal === local.ordinal) return true
+    if (operation._tag === 'Match')
+      return operation.arms.some((arm) =>
+        [...arm.bindings, ...arm.cleanupBindings].some(
+          (binding) => binding.destination.ordinal === local.ordinal,
+        ),
+      )
+    if (operation._tag === 'CatchEffect')
+      return (
+        operation.outcome.ordinal === local.ordinal ||
+        operation.successValue.ordinal === local.ordinal ||
+        operation.failureValue.ordinal === local.ordinal
+      )
+    return false
+  }
+  const result = root.result
+  const initialized =
+    result !== undefined &&
+    (result.ordinal < fn.parameterCount ||
+      fn.regions
+        .flatMap(operationsOf)
+        .flatMap(operationTree)
+        .some((operation) => !ownOperations.has(operation) && declares(operation, result)))
+  const incoming = new Map<number, Set<boolean>>()
+  const pending: Array<number> = []
+  const enqueue = (target: RegionId, state: boolean): void => {
+    if (!regions.has(target.ordinal)) {
+      valid = false
+      return
+    }
+    const states = incoming.get(target.ordinal) ?? new Set<boolean>()
+    if (states.has(state)) return
+    states.add(state)
+    incoming.set(target.ordinal, states)
+    pending.push(target.ordinal)
+  }
+  enqueue(root.entry, initialized)
+  while (pending.length > 0) {
+    const id = pending.shift()
+    if (id === undefined) continue
+    const region = regions.get(id)
+    if (region === undefined) continue
+    for (const initial of incoming.get(id) ?? []) {
+      if (region._tag === 'ConditionalRegion') {
+        enqueue(region.taken, initial)
+        enqueue(region.otherwise, initial)
+        continue
+      }
+      if (region._tag === 'LoopRegion') {
+        enqueue(region.condition, initial)
+        continue
+      }
+      let available = initial
+      let continuing = true
+      for (const operation of operationsOf(region)) {
+        if (!continuing) {
+          valid = false
+          break
+        }
+        const nested = (execution: Execution): boolean => {
+          const flow = executionCompletion(
+            fn,
+            execution,
+            'destination' in operation ? operation.destination : undefined,
+            active,
+          )
+          valid &&= flow.valid
+          return flow.completes
+        }
+        if (operation._tag === 'Match') {
+          continuing = false
+          const selectable = selectableMatchArms(operation)
+          for (const arm of operation.arms) {
+            const guard = arm.guard === undefined || nested(arm.guard.execution)
+            const selected = nested(arm.selected.execution)
+            if (selectable.has(arm.id.ordinal) && guard && selected) continuing = true
+          }
+        } else if (operation._tag === 'Conditional') {
+          const taken = nested(operation.taken)
+          const otherwise = nested(operation.otherwise)
+          continuing = taken || otherwise
+        } else if (operation._tag === 'ShortCircuit') nested(operation.right)
+        else if (operation._tag === 'PropagateEffectFailure') continuing = false
+        if (continuing && result !== undefined && declares(operation, result)) available = true
+      }
+      if (!continuing) continue
+      const outcome = region.outcome
+      if (outcome._tag === 'Complete') {
+        completes = true
+        if (!available) valid = false
+      } else if (outcome._tag === 'Forward') enqueue(outcome.target, available)
+      else if (outcome._tag === 'Yield') {
+        const loop = [...loops.values()].find(
+          (loop) => loop.condition.ordinal === region.id.ordinal,
+        )
+        if (loop === undefined) valid = false
+        else {
+          enqueue(loop.body, available)
+          enqueue(loop.following, available)
+        }
+      } else if (outcome._tag === 'Exit' || outcome._tag === 'Repeat') {
+        const loop = loops.get(outcome.loop.ordinal)
+        // A target outside this region graph belongs to the enclosing execution and never completes this arm.
+        if (loop !== undefined)
+          enqueue(outcome._tag === 'Exit' ? loop.following : loop.condition, available)
+      }
+    }
+  }
+  if (
+    completes !== (result !== undefined) ||
+    (result !== undefined && result.ordinal === forbiddenResult?.ordinal)
+  )
+    valid = false
+  active.delete(root)
+  return { completes, valid }
 }
 
 const mergePathStates = <State>(...groups: ReadonlyArray<ReadonlySet<State>>): ReadonlySet<State> =>
@@ -877,12 +1097,13 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
       return [operation.local]
     case 'Match':
       return [
-        operation.destination,
+        ...(operation.destination === undefined ? [] : [operation.destination]),
         operation.scrutinee,
         ...operation.arms.flatMap((arm) => [
           ...arm.bindings.map((binding) => binding.destination),
-          ...(arm.guard === undefined ? [] : [arm.guard.result]),
-          arm.selected.result,
+          ...(arm.guard?.execution.result === undefined ? [] : [arm.guard.execution.result]),
+          ...(arm.selected.execution.result === undefined ? [] : [arm.selected.execution.result]),
+          ...arm.cleanupBindings.map((binding) => binding.destination),
           ...arm.selected.cleanup.map((entry) => entry.destination),
         ]),
       ]
@@ -890,11 +1111,15 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
       return [
         operation.destination,
         operation.condition,
-        operation.taken.result,
-        operation.otherwise.result,
+        ...(operation.taken.result === undefined ? [] : [operation.taken.result]),
+        ...(operation.otherwise.result === undefined ? [] : [operation.otherwise.result]),
       ]
     case 'ShortCircuit':
-      return [operation.destination, operation.left, operation.right.result]
+      return [
+        operation.destination,
+        operation.left,
+        ...(operation.right.result === undefined ? [] : [operation.right.result]),
+      ]
   }
 }
 
@@ -1815,19 +2040,24 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
           ...arm.before.map(Match.sourceType),
           ...arm.after.map(Match.sourceType),
           ...arm.bindings.map((binding) => semanticType(binding.type)),
-          ...(arm.guard?.operations.flatMap(operationTypes) ?? []),
-          ...arm.selected.operations.flatMap(operationTypes),
+          ...(arm.guard === undefined
+            ? []
+            : executionOperations(arm.guard.execution).flatMap(operationTypes)),
+          ...executionOperations(arm.selected.execution).flatMap(operationTypes),
           ...arm.selected.cleanup.flatMap((entry) => cleanupTypes(entry.cleanup)),
         ]),
       ]
     case 'Conditional':
       return [
         semanticType(operation.type),
-        ...operation.taken.operations.flatMap(operationTypes),
-        ...operation.otherwise.operations.flatMap(operationTypes),
+        ...executionOperations(operation.taken).flatMap(operationTypes),
+        ...executionOperations(operation.otherwise).flatMap(operationTypes),
       ]
     case 'ShortCircuit':
-      return [semanticType(operation.type), ...operation.right.operations.flatMap(operationTypes)]
+      return [
+        semanticType(operation.type),
+        ...executionOperations(operation.right).flatMap(operationTypes),
+      ]
     case 'Move':
       return []
     case 'Drop':
@@ -2166,13 +2396,13 @@ const loanViolations = (
       }
       if (operation._tag === 'Match') {
         for (const arm of operation.arms) {
-          if (arm.guard !== undefined) process(arm.guard.operations, active)
-          process(arm.selected.operations, active)
+          if (arm.guard !== undefined) process(executionOperations(arm.guard.execution), active)
+          process(executionOperations(arm.selected.execution), active)
         }
       }
       if (operation._tag === 'Conditional') {
-        process(operation.taken.operations, new Map(active))
-        process(operation.otherwise.operations, new Map(active))
+        process(executionOperations(operation.taken), new Map(active))
+        process(executionOperations(operation.otherwise), new Map(active))
       }
     }
     for (const [key] of active) {
@@ -2955,6 +3185,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
   }
   const instanceKeys = new Set<string>()
   for (const fn of self.functions) {
+    const allRegions = regionsTree(fn.regions)
     violations.push(...suspensionViolations(fn, self.layout))
     const currentInstance = instanceText(fn.instance)
     const concreteTypes = [
@@ -3008,7 +3239,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
     }
 
     const byId = new Map<number, Region>()
-    for (const region of fn.regions) {
+    for (const region of allRegions) {
       if (byId.has(region.id.ordinal)) {
         violations.push(
           Object.freeze({
@@ -3031,7 +3262,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         }),
       )
     }
-    for (const region of fn.regions) {
+    for (const region of allRegions) {
       for (const [target] of regionTargets(region)) {
         if (!byId.has(target.ordinal)) {
           violations.push(
@@ -3084,11 +3315,11 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         }
       }
     }
-    for (const region of [...fn.regions].sort((a, b) => a.id.ordinal - b.id.ordinal)) {
+    for (const region of [...allRegions].sort((a, b) => a.id.ordinal - b.id.ordinal)) {
       if (color.get(region.id.ordinal) === undefined) visit(region)
     }
 
-    const loopRegions = fn.regions.filter(
+    const loopRegions = allRegions.filter(
       (region): region is LoopRegion => region._tag === 'LoopRegion',
     )
     const loops = new Map<number, LoopRegion>()
@@ -3123,7 +3354,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         )
       }
     }
-    for (const region of fn.regions) {
+    for (const region of allRegions) {
       const outcome = outcomeOf(region)
       if (outcome?._tag !== 'Yield') continue
       const owners = conditionOwners.get(region.id.ordinal) ?? []
@@ -3157,19 +3388,21 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
       if (operation._tag === 'Conditional') {
         return [
           operation,
-          ...operation.taken.operations.flatMap(successPathOperations),
-          ...operation.otherwise.operations.flatMap(successPathOperations),
+          ...executionOperations(operation.taken).flatMap(successPathOperations),
+          ...executionOperations(operation.otherwise).flatMap(successPathOperations),
         ]
       }
       if (operation._tag === 'ShortCircuit') {
-        return [operation, ...operation.right.operations.flatMap(successPathOperations)]
+        return [operation, ...executionOperations(operation.right).flatMap(successPathOperations)]
       }
       if (operation._tag === 'Match') {
         return [
           operation,
           ...operation.arms.flatMap((arm) => [
-            ...(arm.guard?.operations.flatMap(successPathOperations) ?? []),
-            ...arm.selected.operations.flatMap(successPathOperations),
+            ...(arm.guard === undefined
+              ? []
+              : executionOperations(arm.guard.execution).flatMap(successPathOperations)),
+            ...executionOperations(arm.selected.execution).flatMap(successPathOperations),
           ]),
         ]
       }
@@ -3260,6 +3493,50 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         current = loops.get(current.ordinal)?.parent
       }
       return false
+    }
+    for (const region of allRegions) {
+      if (fn.regions.includes(region)) continue
+      const outcome = outcomeOf(region)
+      if (region.ownerLoop !== undefined && !loops.has(region.ownerLoop.ordinal))
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'InvalidLexicalOwner',
+            function: fn.id,
+            region: region.id,
+            detail: 'nested execution references a missing lexical loop owner',
+          }),
+        )
+      if (
+        (outcome?._tag === 'Repeat' || outcome?._tag === 'Exit') &&
+        !isAncestor(region.ownerLoop, outcome.loop)
+      )
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'InvalidLoopTarget',
+            function: fn.id,
+            region: region.id,
+            detail: 'nested execution transfers to a non-ancestor loop',
+          }),
+        )
+      if (outcome?._tag === 'Return') {
+        const returned = fn.localTypes.at(outcome.value.ordinal)
+        if (
+          returned === undefined ||
+          (returned._tag !== 'Bottom' &&
+            !SilkType.equals(semanticType(returned), semanticType(fn.result)))
+        )
+          violations.push(
+            Object.freeze({
+              _tag: 'Violation',
+              rule: 'InvalidReturn',
+              function: fn.id,
+              region: region.id,
+              detail: 'nested execution return disagrees with the enclosing function contract',
+            }),
+          )
+      }
     }
     for (const region of fn.regions) {
       violations.push(
@@ -4888,9 +5165,61 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             )
           }
         }
+        if (operation._tag === 'Conditional' || operation._tag === 'ShortCircuit') {
+          const branches =
+            operation._tag === 'Conditional'
+              ? [operation.taken, operation.otherwise]
+              : [operation.right]
+          if (
+            branches.some((branch) => !executionCompletion(fn, branch, operation.destination).valid)
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidMatchJoin',
+                function: fn.id,
+                region: region.id,
+                detail: 'conditional execution has an unavailable or inconsistent normal result',
+              }),
+            )
+        }
         if (operation._tag === 'Match') {
+          let completes = false
+          const selectable = selectableMatchArms(operation)
+          for (const arm of operation.arms) {
+            const guard =
+              arm.guard === undefined
+                ? { completes: true, valid: true }
+                : executionCompletion(fn, arm.guard.execution)
+            const body = executionCompletion(fn, arm.selected.execution, operation.destination)
+            if (selectable.has(arm.id.ordinal) && guard.completes && body.completes)
+              completes = true
+            if (!guard.valid || !body.valid)
+              violations.push(
+                Object.freeze({
+                  _tag: 'Violation',
+                  rule: 'InvalidMatchJoin',
+                  function: fn.id,
+                  region: region.id,
+                  detail: `arm #${arm.id.ordinal} has an unavailable normal result or executes continuation work after transfer`,
+                }),
+              )
+          }
+          if (completes !== (operation.destination !== undefined))
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidMatchJoin',
+                function: fn.id,
+                region: region.id,
+                detail: 'match join destination disagrees with its normally completing paths',
+              }),
+            )
           const source = fn.localTypes.at(operation.scrutinee.ordinal)
-          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const destination =
+            operation.destination === undefined
+              ? undefined
+              : fn.localTypes.at(operation.destination.ordinal)
           const plannedScrutinee = Layout.callingShape(
             self.layout,
             semanticType(operation.scrutineeType),
@@ -4908,9 +5237,10 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           if (
             source === undefined ||
             !enumScrutineeValid ||
-            destination === undefined ||
+            (destination === undefined && operation.type._tag !== 'Bottom') ||
             !SilkType.equals(semanticType(source), semanticType(operation.scrutineeType)) ||
-            !SilkType.equals(semanticType(destination), semanticType(operation.type)) ||
+            (destination !== undefined &&
+              !SilkType.equals(semanticType(destination), semanticType(operation.type))) ||
             !SilkType.equals(
               operation.scrutineeShape.type,
               semanticType(operation.scrutineeType),
@@ -5029,8 +5359,8 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               }
             }
             if (
-              arm.guard !== undefined &&
-              fn.localTypes.at(arm.guard.result.ordinal)?._tag !== 'bool'
+              arm.guard?.execution.result !== undefined &&
+              fn.localTypes.at(arm.guard.execution.result.ordinal)?._tag !== 'bool'
             ) {
               violations.push(
                 Object.freeze({
@@ -5042,10 +5372,15 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 }),
               )
             }
-            const resultType = fn.localTypes.at(arm.selected.result.ordinal)
+            const resultType =
+              arm.selected.execution.result === undefined
+                ? undefined
+                : fn.localTypes.at(arm.selected.execution.result.ordinal)
             if (
-              resultType === undefined ||
-              (resultType._tag !== 'Bottom' &&
+              (arm.selected.execution.result !== undefined && resultType === undefined) ||
+              (selectable.has(arm.id.ordinal) &&
+                resultType !== undefined &&
+                resultType._tag !== 'Bottom' &&
                 !SilkType.equals(semanticType(resultType), semanticType(operation.type)))
             ) {
               violations.push(
@@ -6484,12 +6819,17 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         candidate.id.name === verdict.function.name,
     )
     const fn = candidates.find((candidate) => {
-      const region = candidate.regions.find(
+      const region = regionsTree(candidate.regions).find(
         (candidateRegion) => candidateRegion.id.ordinal === verdict.region.ordinal,
       )
       return region !== undefined && candidate.localTypes.at(verdict.local.ordinal) !== undefined
     })
-    const region = fn?.regions.find((candidate) => candidate.id.ordinal === verdict.region.ordinal)
+    const region =
+      fn === undefined
+        ? undefined
+        : regionsTree(fn.regions).find(
+            (candidate) => candidate.id.ordinal === verdict.region.ordinal,
+          )
     const local = fn?.localTypes.at(verdict.local.ordinal)
     const synchronous = verdict._tag === 'Rejected' || verdict.guards.includes('Synchronous')
     if (fn === undefined || region === undefined || local === undefined || !synchronous) {

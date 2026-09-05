@@ -176,7 +176,10 @@ const staticValueExpression = (
   }
 }
 
-export const hirPatternSelection = (selection: PatternSelectionFact): Hir.PatternSelection => {
+export const hirPatternSelection = (
+  selection: PatternSelectionFact,
+  options: LowerStatementOptions = {},
+): Hir.PatternSelection => {
   let member: Match.CoverageIdentity | undefined
   if (selection.pattern._tag === 'EnumMemberPattern') {
     member = selection.pattern.coverage
@@ -188,7 +191,7 @@ export const hirPatternSelection = (selection: PatternSelectionFact): Hir.Patter
   ) {
     member = Match.structuralMember(selection.pattern.member)
   }
-  const subject = hirExpression(selection.subject)
+  const subject = hirExpression(selection.subject, undefined, options)
   return Object.freeze({
     id: selection.id,
     arm: selection.arm,
@@ -275,6 +278,7 @@ export const lowerStatements = (
                   callSpan: binding.initializer.syntax.span,
                   ordinal: 0,
                 }),
+                options,
               )
             // A declared union is the binding's type: the initializer injects at the boundary.
             if (
@@ -286,8 +290,10 @@ export const lowerStatements = (
                 binding.declaredType.type,
                 'Binding',
                 binding.syntax.span,
+                undefined,
+                options,
               )
-            return hirExpression(binding.initializer)
+            return hirExpression(binding.initializer, undefined, options)
           }
           return Object.freeze({
             _tag: 'Bind',
@@ -302,21 +308,21 @@ export const lowerStatements = (
         if (statement._tag === 'PatternBindStatement')
           return Object.freeze({
             _tag: 'PatternBind',
-            selection: hirPatternSelection(statement.selection),
+            selection: hirPatternSelection(statement.selection, options),
             region: statement.region,
             span: statement.syntax.span,
           })
         if (statement._tag === 'ExpressionStatement')
           return Object.freeze({
             _tag: 'Evaluate',
-            expression: hirExpression(statement.expression),
+            expression: hirExpression(statement.expression, undefined, options),
             region: statement.region,
             span: statement.syntax.span,
           })
         if (statement._tag === 'IfStatement')
           return Object.freeze({
             _tag: 'If',
-            condition: hirExpression(statement.condition),
+            condition: hirExpression(statement.condition, undefined, options),
             taken: lowerStatements(statement.taken, options),
             otherwise: lowerStatements(statement.otherwise, options),
             region: statement.region,
@@ -325,7 +331,7 @@ export const lowerStatements = (
         if (statement._tag === 'IfLetStatement')
           return Object.freeze({
             _tag: 'IfLet',
-            selection: hirPatternSelection(statement.selection),
+            selection: hirPatternSelection(statement.selection, options),
             taken: lowerStatements(statement.taken, options),
             otherwise: lowerStatements(statement.otherwise, options),
             region: statement.region,
@@ -335,7 +341,7 @@ export const lowerStatements = (
           const place =
             statement.root === undefined
               ? undefined
-              : hirAssignmentWritePlace(statement.destination, statement.root)
+              : hirAssignmentWritePlace(statement.destination, statement.root, options)
           if (place === undefined || !statement.compatible)
             return Object.freeze({
               _tag: 'UnavailableStatement',
@@ -345,7 +351,14 @@ export const lowerStatements = (
           return Object.freeze({
             _tag: 'Write',
             place,
-            value: hirExpectedExpression(statement.value, place.type, 'Assignment', place.span),
+            value: hirExpectedExpression(
+              statement.value,
+              place.type,
+              'Assignment',
+              place.span,
+              undefined,
+              options,
+            ),
             region: statement.region,
             span: statement.syntax.span,
           })
@@ -355,7 +368,7 @@ export const lowerStatements = (
             _tag: 'While',
             loop: statement.loop,
             ...(statement.parent === undefined ? {} : { parent: statement.parent }),
-            condition: hirExpression(statement.condition),
+            condition: hirExpression(statement.condition, undefined, options),
             body: lowerStatements(statement.body, options),
             region: statement.region,
             span: statement.syntax.span,
@@ -378,7 +391,7 @@ export const lowerStatements = (
             _tag: 'Return',
             expression: effectJoinConvert(
               options.resultType === undefined
-                ? hirExpression(statement.expression)
+                ? hirExpression(statement.expression, undefined, options)
                 : hirExpectedExpression(
                     statement.expression,
                     options.resultType,
@@ -392,6 +405,7 @@ export const lowerStatements = (
                           ordinal: 0,
                         })
                       : undefined,
+                    options,
                   ),
               options.resultRepresentation,
               statement.syntax.span,
@@ -406,11 +420,11 @@ export const lowerStatements = (
               statement.expression.type._tag === 'Available'
                 ? Object.freeze({
                     _tag: 'Move' as const,
-                    subject: hirExpression(statement.expression),
+                    subject: hirExpression(statement.expression, undefined, options),
                     type: statement.expression.type.type,
                     span: statement.expression.syntax.span,
                   })
-                : hirExpression(statement.expression),
+                : hirExpression(statement.expression, undefined, options),
             region: statement.region,
             span: statement.syntax.span,
           })
@@ -426,14 +440,14 @@ export const lowerStatements = (
             statement.transfer === 'Move'
               ? Object.freeze({
                   _tag: 'Move',
-                  subject: hirExpression(statement.expression),
+                  subject: hirExpression(statement.expression, undefined, options),
                   type:
                     statement.expression.type._tag === 'Available'
                       ? statement.expression.type.type
                       : statement.failure,
                   span: statement.expression.syntax.span,
                 })
-              : hirExpression(statement.expression),
+              : hirExpression(statement.expression, undefined, options),
           failure: statement.failure,
           transfer: statement.transfer,
           region: statement.region,
@@ -485,7 +499,11 @@ export const loanEndsOf = (
     }),
   )
 
-export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Expression => {
+export const hirExpression = (
+  fact: ExpressionFact,
+  borrow?: Hir.BorrowId,
+  options: LowerStatementOptions = {},
+): Hir.Expression => {
   if (fact._tag === 'CompileError')
     return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
   if (fact._tag === 'ShortCircuit') {
@@ -494,8 +512,8 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     if (left === undefined || right === undefined || fact.type._tag !== 'Available') {
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
     }
-    const loweredLeft = hirExpression(left.expression)
-    const loweredRight = hirExpression(right.expression)
+    const loweredLeft = hirExpression(left.expression, undefined, options)
+    const loweredRight = hirExpression(right.expression, undefined, options)
     return loweredLeft._tag === 'Unavailable' || loweredRight._tag === 'Unavailable'
       ? Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
       : Object.freeze({
@@ -661,7 +679,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     })
   }
   if (fact._tag === 'EnumValue') {
-    const value = hirExpression(fact.argument)
+    const value = hirExpression(fact.argument, undefined, options)
     return fact.type._tag !== 'Available' || value._tag === 'Unavailable'
       ? Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
       : Object.freeze({
@@ -687,7 +705,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     return hirReference(fact.reference, fact.type, fact.syntax.span)
   }
   if (fact._tag === 'Move') {
-    const subject = hirExpression(fact.subject)
+    const subject = hirExpression(fact.subject, undefined, options)
     if (subject._tag === 'Unavailable' || fact.type._tag !== 'Available') {
       return subject._tag === 'Unavailable'
         ? subject
@@ -705,14 +723,23 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
   }
   if (fact._tag === 'PlaceReplace') {
     const place =
-      fact.root === undefined ? undefined : hirAssignmentWritePlace(fact.destination, fact.root)
+      fact.root === undefined
+        ? undefined
+        : hirAssignmentWritePlace(fact.destination, fact.root, options)
     if (place === undefined || !fact.compatible || fact.type._tag !== 'Available') {
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
     }
     return Object.freeze({
       _tag: 'Replace',
       place,
-      value: hirExpectedExpression(fact.value, place.type, 'Assignment', place.span),
+      value: hirExpectedExpression(
+        fact.value,
+        place.type,
+        'Assignment',
+        place.span,
+        undefined,
+        options,
+      ),
       type: fact.type.type,
       span: fact.syntax.span,
     })
@@ -727,9 +754,13 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       captures: Object.freeze(
         fact.captures.map((capture) =>
           Object.freeze({
-            ...(capture.reference._tag === 'BindingFact'
-              ? { binding: capture.reference.id }
-              : { parameter: capture.reference.id }),
+            ...(capture.reference._tag === 'BindingFact' ? { binding: capture.reference.id } : {}),
+            ...(capture.reference._tag === 'PatternBinding'
+              ? { pattern: capture.reference.id }
+              : {}),
+            ...(capture.reference._tag === 'ParameterDeclaration'
+              ? { parameter: capture.reference.id }
+              : {}),
             access: capture.access,
             span: capture.span,
           }),
@@ -740,7 +771,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     })
   }
   if (fact._tag === 'Run') {
-    const subject = hirExpression(fact.subject)
+    const subject = hirExpression(fact.subject, undefined, options)
     if (subject._tag === 'Unavailable' || fact.type._tag !== 'Available')
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
     return Object.freeze({
@@ -751,8 +782,8 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     })
   }
   if (fact._tag === 'EffectCatch') {
-    const protected_ = hirExpression(fact.protected)
-    const handler = hirExpression(fact.handler)
+    const protected_ = hirExpression(fact.protected, undefined, options)
+    const handler = hirExpression(fact.handler, undefined, options)
     if (
       protected_._tag === 'Unavailable' ||
       handler._tag === 'Unavailable' ||
@@ -777,7 +808,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     })
   }
   if (fact._tag === 'EffectBindRequirement') {
-    const protected_ = hirExpression(fact.protected)
+    const protected_ = hirExpression(fact.protected, undefined, options)
     if (
       protected_._tag === 'Unavailable' ||
       fact.provider === undefined ||
@@ -807,7 +838,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     })
   }
   if (fact._tag === 'Match') {
-    const loweredScrutinee = hirExpression(fact.scrutinee)
+    const loweredScrutinee = hirExpression(fact.scrutinee, undefined, options)
     const scrutinee =
       fact.access === 'Move' &&
       (loweredScrutinee._tag === 'Project' || loweredScrutinee._tag === 'IndexPlace')
@@ -858,10 +889,36 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
               ),
             ),
             cleanup: arm.pattern.omitted,
-            ...(arm.guard === undefined ? {} : { guard: hirExpression(arm.guard) }),
-            result: Type.isUnion(target)
-              ? hirExpectedExpression(arm.result, target, 'MatchArm', arm.syntax.span)
-              : hirExpression(arm.result),
+            ...(arm.guard === undefined
+              ? {}
+              : { guard: hirExpression(arm.guard, undefined, options) }),
+            body:
+              arm.body._tag === 'Expression'
+                ? Object.freeze({
+                    _tag: 'Expression' as const,
+                    expression: Type.isUnion(target)
+                      ? hirExpectedExpression(
+                          arm.body.expression,
+                          target,
+                          'MatchArm',
+                          arm.syntax.span,
+                          undefined,
+                          options,
+                        )
+                      : hirExpression(arm.body.expression, undefined, options),
+                    type:
+                      arm.body.type._tag === 'Available' && !Type.isUnion(target)
+                        ? arm.body.type.type
+                        : target,
+                    span: arm.body.syntax.span,
+                  })
+                : Object.freeze({
+                    _tag: 'Block' as const,
+                    statements: lowerStatements(arm.body.statements, options),
+                    completion: arm.body.completion,
+                    type: arm.body.type._tag === 'Available' ? arm.body.type.type : target,
+                    span: arm.body.syntax.span,
+                  }),
             before: arm.before,
             after: arm.after,
             reachable: arm.reachable,
@@ -909,8 +966,10 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
                   Type.substitute(field.declaredType.type, substitution),
                   'StructField',
                   field.syntax.span,
+                  undefined,
+                  options,
                 )
-              : hirExpression(initializer.expression)
+              : hirExpression(initializer.expression, undefined, options)
           return Object.freeze({ field: field.id, value })
         }),
       ),
@@ -957,8 +1016,10 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
                   Type.substitute(field.declaredType.type, substitution),
                   'StructField',
                   field.syntax.span,
+                  undefined,
+                  options,
                 )
-              : hirExpression(initializer.expression)
+              : hirExpression(initializer.expression, undefined, options)
           return Object.freeze({ field: field.id, value })
         }),
       ),
@@ -975,12 +1036,14 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       elements: Object.freeze(
         fact.elements.map((element) =>
           element.expected === undefined
-            ? hirExpression(element.expression)
+            ? hirExpression(element.expression, undefined, options)
             : hirExpectedExpression(
                 element.expression,
                 element.expected,
                 'ArrayElement',
                 element.syntax.span,
+                undefined,
+                options,
               ),
         ),
       ),
@@ -992,7 +1055,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     if (fact.staticValue !== undefined && fact.type._tag === 'Available')
       return staticValueExpression(fact.staticValue, fact.type.type, fact.syntax.span)
     if (fact.state._tag === 'SliceLength' && fact.type._tag === 'Available') {
-      const slice = hirExpression(fact.subject)
+      const slice = hirExpression(fact.subject, undefined, options)
       return slice._tag === 'Unavailable'
         ? slice
         : Object.freeze({
@@ -1017,7 +1080,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     }
     return Object.freeze({
       _tag: 'Project',
-      subject: hirExpression(fact.subject),
+      subject: hirExpression(fact.subject, undefined, options),
       nominal: fact.nominal,
       field: fact.state.field.id,
       access: 'CopyRead',
@@ -1032,8 +1095,8 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       fact.type._tag === 'Available' &&
       fact.bounds._tag === 'RuntimeSlice'
     ) {
-      const slice = hirExpression(fact.subject)
-      const index = hirExpression(fact.index)
+      const slice = hirExpression(fact.subject, undefined, options)
+      const index = hirExpression(fact.index, undefined, options)
       if (slice._tag === 'Unavailable' || index._tag === 'Unavailable') {
         return slice._tag === 'Unavailable' ? slice : index
       }
@@ -1058,8 +1121,8 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
         ...(fact.bounds._tag === 'Invalid' ? { cause: fact.bounds.cause } : {}),
       })
     }
-    const subject = hirExpression(fact.subject)
-    const index = hirExpression(fact.index)
+    const subject = hirExpression(fact.subject, undefined, options)
+    const index = hirExpression(fact.index, undefined, options)
     if (subject._tag === 'Unavailable' || index._tag === 'Unavailable') {
       return subject._tag === 'Unavailable' ? subject : index
     }
@@ -1091,7 +1154,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     }
     return Object.freeze({
       _tag: 'ReferentPlace',
-      subject: hirExpression(fact.subject),
+      subject: hirExpression(fact.subject, undefined, options),
       reference: fact.reference,
       access: 'CopyRead',
       borrowAccess: fact.borrowAccess,
@@ -1132,7 +1195,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
         root = Object.freeze({
           _tag: 'TemporarySliceRoot',
           owner: fact.formation.root.owner,
-          value: hirExpression(fact.formation.root.value),
+          value: hirExpression(fact.formation.root.value, undefined, options),
         })
         break
     }
@@ -1149,7 +1212,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
         continue
       }
       if (selector._tag === 'SliceIndex') {
-        const index = hirExpression(selector.index)
+        const index = hirExpression(selector.index, undefined, options)
         if (index._tag === 'Unavailable') {
           return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
         }
@@ -1163,7 +1226,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
         )
         continue
       }
-      const index = hirExpression(selector.index)
+      const index = hirExpression(selector.index, undefined, options)
       if (index._tag === 'Unavailable') {
         return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
       }
@@ -1213,7 +1276,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       span: fact.syntax.span,
     })
   }
-  if (fact._tag === 'Grouped') return hirExpression(fact.expression, borrow)
+  if (fact._tag === 'Grouped') return hirExpression(fact.expression, borrow, options)
   if (fact._tag === 'FunctionItem') {
     const target = hirCallableTarget(fact.reference)
     if (target === undefined || fact.type._tag !== 'Available')
@@ -1258,6 +1321,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
                 callSpan: fact.syntax.span,
                 ordinal: capture.ordinal,
               }),
+              options,
             ),
             access: capture.access,
           }),
@@ -1289,10 +1353,10 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
           })
     return Object.freeze({
       _tag: 'CallableApply',
-      callee: hirExpression(fact.callee),
+      callee: hirExpression(fact.callee, undefined, options),
       arguments: Object.freeze(
         fact.arguments.map((argument, ordinal) =>
-          hirExpression(argument.expression, argumentBorrowId(argument, ordinal)),
+          hirExpression(argument.expression, argumentBorrowId(argument, ordinal), options),
         ),
       ),
       // A staged application retains every argument loan inside the new environment.
@@ -1347,7 +1411,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
         : { witnessEffectSite: fact.witnessEffectSite }),
       arguments: Object.freeze(
         fact.arguments.map((argument, ordinal) =>
-          hirExpression(argument.expression, argumentBorrowId(argument, ordinal)),
+          hirExpression(argument.expression, argumentBorrowId(argument, ordinal), options),
         ),
       ),
       loanEnds: borrowIds,
@@ -1362,8 +1426,10 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
   ) {
     const leftFact = fact.arguments.at(0)
     const rightFact = fact.arguments.at(1)
-    const left = leftFact === undefined ? undefined : hirExpression(leftFact.expression)
-    const right = rightFact === undefined ? undefined : hirExpression(rightFact.expression)
+    const left =
+      leftFact === undefined ? undefined : hirExpression(leftFact.expression, undefined, options)
+    const right =
+      rightFact === undefined ? undefined : hirExpression(rightFact.expression, undefined, options)
     return left === undefined ||
       right === undefined ||
       left._tag === 'Unavailable' ||
@@ -1408,7 +1474,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     const arguments_ = Object.freeze(
       fact.arguments.map((argument, ordinal) => {
         const borrowId = argumentBorrowId(argument, ordinal)
-        return hirExpression(argument.expression, borrowId)
+        return hirExpression(argument.expression, borrowId, options)
       }),
     )
     const heldLoans = Object.freeze(
@@ -1527,8 +1593,9 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
                 'Argument',
                 parameter.syntax.span,
                 borrowId,
+                options,
               )
-            : hirExpression(argument.expression, borrowId)
+            : hirExpression(argument.expression, borrowId, options)
         }),
       ),
       loanEnds: loanEndsOf(fact.arguments),
@@ -1577,8 +1644,9 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
                   'Argument',
                   parameter.syntax.span,
                   borrowId,
+                  options,
                 )
-              : hirExpression(argument.expression, borrowId),
+              : hirExpression(argument.expression, borrowId, options),
           ]
         }),
       ),
@@ -1648,6 +1716,7 @@ export const hirExpectedExpression = (
   context: Extract<Hir.Expression, { readonly _tag: 'UnionConvert' }>['context'],
   expectedAt: SourceSpan.SourceSpan,
   borrow?: Hir.BorrowId,
+  options: LowerStatementOptions = {},
 ): Hir.Expression => {
   if (
     fact._tag === 'Integer' &&
@@ -1662,7 +1731,7 @@ export const hirExpectedExpression = (
       type: target,
       span: fact.syntax.span,
     })
-  const loweredSource = hirExpression(fact, borrow)
+  const loweredSource = hirExpression(fact, borrow, options)
   if (loweredSource._tag === 'Unavailable') return loweredSource
   const unionTarget = Type.isUnion(target) ? target : undefined
   const representation = unionTarget === undefined ? undefined : representationOfExpression(fact)
@@ -1713,6 +1782,7 @@ export const hirExpectedExpression = (
 export const hirWritePlace = (
   fact: ExpressionFact,
   root: AssignmentRootFact,
+  options: LowerStatementOptions = {},
 ): Hir.WritePlace | undefined => {
   const selectors: Array<Hir.WriteSelector> = []
   const walk = (current: ExpressionFact): boolean => {
@@ -1751,7 +1821,7 @@ export const hirWritePlace = (
       ) {
         return false
       }
-      const index = hirExpression(current.index)
+      const index = hirExpression(current.index, undefined, options)
       if (index._tag === 'Unavailable') return false
       selectors.push(
         Object.freeze({
@@ -1790,6 +1860,7 @@ export const assignmentRootType = (root: AssignmentRootFact): SemanticType | und
 export const hirBorrowedWritePlace = (
   fact: ExpressionFact,
   root: AssignmentRootFact,
+  options: LowerStatementOptions = {},
 ): Hir.BorrowedWritePlace | undefined => {
   const rootType = assignmentRootType(root)
   if (
@@ -1837,7 +1908,7 @@ export const hirBorrowedWritePlace = (
     }
     if (current._tag === 'IndexProjection') {
       if (!walk(current.subject) || current.type._tag !== 'Available') return false
-      const index = hirExpression(current.index)
+      const index = hirExpression(current.index, undefined, options)
       if (index._tag === 'Unavailable') return false
       if (
         current.slice !== undefined &&
@@ -1892,10 +1963,11 @@ export const hirBorrowedWritePlace = (
 export const hirAssignmentWritePlace = (
   fact: ExpressionFact,
   root: AssignmentRootFact,
+  options: LowerStatementOptions = {},
 ): Hir.WritePlace | undefined => {
   const access = assignmentRootAccess(root)
-  if (access === 'ExclusiveBorrowed') return hirBorrowedWritePlace(fact, root)
-  if (access === 'MutableOwned') return hirWritePlace(fact, root)
+  if (access === 'ExclusiveBorrowed') return hirBorrowedWritePlace(fact, root, options)
+  if (access === 'MutableOwned') return hirWritePlace(fact, root, options)
   return undefined
 }
 

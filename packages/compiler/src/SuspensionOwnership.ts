@@ -156,7 +156,8 @@ const executionPackagePlan = (
 const operationDefinitions = (operation: Mir.Operation): ReadonlySet<number> => {
   const definitions = new Set<number>()
   for (const nested of Mir.operationTree(operation)) {
-    if ('destination' in nested) definitions.add(nested.destination.ordinal)
+    if ('destination' in nested && nested.destination !== undefined)
+      definitions.add(nested.destination.ordinal)
     if (nested._tag === 'ExecutionPark') definitions.add(nested.guard.ordinal)
     if (
       nested._tag === 'RunEffect' ||
@@ -255,6 +256,65 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
   }
 
   const liveAfter = new Map<Mir.Operation, ReadonlySet<number>>()
+  const analyzeExecution = (
+    execution: Mir.Execution,
+    following: ReadonlySet<number>,
+  ): Set<number> => {
+    const loops = new Map(
+      Mir.regionsTree(execution.regions).flatMap((region) =>
+        region._tag === 'LoopRegion' ? [[region.loop.ordinal, region] as const] : [],
+      ),
+    )
+    const before = new Map<number, Set<number>>()
+    const successors = (region: Mir.Region): ReadonlySet<number> => {
+      if (region._tag === 'OperationRegion' || region._tag === 'CleanupRegion') {
+        const outcome = region.outcome
+        if (outcome._tag === 'Complete') return following
+        if (outcome._tag === 'Return' || outcome._tag === 'Trap') return new Set()
+        if (outcome._tag === 'Exit' || outcome._tag === 'Repeat') {
+          const loop = loops.get(outcome.loop.ordinal)
+          return loop === undefined
+            ? following
+            : (before.get((outcome._tag === 'Exit' ? loop.following : loop.condition).ordinal) ??
+                new Set())
+        }
+        if (outcome._tag === 'Yield') {
+          const loop = [...loops.values()].find(
+            (loop) => loop.condition.ordinal === region.id.ordinal,
+          )
+          return loop === undefined
+            ? following
+            : SetOf.union(
+                before.get(loop.body.ordinal) ?? new Set(),
+                before.get(loop.following.ordinal) ?? new Set(),
+              )
+        }
+      }
+      return new Set(
+        Mir.regionTargets(region).flatMap(([target]) => [...(before.get(target.ordinal) ?? [])]),
+      )
+    }
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const region of [...Mir.topologicalRegions(execution)].reverse()) {
+        const live = transferSequence(
+          regionOperations(region),
+          SetOf.union(successors(region), outcomeUses(region)),
+        )
+        if (!SetOf.equal(live, before.get(region.id.ordinal) ?? new Set())) {
+          before.set(region.id.ordinal, live)
+          changed = true
+        }
+      }
+    }
+    for (const region of Mir.topologicalRegions(execution))
+      analyzeSequence(
+        regionOperations(region),
+        SetOf.union(successors(region), outcomeUses(region)),
+      )
+    return before.get(execution.entry.ordinal) ?? new Set()
+  }
   const analyzeSequence = (
     operations: ReadonlyArray<Mir.Operation>,
     following: ReadonlySet<number>,
@@ -269,23 +329,49 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
           [...live].filter((local) => !operationDefinitions(operation).has(local)),
         )
         for (const arm of operation.arms) {
-          const selected = analyzeSequence(
-            arm.selected.operations,
-            SetOf.union(outer, new Set([arm.selected.result.ordinal])),
+          const selected = analyzeExecution(
+            arm.selected.execution,
+            SetOf.union(
+              outer,
+              new Set(
+                arm.selected.execution.result === undefined
+                  ? []
+                  : [arm.selected.execution.result.ordinal],
+              ),
+            ),
           )
           if (arm.guard !== undefined)
-            analyzeSequence(
-              arm.guard.operations,
-              SetOf.union(selected, new Set([arm.guard.result.ordinal])),
+            analyzeExecution(
+              arm.guard.execution,
+              SetOf.union(
+                selected,
+                new Set(
+                  arm.guard.execution.result === undefined
+                    ? []
+                    : [arm.guard.execution.result.ordinal],
+                ),
+              ),
             )
         }
+      } else if (operation._tag === 'Conditional') {
+        const outer = new Set(
+          [...live].filter((local) => !operationDefinitions(operation).has(local)),
+        )
+        for (const branch of [operation.taken, operation.otherwise])
+          analyzeExecution(
+            branch,
+            SetOf.union(outer, new Set(branch.result === undefined ? [] : [branch.result.ordinal])),
+          )
       } else if (operation._tag === 'ShortCircuit') {
         const outer = new Set(
           [...live].filter((local) => !operationDefinitions(operation).has(local)),
         )
-        analyzeSequence(
-          operation.right.operations,
-          SetOf.union(outer, new Set([operation.right.result.ordinal])),
+        analyzeExecution(
+          operation.right,
+          SetOf.union(
+            outer,
+            new Set(operation.right.result === undefined ? [] : [operation.right.result.ordinal]),
+          ),
         )
       }
       live = transferOperation(operation, live)

@@ -949,7 +949,9 @@ it.effect('rejects lexical and parser damage without producing formatted bytes',
       SyntaxFormatter.format(parse('memory://lexical.silk', '@@@')),
     )
     const parser = yield* Effect.result(
-      SyntaxFormatter.format(parse('memory://parser.silk', 'pub fn main() -> i32 { return 42')),
+      SyntaxFormatter.format(
+        parse('memory://parser.silk', 'pub fn main() -> i32 { match 0 { _ => { drop 42'),
+      ),
     )
 
     assert.strictEqual(Result.isFailure(lexical), true)
@@ -1160,7 +1162,8 @@ it.effect('formats match arms, guards, access modes, and nested patterns idempot
   Effect.gen(function* () {
     const source = `pub struct Span { start: i32 end: i32 }
 pub struct Token { span: Span }
-pub fn inspect(event: Token) -> i32 { return match   & mut event { Token { span: Span { start: offset , .. }, .. } if true=>offset _=>0 } }`
+pub fn inspect(event: Token) -> i32 { return match   & mut event { Token { span: Span { start: offset , .. }, .. } if true=>{ // selected\n let result=offset return result } Token {..} if false=>{} Token {..}=>0 _=>{ // empty
+    } } }`
     const first = yield* SyntaxFormatter.format(parse('memory://match-format.silk', source))
     const expected = `pub struct Span {
   start: i32
@@ -1173,8 +1176,14 @@ pub struct Token {
 
 pub fn inspect(event: Token) -> i32 {
   return match &mut event {
-    Token {span: Span {start: offset, ..}, ..} if true => offset
-    _ => 0
+    Token {span: Span {start: offset, ..}, ..} if true => { // selected
+      let result = offset
+      return result
+    }
+    Token {..} if false => {}
+    Token {..} => 0
+    _ => { // empty
+    }
   }
 }
 `

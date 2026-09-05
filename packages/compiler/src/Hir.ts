@@ -411,6 +411,22 @@ export interface PatternSelection {
 }
 
 /** One typed core semantic operation with exact source provenance. */
+/** Expression values and ordinary statement regions stay distinct at match arms. */
+export type MatchArmBody =
+  | {
+      readonly _tag: 'Expression'
+      readonly expression: Expression
+      readonly type: Type.Type
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'Block'
+      readonly statements: ReadonlyArray<Statement>
+      readonly completion: { readonly fallsThrough: boolean }
+      readonly type: Type.Type
+      readonly span: SourceSpan.SourceSpan
+    }
+
 export type Expression =
   | {
       readonly _tag: 'IntegerLiteral'
@@ -553,7 +569,7 @@ export type Expression =
         readonly bindings: ReadonlyArray<PatternBinding>
         readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
         readonly guard?: Expression
-        readonly result: Expression
+        readonly body: MatchArmBody
         readonly before: ReadonlyArray<Match.CoverageIdentity>
         readonly after: ReadonlyArray<Match.CoverageIdentity>
         readonly reachable: boolean
@@ -796,6 +812,7 @@ export type Expression =
       readonly site: EffectSiteId
       readonly statements: ReadonlyArray<Statement>
       readonly captures: ReadonlyArray<{
+        readonly pattern?: Match.BindingId
         readonly binding?: BindingId
         readonly parameter?: DeclarationFacts.ParameterId
         readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
@@ -1003,7 +1020,7 @@ export interface HirFunction {
   readonly statements: ReadonlyArray<Statement>
 }
 
-/** The return statement's expression — every body ends in exactly one. */
+/** The terminal return expression; throws when the body ends in another control-flow shape. */
 export const returned = (self: HirFunction): Expression => {
   let statements = self.statements
   let last = statements.at(-1)
@@ -1125,7 +1142,9 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
           expression.scrutinee,
           ...expression.arms.flatMap((arm) => [
             ...(arm.guard === undefined ? [] : [arm.guard]),
-            arm.result,
+            ...(arm.body._tag === 'Expression'
+              ? [arm.body.expression]
+              : arm.body.statements.flatMap(statementExpressions)),
           ]),
         ]
       default:
@@ -1137,6 +1156,76 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
 export const expressionTree = (expression: Expression): ReadonlyArray<Expression> => {
   const children = expressionChildren(expression)
   return Object.freeze([expression, ...children.flatMap(expressionTree)])
+}
+
+/** Reachable return operands in this execution boundary, including eager ordinary arms. */
+export const returnExpressions = (body: ReadonlyArray<Statement>): ReadonlyArray<Expression> => {
+  const returned: Array<Expression> = []
+  const expression = (value: Expression): boolean => {
+    if (value._tag === 'EffectBlock') return true
+    if (value._tag === 'Match') {
+      if (!expression(value.scrutinee)) return false
+      let completes = false
+      let remaining = [...value.members]
+      for (const arm of value.arms) {
+        const selected = remaining.filter(
+          (candidate) =>
+            arm.universal || (arm.member !== undefined && Match.selects(arm.member, candidate)),
+        )
+        if (!arm.reachable || selected.length === 0) continue
+        const guardCompletes = arm.guard === undefined || expression(arm.guard)
+        if (arm.guard === undefined || !guardCompletes)
+          remaining = remaining.filter((candidate) => !selected.includes(candidate))
+        if (!guardCompletes) continue
+        const normal =
+          arm.body._tag === 'Expression'
+            ? expression(arm.body.expression)
+            : statements(arm.body.statements)
+        completes ||= normal
+      }
+      return completes
+    }
+    if (value._tag === 'ShortCircuit') {
+      if (!expression(value.left)) return false
+      expression(value.right)
+      return true
+    }
+    for (const child of expressionChildren(value)) if (!expression(child)) return false
+    return value._tag === 'Unavailable' || !Type.isNever(value.type)
+  }
+  const statements = (items: ReadonlyArray<Statement>): boolean => {
+    for (const statement of items) {
+      if (statement._tag === 'Unsafe') {
+        if (!statements(statement.statements)) return false
+        continue
+      }
+      if (statement._tag === 'If' || statement._tag === 'IfLet') {
+        if (
+          !expression(statement._tag === 'If' ? statement.condition : statement.selection.subject)
+        )
+          return false
+        const taken = statements(statement.taken)
+        const otherwise = statements(statement.otherwise)
+        if (!taken && !otherwise) return false
+        continue
+      }
+      if (statement._tag === 'While') {
+        if (!expression(statement.condition)) return false
+        statements(statement.body)
+        continue
+      }
+      for (const child of statementExpressions(statement)) if (!expression(child)) return false
+      if (statement._tag === 'Return') {
+        returned.push(statement.expression)
+        return false
+      }
+      if (statement._tag === 'Fail' || statement._tag === 'Break' || statement._tag === 'Continue')
+        return false
+    }
+    return true
+  }
+  statements(body)
+  return Object.freeze(returned)
 }
 
 /** The first unavailable expression's cause and span, if the body has one. */
@@ -1225,8 +1314,12 @@ export const firstUnavailable = (
         for (const arm of expression.arms) {
           const guard = arm.guard === undefined ? undefined : walk(arm.guard)
           if (guard !== undefined) return guard
-          const result = walk(arm.result)
-          if (result !== undefined) return result
+          for (const expression of arm.body._tag === 'Expression'
+            ? [arm.body.expression]
+            : arm.body.statements.flatMap(statementExpressions)) {
+            const result = walk(expression)
+            if (result !== undefined) return result
+          }
         }
         return undefined
       }
@@ -1482,7 +1575,18 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
           }),
         ),
       )
+      let remaining = [...expression.members]
       for (const [index, arm] of expression.arms.entries()) {
+        const selected = remaining.filter(
+          (candidate) =>
+            arm.universal || (arm.member !== undefined && Match.selects(arm.member, candidate)),
+        )
+        const executes = selected.length > 0
+        if (
+          arm.guard === undefined ||
+          (arm.guard._tag !== 'Unavailable' && Type.isNever(arm.guard.type))
+        )
+          remaining = remaining.filter((candidate) => !selected.includes(candidate))
         const transition = coverage.transitions.at(index)
         if (arm.id.ordinal !== index) {
           issues.push(Object.freeze({ _tag: 'InvalidMatchArmOrder', span: arm.span }))
@@ -1497,15 +1601,22 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         }
         if (
           arm.guard !== undefined &&
-          (arm.guard._tag === 'Unavailable' || !Type.equals(arm.guard.type, 'bool'))
+          (arm.guard._tag === 'Unavailable' ||
+            (!Type.equals(arm.guard.type, 'bool') && !Type.isNever(arm.guard.type)))
         ) {
           issues.push(Object.freeze({ _tag: 'InvalidMatchGuard', span: arm.guard.span }))
         }
         if (
-          arm.result._tag === 'Unavailable' ||
-          !TypeCompatibility.isCompatible(TypeCompatibility.check(arm.result.type, expression.type))
+          executes &&
+          (arm.guard === undefined ||
+            arm.guard._tag === 'Unavailable' ||
+            !Type.isNever(arm.guard.type)) &&
+          ((arm.body._tag === 'Expression' && arm.body.expression._tag === 'Unavailable') ||
+            !TypeCompatibility.isCompatible(
+              TypeCompatibility.check(arm.body.type, expression.type),
+            ))
         ) {
-          issues.push(Object.freeze({ _tag: 'InvalidMatchResult', span: arm.result.span }))
+          issues.push(Object.freeze({ _tag: 'InvalidMatchResult', span: arm.body.span }))
         }
         for (const binding of arm.bindings) {
           if (
@@ -1523,8 +1634,19 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
     active.delete(expression)
   }
   for (const fn of self.functions) {
+    const visitedStatements = new Set<Statement>()
     const statements = (body: ReadonlyArray<Statement>): void => {
       for (const statement of body) {
+        if (visitedStatements.has(statement)) continue
+        visitedStatements.add(statement)
+        for (const root of statementExpressions(statement))
+          for (const expression of expressionTree(root)) {
+            if (expression._tag === 'Match')
+              for (const arm of expression.arms) {
+                if (arm.body._tag === 'Block') statements(arm.body.statements)
+              }
+            else if (expression._tag === 'EffectBlock') statements(expression.statements)
+          }
         if (statement._tag === 'Write' && statement.place._tag === 'BorrowedWritePlace') {
           const [first, ...rest] = statement.place.selectors
           const wellFormed = Type.isReference(statement.place.slice)
@@ -1741,7 +1863,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'EffectBlock':
       return [
-        `${indent}effect-block site=${executableSiteLabel(expression.site)} access=${expression.type.access.toLowerCase()} captures=${expression.captures.map((capture) => `${capture.binding === undefined ? `p${capture.parameter?.ordinal ?? '?'}` : `b${capture.binding.ordinal}`}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}effect-block site=${executableSiteLabel(expression.site)} access=${expression.type.access.toLowerCase()} captures=${expression.captures.map((capture) => `${[capture.pattern === undefined ? '' : `pattern${capture.pattern.arm.match.span.start}.${capture.pattern.arm.ordinal}.${capture.pattern.ordinal}`, capture.binding === undefined ? '' : `b${capture.binding.ordinal}`, capture.parameter === undefined ? '' : `p${capture.parameter.ordinal}`].join('')}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         ...expression.statements.map((statement) => encodeStatement(statement, depth + 1)),
       ].join('\n')
     case 'UnionConvert':
@@ -1770,7 +1892,12 @@ const encodeExpression = (expression: Expression, depth: number): string => {
               ? []
               : [`${indent}    guard`, encodeExpression(arm.guard, depth + 3)]),
             `${indent}    result`,
-            encodeExpression(arm.result, depth + 3),
+            ...(arm.body._tag === 'Expression'
+              ? [encodeExpression(arm.body.expression, depth + 3)]
+              : [
+                  `${indent}      block completes=${arm.body.completion.fallsThrough}`,
+                  ...arm.body.statements.map((statement) => encodeStatement(statement, depth + 3)),
+                ]),
           ]
         }),
       ].join('\n')

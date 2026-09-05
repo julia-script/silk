@@ -10,7 +10,7 @@ import * as Instances from './Instances.js'
 import * as TypeInference from './internal/TypeInference.js'
 import type * as Layout from './Layout.js'
 import type { ExecutableEffectType } from './Lower.js'
-import { i32, local, mirType } from './Lower.js'
+import { i32, local, mirType, patternKey } from './Lower.js'
 import type {} from './LowerExpression.js'
 import { lowerExpressionInner } from './LowerExpression.js'
 import { lowerSequence } from './LowerStatements.js'
@@ -44,6 +44,50 @@ import {
   sourceWitnessArguments,
   witnessEffectContract,
 } from './WitnessLowering.js'
+
+const publishRunnerSuccess = (
+  fn: FunctionLowering,
+  id: Mir.RegionId,
+  operations: ReadonlyArray<Mir.Operation>,
+  success: LoweredExpression,
+  type: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }>,
+  span: SourceSpan.SourceSpan,
+): void => {
+  if (success === 'Transferred') {
+    fn.publish(
+      Object.freeze({
+        _tag: 'OperationRegion',
+        id,
+        operations,
+        outcome: Object.freeze({
+          _tag: 'Trap',
+          reason: 'unreachable runner continuation',
+          provenance: generated(span),
+        }),
+      }),
+    )
+    return
+  }
+  const destination = fn.alloc(type)
+  fn.publish(
+    Object.freeze({
+      _tag: 'OperationRegion',
+      id,
+      operations: Object.freeze([
+        ...operations,
+        Object.freeze({
+          _tag: 'PackEffectOutcome' as const,
+          destination,
+          source: success.result,
+          tag: 0,
+          type,
+          provenance: generated(span),
+        }),
+      ]),
+      outcome: Object.freeze({ _tag: 'Return', value: destination, provenance: generated(span) }),
+    }),
+  )
+}
 
 const runtimeParameterCount = (fn: Hir.HirFunction): number =>
   fn.declaration.parameters.filter((parameter) => parameter.phase === 'Runtime').length
@@ -101,6 +145,24 @@ export const returnedEffectBlock = (
       statement._tag === 'Bind' && statement.binding.ordinal === returned.binding.ordinal,
   )
   return binding?.initializer._tag === 'EffectBlock' ? binding.initializer : undefined
+}
+
+/** Reads the one represented result shared by all reachable enclosing return sites. */
+export const returnedValueType = (
+  layout: Layout.Plan,
+  opaqueRealizations: OpaqueRealization.Catalog,
+  fn: Hir.HirFunction,
+  substitution: Type.Substitution,
+): ReturnType<typeof representedValueType> => {
+  const returned = Hir.returnExpressions(fn.statements).flatMap((expression) =>
+    expression._tag === 'Unavailable' || Type.isNever(expression.type)
+      ? []
+      : [Type.substitute(expression.type, substitution)],
+  )
+  const first = returned.at(0)
+  return first === undefined || !returned.every((type) => Type.equals(type, first))
+    ? undefined
+    : representedValueType(layout, opaqueRealizations, first, new Map())
 }
 
 export const lowerInstance = (
@@ -238,22 +300,14 @@ export const lowerInstance = (
         )
       : undefined
   const returnedBlock = contract._tag === 'Contract' ? returnedEffectBlock(fn) : undefined
-  const terminalStatement = fn.statements.at(-1)
-  const returnedExpression =
-    terminalStatement?._tag === 'Return' && 'type' in terminalStatement.expression
-      ? terminalStatement.expression
-      : undefined
   const hiddenEffectValue =
     returnedBlock === undefined ? undefined : effectValueType(layout, instance.key, returnedBlock)
-  const hiddenCompositeResult =
-    returnedExpression === undefined
-      ? undefined
-      : representedValueType(
-          layout,
-          opaqueRealizations,
-          returnedExpression.type,
-          instance.substitution,
-        )
+  const hiddenCompositeResult = returnedValueType(
+    layout,
+    opaqueRealizations,
+    fn,
+    instance.substitution,
+  )
   const specializedEffectValue =
     instance.resultEffect === undefined
       ? undefined
@@ -311,7 +365,12 @@ export const lowerInstance = (
   })
   const entry = lowerSequence(lowering, fn.statements, indexExits(plan), undefined, terminal)
 
-  if (entry === undefined || lowering.regions.some((region) => region === undefined)) {
+  if (
+    entry === undefined ||
+    lowering.regions.some(
+      (region, ordinal) => region === undefined && !lowering.extractedRegions.has(ordinal),
+    )
+  ) {
     const unavailable = Hir.firstUnavailable(fn)
     return trapFunction(instance, 'unavailable body', unavailable?.span ?? bodySpan(fn))
   }
@@ -442,6 +501,8 @@ export const lowerEffectRunner = (
       lowering.bindingLocals.set(capture.binding.ordinal, captureLocal)
     if (capture.parameter !== undefined)
       lowering.parameterLocals.set(capture.parameter.ordinal, captureLocal)
+    if (capture.pattern !== undefined)
+      lowering.patternLocals.set(patternKey(capture.pattern), captureLocal)
   })
   const terminal: Mir.Outcome = Object.freeze({
     _tag: 'Trap',
@@ -449,7 +510,12 @@ export const lowerEffectRunner = (
     provenance: generated(block.span),
   })
   const entry = lowerSequence(lowering, block.statements, indexExits(plan), undefined, terminal)
-  if (entry === undefined || lowering.regions.some((region) => region === undefined))
+  if (
+    entry === undefined ||
+    lowering.regions.some(
+      (region, ordinal) => region === undefined && !lowering.extractedRegions.has(ordinal),
+    )
+  )
     return undefined
   const result: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
     _tag: 'EffectOutcome',
@@ -562,27 +628,7 @@ export const lowerCatchEffectRunner = (
     type: spec.type.type,
   })
   if (success === undefined) return undefined
-  const returned = lowering.alloc(result)
-  const packed: Mir.Operation = Object.freeze({
-    _tag: 'PackEffectOutcome',
-    destination: returned,
-    source: success.result,
-    tag: 0,
-    type: result,
-    provenance: generated(spec.expression.span),
-  })
-  lowering.publish(
-    Object.freeze({
-      _tag: 'OperationRegion',
-      id: region,
-      operations: Object.freeze([...operations, packed]),
-      outcome: Object.freeze({
-        _tag: 'Return',
-        value: returned,
-        provenance: generated(spec.expression.span),
-      }),
-    }),
-  )
+  publishRunnerSuccess(lowering, region, operations, success, result, spec.expression.span)
   return Object.freeze({
     _tag: 'MirFunction',
     id: spec.id,
@@ -713,29 +759,7 @@ export const lowerBuiltinEffectRunner = (
     _tag: 'EffectOutcome',
     type: spec.type.type,
   })
-  const returned = lowering.alloc(result)
-  lowering.publish(
-    Object.freeze({
-      _tag: 'OperationRegion',
-      id: region,
-      operations: Object.freeze([
-        ...operations,
-        Object.freeze({
-          _tag: 'PackEffectOutcome' as const,
-          destination: returned,
-          source: success.result,
-          tag: 0,
-          type: result,
-          provenance: generated(spec.expression.span),
-        }),
-      ]),
-      outcome: Object.freeze({
-        _tag: 'Return',
-        value: returned,
-        provenance: generated(spec.expression.span),
-      }),
-    }),
-  )
+  publishRunnerSuccess(lowering, region, operations, success, result, spec.expression.span)
   return Object.freeze({
     _tag: 'MirFunction',
     id: spec.id,
@@ -834,7 +858,7 @@ export const lowerWitnessEffectRunner = (
     ),
   )
   const region = lowering.reserve()
-  const [returned, operations] = lowering.capture((): Mir.LocalId | undefined => {
+  const [returned, operations] = lowering.capture((): Mir.LocalId | 'Transferred' | undefined => {
     let success: LoweredExpression | undefined
     let reborrows: WitnessArguments['reborrows'] = Object.freeze([])
     if (spec.target !== undefined) {
@@ -932,6 +956,7 @@ export const lowerWitnessEffectRunner = (
         }),
       )
     }
+    if (success === 'Transferred') return success
     if (success === undefined) return undefined
     endWitnessReborrows(lowering, reborrows, spec.expression.span)
     const outcome: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
@@ -957,11 +982,18 @@ export const lowerWitnessEffectRunner = (
       _tag: 'OperationRegion',
       id: region,
       operations,
-      outcome: Object.freeze({
-        _tag: 'Return',
-        value: returned,
-        provenance: generated(spec.expression.span),
-      }),
+      outcome:
+        returned === 'Transferred'
+          ? Object.freeze({
+              _tag: 'Trap',
+              reason: 'unreachable runner continuation',
+              provenance: generated(spec.expression.span),
+            })
+          : Object.freeze({
+              _tag: 'Return',
+              value: returned,
+              provenance: generated(spec.expression.span),
+            }),
     }),
   )
   return Object.freeze({

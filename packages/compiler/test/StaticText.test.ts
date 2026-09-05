@@ -1788,3 +1788,64 @@ it.effect('keeps lexical literal sentinels out of parser and semantic diagnostic
     assert.strictEqual(Projections.hirOf(snapshot, 'static/lexical-sentinel')?.functions.length, 1)
   }),
 )
+
+it.effect('evaluates statement arms and carries transfers through eager static expressions', () =>
+  Effect.gen(function* () {
+    const source = `struct Payload { value: i32 }
+struct Pair { left: i32 right: i32 }
+enum Flag { Ready, Waiting }
+union Choice { Some { value: i32 }, None }
+static fn identity(value: i32) -> i32 { return value }
+static fn early() -> i32 {
+  return identity(match 0 { _ => { return 17 } }) + (1 / 0)
+}
+static fn aggregate() -> i32 {
+  let pair = Pair { left: match 0 { _ => { return 19 } }, right: 1 / 0 }
+  return pair.right
+}
+static fn canonical() -> i32 {
+  let choice = Choice.Some { value: 7 }
+  let selected = match choice {
+    Choice.Some { value } => value
+    Choice.None => 0
+  }
+  return match Flag.Ready { Flag.Waiting => 1 / 0 Flag.Ready => selected }
+}
+static fn guarded() -> i32 {
+  return match (Payload { value: 3 }) {
+    Payload { value } if false => 1 / 0
+    Payload { value } if match value { _ => { return value } } => 1 / 0
+    _ => 1 / 0
+  }
+}
+static fn loops() -> i32 {
+  let mut count = 0
+  let mut total = 0
+  while count < 4 {
+    count = count + 1
+    match count {
+      _ if count == 1 => { continue }
+      _ if count == 4 => { break }
+      _ => { while true { break } total = total + count }
+    }
+  }
+  match total { _ => { drop 42 } }
+  return total
+}
+pub fn main() -> i32 {
+  static if early() == 17 && aggregate() == 19 && canonical() == 7 && guarded() == 3 && loops() == 5 {
+    return 42
+  } else { compileError("incorrect statement-arm evaluation") }
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'static/match-arm-transfers',
+      encoder.encode(source),
+      Target.x8664UnknownLinuxGnu.id,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const main = Analysis.instancesOf(snapshot).instances.find(
+      (instance) => instance.key.declaration.name === 'main',
+    )
+    assert.isDefined(main)
+  }),
+)

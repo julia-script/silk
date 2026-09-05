@@ -22,7 +22,7 @@ import * as SyntaxTree from '../SyntaxTree.js'
 import type * as Token from '../Token.js'
 import * as ExpressionNesting from './ExpressionNesting.js'
 import { expressionFollowing, expressionStarts, typeStarts } from './Grammar.js'
-import { parseBlock } from './Statement.js'
+import { endsBlock, parseBlock } from './Statement.js'
 import {
   parseFailureRow,
   parseParameterList,
@@ -574,8 +574,8 @@ export const primaryKind = (
 
 export const remainingRightParentheses = (state: State): number => {
   let count = 0
-  // Braces opened inside the scan belong to struct or record literals in argument position, so
-  // their closing brace does not end the enclosing block.
+  // A braced argument subtree may contain ordinary statements and its own calls.
+  // Neither those statement boundaries nor their parentheses belong to the enclosing call.
   let braceDepth = 0
   for (let index = state.index; index < state.lexical.tokens.length; index += 1) {
     const token = state.lexical.tokens.at(index)
@@ -588,6 +588,7 @@ export const remainingRightParentheses = (state: State): number => {
       braceDepth -= 1
       continue
     }
+    if (braceDepth > 0) continue
     let followingIndex = index + 1
     let following = state.lexical.tokens.at(followingIndex)
     while (following !== undefined && isTrivia(following.kind)) {
@@ -1523,10 +1524,32 @@ export function parseMatchArm(
     state = guard.state
   }
 
-  const arrow = expect(state, 'FatArrow', [...expressionStarts, 'Identifier', 'RightBrace'])
-  const result = parseChildExpression(arrow.state, depth, true, (childDepth) =>
-    parseExpression(arrow.state, reservedForEnclosingCalls, 'Identifier', true, childDepth),
-  )
+  const arrow = expect(state, 'FatArrow', [
+    ...expressionStarts,
+    'LeftBrace',
+    'Identifier',
+    'RightBrace',
+  ])
+  const result = parseChildExpression(arrow.state, depth, true, (childDepth) => {
+    if (nextSignificantKind(arrow.state) !== 'LeftBrace')
+      return parseExpression(arrow.state, reservedForEnclosingCalls, 'Identifier', true, childDepth)
+    const block = parseBlock(
+      Object.freeze({ ...arrow.state, expressionDepth: childDepth }),
+      false,
+      false,
+      true,
+    )
+    const { expressionDepth: _depth, ...following } = block.state
+    return Object.freeze({
+      node: block.node,
+      state: Object.freeze({
+        ...following,
+        ...(arrow.state.expressionDepth === undefined
+          ? {}
+          : { expressionDepth: arrow.state.expressionDepth }),
+      }),
+    })
+  })
   state = result.state
   children = Object.freeze([...children, ...arrow.elements, result.node])
   return Object.freeze({ state, node: syntaxNode(state, 'MatchArm', children) })
@@ -1567,10 +1590,7 @@ export function parseMatchExpression(
     ...left.elements,
   ])
 
-  while (
-    nextSignificantKind(state) !== 'RightBrace' &&
-    nextSignificantKind(state) !== 'EndOfFile'
-  ) {
+  while (!endsBlock(state)) {
     const arm = parseMatchArm(state, reservedForEnclosingCalls, depth)
     children = Object.freeze([...children, arm.node])
     state = arm.state
@@ -2088,15 +2108,16 @@ export function parseExpression(
   allowStructLiteral = true,
   depth = ExpressionNesting.root,
 ): NodeResult {
+  const activeDepth = Math.max(depth, initial.expressionDepth ?? ExpressionNesting.root)
   let left = parseInfixExpression(
     initial,
     reservedForEnclosingCalls,
     recoveryKind,
     0,
     allowStructLiteral,
-    depth,
+    activeDepth,
   )
-  let chainDepth = depth
+  let chainDepth = activeDepth
   while (nextSignificantKind(left.state) === 'PipeGreater') {
     const pipe = expect(left.state, 'PipeGreater', [...expressionStarts, ...expressionFollowing])
     const target = parseChildExpression(pipe.state, chainDepth, allowStructLiteral, (childDepth) =>

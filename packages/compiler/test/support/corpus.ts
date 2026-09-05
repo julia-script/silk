@@ -6147,6 +6147,104 @@ const pressurePrograms: ReadonlyArray<CorpusProgram> = [
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
+    name: 'match-statement-arm-control',
+    source: `struct Left { value: i32 }
+struct Right {}
+struct Total { value: i32 }
+fn identity(value: i32) -> i32 { return value }
+fn early(input: Left | Right) -> i32 {
+  return identity(match &input {
+    Left { value } => { return value }
+    Right {} => 0
+  }) + 100
+}
+fn guarded(input: Left | Right) -> i32 {
+  return match &input {
+    Left { value } if false => 100
+    Left { value } if match value { _ => { return value } } => 100
+    _ => 0
+  }
+}
+fn deferred(input: Left | Right) -> Effect<i32> {
+  match &input {
+    Left { value } => { return effect { return value } }
+    Right {} => { return effect { return 8 } }
+  }
+}
+effect fn add(total: &mut Total, amount: i32) -> () { total.value = total.value + amount }
+effect fn selected() -> i32 {
+  let mut total = Total { value: 0 }
+  let mut count = 0
+  while count < 4 {
+    count = count + 1
+    match count {
+      _ if count == 1 => { continue }
+      _ if count == 4 => { break }
+      _ => { while true { break } run add(&mut total, count) }
+    }
+  }
+  let input = Left { value: 2 }
+  match &input {
+    Left { value } => { run add(&mut total, value) run add(&mut total, 3) }
+  }
+  return total.value
+}
+pub fn main() -> i32 {
+  if early(Left { value: 17 }) != 17 { return 1 }
+  if early(Right {}) != 100 { return 2 }
+  if guarded(Left { value: 3 }) != 3 { return 3 }
+  let result = run selected()
+  if result != 10 { return 4 }
+  let left = run deferred(Left { value: 7 })
+  let right = run deferred(Right {})
+  if left != 7 || right != 8 { return 5 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'match-statement-arm-abandoned-cleanup',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+struct Counts { order: i32 }
+struct Guard { counts: Shared<Counts> digit: i32 }
+struct Pair { selected: Guard omitted: Guard }
+fn read(counts: &Counts) -> i32 { return counts.order }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let digit = self.digit
+    Shared.withMut(&self.counts, fn(counts: &mut Counts) -> () {
+      counts.order = counts.order * 10 + digit
+    })
+  }
+}
+fn guard(counts: &Shared<Counts>, digit: i32) -> Guard {
+  return Guard { counts: Shared.clone<Counts>(counts), digit: digit }
+}
+fn uncalled(first: Guard, value: i32) -> i32 { return 99 }
+fn early(counts: &Shared<Counts>) -> i32 {
+  return uncalled(guard(counts, 1), match move (Pair {
+    selected: guard(counts, 2), omitted: guard(counts, 3),
+  }) {
+    Pair { selected, .. } => { let local = guard(counts, 4) return 17 }
+  })
+}
+effect fn program() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let counts = run Shared.make<Counts>(Counts { order: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if early(&counts) != 17 { return 1 }
+  let order = Shared.with<Counts, i32>(&counts, read)
+  drop counts
+  if order != 4231 { return 2 }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'integer-operation-matrix',
     source: integerOperationMatrix,
     expected: { _tag: 'Completes', result: 42 },

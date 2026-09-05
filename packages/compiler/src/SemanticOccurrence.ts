@@ -1166,7 +1166,11 @@ const collectExpression = (
       for (const arm of expression.arms) {
         collectPattern(arm.pattern, index, scope, pending)
         if (arm.guard !== undefined) collectExpression(arm.guard, index, scope, pending)
-        collectExpression(arm.result, index, scope, pending)
+        if (arm.body._tag === 'Expression')
+          collectExpression(arm.body.expression, index, scope, pending)
+        else
+          for (const statement of arm.body.statements)
+            collectStatement(statement, index, scope, pending)
       }
       return
     case 'EffectBlock':

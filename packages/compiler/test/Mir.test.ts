@@ -832,3 +832,103 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`),
     )
   }),
 )
+
+it.effect('rejects missing normal match results and invented results on transferring arms', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'mir/ordinary-arm-results',
+      ascii(`enum Choice { First, Last }
+fn inspect(value: Choice) -> i32 {
+  return match value { Choice.First => { return 7 } Choice.Last => 9 }
+}
+pub fn main() -> i32 { return inspect(Choice.Last) }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(program), [])
+    const fn = program.functions.find((fn) => fn.id.name === 'inspect') ?? raise('expected inspect')
+    const match =
+      MirVerification.operations(fn).find((operation) => operation._tag === 'Match') ??
+      raise('expected match')
+    const transferring = match.arms.at(0) ?? raise('expected transferring arm')
+    const completing = match.arms.at(1) ?? raise('expected completing arm')
+    const result = completing.selected.execution.result ?? raise('expected normal arm result')
+    const replace = (replacement: Mir.MatchOperation): Mir.Module => ({
+      ...program,
+      functions: program.functions.map((candidate) =>
+        candidate !== fn
+          ? candidate
+          : {
+              ...candidate,
+              regions: candidate.regions.map((region) =>
+                region._tag !== 'OperationRegion'
+                  ? region
+                  : {
+                      ...region,
+                      operations: region.operations.map((operation) =>
+                        operation === match ? replacement : operation,
+                      ),
+                    },
+              ),
+            },
+      ),
+    })
+    const withoutResult: Mir.Execution = {
+      entry: completing.selected.execution.entry,
+      regions: completing.selected.execution.regions,
+    }
+    const absent = replace({
+      ...match,
+      arms: [
+        transferring,
+        { ...completing, selected: { ...completing.selected, execution: withoutResult } },
+      ],
+    })
+    assert.include(
+      MirVerification.verify(absent).map((violation) => violation.rule),
+      'InvalidMatchJoin',
+    )
+    const invented = replace({
+      ...match,
+      arms: [
+        {
+          ...transferring,
+          selected: {
+            ...transferring.selected,
+            execution: { ...transferring.selected.execution, result },
+          },
+        },
+        completing,
+      ],
+    })
+    assert.include(
+      MirVerification.verify(invented).map((violation) => violation.rule),
+      'InvalidMatchJoin',
+    )
+    const uninitialized: Mir.LocalId = { _tag: 'Local', ordinal: fn.localTypes.length }
+    const missingWrite = replace({
+      ...match,
+      arms: [
+        transferring,
+        {
+          ...completing,
+          selected: {
+            ...completing.selected,
+            execution: { ...completing.selected.execution, result: uninitialized },
+          },
+        },
+      ],
+    })
+    assert.include(
+      MirVerification.verify({
+        ...missingWrite,
+        functions: missingWrite.functions.map((candidate) =>
+          candidate.id.name === 'inspect'
+            ? { ...candidate, localTypes: [...candidate.localTypes, { _tag: 'i32' }] }
+            : candidate,
+        ),
+      }).map((violation) => violation.rule),
+      'InvalidMatchJoin',
+    )
+  }),
+)

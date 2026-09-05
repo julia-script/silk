@@ -9,6 +9,8 @@ export interface State {
   readonly index: number
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly recovering: boolean
+  /** Parent expression depth retained while parsing ordinary statements inside a match arm. */
+  readonly expressionDepth?: number
 }
 
 export interface ElementsResult {

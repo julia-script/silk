@@ -173,10 +173,30 @@ const usesOf = (
   definition: Extract<Mir.Operation, { readonly _tag: 'MakeEffect' }>,
 ): ReadonlyArray<{ readonly region: Mir.Region; readonly operation?: Mir.Operation }> => {
   const uses: Array<{ readonly region: Mir.Region; readonly operation?: Mir.Operation }> = []
-  for (const region of fn.regions) {
+  for (const region of Mir.regionsTree(fn.regions)) {
     if (region._tag === 'OperationRegion') {
       for (const operation of region.operations) {
-        if (operation !== definition && containsLocal(operation, definition.destination.ordinal))
+        let directlyUses: boolean
+        if (operation._tag === 'Match')
+          directlyUses =
+            operation.scrutinee.ordinal === definition.destination.ordinal ||
+            operation.arms.some(
+              (arm) =>
+                arm.guard?.execution.result?.ordinal === definition.destination.ordinal ||
+                arm.selected.execution.result?.ordinal === definition.destination.ordinal,
+            )
+        else if (operation._tag === 'Conditional')
+          directlyUses = [
+            operation.condition,
+            operation.taken.result,
+            operation.otherwise.result,
+          ].some((local) => local?.ordinal === definition.destination.ordinal)
+        else if (operation._tag === 'ShortCircuit')
+          directlyUses = [operation.left, operation.right.result].some(
+            (local) => local?.ordinal === definition.destination.ordinal,
+          )
+        else directlyUses = containsLocal(operation, definition.destination.ordinal)
+        if (operation !== definition && directlyUses)
           uses.push(Object.freeze({ region, operation }))
       }
       if (containsLocal(region.outcome, definition.destination.ordinal))
@@ -231,6 +251,56 @@ const operationClassification = (
     ? ProvisionalMir.classificationOfRunner(provisional, operation.runner, operation.typeArguments)
     : ProvisionalMir.classificationOfRun(provisional, fn.instance, operation.provenance.span)
 
+/** Applies normalization within every explicit execution without flattening its control flow. */
+const mapRegions = (
+  regions: ReadonlyArray<Mir.Region>,
+  transform: (region: Mir.Region) => Mir.Region,
+): ReadonlyArray<Mir.Region> => {
+  const execution = (value: Mir.Execution): Mir.Execution =>
+    Object.freeze({ ...value, regions: mapRegions(value.regions, transform) })
+  const operation = (value: Mir.Operation): Mir.Operation => {
+    if (value._tag === 'Match')
+      return Object.freeze({
+        ...value,
+        arms: Object.freeze(
+          value.arms.map((arm) =>
+            Object.freeze({
+              ...arm,
+              ...(arm.guard === undefined
+                ? {}
+                : { guard: Object.freeze({ execution: execution(arm.guard.execution) }) }),
+              selected: Object.freeze({
+                ...arm.selected,
+                execution: execution(arm.selected.execution),
+              }),
+            }),
+          ),
+        ),
+      })
+    if (value._tag === 'Conditional')
+      return Object.freeze({
+        ...value,
+        taken: execution(value.taken),
+        otherwise: execution(value.otherwise),
+      })
+    if (value._tag === 'ShortCircuit')
+      return Object.freeze({ ...value, right: execution(value.right) })
+    return value
+  }
+  return Object.freeze(
+    regions.map((region) =>
+      transform(
+        region._tag === 'OperationRegion'
+          ? Object.freeze({
+              ...region,
+              operations: Object.freeze(region.operations.map(operation)),
+            })
+          : region,
+      ),
+    ),
+  )
+}
+
 /** Normalizes one target-aware MIR module from exact provisional runner facts. */
 export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Module): Mir.Module => {
   if (program.normalization !== undefined) return program
@@ -239,7 +309,7 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
   const functions = program.functions.map((fn) => {
     let functionChanged = false
     const constructorGuards = new Map<number, ConstructorGuard>()
-    const foldedRegions = fn.regions.map((region) => {
+    const foldedRegions = mapRegions(fn.regions, (region) => {
       if (region._tag !== 'OperationRegion') return region
       const operations = region.operations.map((operation) => {
         const target =
@@ -298,7 +368,7 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
     const folded = functionChanged
       ? Object.freeze({ ...fn, regions: Object.freeze(foldedRegions) })
       : fn
-    for (const region of folded.regions) {
+    for (const region of Mir.regionsTree(folded.regions)) {
       if (region._tag !== 'OperationRegion') continue
       for (const operation of region.operations) {
         if (
@@ -322,7 +392,7 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
       }
     }
     let directChanged = false
-    const directRegions = folded.regions.map((region) => {
+    const directRegions = mapRegions(folded.regions, (region) => {
       if (region._tag !== 'OperationRegion') return region
       const removed = new Set<Mir.Operation>()
       const replacements = new Map<Mir.Operation, Mir.Operation>()

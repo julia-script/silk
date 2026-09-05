@@ -1211,14 +1211,8 @@ export interface ConditionalOperation {
   readonly _tag: 'Conditional'
   readonly destination: LocalId
   readonly condition: LocalId
-  readonly taken: {
-    readonly operations: ReadonlyArray<Operation>
-    readonly result: LocalId
-  }
-  readonly otherwise: {
-    readonly operations: ReadonlyArray<Operation>
-    readonly result: LocalId
-  }
+  readonly taken: Execution
+  readonly otherwise: Execution
   readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' }>
   readonly resultShape: Layout.CallingShape
   readonly provenance: Provenance
@@ -1236,10 +1230,7 @@ export interface ShortCircuitOperation {
   readonly operator: 'And' | 'Or'
   readonly destination: LocalId
   readonly left: LocalId
-  readonly right: {
-    readonly operations: ReadonlyArray<Operation>
-    readonly result: LocalId
-  }
+  readonly right: Execution
   readonly type: Extract<Type, { readonly _tag: 'bool' }>
   readonly provenance: Provenance
 }
@@ -1274,6 +1265,13 @@ export interface MatchBinding {
   readonly provenance: Provenance
 }
 
+/** A nested acyclic region graph with a value only on its normal completion paths. */
+export interface Execution {
+  readonly entry: RegionId
+  readonly regions: ReadonlyArray<Region>
+  readonly result?: LocalId
+}
+
 export interface MatchArm {
   readonly id: Match.ArmId
   readonly member?: Match.CoverageIdentity
@@ -1281,14 +1279,15 @@ export interface MatchArm {
   readonly before: ReadonlyArray<Match.CoverageIdentity>
   readonly after: ReadonlyArray<Match.CoverageIdentity>
   readonly bindings: ReadonlyArray<MatchBinding>
-  readonly guard?: {
-    readonly operations: ReadonlyArray<Operation>
-    readonly result: LocalId
-  }
+  readonly cleanupBindings: ReadonlyArray<{
+    readonly destination: LocalId
+    readonly path: ReadonlyArray<DeclarationFacts.FieldId>
+    readonly type: Type
+  }>
+  readonly guard?: { readonly execution: Execution }
   readonly selected: {
     readonly access: Match.Access
-    readonly operations: ReadonlyArray<Operation>
-    readonly result: LocalId
+    readonly execution: Execution
     readonly cleanup: ReadonlyArray<{
       readonly destination: LocalId
       readonly path: ReadonlyArray<DeclarationFacts.FieldId>
@@ -1303,7 +1302,7 @@ export interface MatchArm {
 export interface MatchOperation {
   readonly _tag: 'Match'
   readonly id: Match.MatchId
-  readonly destination: LocalId
+  readonly destination?: LocalId
   readonly scrutinee: LocalId
   readonly scrutineeType: Type
   readonly scrutineeShape: Layout.CallingShape
@@ -1322,6 +1321,7 @@ export interface MatchOperation {
 }
 
 export type Outcome =
+  | { readonly _tag: 'Complete'; readonly provenance: Provenance }
   | { readonly _tag: 'Forward'; readonly target: RegionId; readonly provenance: Provenance }
   | { readonly _tag: 'Return'; readonly value: LocalId; readonly provenance: Provenance }
   | { readonly _tag: 'Trap'; readonly reason: string; readonly provenance: Provenance }
@@ -1735,7 +1735,9 @@ export const controlEdges = (self: MirFunction): ReadonlyArray<ControlEdge> =>
   )
 
 /** Canonical parent-before-child traversal over structural edges only. */
-export const topologicalRegions = (self: MirFunction): ReadonlyArray<Region> => {
+export const topologicalRegions = (
+  self: Pick<MirFunction, 'entry' | 'regions'>,
+): ReadonlyArray<Region> => {
   const byId = new Map(self.regions.map((region) => [region.id.ordinal, region] as const))
   const visited = new Set<number>()
   const ordered: Array<Region> = []
@@ -1831,14 +1833,70 @@ export const operationsOf = (region: Region): ReadonlyArray<Operation> => {
   return []
 }
 
+/** Structural operations inside one nested execution, preserving region order. */
+export const executionOperations = (execution: Execution): ReadonlyArray<Operation> =>
+  topologicalRegions(execution).flatMap(operationsOf)
+
+/** Maps operation sequences while retaining the nested region and outcome graph. */
+export const mapExecutionOperations = (
+  execution: Execution,
+  transform: (operations: ReadonlyArray<Operation>) => ReadonlyArray<Operation>,
+): Execution =>
+  Object.freeze({
+    ...execution,
+    regions: Object.freeze(
+      execution.regions.map((region): Region => {
+        if (region._tag === 'OperationRegion')
+          return Object.freeze({ ...region, operations: transform(region.operations) })
+        if (region._tag !== 'CleanupRegion') return region
+        const releases = transform(region.releases)
+        const cleanup = releases.filter(
+          (operation): operation is Extract<Operation, { readonly _tag: 'Drop' | 'EndLoan' }> =>
+            operation._tag === 'Drop' || operation._tag === 'EndLoan',
+        )
+        if (cleanup.length !== releases.length)
+          throw new RangeError('Cleanup region transformation introduced a non-cleanup operation')
+        return Object.freeze({ ...region, releases: Object.freeze(cleanup) })
+      }),
+    ),
+  })
+
+/** All nested region identities, without flattening the authored execution boundaries. */
+export const regionsTree = (regions: ReadonlyArray<Region>): ReadonlyArray<Region> => {
+  const found: Array<Region> = []
+  const seen = new Set<Region>()
+  const operation = (value: Operation): void => {
+    if (value._tag === 'Match')
+      for (const arm of value.arms) {
+        if (arm.guard !== undefined) visit(topologicalRegions(arm.guard.execution))
+        visit(topologicalRegions(arm.selected.execution))
+      }
+    else if (value._tag === 'ShortCircuit') visit(topologicalRegions(value.right))
+    else if (value._tag === 'Conditional') {
+      visit(topologicalRegions(value.taken))
+      visit(topologicalRegions(value.otherwise))
+    }
+  }
+  const visit = (items: ReadonlyArray<Region>): void => {
+    for (const region of items) {
+      if (seen.has(region)) continue
+      seen.add(region)
+      found.push(region)
+      operationsOf(region).forEach(operation)
+    }
+  }
+  visit(regions)
+  return Object.freeze(found)
+}
+
 export const operationChildren = (operation: Operation): ReadonlyArray<Operation> => {
   if (operation._tag === 'Conditional')
-    return [...operation.taken.operations, ...operation.otherwise.operations]
-  if (operation._tag === 'ShortCircuit') return operation.right.operations
+    return [...executionOperations(operation.taken), ...executionOperations(operation.otherwise)]
+  if (operation._tag === 'ShortCircuit') return executionOperations(operation.right)
   if (operation._tag === 'Match') {
     return operation.arms.flatMap((arm) => [
-      ...(arm.guard?.operations ?? []),
-      ...arm.selected.operations,
+      ...(arm.guard === undefined ? [] : executionOperations(arm.guard.execution)),
+      ...executionOperations(arm.selected.execution),
     ])
   }
   if (

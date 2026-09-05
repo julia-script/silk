@@ -459,7 +459,10 @@ export const make = (operations: Operations) => {
           if (arm.reachable) {
             return [
               ...(arm.guard === undefined ? [] : callTargets(arm.guard, index, substitution)),
-              ...callTargets(arm.result, index, substitution),
+              ...(arm.body._tag === 'Expression'
+                ? [arm.body.expression]
+                : arm.body.statements.flatMap(Hir.statementExpressions)
+              ).flatMap((child) => callTargets(child, index, substitution)),
             ]
           }
           return []
@@ -571,7 +574,13 @@ export const make = (operations: Operations) => {
           ...walk(expression.scrutinee),
           ...expression.arms.flatMap((arm) => {
             if (arm.reachable) {
-              return [...(arm.guard === undefined ? [] : walk(arm.guard)), ...walk(arm.result)]
+              return [
+                ...(arm.guard === undefined ? [] : walk(arm.guard)),
+                ...(arm.body._tag === 'Expression'
+                  ? [arm.body.expression]
+                  : arm.body.statements.flatMap(Hir.statementExpressions)
+                ).flatMap(walk),
+              ]
             }
             return []
           }),
@@ -659,7 +668,13 @@ export const make = (operations: Operations) => {
           ...walk(expression.scrutinee),
           ...expression.arms.flatMap((arm) => {
             if (arm.reachable) {
-              return [...(arm.guard === undefined ? [] : walk(arm.guard)), ...walk(arm.result)]
+              return [
+                ...(arm.guard === undefined ? [] : walk(arm.guard)),
+                ...(arm.body._tag === 'Expression'
+                  ? [arm.body.expression]
+                  : arm.body.statements.flatMap(Hir.statementExpressions)
+                ).flatMap(walk),
+              ]
             }
             return []
           }),
@@ -1085,9 +1100,15 @@ export const make = (operations: Operations) => {
     readonly context: EffectOriginContext
   }
 
-  function returnedExpression(fn: Hir.HirFunction): Hir.Expression | undefined {
-    const terminal = fn.statements.at(-1)
-    return terminal?._tag === 'Return' ? terminal.expression : undefined
+  function commonOrigin<A>(
+    values: ReadonlyArray<A | undefined>,
+    key: (value: A) => string,
+  ): A | undefined {
+    const first = values.at(0)
+    return first !== undefined &&
+      values.every((value) => value !== undefined && key(value) === key(first))
+      ? first
+      : undefined
   }
 
   function resultCallableIdentity(
@@ -1098,22 +1119,27 @@ export const make = (operations: Operations) => {
     resolving: ReadonlySet<string> = new Set(),
   ): Type.CallableIdentityArgument | undefined {
     const substitution = instanceSubstitution(fn, owner)
-    const expression = returnedExpression(fn)
-    if (substitution === undefined || expression === undefined || fn.contract._tag !== 'Contract')
+    const expressions = Hir.returnExpressions(fn.statements)
+    if (substitution === undefined || expressions.length === 0 || fn.contract._tag !== 'Contract')
       return undefined
     const result = Type.substitute(fn.contract.result, substitution)
     const contract = Type.isRepresented(result) ? result.contract : result
     if (!Type.isCallable(contract)) return undefined
     const identity = keyText(owner)
     if (resolving.has(identity)) return undefined
-    return callableOriginOf(expression, {
-      fn,
-      owner,
-      substitution,
-      results,
-      index,
-      resolving: new Set(resolving).add(identity),
-    })
+    return commonOrigin(
+      expressions.map((expression) =>
+        callableOriginOf(expression, {
+          fn,
+          owner,
+          substitution,
+          results,
+          index,
+          resolving: new Set(resolving).add(identity),
+        }),
+      ),
+      Type.genericArgumentKey,
+    )
   }
 
   function serviceEffectRecipes(
@@ -1140,7 +1166,9 @@ export const make = (operations: Operations) => {
     if (expression._tag === 'Match')
       return Object.freeze(
         expression.arms.flatMap((arm) =>
-          arm.reachable ? serviceEffectRecipes(arm.result, context, resolving) : [],
+          arm.reachable && arm.body._tag === 'Expression'
+            ? serviceEffectRecipes(arm.body.expression, context, resolving)
+            : [],
         ),
       )
     if (expression._tag === 'EffectCatch')
@@ -1369,20 +1397,25 @@ export const make = (operations: Operations) => {
         targetKey === undefined || target === undefined
           ? undefined
           : instanceSubstitution(target, targetKey)
-      const returned = target === undefined ? undefined : returnedExpression(target)
+      const returned = target === undefined ? [] : Hir.returnExpressions(target.statements)
       if (
         substitution === undefined ||
-        returned === undefined ||
+        returned.length === 0 ||
         targetKey === undefined ||
         target === undefined
       )
         return undefined
-      return compositeEffectRepresentationOf(returned, {
-        ...context,
-        fn: target,
-        owner: targetKey,
-        substitution,
-      })
+      return commonOrigin(
+        returned.map((expression) =>
+          compositeEffectRepresentationOf(expression, {
+            ...context,
+            fn: target,
+            owner: targetKey,
+            substitution,
+          }),
+        ),
+        Type.genericArgumentKey,
+      )
     }
     if (expression._tag === 'CallableApply') {
       const targetKey = targetKeyOfCallableApply(expression, context)
@@ -1392,20 +1425,25 @@ export const make = (operations: Operations) => {
         targetKey === undefined || target === undefined
           ? undefined
           : instanceSubstitution(target, targetKey)
-      const returned = target === undefined ? undefined : returnedExpression(target)
+      const returned = target === undefined ? [] : Hir.returnExpressions(target.statements)
       if (
         substitution === undefined ||
-        returned === undefined ||
+        returned.length === 0 ||
         targetKey === undefined ||
         target === undefined
       )
         return undefined
-      return compositeEffectRepresentationOf(returned, {
-        ...context,
-        fn: target,
-        owner: targetKey,
-        substitution,
-      })
+      return commonOrigin(
+        returned.map((expression) =>
+          compositeEffectRepresentationOf(expression, {
+            ...context,
+            fn: target,
+            owner: targetKey,
+            substitution,
+          }),
+        ),
+        Type.genericArgumentKey,
+      )
     }
     return undefined
   }
@@ -1555,8 +1593,8 @@ export const make = (operations: Operations) => {
     resolving: ReadonlySet<string> = new Set(),
   ): string | undefined => {
     const substitution = instanceSubstitution(fn, owner)
-    const expression = returnedExpression(fn)
-    if (substitution === undefined || expression === undefined) return undefined
+    const expressions = Hir.returnExpressions(fn.statements)
+    if (substitution === undefined || expressions.length === 0) return undefined
     if (
       fn.contract._tag !== 'Contract' ||
       !Type.isEffect(Type.substitute(fn.contract.result, substitution))
@@ -1564,14 +1602,19 @@ export const make = (operations: Operations) => {
       return undefined
     const identity = keyText(owner)
     if (resolving.has(identity)) return undefined
-    return effectOriginOf(expression, {
-      fn,
-      owner,
-      substitution,
-      results,
-      index,
-      resolving: new Set(resolving).add(identity),
-    })
+    return commonOrigin(
+      expressions.map((expression) =>
+        effectOriginOf(expression, {
+          fn,
+          owner,
+          substitution,
+          results,
+          index,
+          resolving: new Set(resolving).add(identity),
+        }),
+      ),
+      (identity) => identity,
+    )
   }
 
   const effectOriginOf = (
@@ -1680,7 +1723,8 @@ export const make = (operations: Operations) => {
     if (expression._tag === 'Match') {
       const identities = expression.arms.flatMap((arm) => {
         if (!arm.reachable) return []
-        const identity = effectOriginOf(arm.result, context)
+        const identity =
+          arm.body._tag === 'Expression' ? effectOriginOf(arm.body.expression, context) : undefined
         return identity === undefined ? [] : [identity]
       })
       return identities.length !== 0 && new Set(identities).size === 1
@@ -1726,8 +1770,12 @@ export const make = (operations: Operations) => {
     context: EffectOriginContext,
   ): string | undefined => {
     if (expression._tag === 'EffectBlock') {
-      const terminal = expression.statements.at(-1)
-      return terminal?._tag === 'Return' ? effectOriginOf(terminal.expression, context) : undefined
+      return commonOrigin(
+        Hir.returnExpressions(expression.statements).map((returned) =>
+          effectOriginOf(returned, context),
+        ),
+        (identity) => identity,
+      )
     }
     if (expression._tag === 'BindingReference') {
       const initializer = callableBindings(context.fn).get(expression.binding.ordinal)
@@ -1740,7 +1788,10 @@ export const make = (operations: Operations) => {
     if (expression._tag === 'Match') {
       const identities = expression.arms.flatMap((arm) => {
         if (!arm.reachable) return []
-        const identity = successEffectOriginOf(arm.result, context)
+        const identity =
+          arm.body._tag === 'Expression'
+            ? successEffectOriginOf(arm.body.expression, context)
+            : undefined
         return identity === undefined ? [] : [identity]
       })
       return identities.length !== 0 && new Set(identities).size === 1
@@ -1763,25 +1814,30 @@ export const make = (operations: Operations) => {
       targetKey === undefined ? undefined : targetFunction(context.results, expression.target)
     if (targetKey === undefined || target === undefined) return undefined
     const substitution = instanceSubstitution(target, targetKey)
-    const returned = returnedExpression(target)
-    if (substitution === undefined || returned === undefined) return undefined
+    const returned = Hir.returnExpressions(target.statements)
+    if (substitution === undefined || returned.length === 0) return undefined
     const marker = `success:${keyText(targetKey)}`
     if (context.resolving.has(marker)) return undefined
-    return successEffectOriginOf(returned, {
-      fn: target,
-      owner: targetKey,
-      substitution,
-      results: context.results,
-      index: context.index,
-      resolving: new Set(context.resolving).add(marker),
-      ...(context.resolveEffectIdentity === undefined
-        ? {}
-        : { resolveEffectIdentity: context.resolveEffectIdentity }),
-      ...(context.successOfIdentity === undefined
-        ? {}
-        : { successOfIdentity: context.successOfIdentity }),
-      parameterArguments: { arguments: expression.arguments, context },
-    })
+    return commonOrigin(
+      returned.map((result) =>
+        successEffectOriginOf(result, {
+          fn: target,
+          owner: targetKey,
+          substitution,
+          results: context.results,
+          index: context.index,
+          resolving: new Set(context.resolving).add(marker),
+          ...(context.resolveEffectIdentity === undefined
+            ? {}
+            : { resolveEffectIdentity: context.resolveEffectIdentity }),
+          ...(context.successOfIdentity === undefined
+            ? {}
+            : { successOfIdentity: context.successOfIdentity }),
+          parameterArguments: { arguments: expression.arguments, context },
+        }),
+      ),
+      (identity) => identity,
+    )
   }
 
   /**
@@ -2383,15 +2439,33 @@ export const make = (operations: Operations) => {
             return 0
           })
         const captures = block.captures.flatMap((capture, ordinal) => {
-          const source = capture.binding === undefined ? 'Parameter' : 'Binding'
-          const sourceOrdinal = capture.binding?.ordinal ?? capture.parameter?.ordinal
+          let source: 'Pattern' | 'Binding' | 'Parameter'
+          if (capture.pattern !== undefined) source = 'Pattern'
+          else if (capture.binding !== undefined) source = 'Binding'
+          else source = 'Parameter'
+          const sourceOrdinal =
+            capture.pattern?.ordinal ?? capture.binding?.ordinal ?? capture.parameter?.ordinal
           const initializer =
-            sourceOrdinal === undefined || source === 'Parameter'
+            sourceOrdinal === undefined || source !== 'Binding'
               ? undefined
               : bindings.get(sourceOrdinal)
           let sourceType: Type.Type | undefined
           if (sourceOrdinal === undefined) {
             sourceType = undefined
+          } else if (capture.pattern !== undefined) {
+            const pattern = capture.pattern
+            const reference = callableExpressions(instance.function).find(
+              (expression) =>
+                expression._tag === 'PatternBindingReference' &&
+                expression.binding.ordinal === pattern.ordinal &&
+                expression.binding.arm.ordinal === pattern.arm.ordinal &&
+                expression.binding.arm.match.span.start === pattern.arm.match.span.start &&
+                expression.binding.arm.match.function.sourceId ===
+                  pattern.arm.match.function.sourceId &&
+                expression.binding.arm.match.function.ordinal ===
+                  pattern.arm.match.function.ordinal,
+            )
+            sourceType = reference?._tag === 'PatternBindingReference' ? reference.type : undefined
           } else if (source === 'Parameter') {
             if (instance.function.contract._tag === 'Contract') {
               const runtimeOrdinal = instance.function.declaration.parameters
@@ -2821,9 +2895,9 @@ export const make = (operations: Operations) => {
       if (resolving.has(identity)) return Object.freeze([])
       const candidates = instances.filter((candidate) => candidate.resultEffect === identity)
       const candidate = candidates.length === 1 ? candidates.at(0) : undefined
-      const expression =
-        candidate === undefined ? undefined : returnedExpression(candidate.function)
-      if (candidate === undefined || expression === undefined) return Object.freeze([])
+      const expressions =
+        candidate === undefined ? [] : Hir.returnExpressions(candidate.function.statements)
+      if (candidate === undefined || expressions.length === 0) return Object.freeze([])
       const recipeContext: EffectOriginContext = {
         fn: candidate.function,
         owner: candidate.key,
@@ -2835,7 +2909,9 @@ export const make = (operations: Operations) => {
         successOfIdentity,
         serviceRecipesOfIdentity,
       }
-      return serviceEffectRecipes(expression, recipeContext)
+      return Object.freeze(
+        expressions.flatMap((expression) => serviceEffectRecipes(expression, recipeContext)),
+      )
     }
     const addDependency = (owner: string, target: string): void => {
       const targets = dependencies.get(owner) ?? new Set<string>()
@@ -2883,7 +2959,11 @@ export const make = (operations: Operations) => {
         if (expression._tag === 'Match') {
           return Object.freeze([
             ...new Set(
-              expression.arms.flatMap((arm) => (arm.reachable ? effectOrigins(arm.result) : [])),
+              expression.arms.flatMap((arm) =>
+                arm.reachable && arm.body._tag === 'Expression'
+                  ? effectOrigins(arm.body.expression)
+                  : [],
+              ),
             ),
           ])
         }
@@ -2942,7 +3022,11 @@ export const make = (operations: Operations) => {
         if (expression._tag === 'Match') {
           return Object.freeze([
             ...new Set(
-              expression.arms.flatMap((arm) => (arm.reachable ? executionTargets(arm.result) : [])),
+              expression.arms.flatMap((arm) =>
+                arm.reachable && arm.body._tag === 'Expression'
+                  ? executionTargets(arm.body.expression)
+                  : [],
+              ),
             ),
           ])
         }
