@@ -176,43 +176,58 @@ const lowerOperandWithProvision = (
   )
 }
 
+const lowerTransferredPlace = (
+  fn: FunctionLowering,
+  transition: Ownership.PlaceTransition,
+  semanticType: DeclarationFacts.SemanticType,
+  span: SourceSpan.SourceSpan,
+): LoweredExpression | undefined => {
+  const root = ownershipLocal(fn, transition.root)
+  if (root === undefined) return undefined
+  if (transition.path.length === 0) return { result: root }
+  const type = fn.type(semanticType)
+  const selectors = lowerOwnershipPath(fn, root, transition.path, span)
+  if (type === undefined || selectors === undefined) return undefined
+  const destination = fn.alloc(type)
+  fn.emit({
+    _tag: 'ReadPlace',
+    destination,
+    root,
+    selectors,
+    type,
+    consume: true,
+    ownershipPath: transition.path,
+    provenance: authored(span),
+  })
+  return { result: destination }
+}
+
 export function lowerExpression(
   fn: FunctionLowering,
   expression: Hir.Expression,
   availableRequirements = fn.activeRequirements ?? fn.providedRequirements,
 ): LoweredExpression | undefined {
   const lower = (): LoweredExpression | undefined => {
+    // Generated wrappers can share the source place's span. Only the place itself extracts
+    // ownership; a match or conversion must still lower its computation and result type.
     const consuming =
-      expression._tag === 'Move' ? undefined : transitionAt(fn, expression.span, 'Move')
+      expression._tag === 'ParameterReference' ||
+      expression._tag === 'BindingReference' ||
+      expression._tag === 'PatternBindingReference' ||
+      expression._tag === 'Project' ||
+      expression._tag === 'ReferentPlace' ||
+      expression._tag === 'IndexPlace' ||
+      expression._tag === 'SliceIndexPlace'
+        ? transitionAt(fn, expression.span, 'Move')
+        : undefined
     let lowered: LoweredExpression | undefined
     if (consuming !== undefined && consuming.path.length > 0 && expression._tag !== 'Unavailable') {
-      const root = ownershipLocal(fn, consuming.root)
-      const type = fn.type(expression.type)
-      const selectors =
-        root === undefined
-          ? undefined
-          : lowerOwnershipPath(fn, root, consuming.path, expression.span)
-      if (root === undefined || type === undefined || selectors === undefined) return undefined
-      const destination = fn.alloc(type)
-      fn.emit({
-        _tag: 'ReadPlace',
-        destination,
-        root,
-        selectors,
-        type,
-        consume: true,
-        ownershipPath: consuming.path,
-        provenance: authored(expression.span),
-      })
-      lowered = { result: destination }
+      lowered = lowerTransferredPlace(fn, consuming, expression.type, expression.span)
     } else lowered = lowerExpressionInner(fn, expression, availableRequirements)
     if (lowered === 'Transferred') return lowered
     if (lowered !== undefined) {
       fn.expressionLocals.set(spanKey(expression.span), lowered.result)
-      if (expression._tag !== 'Move') {
-        const transition = transitionAt(fn, expression.span, 'Move')
-        if (transition !== undefined) emitInitializationTransition(fn, transition)
-      }
+      if (consuming !== undefined) emitInitializationTransition(fn, consuming)
     }
     endReturnedViewLoans(fn, expression.span)
     return lowered
@@ -362,30 +377,12 @@ export function lowerExpressionInner(
       const transition = transitionAt(fn, expression.span, 'Move')
       if (transition === undefined)
         return lowerExpression(fn, expression.subject, availableRequirements)
-      const root = ownershipLocal(fn, transition.root)
-      if (root === undefined) return undefined
-      if (transition.path.length === 0) {
-        emitInitializationTransition(fn, transition)
-        return { result: root }
-      }
-      const type =
-        expression.subject._tag === 'Unavailable' ? undefined : fn.type(expression.subject.type)
-      if (type === undefined) return undefined
-      const selectors = lowerOwnershipPath(fn, root, transition.path, expression.span)
-      if (selectors === undefined) return undefined
-      const destination = fn.alloc(type)
-      fn.emit({
-        _tag: 'ReadPlace',
-        destination,
-        root,
-        selectors,
-        type,
-        consume: true,
-        ownershipPath: transition.path,
-        provenance: authored(expression.span),
-      })
-      emitInitializationTransition(fn, transition)
-      return { result: destination }
+      const lowered =
+        expression.subject._tag === 'Unavailable'
+          ? undefined
+          : lowerTransferredPlace(fn, transition, expression.subject.type, expression.span)
+      if (lowered !== undefined) emitInitializationTransition(fn, transition)
+      return lowered
     }
     case 'Replace':
       return lowerReplaceExpression(fn, expression, availableRequirements)
@@ -2016,7 +2013,21 @@ function lowerMatchExpression(
     )
     if (selectors === undefined) return undefined
     scrutinee = { result: root }
-  } else scrutinee = lowerExpression(fn, expression.scrutinee, availableRequirements)
+  } else {
+    const transition =
+      expression.access === 'Move' ? transitionAt(fn, expression.span, 'Move') : undefined
+    if (transition === undefined)
+      scrutinee = lowerExpression(fn, expression.scrutinee, availableRequirements)
+    else {
+      scrutinee = lowerTransferredPlace(
+        fn,
+        transition,
+        expression.scrutinee.type,
+        expression.scrutinee.span,
+      )
+      if (scrutinee !== undefined) emitInitializationTransition(fn, transition)
+    }
+  }
   if (scrutinee === 'Transferred') return scrutinee
   const scrutineeType = fn.type(expression.scrutinee.type)
   const resultType = fn.type(expression.type)

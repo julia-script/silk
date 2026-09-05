@@ -34,14 +34,6 @@ export interface ExitIndex {
   readonly transfers: ReadonlyMap<string, Ownership.ExitPlan>
 }
 
-const conditionalPaths = (
-  state: MovePath.State,
-  path: MovePath.Path = [],
-): ReadonlyArray<MovePath.Path> => [
-  ...(state.initialization === 'Maybe' || state.discriminant === 'Maybe' ? [path] : []),
-  ...state.children.flatMap((child) => conditionalPaths(child.state, [...path, child.selector])),
-]
-
 /** Allocates only flags demanded by a conditional ownership fact, before entering any branch. */
 export const prepareInitialization = (fn: FunctionLowering): ReadonlyArray<Mir.Operation> => {
   if (fn.initializationStarted) return []
@@ -50,7 +42,7 @@ export const prepareInitialization = (fn: FunctionLowering): ReadonlyArray<Mir.O
   const collect = (root: Ownership.BindingSite, state: MovePath.State): void => {
     const key = Ownership.siteKey(root)
     const paths = roots.get(key) ?? new Map<string, MovePath.Path>()
-    for (const path of conditionalPaths(state)) paths.set(MovePath.key(path), path)
+    for (const path of MovePath.conditionalPaths(state)) paths.set(MovePath.key(path), path)
     if (paths.size > 0) roots.set(key, paths)
   }
   for (const exit of fn.ownership?.exits ?? [])
@@ -118,7 +110,7 @@ export const initializationFor = (
   path: MovePath.Path = [],
 ): Mir.DropOperation['initialization'] => {
   if (state.initialization === 'Initialized' && state.children.length === 0) return undefined
-  const required = new Set(conditionalPaths(state).map(MovePath.key))
+  const required = new Set(MovePath.conditionalPaths(state).map(MovePath.key))
   const flags = (fn.initializationFlags.get(Ownership.siteKey(root)) ?? []).flatMap((flag) =>
     flag.path.length >= path.length &&
     MovePath.overlaps(flag.path, path) &&

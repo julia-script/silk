@@ -678,6 +678,24 @@ interface SelectedCallLifetimes {
   readonly compatibility?: TypeCompatibility.Context | undefined
 }
 
+/** Opens an inherent member's header lifetimes before contextual argument checking. */
+export const instantiateSourceParameters = (
+  declaration: SourceCallable,
+  call: SyntaxTree.Node,
+  resolution: ResolutionContext,
+): ReadonlyArray<SemanticType | undefined> => {
+  const selected = selectedCallLifetimes(
+    call,
+    DeclarationFacts.executableLifetimes(declaration).lifetimeBinders,
+    resolution,
+  )
+  return declaration.parameters.map((parameter) =>
+    parameter.declaredType._tag === 'Resolved'
+      ? Type.substitute(parameter.declaredType.type, selected.substitution)
+      : undefined,
+  )
+}
+
 /** Instantiates only the already selected contract's binders, at one declaration-local call site. */
 const selectedCallLifetimes = (
   call: SyntaxTree.Node,

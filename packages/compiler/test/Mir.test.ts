@@ -31,6 +31,14 @@ it('preserves access, safety, and outcome contracts when adapting physical opera
   assert.isFalse(Mir.acceptsRuntimeOperand(parameter, callback))
   assert.isFalse(Mir.acceptsRuntimeOperand({ ...callback, unsafe: true }, parameter))
   assert.isFalse(Mir.acceptsRuntimeOperand(callback, { ...parameter, parameters: ['bool'] }))
+
+  for (const make of [Type.reference, Type.slice]) {
+    const exclusive = make('Exclusive', 'i32', first.environment)
+    const sharedView = make('Shared', 'i32', second.environment)
+    assert.isTrue(Mir.acceptsRuntimeOperand(exclusive, sharedView))
+    assert.isFalse(Mir.acceptsRuntimeOperand(sharedView, exclusive))
+    assert.isFalse(Mir.acceptsRuntimeOperand(exclusive, make('Shared', 'bool', second.environment)))
+  }
 })
 
 it('erases lifetime argument positions without erasing runtime specialization arguments', () => {

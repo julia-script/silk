@@ -51,14 +51,6 @@ const subtree = (state: MovePath.State, path: MovePath.Path): MovePath.State => 
   return selected
 }
 
-const conditionalPaths = (
-  state: MovePath.State,
-  path: MovePath.Path = [],
-): ReadonlyArray<MovePath.Path> => [
-  ...(state.initialization === 'Maybe' || state.discriminant === 'Maybe' ? [path] : []),
-  ...state.children.flatMap((child) => conditionalPaths(child.state, [...path, child.selector])),
-]
-
 /** A joined cleanup fact must include every possibility on each incoming concrete path. */
 const covers = (expected: MovePath.State, actual: MovePath.State): boolean => {
   if (expected.initialization !== 'Maybe' && expected.initialization !== actual.initialization)
@@ -286,7 +278,7 @@ export const analyze = (
               operation.provenance,
               'cleanup initializedness does not cover the incoming owned state',
             )
-          const required = new Set(conditionalPaths(expected).map(MovePath.key))
+          const required = new Set(MovePath.conditionalPaths(expected).map(MovePath.key))
           const provided = operation.initialization?.flags ?? []
           const identities = new Set(provided.map((flag) => MovePath.key(flag.path)))
           if (
@@ -359,6 +351,17 @@ export const analyze = (
         for (const state of states) read(state, outcome.value, [], outcome.provenance)
     },
     before: (operation, states) => {
+      if (operation._tag === 'Match') {
+        // A retained if-let result joins its matched and unmatched paths before the generated
+        // conditional. Bindings belong to this invocation, never a previous loop iteration.
+        states = map(states, (state) => {
+          const roots = new Map(state.roots)
+          for (const arm of operation.arms)
+            for (const binding of [...arm.bindings, ...arm.cleanupBindings])
+              roots.delete(binding.destination.ordinal)
+          return intern(roots, state.flags)
+        })
+      }
       snapshots.set(operation, merge(snapshots.get(operation) ?? new Set(), states))
       if (operation._tag === 'Match')
         for (const state of states) {

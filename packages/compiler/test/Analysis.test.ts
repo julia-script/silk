@@ -769,8 +769,8 @@ it.effect('publishes sealed affine Execution identity, affinity, and logical lif
       'execution-semantics',
       ascii(
         `struct Execution<T> { value: T }
-struct NestedLoan { value: &i32 }
-union NestedUnionLoan { Empty, Ready { value: &i32 } }
+struct NestedLoan<'a> { value: &'a i32 }
+union NestedUnionLoan<'a> { Empty, Ready { value: &'a i32 } }
 fn retain(value: Intrinsic.Execution<i32>) -> () { drop value }
 fn ordinary(value: Execution<i32>) -> () { drop value }
 pub fn main() -> i32 { return 42 }`,
@@ -832,11 +832,16 @@ pub fn main() -> i32 { return 42 }`,
       ExecutionAffinity.ofEnvironment(self.index, [{ type: Type.sharedCore('i32') }])._tag,
       'LocalExecution',
     )
+    const localLifetime = Lifetime.local(
+      { module: 'execution-semantics', name: 'retain' },
+      'capture',
+      0,
+    )
     const lexical = ExecutableProperty.detachedOfEnvironment(self.index, [
       {
         ordinal: 0,
         access: 'Take',
-        type: Type.reference('Shared', 'i32', Lifetime.staticLifetime),
+        type: Type.reference('Shared', 'i32', localLifetime),
       },
     ])
     assert.strictEqual(lexical._tag, 'Unsatisfied')
@@ -844,7 +849,7 @@ pub fn main() -> i32 { return 42 }`,
       lexical._tag === 'Unsatisfied' ? lexical.causes.at(0)?.reason : undefined,
       'LexicalLoan',
     )
-    for (const borrowed of [Type.string(Lifetime.staticLifetime), Type.slot('i32')]) {
+    for (const borrowed of [Type.string(localLifetime), Type.slot('i32')]) {
       const verdict = ExecutableProperty.detachedOfEnvironment(self.index, [
         { ordinal: 0, access: 'Take', type: borrowed },
       ])
@@ -871,7 +876,7 @@ pub fn main() -> i32 { return 42 }`,
       {
         ordinal: 0,
         access: 'Take',
-        type: Type.nominal('execution-semantics', 'NestedLoan'),
+        type: Type.nominal('execution-semantics', 'NestedLoan', [localLifetime]),
       },
     ])
     assert.strictEqual(nested._tag, 'Unsatisfied')
@@ -887,7 +892,7 @@ pub fn main() -> i32 { return 42 }`,
       {
         ordinal: 0,
         access: 'Take',
-        type: Type.nominal('execution-semantics', 'NestedUnionLoan'),
+        type: Type.nominal('execution-semantics', 'NestedUnionLoan', [localLifetime]),
       },
     ])
     assert.strictEqual(nestedUnion._tag, 'Unsatisfied')

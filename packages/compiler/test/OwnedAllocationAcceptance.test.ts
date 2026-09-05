@@ -63,7 +63,7 @@ it('classifies inexpressible local-shared escape containers at the ownership-fac
 it.effect('rejects a direct callback-dependent reference at a local-shared boundary', () =>
   Effect.gen(function* () {
     const source = ascii(`struct Pair { first: i32 second: i32 }
-fn direct<'a>(value: &'a mut Pair) -> &'a mut Pair { return value }
+fn direct<'a>(value: &'a mut Pair) -> &'a mut Pair { return move value }
 fn directConflict<'a>() -> &'a mut Pair { return directConflict() }
 unsafe fn directProbe<'scope>(core: &'scope Intrinsic.SharedCore<Pair>) -> &'scope mut Pair {
   return Intrinsic.sharedWithMut<Pair, &'scope mut Pair>(core, direct, directConflict)

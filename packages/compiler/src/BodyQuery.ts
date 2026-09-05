@@ -26,7 +26,7 @@ export interface Counters {
 
 interface Dependency {
   readonly key: string
-  readonly signature: string
+  readonly signature: string | undefined
   readonly implementation?: string
 }
 
@@ -288,6 +288,13 @@ const dependencies = (
     })
   }
   for (const key of [...selected].sort()) add(key)
+  // A failed lookup consumed the absence of this exact member. Retain that input so adding
+  // the member repairs cached diagnostics without invalidating users of unrelated names.
+  for (const diagnostic of analysis.diagnostics) {
+    if (diagnostic.reason._tag !== 'UnknownImportedMember') continue
+    const key = `${diagnostic.reason.module}/${diagnostic.reason.spelling}`
+    if (!result.has(key)) result.set(key, { key, signature: self.signatures.get(key) })
+  }
   return [...result.values()].sort((left, right) => left.key.localeCompare(right.key))
 }
 

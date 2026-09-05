@@ -1506,7 +1506,10 @@ export const collectAnonymousCallableDeclaration = (
       functionKind:
         SyntaxTree.directToken(node, 'EffectKeyword') === undefined ? 'Ordinary' : 'Effect',
       unsafe: false,
-      typeParameters: Object.freeze([...inheritedTypeParameters]),
+      typeParameters: Object.freeze([
+        ...inheritedTypeParameters,
+        ...implicitLifetimeParameters(lifetimeContext, environment),
+      ]),
       parameterCount: parameterFacts.length,
       parameters: parameterFacts,
       name,
@@ -1917,7 +1920,27 @@ const collectTypeParameters = (
           }),
     })
   })
-  const implicitFacts: ReadonlyArray<TypeParameterFact> = lifetimeContext.implicit.map((binder) => {
+  const implicitFacts = implicitLifetimeParameters(lifetimeContext, environment)
+  return Object.freeze({
+    facts: Object.freeze([...facts, ...implicitFacts]),
+    lifetimeContext: Object.freeze({
+      ...lifetimeContext,
+      parameters: new Map(
+        [...environment].filter(
+          ([name]) => !lifetimeContext.implicit.some((binder) => binder.parameter.name === name),
+        ),
+      ),
+    }),
+    environment,
+    diagnostics: Object.freeze(diagnostics),
+  })
+}
+
+const implicitLifetimeParameters = (
+  lifetimeContext: DeclarationLifetime.Context,
+  environment: Map<string, Type.Parameter>,
+): ReadonlyArray<TypeParameterFact> =>
+  lifetimeContext.implicit.map((binder) => {
     environment.set(binder.parameter.name, binder.parameter)
     return Object.freeze({
       _tag: 'TypeParameterDeclaration',
@@ -1934,20 +1957,6 @@ const collectTypeParameters = (
       implicitLifetime: true,
     })
   })
-  return Object.freeze({
-    facts: Object.freeze([...facts, ...implicitFacts]),
-    lifetimeContext: Object.freeze({
-      ...lifetimeContext,
-      parameters: new Map(
-        [...environment].filter(
-          ([name]) => !lifetimeContext.implicit.some((binder) => binder.parameter.name === name),
-        ),
-      ),
-    }),
-    environment,
-    diagnostics: Object.freeze(diagnostics),
-  })
-}
 
 const collectReturnType = (
   source: SourceFile.SourceFile,

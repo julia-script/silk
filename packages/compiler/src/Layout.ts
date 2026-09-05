@@ -22,6 +22,7 @@ import * as TypeInference from './internal/TypeInference.js'
 import * as LocalSharedAllocationProvenance from './LocalSharedAllocationProvenance.js'
 import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import * as Match from './Match.js'
+import * as MovePath from './MovePath.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as RepresentationField from './RepresentationField.js'
 import * as RowAlgebra from './RowAlgebra.js'
@@ -2023,6 +2024,7 @@ export const catalog = (
     if (declaration.union.typeParameters.length === 0) layoutNominal(declaration.type)
   }
   for (const instance of discovery?.instances ?? []) {
+    if (needsInitializationFlags(instance)) addReferenced('bool')
     const substitution = instance.substitution
     if (instance.function.contract._tag === 'Contract') {
       for (const parameter of instance.specialization.parameters) addReferenced(parameter)
@@ -2330,11 +2332,22 @@ const addStatementTypes = (
   }
 }
 
+const needsInitializationFlags = (instance: Instances.Instance): boolean =>
+  instance.ownership.exits.some((exit) =>
+    exit.releases.some((release) => MovePath.conditionalPaths(release.initialization).length > 0),
+  ) ||
+  instance.ownership.transitions.some(
+    (transition) =>
+      MovePath.conditionalPaths(transition.before).length > 0 ||
+      MovePath.conditionalPaths(transition.after).length > 0,
+  )
+
 const addFunctionTypes = (
   types: Map<string, DeclarationFacts.SemanticType>,
   instance: Instances.Instance,
 ): void => {
   const fn = instance.function
+  if (needsInitializationFlags(instance)) types.set(Type.runtimeKey('bool'), 'bool')
   const substitution = instance.substitution
   for (const parameter of fn.declaration.parameters) {
     if (parameter.declaredType._tag === 'Resolved') {

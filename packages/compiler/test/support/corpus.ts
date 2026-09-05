@@ -596,10 +596,11 @@ fn suspend(
   return ()
 }
 effect fn driveOnce<
-  S: once fn(&mut (), Intrinsic.Execution<i32>) -> () + Intrinsic.NonParking
+  'env, 'state,
+  S: once fn<'env>(&'state mut (), Intrinsic.Execution<i32>) -> () + Intrinsic.NonParking
 >(
   execution: Intrinsic.Execution<i32>,
-  state: &mut (),
+  state: &'state mut (),
   onSuspend: S
 ) -> () {
   return run Execution.drive(move execution, move state, complete, move onSuspend)
@@ -866,10 +867,11 @@ fn suspend(
   return ()
 }
 effect fn driveOnce<
-  S: once fn(&mut (), Intrinsic.Execution<i32>) -> () + Intrinsic.NonParking
+  'env, 'state,
+  S: once fn<'env>(&'state mut (), Intrinsic.Execution<i32>) -> () + Intrinsic.NonParking
 >(
   execution: Intrinsic.Execution<i32>,
-  state: &mut (),
+  state: &'state mut (),
   onSuspend: S
 ) -> () {
   return run Execution.drive(move execution, move state, complete, move onSuspend)
@@ -1702,8 +1704,8 @@ pub fn main() -> i32 {
   },
   {
     name: 'nominal-union-represented-copy-drop',
-    source: `union Parser<F: once fn(i32) -> i32> { Empty, Ready { parse: F } }
-union Deferred<F: once Effect<i32>> { Empty, Ready { operation: F } }
+    source: `union Parser<F: once fn<'static>(i32) -> i32> { Empty, Ready { parse: F } }
+union Deferred<F: once Effect<'static; i32>> { Empty, Ready { operation: F } }
 union Flag { Empty, Value { value: i32 } }
 impl Copy for Flag {}
 struct Token {}
@@ -1711,13 +1713,13 @@ impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
 union Owner { Empty, Present { token: Token, value: i32 } }
 
 fn increment(value: i32) -> i32 { return value + 1 }
-fn parse<F: once fn(i32) -> i32>(parser: Parser<F>) -> i32 {
+fn parse<F: once fn<'static>(i32) -> i32>(parser: Parser<F>) -> i32 {
   return match move parser {
     Parser<F>.Empty => 0
     Parser<F>.Ready { parse } => parse(19)
   }
 }
-fn force<F: once Effect<i32>>(deferred: Deferred<F>) -> i32 {
+fn force<F: once Effect<'static; i32>>(deferred: Deferred<F>) -> i32 {
   return match move deferred {
     Deferred<F>.Empty => 0
     Deferred<F>.Ready { operation } => run operation
@@ -1814,7 +1816,7 @@ pub fn main() -> i32 { return change(0) }`,
     name: 'finite-effect-join',
     source: `struct First {}
 struct Second {}
-fn choose(input: First | Second) -> Effect<i32> {
+fn choose(input: First | Second) -> Effect<'static; i32> {
   return match move input {
     First {} => effect { return 41 }
     Second {} => effect { return 42 }
@@ -1829,7 +1831,7 @@ pub fn main() -> i32 { return run choose(First {}) }`,
     name: 'finite-effect-join-capture-arity',
     source: `struct First {}
 struct Second {}
-fn choose(input: First | Second, a: i32, b: i32, c: i32) -> Effect<i32> {
+fn choose(input: First | Second, a: i32, b: i32, c: i32) -> Effect<'static; i32> {
   return match move input {
     First {} => effect { return a + b + c }
     Second {} => effect { return c }
@@ -1866,7 +1868,7 @@ impl Drop for Guard {
     return ()
   }
 }
-fn choose(input: First | Second, guard: Guard) -> once Effect<i32> {
+fn choose(input: First | Second, guard: Guard) -> once Effect<'static; i32> {
   return match move input {
     First {} => effect { drop move guard return 41 }
     Second {} => effect { drop move guard return 42 }
@@ -2752,9 +2754,9 @@ pub fn main() -> i32 {
     name: 'module-string-constants',
     source: `import silk.usize as usize
 import silk.string { String }
-const escapedPattern: string = "\\\\d+\\\\.\\\\d+"
-const rawPattern: string = r"\\d+\\.\\d+"
-const windowsPath: string = r"C:\\Users\\build"
+const escapedPattern: string<'static> = "\\\\d+\\\\.\\\\d+"
+const rawPattern: string<'static> = r"\\d+\\.\\d+"
+const windowsPath: string<'static> = r"C:\\Users\\build"
 fn sameText(left: string, right: string) -> bool {
   if String.byteLength(left) != String.byteLength(right) { return false }
   let leftBytes = String.utf8Bytes(left)
@@ -2991,7 +2993,7 @@ fn observeSecond(result: Result<i32, Second>) -> i32 {
   }
 }
 effect fn inner(value: i32) -> i32 { return value * 2 }
-effect fn outer(value: i32) -> Effect<i32> { return inner(value) }
+effect fn outer(value: i32) -> Effect<'static; i32> { return inner(value) }
 
 pub fn main() -> i32 {
   let mapped = run Effect.result(succeed(40) |> Effect.map(addTwo))
@@ -3044,8 +3046,8 @@ pub fn main() -> i32 {
   {
     name: 'effect-string-failure-channel',
     source: `import silk.effect { Effect }
-effect fn failText() -> i32 ! string { fail "oops" }
-effect fn recoverText(error: string) -> i32 { return 42 }
+effect fn failText() -> i32 ! string<'static> { fail "oops" }
+effect fn recoverText(error: string<'static>) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(failText(), recoverText) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
@@ -4682,9 +4684,9 @@ impl Drop for Guard {
     return ()
   }
 }
-struct Holder<F: once fn(i32) -> i32> { step: F }
+struct Holder<F: once fn<'static>(i32) -> i32> { step: F }
 fn consume(value: i32, guard: Guard) -> i32 { return value + guard.tag }
-fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 { return 42 }
+fn keep<F: once fn<'static>(i32) -> i32>(holder: Holder<F>) -> i32 { return 42 }
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
@@ -4802,7 +4804,7 @@ import silk.shared { Shared }
 struct Problem { code: i32 }
 struct Counter { value: i32 sum: i32 }
 struct Guard { value: i32 counter: Shared<Counter> }
-struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> { operation: F }
+struct Deferred<A, E, ?R, F: once Effect<'static; A ! E ? R>> { operation: F }
 fn record(counter: &mut Counter, value: i32) -> i32 {
   counter.value = counter.value + 1
   counter.sum = counter.sum + value
@@ -4821,7 +4823,7 @@ fn guard(value: i32, counter: &Shared<Counter>) -> Guard {
   return Guard { value: value, counter: Shared.clone<Counter>(counter) }
 }
 fn consume(held: Guard) -> i32 { return held.value }
-fn defer<A, E, ?R, F: once Effect<A ! E ? R>>(operation: F) -> Deferred<A, E, R, F> {
+fn defer<A, E, ?R, F: once Effect<'static; A ! E ? R>>(operation: F) -> Deferred<A, E, R, F> {
   return Deferred<A, E, R> { operation: move operation }
 }
 effect fn failing(held: Guard) -> i32 ! Problem {
@@ -4984,7 +4986,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
   {
     name: 'opaque-callable',
     source: `fn add(left: i32, right: i32) -> i32 { return left + right }
-fn make(value: i32) -> some<F: fn(i32) -> i32> F { return add(value) }
+fn make(value: i32) -> some<F: fn<'static>(i32) -> i32> F { return add(value) }
 pub fn main() -> i32 {
   let first = make(40)
   let second = make(1)
@@ -4997,7 +4999,7 @@ pub fn main() -> i32 {
     name: 'ordinary-union-executable-members',
     source: `fn add(left: i32, right: i32) -> i32 { return left + right }
 fn selectedCallable() -> typeof(add) | i32 { return add }
-fn selectedEffect() -> some<F: Effect<i32>> F | i32 {
+fn selectedEffect() -> some<F: Effect<'static; i32>> F | i32 {
   return effect { return 42 }
 }
 pub fn main() -> i32 {
@@ -5328,7 +5330,7 @@ impl Drop for Guard {
     return ()
   }
 }
-struct Holder<F: once fn(i32) -> i32> { step: F }
+struct Holder<F: once fn<'static>(i32) -> i32> { step: F }
 fn consume(value: i32, guard: Guard) -> i32 { return value }
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -5365,8 +5367,8 @@ effect fn load(flag: bool) -> i32 ! NotFoundError {
   if flag { fail NotFoundError {} }
   return 5
 }
-effect fn recover(error: NotFoundError) -> string { return "missing" }
-fn handled(flag: bool) -> Effect<i32 | string> {
+effect fn recover(error: NotFoundError) -> string<'static> { return "missing" }
+fn handled(flag: bool) -> Effect<'static; i32 | string<'static>> {
   return Effect.catch<NotFoundError>(load(flag), recover)
 }
 pub fn main() -> i32 {
@@ -5392,7 +5394,7 @@ effect fn load(flag: bool) -> i32 ! NotFoundError {
   return 5
 }
 effect fn rethrow(error: NotFoundError) -> never ! OtherError { fail OtherError {} }
-fn handled(flag: bool) -> Effect<i32 ! OtherError> {
+fn handled(flag: bool) -> Effect<'static; i32 ! OtherError> {
   return Effect.catch<NotFoundError>(load(flag), rethrow)
 }
 effect fn rec(e: OtherError) -> i32 { return 1 }
@@ -5412,7 +5414,7 @@ impl Drop for Token {
   fn drop(self: &mut Token) -> () { return () }
 }
 effect fn withToken(t: Token) -> i32 { return t.value }
-fn choose(flag: bool) -> once Effect<i32> {
+fn choose(flag: bool) -> once Effect<'static; i32> {
   if flag {
     let t = Token { value: 1 }
     return withToken(move t)
@@ -5432,7 +5434,7 @@ pub fn main() -> i32 {
     name: 'effect-block-fail-only',
     source: `import silk.effect { Effect }
 struct ProblemError {}
-fn fallible() -> Effect<i32 ! ProblemError> {
+fn fallible() -> Effect<'static; i32 ! ProblemError> {
   return effect { fail ProblemError {} }
 }
 effect fn recover(e: ProblemError) -> i32 { return 7 }
@@ -6222,7 +6224,7 @@ fn guarded(input: Left | Right) -> i32 {
     _ => 0
   }
 }
-fn deferred(input: Left | Right) -> Effect<i32> {
+fn deferred(input: Left | Right) -> Effect<'static; i32> {
   match &input {
     Left { value } => { return effect { return value } }
     Right {} => { return effect { return 8 } }
@@ -6273,6 +6275,7 @@ impl Drop for Guard {
     let digit = self.digit
     Shared.withMut(&self.counts, fn(counts: &mut Counts) -> () {
       counts.order = counts.order * 10 + digit
+      return ()
     })
   }
 }
@@ -6315,20 +6318,20 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`,
     name: 'callable-return-and-borrow-contracts',
     source: `struct Token { value: i32 }
 fn inc2(value: i32) -> i32 { return value + 2 }
-fn returnedNamed() -> fn(i32) -> i32 { return inc2 }
-fn returnedAnonymous(offset: i32) -> fn(i32) -> i32 {
+fn returnedNamed() -> fn<'static>(i32) -> i32 { return inc2 }
+fn returnedAnonymous(offset: i32) -> fn<'static>(i32) -> i32 {
   return fn(value: i32) -> i32 { return value + offset }
 }
 fn combine(left: i32, right: i32) -> i32 { return left * 10 + right }
-fn returnedSection() -> fn(i32) -> i32 { return combine(2) }
-fn returnedOnce(token: Token) -> once fn() -> Token {
+fn returnedSection() -> fn<'static>(i32) -> i32 { return combine(2) }
+fn returnedOnce(token: Token) -> once fn<'static>() -> Token {
   return fn() -> Token { return move token }
 }
-fn returnedCopyBinding() -> fn() -> i32 {
+fn returnedCopyBinding() -> fn<'static>() -> i32 {
   let value = 42
   return fn() -> i32 { return value }
 }
-fn pass(operation: fn(i32) -> i32) -> fn(i32) -> i32 { return operation }
+fn pass<'env>(operation: fn<'env>(i32) -> i32) -> fn<'env>(i32) -> i32 { return operation }
 fn select(value: i32, values: &[i32]) -> i32 { return value + values[0] }
 fn returnedBorrow(values: &[i32]) -> fn(i32) -> i32 { return select(&values) }
 fn selectMut(value: i32, values: &mut [i32]) -> i32 {
@@ -6731,7 +6734,7 @@ effect fn useLeft() -> i32 ? &LeftClock { return run LeftClock.read() }
 effect fn useRight() -> i32 ? &RightClock { return run RightClock.read() }
 struct First {}
 struct Second {}
-fn choose(input: First | Second) -> Effect<i32 ? &LeftClock | &RightClock> {
+fn choose(input: First | Second) -> Effect<'static; i32 ? &LeftClock | &RightClock> {
   return match move input {
     First {} => useLeft()
     Second {} => useRight()
@@ -6950,8 +6953,8 @@ pub fn main() -> i32 { return run Effect.catchAll(execute(), recover) }`,
   {
     name: 'effect-access-forwarding',
     source: `struct Payload { value: i32 }
-fn forwardReusable(self: mut Effect<i32>) -> mut Effect<i32> { return move self }
-fn forwardOnce(self: once Effect<Payload>) -> once Effect<Payload> { return move self }
+fn forwardReusable<'env>(self: mut Effect<'env; i32>) -> mut Effect<'env; i32> { return move self }
+fn forwardOnce<'env>(self: once Effect<'env; Payload>) -> once Effect<'env; Payload> { return move self }
 pub fn main() -> i32 {
   let mut counter = 40
   let pending = effect { counter = counter + 1 return counter }
@@ -6970,7 +6973,7 @@ pub fn main() -> i32 {
   },
   {
     name: 'opaque-effect',
-    source: `fn make(value: i32) -> some<F: Effect<i32>> F {
+    source: `fn make(value: i32) -> some<F: Effect<'static; i32>> F {
   return effect { return value }
 }
 pub fn main() -> i32 { return run make(42) }`,
@@ -7577,7 +7580,7 @@ impl Drop for Token {
   }
 }
 fn consume(value: i32, token: Token) -> i32 { return value + token.marker }
-struct Holder<F: once fn(i32) -> i32> { step: F }
+struct Holder<F: once fn<'static>(i32) -> i32> { step: F }
 effect fn failWith(audit: &Shared<Audit>) -> () ! Problem {
   let callback = consume(Token { marker: 4, audit: Shared.clone(audit) })
   fail Problem {}

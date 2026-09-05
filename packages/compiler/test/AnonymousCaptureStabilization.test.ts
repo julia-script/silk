@@ -1,6 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Lifetime from '../src/Lifetime.js'
+import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -16,6 +18,36 @@ fn addToken(value: i32, token: Token) -> i32 { return value + token.value }
 const payloadSurface = `import silk.effect { Effect }
 struct Payload { value: i32 }
 `
+
+it.effect(
+  'quantifies an anonymous borrowed parameter independently of its captured environment',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSource(
+        'anonymous-capture/quantified-input',
+        ascii(`fn apply(use: for<'a> fn<'static>(&'a mut i32) -> i32) -> i32 {
+  let mut value = 40
+  return use(&mut value)
+}
+pub fn main() -> i32 {
+  let offset = 2
+  return apply(fn(value: &mut i32) -> i32 {
+    value.* = value.* + offset
+    return value.*
+  })
+}`),
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const anonymous = Analysis.expressionsOf(snapshot, 'anonymous-capture/quantified-input').find(
+        (expression) => expression.syntax.kind === 'AnonymousCallableExpression',
+      )
+      const type = anonymous?.type._tag === 'Available' ? anonymous.type.type : undefined
+      assert.isTrue(type !== undefined && Type.isCallable(type))
+      if (type === undefined || !Type.isCallable(type)) return
+      assert.strictEqual(type.lifetimeBinders.length, 1)
+      assert.deepEqual(Type.freeLifetimes(type), [Lifetime.staticLifetime])
+    }),
+)
 
 it.effect('derives take-once invocation and run access from captured affine temporaries', () =>
   Effect.gen(function* () {

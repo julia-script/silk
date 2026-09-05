@@ -1388,6 +1388,34 @@ it('checks finite callable binders with rigid placeholders and rejects stronger 
     { environment: Lifetime.staticLifetime, lifetimeBinders: [x] },
   )
   assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(escaping, universal)))
+  const selected = Type.callable(
+    [Type.reference('Shared', 'i32', y)],
+    Type.reference('Shared', 'i32', y),
+    detached,
+  )
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(universal, selected)))
+  const selectedInference = new Map<string, Type.GenericArgument>()
+  assert.isTrue(TypeInference.infer(selected, universal, selectedInference))
+  assert.deepEqual([...selectedInference], [[Lifetime.key(y), y]])
+  const restricted = Type.callable(universal.parameters, universal.result, {
+    ...universal,
+    lifetimeBounds: [{ longer: x, shorter: Lifetime.staticLifetime }],
+  })
+  assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(restricted, selected)))
+  assert.isFalse(TypeInference.infer(selected, restricted, new Map()))
+  const outerType = Type.parameter(offeredOwner, 2, 'T')
+  const typeRestricted = Type.callable(universal.parameters, universal.result, {
+    ...universal,
+    typeOutlives: [{ type: outerType, lifetime: x }],
+  })
+  assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(typeRestricted, selected)))
+  assert.isFalse(TypeInference.infer(selected, typeRestricted, new Map()))
+  const captured = Type.callable(universal.parameters, universal.result, {
+    ...universal,
+    environment: a,
+  })
+  assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(captured, selected)))
+  assert.isFalse(TypeInference.infer(selected, captured, new Map()))
 })
 
 it('infers a selected call with a common local region and preserves mutable pointee invariance', () => {

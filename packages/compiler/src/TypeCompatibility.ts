@@ -1,5 +1,6 @@
 import * as Lifetime from './Lifetime.js'
 import * as Canonical from './internal/Canonical.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as Type from './Type.js'
 
 /** One canonical source-member to target-member relationship for an implicit union conversion. */
@@ -227,6 +228,10 @@ const callableCompatible = (
   target: Type.Callable,
   self: Context,
 ): boolean => {
+  if (source.lifetimeBinders.length > 0 && target.lifetimeBinders.length === 0) {
+    const instantiated = TypeInference.instantiateOfferedCallable(source, target, self)
+    return instantiated !== undefined && callableCompatible(instantiated, target, self)
+  }
   if (
     source.parameters.length !== target.parameters.length ||
     (source.unsafe && !target.unsafe) ||

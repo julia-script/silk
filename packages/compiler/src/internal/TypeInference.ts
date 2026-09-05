@@ -45,6 +45,8 @@ import {
   isString,
   isTypeArgument,
   key,
+  parameterArgument,
+  parameters,
   representationAdmissibility,
   representationArgumentKind,
   requirementMembers,
@@ -54,6 +56,7 @@ import {
   requirementRowPolicy,
   requirementSatisfies,
   someSubterm,
+  string,
   satisfiesOutlives,
   substitute,
   substituteFailureRow,
@@ -594,6 +597,18 @@ const inferQuantifiedExecutable = (
   inferred: Map<string, GenericArgument>,
   context: InferenceContext,
 ): boolean => {
+  if (
+    isCallable(pattern) &&
+    isCallable(actual) &&
+    pattern.lifetimeBinders.length === 0 &&
+    actual.lifetimeBinders.length > 0
+  ) {
+    const expected = substitute(pattern, inferred)
+    const instantiated = isCallable(expected)
+      ? instantiateOfferedCallable(actual, expected, context.lifetimes?.compatibility)
+      : undefined
+    return instantiated !== undefined && inferType(pattern, instantiated, inferred, context)
+  }
   if (pattern.lifetimeBinders.length !== actual.lifetimeBinders.length) return false
   const nested = (type: Type): boolean =>
     someSubterm(
@@ -663,6 +678,101 @@ const inferQuantifiedExecutable = (
   }
   commitInference(inferred, trial)
   return true
+}
+
+/**
+ * Instantiates an offered outer invocation binder at one already selected monomorphic signature.
+ * Only that binder's variables may be solved; surrounding parameters remain rigid. The caller
+ * still checks the offered signature, bounds and variance in the source-to-expected direction.
+ */
+export const instantiateOfferedCallable = (
+  source: Callable,
+  target: Callable,
+  compatibility: TypeCompatibility.Context = TypeCompatibility.context(),
+): Callable | undefined => {
+  const nested = (type: Type): boolean =>
+    someSubterm(
+      type,
+      (part) => (isCallable(part) || isEffect(part)) && part.lifetimeBinders.length > 0,
+    )
+  if (
+    source.lifetimeBinders.length === 0 ||
+    target.lifetimeBinders.length !== 0 ||
+    source.parameters.length !== target.parameters.length ||
+    [...source.parameters, source.result, ...target.parameters, target.result].some(nested)
+  )
+    return undefined
+  const inferable = new Set(source.lifetimeBinders.map(Lifetime.key))
+  const inferred = new Map<string, GenericArgument>(
+    parameters(source).map((parameter_) => [key(parameter_), parameterArgument(parameter_)]),
+  )
+  const context: InferenceContext = {
+    allowOpenGenericArguments: false,
+    lifetimes: {
+      compatibility,
+      inferable,
+      accepts: (longer, shorter, invariant) =>
+        TypeCompatibility.isCompatible(
+          TypeCompatibility.check(string(longer), string(shorter), compatibility),
+        ) &&
+        (!invariant ||
+          TypeCompatibility.isCompatible(
+            TypeCompatibility.check(string(shorter), string(longer), compatibility),
+          )),
+    },
+  }
+  const sites = [...source.parameters, source.result]
+  const expectedSites = [...target.parameters, target.result]
+  for (const [ordinal, site] of sites.entries()) {
+    const expected = expectedSites.at(ordinal)
+    if (expected === undefined || !inferType(site, expected, inferred, context)) return undefined
+  }
+  const substitution = new Map<string, GenericArgument>()
+  for (const binder of source.lifetimeBinders) {
+    const selected = inferred.get(Lifetime.key(binder))
+    if (selected === undefined || !Lifetime.isLifetime(selected)) return undefined
+    substitution.set(Lifetime.key(binder), selected)
+  }
+  // Discharge invocation preconditions while their binders are still known. Once opened, those
+  // predicates are free and must never be reclassified as assumed formation evidence.
+  const formation = executableFormationRequirements(source)
+  const boundsContext = {
+    ...compatibility,
+    typeBounds: [...compatibility.typeBounds, ...target.typeOutlives, ...formation.typeOutlives],
+    assumptions: Lifetime.assumptions([
+      ...compatibility.assumptions.bounds,
+      ...target.lifetimeBounds,
+      ...formation.lifetimeBounds,
+    ]),
+  }
+  if (
+    !source.lifetimeBounds.every((bound) =>
+      TypeCompatibility.isCompatible(
+        TypeCompatibility.check(
+          string(substituteLifetime(bound.longer, substitution)),
+          string(substituteLifetime(bound.shorter, substitution)),
+          boundsContext,
+        ),
+      ),
+    ) ||
+    !source.typeOutlives.every((bound) =>
+      TypeCompatibility.typeOutlives(boundsContext, {
+        type: substitute(bound.type, substitution),
+        lifetime: substituteLifetime(bound.lifetime, substitution),
+      }),
+    )
+  )
+    return undefined
+  const opened = callable(
+    source.parameters,
+    source.result,
+    { ...source, lifetimeBinders: [] },
+    source.mode,
+    source.schema,
+    source.unsafe,
+  )
+  const instantiated = substitute(opened, substitution)
+  return isCallable(instantiated) ? instantiated : undefined
 }
 
 /** Invocation preconditions need implication; independent formation facts travel with the value. */

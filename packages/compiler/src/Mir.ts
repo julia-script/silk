@@ -1635,6 +1635,16 @@ export const applyOperands = <T>(
 export const acceptsRuntimeOperand = (actual: SilkType.Type, expected: SilkType.Type): boolean =>
   SilkType.runtimeKey(actual) === SilkType.runtimeKey(expected) ||
   TypeCompatibility.isCompatible(TypeCompatibility.check(actual, expected)) ||
+  (SilkType.isReference(actual) &&
+    SilkType.isReference(expected) &&
+    expected.access === 'Shared' &&
+    actual.access === 'Exclusive' &&
+    SilkType.runtimeKey(actual.target) === SilkType.runtimeKey(expected.target)) ||
+  (SilkType.isSlice(actual) &&
+    SilkType.isSlice(expected) &&
+    expected.access === 'Shared' &&
+    actual.access === 'Exclusive' &&
+    SilkType.runtimeKey(actual.element) === SilkType.runtimeKey(expected.element)) ||
   (SilkType.isEffect(actual) &&
     SilkType.isEffect(expected) &&
     SilkType.compareAccess(expected.access, actual.access) &&

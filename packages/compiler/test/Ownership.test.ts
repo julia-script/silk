@@ -522,8 +522,8 @@ fn repeat() -> i32 {
   while index < 2 {
     let pair = Pair { left: Token { value: index }, right: Token { value: 0 } }
     let token = match move pair {
-      Pair { left } if left.value < 1 => Token { value: 1 }
-      Pair { left } => Token { value: 2 }
+      Pair { left, .. } if left.value < 1 => Token { value: 1 }
+      Pair { left, .. } => Token { value: 2 }
     }
     index = index + token.value
   }

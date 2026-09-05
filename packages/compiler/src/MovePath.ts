@@ -344,3 +344,9 @@ export const encodeState = (state: State): string => {
     .join(',')
   return `${state.initialization.toLowerCase()}${variant}${discriminant}${children.length === 0 ? '' : `{${children}}`}`
 }
+
+/** Lists the sparse state paths that require conditional initialization flags. */
+export const conditionalPaths = (state: State, path: Path = []): ReadonlyArray<Path> => [
+  ...(state.initialization === 'Maybe' || state.discriminant === 'Maybe' ? [path] : []),
+  ...state.children.flatMap((child) => conditionalPaths(child.state, [...path, child.selector])),
+]

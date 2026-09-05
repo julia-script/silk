@@ -4332,6 +4332,7 @@ import {
   interfaceEvidence,
   interfaceOperationContract,
   instantiateInterfaceReference,
+  instantiateSourceParameters,
   isSectionArity,
   ownedProviderCaptureAccess,
   serviceOperation,
@@ -7469,8 +7470,8 @@ const analyzeMethodCall = (
   }
   const parameterTypes: ReadonlyArray<SemanticType | undefined> =
     candidate._tag === 'Inherent'
-      ? candidate.declaration.parameters.map(declaredParameterType)
-      : candidate.reference.parameters
+      ? instantiateSourceParameters(candidate.declaration, node, resolution)
+      : instantiateInterfaceReference(candidate.reference, node, resolution).parameters
   const receiver = synthesizeReceiver(
     subjectNode,
     subjectResult,
@@ -8715,7 +8716,23 @@ const analyzeAnonymousCallable = (
   const complete = result !== undefined && parameterTypes.length === authoredParameters.length
   const callable =
     complete && result !== undefined && lifetimes !== undefined
-      ? Type.callable(parameterTypes, result, lifetimes, mode)
+      ? Type.callable(
+          parameterTypes,
+          result,
+          {
+            ...lifetimes,
+            // Authored anonymous parameters quantify their own elided lifetimes. Captured outer
+            // lifetimes remain free and continue to constrain the stored environment.
+            lifetimeBinders: (collected.fact.lifetimeElaboration?.implicit ?? []).map((binder) =>
+              Lifetime.bound(
+                binder.parameter.owner,
+                binder.parameter.ordinal,
+                binder.parameter.name,
+              ),
+            ),
+          },
+          mode,
+        )
       : undefined
   const token = directToken(node, 'FnKeyword')
   const reference: CallReferenceFact =

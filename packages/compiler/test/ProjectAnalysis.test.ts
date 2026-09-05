@@ -133,6 +133,61 @@ const assertProjectViewNotRealizable = (view: ProjectAnalysis.View): void => {
   assert.isTrue(projectViewIsNotSingleRoot)
 }
 
+it.effect('invalidates a cached missing imported member only when that member appears', () =>
+  Effect.gen(function* () {
+    const source = `import shared.Core
+pub fn main() -> i32 { return Core.answer() }
+fn sibling() -> i32 { return 0 }`
+    const root = SourceFile.make('query/Missing', ascii(source))
+    const initialLibrary = 'pub fn other() -> i32 { return 1 }'
+    const initial = yield* ProjectAnalysis.make([root]).pipe(
+      Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(initialLibrary)]]))),
+    )
+    const initialView = ProjectAnalysis.view(initial, root.id) ?? raise('missing initial view')
+    const missing = Analysis.diagnostics(initialView)
+    assert.deepEqual(
+      missing.map((diagnostic) => ({
+        code: diagnostic.code,
+        start: diagnostic.span.start,
+        end: diagnostic.span.end,
+      })),
+      [
+        {
+          code: 'SEM0014',
+          start: source.indexOf('answer'),
+          end: source.indexOf('answer') + 'answer'.length,
+        },
+      ],
+    )
+    const unrelatedLibrary = `${initialLibrary}\nfn unrelated() -> i32 { return 2 }`
+    const unrelated = yield* ProjectAnalysis.revise(initial, [root]).pipe(
+      Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(unrelatedLibrary)]]))),
+    )
+    const unrelatedWork = unrelated.report.find((phase) => phase.phase === 'body-queries')?.counters
+    assert.strictEqual(unrelatedWork?._tag, 'BodyQueryCounters')
+    if (unrelatedWork?._tag !== 'BodyQueryCounters') return
+    assert.strictEqual(unrelatedWork.checked, 1)
+    assert.strictEqual(unrelatedWork.reused, 3)
+    const unrelatedView =
+      ProjectAnalysis.view(unrelated, root.id) ?? raise('missing unrelated view')
+    assert.deepEqual(
+      Analysis.diagnostics(unrelatedView).map((diagnostic) => diagnostic.code),
+      ['SEM0014'],
+    )
+    const repairedLibrary = `${unrelatedLibrary}\npub fn answer() -> i32 { return 42 }`
+    const repaired = yield* ProjectAnalysis.revise(unrelated, [root]).pipe(
+      Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(repairedLibrary)]]))),
+    )
+    const repairedWork = repaired.report.find((phase) => phase.phase === 'body-queries')?.counters
+    assert.strictEqual(repairedWork?._tag, 'BodyQueryCounters')
+    if (repairedWork?._tag !== 'BodyQueryCounters') return
+    assert.strictEqual(repairedWork.checked, 2)
+    assert.strictEqual(repairedWork.reused, 3)
+    const repairedView = ProjectAnalysis.view(repaired, root.id) ?? raise('missing repaired view')
+    assert.deepEqual(Analysis.diagnostics(repairedView), [])
+  }),
+)
+
 it.effect('invalidates transitively consumed static bodies while retaining ordinary siblings', () =>
   Effect.gen(function* () {
     const source = `static fn base() -> i32 { return 1 }

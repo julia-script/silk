@@ -1633,6 +1633,31 @@ export const make = (operations: Operations) => {
             conformance.typeParameters.map((parameter) => parameter.type),
             witness.typeArguments,
           )
+    // Conformance mappings can reference the service operation's own generic binders. Resolve
+    // those at this invocation before using the mapping to seed implementation inference.
+    const service = context.index.modules
+      .find((module) => module.module === expression.service.module)
+      ?.services.find(
+        (service) =>
+          service.canonical._tag === 'Canonical' &&
+          service.canonical.id.name === expression.service.name,
+      )
+    const serviceOperation = service?.operations.find(
+      (candidate) =>
+        candidate.name._tag === 'Present' && candidate.name.spelling === expression.operation,
+    )
+    const operationSubstitution =
+      service === undefined || serviceOperation === undefined
+        ? undefined
+        : TypeInference.substitution(
+            [...service.typeParameters, ...serviceOperation.typeParameters].map(
+              (parameter) => parameter.type,
+            ),
+            expression.typeArguments.map((argument) =>
+              Type.substituteGenericArgument(argument, context.substitution, context.compatibility),
+            ),
+          )
+    if (operationSubstitution === undefined) return undefined
     const mapped = conformance?.operations.find(
       (candidate) =>
         candidate.name._tag === 'Present' && candidate.name.spelling === expression.operation,
@@ -1653,7 +1678,10 @@ export const make = (operations: Operations) => {
         conformanceSubstitution === undefined
       )
         continue
-      const specialized = Type.substituteGenericArgument(argument, conformanceSubstitution)
+      const specialized = Type.substituteGenericArgument(
+        Type.substituteGenericArgument(argument, conformanceSubstitution),
+        operationSubstitution,
+      )
       if (
         Type.genericArgumentKey(specialized) !==
         Type.genericArgumentKey(Type.parameterArgument(parameter.type))

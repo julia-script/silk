@@ -62,16 +62,16 @@ fn pendingComplete<T: CompleteDecoder<T, i32, i32, DecodeProblem ? &Clock>>(valu
   return CompleteDecoder.decode(value, 0)
 }
 
-struct MappedSchema<S, F: fn(i32) -> i32> {
+struct MappedSchema<S, F: fn<'static>(i32) -> i32> {
   source: S
   transform: F
 }
 
-fn mappedDecode<S: Decoder<S>, F: fn(i32) -> i32>(value: &MappedSchema<S, F>) -> i32 {
+fn mappedDecode<S: Decoder<S>, F: fn<'static>(i32) -> i32>(value: &MappedSchema<S, F>) -> i32 {
   return value.transform(Decoder.decode(&value.source))
 }
 
-impl<S: Decoder<S>, F: fn(i32) -> i32> Decoder<MappedSchema<S, F>> for MappedSchema<S, F> {
+impl<S: Decoder<S>, F: fn<'static>(i32) -> i32> Decoder<MappedSchema<S, F>> for MappedSchema<S, F> {
   decode: MappedSchema.mappedDecode
 }
 
@@ -79,7 +79,7 @@ fn add(value: i32, amount: i32) -> i32 {
   return value + amount
 }
 
-fn makeTransform(amount: i32) -> some<F: fn(i32) -> i32> F {
+fn makeTransform(amount: i32) -> some<F: fn<'static>(i32) -> i32> F {
   return add(amount)
 }
 
@@ -103,11 +103,11 @@ impl Drop for Guard {
   }
 }
 
-struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> {
+struct Deferred<A, E, ?R, F: once Effect<'static; A ! E ? R>> {
   operation: F
 }
 
-fn defer<A, E, ?R, F: once Effect<A ! E ? R>>(operation: F) -> Deferred<A, E, R, F> {
+fn defer<A, E, ?R, F: once Effect<'static; A ! E ? R>>(operation: F) -> Deferred<A, E, R, F> {
   return Deferred<A, E, R> {operation: move operation}
 }
 
@@ -216,11 +216,11 @@ fn chooseRoute(choice: i32) -> FirstRoute | SecondRoute {
   return SecondRoute {}
 }
 
-fn executeMapped<S: Decoder<S>, F: fn(i32) -> i32>(schema: &MappedSchema<S, F>) -> ExecuteAction {
+fn executeMapped<S: Decoder<S>, F: fn<'static>(i32) -> i32>(schema: &MappedSchema<S, F>) -> ExecuteAction {
   return ExecuteAction {value: schema.transform(Decoder.decode(&schema.source))}
 }
 
-fn inspectMapped<S: Decoder<S>, F: fn(i32) -> i32>(schema: &MappedSchema<S, F>) -> InspectAction {
+fn inspectMapped<S: Decoder<S>, F: fn<'static>(i32) -> i32>(schema: &MappedSchema<S, F>) -> InspectAction {
   return InspectAction {value: schema.transform(Decoder.decode(&schema.source))}
 }
 

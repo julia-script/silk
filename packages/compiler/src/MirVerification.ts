@@ -4688,12 +4688,8 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             suspendContract === undefined ||
             completeActual === undefined ||
             suspendActual === undefined ||
-            !TypeCompatibility.isCompatible(
-              TypeCompatibility.check(completeActual, completeContract),
-            ) ||
-            !TypeCompatibility.isCompatible(
-              TypeCompatibility.check(suspendActual, suspendContract),
-            ) ||
+            !acceptsRuntimeOperand(completeActual, completeContract) ||
+            !acceptsRuntimeOperand(suspendActual, suspendContract) ||
             !driveCallbackCleanupValid(complete, operation.completionCleanup) ||
             !driveCallbackCleanupValid(suspend, operation.suspensionCleanup) ||
             operation.executionAccess !== 'Take' ||
@@ -6170,9 +6166,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 capture.ordinal === field.ordinal &&
                 capture.parameterOrdinal === field.parameterOrdinal &&
                 capture.access === field.access &&
-                TypeCompatibility.isCompatible(
-                  TypeCompatibility.check(semanticType(source), field.type),
-                )
+                acceptsRuntimeOperand(semanticType(source), field.type)
               )
             })
           const valid =

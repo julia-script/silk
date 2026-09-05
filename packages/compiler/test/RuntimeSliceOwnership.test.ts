@@ -389,7 +389,8 @@ pub fn main() -> i32 { return restored() }`
 
 it.effect('suspends all owner access for an exclusive returned view until its last use', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`fn identity(values: &mut [i32]) -> &mut [i32] { return values }
+    const self =
+      yield* snapshot(`fn identity(values: &mut [i32]) -> &mut [i32] { return move values }
 fn conflict() -> i32 {
   let mut values = [1, 2]
   let mut view = identity(&mut values)

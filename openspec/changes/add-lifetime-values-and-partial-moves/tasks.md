@@ -30,11 +30,17 @@
 
   Evidence: Type tests cover semantic shared unions and generic transport. `RuntimeSliceOwnership.test.ts` “retains borrowed generic payloads across containers and builtin string views” exercises Option<&A>, named/anonymous tuples, anonymous records, arrays, identity, nested references, and both UTF-8 view intrinsics. It checks retained result lifetimes and rejects Detached for the constrained empty Option type.
 
-- [ ] 2.3 Generate use-driven body regions and place loans with retained dependent copies, moves and reborrow ancestry; verify a stored view survives its wrapper while source invalidation and premature exclusive-parent reuse fail.
-- [ ] 2.4 Check mutations against unchanged invariant destination types including failure after mutation and displaced-storage overlap; verify valid reset to another owner and invalid short-source replacement through shortened outer access.
-- [ ] 2.5 Preserve complete capture/environment bounds and exact detachment through storage/generics from first admission; verify nested string/aggregate captures and empty constrained unions cannot become detached, and retain explicit gates for exclusive storage, dependent Drop, dependent Effect outcomes and partial suspension.
+- [x] 2.3 Generate use-driven body regions and place loans with retained dependent copies, moves and reborrow ancestry; verify a stored view survives its wrapper while source invalidation and premature exclusive-parent reuse fail.
 
-  Partial evidence: Type tests cover stored versus hypothetical executable lifetimes, exact Detached representation promises, generic callable/Effect captures, and type-outlives predicates. `DeclarationIndex.test.ts` has explicit later-feature admission cases. Left unchecked: nested string/aggregate captures, constrained empty-union detachment, and every staged gate have not all been verified together by this scoped audit.
+  Evidence: `LifetimeFlow` and `Ownership` retain use-driven regions separately from concrete loan ancestry. The wrapper probe in `ownership-acceptance-current.mjs` accepts a projected stored view after dropping its wrapper and rejects source invalidation with OWN0011/OWN0019. Existing RuntimeSliceOwnership Copy/move cases retain dependent obligations; Ownership’s returned-exclusive-reborrow snapshot rejects overlapping siblings and premature parent access while accepting access after the child ends.
+
+- [x] 2.4 Check mutations against unchanged invariant destination types including failure after mutation and displaced-storage overlap; verify valid reset to another owner and invalid short-source replacement through shortened outer access.
+
+  Evidence: The installed-reference and complete-carrier-reset snapshots in `Ownership.test.ts` cover installation, outgoing-source retirement, conditional writes and same-lifetime siblings across structs, arrays and variants. The refreshed boundary probe rejects a short source assigned through shortened outer access with SEM0037, including failure after mutation, accepts a sufficiently long source, and rejects displaced self-storage overlap with OWN0019. `StatementAnalysis` activates assignment-local compatibility and `WriteStatement` carries only that checked proof slice into HIR lowering.
+
+- [x] 2.5 Preserve complete capture/environment bounds and exact detachment through storage/generics from first admission; verify nested string/aggregate captures and empty constrained unions cannot become detached, and retain explicit gates for exclusive storage, dependent Drop, dependent Effect outcomes and partial suspension.
+
+  Evidence: The existing Suspendability snapshot accepts moved static string views, nested static wrappers and an explicit static-bound generic owner, while rejecting a local-byte string wrapper and nested borrowed Effect at exact SEM0139 call spans. Type/RuntimeSliceOwnership cover retained environments and constrained-empty Option detachment. DeclarationIndex’s staged admission cases retain exclusive-storage, dependent Drop and borrowed Effect-outcome gates; SuspensionOwnership rejects partial suspension with OWN0020 and unavailable MIR. Detached uses already-checked type-outlives assumptions; runtime identity reuse remains restricted to NonParking facts.
 
 - [x] 2.6 Admit opt-in Copy for eligible shared borrowed aggregates while retaining affine defaults; verify copies preserve dependent obligations and exclusive values cannot duplicate.
 
@@ -44,11 +50,25 @@ Scoped evidence command: `pnpm exec vitest run packages/compiler/test/Type.test.
 
 ## 3. Sparse partial ownership
 
-- [ ] 3.1 Implement canonical sparse move paths, inherited initializedness, per-path finite joins, reachability, variant discriminants and lazy shape queries; verify mixed versus conditional state, sparse large arrays and convergence without state combinations.
-- [ ] 3.2 Integrate path state throughout ownership reads/moves/writes, scopes, branches, loops, deferred bodies and structured exits; verify initialized siblings, whole-owner rejection, restoration, repeated loop moves and incoming-evaluation failure.
-- [ ] 3.3 Admit visible nested fields and statically known in-bounds array elements with overlap, dereference and strict-ancestor user Drop checks; verify complete Drop-bearing field transfer and rejection of borrowed/dynamic/private/opaque extraction.
-- [ ] 3.4 Implement match place discriminant-only refinement and consuming-match cleanup under the same ownership authority; verify guards cannot commit moves, partial payload siblings remain usable and joins require new refinement.
-- [ ] 3.5 Elaborate shared cleanup recipes restricted by per-exit initializedness, including conditional fields, sparse array remainders, active variants and explicit drop place; verify every structured exit cleans only remaining ownership in established order.
+- [x] 3.1 Implement canonical sparse move paths, inherited initializedness, per-path finite joins, reachability, variant discriminants and lazy shape queries; verify mixed versus conditional state, sparse large arrays and convergence without state combinations.
+
+  Evidence: `MovePath` uses sparse inherited states and finite joins; existing Ownership algebra tests distinguish incomplete versus Missing ancestors, Mixed versus Maybe, feasible active variants, restoration and idempotent joins. The opt-in sparse-array workload retains three state nodes and two selector computations while array length grows from 16 to 65,536; no missing-field type or variant-state product is constructed.
+
+- [x] 3.2 Integrate path state throughout ownership reads/moves/writes, scopes, branches, loops, deferred bodies and structured exits; verify initialized siblings, whole-owner rejection, restoration, repeated loop moves and incoming-evaluation failure.
+
+  Evidence: Existing Ownership tests exercise initialized sibling use, whole-owner rejection, field restoration and conditional state. The ownership acceptance probe rejects an unrestored repeated loop move with OWN0005, accepts restoration before fallthrough/continue, and retains f0=Maybe after a partial break. Its incoming-failure case verifies that propagation cleanup still sees f0=Missing before an assignment succeeds. The guarded-loop MIR regression now passes after making omitted fields explicit with `..` (2026-09-05, `final-fixture-fixes.log`).
+
+- [x] 3.3 Admit visible nested fields and statically known in-bounds array elements with overlap, dereference and strict-ancestor user Drop checks; verify complete Drop-bearing field transfer and rejection of borrowed/dynamic/private/opaque extraction.
+
+  Evidence: Ownership/StructValues fixtures cover visible nested and constant-index extraction, borrowed/dynamic rejection, disjoint loans, complete Drop-bearing child transfer and strict-ancestor Drop exclusion. The two-module acceptance probe accepts a visible field, rejects a private field with SEM0028, and rejects extraction through an opaque callable abstraction with SEM0026. Explicit Copy moves remain consuming while ordinary Copy reads preserve their source.
+
+- [x] 3.4 Implement match place discriminant-only refinement and consuming-match cleanup under the same ownership authority; verify guards cannot commit moves, partial payload siblings remain usable and joins require new refinement.
+
+  Evidence: The place-match acceptance probe preserves the discriminant, moves one selected payload field, reads its sibling and successfully refines the remaining partial union again; a deliberately consuming guard reports OWN0008. Existing Ownership tests cover provisional consumed-match guards, omitted-field cleanup and feasible variant joins. The expanded guarded-loop MIR case verifies fresh arm bindings and result initialization on each iteration.
+
+- [x] 3.5 Elaborate shared cleanup recipes restricted by per-exit initializedness, including conditional fields, sparse array remainders, active variants and explicit drop place; verify every structured exit cleans only remaining ownership in established order.
+
+  Evidence: The structured-exit acceptance probe retains f0=Missing on ArmEnd, Break, Continue and typed-failure Return releases, and a sparse array exit retains only i1=Missing with ArrayCleanup. Existing MIR corruption assertions reject incorrect state/flag recipes. `NativeAggregate` skips missing paths, guards conditional paths and preserves array cleanup order. The shared native corpus case `partial-owner-cleanup-and-refinement` passed at PR checkpoint 3e17d365 and pins destructor trace `1212354678`; this is case evidence, not a claim that that CI run was globally green.
 
 ## 4. Executable ownership and erasure
 
@@ -56,7 +76,10 @@ Scoped evidence command: `pnpm exec vitest run packages/compiler/test/Type.test.
 
   Evidence: consuming owned projections and exact initialization paths are retained in MIR. The existing exclusive replacement fixture now reaches both replacement functions, verifies valid MIR, and removes the paired write to prove `InvalidSliceOperation` rejects a borrowed hole (85 ms focused test work, `/tmp/silk-lifetime-work/borrowed-hole-focused.log`). Its unrelated standard-library import was removed. An independent direct-reference corruption probe also produced `InvalidAggregateOperation`; neither proof requires backend emission.
 
-- [ ] 4.2 Carry conditional initialization and exact cleanup through lowering, propagation, native cleanup and compile-time execution; verify initialization versus replacement, whole replacement, early failures and exactly-once native-corpus cleanup where structural evidence is insufficient.
+- [x] 4.2 Carry conditional initialization and exact cleanup through lowering, propagation, native cleanup and compile-time execution; verify initialization versus replacement, whole replacement, early failures and exactly-once native-corpus cleanup where structural evidence is insufficient.
+
+  Evidence: Whole replacement retains the displaced partial state and restores complete initialization only after incoming evaluation; the acceptance failure probe carries f0=Missing in RunStaticEffect releases with verifier-clean MIR. `StaticText.test.ts` covers nested/constant-array projected restoration and complete-child replacement through StaticEvaluation (expected result 23). The shared native partial-owner corpus case passed at 3e17d365 (643 ms in `ci-3e17-clean.log`). Current guarded-loop MIR verification also passes. Full current-head milestone checks remain tracked separately in 6.4.
+
 - [x] 4.3 Reject suspension with partial live owners until the frame extension exists, preserving existing complete-owner suspension checks; verify the diagnostic at the suspension boundary with focused ownership/MIR fixtures.
 
   Evidence: `Realization.finalizeMir` now publishes suspension ownership planner violations as OWN0020 and makes MIR unavailable, including when normalization is disabled. `SuspensionOwnership.test.ts` checks the exact partial-owner run span while retaining a complete-owner control. Full focused `SuspensionOwnership.test.ts` and `SuspensionMir.test.ts` run: 6/6 passed (`/tmp/silk-lifetime-work/suspension-gate-group.log`). Independent review confirmed the publication gate with normalization enabled and disabled; a separate residualization review confirmed that compile-time failures withhold MIR while preserving layout diagnostics.
@@ -67,9 +90,18 @@ Scoped evidence command: `pnpm exec vitest run packages/compiler/test/Type.test.
 
 ## 5. Query reuse and attribution
 
-- [ ] 5.1 Publish declaration-relative semantic lifetime/variance/environment/cleanup summaries separately from implementation fingerprints; verify stable alpha-renames and changed exported-bound identity.
-- [ ] 5.2 Reuse checked declaration and generic body facts by actual consumed semantic/static inputs, with separate residual ownership accounting; verify private-body edits spare siblings/downstream bodies, new generic calls instantiate obligations, and changed consumed bounds invalidate real consumers.
-- [ ] 5.3 Expose actual comparison, constraint, region, loan, path, join, cleanup, query and resolution-initiator work; verify lifetime failures never initiate candidate discovery or backend emission and repeated compatible comparisons reuse facts.
+- [x] 5.1 Publish declaration-relative semantic lifetime/variance/environment/cleanup summaries separately from implementation fingerprints; verify stable alpha-renames and changed exported-bound identity.
+
+  Evidence: `ModuleSurface.memberSignature` includes canonical lifetime binders, bounds, executable environments and nominal fields/Drop contracts; `memberImplementation` records consumed static syntax separately and canonicalizes lifetime spelling. `NominalVariance`, `TypeOutlives` and `CleanupPlan` retain declaration-context summaries and reusable recipes. ProjectAnalysis verifies zero body/ownership checks after alpha-renaming and targeted invalidation after an exported bound changes; DeclarationIndex independently verifies body-independent lifetime headers.
+
+- [x] 5.2 Reuse checked declaration and generic body facts by actual consumed semantic/static inputs, with separate residual ownership accounting; verify private-body edits spare siblings/downstream bodies, new generic calls instantiate obligations, and changed consumed bounds invalidate real consumers.
+
+  Evidence: `BodyQuery` records actual consumed semantic and static implementation dependencies, rebinding retained facts after source edits. ProjectAnalysis checks one edited private body while reusing four others, all five bodies after alpha-renaming, one newly added caller while reusing the generic body, and exactly two bodies after a consumed bound changes; its static-dependency case checks only the three transitive consumers and retains the actual recursive component. Ownership verifies exact source-proof reuse, failed residual caching and misses for changed HIR, semantic facts, index or local-shared boundaries. Instances asserts zero executed residual body/ownership work for ordinary generic specialization; StaticText separately verifies repeated static-query reuse and cached growth failures.
+
+- [x] 5.3 Expose actual comparison, constraint, region, loan, path, join, cleanup, query and resolution-initiator work; verify lifetime failures never initiate candidate discovery or backend emission and repeated compatible comparisons reuse facts.
+
+  Evidence: `Lifetime.solve`, contextual TypeCompatibility, Ownership, CleanupPlan, BodyQuery and ResolutionWork expose actual finite work with initiator attribution. Existing Type tests prove assumption-separated comparison reuse and rollback/replay of accepted obligations; Ownership verifies source/cache hits contribute zero executed residual work. The committed frontend/residual reports distinguish retained proof counts from executed query work and retain failing diagnostic samples. Lifetime solvers consume resolved finite types/assumptions without resolver, provider-selection or backend callbacks; the benchmark records observed resolution initiators separately and executes no backend. Its documented attribution limits do not claim whole-compiler resolver totals.
+
 - [x] 5.4 Add opt-in independently varying lifetime/union/wrapper/loan/binder/recursive/module/partial-field/sparse-array/join families including failing diagnostics; run representative growth and edit workloads and record attributable work with any justified algorithm/domain trade-offs.
 
   Evidence: `benchmarks/lifetimes.md` and the two committed JSON reports distinguish 69 frontend growth/edit samples from nine target-selected residual samples. At sizes 4/8/16, ordinary generic owners execute zero residual body or ownership checks; repeated static applications execute each query once and reuse it 3/7/15 times. Distinct static branches perform separate checks. Reports retain actual work, failed-source diagnostics, selection reasons, and the documented reachability/history memory tradeoffs; timings are observations, not correctness assertions.

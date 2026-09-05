@@ -143,16 +143,6 @@ const executionInstance = (key: ExecutionKey): Instances.InstanceKey => {
   return cached
 }
 
-const sameTypeArguments = (
-  left: ReadonlyArray<Type.GenericArgument>,
-  right: ReadonlyArray<Type.GenericArgument>,
-): boolean =>
-  left.length === right.length &&
-  left.every((argument, ordinal) => {
-    const other = right.at(ordinal)
-    return other !== undefined && Type.equalsGenericArgument(argument, other)
-  })
-
 const sameSpan = (left: SourceSpan.SourceSpan, right: SourceSpan.SourceSpan): boolean =>
   left.sourceId === right.sourceId && left.start === right.start && left.end === right.end
 
@@ -249,10 +239,12 @@ const providedClassification = (
         outcome.runner.execution._tag !== 'ProvidedEffectRunnerExecution'
       )
         return []
-      const key = outcome.runner.execution
-      return key.runner.module === instance.declaration.module &&
-        key.runner.name === baseName &&
-        sameTypeArguments(key.owner.typeArguments, instance.typeArguments)
+      // Distinct providers may give the same base runner different suspension behavior.
+      const key = executionInstance(outcome.runner.execution)
+      return key.declaration.module === instance.declaration.module &&
+        key.declaration.name === baseName &&
+        Instances.keyText(Object.freeze({ ...key, declaration: instance.declaration })) ===
+          Instances.keyText(instance)
         ? [outcome.runner.classification]
         : []
     }),

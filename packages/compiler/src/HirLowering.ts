@@ -750,7 +750,17 @@ export const hirExpression = (
       _tag: 'EffectBlock',
       site: fact.site,
       statements: lowerStatements(fact.statements, {
-        ...options,
+        // Deferred bodies retain the enclosing borrow context but own their return boundary.
+        ...(options.functionId === undefined ? {} : { functionId: options.functionId }),
+        ...(options.lifetimeAssumptions === undefined
+          ? {}
+          : { lifetimeAssumptions: options.lifetimeAssumptions }),
+        ...(options.lifetimeCompatibility === undefined
+          ? {}
+          : { lifetimeCompatibility: options.lifetimeCompatibility }),
+        ...(options.eraseIntrinsicSections === undefined
+          ? {}
+          : { eraseIntrinsicSections: options.eraseIntrinsicSections }),
         resultType: fact.type.type.success,
       }),
       captures: Object.freeze(

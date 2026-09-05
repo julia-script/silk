@@ -81,6 +81,21 @@ struct Document { size: i32 }
 impl Printable for Document { fn print(value: &Self) -> i32 { return value.size } }
 `
 
+it.effect('opens both receiver and written argument lifetimes before checking a member call', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'main',
+      ascii(`${counter}
+pub fn main() -> i32 {
+  let left = Counter { value: 20 }
+  let right = Counter { value: 22 }
+  return left.add(&right)
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+  }),
+)
+
 it.effect('completes and hovers the value side with receiver-bound members', () =>
   Effect.gen(function* () {
     const source = `${counter}
