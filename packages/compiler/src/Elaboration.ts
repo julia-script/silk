@@ -1405,7 +1405,6 @@ export interface FunctionFact {
   readonly _tag: 'FunctionFact'
   readonly comparisonWork?: Readonly<import('./TypeCompatibility.js').Work>
   readonly lifetimeFlow?: import('./LifetimeFlow.js').LifetimeFlow
-  readonly lifetimeAdmission?: ReadonlyArray<import('./LifetimeAdmission.js').Obligation>
   readonly declaration: DeclarationFact
   readonly statements: ReadonlyArray<StatementFact>
   readonly bindings: ReadonlyArray<BindingDeclarationFact>

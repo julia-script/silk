@@ -1,4 +1,4 @@
-import { generated, indexExits } from './CleanupEmission.js'
+import { generated, indexExits, initializationFlagsOf } from './CleanupEmission.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type { LoweredExpression } from './EffectLowering.js'
@@ -389,6 +389,7 @@ export const lowerInstance = (
     instance: instance.key,
     parameterCount: runtimeParameterCount(fn),
     localTypes: Object.freeze([...lowering.localTypes]),
+    initializationFlags: initializationFlagsOf(lowering),
     result: resultType,
     entry,
     regions: Object.freeze(
@@ -536,6 +537,7 @@ export const lowerEffectRunner = (
     instance,
     parameterCount: parameterTypes.length,
     localTypes: Object.freeze([...lowering.localTypes]),
+    initializationFlags: initializationFlagsOf(lowering),
     result,
     entry,
     regions: Object.freeze(
@@ -645,6 +647,7 @@ export const lowerCatchEffectRunner = (
     instance,
     parameterCount: parameterTypes.length,
     localTypes: Object.freeze([...lowering.localTypes]),
+    initializationFlags: initializationFlagsOf(lowering),
     result,
     entry: region,
     regions: Object.freeze(
@@ -777,6 +780,7 @@ export const lowerBuiltinEffectRunner = (
     instance,
     parameterCount: allParameters.length,
     localTypes: Object.freeze([...lowering.localTypes]),
+    initializationFlags: initializationFlagsOf(lowering),
     result,
     entry: region,
     regions: Object.freeze(
@@ -1014,6 +1018,7 @@ export const lowerWitnessEffectRunner = (
     instance,
     parameterCount: allParameters.length,
     localTypes: Object.freeze([...lowering.localTypes]),
+    initializationFlags: initializationFlagsOf(lowering),
     result: Object.freeze({ _tag: 'EffectOutcome', type: spec.type.type }),
     entry: region,
     regions: Object.freeze(

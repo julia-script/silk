@@ -249,7 +249,9 @@ const operationClassification = (
 ): ProvisionalMir.Classification =>
   operation._tag === 'CloseEffectEntry'
     ? ProvisionalMir.classificationOfRunner(provisional, operation.runner, operation.typeArguments)
-    : ProvisionalMir.classificationOfRun(provisional, fn.instance, operation.provenance.span)
+    : ProvisionalMir.isOriginOfRun(provisional, fn.instance, operation.provenance.span)
+      ? 'Suspendable'
+      : ProvisionalMir.classificationOfRun(provisional, fn.instance, operation.provenance.span)
 
 /** Applies normalization within every explicit execution without flattening its control flow. */
 const mapRegions = (

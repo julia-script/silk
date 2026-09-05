@@ -170,3 +170,26 @@ pub fn main() -> i32 { return run Effect.catchAll(package(), recover) }`),
     )
   }),
 )
+
+it.effect('rejects nested borrowed completion independently of exact environment detachment', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource('execution-package/outcome-lifetimes', new TextEncoder().encode(`
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.execution { Execution }
+struct Nested<'a> { values: [&'a i32; 1] }
+struct Ready {}
+fn ready(state: &Ready) -> () { return () }
+effect fn borrowed<'a>(value: &'a i32) -> Nested<'a> { return Nested<'a> { values: [value] } }
+effect fn external<'a>(value: &'a i32) -> () ! OutOfMemoryError ? &mut Allocator {
+  let execution = run Execution.make(borrowed(value), Ready {}, ready)
+  drop execution
+  return ()
+}
+effect fn local<'a>() -> Nested<'a> { let value = 42 return Nested<'a> { values: [&value] } }
+pub fn main() -> i32 { return 0 }
+`))
+    const diagnostics = Analysis.diagnostics(self)
+    assert.isTrue(diagnostics.some((diagnostic) => ['SEM0139', 'SEM0212', 'SEM0076'].includes(diagnostic.code)))
+    assert.isTrue(diagnostics.some((diagnostic) => ['OWN0019', 'SEM0144', 'SEM0212'].includes(diagnostic.code)), diagnostics.map((diagnostic) => `${diagnostic.code}:${diagnostic.message}`).join('\n'))
+  }),
+)

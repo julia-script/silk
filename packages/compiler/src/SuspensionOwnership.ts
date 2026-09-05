@@ -9,6 +9,7 @@ import * as Layout from './Layout.js'
 import * as LocalSharedOwnership from './LocalSharedOwnership.js'
 import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
+import * as MovePath from './MovePath.js'
 import * as Ownership from './Ownership.js'
 import * as ProvisionalMir from './ProvisionalMir.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -38,11 +39,13 @@ export interface Slot {
   readonly access: Access
   readonly executionAffinity: ExecutionAffinity.ExecutionAffinity
   readonly localSharedObligations: LocalSharedOwnership.ObligationPlan
+  readonly initialization?: Mir.DropOperation['initialization']
 }
 
 export interface Release {
   readonly local: Mir.LocalId
   readonly cleanup: CleanupPlan.CleanupPlan
+  readonly initialization?: Mir.DropOperation['initialization']
 }
 
 export interface ResumePlan {
@@ -488,7 +491,7 @@ const releasesOf = (operation: Mir.Operation): ReadonlyArray<Release> =>
   operation._tag === 'RunStaticEffect'
     ? Object.freeze(
         (operation.releases ?? []).map((release) =>
-          Object.freeze({ local: release.local, cleanup: release.cleanup }),
+          Object.freeze({ local: release.local, cleanup: release.cleanup, initialization: release.initialization }),
         ),
       )
     : Object.freeze([])
@@ -575,8 +578,22 @@ const planFor = (
   const definitions = definitionMap(fn)
   const operationDefined = operationDefinitions(operation)
   const parkGuard = operation._tag === 'ExecutionPark' ? operation.guard.ordinal : undefined
-  const slots = Object.freeze(
-    [...new Set([...live, ...(parkGuard === undefined ? [] : [parkGuard])])]
+  const states = MirVerification.initializationOf(fn, program.layout).before.get(operation)
+  const flagsByRoot = new Map((fn.initializationFlags ?? []).map((entry) => [entry.root.ordinal, entry.flags]))
+  const initializationOf = (ordinal: number): Mir.DropOperation['initialization'] => {
+    const state = states?.get(ordinal)
+    if (state === undefined || (state.initialization === 'Initialized' && state.children.length === 0)) return undefined
+    const required = new Set(MovePath.conditionalPaths(state).map(MovePath.key))
+    return {
+      state,
+      flags: (flagsByRoot.get(ordinal) ?? []).filter((flag) => required.has(MovePath.key(flag.path))),
+    }
+  }
+  const retained = new Set([...live, ...(parkGuard === undefined ? [] : [parkGuard])])
+  for (const ordinal of live)
+    for (const flag of initializationOf(ordinal)?.flags ?? []) retained.add(flag.local.ordinal)
+  const slots: ReadonlyArray<Slot> = Object.freeze(
+    [...retained]
       .filter((ordinal) => !operationDefined.has(ordinal) || ordinal === parkGuard)
       .sort((left, right) => left - right)
       .flatMap((ordinal) => {
@@ -618,6 +635,7 @@ const planFor = (
             access,
             executionAffinity,
             localSharedObligations,
+            initialization: initializationOf(ordinal),
           }),
         ]
       })
@@ -643,6 +661,7 @@ const planFor = (
       Object.freeze({
         local: slot.local,
         cleanup: slot.access.cleanup,
+        initialization: slot.initialization,
         ordinal: slot.local.ordinal,
       }),
     )
@@ -731,17 +750,18 @@ export const plan = (
           live.get(operation) ?? new Set(),
           control,
         )
-        const partial = MirVerification.initializationOf(fn, program.layout).partialBefore.get(
-          operation,
-        )
-        if (planned.slots.some((slot) => partial?.has(slot.local.ordinal))) {
+        const assignedFlags = MirVerification.initializationOf(fn, program.layout).flagsBefore.get(operation)
+        if (planned.slots.some((slot) => slot.initialization !== undefined &&
+          (MovePath.conditionalPaths(slot.initialization.state).length !== slot.initialization.flags.length ||
+            slot.initialization.flags.some((flag) => !assignedFlags?.has(flag.local.ordinal) ||
+              !planned.slots.some((retained) => retained.local.ordinal === flag.local.ordinal))))) {
           violations.push(
             Object.freeze({
               _tag: 'SuspensionOwnershipViolation',
               function: fn.instance,
               span: operation.provenance.span,
               detail:
-                'a partially initialized owner cannot cross suspension before its frame initialization state is preserved',
+                'suspended partial ownership requires every conditional initialization flag to be assigned and retained',
             }),
           )
           continue

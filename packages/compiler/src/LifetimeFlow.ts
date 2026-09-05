@@ -269,6 +269,17 @@ export const analyze = (
       anchor(lifetime, { ...alias, path: [...alias.path, ...source.path] }, statement, span, true)
       return
     }
+    // Indexing a stored slice borrows its backing allocation, whose validity is
+    // independent of the receiver used to retrieve the slice descriptor.
+    const sliceIndex = source.path.findLast((selector) => selector._tag === 'SliceIndex')
+    if (sliceIndex?._tag === 'SliceIndex') {
+      constrain(sliceIndex.slice.lifetime, lifetime)
+      origins.set(Lifetime.key(lifetime), {
+        lifetime, root: rootSite(source), path: source.path,
+        parent: sliceIndex.slice.lifetime, span,
+      })
+      return
+    }
     let rootType: Type.Type | undefined
     if (source._tag === 'ParameterRoot' && source.parameter.declaredType._tag === 'Resolved')
       rootType = source.parameter.declaredType.type

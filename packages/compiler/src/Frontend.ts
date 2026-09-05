@@ -7,7 +7,6 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as IncrementalReuse from './IncrementalReuse.js'
-import * as LifetimeAdmissionQuery from './LifetimeAdmissionQuery.js'
 import * as ModuleClosure from './ModuleClosure.js'
 import * as ModuleSemantics from './ModuleSemantics.js'
 import * as ModuleSurface from './ModuleSurface.js'
@@ -287,7 +286,6 @@ const analyzeSemantics = Effect.fnUntraced(function* (
     closure.diagnostics,
     headers.resolution.diagnostics,
     ...[...results.values()].map((result) => result.diagnostics),
-    LifetimeAdmissionQuery.check(index, results),
     opaqueRealizations.diagnostics,
     ...[...ownership.values()].map((facts) => facts.diagnostics),
   )

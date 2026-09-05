@@ -1,3 +1,4 @@
+import { partialSuspension } from './support/partialSuspension.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -194,7 +195,7 @@ it.effect('publishes deterministic state ownership and restoration', () =>
   }),
 )
 
-it.effect('reports partial owner suspension during ordinary realized checking', () =>
+it.effect('preserves partial owner state across suspension and cancellation', () =>
   Effect.gen(function* () {
     const source = `struct Token { value: i32 }
 impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
@@ -212,17 +213,64 @@ effect fn complete() -> i32 {
   let result = run delayed()
   return owner.left.value + owner.right.value + result
 }
-pub fn main() -> i32 { let first = run partial() return first + run complete() }`
+effect fn conditional(flag: bool) -> i32 {
+  let mut owner = Pair { left: Token { value: 1 }, right: Token { value: 2 } }
+  if flag { let extracted = move owner.left drop extracted }
+  let result = run delayed()
+  owner.left = Token { value: 3 }
+  return owner.left.value + owner.right.value + result
+}
+pub fn main() -> i32 { let first = run partial() let second = run conditional(true) return first + second + run complete() }`
     const self = yield* snapshot(source)
-    const start = source.indexOf(' run delayed()')
-    assert.deepEqual(
-      Analysis.diagnostics(self).map((diagnostic) => ({
-        code: diagnostic.code,
-        start: diagnostic.span.start,
-        end: diagnostic.span.end,
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const program = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(program), [])
+    const plan = plansFor(available(self), 'partial').at(0)
+    const owner = plan?.slots.find((slot) => slot.type._tag === 'Nominal' && slot.type.type.name === 'Pair')
+    assert.deepEqual(owner?.initialization?.state.children.map((child) => ({ selector: child.selector, initialization: child.state.initialization })),
+      [{ selector: { _tag: 'Field', ordinal: 0 }, initialization: 'Missing' }])
+    assert.deepEqual(plan?.failure.releases.find((release) => release.local.ordinal === owner?.local.ordinal)?.initialization, owner?.initialization)
+    const conditional = plansFor(available(self), 'conditional').at(0)
+    const partial = conditional?.slots.find((slot) => slot.initialization?.state.children.some((child) => child.state.initialization === 'Maybe'))
+    assert.isDefined(partial)
+    assert.lengthOf(partial?.initialization?.flags ?? [], 1)
+    assert.isTrue(partial?.initialization?.flags.every((flag) => conditional?.slots.some((slot) => slot.local.ordinal === flag.local.ordinal && slot.type._tag === 'bool')))
+  }),
+)
+
+it.effect('retains conditional owners inside independently cancellable frames', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(partialSuspension)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const program = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(program), [])
+    const corrupted = {
+      ...program,
+      functions: program.functions.map((fn) => fn.suspension === undefined ? fn : ({
+        ...fn,
+        suspension: { ...fn.suspension, regions: fn.suspension.regions.map((region) =>
+          region._tag !== 'RunSuspendableEffectRegion' || region.relay.state === undefined ? region : ({
+            ...region,
+            relay: { ...region.relay, state: { ...region.relay.state,
+              slots: region.relay.state.slots.map((slot) => ({ ...slot, initialization: undefined })),
+            } },
+          })),
+        },
       })),
-      [{ code: 'OWN0020', start, end: start + ' run delayed()'.length }],
-    )
-    assert.strictEqual(self.mir._tag, 'Unavailable')
+    }
+    assert.isTrue(MirVerification.verify(corrupted).some((violation) => violation.rule === 'InvalidCoroutineFrame'))
+    const lostPayloadFlags = {
+      ...program,
+      coroutineFrames: program.coroutineFrames === undefined ? undefined : {
+        ...program.coroutineFrames,
+        entries: program.coroutineFrames.entries.map((entry) => ({ ...entry,
+          states: entry.states.map((state) => ({ ...state,
+            payload: state.payload.map((field) => ({ ...field, initialization: undefined })),
+          })),
+        })),
+      },
+    }
+    assert.isTrue(MirVerification.verify(lostPayloadFlags).some((violation) => violation.rule === 'InvalidCoroutineFrame'))
+
   }),
 )

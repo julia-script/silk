@@ -1,3 +1,4 @@
+import { partialSuspension } from './partialSuspension.js'
 /**
  * The shared native acceptance corpus: programs with independently pinned process outcomes.
  */
@@ -14,6 +15,7 @@ import {
 } from './ownedAllocatorSuspension.js'
 import { recoveredProvidedWrite, recoveredWriterModule } from './recoveredProvidedWrite.js'
 import { floatOperationMatrix, integerOperationMatrix } from './scalarOperationMatrix.js'
+import { borrowedBox, borrowedStream, borrowedFailure } from './borrowedOutcomes.js'
 import { storedCatchSuspension } from './storedCatchSuspension.js'
 
 // Folded from Transcendental.test.ts: every runtime bit pattern is committed independently of the
@@ -6148,6 +6150,12 @@ const pressurePrograms: ReadonlyArray<CorpusProgram> = [
 ]
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
+  ...[
+    { name: 'borrowed-outcome-box', source: borrowedBox },
+    { name: 'borrowed-outcome-stream', source: borrowedStream },
+    { name: 'borrowed-outcome-failure', source: borrowedFailure },
+  ].map((program): CorpusProgram => ({ ...program, expected: { _tag: 'Completes', result: 42 } })),
+
   {
     name: 'vector-dependent-elements-cleanup-and-extraction',
     source: `import silk.allocator { Allocator, OutOfMemoryError }
@@ -6206,6 +6214,23 @@ effect fn build() -> i32 ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'partial-owner-suspension-cancellation-and-restoration',
+    source: partialSuspension,
+    nativeCSources: {
+      drops: `#include <stdint.h>
+#include <stdio.h>
+static char events[32];
+static unsigned count;
+void silk_record_drop(int32_t value) {
+  if (count < sizeof(events) - 1) events[count++] = (char)('0' + value);
+}
+int32_t silk_verify_drops(void) { puts(events); return 42; }
+`,
+    },
+    nativeStdout: '1212465465\n',
     expected: { _tag: 'Completes', result: 42 },
   },
   {

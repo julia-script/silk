@@ -1,7 +1,6 @@
 import * as Lifetime from './Lifetime.js'
 import * as BodyLifetime from './BodyLifetime.js'
 import * as LifetimeFlow from './LifetimeFlow.js'
-import * as LifetimeAdmission from './LifetimeAdmission.js'
 import * as NominalVariance from './NominalVariance.js'
 import * as TypeOutlives from './TypeOutlives.js'
 import { concreteCallableIdentity, exactCallableOf, executableSites } from './CallResolution.js'
@@ -74,39 +73,6 @@ export const unsafeCallDiagnostic = (
   unsafe && !unsafeCallAuthorized(resolution, call)
     ? Diagnostic.missingUnsafeBoundary(spelling, call.span)
     : undefined
-
-/** Whether a borrow-shaped value is visibly backed only by program-lifetime immutable data. */
-export const isStaticallyDetachedFailure = (
-  expression: ExpressionFact,
-  index: DeclarationIndex.Index,
-): boolean => {
-  if (
-    expression.type._tag === 'Available' &&
-    !DeclarationFacts.containsLexicalBorrow(index, expression.type.type)
-  )
-    return true
-  switch (expression._tag) {
-    case 'StaticText':
-      return expression.data !== undefined
-    case 'Constant':
-      return expression.value?._tag === 'String'
-    case 'Grouped':
-      return isStaticallyDetachedFailure(expression.expression, index)
-    case 'Move':
-      return isStaticallyDetachedFailure(expression.subject, index)
-    case 'StructLiteral':
-    case 'UnionVariant':
-      return expression.fields.every((field) =>
-        isStaticallyDetachedFailure(field.initializer.expression, index),
-      )
-    case 'ArrayLiteral':
-      return expression.elements.every((element) =>
-        isStaticallyDetachedFailure(element.expression, index),
-      )
-    default:
-      return false
-  }
-}
 
 interface StaticIterationElement {
   readonly value: StaticValue.Value
@@ -1549,14 +1515,6 @@ export const analyzeStatements = (
           Diagnostic.invalidFailureType(Type.encode(expression.type), expressionNode.span),
         )
       if (
-        failure !== undefined &&
-        DeclarationFacts.containsLexicalBorrow(context.resolution.index, failure) &&
-        !isStaticallyDetachedFailure(expression.fact, context.resolution.index)
-      )
-        context.diagnostics.push(
-          Diagnostic.providerBackedFailure(Type.encode(failure), expressionNode.span),
-        )
-      if (
         !context.effectBlock &&
         failure !== undefined &&
         !(Type.isParameter(failure)
@@ -1564,7 +1522,7 @@ export const analyzeStatements = (
               Type.equals(parameter, failure),
             )
           : context.declaration.failureRow.failures.some((candidate) =>
-              Type.equals(candidate, failure),
+              typesCompatible(failure, candidate, context.resolution.lifetimeCompatibility),
             ))
       )
         context.diagnostics.push(
@@ -2089,15 +2047,6 @@ export const analyzeFunctionBody = (
     resolution.index,
   )
   context.diagnostics.push(...lifetimeFlow.diagnostics)
-  const lifetimeAdmission = LifetimeAdmission.body(
-    LifetimeAdmission.withAggregates(
-      LifetimeAdmission.context(resolution.index),
-      bodyResolution.generatedAggregates?.values() ?? [],
-    ),
-    statements,
-  )
-  context.diagnostics.push(...lifetimeAdmission.diagnostics)
-
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'FunctionFact',
@@ -2105,7 +2054,6 @@ export const analyzeFunctionBody = (
         ? {}
         : { comparisonWork: Object.freeze({ ...bodyResolution.lifetimeCompatibility.work }) }),
       lifetimeFlow,
-      lifetimeAdmission: lifetimeAdmission.obligations,
       declaration,
       statements,
       bindings: Object.freeze([...context.bindings]),

@@ -423,11 +423,13 @@ export const analyze = (
   }
   run(semantics)
   const before = new Map<Mir.Operation, ReadonlyMap<number, MovePath.State>>()
+  const flagsBefore = new Map<Mir.Operation, ReadonlySet<number>>()
   const partialBefore = new Map<Mir.Operation, ReadonlySet<number>>()
   for (const [operation, states] of snapshots) {
     const joined = [...merge(states)].at(0)
     if (joined === undefined) continue
     before.set(operation, joined.roots)
+    flagsBefore.set(operation, joined.flags)
     const partial = new Set<number>()
     for (const [ordinal, state] of joined.roots) {
       const inspected = MovePath.inspect(state, [], shapeOf({ _tag: 'Local', ordinal }))
@@ -438,6 +440,7 @@ export const analyze = (
   return Object.freeze({
     violations: Object.freeze([...violations.values()]),
     before,
+    flagsBefore,
     partialBefore,
   })
 }
@@ -446,5 +449,6 @@ export const analyze = (
 export interface Analysis {
   readonly violations: ReadonlyArray<Mir.Violation>
   readonly before: ReadonlyMap<Mir.Operation, ReadonlyMap<number, MovePath.State>>
+  readonly flagsBefore: ReadonlyMap<Mir.Operation, ReadonlySet<number>>
   readonly partialBefore: ReadonlyMap<Mir.Operation, ReadonlySet<number>>
 }

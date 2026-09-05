@@ -1,4 +1,5 @@
 import * as MirInitialization from './MirInitialization.js'
+import * as MovePath from './MovePath.js'
 import * as Lifetime from './Lifetime.js'
 import * as CAbi from './CAbi.js'
 import type * as CleanupPlan from './CleanupPlan.js'
@@ -615,8 +616,12 @@ export const suspensionBorrowText = (borrow: SuspensionBorrowIdentity): string =
   return `local:${borrow.local.ordinal}`
 }
 
+const initializationText = (initialization: CoroutineFrameRelease['initialization']): string =>
+  initialization === undefined ? '' :
+    `${MovePath.encodeState(initialization.state)}:${initialization.flags.map((flag) => `${MovePath.key(flag.path)}=%${flag.local.ordinal}`).join(',')}`
+
 export const coroutineFrameReleaseText = (release: CoroutineFrameRelease): string =>
-  `${release.local.ordinal}:${release.cleanup._tag}:${SilkType.key(release.cleanup.type)}`
+  `${release.local.ordinal}:${release.cleanup._tag}:${SilkType.key(release.cleanup.type)}${initializationText(release.initialization)}`
 
 const providerText = (provider: SuspensionProviderArgument): string =>
   `${SilkType.key(provider.capability)}@${provider.role}:${provider.requirementAccess}:${provider.access}:${SilkType.key(provider.providerType)}:${provider.argument?.ordinal ?? 'none'}:${provider.argumentLane ?? 0}:${provider.witness?._tag ?? 'none'}:${provider.purposes.join('+')}`
@@ -868,6 +873,18 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
       )
     for (const slot of slots) {
       const declared = fn.localTypes.at(slot.local.ordinal)
+      const initialization = initializationOf(fn, layout)
+      const expectedState = initialization.before.get(region.operation)?.get(slot.local.ordinal) ?? MovePath.make()
+      const actualState = slot.initialization?.state ?? MovePath.make()
+      const requiredPaths = MovePath.conditionalPaths(expectedState).map(MovePath.key).sort()
+      const flags = slot.initialization?.flags ?? []
+      const sourceFlags = fn.initializationFlags?.find((entry) => entry.root.ordinal === slot.local.ordinal)?.flags ?? []
+      if (MovePath.encodeState(expectedState) !== MovePath.encodeState(actualState) ||
+        requiredPaths.join(',') !== flags.map((flag) => MovePath.key(flag.path)).sort().join(',') ||
+        flags.some((flag) => !sourceFlags.some((source) => source.local.ordinal === flag.local.ordinal && MovePath.key(source.path) === MovePath.key(flag.path)) ||
+          !initialization.flagsBefore.get(region.operation)?.has(flag.local.ordinal) ||
+          !slots.some((retained) => retained.local.ordinal === flag.local.ordinal && retained.type._tag === 'bool')))
+        invalid('InvalidCoroutineFrame', `continuation slot %${slot.local.ordinal} loses initializedness or a conditional cleanup flag`)
       let accessValid: boolean
       if (slot.access._tag === 'Copy') {
         accessValid = isCopy(layout, semanticType(slot.type))
@@ -888,6 +905,13 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
           'InvalidCoroutineFrame',
           `continuation slot %${slot.local.ordinal} has incompatible type or access`,
         )
+    }
+    for (const slot of slots) {
+      if (slot.access._tag !== 'AffineTransfer') continue
+      const releases = descriptor.failure.releases.filter((release) => release.local.ordinal === slot.local.ordinal)
+      if (releases.length !== 1 || releases.some((release) =>
+        initializationText(release.initialization) !== initializationText(slot.initialization)))
+        invalid('InvalidCoroutineFrame', 'cancellation loses a retained owner or its initializedness')
     }
     const parkGuardOrdinal =
       region.operation._tag === 'ExecutionPark' ? region.operation.guard.ordinal : undefined
@@ -2374,7 +2398,7 @@ const loanViolations = (
         const sourceSemantic = semanticType(operation.sourceType)
         const selectedSource = placeType(fn, layout, operation.root, operation.selectors)
         const rootMatchesSource =
-          selectedSource !== undefined && SilkType.equals(selectedSource, sourceSemantic)
+          selectedSource !== undefined && SilkType.runtimeKey(selectedSource) === SilkType.runtimeKey(sourceSemantic)
         const borrowed = operation.type.type
         const descriptor = borrowsDescriptor(operation)
         const sourceElement =
@@ -2727,6 +2751,7 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
             field.local.ordinal === slot.local.ordinal &&
             SilkType.equals(semanticType(field.type), semanticType(slot.type)) &&
             field.access._tag === slot.access._tag &&
+            initializationText(field.initialization) === initializationText(slot.initialization) &&
             field.offset === offset &&
             field.size === physical.size &&
             field.alignment === physical.alignment &&
@@ -2809,7 +2834,7 @@ const runPropagationValid = (
         source !== undefined &&
         target !== undefined &&
         SilkType.equals(source, expectedSource) &&
-        SilkType.equals(source, target)
+        SilkType.runtimeKey(source) === SilkType.runtimeKey(target)
       )
     })
   )
@@ -6332,7 +6357,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             source === undefined ||
             payload === undefined ||
             !SilkType.equals(destination.type, operation.type.type) ||
-            (source._tag !== 'Bottom' && !SilkType.equals(semanticType(source), payload))
+            (source._tag !== 'Bottom' && SilkType.runtimeKey(semanticType(source)) !== SilkType.runtimeKey(payload))
           )
             violations.push(
               Object.freeze({
@@ -6897,7 +6922,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             SilkType.runtimeKey(operation.outcomeType.type)
               ? undefined
               : 'outcome-shape',
-            SilkType.equals(operation.failureValueShape.type, expectedFailureValue)
+            SilkType.runtimeKey(operation.failureValueShape.type) === SilkType.runtimeKey(expectedFailureValue)
               ? undefined
               : 'failure-shape',
           ].filter((disagreement): disagreement is string => disagreement !== undefined)

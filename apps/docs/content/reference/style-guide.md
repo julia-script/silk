@@ -56,7 +56,7 @@ keeps its existing name because it is ordinary result data rather than an error 
 the fiber `Cancelled` outcome keeps its name for the same reason: it is the third arm of `Outcome`
 alongside `Success` and `Failure`, not an error payload type.
 
-**Evidence:** [ordinary failure values](typed-failures.md#fail-001--any-concrete-detached-value-may-be-a-typed-failure).
+**Evidence:** [ordinary failure values](typed-failures.md#fail-001--any-concrete-lifetime-valid-value-may-be-a-typed-failure).
 
 ## STYLE-002 — Operations intrinsic to one type are inherent members with the receiver first
 

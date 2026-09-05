@@ -67,6 +67,10 @@ export const prepareInitialization = (fn: FunctionLowering): ReadonlyArray<Mir.O
       })
     fn.initializationFlags.set(root, Object.freeze(flags))
   }
+  for (const binding of fn.ownership?.bindings ?? []) {
+    const local = ownershipLocal(fn, binding.site)
+    if (local !== undefined) fn.initializationFlagRoots.set(Ownership.siteKey(binding.site), local)
+  }
   return Object.freeze(operations)
 }
 
@@ -76,6 +80,8 @@ export const initializeBinding = (
   root: Ownership.BindingSite,
   span: SourceSpan.SourceSpan,
 ): void => {
+  const local = ownershipLocal(fn, root)
+  if (local !== undefined) fn.initializationFlagRoots.set(Ownership.siteKey(root), local)
   for (const flag of fn.initializationFlags.get(Ownership.siteKey(root)) ?? [])
     fn.emit({
       _tag: 'SetInitialized',
@@ -140,6 +146,15 @@ export const ownershipLocal = (
   if (site._tag === 'Pattern') return fn.patternLocals.get(patternKey(site.binding))
   return undefined
 }
+
+/** Publishes sparse flag identities so a suspended frame can retain conditional ownership. */
+export const initializationFlagsOf = (
+  fn: FunctionLowering,
+): NonNullable<Mir.MirFunction['initializationFlags']> =>
+  Object.freeze([...fn.initializationFlags].flatMap(([identity, flags]) => {
+    const root = fn.initializationFlagRoots.get(identity)
+    return root === undefined ? [] : [{ root, flags }]
+  }))
 
 /** Resolves canonical field and variant identities through the actual specialized owner type. */
 export const lowerOwnershipPath = (

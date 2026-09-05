@@ -1282,7 +1282,7 @@ const lowerStatement = (
       const destination = fn.alloc(outcomeType)
       if (!Type.isUnion(specializedFailure)) {
         const tag = Type.failureMembers(outcomeType.type).findIndex((failure) =>
-          Type.equals(failure, specializedFailure),
+          Type.runtimeKey(failure) === Type.runtimeKey(specializedFailure),
         )
         if (tag < 0) return undefined
         fn.emit(
@@ -1300,7 +1300,7 @@ const lowerStatement = (
         if (sourceType?._tag !== 'Union') return undefined
         const mappings = specializedFailure.members.flatMap((member, source) => {
           const target = Type.failureMembers(outcomeType.type).findIndex((failure) =>
-            Type.equals(failure, member),
+            Type.runtimeKey(failure) === Type.runtimeKey(member),
           )
           return target < 0 ? [] : [Object.freeze({ source, target: target + 1 })]
         })

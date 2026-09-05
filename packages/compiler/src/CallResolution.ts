@@ -2267,13 +2267,13 @@ export const analyzeFunctionItem = (
       const expectedResult = expectedCallable.result
       const resultCompatible =
         Type.isEffect(patternResult) && Type.isEffect(expectedResult)
-          ? TypeInference.infer(
+          ? Type.isParameter(expectedResult.success) || TypeInference.infer(
               patternResult.success,
               expectedResult.success,
               partial,
               itemInference,
             )
-          : TypeInference.infer(patternResult, expectedResult, partial, itemInference)
+          : Type.isParameter(expectedResult) || TypeInference.infer(patternResult, expectedResult, partial, itemInference)
       const allBindersDetermined = (contract?.binders ?? []).every((parameter) =>
         partial.has(Type.key(parameter)),
       )

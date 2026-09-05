@@ -54,7 +54,6 @@ import {
 } from './DeclarationResolution.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as TypeOutlives from './TypeOutlives.js'
-import * as LifetimeAdmission from './LifetimeAdmission.js'
 import * as Lifetime from './Lifetime.js'
 import * as InterfaceWitnessCompatibility from './InterfaceWitnessCompatibility.js'
 import * as Intrinsic from './Intrinsic.js'
@@ -2055,16 +2054,5 @@ export const complete = (
     })
   })
 
-  const lifetimeAdmission = LifetimeAdmission.context(
-    DeclarationIndex.make('Complete', modules, []),
-  )
-  modules = modules.map((module) => {
-    const admissionDiagnostics = LifetimeAdmission.moduleDiagnostics(lifetimeAdmission, module)
-    diagnostics.push(...admissionDiagnostics)
-    return Object.freeze({
-      ...module,
-      diagnostics: Diagnostic.merge(module.diagnostics, admissionDiagnostics),
-    })
-  })
   return DeclarationIndex.make('Complete', modules, Diagnostic.merge(diagnostics))
 }

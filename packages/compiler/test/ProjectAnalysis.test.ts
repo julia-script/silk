@@ -38,6 +38,38 @@ const projectViewIsNotSingleRoot: ProjectAnalysis.View extends Analysis.SingleRo
   ? false
   : true = true
 
+it.effect('reuses borrowed Effect contracts and invalidates changed environment bounds', () =>
+  Effect.gen(function* () {
+    const source = `import shared.Core
+pub fn main() -> i32 { let value = 42 let result = run Core.borrow(&value) return result.* }`
+    const root = SourceFile.make('query/Effect', ascii(source))
+    const library = `pub effect<'env> fn borrow<'data: 'env, 'env>(value: &'data i32) -> &'data i32 { return value }
+fn privateValue() -> i32 { return 1 }`
+    const resolve = (source: string) => SourceResolver.memory(new Map([['shared/Core', ascii(source)]]))
+    const initial = yield* ProjectAnalysis.make([root]).pipe(Effect.provide(resolve(library)))
+    const edited = yield* ProjectAnalysis.revise(initial, [root]).pipe(Effect.provide(resolve(library.replace('return 1', 'return 2'))))
+    const renamed = yield* ProjectAnalysis.revise(edited, [root]).pipe(Effect.provide(resolve(library.replaceAll("'data", "'backing").replaceAll("'env", "'capture").replace('return 1', 'return 2'))))
+    const extra = SourceFile.make('query/Effect', ascii(source + '\nfn another() -> i32 { let value = 21 let result = run Core.borrow(&value) return result.* }'))
+    const additional = yield* ProjectAnalysis.revise(initial, [extra]).pipe(Effect.provide(resolve(library)))
+    for (const project of [initial, edited, renamed, additional]) {
+      const view = ProjectAnalysis.view(project, 'query/Effect') ?? raise('Effect consumer')
+      assert.deepEqual(Analysis.diagnostics(view), [])
+    }
+    const counts = (project: ProjectAnalysis.ProjectAnalysis) => {
+      const counters = project.report.find((phase) => phase.phase === 'body-queries')?.counters
+      if (counters?._tag !== 'BodyQueryCounters') return raise('body counters')
+      return counters
+    }
+    assert.strictEqual(counts(edited).checked, 1)
+    assert.strictEqual(counts(renamed).checked, 0)
+    assert.strictEqual(counts(additional).checked, 1)
+    const constrained = yield* ProjectAnalysis.revise(initial, [root]).pipe(Effect.provide(resolve(library.replace("'data: 'env", "'data: 'static"))))
+    assert.isAbove(counts(constrained).checked, 1)
+    const invalid = ProjectAnalysis.view(constrained, 'query/Effect') ?? raise('changed Effect bound')
+    assert.include(Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code), 'SEM0212')
+  }),
+)
+
 it.effect('invalidates dependent storage consumers when exported variance or cleanup changes', () =>
   Effect.gen(function* () {
     const root = SourceFile.make(

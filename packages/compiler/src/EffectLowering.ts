@@ -158,7 +158,7 @@ export const lowerRunEffectValue = (
       propagationType === undefined
         ? undefined
         : Type.failureMembers(propagationType.type).findIndex((candidate) =>
-            Type.equals(candidate, failure),
+            Type.runtimeKey(candidate) === Type.runtimeKey(failure),
           )
     return target === undefined || target < 0
       ? []
@@ -265,7 +265,7 @@ export const lowerRunEffectComposite = (
       alternative.environment.instance.typeArguments
     const tagMappings = Type.failureMembers(alternative.type).flatMap((failure, sourceOrdinal) => {
       const target = Type.failureMembers(effectType.contract).findIndex((candidate) =>
-        Type.equals(candidate, failure),
+        Type.runtimeKey(candidate) === Type.runtimeKey(failure),
       )
       return target < 0 ? [] : [Object.freeze({ source: sourceOrdinal + 1, target: target + 1 })]
     })
@@ -288,7 +288,7 @@ export const lowerRunEffectComposite = (
         propagationType === undefined
           ? undefined
           : Type.failureMembers(propagationType.type).findIndex((candidate) =>
-              Type.equals(candidate, failure),
+              Type.runtimeKey(candidate) === Type.runtimeKey(failure),
             )
       return target === undefined || target < 0
         ? []
@@ -724,7 +724,7 @@ export const lowerEffectCatch = (
     if (memberType === undefined || memberType._tag === 'EffectOutcome') return undefined
     const bound = fn.alloc(memberType)
     const selectedExecution = lowerExecution(fn, expression.span, () => {
-      if (selectedMembers.some((candidate) => Type.equals(candidate, member))) {
+      if (selectedMembers.some((candidate) => Type.runtimeKey(candidate) === Type.runtimeKey(member))) {
         let handlerArgument = bound
         if (!Type.equals(member, selected)) {
           const selectedType = fn.type(selected)
@@ -780,7 +780,7 @@ export const lowerEffectCatch = (
         return runHandler(applied)
       }
       const target = Type.failureMembers(propagationEffect).findIndex((candidate) =>
-        Type.equals(candidate, member),
+        Type.runtimeKey(candidate) === Type.runtimeKey(member),
       )
       const bottom = fn.type('never')
       if (target < 0 || bottom?._tag !== 'Bottom') return undefined

@@ -62,6 +62,7 @@ const planState = (
         local: slot.local,
         type: slot.type,
         access: slot.access,
+        initialization: slot.initialization,
         offset,
         size: storage.size,
         alignment: storage.alignment,

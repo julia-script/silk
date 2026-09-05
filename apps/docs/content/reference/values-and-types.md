@@ -1421,7 +1421,7 @@ member identities. Exact and opaque executable representations remain compiler-p
 public contract spelling is preserved.
 
 **Evidence:** [union normalization](../../../../packages/compiler/src/Type.ts),
-[ordinary failure values](typed-failures.md#fail-001--any-concrete-detached-value-may-be-a-typed-failure).
+[ordinary failure values](typed-failures.md#fail-001--any-concrete-lifetime-valid-value-may-be-a-typed-failure).
 
 ### UNION-002 — Precise injection and union widening occur only at immediate expected boundaries
 
