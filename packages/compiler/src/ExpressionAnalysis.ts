@@ -8776,12 +8776,17 @@ const analyzeAnonymousCallable = (
         }),
       ),
       retainedDependencies: Object.freeze([]),
-      typeArguments: Object.freeze(declaration.typeParameters.map((parameter) => parameter.type)),
+      typeArguments: Object.freeze(
+        declaration.typeParameters.map((parameter) => Type.parameterArgument(parameter.type)),
+      ),
       ...(environmentOwner === undefined ? {} : { environmentOwner }),
-      // The hidden body is generic over exactly the owner's parameters; naming each as itself
-      // lets an owner instance's substitution specialize the section like any other call site.
+      // Reify inherited parameters in their argument namespace so the owner instance can
+      // specialize captured lifetimes and representation binders like any other call site.
       substitution: new Map(
-        declaration.typeParameters.map((parameter) => [Type.key(parameter.type), parameter.type]),
+        declaration.typeParameters.map((parameter) => [
+          Type.key(parameter.type),
+          Type.parameterArgument(parameter.type),
+        ]),
       ),
       mode,
       type: callable === undefined ? unavailableExpressionType : availableExpressionType(callable),

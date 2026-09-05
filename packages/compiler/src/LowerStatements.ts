@@ -737,7 +737,7 @@ const lowerStatement = (
           _tag: 'Drop',
           local: root,
           selectors,
-          cleanup: concreteCleanup(fn, Mir.semanticType(type)),
+          cleanup: cleanupForLocal(fn, concreteCleanup(fn, Mir.semanticType(type)), type),
           ...(initialization === undefined ? {} : { initialization }),
           provenance: authored(statement.span),
         })

@@ -183,8 +183,9 @@ const operationInputs = (operation: Mir.Operation): ReadonlySet<number> => {
   return new Set(
     Mir.operationTree(operation)
       .flatMap((nested) =>
-        nested._tag === 'Drop' && nested.cleanup._tag === 'NoCleanup'
-          ? []
+        nested._tag === 'Drop' &&
+        !CleanupPlan.mayReadStorage(nested.cleanup, nested.initialization?.state)
+          ? (nested.initialization?.flags.map((flag) => flag.local) ?? [])
           : MirVerification.operationLocals(nested),
       )
       .map((local) => local.ordinal)

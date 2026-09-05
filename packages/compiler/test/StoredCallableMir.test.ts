@@ -81,9 +81,12 @@ pub fn main() -> i32 {
 it.effect('resolves stored owned-capture cleanup before MIR', () =>
   Effect.gen(function* () {
     const source = `struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
 struct Holder<F: once fn<'static>(i32) -> i32> { step: F }
 fn read(value: i32, token: Token) -> i32 { return value }
 pub fn main() -> i32 {
+  let callback = read(Token { value: 2 })
+  drop callback
   let token = Token { value: 1 }
   let holder = Holder { step: read(move token) }
   return 0
@@ -96,6 +99,13 @@ pub fn main() -> i32 {
     assert.notInclude(
       cleanups.map((cleanup) => cleanup._tag),
       'RepresentedCallableCleanup',
+    )
+    assert.isTrue(
+      cleanups.some(
+        (cleanup) =>
+          cleanup._tag === 'CallableCleanup' &&
+          cleanup.slots.some((slot) => slot.cleanup._tag === 'HookCleanup'),
+      ),
     )
     assert.include(
       cleanups.flatMap((cleanup) =>

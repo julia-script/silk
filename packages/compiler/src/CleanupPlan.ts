@@ -4,6 +4,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as FieldRealization from './FieldRealization.js'
 import type * as Hir from './Hir.js'
 import * as TypeInference from './internal/TypeInference.js'
+import * as MovePath from './MovePath.js'
 import * as Type from './Type.js'
 
 export type CallableEnvironmentLocator =
@@ -120,6 +121,24 @@ export type CleanupPlan =
         readonly cleanup: CleanupPlan
       }>
     }
+
+/** Whether cleanup may access storage after applying its exact sparse initialization mask. */
+export const mayReadStorage = (
+  self: CleanupPlan,
+  state: MovePath.State = MovePath.make(),
+): boolean => {
+  if (self._tag === 'NoCleanup' || state.initialization === 'Missing') return false
+  if (self._tag !== 'StructCleanup') return true
+  return self.fields.some((field) =>
+    mayReadStorage(
+      field.cleanup,
+      state.children.find(
+        (child) =>
+          child.selector._tag === 'Field' && child.selector.ordinal === field.field.ordinal,
+      )?.state ?? MovePath.make(state.initialization),
+    ),
+  )
+}
 
 export const hasHook = (self: CleanupPlan): boolean =>
   self._tag === 'HookCleanup' ||

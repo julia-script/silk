@@ -2025,6 +2025,7 @@ export const catalog = (
   }
   for (const instance of discovery?.instances ?? []) {
     if (needsInitializationFlags(instance)) addReferenced('bool')
+    for (const represented of representedParameterTypes(instance)) addReferenced(represented)
     const substitution = instance.substitution
     if (instance.function.contract._tag === 'Contract') {
       for (const parameter of instance.specialization.parameters) addReferenced(parameter)
@@ -2342,11 +2343,35 @@ const needsInitializationFlags = (instance: Instances.Instance): boolean =>
       MovePath.conditionalPaths(transition.after).length > 0,
   )
 
+/** Materializes the exact composite parameter view used by MIR, including its required access. */
+const representedParameterTypes = (instance: Instances.Instance): ReadonlyArray<Type.Represented> =>
+  instance.specialization.parameters.flatMap((parameter, ordinal) => {
+    if (!Type.isEffect(parameter)) return []
+    const representation = Instances.parameterEffectRepresentationArgument(
+      instance.function,
+      instance.key,
+      ordinal,
+    )
+    if (
+      representation === undefined ||
+      !Type.isCompositeEffectRepresentationArgument(representation)
+    )
+      return []
+    const type = Type.substitute(
+      Type.represented(parameter, parameter, representation),
+      instance.substitution,
+      instance.specialization.compatibility,
+    )
+    return Type.isRepresented(type) ? [type] : []
+  })
+
 const addFunctionTypes = (
   types: Map<string, DeclarationFacts.SemanticType>,
   instance: Instances.Instance,
 ): void => {
   const fn = instance.function
+  for (const represented of representedParameterTypes(instance))
+    types.set(Type.runtimeKey(represented), represented)
   if (needsInitializationFlags(instance)) types.set(Type.runtimeKey('bool'), 'bool')
   const substitution = instance.substitution
   for (const parameter of fn.declaration.parameters) {
