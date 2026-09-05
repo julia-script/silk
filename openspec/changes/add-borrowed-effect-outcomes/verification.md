@@ -30,6 +30,7 @@ matching debug/release emission verdicts.
 - Initial `pnpm test`: compiler parallel suite had 2,269 passing tests and one new diagnostic-span
   assertion failure. Corrected the assertion to accommodate leading whitespace in declaration
   spans; the focused completion test then passed. The native corpus was not reached in that run.
-- Final `pnpm check`: production builds passed; compiler parallel suite passed all 2,270 tests
-  across 211 files. Native corpus and remaining workspace checks are running.
-- `pnpm release:candidate`: pending.
+- Final `pnpm check`: passed, including production builds, all 2,270 compiler parallel tests
+  across 211 files, all 316 native acceptance tests, remaining workspace tests, and 17 script tests.
+- Final `pnpm test`: passed with all 22 Turbo tasks cached; no test bodies were rerun.
+- `pnpm release:candidate`: passed all 10 package-consumer checks.
