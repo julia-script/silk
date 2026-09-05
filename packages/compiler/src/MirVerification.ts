@@ -5358,14 +5358,14 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             !enumScrutineeValid ||
             (destination === undefined && operation.type._tag !== 'Bottom') ||
             selectedSource === undefined ||
-            !SilkType.equals(selectedSource, semanticType(operation.scrutineeType)) ||
+            !sameRuntimeType(selectedSource, semanticType(operation.scrutineeType)) ||
             (destination !== undefined &&
-              !SilkType.equals(semanticType(destination), semanticType(operation.type))) ||
-            !SilkType.equals(
+              !sameRuntimeType(semanticType(destination), semanticType(operation.type))) ||
+            !sameRuntimeType(
               operation.scrutineeShape.type,
               semanticType(operation.scrutineeType),
             ) ||
-            !SilkType.equals(operation.resultShape.type, semanticType(operation.type)) ||
+            !sameRuntimeType(operation.resultShape.type, semanticType(operation.type)) ||
             plannedScrutinee === undefined ||
             plannedResult === undefined ||
             !callingShapeEquals(plannedScrutinee, operation.scrutineeShape) ||
@@ -5463,8 +5463,8 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               if (
                 localType === undefined ||
                 selected === undefined ||
-                !SilkType.equals(semanticType(localType), semanticType(binding.type)) ||
-                !SilkType.equals(selected, semanticType(binding.type)) ||
+                !sameRuntimeType(semanticType(localType), semanticType(binding.type)) ||
+                !sameRuntimeType(selected, semanticType(binding.type)) ||
                 binding.access !== operation.access
               ) {
                 violations.push(
@@ -5501,7 +5501,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               (selectable.has(arm.id.ordinal) &&
                 resultType !== undefined &&
                 resultType._tag !== 'Bottom' &&
-                !SilkType.equals(semanticType(resultType), semanticType(operation.type)))
+                !sameRuntimeType(semanticType(resultType), semanticType(operation.type)))
             ) {
               violations.push(
                 Object.freeze({

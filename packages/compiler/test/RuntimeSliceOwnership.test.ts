@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as ConformanceProof from '../src/ConformanceProof.js'
 import * as ExecutableProperty from '../src/ExecutableProperty.js'
 import * as Lifetime from '../src/Lifetime.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as ModuleSurface from '../src/ModuleSurface.js'
 import * as NominalVariance from '../src/NominalVariance.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
@@ -685,24 +686,29 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('plans exactly one displaced cleanup for exclusive borrowed replacement', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.usize as usize
-struct Token { value: i32 }
+    const self = yield* snapshot(`struct Token { value: i32 }
 struct Empty {}
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
 fn replace(values: &mut [Token], index: usize) -> i32 {
   values[index] = Token { value: 42 }
   return values[index].value
 }
 fn clear(values: &mut [Empty], index: usize) -> i32 {
   values[index] = Empty {}
-  return usize.toI32(values.length)
+  return 0
 }
-pub fn main() -> i32 { return 0 }`)
+pub fn main() -> i32 {
+  let mut empty = [Empty {}]
+  let cleared = clear(&mut empty, 0)
+  let mut values = [Token { value: 1 }]
+  return replace(&mut values, 0) + cleared
+}`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])
     const replacements =
       Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(0)?.replacements ?? []
     assert.strictEqual(replacements.length, 1)
-    assert.strictEqual(replacements.at(0)?.cleanup._tag, 'StructCleanup')
+    assert.strictEqual(replacements.at(0)?.cleanup._tag, 'HookCleanup')
     const empty =
       Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(1)?.replacements ?? []
     const cleanup = empty.at(0)?.cleanup
@@ -710,6 +716,33 @@ pub fn main() -> i32 { return 0 }`)
     if (cleanup?._tag === 'StructCleanup') {
       assert.deepEqual(cleanup.fields, [])
     }
+    const mir = self.mir._tag === 'Available' ? self.mir.value : unreachable('replacement MIR')
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const replace = mir.functions.find((fn) => fn.id.name === 'replace') ?? unreachable('replace')
+    const corrupted = {
+      ...mir,
+      functions: mir.functions.map((fn) =>
+        fn !== replace
+          ? fn
+          : {
+              ...fn,
+              regions: fn.regions.map((region) =>
+                region._tag !== 'OperationRegion'
+                  ? region
+                  : {
+                      ...region,
+                      operations: region.operations.filter(
+                        (operation) => operation._tag !== 'WritePlace',
+                      ),
+                    },
+              ),
+            },
+      ),
+    }
+    assert.deepEqual(
+      MirVerification.verify(corrupted).map((violation) => violation.rule),
+      ['InvalidSliceOperation'],
+    )
   }),
 )
 

@@ -485,7 +485,7 @@ export const lowerBuiltinArguments = (
       primitiveParameter === undefined ||
       !Type.isReference(callParameter) ||
       callParameter.access !== 'Shared' ||
-      !Type.equals(actual.type, callParameter) ||
+      Type.runtimeKey(actual.type) !== Type.runtimeKey(callParameter) ||
       !Type.equals(callParameter.target, primitiveParameter)
     ) {
       loweredArguments.push(lowered.result)

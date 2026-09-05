@@ -133,7 +133,7 @@ const callingScalarEquals = (left: Layout.CallingScalar, right: Layout.CallingSc
   typeof left === 'string'
     ? left === right
     : typeof right !== 'string' &&
-      SilkType.equals(left.element, right.element) &&
+      SilkType.runtimeKey(left.element) === SilkType.runtimeKey(right.element) &&
       left.bits === right.bits
 
 export const callingShapeEquals = (

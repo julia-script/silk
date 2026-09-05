@@ -64,18 +64,23 @@ const nestedLoanCauses = (
   type: Type.Type,
   path: ReadonlyArray<string>,
   active: ReadonlySet<string> = new Set(),
+  assumptions: Lifetime.Assumptions = TypeOutlives.context(index.modules).assumptions,
 ): ReadonlyArray<Cause> => {
   if (Type.isString(type) || Type.isReference(type) || Type.isSlice(type))
-    return TypeOutlives.check(type, Lifetime.staticLifetime, TypeOutlives.context(index.modules))
+    return TypeOutlives.check(
+      type,
+      Lifetime.staticLifetime,
+      TypeOutlives.context(index.modules),
+      (longer, shorter) => Lifetime.outlives(assumptions, longer, shorter),
+    )
       ? []
       : Object.freeze([cause('NestedLoan', [...path, Type.encode(type)])])
-  if (Type.isSlot(type))
-    return Object.freeze([cause('NestedLoan', [...path, Type.encode(type)])])
+  if (Type.isSlot(type)) return Object.freeze([cause('NestedLoan', [...path, Type.encode(type)])])
   if (Type.isFixedArray(type))
-    return nestedLoanCauses(index, type.element, [...path, 'element'], active)
+    return nestedLoanCauses(index, type.element, [...path, 'element'], active, assumptions)
   if (Type.isUnion(type))
     return type.members.flatMap((member, ordinal) =>
-      nestedLoanCauses(index, member, [...path, `member#${ordinal}`], active),
+      nestedLoanCauses(index, member, [...path, `member#${ordinal}`], active, assumptions),
     )
   if (Type.isCallable(type) || Type.isEffect(type) || Type.isRepresented(type)) return []
   if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return []
@@ -115,6 +120,7 @@ const nestedLoanCauses = (
           `${owner}.${field.name._tag === 'Present' ? field.name.spelling : `#${field.id.ordinal}`}`,
         ],
         next,
+        assumptions,
       )
     }
     return [cause('Unavailable', [...path, `${owner}.#${field.id.ordinal}`])]
@@ -131,6 +137,7 @@ export interface EnvironmentCapture {
 const detachedCapture = (
   index: DeclarationIndex.Index,
   capture: EnvironmentCapture,
+  assumptions: Lifetime.Assumptions,
 ): ReadonlyArray<Cause> => {
   const path = [`capture#${capture.ordinal}`, Type.encode(capture.type)]
   if (
@@ -141,23 +148,27 @@ const detachedCapture = (
   if (
     capture.access === 'Shared' ||
     capture.access === 'Exclusive' ||
-    ((Type.isReference(capture.type) || Type.isSlice(capture.type) || Type.isString(capture.type)) &&
+    ((Type.isReference(capture.type) ||
+      Type.isSlice(capture.type) ||
+      Type.isString(capture.type)) &&
       !TypeOutlives.check(
         capture.type,
         Lifetime.staticLifetime,
         TypeOutlives.context(index.modules),
+        (longer, shorter) => Lifetime.outlives(assumptions, longer, shorter),
       )) ||
     Type.isSlot(capture.type)
   )
     return Object.freeze([cause('LexicalLoan', path)])
-  return nestedLoanCauses(index, capture.type, path)
+  return nestedLoanCauses(index, capture.type, path, new Set(), assumptions)
 }
 
 /** Proves detachment from retained invocation/drop dependencies, never from result payload rows. */
 export const detachedOfEnvironment = (
   index: DeclarationIndex.Index,
   captures: ReadonlyArray<EnvironmentCapture>,
-): Verdict => verdict(captures.flatMap((capture) => detachedCapture(index, capture)))
+  assumptions: Lifetime.Assumptions = TypeOutlives.context(index.modules).assumptions,
+): Verdict => verdict(captures.flatMap((capture) => detachedCapture(index, capture, assumptions)))
 
 /** Proves that one ordinary value representation owns its complete retained environment. */
 export const detachedOfType = (index: DeclarationIndex.Index, type: Type.Type): Verdict =>
@@ -280,6 +291,35 @@ export const derive = (
   index: DeclarationIndex.Index,
   callableIdentity: (self: Instances.CallableInstance) => string,
 ): ReadonlyArray<Fact> => {
+  const declaredAssumptions = TypeOutlives.context(index.modules).assumptions
+  // Selected instance arguments already satisfy their declaration's lifetime preconditions.
+  // Transport those predicates through the existing substitution without assuming Detached.
+  const owners = new Map(
+    discovery.instances.map((instance) => [Instances.keyText(instance.key), instance]),
+  )
+  const ownerAssumptions = new Map<string, Lifetime.Assumptions>()
+  const assumptionsForOwner = (owner: Instances.InstanceKey): Lifetime.Assumptions => {
+    const key = Instances.keyText(owner)
+    const cached = ownerAssumptions.get(key)
+    if (cached !== undefined) return cached
+    const instance = owners.get(key)
+    if (instance === undefined) return declaredAssumptions
+    const bounds = [
+      ...(instance.specialization.compatibility?.assumptions.bounds ?? []),
+      ...(
+        DeclarationFacts.executableLifetimes(instance.function.declaration).lifetimeBounds ?? []
+      ).map((bound) => ({
+        longer: Type.substituteLifetime(bound.longer, instance.substitution),
+        shorter: Type.substituteLifetime(bound.shorter, instance.substitution),
+      })),
+    ]
+    const assumptions =
+      bounds.length === 0
+        ? declaredAssumptions
+        : Lifetime.assumptions([...declaredAssumptions.bounds, ...bounds])
+    ownerAssumptions.set(key, assumptions)
+    return assumptions
+  }
   const effects = discovery.effects.map((effect): Fact =>
     Object.freeze({
       _tag: 'ExecutablePropertyFact',
@@ -288,7 +328,7 @@ export const derive = (
         index,
         effect.captures.map((capture) => ({ type: capture.type })),
       ),
-      detached: detachedOfEnvironment(index, effect.captures),
+      detached: detachedOfEnvironment(index, effect.captures, assumptionsForOwner(effect.owner)),
       nonParking: nonParkingOfSummary(effect.suspension),
     }),
   )
@@ -301,7 +341,11 @@ export const derive = (
         index,
         callable.captures.map((capture) => ({ type: capture.type })),
       ),
-      detached: detachedOfEnvironment(index, callable.captures),
+      detached: detachedOfEnvironment(
+        index,
+        callable.captures,
+        assumptionsForOwner(callable.owner),
+      ),
       nonParking: (() => {
         if (callable.target._tag !== 'DeclarationCallableTarget') return satisfied
         const declaration = callable.target.declaration

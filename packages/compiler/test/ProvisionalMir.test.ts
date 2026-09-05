@@ -357,7 +357,7 @@ it.effect(
       const self = yield* snapshot(`service Value { effect fn get() -> i32 ? &mut Value }
 struct Provider {}
 effect fn get(self: &mut Provider) -> i32 { return 42 }
-impl Value for Provider { get: get }
+impl Value for Provider { get: Provider.get }
 effect fn seed(value: i32) -> i32 { return value }
 effect fn bound(provider: &mut Provider) -> i32 {
   let value = run Intrinsic.bindRequirementMut(Value.get(), provider)
