@@ -2,6 +2,12 @@ import { createHash } from 'node:crypto'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as CompilationProfile from '../src/CompilationProfile.js'
+import * as PackageConfiguration from '../src/PackageConfiguration.js'
+import * as ProfileBootstrap from '../src/ProfileBootstrap.js'
+import * as ConfigurationOrigin from '../src/ConfigurationOrigin.js'
+import * as ConfigurationValue from '../src/ConfigurationValue.js'
+import * as PackageParameter from '../src/PackageParameter.js'
 import * as FloatingPoint from '../src/FloatingPoint.js'
 import * as Hir from '../src/Hir.js'
 import * as Instances from '../src/Instances.js'
@@ -1926,5 +1932,274 @@ pub fn main() -> i32 {
       (instance) => instance.key.declaration.name === 'main',
     )
     assert.isDefined(main)
+  }),
+)
+
+it.effect(
+  'projects source-owned records, arrays, enums and optional shapes into typed bindings',
+  () =>
+    Effect.gen(function* () {
+      const source = `pub enum Mode { Fast, Careful }
+pub union Presence<T> { Empty, Full { item: T } }
+pub struct Settings {
+  pub count: u64
+  pub enabled: bool
+  pub label: string<'static>
+  pub modes: [Mode; 2]
+  pub extra: Presence<i32>
+}
+pub param settings: Settings
+pub param pointerWidth: usize
+pub fn main() -> i32 { return 0 }`
+      const snapshot = yield* Analysis.ofSource('config', encoder.encode(source))
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const parameters =
+        snapshot.index.modules.find((module) => module.module === 'config')?.constants ?? []
+      const settings =
+        parameters.find(
+          (parameter) =>
+            parameter.name._tag === 'Present' && parameter.name.spelling === 'settings',
+        ) ?? unreachable('expected settings')
+      const pointerWidth =
+        parameters.find(
+          (parameter) =>
+            parameter.name._tag === 'Present' && parameter.name.spelling === 'pointerWidth',
+        ) ?? unreachable('expected pointerWidth')
+      if (
+        settings.declaredType._tag !== 'Resolved' ||
+        pointerWidth.declaredType._tag !== 'Resolved'
+      )
+        return unreachable('expected concrete schemas')
+      const origin = ConfigurationOrigin.literal('typed binding')
+      const context: PackageParameter.Context = {
+        index: snapshot.index,
+        target: Target.x8664UnknownLinuxGnu,
+        packages: new Map(
+          snapshot.index.modules.map((module) => [
+            module.module,
+            { package: 'demo@1.0.0', module: module.module },
+          ]),
+        ),
+      }
+      const schema = yield* PackageParameter.describe(context, settings.declaredType.type, origin)
+      const input = {
+        kind: 'record',
+        fields: {
+          count: { kind: 'integer', value: '18446744073709551615' },
+          enabled: { kind: 'boolean', value: true },
+          label: { kind: 'string', value: 'configured' },
+          modes: {
+            kind: 'array',
+            values: [
+              { kind: 'enum', type: 'demo@1.0.0/config/Mode', member: 'Careful' },
+              { kind: 'enum', type: 'demo@1.0.0/config/Mode', member: 'Fast' },
+            ],
+          },
+          extra: { kind: 'some', value: { kind: 'integer', value: '-42' } },
+        },
+      }
+      const bound = yield* PackageParameter.bind(schema, input, origin, context.target)
+      const roundtrip = yield* PackageParameter.unbind(schema, bound, origin, context.target)
+      const canonical = yield* ConfigurationValue.decode(input, origin)
+      assert.strictEqual(ConfigurationValue.encode(roundtrip), ConfigurationValue.encode(canonical))
+      for (const extra of [
+        { kind: 'none' },
+        { kind: 'some', value: { kind: 'integer', value: '2147483648' } },
+      ]) {
+        const candidate = { ...input, fields: { ...input.fields, extra } }
+        if (extra.kind === 'none') {
+          const value = yield* PackageParameter.bind(schema, candidate, origin, context.target)
+          assert.deepEqual(
+            yield* PackageParameter.unbind(schema, value, origin, context.target),
+            yield* ConfigurationValue.decode(candidate, origin),
+          )
+        } else
+          assert.strictEqual(
+            (yield* Effect.flip(PackageParameter.bind(schema, candidate, origin, context.target)))
+              .code,
+            'InvalidType',
+          )
+      }
+      const wrongEnum = {
+        ...input,
+        fields: {
+          ...input.fields,
+          modes: {
+            kind: 'array',
+            values: [
+              { kind: 'enum', type: 'other@1.0.0/config/Mode', member: 'Fast' },
+              { kind: 'enum', type: 'demo@1.0.0/config/Mode', member: 'Fast' },
+            ],
+          },
+        },
+      }
+      assert.strictEqual(
+        (yield* Effect.flip(PackageParameter.bind(schema, wrongEnum, origin, context.target))).code,
+        'InvalidType',
+      )
+      const integerSchema = yield* PackageParameter.describe(
+        context,
+        pointerWidth.declaredType.type,
+        origin,
+      )
+      assert.strictEqual(
+        (yield* Effect.flip(
+          PackageParameter.bind(
+            integerSchema,
+            { kind: 'integer', value: '4294967296' },
+            origin,
+            Target.wasm32UnknownUnknown,
+          ),
+        )).code,
+        'InvalidType',
+      )
+    }),
+)
+
+const bootstrapSource = (
+  snapshot: Analysis.SingleRootFrontendSnapshot,
+): ProfileBootstrap.Source => ({
+  index: snapshot.index,
+  results: snapshot.results,
+  resolution: snapshot.resolution,
+  modules: snapshot.closure.modules.map((module) => ({
+    canonical: module.name,
+    package: 'demo@1.0.0',
+    module: module.name,
+    bytes: module.syntax.source.bytes,
+  })),
+})
+
+it.effect('bootstraps final-value defaults and predicates with explicit binding precedence', () =>
+  Effect.gen(function* () {
+    const source = `pub param enabled: bool = false
+pub param count: i32 = choose() where count > 0
+param hidden: i32 = 9
+static fn choose() -> i32 { if enabled { return 42 } else { return 7 } }
+pub fn main() -> i32 { return 0 }`
+    const snapshot = yield* Analysis.ofSource('config', encoder.encode(source))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const graph = bootstrapSource(snapshot)
+    const initial = yield* CompilationProfile.normalize({ target: Target.x8664UnknownLinuxGnu.id })
+    const origin = ConfigurationOrigin.literal('project input')
+    const binding: PackageConfiguration.Binding = {
+      package: 'demo@1.0.0',
+      module: 'config',
+      parameter: 'enabled',
+      tier: 'project',
+      value: { kind: 'boolean', value: true },
+      origin,
+    }
+    const defaulted = yield* ProfileBootstrap.complete(initial, graph)
+    const enabled = yield* ProfileBootstrap.complete(initial, graph, [binding])
+    const count = (profile: CompilationProfile.CompilationProfile) =>
+      CompilationProfile.parameter(profile, {
+        package: 'demo@1.0.0',
+        module: 'config',
+        parameter: 'count',
+      })?.value
+    assert.deepEqual(count(defaulted.profile), { kind: 'integer', value: '7' })
+    assert.deepEqual(count(enabled.profile), { kind: 'integer', value: '42' })
+    assert.notStrictEqual(defaulted.profile.identity, enabled.profile.identity)
+    const artifact: PackageConfiguration.Binding = {
+      ...binding,
+      tier: 'artifact',
+      value: { kind: 'boolean', value: false },
+    }
+    assert.strictEqual(
+      (yield* ProfileBootstrap.complete(initial, graph, [artifact, binding])).profile.identity,
+      defaulted.profile.identity,
+    )
+    const conflict = yield* Effect.flip(
+      ProfileBootstrap.complete(initial, graph, [binding, { ...artifact, tier: 'workspace' }]),
+    )
+    assert.strictEqual(conflict.code, 'ConflictingBindings')
+    assert.strictEqual(conflict.origins.length, 2)
+    const rejected = yield* Effect.flip(
+      ProfileBootstrap.complete(initial, graph, [
+        { ...binding, parameter: 'count', value: { kind: 'integer', value: '-1' } },
+      ]),
+    )
+    assert.strictEqual(rejected.code, 'ValidationFailed')
+    for (const [parameter, code] of [
+      ['hidden', 'PrivateParameter'],
+      ['typo', 'UnknownParameter'],
+    ] as const)
+      assert.strictEqual(
+        (yield* Effect.flip(ProfileBootstrap.complete(initial, graph, [{ ...binding, parameter }])))
+          .code,
+        code,
+      )
+    const secret = yield* Effect.flip(
+      ProfileBootstrap.complete(initial, graph, [
+        {
+          ...binding,
+          value: 'DO_NOT_ECHO_123',
+          origin: { source: 'secret store', provenance: 'secret' },
+        },
+      ]),
+    )
+    assert.strictEqual(secret.code, 'ForbiddenProvenance')
+    assert.notInclude(JSON.stringify(secret), 'DO_NOT_ECHO_123')
+    const translated = {
+      ...binding,
+      origin: {
+        source: 'public capability',
+        provenance: 'translated-public' as const,
+        translator: 'capabilities-v1',
+      },
+    }
+    assert.strictEqual(
+      (yield* ProfileBootstrap.complete(initial, graph, [translated])).profile.identity,
+      enabled.profile.identity,
+    )
+    assert.strictEqual(
+      (yield* Effect.flip(
+        ProfileBootstrap.complete(initial, {
+          ...graph,
+          modules: [
+            ...graph.modules,
+            { canonical: 'alias', package: 'demo@1.0.0', module: 'config', bytes: [1] },
+          ],
+        }),
+      )).code,
+      'PackageIdentityConflict',
+    )
+  }),
+)
+
+it.effect('reports demanded default cycles while explicit values break the cycle', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'cycle',
+      encoder.encode(`pub param first: i32 = helper()
+pub param second: i32 = first
+static fn helper() -> i32 { return second }
+static fn unused() -> i32 { return unused() }
+pub fn main() -> i32 { return 0 }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const initial = yield* CompilationProfile.normalize({ target: Target.wasm32UnknownUnknown.id })
+    const graph = bootstrapSource(snapshot)
+    const failed = yield* Effect.flip(ProfileBootstrap.complete(initial, graph))
+    assert.strictEqual(failed.code, 'DependencyCycle')
+    assert.strictEqual(failed.staticFailure?._tag, 'Cycle')
+    const completed = yield* ProfileBootstrap.complete(initial, graph, [
+      {
+        package: 'demo@1.0.0',
+        module: 'cycle',
+        parameter: 'second',
+        tier: 'profile',
+        value: { kind: 'integer', value: '12' },
+        origin: ConfigurationOrigin.literal('cycle override'),
+      },
+    ])
+    assert.deepEqual(
+      completed.profile.parameters.map((parameter) => parameter.value),
+      [
+        { kind: 'integer', value: '12' },
+        { kind: 'integer', value: '12' },
+      ],
+    )
   }),
 )

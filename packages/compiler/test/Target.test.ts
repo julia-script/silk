@@ -151,12 +151,8 @@ it.effect('agrees with pinned LLVM and independently compiled C/object primitive
           BigInt(fact.alignment),
         )
       const witness =
-        ir
-          .split('\n')
-          .find(
-            (line) =>
-              line.startsWith('@silk_primitive_facts'),
-          ) ?? unreachable('expected C witness')
+        ir.split('\n').find((line) => line.startsWith('@silk_primitive_facts')) ??
+        unreachable('expected C witness')
       const observed = [...witness.matchAll(/i32 (\d+)/g)].map((match) => Number(match[1]))
       assert.deepEqual(
         observed,

@@ -7,14 +7,14 @@
 ## 2. Logical profiles and target descriptions
 
 - [ ] 2.1 Implement separate typed logical domains and versioned descriptions for all four targets; verify missing/inconsistent facts and unsupported combinations fail before use with structured diagnostics.
-- [ ] 2.2 Implement canonical immutable profile construction and tagged value encoding; verify independently allocated/reordered equal inputs encode equally while changed logical choices differ and physical paths/provenance cannot affect semantic identity.
-- [ ] 2.3 Add pinned LLVM and independent header-free C/object fixtures for the admitted primitive facts; verify all four target descriptions against those fixtures with exact tool provenance.
+- [x] 2.2 Implement canonical immutable profile construction and tagged value encoding; verify independently allocated/reordered equal inputs encode equally while changed logical choices differ and physical paths/provenance cannot affect semantic identity.
+- [x] 2.3 Add pinned LLVM and independent header-free C/object fixtures for the admitted primitive facts; verify all four target descriptions against those fixtures with exact tool provenance.
 
 ## 3. Source schema and binding surface
 
-- [ ] 3.1 Implement unconditional param declaration parsing and source-preserving formatting, including optional defaults and where predicates; verify parser cases and syntax diagnostics using shared syntax snapshots.
+- [x] 3.1 Implement unconditional param declaration parsing and source-preserving formatting, including optional defaults and where predicates; verify parser cases and syntax diagnostics using shared syntax snapshots.
 - [ ] 3.2 Implement declaration/type facts, stable package/module/parameter identity and public/private visibility; verify imported aliases preserve identity, unknown/private bindings fail and unequal sources cannot claim one package identity.
-- [ ] 3.3 Implement admitted integer, boolean, string, enum, optional, array and record binding conversion with precise type/range checks; verify nested values and wrong nominal/field/element types at the analysis tier.
+- [x] 3.3 Implement admitted integer, boolean, string, enum, optional, array and record binding conversion with precise type/range checks; verify nested values and wrong nominal/field/element types at the analysis tier.
 - [ ] 3.4 Implement origin-bearing binding tiers and provenance rejection; verify same-tier conflicts, missing required values, deterministic public translation and secret/runtime/physical-supply rejection without value disclosure.
 
 ## 4. Bootstrap and ordinary static evaluation

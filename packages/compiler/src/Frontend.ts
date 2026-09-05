@@ -40,6 +40,7 @@ interface FrontendFacts {
 export interface Frontend extends FrontendFacts {
   readonly closure: ModuleClosure.Closure
   readonly requestedTarget?: string
+  readonly configuration?: ModuleClosure.CompilationRequest['configuration']
 }
 
 /** Immutable multi-root frontend facts computed once for one project revision. */
@@ -335,6 +336,7 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
     Object.freeze({
       closure,
       ...facts,
+      ...(request.configuration === undefined ? {} : {configuration: request.configuration}),
       ...(request.target === undefined ? {} : { requestedTarget: request.target }),
     }),
     OpaqueRealization.catalogOf(facts),

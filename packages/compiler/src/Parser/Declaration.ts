@@ -119,7 +119,8 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
     following === 'ServiceKeyword' ||
     following === 'InterfaceKeyword' ||
     following === 'RoleKeyword' ||
-    following === 'ConstKeyword' || following === 'ParamKeyword'
+    following === 'ConstKeyword' ||
+    following === 'ParamKeyword'
   )
 }
 
@@ -192,16 +193,22 @@ export const parseConstantDeclaration = (initial: State): NodeResult => {
 
 /** An unconditional package-owned static parameter with optional default and validation. */
 export const parsePackageParameterDeclaration = (initial: State): NodeResult => {
-  const pubKeyword = nextSignificantKind(initial) === 'PubKeyword'
-    ? expect(initial, 'PubKeyword', ['ParamKeyword', ...topLevelFollowing])
-    : Object.freeze({state: initial, elements: Object.freeze([])})
+  const pubKeyword =
+    nextSignificantKind(initial) === 'PubKeyword'
+      ? expect(initial, 'PubKeyword', ['ParamKeyword', ...topLevelFollowing])
+      : Object.freeze({ state: initial, elements: Object.freeze([]) })
   const keyword = expect(pubKeyword.state, 'ParamKeyword', ['Identifier', ...topLevelFollowing])
   const name = expect(keyword.state, 'Identifier', ['Colon', ...topLevelFollowing])
   const colon = expect(name.state, 'Colon', [...typeStarts, ...topLevelFollowing])
   const type = parseType(colon.state, ['Equals', ...topLevelFollowing])
   let state = type.state
-  const children: Array<SyntaxTree.Element> = [...pubKeyword.elements, ...keyword.elements,
-    ...name.elements, ...colon.elements, type.node]
+  const children: Array<SyntaxTree.Element> = [
+    ...pubKeyword.elements,
+    ...keyword.elements,
+    ...name.elements,
+    ...colon.elements,
+    type.node,
+  ]
   if (nextSignificantKind(state) === 'Equals') {
     const equals = expect(state, 'Equals', expressionStarts)
     const initializer = parseExpression(equals.state, 0, 'Integer', false, ExpressionNesting.root)
@@ -212,9 +219,11 @@ export const parsePackageParameterDeclaration = (initial: State): NodeResult => 
     const where = expect(state, 'Identifier', expressionStarts)
     const predicate = parseExpression(where.state, 0, 'Integer', false, ExpressionNesting.root)
     state = predicate.state
-    children.push(syntaxNode(state, 'PackageParameterValidation', [...where.elements, predicate.node]))
+    children.push(
+      syntaxNode(state, 'PackageParameterValidation', [...where.elements, predicate.node]),
+    )
   }
-  return Object.freeze({state, node: syntaxNode(state, 'PackageParameterDeclaration', children)})
+  return Object.freeze({ state, node: syntaxNode(state, 'PackageParameterDeclaration', children) })
 }
 
 /** Parses an imported or exported C data symbol. Both forms are immutable Silk bindings. */

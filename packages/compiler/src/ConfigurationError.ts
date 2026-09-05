@@ -1,5 +1,6 @@
 import * as Data from 'effect/Data'
 import * as ConfigurationOrigin from './ConfigurationOrigin.js'
+import type * as StaticEvaluation from './StaticEvaluation.js'
 
 export type Code =
   | 'InvalidInput'
@@ -23,6 +24,7 @@ export class ConfigurationError extends Data.TaggedError('ConfigurationError')<{
   readonly message: string
   readonly origins: ReadonlyArray<ConfigurationOrigin.ConfigurationOrigin>
   readonly dependencies: ReadonlyArray<string>
+  readonly staticFailure?: StaticEvaluation.StaticFailure
 }> {}
 
 /** Constructs one stable diagnostic from logical identity and current-request provenance. */

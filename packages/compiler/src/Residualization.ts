@@ -1,3 +1,4 @@
+import type * as CompilationProfile from './CompilationProfile.js'
 import * as Lifetime from './Lifetime.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
@@ -89,6 +90,7 @@ export const noWork: Counters = Object.freeze(emptyCounters())
 
 interface State {
   readonly target: Target.Target
+  readonly parameters: ReadonlyMap<string, StaticValue.Value>
   readonly environment: StaticEvaluation.TargetEnvironment
   readonly results: ReadonlyMap<string, Elaboration.Result>
   readonly resolution: NameResolution.Resolution
@@ -110,22 +112,24 @@ export interface Coordinator {
 }
 
 export const make = (
-  target: Target.Target,
+  compilation: CompilationProfile.Initial | CompilationProfile.CompilationProfile,
   results: ReadonlyMap<string, Elaboration.Result>,
   resolution: NameResolution.Resolution,
   index: DeclarationIndex.Index,
   limits: StaticEvaluation.Limits = StaticEvaluation.defaultLimits,
+  parameters: ReadonlyMap<string, StaticValue.Value> = new Map(),
 ): Coordinator =>
   Object.freeze({
     _tag: 'ResidualizationCoordinator',
     [stateSymbol]: {
-      target,
-      environment: StaticEvaluation.targetEnvironment(target),
+      target: compilation.target,
+      parameters: new Map(parameters),
+      environment: StaticEvaluation.targetEnvironment(compilation),
       results,
       resolution,
       index,
-      evaluation: StaticEvaluation.make<StaticValue.Value>(target, limits),
-      residuals: StaticEvaluation.make<ResidualBody>(target, limits),
+      evaluation: StaticEvaluation.make<StaticValue.Value>(compilation, limits),
+      residuals: StaticEvaluation.make<ResidualBody>(compilation, limits),
       staticResultOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
       counters: emptyCounters(),
       observations: new Map(),
@@ -634,6 +638,7 @@ function evaluateConstantValue(
   declaration: DeclarationFacts.ConstantFact,
   span: SourceSpan.SourceSpan,
   parentTrace: StaticEvaluation.Trace,
+  predicate?: SyntaxTree.Node,
 ): StaticEvaluation.Outcome<StaticValue.Value> {
   if (declaration.canonical._tag !== 'Canonical')
     return StaticEvaluation.failed(
@@ -644,8 +649,28 @@ function evaluateConstantValue(
         parentTrace,
       ),
     )
+  const initializer = predicate ?? declaration.initializer
+  const expected =
+    predicate === undefined && declaration.declaredType._tag === 'Resolved'
+      ? declaration.declaredType.type
+      : 'bool'
+  if (predicate === undefined && declaration._tag === 'PackageParameterDeclaration') {
+    const bound = self[stateSymbol].parameters.get(
+      Canonical.record('PackageParameter', [
+        declaration.canonical.id.module,
+        declaration.canonical.id.name,
+      ]),
+    )
+    if (bound !== undefined) return StaticEvaluation.complete(bound)
+  }
   const application: StaticEvaluation.Application = Object.freeze({
-    declaration: declaration.canonical.id,
+    declaration:
+      predicate === undefined
+        ? declaration.canonical.id
+        : Object.freeze({
+            ...declaration.canonical.id,
+            name: `${declaration.canonical.id.name}#validation`,
+          }),
     typeArguments: Object.freeze([]),
     evidence: Object.freeze([]),
     contractRow: Object.freeze([]),
@@ -663,7 +688,7 @@ function evaluateConstantValue(
           StaticEvaluation.phaseViolation(
             'StaticEvaluation.constant',
             'constant declaration is unavailable',
-            declaration.initializer.span,
+            initializer.span,
             evaluation.trace,
           ),
         )
@@ -710,7 +735,7 @@ function evaluateConstantValue(
       })
       const analyzed = analyzeExpression(
         input.result.syntax.source,
-        declaration.initializer,
+        initializer,
         input.declarations,
         constantHost(declaration),
         Object.freeze({
@@ -719,15 +744,28 @@ function evaluateConstantValue(
           patternBindings: Object.freeze([]),
         }),
         Object.freeze({ scope: input.scope, index: self[stateSymbol].index, staticContext }),
-        declaration.declaredType.type,
+        expected,
       )
+      let nestedFailure: StaticEvaluation.StaticFailure | undefined
+      if (analyzed !== undefined)
+        Elaboration.visitExpressionFacts(analyzed.fact, {
+          expression: (expression) => {
+            if (
+              nestedFailure === undefined &&
+              expression._tag === 'Call' &&
+              expression.staticFailure !== undefined
+            )
+              nestedFailure = expression.staticFailure
+          },
+        })
+      if (nestedFailure !== undefined) return StaticEvaluation.failed(nestedFailure)
       const firstError = analyzed?.diagnostics.find((diagnostic) => diagnostic.severity === 'error')
       if (analyzed === undefined || firstError !== undefined)
         return StaticEvaluation.failed(
           StaticEvaluation.phaseViolation(
             'StaticEvaluation.constant',
             firstError?.message ?? 'constant initializer cannot be analyzed',
-            firstError?.span ?? declaration.initializer.span,
+            firstError?.span ?? initializer.span,
             evaluation.trace,
           ),
         )
@@ -737,12 +775,15 @@ function evaluateConstantValue(
       })
       if (value._tag === 'Failed') return value
       const actual = staticValueType(value.value)
-      if (actual === undefined || !Type.equals(actual, declaration.declaredType.type))
+      if (
+        (predicate !== undefined || declaration._tag !== 'PackageParameterDeclaration') &&
+        (actual === undefined || !Type.equals(actual, expected))
+      )
         return StaticEvaluation.failed(
           StaticEvaluation.phaseViolation(
             'StaticEvaluation.constant',
             `initializer produced ${actual === undefined ? 'an unsupported aggregate' : Type.display(actual)} instead of ${Type.display(declaration.declaredType.type)}`,
-            declaration.initializer.span,
+            initializer.span,
             evaluation.trace,
           ),
         )
@@ -761,6 +802,21 @@ export const evaluateConstant = (
   declaration: DeclarationFacts.ConstantFact,
 ): StaticEvaluation.Outcome<StaticValue.Value> =>
   evaluateConstantValue(self, declaration, declaration.initializer.span, Object.freeze([]))
+
+/** Evaluates a package predicate through the same calls and final-value environment as defaults. */
+export const evaluateParameterPredicate = (
+  self: Coordinator,
+  declaration: DeclarationFacts.PackageParameterFact,
+): StaticEvaluation.Outcome<StaticValue.Value> =>
+  declaration.predicate === undefined
+    ? StaticEvaluation.complete(StaticValue.boolean(true))
+    : evaluateConstantValue(
+        self,
+        declaration,
+        declaration.predicate.span,
+        Object.freeze([]),
+        declaration.predicate,
+      )
 
 const containsSyntaxKind = (node: SyntaxTree.Node, kind: SyntaxTree.NodeKind): boolean =>
   node.kind === kind ||

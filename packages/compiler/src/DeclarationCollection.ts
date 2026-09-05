@@ -3368,7 +3368,9 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       const initializer =
         node.children.find(
           (element): element is SyntaxTree.Node =>
-            SyntaxTree.isNode(element) && element.kind !== 'PackageParameterValidation' && !isDeclaredTypeNode(element),
+            SyntaxTree.isNode(element) &&
+            element.kind !== 'PackageParameterValidation' &&
+            !isDeclaredTypeNode(element),
         ) ?? node
       const declaredType = analyzeDeclaredType(source, declaredTypeNode(node))
       diagnostics.push(...declaredType.diagnostics)
@@ -3382,18 +3384,23 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         name,
         declaredType: declaredType.fact,
         initializerTemplate: staticExpressionTemplate(source, initializer),
-        literal: node.kind === 'PackageParameterDeclaration'
-          ? Object.freeze({_tag: 'Unavailable' as const, syntax: initializer})
-          : constantLiteral(source, initializer),
+        literal:
+          node.kind === 'PackageParameterDeclaration'
+            ? Object.freeze({ _tag: 'Unavailable' as const, syntax: initializer })
+            : constantLiteral(source, initializer),
         initializer,
         syntax: node,
       }
       return node.kind === 'PackageParameterDeclaration'
-        ? Object.freeze({...base, _tag: 'PackageParameterDeclaration',
+        ? Object.freeze({
+            ...base,
+            _tag: 'PackageParameterDeclaration',
             hasDefault: SyntaxTree.directToken(node, 'Equals') !== undefined,
-            ...(predicate === undefined ? {} : {predicate, predicateTemplate: staticExpressionTemplate(source, predicate)}),
+            ...(predicate === undefined
+              ? {}
+              : { predicate, predicateTemplate: staticExpressionTemplate(source, predicate) }),
           })
-        : Object.freeze({...base, _tag: 'ConstantDeclaration'})
+        : Object.freeze({ ...base, _tag: 'ConstantDeclaration' })
     }
     if (node.kind === 'ForeignStaticDeclaration' || node.kind === 'ExportStaticDeclaration') {
       const declaredType = analyzeDeclaredType(source, declaredTypeNode(node))
@@ -4421,7 +4428,10 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       members.filter((member): member is InterfaceFact => member._tag === 'InterfaceDeclaration'),
     ),
     constants: Object.freeze(
-      members.filter((member): member is ConstantFact => (member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration')),
+      members.filter(
+        (member): member is ConstantFact =>
+          member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration',
+      ),
     ),
     conformances: Object.freeze(conformances),
     inherentImpls: Object.freeze(inherentImpls),

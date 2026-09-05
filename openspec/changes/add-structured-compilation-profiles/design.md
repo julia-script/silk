@@ -18,6 +18,9 @@ Introduce `[pub] param name: Type = expression [where predicate]` at uncondition
 
 Parameters are immutable static values at use sites, not variables or callable compiler operations. Introduce a distinct declaration kind so tooling can distinguish schema declarations from constants. Do not encode declarations as compiler-recognized calls to a standard-library helper. Inline predicates ensure externally supplied values are validated too; validation hidden only in a default helper would bypass overrides.
 
+An optional schema is a nominal union with exactly two variants: one fieldless, one with a single
+admitted payload field. Transport none/some selects by shape, never by standard-library spelling.
+
 ### Package and parameter identities
 
 A resolved package instance has logical identity `name@version`; source provisioning maps it to a source root outside the profile. Two unequal package sources claiming the same logical identity in one graph are diagnosed. A parameter identity is the tuple (package identity, package-relative canonical module identity, declared name). Renamed import aliases and physical checkout locations cannot change it. Dependency bindings address only public declarations using that tuple. Standalone source requests supply an explicit logical root package identity at the application edge; the compiler does not invent identity from an absolute filename.

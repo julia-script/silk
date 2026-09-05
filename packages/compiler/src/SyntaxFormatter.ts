@@ -670,7 +670,9 @@ const printConstantDeclaration = (
 ): FormatDocument.Document => {
   const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
   const validation = directNodes(node).find((child) => child.kind === 'PackageParameterValidation')
-  const value = directNodes(node).filter((child) => child !== validation).at(1)
+  const value = directNodes(node)
+    .filter((child) => child !== validation)
+    .at(1)
   const equals = directTokens(node).find((token) => token.kind === 'Equals')
   const type = directNodes(node).at(0) ?? nodeOf(node, 'TypePath')
   return FormatDocument.concat(
@@ -685,10 +687,12 @@ const printConstantDeclaration = (
     printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
     printToken(context, tokenOf(node, 'Colon')),
     printNode(context, type, FormatDocument.text(' ')),
-    ...(equals === undefined || value === undefined ? [] : [
-      printToken(context, equals, FormatDocument.text(' ')),
-      printNode(context, value, FormatDocument.text(' ')),
-    ]),
+    ...(equals === undefined || value === undefined
+      ? []
+      : [
+          printToken(context, equals, FormatDocument.text(' ')),
+          printNode(context, value, FormatDocument.text(' ')),
+        ]),
     ...(validation === undefined ? [] : [printNode(context, validation, FormatDocument.text(' '))]),
   )
 }

@@ -79,7 +79,9 @@ explicitly at the application edge.
 ## PROFILE-003 — Values and external bindings
 
 Admitted types are integers, booleans, strings, nominal enums, optionals, arrays and records
-recursively containing admitted values. Integer range and signedness, enum type and member,
+recursively containing admitted values. An optional is any nominal union with exactly one fieldless variant and one single-field variant;
+variant and payload field spellings are not compiler-recognized names. The `none` and `some`
+transport cases map to those shapes. Integer range and signedness, enum type and member,
 optional element type, array length/element type, and record fields are checked without coercion.
 Callable values, runtime handles, resources, opaque identities and ambient capabilities are not
 configuration values.

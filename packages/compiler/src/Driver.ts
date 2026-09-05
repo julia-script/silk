@@ -354,7 +354,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
       diagnostics: frontend.diagnostics,
       report: Object.freeze([...report]),
     })
-  const preparation = Realization.prepare(frontend, targetId, {
+  const preparation = yield* Realization.prepare(frontend, targetId, {
     heapBytes,
     artifactKind: request.artifactKind,
   })

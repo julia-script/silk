@@ -313,7 +313,10 @@ export const analyzeConstant = (
   let type: SemanticType | undefined
   let detail: string | undefined
 
-  if (
+  if (declaration._tag === 'PackageParameterDeclaration' && declared._tag === 'Resolved') {
+    // The package bootstrap validates the serializable domain and supplies the final value.
+    type = declared.type
+  } else if (
     declared._tag !== 'Resolved' ||
     !(
       Type.isString(declared.type) ||
@@ -786,7 +789,11 @@ export const analyzeConstantReference = (
           spelling(source, second),
           second,
         )
-  if (lookup._tag !== 'Resolved' || (lookup.declaration._tag !== 'ConstantDeclaration' && lookup.declaration._tag !== 'PackageParameterDeclaration'))
+  if (
+    lookup._tag !== 'Resolved' ||
+    (lookup.declaration._tag !== 'ConstantDeclaration' &&
+      lookup.declaration._tag !== 'PackageParameterDeclaration')
+  )
     return undefined
   const result = analyzeConstant(lookup.declaration, second ?? first, node, false)
   if (

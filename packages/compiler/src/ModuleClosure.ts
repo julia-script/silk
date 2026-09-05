@@ -1,3 +1,5 @@
+import type * as CompilationProfile from './CompilationProfile.js'
+import type * as PackageConfiguration from './PackageConfiguration.js'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
@@ -18,6 +20,11 @@ import type * as Token from './Token.js'
 export interface CompilationRequest {
   readonly root: SourceFile.SourceFile
   readonly target?: string
+  readonly configuration?: {
+    readonly profile: CompilationProfile.Input
+    readonly bindings?: ReadonlyArray<PackageConfiguration.Binding>
+    readonly modules?: ReadonlyArray<Omit<PackageConfiguration.Module, 'bytes'>>
+  }
 }
 
 /** One project frontend request with one or more independently queryable roots. */

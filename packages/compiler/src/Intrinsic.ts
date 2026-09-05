@@ -897,28 +897,21 @@ const stringOperations = Object.freeze([
 
 const stringActor = actor('string', 'Type', Object.freeze([]))
 
-const targetProfileOperation: Operation = Object.freeze({
-  _tag: 'IntrinsicOperation',
-  id: operationId('Intrinsic', 'targetProfile'),
-  spelling: 'targetProfile',
-  typeParameters: Object.freeze([]),
-  parameters: Object.freeze([]),
-  result: 'u8',
-  unsafe: false,
-  phase: 'StaticOnly',
-  admission: 'Language',
-  consumer: 'silk/target.profile',
-  targets: Object.freeze([]),
-  rule: Object.freeze({
-    _tag: 'StaticOnlyRule',
-    contract: CallableContract.make({
-      environment: Lifetime.staticLifetime,
-      lifetimeBinders: [],
-      functionKind: 'Function',
-      result: 'u8',
-    }),
-  }),
-})
+const profileOperations: ReadonlyArray<Operation> = Object.freeze([
+  ...['targetArchitecture', 'targetOperatingSystem', 'targetAbi', 'targetObjectFormat', 'targetEndianness'].map((name) => ({name, result: "string<'static>", type: Type.string(Lifetime.staticLifetime), arguments: []})),
+  ...['targetPointerBits', 'targetPointerAlignment'].map((name) => ({name, result: 'u32', type: 'u32' as const, arguments: []})),
+  {name: 'profileText', result: "string<'static>", type: Type.string(Lifetime.staticLifetime), arguments: ['key']},
+  {name: 'profileFlag', result: 'bool', type: 'bool' as const, arguments: ['key']},
+  {name: 'profileContains', result: 'bool', type: 'bool' as const, arguments: ['key', 'value']},
+].map((operation): Operation => Object.freeze({
+  _tag: 'IntrinsicOperation', id: operationId('Intrinsic', operation.name), spelling: operation.name,
+  typeParameters: Object.freeze([]), parameters: Object.freeze(operation.arguments.map((name) => valueParameter(name, "string<'static>"))),
+  result: operation.result, unsafe: false, phase: 'StaticOnly', admission: 'Language', consumer: `silk/target.${operation.name}`,
+  targets: Object.freeze([]), rule: Object.freeze({_tag: 'StaticOnlyRule', contract: CallableContract.make({
+    environment: Lifetime.staticLifetime, lifetimeBinders: [], functionKind: 'Function',
+    parameters: operation.arguments.map(() => ({type: Type.string(Lifetime.staticLifetime), mode: 'Value'})), result: operation.type,
+  })}),
+})))
 
 const staticTextOperation = (
   name: string,
@@ -2254,7 +2247,7 @@ const intrinsicOperations = Object.freeze([
       contract: catchContract,
     }),
   ]),
-  targetProfileOperation,
+  ...profileOperations,
   ...staticTextOperations,
   ...reflectionOperations,
   borrowFieldOperation,

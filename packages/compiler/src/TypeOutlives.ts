@@ -275,7 +275,8 @@ export const moduleDiagnostics = (
   }
   for (const member of self.members) {
     if (member._tag === 'FunctionDeclaration') inspectOperation(member)
-    else if ((member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration')) inspect(member.declaredType)
+    else if (member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration')
+      inspect(member.declaredType)
     else if (member._tag === 'StructDeclaration')
       for (const field of member.fields) inspect(field.declaredType)
     else if (member._tag === 'UnionDeclaration')

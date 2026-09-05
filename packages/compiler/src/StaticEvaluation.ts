@@ -1,3 +1,4 @@
+import type * as CompilationProfile from './CompilationProfile.js'
 import * as Option from 'effect/Option'
 import * as Constraint from './Constraint.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
@@ -23,34 +24,18 @@ import * as Type from './Type.js'
 export interface TargetEnvironment {
   readonly _tag: 'StaticTargetEnvironment'
   readonly target: Target.Id
-  readonly profile: 0 | 1 | 2 | 3
+  readonly compilation: CompilationProfile.Initial | CompilationProfile.CompilationProfile
   readonly kind: 'Native' | 'WebAssembly'
   readonly pointerBits: 32 | 64
   readonly endianness: 'little'
 }
 
-const profile = (target: Target.Id): TargetEnvironment['profile'] => {
-  switch (target) {
-    case 'aarch64-apple-darwin':
-      return 0
-    case 'aarch64-unknown-linux-gnu':
-      return 1
-    case 'wasm32-unknown-unknown':
-      return 2
-    case 'x86_64-unknown-linux-gnu':
-      return 3
-  }
-}
-
-/** Copies one selected compiler target into identity-free static environment facts. */
-export const targetEnvironment = (target: Target.Target): TargetEnvironment =>
+/** Exposes immutable profile facts to the private bootstrap or completed evaluation session. */
+export const targetEnvironment = (compilation: CompilationProfile.Initial | CompilationProfile.CompilationProfile): TargetEnvironment =>
   Object.freeze({
-    _tag: 'StaticTargetEnvironment',
-    target: target.id,
-    profile: profile(target.id),
-    kind: target.kind,
-    pointerBits: target.pointerSize === 4 ? 32 : 64,
-    endianness: target.endianness,
+    _tag: 'StaticTargetEnvironment', target: compilation.target.id, compilation,
+    kind: compilation.target.kind, pointerBits: compilation.target.pointerSize === 4 ? 32 : 64,
+    endianness: compilation.target.endianness,
   })
 
 /** Compiler-owned deterministic limits for one complete static-evaluation session. */
@@ -1042,19 +1027,59 @@ export const constructAggregate = (
     : outcome
 }
 
-/** Implements the StaticOnly `Intrinsic.targetProfile() -> u8` primitive. */
-export const targetProfile = (
+/** Reads one closed logical fact; selectors never interpret arbitrary compiler state. */
+export const profileFact = (
   environment: TargetEnvironment,
+  operation: string,
+  arguments_: ReadonlyArray<StaticValue.Value>,
   span: SourceSpan.SourceSpan,
   trace: Trace = Object.freeze([]),
-): Outcome<StaticValue.Value> =>
-  admittedValue(
-    environment,
-    { _tag: 'IntegerValue', type: 'u8', value: BigInt(environment.profile) },
-    'StaticEvaluation.targetProfile',
-    span,
-    trace,
-  )
+): Outcome<StaticValue.Value> | undefined => {
+  const profile = environment.compilation
+  const target = profile.target
+  const text = (value: string): Outcome<StaticValue.Value> => complete(Object.freeze({_tag: 'TextValue', bytes: Object.freeze([...new TextEncoder().encode(value)])}))
+  const integer = (value: number): Outcome<StaticValue.Value> => complete(Object.freeze({_tag: 'IntegerValue', type: 'u32', value: BigInt(value)}))
+  const selection = (value: CompilationProfile.Selection): string => value.kind === 'named' ? value.name : value.kind
+  switch (operation) {
+    case 'targetArchitecture': return text(target.architecture)
+    case 'targetOperatingSystem': return text(target.operatingSystem)
+    case 'targetAbi': return text(target.abi)
+    case 'targetObjectFormat': return text(target.objectFormat)
+    case 'targetEndianness': return text(target.endianness)
+    case 'targetPointerBits': return integer(environment.pointerBits)
+    case 'targetPointerAlignment': return integer(target.pointerAlignment)
+  }
+  if (operation !== 'profileText' && operation !== 'profileFlag' && operation !== 'profileContains') return undefined
+  const keyValue = arguments_[0]
+  const key = keyValue?._tag === 'TextValue' ? new TextDecoder().decode(Uint8Array.from(keyValue.bytes)) : undefined
+  if (operation === 'profileText') {
+    switch (key) {
+      case 'cpu': return text(profile.cpu.model)
+      case 'deployment': return text(profile.deployment ?? '')
+      case 'libc': return text(profile.libc)
+      case 'artifact': return text(profile.artifact)
+      case 'entry': return text(selection(profile.entry))
+      case 'link': return text(profile.link)
+      case 'code-model': return text(profile.codeModel)
+      case 'relocation': return text(profile.relocation)
+      case 'optimization': return text(profile.optimization)
+      case 'safety': return text(profile.safety)
+      case 'threading': return text(profile.threading)
+      case 'unwind': return text(profile.unwind)
+      case 'runtime': return text(selection(profile.runtime))
+    }
+  }
+  if (operation === 'profileFlag' && key === 'debug') return complete(StaticValue.boolean(profile.debug))
+  if (operation === 'profileContains') {
+    const member = arguments_[1]
+    const values = key === 'cpu-features' ? profile.cpu.features : key === 'sanitizers' ? profile.sanitizers : undefined
+    if (values !== undefined && member?._tag === 'TextValue') {
+      const value = new TextDecoder().decode(Uint8Array.from(member.bytes))
+      return complete(StaticValue.boolean(values.some((candidate) => candidate === value)))
+    }
+  }
+  return failed(phaseViolation('StaticEvaluation.profileFact', 'unknown profile fact selector', span, trace))
+}
 
 /** Stable environment key for one source parameter or local binding. */
 export const localValueKey = (
@@ -1728,8 +1753,8 @@ const evaluateExpression = (
         fact.reference.intrinsic.id.actor === 'Intrinsic'
       ) {
         const operation = fact.reference.intrinsic.id.name
-        if (operation === 'targetProfile')
-          return targetProfile(context.environment, fact.syntax.span, context.trace)
+        const profile = profileFact(context.environment, operation, arguments_.value, fact.syntax.span, context.trace)
+        if (profile !== undefined) return profile
         const typeArgument = intrinsicTypeArgument(fact, 0, context.typeSubstitution)
         if (operation === 'reflectType' || operation === 'reflectFields') {
           if (typeArgument === undefined)
@@ -2354,10 +2379,10 @@ export interface Evaluation<A> {
 }
 
 /** Starts one target-scoped static-evaluation session. */
-export const make = <A>(target: Target.Target, policy: Limits = defaultLimits): Evaluation<A> =>
+export const make = <A>(compilation: CompilationProfile.Initial | CompilationProfile.CompilationProfile, policy: Limits = defaultLimits): Evaluation<A> =>
   Object.freeze({
     _tag: 'StaticEvaluation',
-    environment: targetEnvironment(target),
+    environment: targetEnvironment(compilation),
     limits: limits(policy),
     [stateSymbol]: {
       cache: new Map(),
@@ -2385,7 +2410,7 @@ export const cacheEntries = <A>(self: Evaluation<A>): ReadonlyArray<CacheEntry<A
 /** Canonical target-and-application identity used only inside static-evaluation coordination. */
 export const applicationKey = (environment: TargetEnvironment, application: Application): string =>
   Canonical.record('StaticApplication', [
-    environment.target,
+    environment.compilation.identity,
     application.declaration.module,
     application.declaration.name,
     Canonical.array(application.typeArguments),

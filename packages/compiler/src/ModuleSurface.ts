@@ -2215,7 +2215,9 @@ const constant = (value: DeclarationFacts.ConstantFact): string =>
     declaredType(value.declaredType),
     record('StaticExpressionTemplate', [value.initializerTemplate.canonical]),
     constantLiteral(value.literal),
-    ...(value._tag === 'PackageParameterDeclaration' ? [String(value.hasDefault), optional(value.predicateTemplate?.canonical)] : []),
+    ...(value._tag === 'PackageParameterDeclaration'
+      ? [String(value.hasDefault), optional(value.predicateTemplate?.canonical)]
+      : []),
   ])
 
 const foreignStatic = (value: DeclarationFacts.ForeignStaticFact): string =>
